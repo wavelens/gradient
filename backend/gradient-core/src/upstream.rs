@@ -379,9 +379,15 @@ pub async fn lookup_upstream_narinfo(
     ProbeResult::settle(None, samples, tripped)
 }
 
+#[derive(Debug, Clone)]
+pub struct VerifiedPath {
+    pub verified_by: CacheUpstreamId,
+    pub path: CachedPath,
+}
+
 #[derive(Debug, Default)]
 pub struct BatchProbe {
-    pub found: HashMap<String, CachedPath>,
+    pub found: HashMap<String, VerifiedPath>,
     pub unanswered: HashMap<String, Vec<CacheUpstreamId>>,
     pub stats: HashMap<CacheUpstreamId, UpstreamAccum>,
 }
@@ -424,8 +430,8 @@ pub async fn probe_batch(
 
     while let Some((hash, res)) = futs.next().await {
         fold_samples(&res.samples, &mut batch.stats);
-        if let Some((_, cp)) = res.best {
-            batch.found.insert(hash, cp);
+        if let Some((verified_by, path)) = res.best {
+            batch.found.insert(hash, VerifiedPath { verified_by, path });
         } else if !res.unanswered.is_empty() {
             batch.unanswered.insert(hash, res.unanswered);
         }
@@ -892,7 +898,7 @@ mod tests {
         )
         .await;
 
-        let found = &batch.found[stored];
+        let found = &batch.found[stored].path;
         assert_eq!(found.path, format!("/nix/store/{stored}-hello"));
         assert_eq!(
             found.references,

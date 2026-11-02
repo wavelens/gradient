@@ -106,11 +106,13 @@ pub async fn probe_outputs(
         hits: HashMap::new(),
         unanswered: batch.unanswered.into_keys().collect(),
     };
-    for (hash, cp) in batch.found {
+    for (hash, found) in batch.found {
+        let cp = found.path;
         answer.hits.insert(
             hash,
             UpstreamHit {
                 url: cp.url.clone(),
+                verified_by: Some(found.verified_by),
                 nar_hash: cp.nar_hash.clone(),
                 file_hash: cp.file_hash.clone(),
                 file_size: cp.file_size.map(|v| v as i64),

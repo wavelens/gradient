@@ -12,8 +12,8 @@ use gradient_db::status::BuildRefusal;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_types::MCachedPath;
 use gradient_types::ids::{
-    BuildAttemptId, CacheId, CachedPathId, DerivationBuildId, DerivationId, DispatchedJobId,
-    EvaluationId, ExecJobAttemptId, ExecJobId, ProjectId, TaskId,
+    BuildAttemptId, CacheId, CacheUpstreamId, CachedPathId, DerivationBuildId, DerivationId,
+    DispatchedJobId, EvaluationId, ExecJobAttemptId, ExecJobId, ProjectId, TaskId,
 };
 use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation};
 
@@ -39,6 +39,7 @@ pub enum ContinuationOutcome {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UpstreamHit {
     pub url: Option<String>,
+    pub verified_by: Option<CacheUpstreamId>,
     pub nar_hash: Option<String>,
     pub file_hash: Option<String>,
     pub file_size: Option<i64>,

@@ -14,8 +14,35 @@ use gradient_wire::types::{
 use tokio::sync::mpsc;
 
 use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingExecJob};
-use gradient_pool::{WorkerCaps, WorkerInfo};
+use gradient_pool::{WorkerCaps, WorkerInfo, WorkerJob, WorkerJobPolicy};
 use gradient_types::exec::{DeviceClass, ExecAllow, ExecDefaults, ExecInventory, ExecSpec};
+
+pub(crate) const TRUSTED_KEY: &str = "trusted-1:t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t=";
+pub(crate) const RESTRICTED_WORKER: &str = "restricted";
+
+#[derive(Debug)]
+pub(crate) struct TrustedSubstitutionsOnly;
+
+impl WorkerJobPolicy for TrustedSubstitutionsOnly {
+    fn allows(&self, worker: &str, job: WorkerJob<'_>) -> bool {
+        worker != RESTRICTED_WORKER
+            || matches!(job, WorkerJob::Substitution { verifying_keys }
+                if verifying_keys.iter().all(|key| key.as_deref() == Some(TRUSTED_KEY)))
+    }
+}
+
+pub(crate) fn substitution_job(
+    peer: ProjectId,
+    derivation_build: DerivationBuildId,
+    verifying_keys: Vec<Option<String>>,
+) -> PendingBuildJob {
+    let mut job = build_job(EvaluationId::now_v7(), peer, derivation_build);
+    job.job.build.kind = BuildSpecKind::Substitute;
+    job.job.requirement.architecture = gradient_types::BUILTIN_ARCH.into();
+    job.substitute = true;
+    job.verifying_keys = verifying_keys;
+    job
+}
 
 pub(crate) fn port() -> (Arc<dyn SessionPort>, mpsc::UnboundedReceiver<SessionSignal>) {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -96,6 +123,7 @@ pub(crate) fn build_job(
         ifd: false,
         pname: None,
         substitute: false,
+        verifying_keys: Vec::new(),
     }
 }
 

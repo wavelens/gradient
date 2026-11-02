@@ -1134,7 +1134,7 @@ gradient_db::sql_fn! {
 }
 
 gradient_db::sql! {
-    CLEAR_OUTPUTS_UPSTREAM_RECORD = "UPDATE derivation_output SET external_url = NULL, nar_hash = NULL, file_hash = NULL, \
+    CLEAR_OUTPUTS_UPSTREAM_RECORD = "UPDATE derivation_output SET external_url = NULL, verified_by_upstream = NULL, nar_hash = NULL, file_hash = NULL, \
          file_size = NULL, nar_size = NULL, references_list = NULL, deriver = NULL \
          WHERE derivation = $1",
         params = [DerivationId];

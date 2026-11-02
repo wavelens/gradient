@@ -77,6 +77,7 @@ pub struct Scheduler {
     pub graph: Arc<Graph>,
     pub started_at: DateTime<Utc>,
     pub(crate) upstream_query: Arc<Semaphore>,
+    pub(crate) job_policy: Arc<dyn gradient_pool::WorkerJobPolicy>,
     core: Arc<tokio::sync::watch::Sender<Option<ActorRef<SchedulerMsg>>>>,
     pub cluster: ClusterAttempts,
     pub(crate) scoring: Scoring,
@@ -106,6 +107,7 @@ impl Scheduler {
             graph: Arc::clone(&state.graph),
             started_at: state.started_at,
             upstream_query: Arc::clone(&state.memory.upstream_query),
+            job_policy: Arc::clone(&state.extensions.worker_job_policy),
             core: Arc::new(tokio::sync::watch::channel(None).0),
             cluster: ClusterAttempts::default(),
             scoring: Scoring::new(policy),
@@ -128,6 +130,7 @@ impl Scheduler {
     ) -> Result<ActorRef<SchedulerMsg>, SpawnErr> {
         let args = CoreArgs {
             policy: Arc::clone(&self.scoring.policy),
+            job_policy: Arc::clone(&self.job_policy),
             kept: self.held_for_new_core().await,
             reclaim_grace: std::time::Duration::from_secs(
                 self.db.config.proto.assignment_reclaim_grace_secs,

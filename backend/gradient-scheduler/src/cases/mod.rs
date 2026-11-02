@@ -43,6 +43,7 @@ use gradient_fixtures::shape::Shape;
 use gradient_graph::writer::GraphMsg;
 use gradient_graph::{Graph, testing};
 use gradient_pool::session_port::{SessionPort, SessionSignal};
+use gradient_pool::{EveryJobAllowed, WorkerJobPolicy};
 use gradient_test_support::state::TestState;
 use gradient_types::ids::ProjectId;
 use gradient_types::{BuildArgs, RuntimeConfig};
@@ -115,6 +116,12 @@ impl SchedulerCase {
         case
     }
 
+    pub async fn start_with_job_policy(shape: Shape, job_policy: Arc<dyn WorkerJobPolicy>) -> Self {
+        let case = Self::start_seeded_with(shape, |_| {}, job_policy).await;
+        case.assert_drift("the seed").await;
+        case
+    }
+
     pub async fn start_then(shape: Shape, seed: impl AsyncFnOnce(&Self)) -> Self {
         let case = Self::start_seeded(shape, |_| {}).await;
         seed(&case).await;
@@ -139,13 +146,21 @@ impl SchedulerCase {
     }
 
     async fn start_seeded(shape: Shape, config: impl FnOnce(&mut RuntimeConfig) + 'static) -> Self {
+        Self::start_seeded_with(shape, config, Arc::new(EveryJobAllowed)).await
+    }
+
+    async fn start_seeded_with(
+        shape: Shape,
+        config: impl FnOnce(&mut RuntimeConfig) + 'static,
+        job_policy: Arc<dyn WorkerJobPolicy>,
+    ) -> Self {
         let started_at = Utc::now();
         let declared = shape.declared_statuses();
         let db = shape.into_database().await;
         let (secret, _) = testing::secret_file();
         let secret = Arc::new(secret);
         let graph = Graph::new();
-        let instance = instance(&db, &graph, started_at, &secret, config);
+        let instance = instance(&db, &graph, started_at, &secret, config, job_policy);
 
         testing::settle_seed(&instance.ctx, &db, declared).await;
         enter_queued_builds(&instance.ctx, &db, None).await;
@@ -156,9 +171,16 @@ impl SchedulerCase {
     pub async fn second_instance(&self) -> SchedulerCase {
         let config = RuntimeConfig::clone(&self.ctx.config);
         let graph = Graph::new();
-        let instance = instance(&self.db, &graph, Utc::now(), &self.secret, move |c| {
-            *c = config;
-        });
+        let instance = instance(
+            &self.db,
+            &graph,
+            Utc::now(),
+            &self.secret,
+            move |c| {
+                *c = config;
+            },
+            Arc::clone(&self.scheduler.job_policy),
+        );
         Self::spawn(
             Arc::clone(&self.db),
             instance,
@@ -341,6 +363,7 @@ fn instance(
     started_at: DateTime<Utc>,
     secret: &NamedTempFile,
     config: impl FnOnce(&mut RuntimeConfig) + 'static,
+    job_policy: Arc<dyn WorkerJobPolicy>,
 ) -> Instance {
     let crypt_file = secret.path().to_string_lossy().into_owned();
     let state = TestState::new()
@@ -354,6 +377,7 @@ fn instance(
         .graph(Arc::clone(graph))
         .started_at(started_at)
         .config(config)
+        .worker_job_policy(job_policy)
         .build();
 
     Instance {

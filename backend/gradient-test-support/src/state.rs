@@ -120,6 +120,11 @@ impl TestState {
         self
     }
 
+    pub fn worker_job_policy(mut self, policy: Arc<dyn gradient_core::WorkerJobPolicy>) -> Self {
+        self.extensions.worker_job_policy = policy;
+        self
+    }
+
     pub fn build(self) -> Arc<ServerState> {
         let mut config = RuntimeConfig::from_cli(&self.cli).expect("valid test config");
         for change in self.config_changes {

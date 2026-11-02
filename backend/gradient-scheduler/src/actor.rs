@@ -407,6 +407,7 @@ pub enum SchedulerMsg {
 
 pub struct CoreArgs {
     pub policy: Arc<dyn ScoringPolicy>,
+    pub job_policy: Arc<dyn gradient_pool::WorkerJobPolicy>,
     pub kept: Vec<KeptAssignment>,
     pub reclaim_grace: Duration,
 }
@@ -895,7 +896,7 @@ impl Actor for CoreActor {
             );
         }
         Ok(SchedulerCore {
-            pool: WorkerPool::new(),
+            pool: WorkerPool::with_job_policy(args.job_policy),
             tracker,
             offers: 0,
             policy: args.policy,

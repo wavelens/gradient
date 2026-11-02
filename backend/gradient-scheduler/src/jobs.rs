@@ -15,19 +15,19 @@ use gradient_types::ids::{
     DispatchedJobId, EvaluationId, ExecJobId, ProjectId, TaskId,
 };
 use gradient_wire::types::{
-    BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeStep, Job, JobCandidate, JobKind,
-    RequiredPath,
+    BuildJob, BuildSpecKind, CandidateScore, FlakeJob, FlakeSource, FlakeStep, Job, JobCandidate,
+    JobKind, RequiredPath,
 };
 
 use crate::cluster::{ClusterBook, PendingCluster};
 use crate::count::clamp_to_u32;
 pub use crate::exec_job::{ExecAssignment, ExecPeer, PendingExecJob, exec_job_key};
 use gradient_graph::RamShortage;
-use gradient_pool::WorkerCaps;
 use gradient_pool::score::weights::REFERENCE_CORES;
 use gradient_pool::score::{
     BuildEstimate, CoreChoice, JobContext, RamFit, RamNeed, ScoredJob, ScoringPolicy, WorkerContext,
 };
+use gradient_pool::{WorkerCaps, WorkerJob};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
@@ -86,6 +86,7 @@ pub struct PendingBuildJob {
     pub ifd: bool,
     pub pname: Option<String>,
     pub substitute: bool,
+    pub verifying_keys: Vec<Option<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -312,6 +313,20 @@ impl PendingJob {
         }
     }
 
+    pub fn worker_job(&self) -> WorkerJob<'_> {
+        match self {
+            PendingJob::Eval(_) => WorkerJob::Evaluation,
+            PendingJob::Exec(_) => WorkerJob::Exec,
+            PendingJob::Build(j) => match j.job.build.kind {
+                BuildSpecKind::Build => WorkerJob::Build,
+                BuildSpecKind::Download => WorkerJob::Download,
+                BuildSpecKind::Substitute => WorkerJob::Substitution {
+                    verifying_keys: &j.verifying_keys,
+                },
+            },
+        }
+    }
+
     pub fn ifd(&self) -> bool {
         matches!(self, PendingJob::Build(j) if j.ifd)
     }
@@ -421,12 +436,15 @@ struct ScoredCandidate {
 }
 
 fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
-    match (job, caps) {
-        (PendingJob::Exec(j), caps) => caps.is_some_and(|c| j.fits(c)),
-        (_, None) => true,
-        (PendingJob::Eval(j), Some(c)) => c.can_eval(&j.job),
-        (PendingJob::Build(j), Some(c)) => c.can_run_build(&j.job),
-    }
+    let Some(c) = caps else {
+        return !matches!(job, PendingJob::Exec(_));
+    };
+    c.allowed_jobs.contains(job.worker_job())
+        && match job {
+            PendingJob::Exec(j) => j.fits(c),
+            PendingJob::Eval(j) => c.can_eval(&j.job),
+            PendingJob::Build(j) => c.can_run_build(&j.job),
+        }
 }
 
 pub(crate) struct AbortedJobs {
@@ -2630,6 +2648,7 @@ mod tests {
             ifd: false,
             pname: None,
             substitute: false,
+            verifying_keys: Vec::new(),
         })
     }
 
@@ -3035,6 +3054,57 @@ mod tests {
         );
         assert!(assignment.is_none());
         assert_eq!(tracker.pending_count(), 1);
+    }
+
+    #[test]
+    fn a_substitution_the_job_policy_refuses_a_worker_goes_to_another_worker() {
+        use crate::test_jobs::{RESTRICTED_WORKER, TRUSTED_KEY, TrustedSubstitutionsOnly};
+
+        let mut tracker = JobTracker::new();
+        let peer = ProjectId::now_v7();
+        let untrusted = vec![Some("other-1:o0o0".to_owned())];
+        let trusted = vec![Some(TRUSTED_KEY.to_owned())];
+        for (id, keys) in [("untrusted", untrusted), ("trusted", trusted)] {
+            let job = crate::test_jobs::substitution_job(peer, DerivationBuildId::now_v7(), keys);
+            tracker.add_pending(id.into(), PendingJob::Build(job));
+        }
+        let policy: std::sync::Arc<dyn gradient_pool::WorkerJobPolicy> =
+            std::sync::Arc::new(TrustedSubstitutionsOnly);
+        let caps = |worker: &str| WorkerCaps {
+            capabilities: GradientCapabilities {
+                network: true,
+                build: true,
+                ..Default::default()
+            },
+            allowed_jobs: gradient_pool::AllowedJobs::of(worker, &policy),
+            ..Default::default()
+        };
+        let (restricted, other) = (caps(RESTRICTED_WORKER), caps("other"));
+        for (w, id) in [(RESTRICTED_WORKER, "trusted"), ("other", "untrusted")] {
+            tracker.record_scores(
+                w,
+                vec![CandidateScore {
+                    job_id: id.into(),
+                    missing_count: 0,
+                    missing_nar_size: 0,
+                    outputs_present: false,
+                }],
+            );
+        }
+        let p = gradient_pool::score::policy_for(gradient_types::ScoringPolicy::Simple);
+        let inst = gradient_pool::score::InstanceContext::default();
+        let mut take = |worker: &str, caps: &WorkerCaps| {
+            tracker
+                .take_best_of_kind(worker, None, Some(caps), &JobKind::Build, &*p, &inst, &[])
+                .map(|a| a.job_id().to_owned())
+        };
+
+        assert_eq!(
+            take(RESTRICTED_WORKER, &restricted).as_deref(),
+            Some("trusted")
+        );
+        assert_eq!(take(RESTRICTED_WORKER, &restricted), None);
+        assert_eq!(take("other", &other).as_deref(), Some("untrusted"));
     }
 
     #[test]

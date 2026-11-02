@@ -6,9 +6,11 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::AttemptOutcome;
+use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::ids::{DispatchedJobId, EvaluationId};
+use gradient_entity::ids::{CacheId, CacheUpstreamId, DispatchedJobId, EvaluationId};
+use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_fixtures::shape::shape;
 use gradient_graph::{NarCommit, Transition};
 use gradient_pool::session_port::SessionSignal;
@@ -20,10 +22,12 @@ use gradient_wire::types::{
 use super::{
     A, A_DEV, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, REPOSITORY, SchedulerCase,
     SlotKind, X, X_OUT, X86, ago, attr_of, build_output, drv_nar, drv_path, eval_key, failure,
-    from_now, is_recent, job_ids, narinfo, output_nar, span, store_path, w_all,
+    from_now, is_recent, job_ids, narinfo, output_nar, span, store_path, w_all, w_network_build,
 };
 use crate::actor::Offer;
 use crate::jobs::Assignment;
+use crate::test_jobs::{RESTRICTED_WORKER, TRUSTED_KEY, TrustedSubstitutionsOnly};
+use std::sync::Arc;
 
 const W1: &str = "w1";
 const W2: &str = "w2";
@@ -2097,4 +2101,73 @@ async fn open_rows(case: &SchedulerCase, keys: &[String]) -> Vec<(String, String
         }
     }
     open
+}
+
+#[tokio::test]
+async fn c31_a_restricted_worker_takes_only_substitutions_its_job_policy_allows() {
+    let e1 = EvaluationId::now_v7();
+    let (trusted, other) = (CacheUpstreamId::now_v7(), CacheUpstreamId::now_v7());
+    let case = SchedulerCase::start_with_job_policy(
+        shape()
+            .passthrough(e1)
+            .verified_by(other)
+            .derivation(B)
+            .walked()
+            .probed()
+            .cache_available()
+            .entry_point(&attr_of(B))
+            .job()
+            .output(B_OUT)
+            .build_status(BuildStatus::Queued)
+            .verified_by(trusted)
+            .into_cache(CacheId::now_v7())
+            .upstream(
+                trusted,
+                "https://trusted.invalid",
+                TRUSTED_KEY,
+                CacheUpstreamKind::Http,
+                CacheSubscriptionMode::ReadWrite,
+                true,
+            )
+            .upstream(
+                other,
+                "https://other.invalid",
+                "other-1:o0o0",
+                CacheUpstreamKind::Http,
+                CacheSubscriptionMode::ReadWrite,
+                true,
+            ),
+        Arc::new(TrustedSubstitutionsOnly),
+    )
+    .await;
+    let (a, b) = (case.key(A).await, case.key(B).await);
+    case.connect(RESTRICTED_WORKER, w_network_build(), &[])
+        .await;
+
+    case.admit_startable_moves().await;
+    case.offers_full(RESTRICTED_WORKER).await;
+    case.score_all(RESTRICTED_WORKER).await;
+    let taken = case.request_job(RESTRICTED_WORKER, JobKind::Build).await;
+    assert_eq!(
+        taken.map(|j| j.job_id().to_owned()),
+        Some(b),
+        "after 1: result.job_id"
+    );
+    case.check("step 1").await;
+
+    case.idle(RESTRICTED_WORKER, JobKind::Build).await;
+    assert!(case.pending(&a).await, "after 2: pending(build:A)");
+    case.check("step 2").await;
+
+    case.connect(W2, w_network_build(), &[]).await;
+    case.offers_full(W2).await;
+    case.score_all(W2).await;
+    let taken = case.request_job(W2, JobKind::Build).await;
+    assert_eq!(
+        taken.map(|j| j.job_id().to_owned()),
+        Some(a),
+        "after 3: result.job_id"
+    );
+    case.check("step 3").await;
+    case.finish().await;
 }

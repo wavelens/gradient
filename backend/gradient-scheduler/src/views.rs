@@ -214,6 +214,7 @@ mod tests {
             ifd: false,
             pname: Some("curl".into()),
             substitute: false,
+            verifying_keys: Vec::new(),
         })
     }
 

@@ -1613,6 +1613,7 @@ async fn persist_narinfo(
 
         let mut am = o.clone().into_active_model();
         am.external_url = Set(hit.url.clone());
+        am.verified_by_upstream = Set(hit.verified_by);
         am.nar_hash = Set(hit.nar_hash.clone());
         am.file_hash = Set(hit.file_hash.clone());
         am.file_size = Set(hit.file_size);

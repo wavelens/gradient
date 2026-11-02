@@ -12,7 +12,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DerivationId, DerivationOutputId};
+use crate::ids::{CacheUpstreamId, DerivationId, DerivationOutputId};
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation_output")]
@@ -26,6 +26,7 @@ pub struct Model {
     pub ca: Option<String>,
     pub nar_size: Option<i64>,
     pub external_url: Option<String>,
+    pub verified_by_upstream: Option<CacheUpstreamId>,
     pub nar_hash: Option<String>,
     pub file_hash: Option<String>,
     pub file_size: Option<i64>,
