@@ -19212,6 +19212,10 @@ components:
           type:
           - boolean
           - 'null'
+        only_evaluate:
+          type:
+          - boolean
+          - 'null'
     PatchTeamRequest:
       type: object
       properties:
@@ -20597,6 +20601,7 @@ components:
       - retry_failed_builds
       - multi_node_evaluation
       - exec_enabled
+      - only_evaluate
       - can_edit
       - can_trigger
       properties:
@@ -20647,6 +20652,8 @@ components:
         multi_node_evaluation:
           type: boolean
         exec_enabled:
+          type: boolean
+        only_evaluate:
           type: boolean
         can_edit:
           type: boolean

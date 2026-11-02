@@ -58,6 +58,7 @@ pub struct TaskResponse {
     pub retry_failed_builds: bool,
     pub multi_node_evaluation: bool,
     pub exec_enabled: bool,
+    pub only_evaluate: bool,
     pub can_edit: bool,
     pub can_trigger: bool,
 }
@@ -91,6 +92,7 @@ impl TaskResponse {
             retry_failed_builds: task.retry_failed_builds,
             multi_node_evaluation: task.multi_node_evaluation,
             exec_enabled: task.exec_enabled,
+            only_evaluate: task.only_evaluate,
             can_edit,
             can_trigger,
         }

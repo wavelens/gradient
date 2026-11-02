@@ -40,6 +40,7 @@ function taskFor(c: AccessCase) {
     retry_failed_builds: true,
     multi_node_evaluation: false,
     exec_enabled: false,
+    only_evaluate: false,
     managed: c.managed,
     can_edit: c.canEdit,
     can_trigger: c.canTrigger ?? c.canEdit,
@@ -209,6 +210,19 @@ describe('TaskSettingsComponent - retrying failed builds', () => {
       'demo',
       expect.objectContaining({ retry_failed_builds: false }),
     );
+  });
+});
+
+describe('TaskSettingsComponent - only evaluating', () => {
+  it('saves the opt-in to only evaluate', () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup({ managed: false, canEdit: true }, undefined, updateTask);
+    expect(fixture.componentInstance.formData.only_evaluate).toBe(false);
+
+    fixture.componentInstance.formData.only_evaluate = true;
+    fixture.componentInstance.saveSettings();
+
+    expect(updateTask).toHaveBeenCalledWith('acme', 'demo', expect.objectContaining({ only_evaluate: true }));
   });
 });
 

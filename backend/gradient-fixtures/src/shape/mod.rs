@@ -137,6 +137,13 @@ impl Shape {
         self
     }
 
+    pub fn only_evaluate(self) -> Self {
+        let mut shape = self.task_option(|task| task.only_evaluate = true);
+        let at = shape.current_evaluation();
+        shape.evaluations[at].only_evaluate = true;
+        shape
+    }
+
     pub fn without_cache_signing(self) -> Self {
         self.task_option(|task| task.sign_cache = false)
     }

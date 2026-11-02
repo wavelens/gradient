@@ -40,6 +40,7 @@ static CANDIDATES_SQL: LazyLock<String> = LazyLock::new(|| {
          img.derivation AS image_derivation \
          FROM entry_point e \
          JOIN derivation d ON d.id = e.derivation \
+         JOIN evaluation ev ON ev.id = e.evaluation AND NOT ev.only_evaluate \
          LEFT JOIN entry_point img ON img.evaluation = e.evaluation \
               AND img.eval = e.eval || '{image_suffix}' \
          WHERE e.evaluation = $1 AND e.exec IS NOT NULL \

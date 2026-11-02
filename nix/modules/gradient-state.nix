@@ -340,6 +340,12 @@
         description = "Whether to run exec jobs of this task. Exec entry points of a task with this option off fail with a message.";
       };
 
+      only_evaluate = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Whether the evaluation of this task can run an evaluation alone. Such evaluations end at evaluation completion, build nothing, and run no exec jobs.";
+      };
+
       concurrency = mkOption {
         type = types.enum [ "auto" "hard_abort" "soft_abort" "skip" "all" ];
         default = "auto";

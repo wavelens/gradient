@@ -61,6 +61,7 @@ impl<'a> StateApplicator<'a> {
                 proj.retry_failed_builds = Set(state_task.retry_failed_builds);
                 proj.multi_node_evaluation = Set(state_task.multi_node_evaluation);
                 proj.exec_enabled = Set(state_task.exec_enabled);
+                proj.only_evaluate = Set(state_task.only_evaluate);
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!(name = %state_task.name, "Updated managed task");
@@ -88,6 +89,7 @@ impl<'a> StateApplicator<'a> {
                     retry_failed_builds: state_task.retry_failed_builds,
                     multi_node_evaluation: state_task.multi_node_evaluation,
                     exec_enabled: state_task.exec_enabled,
+                    only_evaluate: state_task.only_evaluate,
                     ..Default::default()
                 }
                 .into_active_model();

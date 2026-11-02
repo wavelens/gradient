@@ -351,6 +351,10 @@ async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> 
             EvaluationStatus::EvaluatingFlake | EvaluationStatus::EvaluatingDerivation
         )
     {
+        if eval.only_evaluate {
+            gradient_db::status::settle_without_builds(ctx, eval).await?;
+            return Ok(());
+        }
         info!(%evaluation_id, "eval job complete; promoting evaluation to Building");
         update_evaluation_status(ctx, eval, EvaluationStatus::Building).await?;
     }

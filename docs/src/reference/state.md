@@ -82,6 +82,7 @@ services.gradient.state = {
 | `keep_evaluations` | int | `30` | How many finished evaluations, regardless of outcome, to keep for metrics and history. Must be at least 1 and at most `eval.maxKeep`. |
 | `multi_node_evaluation` | bool | `false` | Whether more than one eval worker may evaluate one evaluation of this task together. The server can split an evaluation only when past evaluations predict a gain. |
 | `name` | string | attribute name | Unique name of the task. |
+| `only_evaluate` | bool | `false` | Set to `true` to evaluate the task only. Evaluations end after evaluation. No build. No exec jobs run. |
 | `project` | string | - | Name of the project that owns this task. |
 | `repository` | string | - | Git repository URL of the task. |
 | `retry_failed_builds` | bool | `true` | Whether a new evaluation of this task re-queues its permanently failed builds and their dependents. With `false`, they remain failed until a user retries the build or the evaluation. |

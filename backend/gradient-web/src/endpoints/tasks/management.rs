@@ -82,6 +82,7 @@ pub struct PatchTaskRequest {
     pub retry_failed_builds: Option<bool>,
     pub multi_node_evaluation: Option<bool>,
     pub exec_enabled: Option<bool>,
+    pub only_evaluate: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -404,6 +405,7 @@ pub async fn patch_task(
             body.multi_node_evaluation.is_some(),
         ),
         ("exec_enabled", body.exec_enabled.is_some()),
+        ("only_evaluate", body.only_evaluate.is_some()),
     ]);
     let mut atask: ATask = task.into();
     let mut patcher = TaskPatcher::new(&state, &mut atask);
@@ -443,6 +445,9 @@ pub async fn patch_task(
     }
     if let Some(exec_enabled) = body.exec_enabled {
         patcher.atask.exec_enabled = Set(exec_enabled);
+    }
+    if let Some(only_evaluate) = body.only_evaluate {
+        patcher.atask.only_evaluate = Set(only_evaluate);
     }
 
     atask.force_evaluation = Set(true);
