@@ -27,7 +27,7 @@ use gradient_storage::NarSource;
 use gradient_storage::NarStore;
 use gradient_types::*;
 use gradient_util::debounce::Debounce;
-use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
+use gradient_util::nix_hash::normalize_nar_hash;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -169,11 +169,13 @@ pub(super) async fn get_nar_by_hash(
         .ok_or(CacheRefusal::NotRecorded("NarSize"))? as u64;
     let references =
         gradient_db::graph::runtime_closure::references_for_hash(db, &cached_path_row.hash).await?;
-    let file_hash_nix32 = strip_hash_algo(&file_hash).to_string();
 
     Ok(NixPathInfo {
         store_path: original_text(mapper, cached_path_row.store_path()),
-        url: format!("nar/{}.nar.zst", file_hash_nix32),
+        url: format!(
+            "nar/{}.nar.zst",
+            original_text(mapper, cached_path_row.hash.clone())
+        ),
         compression: "zstd".to_string(),
         file_hash,
         file_size,

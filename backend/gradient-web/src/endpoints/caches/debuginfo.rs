@@ -11,6 +11,7 @@ use super::helpers::{CacheContext, cache_client_ip};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
+use crate::store_paths::original_text;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
@@ -19,9 +20,8 @@ use gradient_core::upstream_source::UpstreamSource;
 use gradient_db::WebDb;
 use gradient_db::caches::debug_info::DebugInfoTarget;
 use gradient_db::caches::upstream::pull_through_upstream_caches;
-use gradient_types::MCache;
 use gradient_types::ids::CacheUpstreamId;
-use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
+use gradient_types::{MCache, StorePathMapper};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -31,11 +31,10 @@ struct DebugInfoRedirect {
     member: String,
 }
 
-impl From<DebugInfoTarget> for DebugInfoRedirect {
-    fn from(target: DebugInfoTarget) -> Self {
-        let file_hash = strip_hash_algo(&normalize_nar_hash(&target.file_hash)).to_string();
+impl DebugInfoRedirect {
+    fn for_cached_path(target: DebugInfoTarget, mapper: &StorePathMapper) -> Self {
         Self {
-            archive: format!("../nar/{file_hash}.nar.zst"),
+            archive: format!("../nar/{}.nar.zst", original_text(mapper, target.hash)),
             member: target.member,
         }
     }
@@ -75,7 +74,11 @@ pub async fn debuginfo(
         gradient_db::caches::debug_info::lookup_for_cache(&state.web_db, ctx.cache.id, &build_id)
             .await?
     {
-        return Ok(redirect_response(target.into(), "HIT"));
+        let mapper = state.cache_mapper(ctx.cache.id);
+        return Ok(redirect_response(
+            DebugInfoRedirect::for_cached_path(target, &mapper),
+            "HIT",
+        ));
     }
 
     let upstream_caches = upstream_caches_for(&state.web_db, &ctx.cache).await;

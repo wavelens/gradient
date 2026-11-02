@@ -11,7 +11,7 @@
 
 use axum::extract::connect_info::MockConnectInfo;
 use axum_test::TestServer;
-use gradient_entity::{MappingContext, RotatedHashMapping, StorePathMapping};
+use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
 use gradient_fixtures::database::TestDatabase;
 use gradient_fixtures::mock::mock_db;
 use gradient_storage::NarStore;
@@ -31,9 +31,6 @@ fn cache_id() -> CacheId {
 }
 fn user_id() -> UserId {
     UserId::new(Uuid::parse_str("30000000-0000-0000-0000-000000000002").unwrap())
-}
-fn cached_path_id() -> CachedPathId {
-    CachedPathId::new(Uuid::parse_str("30000000-0000-0000-0000-000000000003").unwrap())
 }
 fn test_date() -> chrono::NaiveDateTime {
     chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
@@ -58,21 +55,6 @@ fn cache_row() -> gradient_entity::cache::Model {
     }
 }
 
-fn cached_path_row() -> gradient_entity::cached_path::Model {
-    gradient_entity::cached_path::Model {
-        id: cached_path_id(),
-        hash: STORE_HASH.into(),
-        package: "hello".into(),
-        file_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
-        file_size: Some(12345),
-        nar_size: Some(67890),
-        nar_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
-        created_at: test_date(),
-        confirmed: true,
-        ..Default::default()
-    }
-}
-
 fn served() -> std::collections::BTreeMap<&'static str, sea_orm::Value> {
     std::collections::BTreeMap::from([("served", sea_orm::Value::Int(Some(1)))])
 }
@@ -90,7 +72,6 @@ async fn nar_serve_streams_stored_blob_byte_for_byte() {
 
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![cached_path_row()]])
         .append_query_results([vec![served()]])
         .into_connection();
 
@@ -110,7 +91,7 @@ async fn nar_serve_streams_stored_blob_byte_for_byte() {
     let server = TestServer::new(router);
 
     let resp = server
-        .get(&format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst"))
+        .get(&format!("/cache/test-cache/nar/{STORE_HASH}.nar.zst"))
         .await;
 
     resp.assert_status_ok();
@@ -135,10 +116,8 @@ async fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
     let cli = test_cli();
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![cached_path_row()]])
         .append_query_results([vec![served()]])
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![cached_path_row()]])
         .append_query_results([vec![served()]])
         .into_connection();
 
@@ -162,7 +141,7 @@ async fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
         .expect("router")
         .layer(MockConnectInfo(peer));
     let server = TestServer::new(router);
-    let url = format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst");
+    let url = format!("/cache/test-cache/nar/{STORE_HASH}.nar.zst");
 
     let first = server.get(&url).await;
     first.assert_status_ok();
@@ -188,7 +167,6 @@ async fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
     let cli = test_cli();
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![cached_path_row()]])
         .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
         .into_connection();
     let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
@@ -204,23 +182,22 @@ async fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
             "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
         ));
     let resp = TestServer::new(router)
-        .get(&format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst"))
+        .get(&format!("/cache/test-cache/nar/{STORE_HASH}.nar.zst"))
         .await;
 
     resp.assert_status_not_found();
 }
 
 #[tokio::test]
-async fn a_nar_url_file_hash_is_looked_up_unmapped() {
+async fn a_nar_url_store_hash_is_mapped_inbound() {
     let cli = test_cli();
     let db = mock_db()
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![cached_path_row()]])
         .append_query_results([vec![served()]])
         .into_connection();
     let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
     nar_storage
-        .put(STORE_HASH, blob())
+        .put(EXAMPLE_STORED_HASH, blob())
         .await
         .expect("seed NAR blob");
     let state = TestState::new()
@@ -234,17 +211,16 @@ async fn a_nar_url_file_hash_is_looked_up_unmapped() {
         .layer(MockConnectInfo(
             "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
         ));
-    TestServer::new(router)
-        .get(&format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst"))
-        .await
-        .assert_status_ok();
+    let resp = TestServer::new(router)
+        .get(&format!(
+            "/cache/test-cache/nar/{EXAMPLE_ORIGINAL_HASH}.nar.zst"
+        ))
+        .await;
 
-    let rotated = RotatedHashMapping
-        .inbound_prefix(MappingContext::Cache(cache_id()), FILE_HASH_NIX32)
-        .unwrap();
+    resp.assert_status_ok();
+    assert_eq!(resp.as_bytes().as_ref(), blob().as_slice());
     let log = format!("{:?}", db.into_transaction_log());
-    assert!(log.contains(&format!("sha256:{FILE_HASH_NIX32}")), "{log}");
-    assert!(!log.contains(&rotated), "{log}");
+    assert!(log.contains(EXAMPLE_STORED_HASH), "{log}");
 }
 
 fn empty_directory_nar() -> Vec<u8> {
@@ -296,7 +272,7 @@ async fn insert_signed_path(
 }
 
 #[tokio::test]
-async fn an_empty_directory_nar_shared_with_another_cache_is_served() {
+async fn paths_sharing_identical_bytes_are_served_by_their_own_store_hash() {
     let cli = test_cli();
     let db = TestDatabase::create().await;
     let connection = db.connection();
@@ -319,12 +295,14 @@ async fn an_empty_directory_nar_shared_with_another_cache_is_served() {
         .unwrap();
     }
     let file_hash = format!("sha256:{FILE_HASH_NIX32}");
-    let other_path = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-    insert_signed_path(&connection, other, other_path, &file_hash).await;
+    let sibling_path = "cccccccccccccccccccccccccccccccc";
+    let other_cache_path = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     insert_signed_path(&connection, requested, STORE_HASH, &file_hash).await;
+    insert_signed_path(&connection, requested, sibling_path, &file_hash).await;
+    insert_signed_path(&connection, other, other_cache_path, &file_hash).await;
 
     let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
-    for hash in [other_path, STORE_HASH] {
+    for hash in [STORE_HASH, sibling_path, other_cache_path] {
         nar_storage
             .put(hash, empty_directory_nar())
             .await
@@ -340,11 +318,17 @@ async fn an_empty_directory_nar_shared_with_another_cache_is_served() {
             "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
         ));
 
-    let resp = TestServer::new(router)
-        .get(&format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst"))
-        .await;
-
-    resp.assert_status_ok();
-    assert_eq!(resp.as_bytes().as_ref(), empty_directory_nar().as_slice());
+    let server = TestServer::new(router);
+    for hash in [STORE_HASH, sibling_path] {
+        let resp = server
+            .get(&format!("/cache/test-cache/nar/{hash}.nar.zst"))
+            .await;
+        resp.assert_status_ok();
+        assert_eq!(resp.as_bytes().as_ref(), empty_directory_nar().as_slice());
+    }
+    server
+        .get(&format!("/cache/test-cache/nar/{other_cache_path}.nar.zst"))
+        .await
+        .assert_status_not_found();
     db.finish().await;
 }

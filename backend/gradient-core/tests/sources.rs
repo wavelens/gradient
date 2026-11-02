@@ -21,8 +21,8 @@ fn h32() -> String {
 fn hash_from_url_reads_the_hash_from_narinfo_and_nar_names() {
     for (url, expected) in [
         (format!("{}.narinfo", h32()), h32()),
-        (format!("{}.nar", H52), H52.to_string()),
-        (format!("{}.nar.zst", H52), H52.to_string()),
+        (format!("{}.nar", h32()), h32()),
+        (format!("{}.nar.zst", h32()), h32()),
     ] {
         assert_eq!(get_hash_from_url(url.clone()).unwrap(), expected, "{url}");
     }
@@ -36,6 +36,7 @@ fn hash_from_url_rejects_malformed_names() {
         format!("{}.nar.zst.extra", h32()),
         format!("{}.narinfo", &H32[..31]),
         format!("{}.nar", "a".repeat(40)),
+        format!("{}.nar.zst", H52),
         format!("{}.txt", h32()),
     ];
     for ch in ['e', 'o', 't', 'u'] {
