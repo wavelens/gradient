@@ -21,8 +21,8 @@ ${baseDir}/nars/<2 chars>/<rest>.nar.zst
 
 - Named by the **store-path hash**.
 - The server will presign upload URLs before the worker has the content hash.
-- The narinfo will advertise `nar/<file_hash>.nar.zst` as the URL.
-- The `resolve_effective_hash_db` function will map the file hash back to the key.
+- The narinfo will advertise `nar/<store hash>.nar.zst` as the URL, with the hash as the client sees it.
+- NAR requests keyed by file hash end with `404`. All copies of the same NAR share one file hash. Only the store hash can name a single path.
 - `last_fetched_at` and `fetch_count` on `cached_path` feed eviction.
 
 ## Writes

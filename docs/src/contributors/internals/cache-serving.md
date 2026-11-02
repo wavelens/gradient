@@ -70,7 +70,7 @@ sequenceDiagram
 **Response:** The `GET /cache/{cache}/debuginfo/{build_id}` route mirrors Nix's `index-debug-info` format.
 
 ```json
-{"archive": "../nar/<file_hash>.nar.zst", "member": "lib/debug/.build-id/<xx>/<yy>.debug"}
+{"archive": "../nar/<store hash>.nar.zst", "member": "lib/debug/.build-id/<xx>/<yy>.debug"}
 ```
 
 - `archive` paths are relative to the requested key.
