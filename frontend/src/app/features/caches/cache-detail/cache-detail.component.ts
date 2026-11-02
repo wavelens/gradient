@@ -132,7 +132,7 @@ export class CacheDetailComponent implements OnInit {
   });
 
   get installNetrcCommand(): string {
-    return `nix run github:wavelens/gradient/latest#gradient-cli -- cache install-netrc --server ${this.serverUrl} --token <YOUR_TOKEN> --cache ${this.cacheName}`;
+    return `nix run nixpkgs#gradient-cli -- cache install-netrc --server ${this.serverUrl} --token <YOUR_TOKEN> --cache ${this.cacheName}`;
   }
 
   activePoints = computed<CacheMetricPoint[]>(() => {
