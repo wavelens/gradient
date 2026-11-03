@@ -37,7 +37,7 @@ docs_dir: docs/src
 
 extra_css:
   - stylesheets/roadmap.css
-  - stylesheets/ai-assistant.css
+  - stylesheets/important-further-steps.css
 
 nav:
   - Home: index.md

@@ -1,0 +1,25 @@
+.md-typeset details.important-further-steps {
+  margin-top: 3em;
+  border: none;
+  box-shadow: none;
+  background: none;
+  font-size: inherit;
+}
+
+.md-typeset details.important-further-steps > summary {
+  padding: 0;
+  background: none;
+  font-size: 0.5rem;
+  font-weight: normal;
+  color: var(--md-default-fg-color--lightest);
+  opacity: 0.10;
+}
+
+.md-typeset details.important-further-steps > summary::before,
+.md-typeset details.important-further-steps > summary::after {
+  display: none;
+}
+
+.md-typeset details.important-further-steps[open] > summary {
+  opacity: 1;
+}
