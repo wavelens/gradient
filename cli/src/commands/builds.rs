@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::error::CliError;
 use crate::input::client_from_config;
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::Output;
 use clap::Subcommand;
 
 #[derive(Subcommand, Debug)]
@@ -41,13 +42,13 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Ok(g) => {
                     if interactive && !out.is_json() {
                         crate::tui::run(crate::tui::graph::GraphTree::from_build_graph(&g))
-                            .unwrap_or_else(|e| out.err(ExitKind::Api, format!("tui error: {e}")));
+                            .unwrap_or_else(|e| out.fail(CliError::TerminalUi(e)));
                     } else {
                         out.ok(&g);
                         out.human(format!("{} nodes, {} edges", g.nodes.len(), g.edges.len()));
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
         Commands::Log {

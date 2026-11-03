@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use connector::ConnectorError;
+use crate::error::CliError;
 use serde::Serialize;
 use std::io::{self, IsTerminal, Write};
 use std::process::exit;
@@ -133,6 +133,11 @@ impl Output {
         exit(kind.code());
     }
 
+    pub fn fail(&self, error: impl Into<CliError>) -> ! {
+        let error = error.into();
+        self.err(error.exit_kind(), error)
+    }
+
     #[cfg(test)]
     pub fn render_ok_to_string<T: Serialize>(&self, data: &T) -> Result<String, serde_json::Error> {
         let env = serde_json::json!({ "error": false, "message": data });
@@ -143,13 +148,6 @@ impl Output {
     pub fn render_err_to_string(&self, msg: &str) -> Result<String, serde_json::Error> {
         let env = serde_json::json!({ "error": true, "message": msg });
         serde_json::to_string(&env)
-    }
-}
-
-pub fn to_exit_kind(err: &ConnectorError) -> ExitKind {
-    match err {
-        ConnectorError::Unauthorized => ExitKind::Unauthorized,
-        _ => ExitKind::Api,
     }
 }
 

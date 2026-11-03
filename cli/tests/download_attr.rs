@@ -110,6 +110,6 @@ async fn download_json_without_args_exits_with_missing_argument() {
         env["message"]
             .as_str()
             .unwrap()
-            .contains("missing argument")
+            .contains("No argument: flake ref or --products")
     );
 }

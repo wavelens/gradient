@@ -6,8 +6,9 @@
 
 use crate::commands::build::{BuildParams, TrackedFile, result_link_name};
 use crate::config::{ConfigKey, load_config};
+use crate::error::{CliError, FileAction};
 use crate::input::server_base;
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{ExitKind, Output};
 use connector::ConnectorError;
 use connector::api::{ArtefactTree, DispatchResponse};
 use futures::StreamExt as _;
@@ -31,19 +32,11 @@ pub async fn start_via_nar(
     for entry in entries {
         let dest = staging.path().join(&entry.path);
         if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent).unwrap_or_else(|e| {
-                out.err(
-                    ExitKind::Api,
-                    format!("Failed to stage {}: {}", entry.path, e),
-                )
-            });
+            std::fs::create_dir_all(parent)
+                .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Stage, &entry.path, e)));
         }
-        std::fs::copy(&entry.abs, &dest).unwrap_or_else(|e| {
-            out.err(
-                ExitKind::Api,
-                format!("Failed to stage {}: {}", entry.path, e),
-            )
-        });
+        std::fs::copy(&entry.abs, &dest)
+            .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Stage, &entry.path, e)));
     }
 
     let mut stream = NarByteStream::new(staging.path().to_path_buf());
@@ -77,7 +70,7 @@ pub async fn start_via_nar(
                 format!("Source upload stalled: server stayed at {received} of {total} bytes"),
             ),
             Err(e) => out.err(
-                to_exit_kind(&e),
+                ExitKind::from(&e),
                 upload_error_message(&e, nar_len, file_count, project),
             ),
         }
@@ -95,7 +88,7 @@ pub async fn start_via_nar(
     {
         Ok(d) => d,
         Err(e) => out.err(
-            to_exit_kind(&e),
+            ExitKind::from(&e),
             upload_error_message(&e, nar_len, file_count, project),
         ),
     }

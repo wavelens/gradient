@@ -5,6 +5,7 @@
  */
 
 use super::config::*;
+use crate::error::{CliError, FileAction};
 use crate::output::{ExitKind, Output};
 use connector::Client;
 use rpassword::read_password;
@@ -13,17 +14,25 @@ use std::io::{IsTerminal, Write};
 use std::process::Command;
 use std::{fs, io};
 
-pub fn client_from_config(out: Output) -> Client {
-    let cfg = load_config();
-    let server = cfg
+pub fn selected_project(out: Output) -> String {
+    get_value(ConfigKey::SelectedProject, true)
+        .unwrap_or_else(|| out.fail(CliError::NoProjectSelected))
+}
+
+pub fn selected_task(out: Output) -> (String, String) {
+    selected_task_ids().unwrap_or_else(|| out.fail(CliError::NoTaskSelected))
+}
+
+pub fn server_base(out: Output) -> String {
+    load_config()
         .get(&ConfigKey::Server)
         .and_then(|v| v.clone())
-        .unwrap_or_else(|| {
-            out.err(
-                ExitKind::Usage,
-                "Server URL not set. Run `gradient login <url>` to set the server and authenticate.",
-            );
-        });
+        .unwrap_or_else(|| out.fail(CliError::ServerNotSet))
+}
+
+pub fn client_from_config(out: Output) -> Client {
+    let cfg = load_config();
+    let server = server_base(out);
     let token = cfg
         .get(&ConfigKey::AuthToken)
         .and_then(|v| v.clone())
@@ -36,19 +45,6 @@ pub fn client_from_config(out: Output) -> Client {
         .unwrap_or_else(|e| out.err(ExitKind::Api, format!("client init failed: {}", e)))
 }
 
-#[cfg(feature = "nix")]
-pub fn server_base(out: Output) -> String {
-    load_config()
-        .get(&ConfigKey::Server)
-        .and_then(|v| v.clone())
-        .unwrap_or_else(|| {
-            out.err(
-                ExitKind::Usage,
-                "Server URL not set. Run `gradient login <url>` to set the server and authenticate.",
-            );
-        })
-}
-
 pub struct Inputs {
     values: HashMap<String, String>,
     out: Output,
@@ -56,10 +52,10 @@ pub struct Inputs {
 
 impl Inputs {
     pub fn get(&self, field: &str) -> String {
-        self.values.get(field).cloned().unwrap_or_else(|| {
-            self.out
-                .err(ExitKind::Usage, format!("{} cannot be empty.", field))
-        })
+        self.values
+            .get(field)
+            .cloned()
+            .unwrap_or_else(|| self.out.fail(CliError::EmptyField(field.to_owned())))
     }
 }
 
@@ -88,12 +84,8 @@ pub fn handle_input(fields: Vec<(String, Option<String>)>, skip: bool, out: Outp
     let editor =
         std::env::var("EDITOR").unwrap_or_else(|_| out.err(ExitKind::Usage, "EDITOR is not set."));
 
-    fs::write(&path, draft).unwrap_or_else(|e| {
-        out.err(
-            ExitKind::Api,
-            format!("Failed to write {}: {}", path.display(), e),
-        )
-    });
+    fs::write(&path, draft)
+        .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Write, &path, e)));
 
     let status = Command::new(&editor)
         .arg(&path)
@@ -109,12 +101,8 @@ pub fn handle_input(fields: Vec<(String, Option<String>)>, skip: bool, out: Outp
         out.err(ExitKind::Usage, format!("Failed to open editor {}", editor));
     }
 
-    let edited = fs::read_to_string(&path).unwrap_or_else(|e| {
-        out.err(
-            ExitKind::Api,
-            format!("Failed to read {}: {}", path.display(), e),
-        )
-    });
+    let edited = fs::read_to_string(&path)
+        .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Read, &path, e)));
     let _ = fs::remove_file(&path);
 
     let values = parse_edited(&fields, &edited).unwrap_or_else(|e| out.err(ExitKind::Usage, e));
@@ -139,30 +127,34 @@ fn parse_edited(
         }
 
         if value.is_empty() {
-            return Err(format!("{} cannot be empty.", field));
+            return Err(CliError::EmptyField(field.to_owned()).to_string());
         }
 
         values.insert(field.to_string(), value.to_string());
     }
 
     match fields.iter().find(|(field, _)| !values.contains_key(field)) {
-        Some((missing, _)) => Err(format!("{} cannot be empty.", missing)),
+        Some((missing, _)) => Err(CliError::EmptyField(missing.clone()).to_string()),
         None => Ok(values),
     }
 }
 
-pub fn ask_for_password(out: Output) -> String {
-    print!("Password: ");
+pub fn ask_for_secret(prompt: &str, out: Output) -> String {
+    print!("{}: ", prompt);
     flush_stdout(out);
 
-    let input = read_password()
-        .unwrap_or_else(|e| out.err(ExitKind::Usage, format!("Failed to read password: {}", e)));
+    let input =
+        read_password().unwrap_or_else(|e| out.fail(CliError::ReadInput(prompt.to_owned(), e)));
 
     if input.is_empty() {
-        out.err(ExitKind::Usage, "Password cannot be empty.");
+        out.fail(CliError::EmptyField(prompt.to_owned()));
     }
 
     input
+}
+
+pub fn ask_for_password(out: Output) -> String {
+    ask_for_secret("Password", out)
 }
 
 pub fn ask_for_input(prompt: &str, out: Output) -> String {
@@ -172,11 +164,11 @@ pub fn ask_for_input(prompt: &str, out: Output) -> String {
     let mut input = String::new();
     io::stdin()
         .read_line(&mut input)
-        .unwrap_or_else(|e| out.err(ExitKind::Usage, format!("Failed to read {}: {}", prompt, e)));
+        .unwrap_or_else(|e| out.fail(CliError::ReadInput(prompt.to_owned(), e)));
 
     let input = input.trim().to_string();
     if input.is_empty() {
-        out.err(ExitKind::Usage, format!("{} cannot be empty.", prompt));
+        out.fail(CliError::EmptyField(prompt.to_owned()));
     }
 
     input
@@ -195,9 +187,9 @@ pub fn ask_for_choice(prompt: &str, options: &[String], out: Output) -> Option<S
         flush_stdout(out);
 
         let mut input = String::new();
-        let read = io::stdin().read_line(&mut input).unwrap_or_else(|e| {
-            out.err(ExitKind::Usage, format!("Failed to read {}: {}", prompt, e))
-        });
+        let read = io::stdin()
+            .read_line(&mut input)
+            .unwrap_or_else(|e| out.fail(CliError::ReadInput(prompt.to_owned(), e)));
         if read == 0 {
             return None;
         }

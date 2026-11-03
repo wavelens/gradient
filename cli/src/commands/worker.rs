@@ -5,9 +5,8 @@
  */
 
 use crate::commands::completion;
-use crate::config::*;
-use crate::input::client_from_config;
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::input::{client_from_config, selected_project};
+use crate::output::Output;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::RegisterWorkerRequest;
@@ -47,13 +46,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             url,
             token,
         } => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                _ => out.err(
-                    ExitKind::Usage,
-                    "Project is required. Use `gradient project select <name>`.",
-                ),
-            };
+            let project = selected_project(out);
 
             let token_provided = token.is_some();
             let client = client_from_config(out);
@@ -88,18 +81,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.human("Token was pre-supplied; not echoed back.");
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
         Commands::List => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                _ => out.err(
-                    ExitKind::Usage,
-                    "Project is required. Use `gradient project select <name>`.",
-                ),
-            };
+            let project = selected_project(out);
 
             let client = client_from_config(out);
             match client.workers().list(&project).await {
@@ -123,18 +110,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                         }
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
         Commands::Delete { worker_id } => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                _ => out.err(
-                    ExitKind::Usage,
-                    "Project is required. Use `gradient project select <name>`.",
-                ),
-            };
+            let project = selected_project(out);
 
             let client = client_from_config(out);
             match client.workers().delete(&project, &worker_id).await {
@@ -142,7 +123,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"deleted": true}));
                     out.human("Worker unregistered.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
     }

@@ -6,6 +6,7 @@
 
 mod commands;
 mod config;
+mod error;
 mod input;
 mod logfmt;
 mod narinfo;

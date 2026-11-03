@@ -7,8 +7,9 @@
 use crate::commands::cache_nar;
 use crate::commands::cache_upload;
 use crate::commands::completion;
+use crate::error::{CliError, FileAction};
 use crate::input::{client_from_config, handle_input};
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::{MakeCacheRequest, PatchCacheRequest};
@@ -121,7 +122,7 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let priority = match input.get("Priority").parse::<i32>() {
                 Ok(p) => p,
-                Err(_) => out.err(ExitKind::Usage, "Priority must be an integer."),
+                Err(_) => out.fail(CliError::NotAnInteger("Priority")),
             };
             let max_storage_gb = parse_max_storage_gb(&input.get("Max Storage (GB)"), out);
 
@@ -144,7 +145,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"created": true}));
                     out.human("Cache created.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -161,7 +162,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         }
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -176,7 +177,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             let client = client_from_config(out);
             let current = match client.caches().get(&name).await {
                 Ok(c) => c,
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             };
 
             let input_fields = [
@@ -205,7 +206,7 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let priority = match input.get("Priority").parse::<i32>() {
                 Ok(p) => p,
-                Err(_) => out.err(ExitKind::Usage, "Priority must be an integer."),
+                Err(_) => out.fail(CliError::NotAnInteger("Priority")),
             };
 
             match client
@@ -230,7 +231,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"updated": true}));
                     out.human("Cache updated.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -241,7 +242,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"deleted": true}));
                     out.human("Cache deleted.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -252,7 +253,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"public_key": key}));
                     out.human(format!("Cache Public Key: {}", key));
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -268,10 +269,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                     print!("API key (GRAD…): ");
                     std::io::Write::flush(&mut std::io::stdout()).ok();
                     let entered = rpassword::read_password().unwrap_or_else(|e| {
-                        out.err(ExitKind::Api, format!("Failed to read token: {}", e));
+                        out.fail(CliError::ReadInput("API key".into(), e));
                     });
                     if entered.is_empty() {
-                        out.err(ExitKind::Usage, "Token cannot be empty.");
+                        out.fail(CliError::EmptyField("API key".into()));
                     }
                     entered
                 }
@@ -296,18 +297,11 @@ pub async fn handle(cmd: Commands, out: Output) {
             if let Some(parent) = std::path::Path::new(&netrc_file).parent()
                 && let Err(e) = fs::create_dir_all(parent)
             {
-                out.err(
-                    ExitKind::Api,
-                    format!("Failed to create directory '{}': {}", parent.display(), e),
-                );
+                out.fail(CliError::file(FileAction::Create, parent, e));
             }
 
-            fs::write(&netrc_file, &updated).unwrap_or_else(|e| {
-                out.err(
-                    ExitKind::Api,
-                    format!("Failed to write '{}': {}", netrc_file, e),
-                );
-            });
+            fs::write(&netrc_file, &updated)
+                .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Write, &netrc_file, e)));
 
             out.ok(&serde_json::json!({
                 "installed": true,
@@ -333,6 +327,6 @@ fn parse_max_storage_gb(raw: &str, out: Output) -> i32 {
             ExitKind::Usage,
             "Max storage must be 0 (unlimited) or at least 1.",
         ),
-        Err(_) => out.err(ExitKind::Usage, "Max storage must be an integer."),
+        Err(_) => out.fail(CliError::NotAnInteger("Max storage")),
     }
 }
