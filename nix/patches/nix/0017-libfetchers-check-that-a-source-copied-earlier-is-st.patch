@@ -1,4 +1,4 @@
-From 3f7eaf3c197f2fdd63d3873019a04d17600b960a Mon Sep 17 00:00:00 2001
+From 8cb736bd7ca3a9c192ffab9fd8fb7ac2eaa7fe33 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Mon, 5 Oct 2026 00:56:03 +0200
 Subject: [PATCH] libfetchers: check that a source copied earlier is still in
@@ -10,31 +10,174 @@ store. An evaluator that lives longer than one evaluation can see that
 path garbage-collected in between and then hands out a path that no
 longer exists. Root the path and check it before trusting the memo; a
 path that is gone is copied again.
----
- src/libfetchers/fetch-to-store.cc | 13 +++++++++++--
- 1 file changed, 11 insertions(+), 2 deletions(-)
 
+The memo also stored a store handle that registered that path as a root.
+Temporary roots live as long as that handle. Later lookups through it
+skip the addTempRoot and isValidPath round trip. All stdenv derivations
+import ./source-stdenv.sh and ./default-builder.sh. These pairs were the
+most frequent daemon calls during evaluation.
+---
+ src/libfetchers-tests/fetch-to-store.cc | 77 +++++++++++++++++++++++++
+ src/libfetchers-tests/meson.build       |  1 +
+ src/libfetchers/fetch-to-store.cc       | 28 +++++++--
+ 3 files changed, 101 insertions(+), 5 deletions(-)
+ create mode 100644 src/libfetchers-tests/fetch-to-store.cc
+
+diff --git a/src/libfetchers-tests/fetch-to-store.cc b/src/libfetchers-tests/fetch-to-store.cc
+new file mode 100644
+index 000000000..7c50b05dd
+--- /dev/null
++++ b/src/libfetchers-tests/fetch-to-store.cc
+@@ -0,0 +1,77 @@
++#include <gtest/gtest.h>
++
++#include "nix/fetchers/fetch-settings.hh"
++#include "nix/fetchers/fetch-to-store.hh"
++#include "nix/store/derivations.hh"
++#include "nix/store/dummy-store.hh"
++#include "nix/store/globals.hh"
++#include "nix/store/tests/forwarding-store.hh"
++#include "nix/util/file-system.hh"
++#include "nix/util/source-accessor.hh"
++
++namespace nix {
++
++struct RootCountingStore : ForwardingStore
++{
++    size_t tempRoots = 0;
++
++    using ForwardingStore::ForwardingStore;
++
++    void addTempRoot(const StorePath & path) override
++    {
++        ++tempRoots;
++        ForwardingStore::addTempRoot(path);
++    }
++};
++
++class FetchToStoreTest : public ::testing::Test
++{
++public:
++    static void SetUpTestSuite()
++    {
++        initLibStore(/*loadConfig=*/false);
++    }
++
++protected:
++    ref<Store> dummy = [] {
++        auto config = make_ref<DummyStoreConfig>(StoreReference::Params{});
++        config->readOnly = false;
++        return config->openStore();
++    }();
++    fetchers::Settings settings;
++    std::filesystem::path dir = createTempDir();
++    SourcePath builder{getFSSourceAccessor(), CanonPath((dir / "builder.sh").string())};
++
++    FetchToStoreTest()
++    {
++        writeFile(dir / "builder.sh", "echo");
++    }
++
++    StorePath fetch(Store & store)
++    {
++        return fetchToStore(settings, store, builder, FetchMode::Copy, "builder.sh");
++    }
++};
++
++TEST_F(FetchToStoreTest, aCopiedSourceIsNotRootedAgainThroughTheSameStore)
++{
++    auto store = make_ref<RootCountingStore>(dummy);
++    auto copied = fetch(*store);
++
++    store->tempRoots = 0;
++    EXPECT_EQ(fetch(*store), copied);
++    EXPECT_EQ(fetch(*store), copied);
++    EXPECT_EQ(store->tempRoots, 0);
++}
++
++TEST_F(FetchToStoreTest, anotherStoreRootsACopiedSourceOnce)
++{
++    auto copied = fetch(*make_ref<RootCountingStore>(dummy));
++
++    auto other = make_ref<RootCountingStore>(dummy);
++    EXPECT_EQ(fetch(*other), copied);
++    EXPECT_EQ(fetch(*other), copied);
++    EXPECT_EQ(other->tempRoots, 1);
++}
++
++} // namespace nix
+diff --git a/src/libfetchers-tests/meson.build b/src/libfetchers-tests/meson.build
+index 22cd6b378..2ae9cdd2f 100644
+--- a/src/libfetchers-tests/meson.build
++++ b/src/libfetchers-tests/meson.build
+@@ -41,6 +41,7 @@ subdir('nix-meson-build-support/common')
+ sources = files(
+   'access-tokens.cc',
+   'attrs.cc',
++  'fetch-to-store.cc',
+   'git-lfs-fetch.cc',
+   'git-utils.cc',
+   'git.cc',
 diff --git a/src/libfetchers/fetch-to-store.cc b/src/libfetchers/fetch-to-store.cc
-index 085c97da7..3685e1696 100644
+index 085c97da7..869609a43 100644
 --- a/src/libfetchers/fetch-to-store.cc
 +++ b/src/libfetchers/fetch-to-store.cc
-@@ -55,8 +55,17 @@ std::pair<StorePath, Hash> fetchToStore2(
+@@ -11,7 +11,7 @@ struct SrcToStore
+ {
+     boost::concurrent_flat_map<
+         std::tuple<SourcePath, ContentAddressMethod::Raw, std::string>,
+-        std::tuple<StorePath, Hash, FetchMode>>
++        std::tuple<StorePath, Hash, FetchMode, std::weak_ptr<Store>>>
+         cache;
+ };
+ 
+@@ -55,8 +55,24 @@ std::pair<StorePath, Hash> fetchToStore2(
  
      if (!filter) {
          auto dstPathCached = getConcurrent(settings.srcToStore->cache, srcToStoreKey);
 -        if (dstPathCached && (mode == FetchMode::DryRun || std::get<2>(*dstPathCached) == FetchMode::Copy))
 -            return std::make_pair(std::get<0>(*dstPathCached), std::get<1>(*dstPathCached));
 +        if (dstPathCached) {
-+            auto & [storePath, hash, cachedMode] = *dstPathCached;
++            auto & [storePath, hash, cachedMode, rootedBy] = *dstPathCached;
 +            if (mode == FetchMode::DryRun)
 +                return {storePath, hash};
-+            /* A long-lived evaluator outlives the copy: the store path may have been garbage collected since. */
++            /* Temporary roots persist for the lifetime of the store handle that acquired them. Paths rooted through
++               this handle remain valid. Other handles root that path and check that the garbage collector has not
++               removed the path since. */
 +            if (cachedMode == FetchMode::Copy) {
-+                store.addTempRoot(storePath);
-+                if (store.isValidPath(storePath))
++                if (rootedBy.lock().get() == &store)
 +                    return {storePath, hash};
++                store.addTempRoot(storePath);
++                if (store.isValidPath(storePath)) {
++                    settings.srcToStore->cache.insert_or_assign(
++                        srcToStoreKey, std::make_tuple(storePath, hash, cachedMode, store.weak_from_this()));
++                    return {storePath, hash};
++                }
 +            }
 +        }
      }
  
      std::optional<fetchers::Cache::Key> cacheKey;
+@@ -82,7 +98,8 @@ std::pair<StorePath, Hash> fetchToStore2(
+                     path,
+                     store.printStorePath(storePath),
+                     hash.to_string(HashFormat::SRI, true));
+-                settings.srcToStore->cache.insert_or_assign(srcToStoreKey, std::make_tuple(storePath, hash, mode));
++                settings.srcToStore->cache.insert_or_assign(
++                    srcToStoreKey, std::make_tuple(storePath, hash, mode, store.weak_from_this()));
+                 return {storePath, hash};
+             }
+             debug("source path '%s' not in store", path);
+@@ -139,7 +156,8 @@ std::pair<StorePath, Hash> fetchToStore2(
+         settings.getCache()->upsert(*cacheKey, {{"hash", hash.to_string(HashFormat::SRI, true)}});
+ 
+     if (!filter)
+-        settings.srcToStore->cache.insert_or_assign(srcToStoreKey, std::make_tuple(storePath, hash, mode));
++        settings.srcToStore->cache.insert_or_assign(
++            srcToStoreKey, std::make_tuple(storePath, hash, mode, store.weak_from_this()));
+ 
+     return {storePath, hash};
+ }
+-- 
+2.56.0
+
