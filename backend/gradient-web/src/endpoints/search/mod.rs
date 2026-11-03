@@ -6,7 +6,6 @@
 
 pub mod classify;
 
-use crate::access::viewer;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
@@ -181,7 +180,10 @@ pub async fn get_search(
     let hits = search(
         &state.web_db,
         &state.extensions.store_path_mapping,
-        viewer(&state, &user),
+        Viewer {
+            user: user.id,
+            public_listing: state.config.server.public_listing,
+        },
         classify(&q.q),
         per_kind(q.limit),
     )
