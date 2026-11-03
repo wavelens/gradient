@@ -186,6 +186,7 @@ flowchart LR
 - Take order: the member's own deferred sets, planned shards, deferred sets of other members, then lowest `seq`.
 - Appends lock the `eval_split` row first. `seq` values stay unique per evaluation.
 - The server can only answer `Finished`, when no shard is `Queued` or `Running`.
+- A member can have at most two running shards. A worker can request a second shard with the first shard still on the list. The second shard can keep other evaluation subprocesses busy while the slow attribute can finish the first. Servers older than protocol 55 receive one shard at a time.
 
 ### Recovery
 
@@ -197,7 +198,7 @@ flowchart LR
 | Returned shard with 2 or more children | `Split` into two queued halves |
 | Returned shard with 1 child or none | Queued again once (`MAX_SHARD_ATTEMPTS` = 2), then `Failed` with an attribute error |
 | Every member lost after `planned_at` | Retry. The queue survives into the next attempt. Staged `EvalStats` of the failed attempt get deleted |
-| A request without `finished`, with a running shard still under the member key | That shard goes back to the queue first |
+| Request with a member key whose running shard is absent from both `finished` and `held` | That shard returns to the queue first |
 
 ### Verdict
 

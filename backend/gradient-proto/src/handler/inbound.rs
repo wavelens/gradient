@@ -17,6 +17,7 @@ use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
 
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
+use gradient_scheduler::eval_split::reply::ShardRequest;
 use gradient_scheduler::jobs::{Assignment, PendingJob, Reattached};
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_wire::Rejection;
@@ -468,14 +469,16 @@ impl<'a> InboundContext<'a> {
                 job_id,
                 have_source,
                 finished,
+                held,
             } => {
                 if self.owns_split_member(&job_id).await {
+                    let request = ShardRequest {
+                        have_source,
+                        finished,
+                        held,
+                    };
                     self.job_events
-                        .push(JobEvent::ShardRequest {
-                            job_id,
-                            have_source,
-                            finished,
-                        })
+                        .push(JobEvent::ShardRequest { job_id, request })
                         .await;
                 } else {
                     send_reply(self.writer, job_id, EvalShardOutcome::Finished).await;

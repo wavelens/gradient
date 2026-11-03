@@ -246,6 +246,8 @@ pub enum ClientMessage {
         job_id: String,
         have_source: bool,
         finished: Option<FinishedShard>,
+        #[proto(55, default)]
+        held: Vec<String>,
     },
 
     #[proto(42)]

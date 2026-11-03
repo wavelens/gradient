@@ -165,7 +165,11 @@ fn escape_like(text: &str) -> String {
         .replace('_', "\\_")
 }
 
-pub async fn requeue_shards_of<C>(db: &C, job: &str) -> Result<Vec<FailedShard>, DbErr>
+pub async fn requeue_shards_of<C>(
+    db: &C,
+    job: &str,
+    held: &[EvalShardId],
+) -> Result<Vec<FailedShard>, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
@@ -173,6 +177,7 @@ where
     let running = EEvalShard::find()
         .filter(CEvalShard::TakenJob.eq(job))
         .filter(CEvalShard::State.eq(EvalShardState::Running))
+        .filter(CEvalShard::Id.is_not_in(held.iter().copied()))
         .order_by_asc(CEvalShard::Seq)
         .lock(LockType::NoKeyUpdate)
         .all(&txn)
@@ -461,7 +466,7 @@ mod tests {
             .append_exec_results([exec(1), exec(2)])
             .into_connection();
 
-        let failed = requeue_shards_of(&db, "job-A").await.expect("requeue");
+        let failed = requeue_shards_of(&db, "job-A", &[]).await.expect("requeue");
 
         assert!(failed.is_empty());
         let statements = all_statements(db.into_transaction_log());
@@ -493,7 +498,7 @@ mod tests {
             .append_exec_results([exec(1)])
             .into_connection();
 
-        let failed = requeue_shards_of(&db, "job-A").await.expect("requeue");
+        let failed = requeue_shards_of(&db, "job-A", &[]).await.expect("requeue");
 
         assert_eq!(
             failed,
@@ -508,5 +513,27 @@ mod tests {
         let state = format!("SmallInt(Some({}))", i16::from(EvalShardState::Failed));
         assert!(values.contains(&state), "{values}");
         assert!(statement(&statements, "INSERT").is_empty());
+    }
+
+    #[tokio::test]
+    async fn shards_the_member_still_holds_stay_running() {
+        let held = EvalShardId::now_v7();
+        let db = mock_db()
+            .append_query_results([Vec::<MEvalShard>::new()])
+            .into_connection();
+
+        let failed = requeue_shards_of(&db, "job-A", &[held])
+            .await
+            .expect("requeue");
+
+        assert!(failed.is_empty());
+        let statements = all_statements(db.into_transaction_log());
+        let running = &statement(&statements, "SELECT")[0];
+        assert!(running.sql.contains("\"id\" NOT IN ($"), "{}", running.sql);
+        assert!(
+            format!("{:?}", running.values).contains(&held.to_string()),
+            "{:?}",
+            running.values
+        );
     }
 }
