@@ -124,7 +124,7 @@
     "flag": "public-listing",
     "env": "GRADIENT_PUBLIC_LISTING",
     "type": "bool",
-    "description": "Whether to list public projects and caches to everyone. Set this to `false` to hide\n`GET /api/v1/projects/public` and `GET /api/v1/caches/public` behind `404`. Search, stars,\ndashboards, and cache dashboards show only items that a user can access. Access can come\nthrough membership, sharing, or subscription. Direct links still work. Public projects,\ntasks, and caches are no exception.",
+    "description": "Whether to list public projects and caches to everyone. Set this option to `false` for `404`\nfrom `GET /api/v1/projects/public` and `GET /api/v1/caches/public`. Search operations skip\npublic items. These items don't have the user's membership, share, subscription, or star.\nCache dashboards skip public caches. These caches don't have membership, share, or\nsubscription. Stars, dashboards, and direct links still work for public projects, tasks, and\ncaches.",
     "default": "true",
     "values": [
       "true",

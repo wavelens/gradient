@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{NON_PR, Viewer};
+use super::NON_PR;
+use super::stars::user_value;
 use chrono::NaiveDateTime;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -22,7 +23,7 @@ fn task_facts_sql() -> String {
         "WITH viewer_tasks AS ( \
             SELECT t.id FROM task t JOIN project_access pu ON pu.project = t.project WHERE pu.\"user\" = $1 \
             UNION SELECT s.task FROM user_task_star s JOIN task st ON st.id = s.task \
-            JOIN project sproj ON sproj.id = st.project WHERE s.\"user\" = $1 AND $2 AND sproj.public) \
+            JOIN project sproj ON sproj.id = st.project WHERE s.\"user\" = $1 AND sproj.public) \
         SELECT p.name AS project, t.name AS task, \
             EXISTS (SELECT 1 FROM user_task_star s WHERE s.\"user\" = $1 AND s.task = t.id) AS starred, \
             EXISTS (SELECT 1 FROM project_access ta WHERE ta.project = t.project AND ta.\"user\" = $1 AND ta.via_team) AS team, \
@@ -83,7 +84,7 @@ fn history_sql() -> String {
 
 crate::sql_fn! {
     TASK_FACTS = task_facts_sql,
-        params = [UserId, Bool(true)],
+        params = [UserId],
         tier = Bulk;
 
     ENTRY_POINT_OUTCOMES = outcomes_sql,
@@ -158,9 +159,9 @@ fn task_facts_row(r: &QueryResult) -> Result<TaskFactsRow, DbErr> {
 
 pub async fn task_facts<C: ConnectionTrait>(
     db: &C,
-    viewer: Viewer,
+    user: UserId,
 ) -> Result<Vec<TaskFactsRow>, DbErr> {
-    db.query_all_raw(TASK_FACTS.bind([viewer.user_value(), viewer.listing_value()]))
+    db.query_all_raw(TASK_FACTS.bind([user_value(user)]))
         .await?
         .iter()
         .map(task_facts_row)

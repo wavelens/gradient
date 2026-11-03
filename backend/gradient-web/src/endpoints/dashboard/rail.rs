@@ -5,7 +5,6 @@
  */
 
 use super::rank::Tier;
-use crate::access::viewer;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::State;
@@ -116,7 +115,7 @@ pub fn build_rail(
     operation_id = "getDashboardRail",
     tag = "dashboard",
     summary = "Sidebar rail of the current user",
-    description = "Projects: member projects plus starred public ones, sorted by tier (`starred_active`, `active`, `starred`, `team`, `member`), then name.\nActive means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.\n`tasks` is present only on `starred_active` projects and omitted otherwise.\nCaches: those the viewer created, is a member of or reaches through a member project, plus starred public ones; starred first, then name. Superusers get no extra caches here.\nStarred public items only appear, while `GRADIENT_PUBLIC_LISTING` is true.",
+    description = "Projects: member projects plus starred public ones, sorted by tier (`starred_active`, `active`, `starred`, `team`, `member`), then name.\nActive means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.\n`tasks` is present only on `starred_active` projects and omitted otherwise.\nCaches: those the viewer created, is a member of or reaches through a member project, plus starred public ones; starred first, then name. Superusers get no extra caches here.",
     responses((status = OK, description = "Rail projects and caches", body = Rail), WebError)
 )]
 pub async fn get_rail(
@@ -124,11 +123,10 @@ pub async fn get_rail(
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Rail>>> {
     let db = &state.web_db;
-    let viewer = viewer(&state, &user);
     Ok(ok_json(build_rail(
-        rail_projects(db, viewer).await?,
-        rail_tasks(db, viewer).await?,
-        rail_caches(db, viewer).await?,
+        rail_projects(db, user.id).await?,
+        rail_tasks(db, user.id).await?,
+        rail_caches(db, user.id).await?,
     )))
 }
 

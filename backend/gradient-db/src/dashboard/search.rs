@@ -36,7 +36,8 @@ crate::sql! {
             UNION ALL SELECT 'task', p.name, t.name, t.display_name, \
                 EXISTS (SELECT 1 FROM user_task_star s WHERE s.\"user\" = $1 AND s.task = t.id) \
                 FROM task t JOIN project p ON p.id = t.project \
-                WHERE (t.name ILIKE $2 OR t.display_name ILIKE $2) AND ", project_readable!("$4"), " \
+                WHERE (t.name ILIKE $2 OR t.display_name ILIKE $2) AND ", project_readable!("($4 OR EXISTS \
+                    (SELECT 1 FROM user_task_star ts WHERE ts.\"user\" = $1 AND ts.task = t.id))"), " \
             UNION ALL SELECT 'cache', NULL, c.name, c.display_name, \
                 EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id) \
                 FROM cache c WHERE (c.name ILIKE $2 OR c.display_name ILIKE $2) AND ", cache_readable!("$4"), " \
