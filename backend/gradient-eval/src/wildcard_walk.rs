@@ -108,7 +108,13 @@ impl Sink<'_> {
         }
     }
 
-    fn restrict_trailing(&mut self, path: &[String], wildcard: &str, names: Vec<String>) -> bool {
+    fn restrict(
+        &mut self,
+        path: &[String],
+        wildcard: &str,
+        rest: &[String],
+        names: &[String],
+    ) -> bool {
         let Sink::Shards(out) = self else {
             return false;
         };
@@ -116,9 +122,10 @@ impl Sink<'_> {
         if !names.is_empty() {
             let mut segments = path.to_vec();
             segments.push(wildcard.to_owned());
+            segments.extend_from_slice(rest);
             out.push(Shard {
                 segments,
-                only: Some(names),
+                only: Some(names.to_vec()),
             });
         }
 
@@ -263,7 +270,7 @@ fn level<N: WalkNode>(
 ) {
     let Pattern { seg, glob } = pattern;
     let names = wildcard_children(node, path, only, glob, diags);
-    if rest.is_empty() && sink.restrict_trailing(path, seg, names.clone()) {
+    if sink.restrict(path, seg, rest, &names) {
         return;
     }
 
@@ -279,7 +286,7 @@ fn level<N: WalkNode>(
                 sink.emit_leaf(p);
             }
         } else {
-            descend(&child, p, rest, sink, diags);
+            traverse(&child, &p, rest, None, sink, diags);
         }
     }
 }
@@ -295,7 +302,7 @@ fn nested<N: WalkNode>(
     diags: &mut Vec<AttrError>,
 ) {
     let names = wildcard_children(node, path, only, None, diags);
-    if rest.is_empty() && sink.restrict_trailing(path, seg, names.clone()) {
+    if sink.restrict(path, seg, rest, &names) {
         return;
     }
 
@@ -336,32 +343,13 @@ fn nested<N: WalkNode>(
         } else if is_opaque_set(&child, &p, diags) {
             continue;
         } else {
-            descend(&child, p, rest, sink, diags);
+            traverse(&child, &p, rest, None, sink, diags);
         }
     }
 }
 
 fn is_opaque_set<N: WalkNode>(child: &N, path: &[String], diags: &mut Vec<AttrError>) -> bool {
     attempt(child.is_opaque(), path, diags).is_none_or(|opaque| opaque)
-}
-
-fn descend<N: WalkNode>(
-    child: &N,
-    mut path: Vec<String>,
-    rest: &[String],
-    sink: &mut Sink<'_>,
-    diags: &mut Vec<AttrError>,
-) {
-    match sink {
-        Sink::Shards(out) => {
-            path.extend_from_slice(rest);
-            out.push(Shard {
-                segments: path,
-                only: None,
-            });
-        }
-        Sink::Derivations { .. } => traverse(child, &path, rest, None, sink, diags),
-    }
 }
 
 pub fn discover<N: WalkNode>(
@@ -1056,22 +1044,18 @@ mod tests {
     }
 
     #[test]
-    fn plan_non_trailing_wildcard_keeps_residual() {
+    fn plan_non_trailing_wildcard_restricts_the_pattern_to_each_child_name() {
         let root = tree();
-        assert_eq!(
-            shards(&root, &["packages", "*", "hello"]),
-            vec![
-                residual(&["packages", "aarch64-linux", "hello"]),
-                residual(&["packages", "x86_64-linux", "hello"]),
-            ]
-        );
-        assert_eq!(
-            shards(&root, &["packages", "*-linux", "hello"]),
-            vec![
-                residual(&["packages", "aarch64-linux", "hello"]),
-                residual(&["packages", "x86_64-linux", "hello"]),
-            ]
-        );
+        for wildcard in ["*", "*-linux", "**"] {
+            assert_eq!(
+                shards(&root, &["packages", wildcard, "hello"]),
+                vec![restricted(
+                    &["packages", wildcard, "hello"],
+                    &["aarch64-linux", "x86_64-linux"]
+                )]
+            );
+            assert_split_equivalent(&root, &["packages", wildcard, "hello"]);
+        }
     }
 
     #[test]
@@ -1113,10 +1097,7 @@ mod tests {
         )]);
         assert_eq!(
             shards(&root, &["packages", "*", "hello"]),
-            vec![
-                residual(&["packages", "sysA", "hello"]),
-                residual(&["packages", "sysB", "hello"])
-            ]
+            vec![restricted(&["packages", "*", "hello"], &["sysA", "sysB"])]
         );
         assert_split_equivalent(&root, &["packages", "*", "hello"]);
         assert_split_equivalent(&root, &["packages", "**"]);
