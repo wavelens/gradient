@@ -1589,10 +1589,12 @@ mod tests {
 
     fn listed_sql(public_listing: bool, visible: Option<Condition>) -> String {
         use sea_orm::QueryTrait;
-        ECache::find()
+        let sql = ECache::find()
             .filter(listed_or(public_listing, visible))
             .build(DatabaseBackend::Postgres)
-            .to_string()
+            .to_string();
+        let (_, condition) = sql.split_once(" WHERE ").expect("a WHERE clause");
+        condition.to_owned()
     }
 
     #[test]
@@ -1614,7 +1616,7 @@ mod tests {
     #[test]
     fn listing_off_shows_an_anonymous_caller_no_cache() {
         let sql = listed_sql(false, None);
-        assert!(sql.ends_with("WHERE FALSE"), "sql = {sql}");
+        assert_eq!(sql, "FALSE");
     }
 
     #[tokio::test]
