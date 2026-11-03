@@ -33,7 +33,7 @@ Open **Settings** from the project page.
 
 Anyone can view every evaluation and build on a public project, signed in or not.
 
-Public projects and caches also appear in the project and cache lists, search and the command palette. The server option [`publicListing`](../reference/configuration.md) turns those lists off, and then only members, shared users and subscribers find the item. Direct links keep working for everyone.
+Public projects and caches also appear in lists of projects and caches, search, and the command palette. The server option [`publicListing`](../reference/configuration.md) can turn off those lists. Only members, shared users, subscribers, and users who starred an item can find that item in that case. Stars and direct links still work for everyone.
 
 ## Cache Settings
 

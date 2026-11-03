@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-/// Visibility rules reflect `load_*(Readable)`. There's no superuser bypass. Placeholder arguments
-/// set the public list flag. Public items don't appear with that flag false.
+/// Visibility rules match `load_*(Readable)`. Superusers can't bypass them. Placeholder arguments
+/// keep the public list flag. Stars from users keep public items visible regardless of that flag.
 macro_rules! project_readable {
     ($listed:literal) => {
         concat!(
-            "((",
+            "(((",
             $listed,
-            " AND p.public) OR EXISTS (SELECT 1 FROM project_access pu \
+            " OR EXISTS (SELECT 1 FROM user_project_star ps WHERE ps.\"user\" = $1 AND ps.project = p.id)) \
+            AND p.public) OR EXISTS (SELECT 1 FROM project_access pu \
             WHERE pu.project = p.id AND pu.\"user\" = $1))"
         )
     };
@@ -20,9 +21,10 @@ macro_rules! project_readable {
 macro_rules! cache_readable {
     ($listed:literal) => {
         concat!(
-            "((",
+            "(((",
             $listed,
-            " AND c.public) OR c.created_by = $1 \
+            " OR EXISTS (SELECT 1 FROM user_cache_star cs WHERE cs.\"user\" = $1 AND cs.cache = c.id)) \
+            AND c.public) OR c.created_by = $1 \
             OR EXISTS (SELECT 1 FROM cache_access cu WHERE cu.cache = c.id AND cu.\"user\" = $1) \
             OR EXISTS (SELECT 1 FROM project_cache pc JOIN project_access pu ON pu.project = pc.project \
             WHERE pc.cache = c.id AND pu.\"user\" = $1))"

@@ -7,13 +7,12 @@
 use super::rank::{
     Counts, Filter, HistoryBar, Outcomes, Paging, TaskFacts, TaskRow, counts, history_len, rank,
 };
-use crate::access::viewer;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::dashboard::{Viewer, entry_point_outcomes, histories, task_facts};
+use gradient_db::dashboard::{entry_point_outcomes, histories, task_facts};
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr};
 use serde::{Deserialize, Serialize};
@@ -93,12 +92,12 @@ async fn attach_history<C: ConnectionTrait>(
 
 pub async fn load_page<C: ConnectionTrait>(
     db: &C,
-    viewer: Viewer,
+    user: UserId,
     filter: Option<Filter>,
     paging: Paging,
     history: u64,
 ) -> Result<TasksPage, DbErr> {
-    let facts: Vec<TaskFacts> = task_facts(db, viewer)
+    let facts: Vec<TaskFacts> = task_facts(db, user)
         .await?
         .into_iter()
         .map(TaskFacts::from)
@@ -133,7 +132,7 @@ pub async fn load_page<C: ConnectionTrait>(
     operation_id = "getDashboardTasks",
     tag = "dashboard",
     summary = "Ranked task table of the current user",
-    description = "Tasks of the viewer's projects plus starred tasks of public projects, PR-triggered evaluations excluded.\nRanked by tier (`starred_active`, `active`, `starred`, `team`, `member`), then newest latest evaluation first.\nActive means a non-PR evaluation in the last 14 days. `counts` always covers every task; `total` is the number of tasks matching `filter`.\nStarred public items only appear, while `GRADIENT_PUBLIC_LISTING` is true.",
+    description = "Tasks of the viewer's projects plus starred tasks of public projects, PR-triggered evaluations excluded.\nRanked by tier (`starred_active`, `active`, `starred`, `team`, `member`), then newest latest evaluation first.\nActive means a non-PR evaluation in the last 14 days. `counts` always covers every task; `total` is the number of tasks matching `filter`.",
     params(TasksQuery),
     responses((status = OK, description = "One page of ranked tasks", body = TasksPage), WebError)
 )]
@@ -146,7 +145,7 @@ pub async fn get_tasks(
     Ok(ok_json(
         load_page(
             &state.web_db,
-            viewer(&state, &user),
+            user.id,
             q.filter,
             paging,
             history_len(q.history),
@@ -199,10 +198,7 @@ mod tests {
 
         let page = load_page(
             &db,
-            Viewer {
-                user: UserId::now_v7(),
-                public_listing: true,
-            },
+            UserId::now_v7(),
             None,
             Paging::from_query(None, None),
             30,
@@ -225,10 +221,7 @@ mod tests {
 
         let page = load_page(
             &db,
-            Viewer {
-                user: UserId::now_v7(),
-                public_listing: true,
-            },
+            UserId::now_v7(),
             Some(Filter::All),
             Paging::from_query(Some(9), None),
             30,
@@ -250,10 +243,7 @@ mod tests {
 
         let page = load_page(
             &db,
-            Viewer {
-                user: UserId::now_v7(),
-                public_listing: true,
-            },
+            UserId::now_v7(),
             None,
             Paging::from_query(None, None),
             30,
@@ -282,10 +272,7 @@ mod tests {
 
         let page = load_page(
             &db,
-            Viewer {
-                user: UserId::now_v7(),
-                public_listing: true,
-            },
+            UserId::now_v7(),
             Some(Filter::All),
             Paging::from_query(None, None),
             30,

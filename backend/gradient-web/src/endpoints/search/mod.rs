@@ -142,7 +142,7 @@ pub async fn search<C: ConnectionTrait>(
     per_kind: u64,
 ) -> Result<Vec<SearchHit>, DbErr> {
     let Some(text) = lookups.text else {
-        return Ok(starred(db, viewer)
+        return Ok(starred(db, viewer.user)
             .await?
             .into_iter()
             .map(SearchHit::from)
@@ -169,7 +169,7 @@ pub async fn search<C: ConnectionTrait>(
     operation_id = "getSearch",
     tag = "dashboard",
     summary = "Typed search for the command palette",
-    description = "Classifies `q` and performs every lookup it could mean. The name lookup always takes place, and a project named like a commit hash is still found.\n- Store path or bare 32-char nix32 hash: NARs of that hash in readable caches (`nar`, at most 10).\n- 7 to 40 hex characters: evaluations of commits with that prefix in readable projects, newest first, PR-triggered ones included (`commit`, at most 5).\n- Any text: projects, tasks and caches whose name or display name contains it, at most `limit` per kind, starred first.\nAn empty `q` returns the user's starred projects, tasks and caches, labelled by display name like name hits.\nVisibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user. With `GRADIENT_PUBLIC_LISTING=false` the public flag grants nothing here, so only membership, sharing or a subscription makes an item visible. There is no superuser bypass, so every hit opens a readable page.\nResults are ordered NAR hits, commit hits, then name hits (starred first, then kind, then name).",
+    description = "Classifies `q` and performs every lookup it could mean. The name lookup always takes place, and a project named like a commit hash is still found.\n- Store path or bare 32-char nix32 hash: NARs of that hash in readable caches (`nar`, at most 10).\n- 7 to 40 hex characters: evaluations of commits with that prefix in readable projects, newest first, PR-triggered ones included (`commit`, at most 5).\n- Any text: projects, tasks and caches whose name or display name contains it, at most `limit` per kind, starred first.\nAn empty `q` returns the user's starred projects, tasks and caches, labelled by display name like name hits.\nVisibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user. Servers with `GRADIENT_PUBLIC_LISTING=false` respect the public flag only for items that a user starred. There is no superuser bypass, so every hit opens a readable page.\nResults are ordered NAR hits, commit hits, then name hits (starred first, then kind, then name).",
     params(SearchQuery),
     responses((status = OK, description = "Search hits with the frontend route each one navigates to", body = Vec<SearchHit>), WebError)
 )]
@@ -248,6 +248,23 @@ mod tests {
             let values = format!("{:?}", stmt.values);
             assert!(values.contains("Bool(Some(false))"), "{values}");
         }
+    }
+
+    #[tokio::test]
+    async fn starred_items_ignore_the_public_listing_flag() {
+        let db = mock_db()
+            .append_query_results([vec![name_row("project", None, "infra", true)]])
+            .into_connection();
+        let mapping: Arc<dyn StorePathMapping> = Arc::new(IdentityMapping);
+        let hits = search(&db, &mapping, viewer(false), classify(""), 5)
+            .await
+            .unwrap();
+
+        assert_eq!(routes(&hits), [(HitKind::Project, "/project/infra")]);
+        let log = db.into_transaction_log();
+        let statements: Vec<_> = log.iter().flat_map(|t| t.statements()).collect();
+        assert_eq!(statements.len(), 1);
+        assert!(!format!("{:?}", statements[0].values).contains("Bool("));
     }
 
     #[test]

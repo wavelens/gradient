@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::Viewer;
 use super::search::{NameHitRow, NameKind, name_hit_row};
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr, Value};
@@ -59,13 +58,13 @@ crate::sql! {
         tier = Hot;
 
     STARRED = concat!("SELECT 'project' AS kind, NULL::text AS project, p.name, p.display_name, true AS starred \
-        FROM user_project_star s JOIN project p ON p.id = s.project WHERE s.\"user\" = $1 AND ", project_readable!("$2"), " \
+        FROM user_project_star s JOIN project p ON p.id = s.project WHERE s.\"user\" = $1 AND ", project_readable!("true"), " \
         UNION ALL SELECT 'task', p.name, t.name, t.display_name, true FROM user_task_star s \
-        JOIN task t ON t.id = s.task JOIN project p ON p.id = t.project WHERE s.\"user\" = $1 AND ", project_readable!("$2"), " \
+        JOIN task t ON t.id = s.task JOIN project p ON p.id = t.project WHERE s.\"user\" = $1 AND ", project_readable!("true"), " \
         UNION ALL SELECT 'cache', NULL, c.name, c.display_name, true FROM user_cache_star s \
-        JOIN cache c ON c.id = s.cache WHERE s.\"user\" = $1 AND ", cache_readable!("$2"), " \
+        JOIN cache c ON c.id = s.cache WHERE s.\"user\" = $1 AND ", cache_readable!("true"), " \
         ORDER BY kind, project, name"),
-        params = [UserId, Bool(true)],
+        params = [UserId],
         tier = Hot;
 }
 
@@ -105,8 +104,8 @@ pub async fn unstar<C: ConnectionTrait>(
     Ok(())
 }
 
-pub async fn starred<C: ConnectionTrait>(db: &C, viewer: Viewer) -> Result<Vec<NameHitRow>, DbErr> {
-    db.query_all_raw(STARRED.bind([viewer.user_value(), viewer.listing_value()]))
+pub async fn starred<C: ConnectionTrait>(db: &C, user: UserId) -> Result<Vec<NameHitRow>, DbErr> {
+    db.query_all_raw(STARRED.bind([user_value(user)]))
         .await?
         .iter()
         .map(name_hit_row)
@@ -115,10 +114,10 @@ pub async fn starred<C: ConnectionTrait>(db: &C, viewer: Viewer) -> Result<Vec<N
 
 pub async fn starred_names<C: ConnectionTrait>(
     db: &C,
-    viewer: Viewer,
+    user: UserId,
 ) -> Result<StarredNames, DbErr> {
     let mut out = StarredNames::default();
-    for row in starred(db, viewer).await? {
+    for row in starred(db, user).await? {
         match row.kind {
             NameKind::Project => out.projects.push(row.name),
             NameKind::Task { project } => out.tasks.push(StarredTask {

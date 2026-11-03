@@ -46,11 +46,12 @@ pub struct ServerArgs {
     /// access those endpoints with `false` (default).
     #[arg(default_value = "false")]
     pub public_stats: bool,
-    /// Whether to list public projects and caches to everyone. Set this to `false` to hide
-    /// `GET /api/v1/projects/public` and `GET /api/v1/caches/public` behind `404`. Search, stars,
-    /// dashboards, and cache dashboards show only items that a user can access. Access can come
-    /// through membership, sharing, or subscription. Direct links still work. Public projects,
-    /// tasks, and caches are no exception.
+    /// Whether to list public projects and caches to everyone. Set this option to `false` for `404`
+    /// from `GET /api/v1/projects/public` and `GET /api/v1/caches/public`. Search operations skip
+    /// public items. These items don't have the user's membership, share, subscription, or star.
+    /// Cache dashboards skip public caches. These caches don't have membership, share, or
+    /// subscription. Stars, dashboards, and direct links still work for public projects, tasks, and
+    /// caches.
     #[arg(default_value = "true")]
     pub public_listing: bool,
     /// Days to keep job assignment records, finished deliveries, worker connection history,

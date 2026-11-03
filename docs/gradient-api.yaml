@@ -5247,7 +5247,6 @@ paths:
         Active means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.
         `tasks` is present only on `starred_active` projects and omitted otherwise.
         Caches: those the viewer created, is a member of or reaches through a member project, plus starred public ones; starred first, then name. Superusers get no extra caches here.
-        Starred public items only appear, while `GRADIENT_PUBLIC_LISTING` is true.
       operationId: getDashboardRail
       responses:
         '200':
@@ -5307,7 +5306,6 @@ paths:
         Tasks of the viewer's projects plus starred tasks of public projects, PR-triggered evaluations excluded.
         Ranked by tier (`starred_active`, `active`, `starred`, `team`, `member`), then newest latest evaluation first.
         Active means a non-PR evaluation in the last 14 days. `counts` always covers every task; `total` is the number of tasks matching `filter`.
-        Starred public items only appear, while `GRADIENT_PUBLIC_LISTING` is true.
       operationId: getDashboardTasks
       parameters:
       - name: filter
@@ -8913,7 +8911,7 @@ paths:
         - 7 to 40 hex characters: evaluations of commits with that prefix in readable projects, newest first, PR-triggered ones included (`commit`, at most 5).
         - Any text: projects, tasks and caches whose name or display name contains it, at most `limit` per kind, starred first.
         An empty `q` returns the user's starred projects, tasks and caches, labelled by display name like name hits.
-        Visibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user. With `GRADIENT_PUBLIC_LISTING=false` the public flag grants nothing here, so only membership, sharing or a subscription makes an item visible. There is no superuser bypass, so every hit opens a readable page.
+        Visibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user. Servers with `GRADIENT_PUBLIC_LISTING=false` respect the public flag only for items that a user starred. There is no superuser bypass, so every hit opens a readable page.
         Results are ordered NAR hits, commit hits, then name hits (starred first, then kind, then name).
       operationId: getSearch
       parameters:
