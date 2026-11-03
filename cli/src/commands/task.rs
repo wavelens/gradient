@@ -68,6 +68,8 @@ pub enum Commands {
     Evaluate,
 }
 
+const NO_TASK_SELECTED: &str = "No task is currently selected. Run 'gradient task select' first.";
+
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Select { task } => {
@@ -91,7 +93,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
                 }
-                _ => out.err(ExitKind::Usage, "Task is required for command."),
+                _ => out.err(ExitKind::Usage, NO_TASK_SELECTED),
             };
 
             let client = client_from_config(out);
@@ -165,7 +167,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
                 }
-                _ => out.err(ExitKind::Usage, "Task is required for command."),
+                _ => out.err(ExitKind::Usage, NO_TASK_SELECTED),
             };
 
             let client = client_from_config(out);
@@ -273,7 +275,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
                 }
-                _ => out.err(ExitKind::Usage, "Task is required for command."),
+                _ => out.err(ExitKind::Usage, NO_TASK_SELECTED),
             };
 
             let client = client_from_config(out);
@@ -331,7 +333,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
                 }
-                _ => out.err(ExitKind::Usage, "Task is required for command."),
+                _ => out.err(ExitKind::Usage, NO_TASK_SELECTED),
             };
 
             let client = client_from_config(out);
@@ -350,7 +352,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
                 }
-                _ => out.err(ExitKind::Usage, "Task is required for command."),
+                _ => out.err(ExitKind::Usage, NO_TASK_SELECTED),
             };
 
             let client = client_from_config(out);
