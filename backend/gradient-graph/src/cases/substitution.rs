@@ -249,6 +249,31 @@ async fn s05_a_build_needing_an_output_no_cache_holds_keeps_its_producer_a_real_
 }
 
 #[tokio::test]
+async fn s11_an_output_referenced_by_a_needed_sibling_output_keeps_its_producer_a_real_build() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(a_builds_with(e1, &["dev"])).await;
+
+    case.upstream_hits(&[(B_OUT2, narinfo(&[(B_OUT2, "b-dev"), (B_OUT, "b")]))])
+        .await;
+    case.upstream_probed(&[B]).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.cache_available, b.unneeded_outputs),
+        (BuildStatus::Created, false, Vec::<String>::new()),
+        "after 1: sb(B) status, cache_available, unneeded_outputs"
+    );
+    let c = case.sb(C).await;
+    assert_eq!(
+        (c.status, c.wanted),
+        (BuildStatus::Created, true),
+        "after 1: sb(C) status, wanted"
+    );
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn s06_an_output_no_cache_holds_does_not_need_the_other_outputs_of_a_referenced_producer() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(
