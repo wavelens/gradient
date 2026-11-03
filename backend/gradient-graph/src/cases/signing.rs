@@ -314,6 +314,35 @@ async fn k06_a_batch_claims_the_cached_outputs_of_its_jobs_for_keyed_signing_pro
 }
 
 #[tokio::test]
+async fn k11_a_claimed_output_brings_the_cached_paths_it_references_into_the_cache() {
+    let e1 = EvaluationId::now_v7();
+    let c1 = CacheId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .into_cache(c1)
+            .keyed(Case::key())
+            .derivation(B)
+            .walked()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .build_status(BuildStatus::Completed)
+            .cached_path(X_OUT, "x")
+            .cached_output(B)
+            .references(&[(B_OUT, "b"), (X_OUT, "x")]),
+    )
+    .await;
+
+    walk_above_b(&case, e1, A, A_OUT, "pkg.a").await;
+
+    signed(&case, B_OUT, c1, "after 1: C1 holds B").await;
+    signed(&case, X_OUT, c1, "after 1: C1 holds what B references").await;
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn k07_a_committed_path_is_claimed_for_every_project_waiting_on_it() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let (c1, c2) = (CacheId::now_v7(), CacheId::now_v7());
