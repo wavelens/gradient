@@ -25,7 +25,7 @@ use sea_orm::{
 };
 use tracing::{info, warn};
 
-use super::planner::{ListedSet, PlannedShard, plan_shards};
+use super::planner::{ListedSet, plan_shards};
 use super::split_params;
 use crate::Scheduler;
 use crate::jobs::parse_eval_job_key;
@@ -302,10 +302,7 @@ async fn finish(
 }
 
 fn packed(costs: &TaskEvalCosts, members: usize, specs: Vec<EvalShardSpec>) -> Vec<NewShard> {
-    let input = PlanInput::from(specs);
-    let members = members.max(1);
-    let planned = plan_shards(costs, &input.listed, members, &split_params(members));
-    input.shards(planned)
+    PlanInput::from(specs).shards(costs, members.max(1))
 }
 
 fn new_shard(spec: EvalShardSpec) -> NewShard {
@@ -328,16 +325,14 @@ async fn mark_planned<C: ConnectionTrait>(db: &C, evaluation: EvaluationId) -> R
 }
 
 struct PlanInput {
-    listed: Vec<ListedSet>,
-    patterns: HashMap<Vec<String>, String>,
+    listed: Vec<(String, ListedSet)>,
     whole: Vec<NewShard>,
 }
 
 impl From<Vec<EvalShardSpec>> for PlanInput {
     fn from(specs: Vec<EvalShardSpec>) -> Self {
-        let mut children: HashMap<Vec<String>, BTreeSet<String>> = HashMap::new();
-        let mut patterns: HashMap<Vec<String>, String> = HashMap::new();
-        let mut order: Vec<Vec<String>> = Vec::new();
+        let mut children: HashMap<String, (Vec<String>, BTreeSet<String>)> = HashMap::new();
+        let mut order: Vec<String> = Vec::new();
         let mut whole = Vec::new();
         for spec in specs {
             let Some(names) = spec.children.clone() else {
@@ -345,46 +340,54 @@ impl From<Vec<EvalShardSpec>> for PlanInput {
                 continue;
             };
 
-            if !patterns.contains_key(&spec.set) {
-                order.push(spec.set.clone());
-                patterns.insert(spec.set.clone(), spec.pattern.clone());
-            }
-
-            children.entry(spec.set).or_default().extend(names);
+            let (_, listed) = children.entry(spec.pattern.clone()).or_insert_with(|| {
+                order.push(spec.pattern.clone());
+                (spec.set, BTreeSet::new())
+            });
+            listed.extend(names);
         }
 
         let listed = order
             .into_iter()
-            .map(|path| ListedSet {
-                children: children
-                    .remove(&path)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect(),
-                path,
+            .map(|pattern| {
+                let (path, names) = children.remove(&pattern).unwrap_or_default();
+                let set = ListedSet {
+                    path,
+                    children: names.into_iter().collect(),
+                };
+                (pattern, set)
             })
             .collect();
 
-        Self {
-            listed,
-            patterns,
-            whole,
-        }
+        Self { listed, whole }
     }
 }
 
 impl PlanInput {
-    fn shards(self, planned: Vec<PlannedShard>) -> Vec<NewShard> {
-        let patterns = self.patterns;
-        planned
+    fn shards(self, costs: &TaskEvalCosts, members: usize) -> Vec<NewShard> {
+        let params = split_params(members);
+        let mut groups: Vec<(f64, Vec<NewShard>)> = self
+            .listed
             .into_iter()
-            .filter_map(|shard| {
-                Some(NewShard {
-                    pattern: patterns.get(&shard.set)?.clone(),
-                    children: Some(shard.children),
-                    predicted_ms: shard.predicted_ms,
-                })
+            .map(|(pattern, set)| {
+                let planned = plan_shards(costs, std::slice::from_ref(&set), members, &params);
+                let total_ms = planned.iter().map(|shard| shard.predicted_ms).sum();
+                let shards = planned
+                    .into_iter()
+                    .map(|shard| NewShard {
+                        pattern: pattern.clone(),
+                        children: Some(shard.children),
+                        predicted_ms: shard.predicted_ms,
+                    })
+                    .collect();
+                (total_ms, shards)
             })
+            .collect();
+        groups.sort_by(|a, b| b.0.total_cmp(&a.0));
+
+        groups
+            .into_iter()
+            .flat_map(|(_, shards)| shards)
             .chain(self.whole)
             .collect()
     }
@@ -532,6 +535,40 @@ mod tests {
                 .map(|shard| shard.children.as_ref().map_or(0, Vec::len))
                 .sum::<usize>(),
             400
+        );
+    }
+
+    #[test]
+    fn patterns_under_the_same_set_are_packed_apart() {
+        let hosts: Vec<String> = (0..40).map(|i| format!("host{i}")).collect();
+        let spec = |pattern: &str| EvalShardSpec {
+            set: vec!["nixosConfigurations".into()],
+            pattern: pattern.into(),
+            children: Some(hosts.clone()),
+        };
+        let toplevel = "nixosConfigurations.*.config.system.build.toplevel";
+        let runner = "nixosConfigurations.*.config.microvm.declaredRunner";
+
+        let shards = packed(
+            &TaskEvalCosts::default(),
+            2,
+            vec![spec(toplevel), spec(runner)],
+        );
+
+        for pattern in [toplevel, runner] {
+            let mut children: Vec<String> = shards
+                .iter()
+                .filter(|shard| shard.pattern == pattern)
+                .flat_map(|shard| shard.children.clone().unwrap_or_default())
+                .collect();
+            children.sort_by_key(|host| host[4..].parse::<u32>().unwrap_or_default());
+            assert_eq!(children, hosts, "{pattern}");
+        }
+        assert!(
+            shards
+                .iter()
+                .all(|shard| shard.children.as_ref().is_some_and(|c| c.len() > 1)),
+            "hosts are packed together: {shards:?}"
         );
     }
 
