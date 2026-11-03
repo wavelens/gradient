@@ -36,7 +36,7 @@ impl Scheduler {
     }
 
     async fn return_lost_shards(&self, job_id: &str) {
-        match requeue_shards_of(&self.db.worker_db, job_id).await {
+        match requeue_shards_of(&self.db.worker_db, job_id, &[]).await {
             Ok(failed) => {
                 info!(%job_id, failed = failed.len(), "shards of a lost split member returned to the queue");
                 self.record_failed_shards(&failed).await;

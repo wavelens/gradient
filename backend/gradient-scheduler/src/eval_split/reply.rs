@@ -83,12 +83,18 @@ pub fn next_step(split: &SplitView, member: &MemberView) -> NextStep {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ShardRequest {
+    pub have_source: bool,
+    pub finished: Option<FinishedShard>,
+    pub held: Vec<String>,
+}
+
 impl Scheduler {
     pub async fn eval_shard_request(
         &self,
         job_id: &str,
-        have_source: bool,
-        finished: Option<FinishedShard>,
+        request: ShardRequest,
     ) -> Result<EvalShardOutcome> {
         let Some((split, index)) = self.split_of(job_id).await? else {
             info!(%job_id, "shard request from a job that is not a split evaluation member");
@@ -96,7 +102,7 @@ impl Scheduler {
         };
 
         let member = MemberView {
-            have_source,
+            have_source: request.have_source,
             is_primary: index == 0,
         };
         let outcome = match next_step(&SplitView::from(&split), &member) {
@@ -106,7 +112,7 @@ impl Scheduler {
                 fingerprint,
             },
             NextStep::Plan => EvalShardOutcome::Plan,
-            NextStep::Take => self.take(&split, job_id, finished).await?,
+            NextStep::Take => self.take(&split, job_id, request).await?,
         };
 
         Ok(outcome)
@@ -225,24 +231,26 @@ impl Scheduler {
         &self,
         split: &MEvalSplit,
         job_id: &str,
-        finished: Option<FinishedShard>,
+        request: ShardRequest,
     ) -> Result<EvalShardOutcome> {
         let evaluation = split.evaluation;
-        let deferred = match &finished {
+        let deferred = match &request.finished {
             Some(finished) if !finished.deferred.is_empty() => {
                 self.planned_shards(split, finished.deferred.clone())
                     .await?
             }
             _ => Vec::new(),
         };
+        let held: Vec<EvalShardId> = request
+            .held
+            .iter()
+            .filter_map(|id| id.parse().ok())
+            .collect();
         let txn = self.db.worker_db.begin().await?;
-        let stale = match finished {
-            Some(finished) => {
-                finish(&txn, job_id, &finished.id, deferred).await?;
-                Vec::new()
-            }
-            None => eval_shards::requeue_shards_of(&txn, job_id).await?,
-        };
+        if let Some(finished) = request.finished {
+            finish(&txn, job_id, &finished.id, deferred).await?;
+        }
+        let stale = eval_shards::requeue_shards_of(&txn, job_id, &held).await?;
 
         let outcome = match eval_shards::take_shard(&txn, evaluation, job_id).await? {
             Some(shard) => EvalShardOutcome::Shard(given_shard(&txn, shard).await?),
@@ -489,7 +497,13 @@ mod tests {
         let scheduler = scheduler(db);
 
         let outcome = scheduler
-            .eval_shard_request(&format!("eval:{evaluation}:1"), true, None)
+            .eval_shard_request(
+                &format!("eval:{evaluation}:1"),
+                ShardRequest {
+                    have_source: true,
+                    ..Default::default()
+                },
+            )
             .await
             .expect("reply");
 
@@ -590,19 +604,21 @@ mod tests {
             .append_query_results([vec![split(evaluation, true, true)]])
             .append_query_results([vec![done.clone()]])
             .append_query_results([Vec::<MEvalShard>::new()])
+            .append_query_results([Vec::<MEvalShard>::new()])
             .append_query_results([Vec::<BTreeMap<&str, sea_orm::Value>>::new()])
             .into_connection();
         let scheduler = scheduler(db);
 
+        let request = ShardRequest {
+            have_source: true,
+            finished: Some(FinishedShard {
+                id: done.id.to_string(),
+                deferred: Vec::new(),
+            }),
+            held: Vec::new(),
+        };
         let outcome = scheduler
-            .eval_shard_request(
-                &job,
-                true,
-                Some(FinishedShard {
-                    id: done.id.to_string(),
-                    deferred: Vec::new(),
-                }),
-            )
+            .eval_shard_request(&job, request)
             .await
             .expect("reply");
 

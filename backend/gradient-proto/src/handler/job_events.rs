@@ -12,10 +12,11 @@ use std::time::{Duration, Instant};
 
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::writer::RECORD_ROW_BUDGET;
+use gradient_scheduler::eval_split::reply::ShardRequest;
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_types::ids::{DispatchedJobId, EvaluationId};
 use gradient_util::shutdown::Shutdown;
-use gradient_wire::types::{BuildFailureKind, BuildMetrics, FinishedShard, InputOutcome};
+use gradient_wire::types::{BuildFailureKind, BuildMetrics, InputOutcome};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{Instrument as _, debug, debug_span, error, info, warn};
@@ -64,8 +65,7 @@ pub(super) enum JobEvent {
     },
     ShardRequest {
         job_id: String,
-        have_source: bool,
-        finished: Option<FinishedShard>,
+        request: ShardRequest,
     },
     Phase {
         job_id: String,
@@ -292,19 +292,8 @@ impl ApplyJobEvent for SchedulerJobEvents {
                     .handle_input_fetched(&self.peer_id, &fetch_id, outcome)
                     .await;
             }
-            JobEvent::ShardRequest {
-                job_id,
-                have_source,
-                finished,
-            } => {
-                handle_eval_shard_request(
-                    &self.scheduler,
-                    &self.writer,
-                    job_id,
-                    have_source,
-                    finished,
-                )
-                .await;
+            JobEvent::ShardRequest { job_id, request } => {
+                handle_eval_shard_request(&self.scheduler, &self.writer, job_id, request).await;
             }
             JobEvent::Phase {
                 job_id,

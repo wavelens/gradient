@@ -23,6 +23,29 @@ fn max_proto_message_size_is_sane() {
 }
 
 #[test]
+fn held_shards_reach_only_a_server_of_version_55() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{ClientMessage, HELD_EVAL_SHARDS_SINCE};
+
+    let request = |held: Vec<String>| ClientMessage::EvalShardRequest {
+        job_id: "eval:e:1".into(),
+        have_source: true,
+        finished: None,
+        held,
+    };
+    let sent = request(vec!["s1".into()]);
+    let since = HELD_EVAL_SHARDS_SINCE;
+
+    let bytes = to_bytes(&sent, since).unwrap();
+    assert_eq!(from_bytes::<ClientMessage>(bytes, since).unwrap(), sent);
+    let bytes = to_bytes(&sent, since - 1).unwrap();
+    assert_eq!(
+        from_bytes::<ClientMessage>(bytes, since - 1).unwrap(),
+        request(Vec::new())
+    );
+}
+
+#[test]
 fn split_evaluation_messages_round_trip_and_need_proto_40() {
     use crate::codec::{from_bytes, to_bytes};
     use crate::messages::{ClientMessage, ServerMessage};
@@ -50,6 +73,7 @@ fn split_evaluation_messages_round_trip_and_need_proto_40() {
                 id: "s".into(),
                 deferred: vec![spec],
             }),
+            held: Vec::new(),
         },
     ];
     for message in client {

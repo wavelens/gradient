@@ -86,7 +86,7 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `InputFetched` | Reply to `FetchInput` after the push: the fetch answer or the download error. `Unplaced` answers return the fetch to the server for another worker | `fetch_id`, `outcome` |
 | `EvalSourceReady` | Names the fetched source of a split evaluation, sent by the primary member (since 40) | `job_id`, `store_path`, `fingerprint` |
 | `EvalShardsPlanned` | Carries the shard plan of a split evaluation, sent by the primary member (since 40) | `job_id`, `shards` |
-| `EvalShardRequest` | Asks for the next shard of a split evaluation and reports the last finished one (since 40) | `job_id`, `have_source`, `finished` |
+| `EvalShardRequest` | Request for the next shard of a split evaluation. `finished` holds the last completed shard, `held` the shard that is still in progress (40 onward, `held` is 55 onward). | `job_id`, `have_source`, `finished`, `held` |
 | `GuestChannelData` | Output bytes of a guest channel, at most 32 KiB (since 44) | `channel_id`, `data` |
 | `CloseGuestChannel` | Close of a guest channel by the worker, with the shell exit code or a refusal text (since 44) | `channel_id`, `exit_code`, `message` |
 

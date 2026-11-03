@@ -5,9 +5,9 @@
  */
 
 use gradient_scheduler::Scheduler;
-use gradient_scheduler::eval_split::reply::RETRY_AFTER_MS;
+use gradient_scheduler::eval_split::reply::{RETRY_AFTER_MS, ShardRequest};
 use gradient_wire::messages::ServerMessage;
-use gradient_wire::types::{EvalShardOutcome, EvalShardSpec, FinishedShard};
+use gradient_wire::types::{EvalShardOutcome, EvalShardSpec};
 use tracing::warn;
 
 use super::socket::{ProtoWriter, send_server_msg};
@@ -17,13 +17,9 @@ pub(super) async fn handle_eval_shard_request(
     scheduler: &Scheduler,
     writer: &ProtoWriter,
     job_id: String,
-    have_source: bool,
-    finished: Option<FinishedShard>,
+    request: ShardRequest,
 ) {
-    let outcome = match scheduler
-        .eval_shard_request(&job_id, have_source, finished)
-        .await
-    {
+    let outcome = match scheduler.eval_shard_request(&job_id, request).await {
         Ok(outcome) => outcome,
         Err(e) => {
             warn!(%job_id, error = %e, "eval shard request failed; asking the member to retry");
