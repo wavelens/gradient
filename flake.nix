@@ -107,6 +107,7 @@
         rustfmt
         sea-orm-cli
         rustEnv
+        rust-analyzer
 
         llvmPackages.lld
         lldb
