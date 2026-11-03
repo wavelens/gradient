@@ -7,6 +7,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
+import { publicListingGuard } from '@core/guards/public-listing.guard';
 import { visibleProjectGuard } from '@core/guards/visible-project.guard';
 import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
 import { taskAccessResolver } from '@core/resolvers/task-access.resolver';
@@ -280,6 +281,7 @@ export const routes: Routes = [
   {
     path: 'projects',
     title: 'Projects',
+    canActivate: [publicListingGuard],
     loadComponent: () =>
       import('./features/projects/project-list/project-list.component').then(
         (m) => m.ProjectListComponent
@@ -288,6 +290,7 @@ export const routes: Routes = [
   {
     path: 'caches',
     title: 'Caches',
+    canActivate: [publicListingGuard],
     loadComponent: () =>
       import('./features/caches/cache-list/cache-list.component').then(
         (m) => m.CacheListComponent

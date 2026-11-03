@@ -5,7 +5,7 @@
  */
 
 use crate::access::{
-    CacheAccess, Caller, ProjectAccess, TaskAccess, load_cache, load_project, load_task,
+    CacheAccess, Caller, ProjectAccess, TaskAccess, load_cache, load_project, load_task, viewer,
 };
 use crate::audit::Audit;
 use crate::authorization::MaybeApiKey;
@@ -134,7 +134,9 @@ pub async fn get_stars(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<StarredNames>>> {
-    Ok(ok_json(starred_names(&state.web_db, user.id).await?))
+    Ok(ok_json(
+        starred_names(&state.web_db, viewer(&state, &user)).await?,
+    ))
 }
 
 #[utoipa::path(

@@ -46,6 +46,13 @@ pub struct ServerArgs {
     /// access those endpoints with `false` (default).
     #[arg(default_value = "false")]
     pub public_stats: bool,
+    /// Whether to list public projects and caches to everyone. Set this to `false` to hide
+    /// `GET /api/v1/projects/public` and `GET /api/v1/caches/public` behind `404`. Search, stars,
+    /// dashboards, and cache dashboards show only items that a user can access. Access can come
+    /// through membership, sharing, or subscription. Direct links still work. Public projects,
+    /// tasks, and caches are no exception.
+    #[arg(default_value = "true")]
+    pub public_listing: bool,
     /// Days to keep job assignment records, finished deliveries, worker connection history,
     /// webhook and task action deliveries, expired sessions and CLI logins. Finished admin
     /// tasks, the audit log, per-build resource samples and finished cluster jobs share the same

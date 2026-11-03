@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::NON_PR;
-use super::stars::user_value;
 use super::tasks::eval_status;
+use super::{NON_PR, Viewer};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr, QueryResult};
@@ -15,7 +14,7 @@ fn rail_projects_sql() -> String {
     format!(
         "WITH viewer AS (SELECT project FROM project_access WHERE \"user\" = $1 \
             UNION SELECT s.project FROM user_project_star s JOIN project sp ON sp.id = s.project \
-            WHERE s.\"user\" = $1 AND sp.public) \
+            WHERE s.\"user\" = $1 AND $2 AND sp.public) \
         SELECT p.id, p.name, p.display_name, \
             EXISTS (SELECT 1 FROM user_project_star s WHERE s.\"user\" = $1 AND s.project = p.id) AS starred, \
             EXISTS (SELECT 1 FROM project_access pu WHERE pu.\"user\" = $1 AND pu.project = p.id) AS member, \
@@ -34,18 +33,18 @@ fn rail_tasks_sql() -> String {
         "SELECT t.project, t.name, (SELECT e.status FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
             WHERE e.task = t.id AND {NON_PR} ORDER BY e.created_at DESC LIMIT 1) AS status \
         FROM task t WHERE t.project IN (SELECT s.project FROM user_project_star s JOIN project p ON p.id = s.project \
-            WHERE s.\"user\" = $1 AND (p.public OR EXISTS (SELECT 1 FROM project_access pu \
+            WHERE s.\"user\" = $1 AND (($2 AND p.public) OR EXISTS (SELECT 1 FROM project_access pu \
             WHERE pu.project = p.id AND pu.\"user\" = $1))) ORDER BY t.name"
     )
 }
 
 crate::sql_fn! {
     RAIL_PROJECTS = rail_projects_sql,
-        params = [UserId],
+        params = [UserId, Bool(true)],
         tier = Bulk;
 
     RAIL_TASKS = rail_tasks_sql,
-        params = [UserId],
+        params = [UserId, Bool(true)],
         tier = Bulk;
 }
 
@@ -57,9 +56,9 @@ crate::sql! {
             OR EXISTS (SELECT 1 FROM cache_access cu WHERE cu.cache = c.id AND cu.\"user\" = $1) \
             OR EXISTS (SELECT 1 FROM project_cache pc JOIN project_access pu ON pu.project = pc.project \
                 WHERE pc.cache = c.id AND pu.\"user\" = $1) \
-            OR EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id AND c.public) \
+            OR EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id AND $2 AND c.public) \
         ORDER BY starred DESC, c.name",
-        params = [UserId],
+        params = [UserId, Bool(true)],
         tier = Bulk;
 }
 
@@ -130,9 +129,9 @@ fn rail_cache_row(r: &QueryResult) -> Result<RailCacheRow, DbErr> {
 
 pub async fn rail_projects<C: ConnectionTrait>(
     db: &C,
-    user: UserId,
+    viewer: Viewer,
 ) -> Result<Vec<RailProjectRow>, DbErr> {
-    db.query_all_raw(RAIL_PROJECTS.bind([user_value(user)]))
+    db.query_all_raw(RAIL_PROJECTS.bind([viewer.user_value(), viewer.listing_value()]))
         .await?
         .iter()
         .map(rail_project_row)
@@ -141,9 +140,9 @@ pub async fn rail_projects<C: ConnectionTrait>(
 
 pub async fn rail_tasks<C: ConnectionTrait>(
     db: &C,
-    user: UserId,
+    viewer: Viewer,
 ) -> Result<Vec<RailTaskRow>, DbErr> {
-    db.query_all_raw(RAIL_TASKS.bind([user_value(user)]))
+    db.query_all_raw(RAIL_TASKS.bind([viewer.user_value(), viewer.listing_value()]))
         .await?
         .iter()
         .map(rail_task_row)
@@ -152,9 +151,9 @@ pub async fn rail_tasks<C: ConnectionTrait>(
 
 pub async fn rail_caches<C: ConnectionTrait>(
     db: &C,
-    user: UserId,
+    viewer: Viewer,
 ) -> Result<Vec<RailCacheRow>, DbErr> {
-    db.query_all_raw(RAIL_CACHES.bind([user_value(user)]))
+    db.query_all_raw(RAIL_CACHES.bind([viewer.user_value(), viewer.listing_value()]))
         .await?
         .iter()
         .map(rail_cache_row)

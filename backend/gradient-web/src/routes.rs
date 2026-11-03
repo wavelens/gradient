@@ -440,11 +440,17 @@ pub(crate) fn webhook_routes() -> OpenApiRouter<Arc<ServerState>> {
     ))
 }
 
-pub(crate) fn open_api() -> OpenApiRouter<Arc<ServerState>> {
+pub(crate) fn public_listing_api() -> OpenApiRouter<Arc<ServerState>> {
     unsecured(enveloped(
         OpenApiRouter::new()
             .routes(routes!(projects::management::get_public_projects))
-            .routes(routes!(caches::management::get_public_caches))
+            .routes(routes!(caches::management::get_public_caches)),
+    ))
+}
+
+pub(crate) fn open_api() -> OpenApiRouter<Arc<ServerState>> {
+    unsecured(enveloped(
+        OpenApiRouter::new()
             .routes(routes!(auth::post_logout))
             .routes(routes!(endpoints::get_health))
             .routes(routes!(endpoints::get_config))

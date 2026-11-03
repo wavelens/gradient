@@ -285,7 +285,7 @@ type PaginatedProject = Paginated<MProject>;
     operation_id = "listPublicProjects",
     tag = "projects",
     summary = "List public projects",
-    description = "Returns a paginated list of all public projects, ordered by name. Does not require authentication.",
+    description = "Returns a paginated list of all public projects, ordered by name. Does not require authentication. Servers that run with `GRADIENT_PUBLIC_LISTING=false` return `404`.",
     params(PaginationParams),
     responses((status = OK, description = "Paginated public project list", body = PaginatedProject), WebError)
 )]

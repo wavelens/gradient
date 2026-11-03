@@ -96,7 +96,9 @@ export class ProjectListComponent implements OnInit {
     } else {
       this.loading.set(false);
     }
-    this.loadPublicProjects();
+    if (this.config.publicListing) {
+      this.loadPublicProjects();
+    }
   }
 
   loadProjects(page = this.projectsPage()): void {

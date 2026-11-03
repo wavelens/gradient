@@ -6,6 +6,7 @@
 
 pub mod classify;
 
+use crate::access::viewer;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
@@ -13,7 +14,7 @@ use axum::{Extension, Json};
 use classify::{Lookups, classify};
 use gradient_core::ServerState;
 use gradient_db::dashboard::{
-    CommitHitRow, NameHitRow, NameKind, NarHitRow, readable_cache_ids, search_commits,
+    CommitHitRow, NameHitRow, NameKind, NarHitRow, Viewer, readable_cache_ids, search_commits,
     search_names, search_nars, starred,
 };
 use gradient_types::*;
@@ -136,12 +137,12 @@ fn cache_hit(name: String, starred: bool) -> SearchHit {
 pub async fn search<C: ConnectionTrait>(
     db: &C,
     mapping: &Arc<dyn StorePathMapping>,
-    user: UserId,
+    viewer: Viewer,
     lookups: Lookups,
     per_kind: u64,
 ) -> Result<Vec<SearchHit>, DbErr> {
     let Some(text) = lookups.text else {
-        return Ok(starred(db, user)
+        return Ok(starred(db, viewer)
             .await?
             .into_iter()
             .map(SearchHit::from)
@@ -149,15 +150,15 @@ pub async fn search<C: ConnectionTrait>(
     };
     let mut hits = Vec::new();
     if let Some(hash) = &lookups.nar {
-        let caches = readable_cache_ids(db, user).await?;
-        let nars = search_nars(db, &nar_lookups(hash, &caches, mapping), user).await?;
+        let caches = readable_cache_ids(db, viewer).await?;
+        let nars = search_nars(db, &nar_lookups(hash, &caches, mapping), viewer).await?;
         hits.extend(nars.into_iter().map(|n| nar_hit(n, hash)));
     }
     if let Some(range) = &lookups.commit {
-        let commits = search_commits(db, &range.low, &range.high, user).await?;
+        let commits = search_commits(db, &range.low, &range.high, viewer).await?;
         hits.extend(commits.into_iter().map(SearchHit::from));
     }
-    let names = search_names(db, &text, per_kind, user).await?;
+    let names = search_names(db, &text, per_kind, viewer).await?;
     hits.extend(names.into_iter().map(SearchHit::from));
     Ok(hits)
 }
@@ -168,7 +169,7 @@ pub async fn search<C: ConnectionTrait>(
     operation_id = "getSearch",
     tag = "dashboard",
     summary = "Typed search for the command palette",
-    description = "Classifies `q` and performs every lookup it could mean. The name lookup always takes place, and a project named like a commit hash is still found.\n- Store path or bare 32-char nix32 hash: NARs of that hash in readable caches (`nar`, at most 10).\n- 7 to 40 hex characters: evaluations of commits with that prefix in readable projects, newest first, PR-triggered ones included (`commit`, at most 5).\n- Any text: projects, tasks and caches whose name or display name contains it, at most `limit` per kind, starred first.\nAn empty `q` returns the user's starred projects, tasks and caches, labelled by display name like name hits.\nVisibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user. There is no superuser bypass, so every hit opens a readable page.\nResults are ordered NAR hits, commit hits, then name hits (starred first, then kind, then name).",
+    description = "Classifies `q` and performs every lookup it could mean. The name lookup always takes place, and a project named like a commit hash is still found.\n- Store path or bare 32-char nix32 hash: NARs of that hash in readable caches (`nar`, at most 10).\n- 7 to 40 hex characters: evaluations of commits with that prefix in readable projects, newest first, PR-triggered ones included (`commit`, at most 5).\n- Any text: projects, tasks and caches whose name or display name contains it, at most `limit` per kind, starred first.\nAn empty `q` returns the user's starred projects, tasks and caches, labelled by display name like name hits.\nVisibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user. With `GRADIENT_PUBLIC_LISTING=false` the public flag grants nothing here, so only membership, sharing or a subscription makes an item visible. There is no superuser bypass, so every hit opens a readable page.\nResults are ordered NAR hits, commit hits, then name hits (starred first, then kind, then name).",
     params(SearchQuery),
     responses((status = OK, description = "Search hits with the frontend route each one navigates to", body = Vec<SearchHit>), WebError)
 )]
@@ -180,7 +181,7 @@ pub async fn get_search(
     let hits = search(
         &state.web_db,
         &state.extensions.store_path_mapping,
-        user.id,
+        viewer(&state, &user),
         classify(&q.q),
         per_kind(q.limit),
     )
@@ -214,13 +215,39 @@ mod tests {
         hits.iter().map(|h| (h.kind, h.route.as_str())).collect()
     }
 
+    fn viewer(public_listing: bool) -> Viewer {
+        Viewer {
+            user: UserId::now_v7(),
+            public_listing,
+        }
+    }
+
     async fn run(results: Vec<Vec<Row>>, q: &str) -> (Vec<SearchHit>, usize) {
         let db = mock_db().append_query_results(results).into_connection();
         let mapping: Arc<dyn StorePathMapping> = Arc::new(IdentityMapping);
-        let hits = search(&db, &mapping, UserId::now_v7(), classify(q), 5)
+        let hits = search(&db, &mapping, viewer(true), classify(q), 5)
             .await
             .unwrap();
         (hits, db.into_transaction_log().len())
+    }
+
+    #[tokio::test]
+    async fn without_public_listing_every_lookup_leaves_public_items_out() {
+        let db = mock_db()
+            .append_query_results([Vec::<Row>::new(), Vec::new()])
+            .into_connection();
+        let mapping: Arc<dyn StorePathMapping> = Arc::new(IdentityMapping);
+        search(&db, &mapping, viewer(false), classify("deadbeef1"), 5)
+            .await
+            .unwrap();
+
+        let log = db.into_transaction_log();
+        let statements: Vec<_> = log.iter().flat_map(|t| t.statements()).collect();
+        assert_eq!(statements.len(), 2);
+        for stmt in statements {
+            let values = format!("{:?}", stmt.values);
+            assert!(values.contains("Bool(Some(false))"), "{values}");
+        }
     }
 
     #[test]
@@ -274,7 +301,7 @@ mod tests {
             .append_query_results([vec![name_row("task", None, "hosts", false)]])
             .into_connection();
         let mapping: Arc<dyn StorePathMapping> = Arc::new(IdentityMapping);
-        let result = search(&db, &mapping, UserId::now_v7(), classify("hosts"), 5).await;
+        let result = search(&db, &mapping, viewer(true), classify("hosts"), 5).await;
         assert!(result.is_err());
     }
 

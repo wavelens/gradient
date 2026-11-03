@@ -1287,7 +1287,7 @@ paths:
       tags:
       - board
       summary: Cache statistics
-      description: Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view). `caches` lists the 10 caches with the most bytes served in the window, largest first, limited to public caches and the caches the caller can see (all caches for superusers).
+      description: Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view). `caches` lists the 10 caches with the most bytes served in the window, largest first, limited to public caches and the caches the caller can see (all caches for superusers). Public caches only enter the count, while `GRADIENT_PUBLIC_LISTING` is true.
       operationId: getBoardCache
       parameters:
       - name: window_hours
@@ -3175,7 +3175,7 @@ paths:
       tags:
       - caches
       summary: List public caches
-      description: Returns every public cache. Does not require authentication.
+      description: Returns every public cache. Does not require authentication. Servers that run with `GRADIENT_PUBLIC_LISTING=false` return `404`.
       operationId: listPublicCaches
       responses:
         '200':
@@ -5247,6 +5247,7 @@ paths:
         Active means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.
         `tasks` is present only on `starred_active` projects and omitted otherwise.
         Caches: those the viewer created, is a member of or reaches through a member project, plus starred public ones; starred first, then name. Superusers get no extra caches here.
+        Starred public items only appear, while `GRADIENT_PUBLIC_LISTING` is true.
       operationId: getDashboardRail
       responses:
         '200':
@@ -5306,6 +5307,7 @@ paths:
         Tasks of the viewer's projects plus starred tasks of public projects, PR-triggered evaluations excluded.
         Ranked by tier (`starred_active`, `active`, `starred`, `team`, `member`), then newest latest evaluation first.
         Active means a non-PR evaluation in the last 14 days. `counts` always covers every task; `total` is the number of tasks matching `filter`.
+        Starred public items only appear, while `GRADIENT_PUBLIC_LISTING` is true.
       operationId: getDashboardTasks
       parameters:
       - name: filter
@@ -6898,7 +6900,7 @@ paths:
       tags:
       - projects
       summary: List public projects
-      description: Returns a paginated list of all public projects, ordered by name. Does not require authentication.
+      description: Returns a paginated list of all public projects, ordered by name. Does not require authentication. Servers that run with `GRADIENT_PUBLIC_LISTING=false` return `404`.
       operationId: listPublicProjects
       parameters:
       - name: page
@@ -8911,7 +8913,7 @@ paths:
         - 7 to 40 hex characters: evaluations of commits with that prefix in readable projects, newest first, PR-triggered ones included (`commit`, at most 5).
         - Any text: projects, tasks and caches whose name or display name contains it, at most `limit` per kind, starred first.
         An empty `q` returns the user's starred projects, tasks and caches, labelled by display name like name hits.
-        Visibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user. There is no superuser bypass, so every hit opens a readable page.
+        Visibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user. With `GRADIENT_PUBLIC_LISTING=false` the public flag grants nothing here, so only membership, sharing or a subscription makes an item visible. There is no superuser bypass, so every hit opens a readable page.
         Results are ordered NAR hits, commit hits, then name hits (starred first, then kind, then name).
       operationId: getSearch
       parameters:
@@ -20155,6 +20157,7 @@ components:
       - gradient_ci_enabled
       - gradient_ci_url
       - exec_enabled
+      - public_listing
       properties:
         version:
           type: string
@@ -20203,6 +20206,8 @@ components:
           - string
           - 'null'
         exec_enabled:
+          type: boolean
+        public_listing:
           type: boolean
     SessionId:
       type: string

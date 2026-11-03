@@ -167,6 +167,7 @@ pub struct ServerConfig {
     pub gradient_ci_url: String,
     pub logo_url: Option<String>,
     pub exec_enabled: bool,
+    pub public_listing: bool,
 }
 
 #[utoipa::path(
@@ -217,6 +218,7 @@ pub async fn get_config(
             gradient_ci_url: gradient_types::consts::GRADIENT_CI_URL.to_owned(),
             logo_url: state.config.server.frontend_logo_url.clone(),
             exec_enabled: state.config.exec.enable,
+            public_listing: state.config.server.public_listing,
         },
     };
 

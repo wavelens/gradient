@@ -14,10 +14,10 @@ import { ConfigService } from '@core/services/config.service';
 import { WhatsNewService } from '@core/whats-new/whats-new.service';
 
 const BRAND: Brand = { label: 'Gradient', href: '/' };
-const NAV: (NavLink & { signedIn?: true })[] = [
+const NAV: (NavLink & { signedIn?: true; publicList?: true })[] = [
   { label: 'Dashboard', href: '/', exact: true, signedIn: true },
-  { label: 'Projects', href: '/projects' },
-  { label: 'Caches', href: '/caches' },
+  { label: 'Projects', href: '/projects', publicList: true },
+  { label: 'Caches', href: '/caches', publicList: true },
   { label: 'Teams', href: '/teams', signedIn: true },
   { label: 'Job Board', href: '/board', signedIn: true },
 ];
@@ -40,7 +40,8 @@ export class AppHeaderComponent {
   protected readonly brand = BRAND;
   protected nav = computed(() => {
     const signedIn = this.authService.isAuthenticated();
-    return NAV.filter((link) => signedIn || !link.signedIn);
+    const listed = this.config.publicListing;
+    return NAV.filter((link) => signedIn || (!link.signedIn && (listed || !link.publicList)));
   });
 
   protected readonly userMenuItems: MenuItem[] = [
