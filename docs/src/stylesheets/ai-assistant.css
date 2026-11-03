@@ -1,0 +1,25 @@
+.md-typeset details.ai-assistant {
+  margin-top: 3em;
+  border: none;
+  box-shadow: none;
+  background: none;
+  font-size: inherit;
+}
+
+.md-typeset details.ai-assistant > summary {
+  padding: 0;
+  background: none;
+  font-size: 0.6rem;
+  font-weight: normal;
+  color: var(--md-default-fg-color--light);
+  opacity: 0.35;
+}
+
+.md-typeset details.ai-assistant > summary::before,
+.md-typeset details.ai-assistant > summary::after {
+  display: none;
+}
+
+.md-typeset details.ai-assistant[open] > summary {
+  opacity: 1;
+}
