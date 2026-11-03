@@ -4,14 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
+use futures::future::BoxFuture;
+use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_eval::pool::LiveThunks;
 use gradient_sources::ShardSpec;
+use gradient_util::sync::Mutex;
 use gradient_wire::messages::{FlakeJob, FlakeOutputNode};
 use gradient_wire::traits::JobReporter;
 use gradient_wire::types::{
@@ -49,6 +53,8 @@ impl SplitMember {
     }
 }
 
+const SHARDS_IN_FLIGHT: usize = 2;
+
 #[async_trait]
 pub(crate) trait SplitServer: Send + Sync {
     async fn announce_plan(&self, shards: Vec<EvalShardSpec>) -> Result<()>;
@@ -57,16 +63,19 @@ pub(crate) trait SplitServer: Send + Sync {
         &self,
         have_source: bool,
         finished: Option<FinishedShard>,
+        held: Vec<String>,
     ) -> Result<EvalShardOutcome>;
+
+    fn shards_in_flight(&self) -> usize;
 }
 
 #[async_trait]
-pub(crate) trait ShardWork: Send {
+pub(crate) trait ShardWork: Send + Sync {
     async fn plan(&mut self) -> Result<Vec<EvalShardSpec>>;
 
-    async fn shard(&mut self, shard: EvalShard) -> Result<Vec<EvalShardSpec>>;
+    async fn shard(&self, shard: EvalShard) -> Result<Vec<EvalShardSpec>>;
 
-    async fn flush(&mut self);
+    async fn flush(&self);
 
     async fn drop_cache(&mut self, corrupt: &CorruptEvalCache);
 }
@@ -81,14 +90,23 @@ impl SplitServer for JobUpdater {
         &self,
         have_source: bool,
         finished: Option<FinishedShard>,
+        held: Vec<String>,
     ) -> Result<EvalShardOutcome> {
-        self.request_eval_shard(have_source, finished).await
+        self.request_eval_shard(have_source, finished, held).await
+    }
+
+    fn shards_in_flight(&self) -> usize {
+        if self.server_keeps_held_eval_shards() {
+            SHARDS_IN_FLIGHT
+        } else {
+            1
+        }
     }
 }
 
 pub(crate) async fn await_source(server: &dyn SplitServer) -> Result<Option<(String, String)>> {
     loop {
-        match server.request(false, None).await? {
+        match server.request(false, None, Vec::new()).await? {
             EvalShardOutcome::Source {
                 store_path,
                 fingerprint,
@@ -101,9 +119,8 @@ pub(crate) async fn await_source(server: &dyn SplitServer) -> Result<Option<(Str
 }
 
 pub(crate) async fn take_shards(server: &dyn SplitServer, work: &mut dyn ShardWork) -> Result<()> {
-    let mut finished = None;
-    loop {
-        let (reply, ()) = tokio::join!(server.request(true, finished.take()), work.flush());
+    let first = loop {
+        let (reply, ()) = tokio::join!(server.request(true, None, Vec::new()), work.flush());
         match reply? {
             EvalShardOutcome::Plan => {
                 let planned = work.plan().await;
@@ -111,15 +128,103 @@ pub(crate) async fn take_shards(server: &dyn SplitServer, work: &mut dyn ShardWo
                 work.flush().await;
                 server.announce_plan(shards).await?;
             }
-            EvalShardOutcome::Shard(shard) => {
-                let id = shard.id.clone();
-                let listed = work.shard(shard).await;
-                let deferred = drop_cache_if_corrupt(work, listed).await?;
-                finished = Some(FinishedShard { id, deferred });
-            }
             EvalShardOutcome::Wait { retry_after_ms } => wait(retry_after_ms).await,
-            EvalShardOutcome::Finished => return Ok(()),
-            EvalShardOutcome::Source { .. } => bail!("a member with the source was sent it again"),
+            reply => break reply,
+        }
+    };
+
+    let taken = ShardTaker::new(server, &*work).run(first).await;
+    drop_cache_if_corrupt(work, taken).await
+}
+
+type Listed = (String, Result<Vec<EvalShardSpec>>);
+
+struct ShardTaker<'a> {
+    server: &'a dyn SplitServer,
+    work: &'a dyn ShardWork,
+    slots: usize,
+    running: FuturesUnordered<BoxFuture<'a, Listed>>,
+    listed: VecDeque<Listed>,
+    held: Vec<String>,
+}
+
+impl<'a> ShardTaker<'a> {
+    fn new(server: &'a dyn SplitServer, work: &'a dyn ShardWork) -> Self {
+        Self {
+            server,
+            work,
+            slots: server.shards_in_flight().max(1),
+            running: FuturesUnordered::new(),
+            listed: VecDeque::new(),
+            held: Vec::new(),
+        }
+    }
+
+    async fn run(mut self, mut reply: EvalShardOutcome) -> Result<()> {
+        loop {
+            let busy = !self.running.is_empty() || !self.listed.is_empty();
+            let room = match reply {
+                EvalShardOutcome::Shard(shard) => {
+                    self.start(shard);
+                    self.running.len() < self.slots
+                }
+                EvalShardOutcome::Wait { retry_after_ms } if !busy => {
+                    wait(retry_after_ms).await;
+                    true
+                }
+                EvalShardOutcome::Finished if !busy => return Ok(()),
+                EvalShardOutcome::Wait { .. } | EvalShardOutcome::Finished => false,
+                EvalShardOutcome::Plan => {
+                    bail!("the plan was asked for after shards were handed out")
+                }
+                EvalShardOutcome::Source { .. } => {
+                    bail!("a member with the source was sent it again")
+                }
+            };
+
+            if !room && self.listed.is_empty() {
+                self.listed.extend(self.running.next().await);
+            }
+            let finished = self.next_finished()?;
+            reply = self.request(finished).await?;
+        }
+    }
+
+    fn start(&mut self, shard: EvalShard) {
+        let (id, work) = (shard.id.clone(), self.work);
+        self.held.push(id.clone());
+        self.running
+            .push(Box::pin(async move { (id, work.shard(shard).await) }));
+    }
+
+    fn next_finished(&mut self) -> Result<Option<FinishedShard>> {
+        let Some((id, deferred)) = self.listed.pop_front() else {
+            return Ok(None);
+        };
+
+        self.held.retain(|held| *held != id);
+        Ok(Some(FinishedShard {
+            id,
+            deferred: deferred?,
+        }))
+    }
+
+    async fn request(&mut self, finished: Option<FinishedShard>) -> Result<EvalShardOutcome> {
+        let (server, work) = (self.server, self.work);
+        let held = self.held.clone();
+        let request = async move {
+            let (reply, ()) = tokio::join!(server.request(true, finished, held), work.flush());
+            reply
+        };
+        tokio::pin!(request);
+
+        loop {
+            tokio::select! {
+                reply = &mut request => return reply,
+                Some(listed) = self.running.next(), if !self.running.is_empty() => {
+                    self.listed.push_back(listed);
+                }
+            }
         }
     }
 }
@@ -207,7 +312,7 @@ struct PoolShardWork<'a> {
     local_flake_path: Option<&'a str>,
     updater: &'a mut JobUpdater,
     sharing: Option<(EvalCacheSharing, String)>,
-    flake_nodes: Vec<FlakeOutputNode>,
+    flake_nodes: Mutex<Vec<FlakeOutputNode>>,
 }
 
 impl<'a> PoolShardWork<'a> {
@@ -232,27 +337,26 @@ impl<'a> PoolShardWork<'a> {
             local_flake_path,
             updater,
             sharing,
-            flake_nodes: Vec::new(),
+            flake_nodes: Mutex::default(),
         }
     }
 
     async fn report_stats(self, started: Instant) {
         let totals = self.context.evaluator.resolver().take_eval_stats();
         let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-        let report = build_eval_stats_report(totals, self.flake_nodes, elapsed_ms);
+        let report = build_eval_stats_report(totals, self.flake_nodes.into_inner(), elapsed_ms);
         if let Err(e) = self.updater.report_eval_stats(report).await {
             warn!(error = %e, "failed to send eval stats report");
         }
     }
 
-    async fn pull_drvs(&mut self, drv_paths: Vec<String>) {
+    async fn pull_drvs(&self, drv_paths: Vec<String>, reporter: &JobUpdater) {
         if drv_paths.is_empty() {
             return;
         }
 
         let pulled =
-            crate::proto::prefetch::pull_cached(self.context.store, drv_paths, &*self.updater)
-                .await;
+            crate::proto::prefetch::pull_cached(self.context.store, drv_paths, reporter).await;
         if let Err(e) = pulled {
             warn!(error = %e, "pulling the derivations of a returned shard failed");
         }
@@ -279,10 +383,11 @@ impl ShardWork for PoolShardWork<'_> {
         Ok(shards.into_iter().map(shard_spec).collect())
     }
 
-    async fn shard(&mut self, shard: EvalShard) -> Result<Vec<EvalShardSpec>> {
-        self.pull_drvs(shard.drv_paths).await;
+    async fn shard(&self, shard: EvalShard) -> Result<Vec<EvalShardSpec>> {
+        let mut reporter = self.updater.concurrent();
+        self.pull_drvs(shard.drv_paths, &reporter).await;
         if let Some((sharing, fingerprint)) = &self.sharing {
-            sharing.pull(&*self.updater, fingerprint).await;
+            sharing.pull(&reporter, fingerprint).await;
         }
 
         let given = ShardSpec {
@@ -294,18 +399,18 @@ impl ShardWork for PoolShardWork<'_> {
             &FsDrvReader,
             self.context.job,
             self.local_flake_path,
-            &mut *self.updater,
+            &mut reporter,
             self.context.abort,
             vec![given],
         )
         .await?;
-        self.flake_nodes.extend(outcome.flake_nodes);
+        self.flake_nodes.lock().extend(outcome.flake_nodes);
 
         Ok(outcome.deferred.into_iter().map(shard_spec).collect())
     }
 
-    async fn flush(&mut self) {
-        if let Some((sharing, _)) = &mut self.sharing {
+    async fn flush(&self) {
+        if let Some((sharing, _)) = &self.sharing {
             sharing.flush().await;
         }
     }
@@ -336,18 +441,19 @@ fn set_of(pattern: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_util::sync::Mutex;
     use gradient_wire::traits::EvalProgressSink;
     use gradient_wire::types::EvalProgress;
-    use std::collections::VecDeque;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    type Request = (bool, Option<FinishedShard>, Vec<String>);
 
     #[derive(Default)]
     struct ScriptedServer {
         replies: Mutex<VecDeque<EvalShardOutcome>>,
-        requests: Mutex<Vec<(bool, Option<FinishedShard>)>>,
+        requests: Mutex<Vec<Request>>,
         plans: Mutex<Vec<Vec<EvalShardSpec>>>,
         events: Arc<Mutex<Vec<&'static str>>>,
+        slots: usize,
     }
 
     impl ScriptedServer {
@@ -371,16 +477,21 @@ mod tests {
             &self,
             have_source: bool,
             finished: Option<FinishedShard>,
+            held: Vec<String>,
         ) -> Result<EvalShardOutcome> {
-            self.requests.lock().push((have_source, finished));
+            self.requests.lock().push((have_source, finished, held));
             self.events.lock().push("request");
             let reply = self.replies.lock().pop_front();
             reply.ok_or_else(|| anyhow::anyhow!("no reply scripted"))
         }
+
+        fn shards_in_flight(&self) -> usize {
+            self.slots
+        }
     }
 
     struct ScriptedWork {
-        deferred: Vec<EvalShardSpec>,
+        deferred: Mutex<Vec<EvalShardSpec>>,
         corrupt: bool,
         events: Arc<Mutex<Vec<&'static str>>>,
     }
@@ -392,7 +503,7 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn shard(&mut self, _shard: EvalShard) -> Result<Vec<EvalShardSpec>> {
+        async fn shard(&self, _shard: EvalShard) -> Result<Vec<EvalShardSpec>> {
             self.events.lock().push("shard");
             if self.corrupt {
                 let corrupt = CorruptEvalCache {
@@ -400,10 +511,10 @@ mod tests {
                 };
                 return Err(anyhow::Error::new(corrupt).context("listing the shard"));
             }
-            Ok(std::mem::take(&mut self.deferred))
+            Ok(std::mem::take(&mut *self.deferred.lock()))
         }
 
-        async fn flush(&mut self) {
+        async fn flush(&self) {
             self.events.lock().push("flush");
         }
 
@@ -458,7 +569,9 @@ mod tests {
         assert!(
             requests
                 .iter()
-                .all(|(have_source, finished)| !have_source && finished.is_none())
+                .all(|(have_source, finished, held)| !have_source
+                    && finished.is_none()
+                    && held.is_empty())
         );
     }
 
@@ -467,7 +580,7 @@ mod tests {
         let events = Arc::default();
         let server = ScriptedServer::new(vec![shard("s1"), EvalShardOutcome::Finished], &events);
         let mut work = ScriptedWork {
-            deferred: vec![python_set()],
+            deferred: Mutex::new(vec![python_set()]),
             corrupt: false,
             events: Arc::clone(&events),
         };
@@ -475,7 +588,7 @@ mod tests {
         take_shards(&server, &mut work).await.expect("taken");
 
         let requests = server.requests.lock();
-        assert_eq!(requests[0], (true, None));
+        assert_eq!(requests[0], (true, None, Vec::new()));
         assert_eq!(
             requests[1],
             (
@@ -483,7 +596,8 @@ mod tests {
                 Some(FinishedShard {
                     id: "s1".into(),
                     deferred: vec![python_set()],
-                })
+                }),
+                Vec::new()
             )
         );
     }
@@ -500,7 +614,7 @@ mod tests {
             &events,
         );
         let mut work = ScriptedWork {
-            deferred: Vec::new(),
+            deferred: Mutex::default(),
             corrupt: false,
             events: Arc::clone(&events),
         };
@@ -522,7 +636,7 @@ mod tests {
         let events = Arc::default();
         let server = ScriptedServer::new(vec![shard("s1"), shard("s2")], &events);
         let mut work = ScriptedWork {
-            deferred: Vec::new(),
+            deferred: Mutex::default(),
             corrupt: true,
             events: Arc::clone(&events),
         };
@@ -532,7 +646,7 @@ mod tests {
             .expect_err("the member fails");
 
         assert!(corrupt_cache_in(&error).is_some(), "{error:#}");
-        assert_eq!(*server.requests.lock(), vec![(true, None)]);
+        assert_eq!(*server.requests.lock(), vec![(true, None, Vec::new())]);
         let events = events.lock().clone();
         let listed = events.iter().position(|e| *e == "shard").expect("a shard");
         assert_eq!(events[listed..], ["shard", "drop cache"]);
@@ -549,7 +663,7 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn shard(&mut self, _shard: EvalShard) -> Result<Vec<EvalShardSpec>> {
+        async fn shard(&self, _shard: EvalShard) -> Result<Vec<EvalShardSpec>> {
             self.events.lock().push("shard");
             self.thunks.store(40, Ordering::Relaxed);
             tokio::time::sleep(Duration::from_secs(3)).await;
@@ -557,9 +671,87 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn flush(&mut self) {}
+        async fn flush(&self) {}
 
         async fn drop_cache(&mut self, _corrupt: &CorruptEvalCache) {}
+    }
+
+    struct TimedWork;
+
+    #[async_trait]
+    impl ShardWork for TimedWork {
+        async fn plan(&mut self) -> Result<Vec<EvalShardSpec>> {
+            Ok(Vec::new())
+        }
+
+        async fn shard(&self, shard: EvalShard) -> Result<Vec<EvalShardSpec>> {
+            let secs = if shard.id == "slow" { 3 } else { 1 };
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+            Ok(Vec::new())
+        }
+
+        async fn flush(&self) {}
+
+        async fn drop_cache(&mut self, _corrupt: &CorruptEvalCache) {}
+    }
+
+    fn done(id: &str) -> Option<FinishedShard> {
+        Some(FinishedShard {
+            id: id.into(),
+            deferred: Vec::new(),
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_next_shard_is_taken_while_a_slow_one_is_still_listed() {
+        let events = Arc::default();
+        let server = ScriptedServer {
+            slots: 2,
+            ..ScriptedServer::new(
+                vec![
+                    shard("slow"),
+                    shard("fast"),
+                    EvalShardOutcome::Wait { retry_after_ms: 0 },
+                    EvalShardOutcome::Finished,
+                ],
+                &events,
+            )
+        };
+        let started = tokio::time::Instant::now();
+
+        take_shards(&server, &mut TimedWork).await.expect("taken");
+
+        assert_eq!(started.elapsed(), Duration::from_secs(3));
+        assert_eq!(
+            *server.requests.lock(),
+            vec![
+                (true, None, Vec::new()),
+                (true, None, vec!["slow".to_owned()]),
+                (true, done("fast"), vec!["slow".to_owned()]),
+                (true, done("slow"), Vec::new()),
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_older_server_gets_one_shard_at_a_time() {
+        let events = Arc::default();
+        let server = ScriptedServer::new(
+            vec![shard("slow"), shard("fast"), EvalShardOutcome::Finished],
+            &events,
+        );
+        let started = tokio::time::Instant::now();
+
+        take_shards(&server, &mut TimedWork).await.expect("taken");
+
+        assert_eq!(started.elapsed(), Duration::from_secs(4));
+        assert!(
+            server
+                .requests
+                .lock()
+                .iter()
+                .all(|(_, _, held)| held.is_empty())
+        );
     }
 
     struct EventSink(Arc<Mutex<Vec<&'static str>>>);
