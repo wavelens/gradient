@@ -266,7 +266,7 @@ pub async fn put(
     operation_id = "listPublicCaches",
     tag = "caches",
     summary = "List public caches",
-    description = "Returns every public cache. Does not require authentication.",
+    description = "Returns every public cache. Does not require authentication. Servers that run with `GRADIENT_PUBLIC_LISTING=false` return `404`.",
     responses((status = OK, description = "Public cache list", body = Vec<MCache>), WebError)
 )]
 pub async fn get_public_caches(

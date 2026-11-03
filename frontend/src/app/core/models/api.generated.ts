@@ -2231,6 +2231,7 @@ export interface ServerConfig {
   gradient_ci_url: string;
   logo_url?: string | null;
   exec_enabled: boolean;
+  public_listing: boolean;
 }
 
 export type SessionId = string;

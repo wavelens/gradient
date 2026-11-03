@@ -65,7 +65,9 @@ export class CacheListComponent implements OnInit {
     } else {
       this.loading.set(false);
     }
-    this.loadPublicCaches();
+    if (this.config.publicListing) {
+      this.loadPublicCaches();
+    }
   }
 
   loadCaches(): void {

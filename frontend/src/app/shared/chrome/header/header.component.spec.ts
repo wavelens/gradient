@@ -17,7 +17,11 @@ import { RELEASE_NOTES_SOURCE } from '@core/whats-new/whats-new.service';
 
 const logout = vi.fn(() => ({ subscribe: () => undefined }));
 
-function setup(registrationDisabled: boolean, signedIn = false): ComponentFixture<AppHeaderComponent> {
+function setup(
+  registrationDisabled: boolean,
+  signedIn = false,
+  publicListing = true,
+): ComponentFixture<AppHeaderComponent> {
   logout.mockClear();
   TestBed.configureTestingModule({
     imports: [AppHeaderComponent],
@@ -33,7 +37,7 @@ function setup(registrationDisabled: boolean, signedIn = false): ComponentFixtur
           logout,
         },
       },
-      { provide: ConfigService, useValue: { registrationDisabled } },
+      { provide: ConfigService, useValue: { registrationDisabled, publicListing } },
       { provide: RELEASE_NOTES_SOURCE, useValue: [] },
     ],
   });
@@ -84,6 +88,27 @@ describe('AppHeaderComponent - user menu', () => {
     const { items } = openMenu();
     items.find((item) => item.textContent?.includes('Log out'))!.click();
     expect(logout).toHaveBeenCalled();
+  });
+});
+
+describe('AppHeaderComponent - public listing', () => {
+  function navLabels(signedIn: boolean, publicListing: boolean): string[] {
+    const root = setup(false, signedIn, publicListing).nativeElement as HTMLElement;
+    return Array.from(root.querySelectorAll('a'))
+      .filter((a) => ['/projects', '/caches'].includes(a.getAttribute('href') ?? ''))
+      .map((a) => (a.textContent ?? '').trim());
+  }
+
+  it('shows a guest the project and cache lists while public listing is on', () => {
+    expect(navLabels(false, true)).toEqual(['Projects', 'Caches']);
+  });
+
+  it('hides the project and cache lists from a guest while public listing is off', () => {
+    expect(navLabels(false, false)).toEqual([]);
+  });
+
+  it('keeps the project and cache lists for a signed-in user while public listing is off', () => {
+    expect(navLabels(true, false)).toEqual(['Projects', 'Caches']);
   });
 });
 

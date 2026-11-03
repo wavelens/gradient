@@ -103,7 +103,7 @@ pub struct BoardCacheSnapshot {
     operation_id = "getBoardCache",
     tag = "board",
     summary = "Cache statistics",
-    description = "Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view). `caches` lists the 10 caches with the most bytes served in the window, largest first, limited to public caches and the caches the caller can see (all caches for superusers).",
+    description = "Cache totals plus hourly traffic and storage-growth series, aggregated across caches (anonymized infra view). `caches` lists the 10 caches with the most bytes served in the window, largest first, limited to public caches and the caches the caller can see (all caches for superusers). Public caches only enter the count, while `GRADIENT_PUBLIC_LISTING` is true.",
     params(WindowParams, TrafficParams),
     responses((status = OK, description = "Cache statistics", body = BoardCacheStats), WebError)
 )]
@@ -121,7 +121,7 @@ pub async fn get_board_cache(
         &scheduler,
     )
     .await?;
-    let visible = board_cache_condition(&state.web_db, &maybe_user).await?;
+    let visible = board_cache_condition(&state, &maybe_user).await?;
     let stats = cache_stats(
         &state.web_db,
         &obs,
@@ -177,7 +177,7 @@ pub async fn cache_live_ws(
         admission: state.memory.upload_admission.clone(),
         scheduler,
         scope: MetricsScope::resolve(&state.web_db, &maybe_user).await?,
-        visible: board_cache_condition(&state.web_db, &maybe_user).await?,
+        visible: board_cache_condition(&state, &maybe_user).await?,
         window: window_clause(&params),
         traffic,
     };

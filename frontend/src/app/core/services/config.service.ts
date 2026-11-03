@@ -33,6 +33,7 @@ export class ConfigService {
   gradientCiUrl = 'https://servers.gradient.ci';
   logoUrl: string | null = null;
   execEnabled = false;
+  publicListing = true;
 
   canCreate(permission: CreatePermission, isSuperuser: boolean): boolean {
     switch (permission) {
@@ -71,6 +72,7 @@ export class ConfigService {
           this.gradientCiUrl = res.message.gradient_ci_url ?? this.gradientCiUrl;
           this.logoUrl = res.message.logo_url ?? null;
           this.execEnabled = res.message.exec_enabled;
+          this.publicListing = res.message.public_listing;
         }
       })
       .catch(() => {

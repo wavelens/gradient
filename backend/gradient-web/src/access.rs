@@ -12,6 +12,8 @@ use crate::permissions::{
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
+use gradient_core::ServerState;
+use gradient_db::dashboard::Viewer;
 use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
 use gradient_db::{DbContext, WebDb};
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
@@ -21,6 +23,7 @@ use gradient_types::{
     TeamRole,
 };
 use sea_orm::Condition;
+use sea_orm::sea_query::Expr;
 
 #[derive(Debug, thiserror::Error)]
 enum AccessRefusal {
@@ -296,14 +299,32 @@ pub async fn visible_cache_condition(db: &WebDb, user_id: UserId) -> WebResult<C
     ))
 }
 
-pub async fn board_cache_condition(db: &WebDb, user: &Option<MUser>) -> WebResult<Condition> {
-    Ok(match user {
-        Some(user) if user.superuser => Condition::all(),
-        Some(user) => {
-            gradient_db::caches::public_or(Some(visible_cache_condition(db, user.id).await?))
-        }
-        None => gradient_db::caches::public_or(None),
-    })
+pub fn viewer(state: &ServerState, user: &MUser) -> Viewer {
+    Viewer {
+        user: user.id,
+        public_listing: state.config.server.public_listing,
+    }
+}
+
+pub async fn board_cache_condition(
+    state: &ServerState,
+    user: &Option<MUser>,
+) -> WebResult<Condition> {
+    let db = &state.web_db;
+    let visible = match user {
+        Some(user) if user.superuser => return Ok(Condition::all()),
+        Some(user) => Some(visible_cache_condition(db, user.id).await?),
+        None => None,
+    };
+    Ok(listed_or(state.config.server.public_listing, visible))
+}
+
+fn listed_or(public_listing: bool, visible: Option<Condition>) -> Condition {
+    match (public_listing, visible) {
+        (true, visible) => gradient_db::caches::public_or(visible),
+        (false, Some(visible)) => visible,
+        (false, None) => Condition::all().add(Expr::val(false)),
+    }
 }
 
 pub async fn load_integration_in_project(
@@ -1573,6 +1594,36 @@ mod tests {
             let stmt = ECache::find().filter(cond).build(DatabaseBackend::Postgres);
             assert!(stmt.sql.contains("created_by"), "sql = {}", stmt.sql);
         });
+    }
+
+    fn listed_sql(public_listing: bool, visible: Option<Condition>) -> String {
+        use sea_orm::QueryTrait;
+        ECache::find()
+            .filter(listed_or(public_listing, visible))
+            .build(DatabaseBackend::Postgres)
+            .to_string()
+    }
+
+    #[test]
+    fn listing_on_adds_public_caches_to_the_visible_ones() {
+        let visible = gradient_db::caches::created_by_or_among(UserId::now_v7(), vec![]);
+        let sql = listed_sql(true, Some(visible));
+        assert!(sql.contains("\"public\" = TRUE"), "sql = {sql}");
+        assert!(sql.contains("created_by"), "sql = {sql}");
+    }
+
+    #[test]
+    fn listing_off_keeps_only_the_visible_caches() {
+        let visible = gradient_db::caches::created_by_or_among(UserId::now_v7(), vec![]);
+        let sql = listed_sql(false, Some(visible));
+        assert!(!sql.contains("\"public\""), "sql = {sql}");
+        assert!(sql.contains("created_by"), "sql = {sql}");
+    }
+
+    #[test]
+    fn listing_off_shows_an_anonymous_caller_no_cache() {
+        let sql = listed_sql(false, None);
+        assert!(sql.ends_with("WHERE FALSE"), "sql = {sql}");
     }
 
     #[tokio::test]

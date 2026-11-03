@@ -4,44 +4,44 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::stars::user_value;
+use super::Viewer;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr, QueryResult, Value};
 
 crate::sql! {
-    READABLE_CACHE_IDS = concat!("SELECT c.id FROM cache c WHERE ", cache_readable!()),
-        params = [UserId],
+    READABLE_CACHE_IDS = concat!("SELECT c.id FROM cache c WHERE ", cache_readable!("$2")),
+        params = [UserId, Bool(true)],
         tier = Bulk;
 
     SEARCH_NARS = concat!("SELECT c.id AS cache_id, c.name AS cache, cp.hash, cp.package FROM cached_path cp \
         JOIN cached_path_signature s ON s.cached_path = cp.id JOIN cache c ON c.id = s.cache \
-        WHERE (c.id, cp.hash) IN (SELECT * FROM unnest($2::uuid[], $3::text[])) AND ", cache_readable!(), " \
+        WHERE (c.id, cp.hash) IN (SELECT * FROM unnest($2::uuid[], $3::text[])) AND ", cache_readable!("$4"), " \
         ORDER BY c.name LIMIT 10"),
-        params = [UserId, CacheIds(4), CachedPathHashes(4)],
+        params = [UserId, CacheIds(4), CachedPathHashes(4), Bool(true)],
         tier = Bulk;
 
     SEARCH_COMMITS = concat!("SELECT p.name AS project, t.name AS task, e.id AS evaluation, \
         encode(c.hash, 'hex') AS hash FROM commit c JOIN evaluation e ON e.commit = c.id \
         JOIN task t ON t.id = e.task JOIN project p ON p.id = t.project \
-        WHERE c.hash BETWEEN decode($2, 'hex') AND decode($3, 'hex') AND ", project_readable!(), " \
+        WHERE c.hash BETWEEN decode($2, 'hex') AND decode($3, 'hex') AND ", project_readable!("$4"), " \
         ORDER BY e.created_at DESC LIMIT 5"),
-        params = [UserId, CommitPrefixLow, CommitPrefixHigh],
+        params = [UserId, CommitPrefixLow, CommitPrefixHigh, Bool(true)],
         tier = Hot;
 
     SEARCH_NAMES = concat!("SELECT kind, project, name, display_name, starred FROM ( \
         SELECT hits.*, row_number() OVER (PARTITION BY kind ORDER BY starred DESC, name) AS rank FROM ( \
             SELECT 'project' AS kind, NULL::text AS project, p.name, p.display_name, \
                 EXISTS (SELECT 1 FROM user_project_star s WHERE s.\"user\" = $1 AND s.project = p.id) AS starred \
-                FROM project p WHERE (p.name ILIKE $2 OR p.display_name ILIKE $2) AND ", project_readable!(), " \
+                FROM project p WHERE (p.name ILIKE $2 OR p.display_name ILIKE $2) AND ", project_readable!("$4"), " \
             UNION ALL SELECT 'task', p.name, t.name, t.display_name, \
                 EXISTS (SELECT 1 FROM user_task_star s WHERE s.\"user\" = $1 AND s.task = t.id) \
                 FROM task t JOIN project p ON p.id = t.project \
-                WHERE (t.name ILIKE $2 OR t.display_name ILIKE $2) AND ", project_readable!(), " \
+                WHERE (t.name ILIKE $2 OR t.display_name ILIKE $2) AND ", project_readable!("$4"), " \
             UNION ALL SELECT 'cache', NULL, c.name, c.display_name, \
                 EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id) \
-                FROM cache c WHERE (c.name ILIKE $2 OR c.display_name ILIKE $2) AND ", cache_readable!(), " \
+                FROM cache c WHERE (c.name ILIKE $2 OR c.display_name ILIKE $2) AND ", cache_readable!("$4"), " \
         ) hits) ranked WHERE rank <= $3 ORDER BY starred DESC, kind, name"),
-        params = [UserId, Text("%a%"), Int(5)],
+        params = [UserId, Text("%a%"), Int(5), Bool(true)],
         tier = Bulk;
 }
 
@@ -123,9 +123,9 @@ pub(super) fn name_hit_row(r: &QueryResult) -> Result<NameHitRow, DbErr> {
 
 pub async fn readable_cache_ids<C: ConnectionTrait>(
     db: &C,
-    user: UserId,
+    viewer: Viewer,
 ) -> Result<Vec<CacheId>, DbErr> {
-    db.query_all_raw(READABLE_CACHE_IDS.bind([user_value(user)]))
+    db.query_all_raw(READABLE_CACHE_IDS.bind([viewer.user_value(), viewer.listing_value()]))
         .await?
         .iter()
         .map(|r| r.try_get("", "id"))
@@ -135,26 +135,36 @@ pub async fn readable_cache_ids<C: ConnectionTrait>(
 pub async fn search_nars<C: ConnectionTrait>(
     db: &C,
     lookups: &[(CacheId, StoreHash)],
-    user: UserId,
+    viewer: Viewer,
 ) -> Result<Vec<NarHitRow>, DbErr> {
     let (caches, hashes): (Vec<uuid::Uuid>, Vec<String>) = lookups
         .iter()
         .map(|(cache, hash)| (cache.into_inner(), hash.to_string()))
         .unzip();
-    db.query_all_raw(SEARCH_NARS.bind([user_value(user), Value::from(caches), Value::from(hashes)]))
-        .await?
-        .iter()
-        .map(nar_hit_row)
-        .collect()
+    db.query_all_raw(SEARCH_NARS.bind([
+        viewer.user_value(),
+        Value::from(caches),
+        Value::from(hashes),
+        viewer.listing_value(),
+    ]))
+    .await?
+    .iter()
+    .map(nar_hit_row)
+    .collect()
 }
 
 pub async fn search_commits<C: ConnectionTrait>(
     db: &C,
     low: &str,
     high: &str,
-    user: UserId,
+    viewer: Viewer,
 ) -> Result<Vec<CommitHitRow>, DbErr> {
-    let stmt = SEARCH_COMMITS.bind([user_value(user), low.into(), high.into()]);
+    let stmt = SEARCH_COMMITS.bind([
+        viewer.user_value(),
+        low.into(),
+        high.into(),
+        viewer.listing_value(),
+    ]);
     db.query_all_raw(stmt)
         .await?
         .iter()
@@ -166,12 +176,13 @@ pub async fn search_names<C: ConnectionTrait>(
     db: &C,
     text: &str,
     per_kind: u64,
-    user: UserId,
+    viewer: Viewer,
 ) -> Result<Vec<NameHitRow>, DbErr> {
     let stmt = SEARCH_NAMES.bind([
-        user_value(user),
+        viewer.user_value(),
         ilike_contains(text).into(),
         Value::BigInt(Some(per_kind as i64)),
+        viewer.listing_value(),
     ]);
     db.query_all_raw(stmt)
         .await?

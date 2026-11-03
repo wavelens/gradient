@@ -311,6 +311,7 @@ pub fn api_spec() -> Result<Spec, SpecError> {
         .merge(routes::auth_sensitive())
         .merge(routes::webhook_routes())
         .merge(routes::open_api())
+        .merge(routes::public_listing_api())
         .merge(routes::cache_upload_api(&limits));
     let mut spec = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .nest("/api/v1", api)

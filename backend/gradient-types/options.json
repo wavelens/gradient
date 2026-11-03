@@ -120,6 +120,19 @@
   },
   {
     "group": "",
+    "field": "public_listing",
+    "flag": "public-listing",
+    "env": "GRADIENT_PUBLIC_LISTING",
+    "type": "bool",
+    "description": "Whether to list public projects and caches to everyone. Set this to `false` to hide\n`GET /api/v1/projects/public` and `GET /api/v1/caches/public` behind `404`. Search, stars,\ndashboards, and cache dashboards show only items that a user can access. Access can come\nthrough membership, sharing, or subscription. Direct links still work. Public projects,\ntasks, and caches are no exception.",
+    "default": "true",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "",
     "field": "retention_days",
     "flag": "retention-days",
     "env": "GRADIENT_RETENTION_DAYS",

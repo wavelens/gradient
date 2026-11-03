@@ -224,12 +224,15 @@ pub fn create_router_with_scheduler(
 
     let (open_api, _) = routes::open_api().split_for_parts();
 
-    let api = Router::new()
+    let mut api = Router::new()
         .merge(auth_api)
         .merge(optional_api)
         .merge(auth_sensitive)
         .merge(webhook_routes)
         .merge(open_api);
+    if state.config.server.public_listing {
+        api = api.merge(routes::public_listing_api().split_for_parts().0);
+    }
 
     scheduler.start();
     state.shutdown.supervise(ChildSpec::pass(
