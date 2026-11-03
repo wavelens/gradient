@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Spread a Job over Workers
 
 One exec job with a guest per node, each on its own worker of one zone. All nodes start together or not at all.

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Exec Secrets
 
 Exec jobs list secret names. Values can come from exactly one of three sources. Guests get each value as a file, a variable and a placeholder. The guest agent and the worker mask every value in text output. The user side is in [Pass Secrets](../../exec/secrets.md).

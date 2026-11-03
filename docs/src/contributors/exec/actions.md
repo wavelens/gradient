@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Exec Actions
 
 Exec jobs talk back to Gradient in two ways. Programs call the API with a job token. Finished jobs fire task actions, open pull requests and add entry points to their evaluation. The user side is in [Open Pull Requests](../../exec/pull-requests.md) and [Chain Evaluations](../../exec/chain-evaluations.md).
