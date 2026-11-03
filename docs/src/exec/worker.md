@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Set Up an Exec Worker
 
 A worker starting every exec job in a fresh cloud-hypervisor guest.

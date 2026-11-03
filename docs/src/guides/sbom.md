@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Export a Software Bill of Materials
 
 All packages in build outputs appear in a software bill of materials (SBOM). Gradient can export the SBOM as a CycloneDX 1.6 JSON file. Scanners use the file. License audits use the file.

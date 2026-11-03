@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Boot a Custom Image
 
 One exec app on its own NixOS guest system, in place of the worker image. Kernel modules, drivers and system services of the job go into the custom image.

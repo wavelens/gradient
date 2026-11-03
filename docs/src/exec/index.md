@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 # Gradient Exec
 
 Flake apps started on workers after each evaluation, with the hardware they ask for. Every exec job boots in a fresh virtual machine with a checkout of the evaluated commit.
