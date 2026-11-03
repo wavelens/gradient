@@ -129,7 +129,7 @@ impl EvalCacheSharing {
     }
 
     pub(super) async fn beside_flusher<T>(
-        &mut self,
+        &self,
         interval: Duration,
         evaluation: impl Future<Output = T>,
     ) -> T {
@@ -143,7 +143,7 @@ impl EvalCacheSharing {
         out
     }
 
-    async fn flush_every(&mut self, interval: Duration, mut stopped: oneshot::Receiver<()>) {
+    async fn flush_every(&self, interval: Duration, mut stopped: oneshot::Receiver<()>) {
         loop {
             tokio::select! {
                 biased;
@@ -153,7 +153,7 @@ impl EvalCacheSharing {
         }
     }
 
-    pub(super) async fn flush(&mut self) {
+    pub(super) async fn flush(&self) {
         let mut unsent = on_file(&self.file, |file| file.unsent_segments())
             .await
             .unwrap_or_else(|e| {
@@ -307,7 +307,7 @@ mod tests {
         let path = dir.path().join("fp.sqlite");
         let file = Arc::new(Mutex::new(eval_cache_sync::open(&path).unwrap()));
         let sink = Arc::new(RecordingSink::default());
-        let mut sharing = EvalCacheSharing::new(file, sink.clone());
+        let sharing = EvalCacheSharing::new(file, sink.clone());
         let nix = nix(&path);
         let root = nix_write(&nix, 0, "");
 
@@ -336,7 +336,7 @@ mod tests {
         let path = dir.path().join("fp.sqlite");
         let file = Arc::new(Mutex::new(eval_cache_sync::open(&path).unwrap()));
         let sink = Arc::new(RecordingSink::failing(1));
-        let mut sharing = EvalCacheSharing::new(file, sink.clone());
+        let sharing = EvalCacheSharing::new(file, sink.clone());
         let nix = nix(&path);
         nix_write(&nix, 0, "");
 
@@ -362,7 +362,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("fp.sqlite");
         let file = Arc::new(Mutex::new(eval_cache_sync::open(&path).unwrap()));
-        let mut sharing = EvalCacheSharing::new(file, Arc::new(RecordingSink::failing(usize::MAX)));
+        let sharing = EvalCacheSharing::new(file, Arc::new(RecordingSink::failing(usize::MAX)));
         let nix = nix(&path);
         nix_write(&nix, 0, "");
 
