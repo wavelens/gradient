@@ -134,6 +134,30 @@ fn store_path_tokens(output: &str) -> String {
 
 pub fn output_needed_predicate(output: &str) -> String {
     format!(
+        "({direct} OR EXISTS (WITH RECURSIVE referrer(id, hash, package) AS ( \
+             SELECT s.id, s.hash, s.package FROM derivation_output s \
+             LEFT JOIN cached_path scp ON scp.hash = s.hash \
+             WHERE s.derivation = {output}.derivation AND s.id <> {output}.id \
+               AND string_to_array({sibling_refs}, ' ') && {tokens} \
+             UNION \
+             SELECT s.id, s.hash, s.package FROM referrer referenced \
+             JOIN derivation_output s ON s.derivation = {output}.derivation AND s.id <> referenced.id \
+             LEFT JOIN cached_path scp ON scp.hash = s.hash \
+             WHERE string_to_array({sibling_refs}, ' ') && {referenced_tokens}) \
+           SELECT 1 FROM referrer JOIN derivation_output s ON s.id = referrer.id \
+           WHERE {sibling_direct}))",
+        direct = directly_needed_predicate(output),
+        sibling_refs = SIBLING_REFERENCES,
+        tokens = store_path_tokens(output),
+        referenced_tokens = store_path_tokens("referenced"),
+        sibling_direct = directly_needed_predicate("s"),
+    )
+}
+
+const SIBLING_REFERENCES: &str = "coalesce(scp.\"references\", s.references_list)";
+
+fn directly_needed_predicate(output: &str) -> String {
+    format!(
         "(EXISTS (SELECT 1 FROM entry_point ep {live} WHERE ep.derivation = {output}.derivation) \
          OR EXISTS (SELECT 1 FROM derivation_dependency e \
                     JOIN derivation_build p ON p.derivation = e.derivation \
