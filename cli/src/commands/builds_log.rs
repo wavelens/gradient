@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::error::CliError;
 use crate::input::client_from_config;
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{ExitKind, Output};
 use futures::{StreamExt, pin_mut};
 
 fn parse_lines(arg: &str) -> Option<(u64, Option<u64>)> {
@@ -39,7 +40,7 @@ pub async fn handle_log(
                     print!("{text}");
                 }
             }
-            Err(e) => out.err(to_exit_kind(&e), e),
+            Err(e) => out.fail(e),
         }
         return;
     }
@@ -47,7 +48,7 @@ pub async fn handle_log(
     if let Some(q) = search {
         let stream = match client.builds().log_search(id, &q, case).await {
             Ok(s) => s,
-            Err(e) => out.err(to_exit_kind(&e), e),
+            Err(e) => out.fail(e),
         };
         pin_mut!(stream);
         while let Some(item) = stream.next().await {
@@ -74,7 +75,7 @@ pub async fn handle_log(
                         println!("{line}: {preview}");
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
         return;
@@ -82,7 +83,7 @@ pub async fn handle_log(
 
     let stream = match client.builds().log_stream(id).await {
         Ok(s) => s,
-        Err(e) => out.err(to_exit_kind(&e), e),
+        Err(e) => out.fail(e),
     };
 
     if interactive && !out.is_json() {
@@ -98,7 +99,7 @@ pub async fn handle_log(
             }
         });
         crate::tui::run(crate::tui::log_view::LogView::streaming(rx))
-            .unwrap_or_else(|e| out.err(ExitKind::Api, format!("tui error: {e}")));
+            .unwrap_or_else(|e| out.fail(CliError::TerminalUi(e)));
     } else {
         pin_mut!(stream);
         while let Some(item) = stream.next().await {
@@ -110,7 +111,7 @@ pub async fn handle_log(
                         print!("{}", line);
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
     }

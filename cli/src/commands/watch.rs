@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::error::CliError;
 use crate::input::client_from_config;
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{ExitKind, Output};
 use crate::tui::watch::{Dashboard, WatchEvent, eval_is_terminal};
 use connector::Client;
 use futures::{StreamExt, pin_mut};
@@ -32,7 +33,7 @@ pub async fn handle_watch(eval_id: &str, out: Output) {
     tokio::spawn(stream_logs(client.clone(), eval_id.to_string(), tx));
 
     crate::tui::run(Dashboard::new(eval_id.to_string(), rx))
-        .unwrap_or_else(|e| out.err(ExitKind::Api, format!("tui error: {e}")));
+        .unwrap_or_else(|e| out.fail(CliError::TerminalUi(e)));
 }
 
 async fn poll_metadata(client: Client, eval_id: String, tx: UnboundedSender<WatchEvent>) {
@@ -79,14 +80,14 @@ async fn stream_plain(client: &Client, eval_id: &str, out: Output) {
     let evals = client.evals();
     let stream = match evals.stream_builds(eval_id).await {
         Ok(s) => s,
-        Err(e) => out.err(to_exit_kind(&e), e),
+        Err(e) => out.fail(e),
     };
     pin_mut!(stream);
     while let Some(item) = stream.next().await {
         match item {
             Ok(line) if line.is_empty() => {}
             Ok(line) => println!("{}", serde_json::json!({"error": false, "message": line})),
-            Err(e) => out.err(to_exit_kind(&e), e),
+            Err(e) => out.fail(e),
         }
     }
 }

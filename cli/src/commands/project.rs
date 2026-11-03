@@ -6,8 +6,11 @@
 
 use crate::commands::completion;
 use crate::config::*;
-use crate::input::{ask_for_choice, client_from_config, handle_input, is_interactive};
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::error::CliError;
+use crate::input::{
+    ask_for_choice, client_from_config, handle_input, is_interactive, selected_project,
+};
+use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::{
@@ -172,15 +175,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"created": true}));
                     out.human("Project created.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
         Commands::Show => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                None => out.err(ExitKind::Usage, "Project is required for command."),
-            };
+            let project = selected_project(out);
 
             let client = client_from_config(out);
             match client.projects().get(&project).await {
@@ -189,7 +189,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.human(format!("Name: {}", project.name));
                     out.human(format!("Description: {}", project.description));
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -206,7 +206,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         }
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -215,15 +215,12 @@ pub async fn handle(cmd: Commands, out: Output) {
             display_name,
             description,
         } => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                None => out.err(ExitKind::Usage, "Project is required for command."),
-            };
+            let project = selected_project(out);
 
             let client = client_from_config(out);
             let current = match client.projects().get(&project).await {
                 Ok(o) => o,
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             };
 
             let input_fields = [
@@ -260,15 +257,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"updated": true}));
                     out.human("Project updated.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
         Commands::Delete => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                None => out.err(ExitKind::Usage, "Project is required for command."),
-            };
+            let project = selected_project(out);
 
             let client = client_from_config(out);
             match client.projects().delete(&project).await {
@@ -276,15 +270,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"deleted": true}));
                     out.human("Project deleted.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
         Commands::User { cmd } => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                None => out.err(ExitKind::Usage, "Project is required for command."),
-            };
+            let project = selected_project(out);
 
             let client = client_from_config(out);
 
@@ -300,7 +291,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                             }
                         }
                     }
-                    Err(e) => out.err(to_exit_kind(&e), e),
+                    Err(e) => out.fail(e),
                 },
 
                 UserCommands::Add { user, role } => {
@@ -330,7 +321,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                             out.ok(&serde_json::json!({"added": true}));
                             out.human("User added.");
                         }
-                        Err(e) => out.err(to_exit_kind(&e), e),
+                        Err(e) => out.fail(e),
                     }
                 }
 
@@ -344,17 +335,14 @@ pub async fn handle(cmd: Commands, out: Output) {
                             out.ok(&serde_json::json!({"removed": true}));
                             out.human("User removed.");
                         }
-                        Err(e) => out.err(to_exit_kind(&e), e),
+                        Err(e) => out.fail(e),
                     }
                 }
             }
         }
 
         Commands::Ssh { cmd } => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                None => out.err(ExitKind::Usage, "Project is required for command."),
-            };
+            let project = selected_project(out);
 
             let client = client_from_config(out);
 
@@ -364,7 +352,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.ok(&serde_json::json!({"public_key": key}));
                         out.human(format!("Public Key: {}", key));
                     }
-                    Err(e) => out.err(to_exit_kind(&e), e),
+                    Err(e) => out.fail(e),
                 },
 
                 SshCommands::Recreate => match client.projects().regenerate_ssh(&project).await {
@@ -372,16 +360,13 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.ok(&serde_json::json!({"public_key": key}));
                         out.human(format!("New Public Key: {}", key));
                     }
-                    Err(e) => out.err(to_exit_kind(&e), e),
+                    Err(e) => out.fail(e),
                 },
             }
         }
 
         Commands::Cache { cmd } => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                None => out.err(ExitKind::Usage, "Project is required for command."),
-            };
+            let project = selected_project(out);
 
             let client = client_from_config(out);
 
@@ -397,7 +382,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                             }
                         }
                     }
-                    Err(e) => out.err(to_exit_kind(&e), e),
+                    Err(e) => out.fail(e),
                 },
 
                 CacheCommands::Add { cache } => {
@@ -406,7 +391,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                             out.ok(&serde_json::json!({"subscribed": true}));
                             out.human("Subscribed to cache.");
                         }
-                        Err(e) => out.err(to_exit_kind(&e), e),
+                        Err(e) => out.fail(e),
                     }
                 }
 
@@ -416,7 +401,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                             out.ok(&serde_json::json!({"unsubscribed": true}));
                             out.human("Unsubscribed from cache.");
                         }
-                        Err(e) => out.err(to_exit_kind(&e), e),
+                        Err(e) => out.fail(e),
                     }
                 }
             }
@@ -426,19 +411,13 @@ pub async fn handle(cmd: Commands, out: Output) {
 
 async fn membership_names(out: Output) -> Vec<String> {
     if get_value(ConfigKey::AuthToken, true).is_none() {
-        out.err(
-            ExitKind::Unauthorized,
-            "Not logged in. Run `gradient login <url>` first.",
-        );
+        out.fail(CliError::NotLoggedIn);
     }
     let client = client_from_config(out);
     match client.projects().list().await {
         Ok(res) => res.items.into_iter().map(|i| i.name).collect(),
-        Err(ConnectorError::Unauthorized) => out.err(
-            ExitKind::Unauthorized,
-            "Not logged in. Run `gradient login <url>` first.",
-        ),
-        Err(e) => out.err(to_exit_kind(&e), e),
+        Err(ConnectorError::Unauthorized) => out.fail(CliError::NotLoggedIn),
+        Err(e) => out.fail(e),
     }
 }
 

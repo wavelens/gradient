@@ -156,6 +156,13 @@ pub fn get_value(key: ConfigKey, quiet: bool) -> Option<String> {
     value
 }
 
+pub fn selected_task_ids() -> Option<(String, String)> {
+    get_value(ConfigKey::SelectedTask, true)
+        .as_deref()
+        .and_then(|selected| selected.split_once('/'))
+        .map(|(project, task)| (project.to_owned(), task.to_owned()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6,8 +6,9 @@
 
 use super::*;
 use crate::config::*;
+use crate::error::CliError;
 use crate::input::*;
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{ExitKind, Output};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 use clap_complete::{CompleteEnv, Shell};
@@ -237,7 +238,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                     out.ok(&serde_json::json!({"status": "online", "server": msg}));
                     out.human("Server Online.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -248,16 +249,10 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             password,
         } => {
             if out.is_json() && password.is_none() {
-                out.err(ExitKind::Usage, "missing argument: --password");
+                out.fail(CliError::MissingArgument("--password"));
             }
 
-            let server_url = get_value(ConfigKey::Server, true);
-            if server_url.is_none() {
-                out.err(
-                    ExitKind::Usage,
-                    "Server URL not set. Run `gradient login <url>` to set the server and authenticate.",
-                );
-            }
+            server_base(out);
 
             let input_fields = [("Username", username), ("Name", name), ("Email", email)]
                 .iter()
@@ -282,7 +277,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                     out.ok(&serde_json::json!({"registered": true}));
                     out.human("Registration successful. Please log in.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -303,7 +298,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
 
             if username.is_some() || password.is_some() {
                 if out.is_json() && password.is_none() {
-                    out.err(ExitKind::Usage, "missing argument: --password");
+                    out.fail(CliError::MissingArgument("--password"));
                 }
                 let username = username.unwrap_or_else(|| ask_for_input("Username", out));
                 let pw = password.unwrap_or_else(|| ask_for_password(out));
@@ -323,7 +318,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                         out.human("Logged in.");
                         project::post_login_project_setup(&client_from_config(out), out).await;
                     }
-                    Err(e) => out.err(to_exit_kind(&e), e),
+                    Err(e) => out.fail(e),
                 }
             } else {
                 run_web_login(out, no_browser).await;
@@ -340,7 +335,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                     out.human(format!("Name: {}", user.name));
                     out.human(format!("Email: {}", user.email));
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -408,7 +403,7 @@ async fn run_web_login(out: Output, no_browser: bool) {
     let client = client_from_config(out);
     let start = match client.auth().cli_device_start().await {
         Ok(s) => s,
-        Err(e) => out.err(to_exit_kind(&e), e),
+        Err(e) => out.fail(e),
     };
 
     out.human(format!(
@@ -426,7 +421,7 @@ async fn run_web_login(out: Output, no_browser: bool) {
 
     loop {
         if std::time::Instant::now() >= deadline {
-            out.err(ExitKind::Api, "Authorization expired before approval.");
+            out.fail(CliError::AuthorizationExpired);
         }
         tokio::time::sleep(interval).await;
         match client
@@ -438,7 +433,7 @@ async fn run_web_login(out: Output, no_browser: bool) {
         {
             Ok(CliPollOutcome::Pending) => continue,
             Ok(CliPollOutcome::Expired) => {
-                out.err(ExitKind::Api, "Authorization expired before approval.");
+                out.fail(CliError::AuthorizationExpired);
             }
             Ok(CliPollOutcome::Denied) => {
                 out.err(ExitKind::Unauthorized, "Authorization was denied.");
@@ -450,7 +445,7 @@ async fn run_web_login(out: Output, no_browser: bool) {
                 project::post_login_project_setup(&client_from_config(out), out).await;
                 return;
             }
-            Err(e) => out.err(to_exit_kind(&e), e),
+            Err(e) => out.fail(e),
         }
     }
 }

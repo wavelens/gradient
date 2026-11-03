@@ -6,7 +6,7 @@
 
 use crate::config::*;
 use crate::input::client_from_config;
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use connector::api::CreatePullRequestRequest;
 use git2::{DiffFormat, DiffOptions, Oid, Repository};
@@ -80,7 +80,7 @@ async fn open(request: OpenRequest, out: Output) {
     let patch = if in_job {
         connector::pull_requests::redact_through_agent(AGENT, patch)
             .await
-            .unwrap_or_else(|e| out.err(to_exit_kind(&e), e))
+            .unwrap_or_else(|e| out.fail(e))
     } else {
         patch
     };
@@ -102,21 +102,17 @@ async fn open(request: OpenRequest, out: Output) {
             out.ok(&opened);
             out.human(&opened.url);
         }
-        Err(e) => out.err(to_exit_kind(&e), e),
+        Err(e) => out.fail(e),
     }
 }
 
 fn selected_task(out: Output) -> (String, String) {
-    get_value(ConfigKey::SelectedTask, true)
-        .as_deref()
-        .and_then(|selected| selected.split_once('/'))
-        .map(|(project, task)| (project.to_owned(), task.to_owned()))
-        .unwrap_or_else(|| {
-            out.err(
-                ExitKind::Usage,
-                "Select a task with 'gradient task select <name>' or run inside an exec job.",
-            )
-        })
+    selected_task_ids().unwrap_or_else(|| {
+        out.err(
+            ExitKind::Usage,
+            "Select a task with 'gradient task select <name>' or run inside an exec job.",
+        )
+    })
 }
 
 fn read_body(file: &PathBuf, out: Output) -> String {

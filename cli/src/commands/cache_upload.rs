@@ -7,7 +7,7 @@
 use crate::commands::completion;
 use crate::input::client_from_config;
 use crate::narinfo::Narinfo;
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{ExitKind, Output};
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::NarinfoPart;
 use std::path::PathBuf;
@@ -107,7 +107,7 @@ pub(crate) async fn upload_bytes(cache: &str, ni: Narinfo, bytes: Vec<u8>, out: 
                 ExitKind::Api,
                 format!("upload stalled for {store_path}: server stayed at {received} of {total}"),
             ),
-            Err(e) => out.err(to_exit_kind(&e), e),
+            Err(e) => out.fail(e),
         }
     }
 
@@ -117,7 +117,7 @@ pub(crate) async fn upload_bytes(cache: &str, ni: Narinfo, bytes: Vec<u8>, out: 
         .await
     {
         Ok(()) => out.ok(&serde_json::json!({"uploaded": true, "store_path": store_path})),
-        Err(e) => out.err(to_exit_kind(&e), e),
+        Err(e) => out.fail(e),
     }
 }
 

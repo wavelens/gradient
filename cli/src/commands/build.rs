@@ -6,6 +6,7 @@
 
 use crate::commands::attr_spec;
 use crate::config::*;
+use crate::error::CliError;
 use crate::input::client_from_config;
 use crate::output::{ExitKind, Output};
 use crate::tui::watch::eval_is_terminal;
@@ -36,11 +37,7 @@ pub async fn handle_build(
     // invocation then points at `gradient login` (#498).
     let client = client_from_config(out);
     if let Err(ConnectorError::Unauthorized) = client.user().get().await {
-        out.err(
-            ExitKind::Unauthorized,
-            "Not authenticated: your gradient session is missing or expired. \
-             Run `gradient login <url>` and try again.",
-        );
+        out.fail(CliError::NotLoggedIn);
     }
 
     let project = project

@@ -6,8 +6,9 @@
 
 use crate::commands::attr_spec;
 use crate::config::*;
+use crate::error::{CliError, FileAction};
 use crate::input::{client_from_config, flush_stdout};
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{ExitKind, Output};
 use connector::api::{ArtefactTree, ProductArtefact};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -21,7 +22,7 @@ pub async fn handle_download(
     out: Output,
 ) {
     if out.is_json() && flake_ref.is_none() && products.is_none() {
-        out.err(ExitKind::Usage, "missing argument: flake ref or --products");
+        out.fail(CliError::MissingArgument("flake ref or --products"));
     }
 
     let client = client_from_config(out);
@@ -38,7 +39,7 @@ pub async fn handle_download(
 
     let tree = match client.evals().artefacts(&eval_id).await {
         Ok(t) => t,
-        Err(e) => out.err(to_exit_kind(&e), e),
+        Err(e) => out.fail(e),
     };
 
     let flat = flatten_products(&tree);
@@ -53,7 +54,7 @@ pub async fn handle_download(
     } else if let Some(spec) = &products {
         parse_selection_spec(spec, flat.len()).unwrap_or_else(|e| out.err(ExitKind::Usage, e))
     } else if out.is_json() {
-        out.err(ExitKind::Usage, "missing argument: flake ref or --products")
+        out.fail(CliError::MissingArgument("flake ref or --products"))
     } else {
         interactive_select(&flat, out)
     };
@@ -69,12 +70,8 @@ pub async fn handle_download(
         .unwrap_or_else(|| std::env::current_dir().expect("read current directory"));
 
     if !out_dir.exists() {
-        std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-            out.err(
-                ExitKind::Api,
-                format!("Failed to create {}: {}", out_dir.display(), e),
-            );
-        });
+        std::fs::create_dir_all(&out_dir)
+            .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Create, &out_dir, e)));
     }
 
     let mut downloaded: Vec<String> = Vec::new();
@@ -90,7 +87,7 @@ pub async fn handle_download(
         {
             Ok(b) => b,
             Err(e) => out.err(
-                to_exit_kind(&e),
+                ExitKind::from(&e),
                 format!("Failed to download {}: {}", display_name, e),
             ),
         };
@@ -98,19 +95,11 @@ pub async fn handle_download(
         if let Some(parent) = dest.parent()
             && !parent.as_os_str().is_empty()
         {
-            std::fs::create_dir_all(parent).unwrap_or_else(|e| {
-                out.err(
-                    ExitKind::Api,
-                    format!("Failed to create {}: {}", parent.display(), e),
-                );
-            });
+            std::fs::create_dir_all(parent)
+                .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Create, parent, e)));
         }
-        std::fs::write(&dest, bytes).unwrap_or_else(|e| {
-            out.err(
-                ExitKind::Api,
-                format!("Failed to write {}: {}", dest.display(), e),
-            );
-        });
+        std::fs::write(&dest, bytes)
+            .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Write, &dest, e)));
         out.human(format!("  wrote {}", dest.display()));
         downloaded.push(dest.display().to_string());
     }
@@ -191,7 +180,7 @@ fn interactive_select(flat: &[FlatProduct<'_>], out: Output) -> Vec<usize> {
     let mut input = String::new();
     io::stdin()
         .read_line(&mut input)
-        .unwrap_or_else(|e| out.err(ExitKind::Usage, format!("Failed to read selection: {}", e)));
+        .unwrap_or_else(|e| out.fail(CliError::ReadInput("selection".into(), e)));
 
     parse_selection_spec(input.trim(), flat.len()).unwrap_or_else(|e| out.err(ExitKind::Usage, e))
 }
@@ -291,7 +280,7 @@ async fn pick_latest_evaluation(
     let (project, task) = resolve_task(task, out);
     let evaluations = match client.tasks().evaluations(&project, &task).await {
         Ok(evals) => evals,
-        Err(e) => out.err(to_exit_kind(&e), e),
+        Err(e) => out.fail(e),
     };
     let latest = evaluations.into_iter().next().unwrap_or_else(|| {
         out.err(
@@ -323,10 +312,8 @@ fn resolve_task(arg: Option<&str>, out: Output) -> (String, String) {
         return (project, spec.to_string());
     }
 
-    if let Some(selected) = get_value(ConfigKey::SelectedTask, true)
-        && let Some((project, proj)) = selected.split_once('/')
-    {
-        return (project.to_string(), proj.to_string());
+    if let Some(selected) = selected_task_ids() {
+        return selected;
     }
 
     out.err(

@@ -5,8 +5,9 @@
  */
 
 use crate::commands::completion;
+use crate::error::CliError;
 use crate::input::client_from_config;
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::caches::NarListQuery;
@@ -79,7 +80,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Ok(res) => {
                     if interactive && !out.is_json() {
                         crate::tui::run(crate::tui::nar_browser::NarBrowser::new(res.items))
-                            .unwrap_or_else(|e| out.err(ExitKind::Api, format!("tui error: {e}")));
+                            .unwrap_or_else(|e| out.fail(CliError::TerminalUi(e)));
                         return;
                     }
                     out.ok(&res);
@@ -105,7 +106,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.human(format!("page {}/{} (total {})", res.page, pages, res.total));
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -129,7 +130,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.human(format!("last_fetched_at: {}", t));
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -157,7 +158,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"deleted": true, "hash": hash}));
                     out.human("NAR deleted.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -176,7 +177,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.human(format!("oldest_fetched_at: {}", t));
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
     }

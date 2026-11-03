@@ -6,8 +6,8 @@
 
 use crate::commands::completion;
 use crate::config::*;
-use crate::input::{client_from_config, handle_input};
-use crate::output::{Color, ExitKind, Output, to_exit_kind};
+use crate::input::{client_from_config, handle_input, selected_project, selected_task};
+use crate::output::{Color, ExitKind, Output};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::{EvaluationStatus, MakeTaskRequest, PatchTaskRequest};
@@ -68,15 +68,10 @@ pub enum Commands {
     Evaluate,
 }
 
-const NO_TASK_SELECTED: &str = "No task is currently selected. Run 'gradient task select' first.";
-
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Select { task } => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                None => out.err(ExitKind::Usage, "Project is required for command."),
-            };
+            let project = selected_project(out);
 
             set_value(
                 ConfigKey::SelectedTask,
@@ -88,19 +83,13 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Show => {
-            let (project, task) = match get_value(ConfigKey::SelectedTask, true) {
-                Some(id) => {
-                    let parts: Vec<&str> = id.split('/').collect();
-                    (parts[0].to_string(), parts[1].to_string())
-                }
-                _ => out.err(ExitKind::Usage, NO_TASK_SELECTED),
-            };
+            let (project, task) = selected_task(out);
 
             let client = client_from_config(out);
 
             let details = match client.tasks().details(&project, &task).await {
                 Ok(d) => d,
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             };
 
             out.ok(&details);
@@ -119,7 +108,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             let eval_summary = &details.last_evaluations[0];
             let eval = match client.evals().get(&eval_summary.id.to_string()).await {
                 Ok(e) => e,
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             };
 
             out.human("===== Evaluation =====");
@@ -133,7 +122,7 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let builds = match client.evals().builds(&eval.id.to_string()).await {
                 Ok(b) => b,
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             };
 
             if builds.builds.is_empty() {
@@ -162,18 +151,12 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Log => {
-            let (project, task) = match get_value(ConfigKey::SelectedTask, true) {
-                Some(id) => {
-                    let parts: Vec<&str> = id.split('/').collect();
-                    (parts[0].to_string(), parts[1].to_string())
-                }
-                _ => out.err(ExitKind::Usage, NO_TASK_SELECTED),
-            };
+            let (project, task) = selected_task(out);
 
             let client = client_from_config(out);
             let details = match client.tasks().details(&project, &task).await {
                 Ok(d) => d,
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             };
             let Some(latest) = details.last_evaluations.first() else {
                 out.err(ExitKind::Api, "Task has no evaluations yet.");
@@ -189,10 +172,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             repository,
             wildcard,
         } => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                _ => out.err(ExitKind::Usage, "Project is required for command."),
-            };
+            let project = selected_project(out);
 
             let input_fields = [
                 ("Name", name),
@@ -237,15 +217,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"created": true}));
                     out.human("Task created.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
         Commands::List => {
-            let project = match get_value(ConfigKey::SelectedProject, true) {
-                Some(id) => id,
-                _ => out.err(ExitKind::Usage, "Project is required for command."),
-            };
+            let project = selected_project(out);
 
             let client = client_from_config(out);
             match client.tasks().list(&project).await {
@@ -259,7 +236,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         }
                     }
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
@@ -270,18 +247,12 @@ pub async fn handle(cmd: Commands, out: Output) {
             repository,
             wildcard,
         } => {
-            let (project, task) = match get_value(ConfigKey::SelectedTask, true) {
-                Some(id) => {
-                    let parts: Vec<&str> = id.split('/').collect();
-                    (parts[0].to_string(), parts[1].to_string())
-                }
-                _ => out.err(ExitKind::Usage, NO_TASK_SELECTED),
-            };
+            let (project, task) = selected_task(out);
 
             let client = client_from_config(out);
             let current = match client.tasks().details(&project, &task).await {
                 Ok(d) => d,
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             };
 
             let input_fields = [
@@ -323,18 +294,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"updated": true}));
                     out.human("Task updated.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
         Commands::Delete => {
-            let (project, task) = match get_value(ConfigKey::SelectedTask, true) {
-                Some(id) => {
-                    let parts: Vec<&str> = id.split('/').collect();
-                    (parts[0].to_string(), parts[1].to_string())
-                }
-                _ => out.err(ExitKind::Usage, NO_TASK_SELECTED),
-            };
+            let (project, task) = selected_task(out);
 
             let client = client_from_config(out);
             match client.tasks().delete(&project, &task).await {
@@ -342,18 +307,12 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"deleted": true}));
                     out.human("Task deleted.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
 
         Commands::Evaluate => {
-            let (project, task) = match get_value(ConfigKey::SelectedTask, true) {
-                Some(id) => {
-                    let parts: Vec<&str> = id.split('/').collect();
-                    (parts[0].to_string(), parts[1].to_string())
-                }
-                _ => out.err(ExitKind::Usage, NO_TASK_SELECTED),
-            };
+            let (project, task) = selected_task(out);
 
             let client = client_from_config(out);
             match client.tasks().evaluate(&project, &task, None).await {
@@ -361,7 +320,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.ok(&serde_json::json!({"evaluation_id": eval_id}));
                     out.human("Task evaluation started.");
                 }
-                Err(e) => out.err(to_exit_kind(&e), e),
+                Err(e) => out.fail(e),
             }
         }
     }
