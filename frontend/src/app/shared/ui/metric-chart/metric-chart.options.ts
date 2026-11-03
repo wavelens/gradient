@@ -172,9 +172,11 @@ function dualAxisTooltip(
 }
 
 function radarOption(cfg: MetricChartConfig, theme: ChartTheme): EChartsOption {
+  const indicator = (cfg.categories ?? []).map((name) => ({ name }));
+  const series = indicator.length ? cfg.series : [];
   return {
     radar: {
-      indicator: (cfg.categories ?? []).map((name) => ({ name })),
+      indicator,
       axisName: { color: theme.text, fontSize: 12, fontFamily: theme.mono },
       splitLine: { lineStyle: { color: theme.grid } },
       splitArea: { show: false },
@@ -183,7 +185,7 @@ function radarOption(cfg: MetricChartConfig, theme: ChartTheme): EChartsOption {
     series: [
       {
         type: 'radar',
-        data: cfg.series.map((s) => ({
+        data: series.map((s) => ({
           name: s.name,
           value: (isXY(s.data) ? s.data.map((p) => p.y) : s.data) as number[],
           areaStyle: { opacity: 0.2 },
