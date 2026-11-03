@@ -226,7 +226,7 @@
               @if (fetchRows().length) {
                 <gr-input-fetch-list [inputs]="fetchRows()" />
               } @else {
-                <span class="evaluating-sub">Prefetching the Nix flake&hellip;</span>
+                <span class="evaluating-sub">Prefetching Nix flake&hellip;</span>
               }
             </div>
           } @else if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {
