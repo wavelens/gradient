@@ -101,7 +101,7 @@
       packages = [
         cargo
         cargo-deny
-        cargo-llvm-cov
+        # cargo-llvm-cov
         cargo-nextest
         pkg-config
         rustc
