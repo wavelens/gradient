@@ -12,8 +12,6 @@ use crate::permissions::{
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
-use gradient_core::ServerState;
-use gradient_db::dashboard::Viewer;
 use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
 use gradient_db::{DbContext, WebDb};
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
@@ -299,24 +297,17 @@ pub async fn visible_cache_condition(db: &WebDb, user_id: UserId) -> WebResult<C
     ))
 }
 
-pub fn viewer(state: &ServerState, user: &MUser) -> Viewer {
-    Viewer {
-        user: user.id,
-        public_listing: state.config.server.public_listing,
-    }
-}
-
 pub async fn board_cache_condition(
-    state: &ServerState,
+    db: &WebDb,
+    public_listing: bool,
     user: &Option<MUser>,
 ) -> WebResult<Condition> {
-    let db = &state.web_db;
     let visible = match user {
         Some(user) if user.superuser => return Ok(Condition::all()),
         Some(user) => Some(visible_cache_condition(db, user.id).await?),
         None => None,
     };
-    Ok(listed_or(state.config.server.public_listing, visible))
+    Ok(listed_or(public_listing, visible))
 }
 
 fn listed_or(public_listing: bool, visible: Option<Condition>) -> Condition {
