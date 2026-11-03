@@ -158,6 +158,11 @@ describe('buildMetricChartOption radar', () => {
     expect(opt.xAxis).toBeUndefined();
     expect(opt.yAxis).toBeUndefined();
   });
+
+  it('emits no radar items without indicators, which ECharts cannot lay out', () => {
+    const opt = buildMetricChartOption({ type: 'radar', series: [{ name: 'busy %', data: [] }], categories: [] }, THEME);
+    expect((opt.series as any[])[0].data).toEqual([]);
+  });
 });
 
 describe('buildMetricChartOption heatmap', () => {
