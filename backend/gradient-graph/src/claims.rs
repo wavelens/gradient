@@ -22,10 +22,12 @@ const INSERT_CHUNK: usize = 1000;
 
 gradient_db::sql_fn! {
     CLAIMS_OF_EVALUATION = claims_of_evaluation_sql,
-        params = [EvaluationId, DerivationIds(64)];
+        params = [EvaluationId, DerivationIds(64)],
+        tier = Bulk;
 
     CLAIMS_OF_PATHS = claims_of_paths_sql,
-        params = [CachedPathHashes(64)];
+        params = [CachedPathHashes(64)],
+        tier = Bulk;
 }
 
 fn claims_of_evaluation_sql() -> String {
@@ -39,14 +41,20 @@ fn claims_of_paths_sql() -> String {
 fn claims_sql(jobs: &str) -> String {
     format!(
         r#"
-WITH claim AS (
-    SELECT DISTINCT dout.hash, pc.cache
+WITH RECURSIVE claim(hash, cache) AS (
+    SELECT dout.hash, pc.cache
     FROM build_job bj
     JOIN derivation_output dout ON dout.derivation = bj.derivation
     JOIN evaluation e           ON e.id = bj.evaluation
     JOIN task t                 ON t.id = e.task
     JOIN project_cache pc       ON pc.project = t.project
     WHERE {jobs} AND t.sign_cache
+    UNION
+    SELECT split_part(regexp_replace(r.token, '^/nix/store/', ''), '-', 1), claim.cache
+    FROM claim
+    JOIN cached_path cp ON cp.hash = claim.hash AND cp.file_hash IS NOT NULL
+    CROSS JOIN LATERAL unnest(string_to_array(cp."references", ' ')) r(token)
+    WHERE r.token <> ''
 )
 SELECT cp.id AS cached_path, cp.hash, cp.package, cp.nar_hash, cp.nar_size, cp."references",
        claim.cache
