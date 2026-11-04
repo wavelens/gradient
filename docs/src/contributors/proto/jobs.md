@@ -192,12 +192,12 @@ A cluster member with the role `split-evaluation-primary` or `split-evaluation-c
 |---|---|
 | Primary | Fetch the flake as usual. Push the inputs during planning, then send `EvalSourceReady`. Ask with `EvalShardRequest { have_source = true }`. On `Plan`: plan the shards, report the plan errors, upload the new eval cache rows, send `EvalShardsPlanned`. Then take shards |
 | Companion | Ask with `have_source = false` until `Source` arrives. Fetch that store path from the cache. Then take shards |
-| Taker loop | Per shard: pull new eval cache segments, pull `drv_paths` in one batch, list the shard across the local subprocesses, stream `EvalResult` batches. The next request can carry `finished` with the deferred sets. The segment upload of the shard takes place during that request |
+| Taker loop | Per shard: pull new eval cache segments, pull `drv_paths` in one batch, list the shard across the local subprocesses, stream `EvalResult` batches. The next request can carry `finished` with the deferred sets |
 | End | `Finished`: send `EvalStats`, then `JobCompleted` |
 
-- `Wait` answers pause the member for `retry_after_ms` (1 000 ms).
+- A `Wait` response can pause a member for `retry_after_ms` (1000 ms). A member with a running shard can poll again after the pause. That member can also poll sooner when the shard completes.
 - Only the primary can report `EvaluatingFlake` and `EvaluatingDerivations`.
-- The 30 s eval cache flush timer is for standalone evaluations only.
+- A 30 s flush timer uploads new eval cache rows while shards are running, up to 4 segments at a time. One final upload follows the last shard.
 - Message shapes: [Split Evaluation Messages](messages.md#split-evaluation-messages).
 
 ## Abort and Lost Workers
