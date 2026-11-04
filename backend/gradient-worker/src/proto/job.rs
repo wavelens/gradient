@@ -14,7 +14,8 @@ use bytes::Bytes;
 use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation,
     EXEC_ABORT_REQUEST_SINCE, EXEC_KEEP_VM_RUNNING_SINCE, EvalCachePullOutcome, EvalMessageLevel,
-    EvalStatsReport, HELD_EVAL_SHARDS_SINCE, JobPhase, JobUpdateKind, QueryMode,
+    EvalStatsReport, FLAKE_INPUT_SOURCES_SINCE, HELD_EVAL_SHARDS_SINCE, JobPhase, JobUpdateKind,
+    QueryMode,
 };
 use gradient_worker_client::correlation::{
     AssignmentHandle, CacheWaiters, ImportWaiters, InputWaiters, KnownDerivationWaiters,
@@ -803,6 +804,17 @@ impl JobReporter for JobUpdater {
 
     async fn report_input_expansion(&mut self, matched: Vec<String>) -> Result<()> {
         self.send_update(JobUpdateKind::InputUpdateExpansion { matched })
+            .await
+    }
+
+    async fn report_input_sources(
+        &mut self,
+        sources: Vec<gradient_wire::messages::FlakeInputSourceWire>,
+    ) -> Result<()> {
+        if self.server_older_than(FLAKE_INPUT_SOURCES_SINCE) {
+            return Ok(());
+        }
+        self.send_update(JobUpdateKind::InputSources { sources })
             .await
     }
 

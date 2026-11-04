@@ -2552,6 +2552,7 @@ export type TriggerConfig = {
   branches?: string[];
   tags?: string[];
   releases_only?: boolean;
+  include_flake_inputs?: boolean;
   type: "reporter_push";
 } | {
   integration_id: IntegrationId;

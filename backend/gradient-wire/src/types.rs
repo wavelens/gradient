@@ -71,6 +71,13 @@ pub struct BumpedInputWire {
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
+pub struct FlakeInputSourceWire {
+    pub name: String,
+    pub repository_url: String,
+    pub branch: Option<String>,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub struct FlakeJob {
     pub steps: Vec<FlakeStep>,
     pub source: FlakeSource,
@@ -180,6 +187,10 @@ pub enum JobUpdateKind {
     #[proto(52)]
     ProgramExited {
         code: i32,
+    },
+    #[proto(56)]
+    InputSources {
+        sources: Vec<FlakeInputSourceWire>,
     },
 }
 

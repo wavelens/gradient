@@ -289,9 +289,11 @@
         type = types.ints.positive;
         default = 30;
         description = ''
-          Number of finished evaluations kept for metrics and history, regardless of outcome. Older
-          ones are garbage collected, and the collection pauses while an evaluation is active.
-          It must be at least 1 and at most {option}`services.gradient.eval.maxKeep`.
+          Retain this number of finished evaluations for metrics and history. Active evaluations
+          never block garbage collection and stay outside this count. Always keep the most recent
+          finished evaluation, whatever its result. The remaining slots go first to the most recent
+          completed evaluations, then to the most recent failed or aborted evaluations. Set this to
+          at least 1 and at most {option}`services.gradient.eval.maxKeep`.
         '';
       };
 
@@ -597,7 +599,11 @@
           - `polling` takes `{ interval_secs = 300; branch = "main"; }`. The interval is at
             least 10 seconds, and `branch` defaults to the remote HEAD.
           - `reporter_push` takes
-            `{ branches = [ "main" "release/*" ]; tags = [ ]; releases_only = false; }`.
+            `{ branches = [ "main" "release/*" ]; tags = [ ]; releases_only = false; include_flake_inputs = false; }`.
+            `include_flake_inputs = true` can also start updates of flake inputs for a task on a
+            report of a push from the integration to the repository of a tracked flake input. Use
+            the branch for that input as the push target, or the default branch of the repository
+            for an input with no branch.
           - `reporter_pull_request` takes
             `{ branches = [ ]; actions = [ "opened" "synchronize" "reopened" ]; require_approval = true; }`.
           - `time` takes `{ cron = "0 0 2 * * *"; }`, six fields in UTC

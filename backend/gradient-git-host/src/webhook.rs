@@ -60,6 +60,8 @@ pub struct GitHubRepository {
     pub ssh_url: String,
     #[serde(default)]
     pub full_name: Option<String>,
+    #[serde(default)]
+    pub default_branch: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +96,8 @@ pub struct GiteaRepository {
     pub ssh_url: Option<String>,
     #[serde(default)]
     pub full_name: Option<String>,
+    #[serde(default)]
+    pub default_branch: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -112,6 +116,8 @@ pub struct GitLabPushPayload {
 pub struct GitLabProject {
     pub http_url: String,
     pub ssh_url: Option<String>,
+    #[serde(default)]
+    pub default_branch: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -391,6 +397,7 @@ pub struct ParsedPushEvent {
     pub author_name: Option<String>,
     pub ref_name: String,
     pub is_tag: bool,
+    pub default_branch: Option<String>,
 }
 
 pub enum PushOutcome {
@@ -481,6 +488,13 @@ fn decode_sha_hex(s: &str, git_host: &str, context: &str) -> Option<Vec<u8>> {
     }
 }
 
+fn normalise_gitea_pr_action(action: String) -> String {
+    match action.as_str() {
+        "synchronized" => "synchronize".to_owned(),
+        _ => action,
+    }
+}
+
 fn normalise_gitlab_mr_action(action: &str) -> String {
     match action {
         "open" => "opened",
@@ -525,6 +539,7 @@ impl ParsedPushEvent {
         };
         Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
+            default_branch: payload.repository.default_branch,
             repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
             commit_message: head.and_then(commit_message),
             author_name: head
@@ -555,6 +570,7 @@ impl ParsedPushEvent {
 
         Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
+            default_branch: payload.repository.default_branch,
             repository_urls: urls,
             commit_message: head.and_then(commit_message),
             author_name: head
@@ -581,6 +597,7 @@ impl ParsedPushEvent {
         if let Some(ssh) = payload.project.ssh_url {
             urls.push(ssh);
         }
+        let default_branch = payload.project.default_branch;
 
         let head = payload
             .commits
@@ -589,6 +606,7 @@ impl ParsedPushEvent {
             .or_else(|| payload.commits.last());
         Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
+            default_branch,
             repository_urls: urls,
             commit_message: head.and_then(commit_message),
             author_name: head
@@ -695,7 +713,7 @@ impl ParsedPullRequestEvent {
         Some(Self {
             commit_hash,
             repository_urls,
-            action: payload.action,
+            action: normalise_gitea_pr_action(payload.action),
             branch: payload.pull_request.head_branch(),
             pr_number: payload.pull_request.number,
             pr_author,
@@ -1328,6 +1346,15 @@ mod tests {
     }
 
     #[test]
+    fn a_gitea_push_to_a_pull_request_matches_the_default_actions() {
+        assert_eq!(
+            normalise_gitea_pr_action("synchronized".to_owned()),
+            "synchronize"
+        );
+        assert_eq!(normalise_gitea_pr_action("opened".to_owned()), "opened");
+    }
+
+    #[test]
     fn parse_github_release_with_sha_target_commitish() {
         let body = format!(
             r#"{{
@@ -1670,5 +1697,44 @@ mod tests {
             ParsedPushEvent::from_github(body.as_bytes()),
             Some(PushOutcome::Ignored)
         ));
+    }
+
+    #[test]
+    fn push_carries_the_default_branch_of_each_forge() {
+        let github = format!(
+            r#"{{
+                "ref": "refs/heads/feature",
+                "after": "{VALID_SHA}",
+                "repository": {{ "clone_url": "https://github.com/org/repo.git", "ssh_url": "git@github.com:org/repo.git", "default_branch": "main" }}
+            }}"#
+        );
+        let gitea = format!(
+            r#"{{
+                "ref": "refs/heads/feature",
+                "after": "{VALID_SHA}",
+                "repository": {{ "clone_url": "https://gitea.example.com/org/repo.git", "default_branch": "trunk" }}
+            }}"#
+        );
+        let gitlab = format!(
+            r#"{{
+                "ref": "refs/heads/feature",
+                "after": "{VALID_SHA}",
+                "project": {{ "http_url": "https://gitlab.example.com/org/repo.git", "default_branch": "master" }},
+                "commits": []
+            }}"#
+        );
+        let branch = |ev: ParsedPushEvent| ev.default_branch;
+        assert_eq!(
+            branch(build(ParsedPushEvent::from_github(github.as_bytes()))).as_deref(),
+            Some("main")
+        );
+        assert_eq!(
+            branch(build(ParsedPushEvent::from_gitea(gitea.as_bytes()))).as_deref(),
+            Some("trunk")
+        );
+        assert_eq!(
+            branch(build(ParsedPushEvent::from_gitlab(gitlab.as_bytes()))).as_deref(),
+            Some("master")
+        );
     }
 }

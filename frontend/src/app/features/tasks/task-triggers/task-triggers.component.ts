@@ -53,6 +53,7 @@ interface TriggerFormState {
   branches: string;
   tags: string;
   releases_only: boolean;
+  include_flake_inputs: boolean;
   actions: string;
   require_approval: boolean;
   cron: string;
@@ -67,6 +68,7 @@ const DEFAULT_FORM: TriggerFormState = {
   branches: '',
   tags: '',
   releases_only: false,
+  include_flake_inputs: false,
   actions: '',
   require_approval: true,
   cron: '',
@@ -202,6 +204,7 @@ export class TaskTriggersComponent implements OnInit {
       branches: (cfg.branches ?? []).join(', '),
       tags: (cfg.tags ?? []).join(', '),
       releases_only: cfg.releases_only ?? false,
+      include_flake_inputs: cfg.include_flake_inputs ?? false,
       actions: (cfg.actions ?? []).join(', '),
       require_approval: cfg.require_approval ?? true,
       cron: cfg.cron ?? '',
@@ -235,6 +238,7 @@ export class TaskTriggersComponent implements OnInit {
         if (branches.length) cfg.branches = branches;
         if (tags.length) cfg.tags = tags;
         if (this.form.releases_only) cfg.releases_only = true;
+        if (this.form.include_flake_inputs) cfg.include_flake_inputs = true;
         return cfg;
       }
       case 'reporter_pull_request': {
@@ -363,6 +367,7 @@ export class TaskTriggersComponent implements OnInit {
         if (cfg.branches?.length) parts.push(`branches: ${cfg.branches.join(', ')}`);
         if (cfg.tags?.length) parts.push(`tags: ${cfg.tags.join(', ')}`);
         if (cfg.releases_only) parts.push('releases only');
+        if (cfg.include_flake_inputs) parts.push('flake input');
         return parts.join(' / ');
       }
       case 'reporter_pull_request': {

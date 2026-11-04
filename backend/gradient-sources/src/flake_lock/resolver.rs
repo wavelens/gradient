@@ -7,7 +7,9 @@
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use gradient_types::SecretString;
+use gradient_wire::traits::InputProgressSink;
 use serde::Deserialize;
+use std::sync::Arc;
 
 use super::lock::LockedRef;
 use super::narhash::{nar_hash_of_dir, tarball_source_nar_hash};
@@ -26,7 +28,11 @@ pub struct ResolvedRev {
 
 #[async_trait]
 pub trait RevisionResolver: Send + Sync {
-    async fn resolve(&self, reference: &LockedRef) -> Result<ResolvedRev>;
+    async fn resolve(
+        &self,
+        reference: &LockedRef,
+        progress: Arc<dyn InputProgressSink>,
+    ) -> Result<ResolvedRev>;
 }
 
 pub struct HttpRevisionResolver {
@@ -77,6 +83,7 @@ impl HttpRevisionResolver {
         owner: &str,
         repo: &str,
         ref_: &Option<String>,
+        progress: &dyn InputProgressSink,
     ) -> Result<ResolvedRev> {
         let r = ref_.clone().unwrap_or_else(|| "HEAD".to_owned());
         let url = format!("{GITHUB_API}/repos/{owner}/{repo}/commits/{r}");
@@ -93,7 +100,7 @@ impl HttpRevisionResolver {
 
         let last_modified = parse_rfc3339(&commit.commit.committer.date)?;
         let tarball = format!("{GITHUB_API}/repos/{owner}/{repo}/tarball/{}", commit.sha);
-        let nar_hash = tarball_source_nar_hash(self.github_get(&tarball)).await?;
+        let nar_hash = tarball_source_nar_hash(self.github_get(&tarball), progress).await?;
 
         Ok(ResolvedRev {
             rev: commit.sha,
@@ -108,6 +115,7 @@ impl HttpRevisionResolver {
         owner: &str,
         repo: &str,
         ref_: &Option<String>,
+        progress: &dyn InputProgressSink,
     ) -> Result<ResolvedRev> {
         let task = format!("{owner}/{repo}").replace('/', "%2F");
         let r = ref_.clone().unwrap_or_else(|| "HEAD".to_owned());
@@ -128,7 +136,7 @@ impl HttpRevisionResolver {
             "{GITLAB_API}/api/v4/tasks/{task}/repository/archive.tar.gz?sha={}",
             commit.id
         );
-        let nar_hash = tarball_source_nar_hash(self.gitlab_get(&tarball)).await?;
+        let nar_hash = tarball_source_nar_hash(self.gitlab_get(&tarball), progress).await?;
 
         Ok(ResolvedRev {
             rev: commit.id,
@@ -138,7 +146,12 @@ impl HttpRevisionResolver {
         })
     }
 
-    async fn resolve_git(&self, url: &str, ref_: &Option<String>) -> Result<ResolvedRev> {
+    async fn resolve_git(
+        &self,
+        url: &str,
+        ref_: &Option<String>,
+        progress: Arc<dyn InputProgressSink>,
+    ) -> Result<ResolvedRev> {
         let url = url.to_owned();
         let ref_owned = ref_.clone();
         let ssh_key = self.ssh_key.clone();
@@ -147,6 +160,7 @@ impl HttpRevisionResolver {
                 &url,
                 ref_owned.as_deref(),
                 ssh_key.as_ref().map(SecretString::expose),
+                &*progress,
             )
         })
         .await
@@ -187,11 +201,19 @@ impl HttpRevisionResolver {
 
 #[async_trait]
 impl RevisionResolver for HttpRevisionResolver {
-    async fn resolve(&self, reference: &LockedRef) -> Result<ResolvedRev> {
+    async fn resolve(
+        &self,
+        reference: &LockedRef,
+        progress: Arc<dyn InputProgressSink>,
+    ) -> Result<ResolvedRev> {
         match reference {
-            LockedRef::Github { owner, repo, ref_ } => self.resolve_github(owner, repo, ref_).await,
-            LockedRef::Gitlab { owner, repo, ref_ } => self.resolve_gitlab(owner, repo, ref_).await,
-            LockedRef::Git { url, ref_ } => self.resolve_git(url, ref_).await,
+            LockedRef::Github { owner, repo, ref_ } => {
+                self.resolve_github(owner, repo, ref_, &*progress).await
+            }
+            LockedRef::Gitlab { owner, repo, ref_ } => {
+                self.resolve_gitlab(owner, repo, ref_, &*progress).await
+            }
+            LockedRef::Git { url, ref_ } => self.resolve_git(url, ref_, progress).await,
             LockedRef::Tarball { .. } => {
                 bail!("tarball inputs are not yet supported by the updater")
             }
@@ -207,13 +229,26 @@ fn git_checkout(
     url: &str,
     ref_: Option<&str>,
     ssh_key: Option<&str>,
+    progress: &dyn InputProgressSink,
 ) -> Result<(String, i64, tempfile::TempDir)> {
-    crate::git::with_private_key(ssh_key, || clone_and_check_out(url, ref_))
+    crate::git::with_private_key(ssh_key, || clone_and_check_out(url, ref_, progress))
 }
 
-fn clone_and_check_out(url: &str, ref_: Option<&str>) -> Result<(String, i64, tempfile::TempDir)> {
+fn clone_and_check_out(
+    url: &str,
+    ref_: Option<&str>,
+    progress: &dyn InputProgressSink,
+) -> Result<(String, i64, tempfile::TempDir)> {
     let tmp = tempfile::tempdir().context("create git temp dir")?;
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.transfer_progress(|stats| {
+        progress.transfer(stats.received_bytes() as u64, None);
+        true
+    });
+    let mut fetch = git2::FetchOptions::new();
+    fetch.remote_callbacks(callbacks);
     let repo = git2::build::RepoBuilder::new()
+        .fetch_options(fetch)
         .clone(url, tmp.path())
         .with_context(|| format!("clone {url}"))?;
 
@@ -276,6 +311,12 @@ mod tests {
     use super::*;
     use std::process::Command;
 
+    struct NoProgress;
+
+    impl InputProgressSink for NoProgress {
+        fn transfer(&self, _: u64, _: Option<u64>) {}
+    }
+
     fn make_git_repo() -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         let repo = tmp.path().join("r");
@@ -314,7 +355,7 @@ mod tests {
     fn git_checkout_clones_file_url_via_repobuilder() {
         let (_tmp, repo) = make_git_repo();
         let url = format!("file://{}", repo.display());
-        let out = git_checkout(&url, None, None);
+        let out = git_checkout(&url, None, None, &NoProgress);
         assert!(out.is_ok(), "file:// clone failed: {:?}", out.err());
     }
 
@@ -322,7 +363,12 @@ mod tests {
     fn git_checkout_with_ssh_key_still_clones_file_url() {
         let (_tmp, repo) = make_git_repo();
         let url = format!("file://{}", repo.display());
-        let out = git_checkout(&url, None, Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
+        let out = git_checkout(
+            &url,
+            None,
+            Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"),
+            &NoProgress,
+        );
         assert!(
             out.is_ok(),
             "file:// clone with an ssh key failed: {:?}",

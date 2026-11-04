@@ -7,9 +7,10 @@
 use anyhow::{Context, Result};
 use base64::Engine as _;
 use futures::StreamExt as _;
+use gradient_wire::traits::InputProgressSink;
 use sha2::{Digest, Sha256};
-use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use tokio::io::AsyncWriteExt as _;
 
 pub async fn nar_hash_of_dir(path: &Path) -> Result<String> {
     let mut stream = harmonia_file_nar::NarByteStream::new(path.to_path_buf());
@@ -27,30 +28,50 @@ pub async fn nar_hash_of_dir(path: &Path) -> Result<String> {
     ))
 }
 
-pub async fn tarball_source_nar_hash(req: reqwest::RequestBuilder) -> Result<String> {
+pub async fn tarball_source_nar_hash(
+    req: reqwest::RequestBuilder,
+    progress: &dyn InputProgressSink,
+) -> Result<String> {
     let resp = req
         .send()
         .await
         .context("fetch source tarball")?
         .error_for_status()
         .context("request the source tarball")?;
-    let bytes = resp
-        .bytes()
-        .await
-        .context("read source tarball body")?
-        .to_vec();
+    let archive = download_to_temp_file(resp, progress).await?;
 
     let tmp = tempfile::tempdir().context("create extraction temp dir")?;
     let dest = tmp.path().to_path_buf();
-    tokio::task::spawn_blocking(move || extract_targz_stripped(&bytes, &dest))
+    tokio::task::spawn_blocking(move || extract_targz_stripped(archive.as_file(), &dest))
         .await
         .context("extraction task panicked")??;
 
     nar_hash_of_dir(tmp.path()).await
 }
 
-fn extract_targz_stripped(bytes: &[u8], dest: &Path) -> Result<()> {
-    let decoder = flate2::read::GzDecoder::new(Cursor::new(bytes));
+async fn download_to_temp_file(
+    mut resp: reqwest::Response,
+    progress: &dyn InputProgressSink,
+) -> Result<tempfile::NamedTempFile> {
+    let archive = tempfile::NamedTempFile::new().context("Create a source tarball file")?;
+    let mut file =
+        tokio::fs::File::from_std(archive.reopen().context("Create a source tarball file")?);
+    let total = resp.content_length();
+    let mut done = 0;
+    while let Some(chunk) = resp.chunk().await.context("read source tarball body")? {
+        file.write_all(&chunk)
+            .await
+            .context("Write the source tarball.")?;
+        done += chunk.len() as u64;
+        progress.transfer(done, total);
+    }
+    file.flush().await.context("Write the source tarball.")?;
+
+    Ok(archive)
+}
+
+fn extract_targz_stripped(archive: &std::fs::File, dest: &Path) -> Result<()> {
+    let decoder = flate2::read::GzDecoder::new(std::io::BufReader::new(archive));
     let mut archive = tar::Archive::new(decoder);
     archive.set_preserve_permissions(true);
     archive.set_preserve_mtime(false);

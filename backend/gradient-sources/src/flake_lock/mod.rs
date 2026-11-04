@@ -5,10 +5,13 @@
  */
 
 pub mod generator;
+pub mod input_source;
 pub mod lock;
 pub mod narhash;
 pub mod resolver;
 
-pub use generator::{BumpedInput, FileEdit, FlakeLockGenerator, InputName, Patch, PatchGenerator};
+pub use generator::{
+    BumpedInput, FileEdit, FlakeLockGenerator, InputName, Patch, PatchGenerator, ResolveProgress,
+};
 pub use lock::{FlakeLock, InputRef, LockedRef, Node};
 pub use resolver::{HttpRevisionResolver, ResolvedRev, RevisionResolver};

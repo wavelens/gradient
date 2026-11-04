@@ -6,12 +6,14 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use gradient_wire::traits::InputProgressSink;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use super::lock::FlakeLock;
-use super::resolver::RevisionResolver;
+use super::lock::{FlakeLock, LockedRef};
+use super::resolver::{ResolvedRev, RevisionResolver};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct InputName(pub String);
@@ -53,9 +55,29 @@ pub struct Patch {
     pub bumped: Vec<BumpedInput>,
 }
 
+pub trait ResolveProgress: Send + Sync {
+    fn queued(&self, inputs: &[String]);
+
+    fn started(&self, index: usize) -> Arc<dyn InputProgressSink>;
+
+    fn finished(&self, index: usize, resolved: bool);
+}
+
 #[async_trait]
 pub trait PatchGenerator: Send + Sync {
-    async fn produce(&self, checkout: &Path, tracked: &[InputName]) -> Result<Option<Patch>>;
+    async fn produce(
+        &self,
+        checkout: &Path,
+        tracked: &[InputName],
+        progress: &dyn ResolveProgress,
+    ) -> Result<Option<Patch>>;
+}
+
+struct Target {
+    input: String,
+    node_name: String,
+    reference: LockedRef,
+    old_rev: Option<String>,
 }
 
 #[derive(Debug)]
@@ -67,91 +89,59 @@ impl<R: RevisionResolver> FlakeLockGenerator<R> {
     pub fn new(resolver: R) -> Self {
         Self { resolver }
     }
+
+    async fn resolve_all(
+        &self,
+        targets: &[Target],
+        progress: &dyn ResolveProgress,
+    ) -> Result<Vec<ResolvedRev>> {
+        let resolutions = targets
+            .iter()
+            .enumerate()
+            .map(|(index, target)| self.resolve_one(index, target, progress));
+        futures::future::join_all(resolutions)
+            .await
+            .into_iter()
+            .collect()
+    }
+
+    async fn resolve_one(
+        &self,
+        index: usize,
+        target: &Target,
+        progress: &dyn ResolveProgress,
+    ) -> Result<ResolvedRev> {
+        let resolved = self
+            .resolver
+            .resolve(&target.reference, progress.started(index))
+            .await;
+        progress.finished(index, resolved.is_ok());
+        resolved.with_context(|| format!("resolve newest revision for input `{}`", target.input))
+    }
 }
 
 #[async_trait]
 impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
-    async fn produce(&self, checkout: &Path, tracked: &[InputName]) -> Result<Option<Patch>> {
+    async fn produce(
+        &self,
+        checkout: &Path,
+        tracked: &[InputName],
+        progress: &dyn ResolveProgress,
+    ) -> Result<Option<Patch>> {
         let lock_path = checkout.join("flake.lock");
         let bytes = tokio::fs::read(&lock_path)
             .await
             .with_context(|| format!("read {}", lock_path.display()))?;
         let mut lock = FlakeLock::parse(&bytes)?;
 
-        let declared = lock.root_input_names();
-        let mut targets = Vec::with_capacity(tracked.len());
-        let mut seen = std::collections::BTreeSet::new();
-        for input in tracked {
-            let names: Vec<String> = if gradient_util::glob::is_pattern(&input.0) {
-                declared
-                    .iter()
-                    .filter(|d| gradient_util::glob::glob_match(&input.0, d))
-                    .cloned()
-                    .collect()
-            } else {
-                vec![input.0.clone()]
-            };
-            for name in names {
-                if !seen.insert(name.clone()) {
-                    continue;
-                }
-                let node_name = lock
-                    .input_node_name(&name)
-                    .with_context(|| format!("tracked input `{name}` is not a direct flake input"))?
-                    .to_owned();
-                targets.push((name, node_name));
-            }
-        }
-
-        let mut resolutions = Vec::with_capacity(targets.len());
-        for (input, node_name) in &targets {
-            let node = lock
-                .nodes
-                .get(node_name)
-                .with_context(|| format!("lock node `{node_name}` missing for input `{input}`"))?;
-            let reference = node
-                .original_ref()
-                .with_context(|| format!("read `original` of input `{input}`"))?;
-            let old_rev = node.locked_rev().map(str::to_owned);
-            let resolved = self
-                .resolver
-                .resolve(&reference)
-                .await
-                .with_context(|| format!("resolve newest revision for input `{input}`"))?;
-            resolutions.push((
-                input.clone(),
-                node_name.clone(),
-                old_rev,
-                reference,
-                resolved,
-            ));
-        }
+        let targets = targets(&lock, tracked)?;
+        let names: Vec<String> = targets.iter().map(|t| t.input.clone()).collect();
+        progress.queued(&names);
+        let resolutions = self.resolve_all(&targets, progress).await?;
 
         let mut bumped = Vec::new();
-        for (input, node_name, old_rev, reference, resolved) in resolutions {
-            if old_rev.as_deref() == Some(resolved.rev.as_str()) {
-                continue;
-            }
-
-            let node = lock
-                .nodes
-                .get_mut(&node_name)
-                .with_context(|| format!("lock node `{node_name}` missing for input `{input}`"))?;
-            let locked = node.locked.get_or_insert_with(Default::default);
-            locked.insert("rev".into(), Value::from(resolved.rev.clone()));
-            locked.insert("narHash".into(), Value::from(resolved.nar_hash));
-            locked.insert("lastModified".into(), Value::from(resolved.last_modified));
-
-            match resolved.ref_.filter(|_| reference.locked_keeps_ref()) {
-                Some(r) => locked.insert("ref".into(), Value::from(r)),
-                None => locked.remove("ref"),
-            };
-
-            bumped.push(BumpedInput {
-                name: input,
-                old_rev,
-                new_rev: resolved.rev,
-            });
+        for (target, resolved) in targets.into_iter().zip(resolutions) {
+            bumped.extend(bump(&mut lock, target, resolved)?);
         }
 
         if bumped.is_empty() {
@@ -170,18 +160,101 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
     }
 }
 
+fn targets(lock: &FlakeLock, tracked: &[InputName]) -> Result<Vec<Target>> {
+    let declared = lock.root_input_names();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut targets = Vec::with_capacity(tracked.len());
+    for input in tracked {
+        let names: Vec<String> = if gradient_util::glob::is_pattern(&input.0) {
+            declared
+                .iter()
+                .filter(|d| gradient_util::glob::glob_match(&input.0, d))
+                .cloned()
+                .collect()
+        } else {
+            vec![input.0.clone()]
+        };
+        for name in names {
+            if seen.insert(name.clone()) {
+                targets.push(target(lock, name)?);
+            }
+        }
+    }
+    Ok(targets)
+}
+
+fn target(lock: &FlakeLock, input: String) -> Result<Target> {
+    let node_name = lock
+        .input_node_name(&input)
+        .with_context(|| format!("tracked input `{input}` is not a direct flake input"))?
+        .to_owned();
+    let node = lock
+        .nodes
+        .get(&node_name)
+        .with_context(|| format!("lock node `{node_name}` missing for input `{input}`"))?;
+    let reference = node
+        .original_ref()
+        .with_context(|| format!("read `original` of input `{input}`"))?;
+    let old_rev = node.locked_rev().map(str::to_owned);
+    Ok(Target {
+        input,
+        node_name,
+        reference,
+        old_rev,
+    })
+}
+
+fn bump(
+    lock: &mut FlakeLock,
+    target: Target,
+    resolved: ResolvedRev,
+) -> Result<Option<BumpedInput>> {
+    let Target {
+        input,
+        node_name,
+        reference,
+        old_rev,
+    } = target;
+    if old_rev.as_deref() == Some(resolved.rev.as_str()) {
+        return Ok(None);
+    }
+
+    let node = lock
+        .nodes
+        .get_mut(&node_name)
+        .with_context(|| format!("lock node `{node_name}` missing for input `{input}`"))?;
+    let locked = node.locked.get_or_insert_with(Default::default);
+    locked.insert("rev".into(), Value::from(resolved.rev.clone()));
+    locked.insert("narHash".into(), Value::from(resolved.nar_hash));
+    locked.insert("lastModified".into(), Value::from(resolved.last_modified));
+
+    match resolved.ref_.filter(|_| reference.locked_keeps_ref()) {
+        Some(r) => locked.insert("ref".into(), Value::from(r)),
+        None => locked.remove("ref"),
+    };
+
+    Ok(Some(BumpedInput {
+        name: input,
+        old_rev,
+        new_rev: resolved.rev,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::super::lock::LockedRef;
-    use super::super::resolver::ResolvedRev;
     use super::*;
+    use gradient_util::sync::Mutex;
     use std::collections::HashMap;
 
     struct FakeResolver(HashMap<String, ResolvedRev>);
 
     #[async_trait]
     impl RevisionResolver for FakeResolver {
-        async fn resolve(&self, reference: &LockedRef) -> Result<ResolvedRev> {
+        async fn resolve(
+            &self,
+            reference: &LockedRef,
+            _: Arc<dyn InputProgressSink>,
+        ) -> Result<ResolvedRev> {
             let key = match reference {
                 LockedRef::Github { repo, .. } => repo.clone(),
                 LockedRef::Git { url, .. } => url.clone(),
@@ -189,6 +262,140 @@ mod tests {
             };
             self.0.get(&key).cloned().context("no canned resolution")
         }
+    }
+
+    struct NoTransfer;
+
+    impl InputProgressSink for NoTransfer {
+        fn transfer(&self, _: u64, _: Option<u64>) {}
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum Event {
+        Queued(Vec<String>),
+        Started(usize),
+        Finished(usize, bool),
+    }
+
+    #[derive(Default)]
+    struct RecordedProgress(Mutex<Vec<Event>>);
+
+    impl ResolveProgress for RecordedProgress {
+        fn queued(&self, inputs: &[String]) {
+            self.0.lock().push(Event::Queued(inputs.to_vec()));
+        }
+
+        fn started(&self, index: usize) -> Arc<dyn InputProgressSink> {
+            self.0.lock().push(Event::Started(index));
+            Arc::new(NoTransfer)
+        }
+
+        fn finished(&self, index: usize, resolved: bool) {
+            self.0.lock().push(Event::Finished(index, resolved));
+        }
+    }
+
+    fn github_node(repo: &str) -> String {
+        format!(
+            r#"{{
+      "locked": {{ "lastModified": 1700000000, "narHash": "sha256-OLD0000000000000000000000000000000000000000=", "owner": "o", "repo": "{repo}", "rev": "1111111111111111111111111111111111111111", "type": "github" }},
+      "original": {{ "owner": "o", "repo": "{repo}", "type": "github" }}
+    }}"#
+        )
+    }
+
+    fn write_github_inputs(dir: &Path, repos: &[&str]) {
+        let nodes: Vec<String> = repos
+            .iter()
+            .map(|r| format!("\"{r}\": {}", github_node(r)))
+            .collect();
+        let root: Vec<String> = repos.iter().map(|r| format!("\"{r}\": \"{r}\"")).collect();
+        let lock = format!(
+            r#"{{ "nodes": {{ {}, "root": {{ "inputs": {{ {} }} }} }}, "root": "root", "version": 7 }}"#,
+            nodes.join(", "),
+            root.join(", ")
+        );
+        std::fs::write(dir.join("flake.lock"), lock).unwrap();
+    }
+
+    fn resolved_at(rev: &str) -> ResolvedRev {
+        ResolvedRev {
+            rev: rev.into(),
+            ref_: None,
+            nar_hash: "sha256-NEW0000000000000000000000000000000000000000=".into(),
+            last_modified: 1800000000,
+        }
+    }
+
+    #[tokio::test]
+    async fn every_target_reports_its_start_and_outcome() {
+        let dir = tempfile::tempdir().unwrap();
+        write_github_inputs(dir.path(), &["nixpkgs", "nixpkgs-lib", "flake-utils"]);
+        let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::from([
+            (
+                "nixpkgs".into(),
+                resolved_at("2222222222222222222222222222222222222222"),
+            ),
+            (
+                "nixpkgs-lib".into(),
+                resolved_at("3333333333333333333333333333333333333333"),
+            ),
+        ])));
+        let progress = RecordedProgress::default();
+
+        let err = lockgen
+            .produce(
+                dir.path(),
+                &["flake-utils".into(), "nixpkgs*".into()],
+                &progress,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(format!("{err:#}").contains("input `flake-utils`"));
+        let events = progress.0.lock();
+        let Event::Queued(order) = &events[0] else {
+            panic!("{events:?}");
+        };
+        let mut sorted = order.clone();
+        sorted.sort();
+        assert_eq!(sorted, ["flake-utils", "nixpkgs", "nixpkgs-lib"]);
+        for (index, name) in order.iter().enumerate() {
+            let outcome = Event::Finished(index, name != "flake-utils");
+            let started = events.iter().position(|e| *e == Event::Started(index));
+            let finished = events.iter().position(|e| *e == outcome);
+            assert!(started.unwrap() < finished.unwrap(), "{events:?}");
+        }
+        assert_eq!(events.len(), 1 + 2 * order.len());
+    }
+
+    struct BarrierResolver(tokio::sync::Barrier);
+
+    #[async_trait]
+    impl RevisionResolver for BarrierResolver {
+        async fn resolve(
+            &self,
+            _: &LockedRef,
+            _: Arc<dyn InputProgressSink>,
+        ) -> Result<ResolvedRev> {
+            self.0.wait().await;
+            Ok(resolved_at("1111111111111111111111111111111111111111"))
+        }
+    }
+
+    #[tokio::test]
+    async fn resolves_inputs_concurrently() {
+        let dir = tempfile::tempdir().unwrap();
+        write_github_inputs(dir.path(), &["a", "b"]);
+        let lockgen = FlakeLockGenerator::new(BarrierResolver(tokio::sync::Barrier::new(2)));
+
+        let produced = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            lockgen.produce(dir.path(), &["*".into()], &RecordedProgress::default()),
+        )
+        .await;
+
+        assert!(produced.unwrap().unwrap().is_none());
     }
 
     fn write_fixture(dir: &Path, rev: &str) {
@@ -236,7 +443,11 @@ mod tests {
             FlakeLockGenerator::new(FakeResolver(HashMap::from([("nixpkgs".into(), resolved)])));
 
         let patch = lockgen
-            .produce(dir.path(), &["nixpkgs".into()])
+            .produce(
+                dir.path(),
+                &["nixpkgs".into()],
+                &RecordedProgress::default(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -309,7 +520,11 @@ mod tests {
         ])));
 
         let patch = lockgen
-            .produce(dir.path(), &["nixpkgs*".into()])
+            .produce(
+                dir.path(),
+                &["nixpkgs*".into()],
+                &RecordedProgress::default(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -360,7 +575,11 @@ mod tests {
             FlakeLockGenerator::new(FakeResolver(HashMap::from([("nixpkgs".into(), resolved)])));
 
         let patch = lockgen
-            .produce(dir.path(), &["nixpkgs".into()])
+            .produce(
+                dir.path(),
+                &["nixpkgs".into()],
+                &RecordedProgress::default(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -416,7 +635,7 @@ mod tests {
         )])));
 
         let patch = lockgen
-            .produce(dir.path(), &["dep".into()])
+            .produce(dir.path(), &["dep".into()], &RecordedProgress::default())
             .await
             .unwrap()
             .unwrap();
@@ -448,7 +667,11 @@ mod tests {
             FlakeLockGenerator::new(FakeResolver(HashMap::from([("nixpkgs".into(), resolved)])));
 
         let patch = lockgen
-            .produce(dir.path(), &["nixpkgs".into()])
+            .produce(
+                dir.path(),
+                &["nixpkgs".into()],
+                &RecordedProgress::default(),
+            )
             .await
             .unwrap();
         assert!(
@@ -464,7 +687,11 @@ mod tests {
 
         let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::new()));
         let err = lockgen
-            .produce(dir.path(), &["does-not-exist".into()])
+            .produce(
+                dir.path(),
+                &["does-not-exist".into()],
+                &RecordedProgress::default(),
+            )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not a direct flake input"));

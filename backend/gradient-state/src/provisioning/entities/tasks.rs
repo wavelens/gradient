@@ -467,6 +467,11 @@ pub(crate) fn build_trigger_config(
                         .get("releases_only")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false),
+                    include_flake_inputs: t
+                        .config
+                        .get("include_flake_inputs")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
                 }
             } else {
                 TriggerConfig::ReporterPullRequest {
@@ -886,7 +891,12 @@ mod trigger_helper_tests {
         let t = StateTrigger {
             trigger_type: TriggerType::ReporterPush,
             integration: Some("gh".into()),
-            config: serde_json::json!({ "branches": ["main"], "tags": [], "releases_only": false }),
+            config: serde_json::json!({
+                "branches": ["main"],
+                "tags": [],
+                "releases_only": false,
+                "include_flake_inputs": true,
+            }),
             active: true,
             is_default: false,
         };
@@ -898,6 +908,7 @@ mod trigger_helper_tests {
                 branches: vec!["main".into()],
                 tags: vec![],
                 releases_only: false,
+                include_flake_inputs: true,
             }
         );
     }

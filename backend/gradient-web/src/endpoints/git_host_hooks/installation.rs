@@ -139,7 +139,7 @@ pub(super) fn normalize_repo_url(url: &str) -> String {
     s.to_string()
 }
 
-fn repo_identity(url: &str) -> Option<String> {
+pub(super) fn repo_identity(url: &str) -> Option<String> {
     parse_owner_repo(url).map(|(owner, repo)| format!("{owner}/{repo}").to_ascii_lowercase())
 }
 
