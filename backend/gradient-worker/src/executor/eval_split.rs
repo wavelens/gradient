@@ -172,8 +172,15 @@ impl<'a> ShardTaker<'a> {
                     wait(retry_after_ms).await;
                     true
                 }
+                EvalShardOutcome::Wait { retry_after_ms } => {
+                    if self.listed.is_empty() {
+                        self.wait_or_listed(retry_after_ms).await;
+                    }
+
+                    true
+                }
                 EvalShardOutcome::Finished if !busy => return Ok(()),
-                EvalShardOutcome::Wait { .. } | EvalShardOutcome::Finished => false,
+                EvalShardOutcome::Finished => false,
                 EvalShardOutcome::Plan => {
                     bail!("the plan was asked for after shards were handed out")
                 }
@@ -195,6 +202,15 @@ impl<'a> ShardTaker<'a> {
         self.held.push(id.clone());
         self.running
             .push(Box::pin(async move { (id, work.shard(shard).await) }));
+    }
+
+    async fn wait_or_listed(&mut self, retry_after_ms: u32) {
+        tokio::select! {
+            () = wait(retry_after_ms) => {}
+            Some(listed) = self.running.next(), if !self.running.is_empty() => {
+                self.listed.push_back(listed);
+            }
+        }
     }
 
     fn next_finished(&mut self) -> Result<Option<FinishedShard>> {
@@ -713,6 +729,7 @@ mod tests {
                     shard("fast"),
                     EvalShardOutcome::Wait { retry_after_ms: 0 },
                     EvalShardOutcome::Finished,
+                    EvalShardOutcome::Finished,
                 ],
                 &events,
             )
@@ -726,6 +743,42 @@ mod tests {
             *server.requests.lock(),
             vec![
                 (true, None, Vec::new()),
+                (true, None, vec!["slow".to_owned()]),
+                (true, done("fast"), vec!["slow".to_owned()]),
+                (true, None, vec!["slow".to_owned()]),
+                (true, done("slow"), Vec::new()),
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_wait_while_a_shard_runs_is_asked_again_after_the_retry_delay() {
+        let events = Arc::default();
+        let server = ScriptedServer {
+            slots: 2,
+            ..ScriptedServer::new(
+                vec![
+                    shard("slow"),
+                    EvalShardOutcome::Wait {
+                        retry_after_ms: 1000,
+                    },
+                    shard("fast"),
+                    EvalShardOutcome::Finished,
+                    EvalShardOutcome::Finished,
+                ],
+                &events,
+            )
+        };
+        let started = tokio::time::Instant::now();
+
+        take_shards(&server, &mut TimedWork).await.expect("taken");
+
+        assert_eq!(started.elapsed(), Duration::from_secs(3));
+        assert_eq!(
+            *server.requests.lock(),
+            vec![
+                (true, None, Vec::new()),
+                (true, None, vec!["slow".to_owned()]),
                 (true, None, vec!["slow".to_owned()]),
                 (true, done("fast"), vec!["slow".to_owned()]),
                 (true, done("slow"), Vec::new()),
