@@ -48,17 +48,12 @@ fn polling_jitter_secs(
     u32::try_from(hasher.finish() % (u64::from(max) + 1)).unwrap_or(max)
 }
 
-pub(crate) fn cron_due(
-    cron_expr: &str,
-    last_fired_at: Option<NaiveDateTime>,
-    now: NaiveDateTime,
-) -> bool {
+pub(crate) fn cron_due(cron_expr: &str, after: NaiveDateTime, now: NaiveDateTime) -> bool {
     use cron::Schedule;
     use std::str::FromStr;
     let Ok(sched) = Schedule::from_str(cron_expr) else {
         return false;
     };
-    let after = last_fired_at.unwrap_or(now - chrono::Duration::days(1));
     let after_utc = chrono::DateTime::<Utc>::from_naive_utc_and_offset(after, Utc);
     let now_utc = chrono::DateTime::<Utc>::from_naive_utc_and_offset(now, Utc);
     sched
@@ -183,7 +178,9 @@ fn due_fire(trig: &ept::Model, now: NaiveDateTime) -> Option<TriggerFire> {
         TriggerConfig::Polling { interval_secs, .. } => {
             polling_due(trig.id, trig.last_fired_at, interval_secs, now)
         }
-        TriggerConfig::Time { cron } => cron_due(&cron, trig.last_fired_at, now),
+        TriggerConfig::Time { cron } => {
+            cron_due(&cron, trig.last_fired_at.unwrap_or(trig.created_at), now)
+        }
         _ => false,
     };
 
@@ -460,24 +457,26 @@ mod tests {
     fn cron_every_minute_fires_after_minute_boundary() {
         let last = dt("2026-05-06 10:00:30");
         let now = dt("2026-05-06 10:01:05");
-        assert!(cron_due("0 * * * * *", Some(last), now));
+        assert!(cron_due("0 * * * * *", last, now));
     }
 
     #[test]
     fn cron_does_not_fire_before_next_boundary() {
         let last = dt("2026-05-06 10:01:00");
         let now = dt("2026-05-06 10:01:30");
-        assert!(!cron_due("0 * * * * *", Some(last), now));
+        assert!(!cron_due("0 * * * * *", last, now));
     }
 
     #[test]
     fn cron_invalid_does_not_fire() {
-        assert!(!cron_due("garbage", None, dt("2026-05-06 10:00:00")));
+        let now = dt("2026-05-06 10:00:00");
+        assert!(!cron_due("garbage", now, now));
     }
 
     #[test]
-    fn cron_no_prior_fires_when_due() {
-        let now = dt("2026-05-06 03:00:00");
-        assert!(cron_due("0 0 2 * * *", None, now));
+    fn a_new_cron_trigger_waits_for_its_first_scheduled_time() {
+        let created = dt("2026-05-06 03:00:00");
+        assert!(!cron_due("0 0 2 * * *", created, dt("2026-05-06 03:00:05")));
+        assert!(cron_due("0 0 2 * * *", created, dt("2026-05-07 02:00:01")));
     }
 }
