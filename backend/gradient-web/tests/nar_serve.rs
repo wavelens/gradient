@@ -189,6 +189,28 @@ async fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
 }
 
 #[tokio::test]
+async fn a_nar_named_by_its_file_hash_is_not_found() {
+    let state = TestState::new().web_db(mock_db().into_connection()).build();
+    let router = gradient_web::create_router(state)
+        .expect("router")
+        .layer(MockConnectInfo(
+            "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+        ));
+    let server = TestServer::new(router);
+
+    for name in [
+        format!("{FILE_HASH_NIX32}.nar.zst"),
+        format!("{FILE_HASH_NIX32}.nar"),
+        format!("{STORE_HASH}.narinfo"),
+    ] {
+        server
+            .get(&format!("/cache/test-cache/nar/{name}"))
+            .await
+            .assert_status_not_found();
+    }
+}
+
+#[tokio::test]
 async fn a_nar_url_store_hash_is_mapped_inbound() {
     let cli = test_cli();
     let db = mock_db()
