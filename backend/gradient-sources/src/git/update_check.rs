@@ -5,7 +5,7 @@
  */
 
 use super::context::TaskGitContext;
-use super::remote::{BranchHead, ls_remote_head};
+use super::remote::{AdvertisedRef, BranchHead, branch_head, list_remote_refs, tag_commit};
 use crate::SourceError;
 use gradient_db::evaluations::branch::newest_on_branch;
 use gradient_types::input::vec_to_hex;
@@ -61,16 +61,30 @@ impl TaskGitContext<'_> {
         &self,
         branch: Option<&str>,
     ) -> Result<BranchHead, SourceError> {
+        let branch = branch.map(str::to_owned);
+        self.select_remote_ref(move |refs| branch_head(refs, branch.as_deref()))
+            .await
+    }
+
+    pub(super) async fn remote_tag_commit(&self, tag: &str) -> Result<Vec<u8>, SourceError> {
+        let tag = tag.to_owned();
+        self.select_remote_ref(move |refs| tag_commit(refs, &tag))
+            .await
+    }
+
+    async fn select_remote_ref<T, F>(&self, select: F) -> Result<T, SourceError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&[AdvertisedRef]) -> Result<T, SourceError> + Send + 'static,
+    {
         let url = self.task.repository.clone();
         let private_key = self.private_key.clone();
-        let branch_owned = branch.map(|b| b.to_owned());
 
         tokio::task::spawn_blocking(move || {
-            ls_remote_head(
+            select(&list_remote_refs(
                 &url,
                 private_key.as_ref().map(SecretString::expose),
-                branch_owned.as_deref(),
-            )
+            )?)
         })
         .await
         .map_err(|e| SourceError::GitExecution {

@@ -14,7 +14,7 @@ use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
 use gradient_entity::evaluation::WalkMode;
 use gradient_entity::task_trigger as ept;
-use gradient_git_host::{ParsedMergeGroupEvent, ParsedPushEvent};
+use gradient_git_host::{ParsedMergeGroupEvent, ParsedPushEvent, ReleaseTarget};
 use gradient_scheduler::Scheduler;
 use gradient_types::branch_key;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
@@ -70,7 +70,7 @@ async fn trigger_task_repository_push(
         &push.repository_urls,
         TriggerType::ReporterPush,
         ref_kind.branch_key(),
-        push.commit_hash.clone(),
+        EventCommit::Known(push.commit_hash.clone()),
         push.commit_message.clone(),
         push.author_name.clone(),
         |cfg| match cfg {
@@ -120,7 +120,7 @@ pub(super) async fn trigger_merge_group_for_integration(
         &group.repository_urls,
         TriggerType::ReporterPush,
         branch_key::branch(&group.queue_branch),
-        group.commit_hash.clone(),
+        EventCommit::Known(group.commit_hash.clone()),
         group.commit_message.clone(),
         group.author_name.clone(),
         |cfg| match cfg {
@@ -178,7 +178,7 @@ pub(super) async fn trigger_pr_for_integration(
         event_repo_urls,
         TriggerType::ReporterPullRequest,
         pull_request_key,
-        commit_hash,
+        EventCommit::Known(commit_hash),
         commit_message,
         author_name,
         |cfg| match cfg {
@@ -188,7 +188,7 @@ pub(super) async fn trigger_pr_for_integration(
                 require_approval,
                 ..
             } => {
-                if !actions.iter().any(|a| a == &action_owned) {
+                if !pr_action_matches(actions, &action_owned) {
                     return FilterResult::SkipFilter;
                 }
                 let matches = match branch_owned.as_deref() {
@@ -224,10 +224,14 @@ pub(super) async fn trigger_release_for_integration(
     integration_id: IntegrationId,
     event_repo_urls: &[String],
     tag: Option<&str>,
-    commit_hash: Vec<u8>,
+    target: &ReleaseTarget,
     commit_message: Option<String>,
     author_name: Option<String>,
 ) -> WebhookTriggerOutcome {
+    let commit = match target {
+        ReleaseTarget::Commit(hash) => EventCommit::Known(hash.clone()),
+        ReleaseTarget::Tag(name) => EventCommit::TipOfTag(name.clone()),
+    };
     fan_out_triggers(
         ci,
         scheduler,
@@ -235,7 +239,7 @@ pub(super) async fn trigger_release_for_integration(
         event_repo_urls,
         TriggerType::ReporterPush,
         tag.map_or_else(|| branch_key::NO_BRANCH.to_owned(), branch_key::tag),
-        commit_hash,
+        commit,
         commit_message,
         author_name,
         |cfg| match cfg {
@@ -269,6 +273,24 @@ pub(super) async fn trigger_release_for_integration(
     .await
 }
 
+enum EventCommit {
+    Known(Vec<u8>),
+    TipOfTag(String),
+}
+
+impl EventCommit {
+    async fn for_task(&self, db: &DbContext, task: &MTask) -> Option<Vec<u8>> {
+        let tag = match self {
+            Self::Known(hash) => return Some(hash.clone()),
+            Self::TipOfTag(tag) => tag,
+        };
+        gradient_sources::remote_tag_commit(db, task, tag)
+            .await
+            .inspect_err(|e| warn!(error = %e, task_id = %task.id, tag, "Resolve release tags for the task repository"))
+            .ok()
+    }
+}
+
 enum FilterResult {
     Fire,
     FirePr { require_approval: bool },
@@ -287,7 +309,7 @@ async fn fan_out_triggers<F>(
     event_repo_urls: &[String],
     trigger_type: TriggerType,
     branch: String,
-    commit_hash: Vec<u8>,
+    commit: EventCommit,
     commit_message: Option<String>,
     author_name: Option<String>,
     filter: F,
@@ -355,6 +377,11 @@ where
         };
         outcome.tasks_scanned += 1;
 
+        let Some(commit_hash) = commit.for_task(&ci.db, &task).await else {
+            push_skipped(&mut outcome, &task, project_name, "tag_not_found");
+            continue;
+        };
+
         let gate_approval = if pr_require_approval {
             decide_pr_gate(ci, &task, approval_ctx.as_ref()).await
         } else {
@@ -365,7 +392,7 @@ where
             trigger_id: trig.id,
             trigger_type,
             branch: branch.clone(),
-            commit_hash: commit_hash.clone(),
+            commit_hash,
             commit_message: commit_message.clone(),
             author_name: author_name.clone(),
             manual,
@@ -512,6 +539,10 @@ pub(super) async fn touch_trigger_last_fired(db: &WebDb, trig: &ept::Model) {
     }
 }
 
+fn pr_action_matches(actions: &[String], action: &str) -> bool {
+    actions.is_empty() || actions.iter().any(|a| a == action)
+}
+
 fn glob_matches(globs: &[String], name: &str) -> bool {
     if globs.is_empty() {
         return true;
@@ -569,7 +600,15 @@ pub(super) async fn project_name_for(db: &WebDb, project_id: ProjectId) -> Optio
 #[cfg(test)]
 mod tests {
     use super::super::approval::PullRequestApprovalContext;
-    use super::{gate_decision, glob_match_pattern, glob_matches};
+    use super::{gate_decision, glob_match_pattern, glob_matches, pr_action_matches};
+
+    #[test]
+    fn an_empty_action_list_fires_on_any_pull_request_action() {
+        assert!(pr_action_matches(&[], "edited"));
+        let listed = vec!["opened".to_owned()];
+        assert!(pr_action_matches(&listed, "opened"));
+        assert!(!pr_action_matches(&listed, "closed"));
+    }
 
     fn fork_ctx() -> PullRequestApprovalContext {
         PullRequestApprovalContext {

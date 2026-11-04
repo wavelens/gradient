@@ -434,9 +434,23 @@ pub struct ParsedPullRequestEvent {
 }
 
 pub struct ParsedReleaseEvent {
-    pub commit_hash: Vec<u8>,
+    pub target: ReleaseTarget,
     pub repository_urls: Vec<String>,
     pub tag: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleaseTarget {
+    Commit(Vec<u8>),
+    Tag(String),
+}
+
+impl ReleaseTarget {
+    fn of(commit_hash: Option<Vec<u8>>, tag: Option<&str>) -> Option<Self> {
+        commit_hash
+            .map(Self::Commit)
+            .or_else(|| tag.map(|t| Self::Tag(t.to_owned())))
+    }
 }
 
 pub struct ParsedPullRequestReviewEvent {
@@ -787,11 +801,12 @@ impl ParsedReleaseEvent {
             &payload.release.target_commitish,
             "github",
             "release.target_commitish",
-        )?;
+        );
+        let tag = payload.release.tag_name;
         Some(Self {
-            commit_hash,
+            target: ReleaseTarget::of(commit_hash, Some(&tag))?,
             repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
-            tag: Some(payload.release.tag_name),
+            tag: Some(tag),
         })
     }
 
@@ -814,11 +829,12 @@ impl ParsedReleaseEvent {
                     .target_commitish
                     .as_deref()
                     .and_then(|s| decode_sha_hex(s, "gitea", "release.target_commitish"))
-            })?;
+            });
+        let tag = payload.release.tag_name;
         Some(Self {
-            commit_hash,
+            target: ReleaseTarget::of(commit_hash, Some(&tag))?,
             repository_urls: gitea_repo_urls(&payload.repository),
-            tag: Some(payload.release.tag_name),
+            tag: Some(tag),
         })
     }
 
@@ -833,9 +849,9 @@ impl ParsedReleaseEvent {
         let commit_hash = payload
             .commit
             .as_ref()
-            .and_then(|c| decode_sha_hex(&c.id, "gitlab", "commit.id"))?;
+            .and_then(|c| decode_sha_hex(&c.id, "gitlab", "commit.id"));
         Some(Self {
-            commit_hash,
+            target: ReleaseTarget::of(commit_hash, payload.tag.as_deref())?,
             repository_urls: gitlab_project_urls(&payload.project),
             tag: payload.tag,
         })
@@ -1371,11 +1387,14 @@ mod tests {
         );
         let ev = ParsedReleaseEvent::from_github(body.as_bytes()).unwrap();
         assert_eq!(ev.tag, Some("v1.2.3".to_string()));
-        assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
+        assert_eq!(
+            ev.target,
+            ReleaseTarget::Commit(hex::decode(VALID_SHA).unwrap())
+        );
     }
 
     #[test]
-    fn parse_github_release_with_branch_target_commitish_returns_none() {
+    fn a_github_release_targeting_a_branch_resolves_through_its_tag() {
         let body = r#"{
             "action": "published",
             "release": {
@@ -1387,7 +1406,9 @@ mod tests {
                 "ssh_url": "git@github.com:org/repo.git"
             }
         }"#;
-        assert!(ParsedReleaseEvent::from_github(body.as_bytes()).is_none());
+        let ev = ParsedReleaseEvent::from_github(body.as_bytes()).unwrap();
+        assert_eq!(ev.target, ReleaseTarget::Tag("v1.2.3".to_owned()));
+        assert_eq!(ev.tag, Some("v1.2.3".to_owned()));
     }
 
     #[test]
@@ -1407,7 +1428,10 @@ mod tests {
         );
         let ev = ParsedReleaseEvent::from_gitea(body.as_bytes()).unwrap();
         assert_eq!(ev.tag, Some("v2.0.0".to_string()));
-        assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
+        assert_eq!(
+            ev.target,
+            ReleaseTarget::Commit(hex::decode(VALID_SHA).unwrap())
+        );
     }
 
     #[test]
@@ -1425,11 +1449,14 @@ mod tests {
             }}"#
         );
         let ev = ParsedReleaseEvent::from_gitea(body.as_bytes()).unwrap();
-        assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
+        assert_eq!(
+            ev.target,
+            ReleaseTarget::Commit(hex::decode(VALID_SHA).unwrap())
+        );
     }
 
     #[test]
-    fn parse_gitea_release_returns_none_when_no_sha_available() {
+    fn a_gitea_release_without_a_sha_resolves_through_its_tag() {
         let body = r#"{
             "action": "published",
             "release": {
@@ -1440,7 +1467,8 @@ mod tests {
                 "clone_url": "https://gitea.example.com/org/repo.git"
             }
         }"#;
-        assert!(ParsedReleaseEvent::from_gitea(body.as_bytes()).is_none());
+        let ev = ParsedReleaseEvent::from_gitea(body.as_bytes()).unwrap();
+        assert_eq!(ev.target, ReleaseTarget::Tag("v2.2.0".to_owned()));
     }
 
     #[test]
@@ -1458,17 +1486,32 @@ mod tests {
         );
         let ev = ParsedReleaseEvent::from_gitlab(body.as_bytes()).unwrap();
         assert_eq!(ev.tag, Some("v3.0.0".to_string()));
-        assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
+        assert_eq!(
+            ev.target,
+            ReleaseTarget::Commit(hex::decode(VALID_SHA).unwrap())
+        );
     }
 
     #[test]
-    fn parse_gitlab_release_without_commit_returns_none() {
+    fn a_gitlab_release_without_a_commit_resolves_through_its_tag() {
         let body = r#"{
             "action": "create",
             "project": {
                 "http_url": "https://gitlab.example.com/org/repo.git"
             },
             "tag": "v3.1.0"
+        }"#;
+        let ev = ParsedReleaseEvent::from_gitlab(body.as_bytes()).unwrap();
+        assert_eq!(ev.target, ReleaseTarget::Tag("v3.1.0".to_owned()));
+    }
+
+    #[test]
+    fn a_gitlab_release_without_a_commit_or_tag_returns_none() {
+        let body = r#"{
+            "action": "create",
+            "project": {
+                "http_url": "https://gitlab.example.com/org/repo.git"
+            }
         }"#;
         assert!(ParsedReleaseEvent::from_gitlab(body.as_bytes()).is_none());
     }

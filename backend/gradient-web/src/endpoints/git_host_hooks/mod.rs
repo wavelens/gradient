@@ -310,7 +310,7 @@ async fn route_github_app_release(
                 integration_id,
                 &parsed.repository_urls,
                 parsed.tag.as_deref(),
-                parsed.commit_hash.clone(),
+                &parsed.target,
                 None,
                 None,
             )
@@ -466,7 +466,7 @@ pub async fn git_host_webhook(
                 integration_id,
                 &urls,
                 parsed.tag.as_deref(),
-                parsed.commit_hash,
+                &parsed.target,
                 None,
                 None,
             )

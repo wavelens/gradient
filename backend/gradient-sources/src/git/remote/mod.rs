@@ -9,7 +9,7 @@ mod git_protocol;
 use super::ssh::with_private_key;
 use super::url::git_transport_url;
 use crate::SourceError;
-use git_protocol::ls_remote_head_git_protocol;
+use git_protocol::list_refs_git_protocol;
 use git2::Direction;
 use gradient_types::branch_key;
 
@@ -30,15 +30,22 @@ pub(in crate::git) fn ls_remote_head(
     private_key: Option<&str>,
     branch: Option<&str>,
 ) -> Result<BranchHead, SourceError> {
-    let url = git_transport_url(url);
-    if url.starts_with("git://") && private_key.is_none() {
-        return ls_remote_head_git_protocol(url, branch);
-    }
-
-    with_private_key(private_key, || ls_remote_head_libgit2(url, branch))
+    branch_head(&list_remote_refs(url, private_key)?, branch)
 }
 
-fn ls_remote_head_libgit2(url: &str, branch: Option<&str>) -> Result<BranchHead, SourceError> {
+pub(in crate::git) fn list_remote_refs(
+    url: &str,
+    private_key: Option<&str>,
+) -> Result<Vec<AdvertisedRef>, SourceError> {
+    let url = git_transport_url(url);
+    if url.starts_with("git://") && private_key.is_none() {
+        return list_refs_git_protocol(url);
+    }
+
+    with_private_key(private_key, || list_refs_libgit2(url))
+}
+
+fn list_refs_libgit2(url: &str) -> Result<Vec<AdvertisedRef>, SourceError> {
     let git_error = |e: git2::Error| SourceError::GitCommandFailed {
         stderr: e.message().to_string(),
     };
@@ -47,9 +54,7 @@ fn ls_remote_head_libgit2(url: &str, branch: Option<&str>) -> Result<BranchHead,
     let conn = remote
         .connect_auth(Direction::Fetch, None, None)
         .map_err(git_error)?;
-    let list = conn.list().map_err(git_error)?;
-
-    branch_head(&advertised(list), branch)
+    Ok(advertised(conn.list().map_err(git_error)?))
 }
 
 fn advertised(list: &[git2::RemoteHead<'_>]) -> Vec<AdvertisedRef> {
@@ -74,6 +79,21 @@ pub(in crate::git) fn branch_head(
         }
         None => default_branch_head(refs).ok_or(SourceError::EmptyRemote),
     }
+}
+
+pub(in crate::git) fn tag_commit(
+    refs: &[AdvertisedRef],
+    tag: &str,
+) -> Result<Vec<u8>, SourceError> {
+    let name = branch_key::tag(tag);
+    let peeled = format!("{name}^{{}}");
+    refs.iter()
+        .find(|r| r.name == peeled)
+        .or_else(|| refs.iter().find(|r| r.name == name))
+        .map(|r| r.oid.clone())
+        .ok_or_else(|| SourceError::TagNotFound {
+            tag: tag.to_owned(),
+        })
 }
 
 fn tip_of(refs: &[AdvertisedRef], name: String) -> Option<BranchHead> {
