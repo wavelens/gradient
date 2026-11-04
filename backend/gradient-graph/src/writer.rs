@@ -207,16 +207,18 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
         return;
     }
 
-    let (batches, replies): (Vec<RecordBatch>, Vec<Reply<RecordReport>>) =
-        std::mem::take(&mut st.queued).into_iter().unzip();
+    let (groups, replies): (Vec<RecordBatch>, Vec<Vec<Reply<RecordReport>>>) =
+        merge_queued(std::mem::take(&mut st.queued))
+            .into_iter()
+            .unzip();
     let (commits, commit_replies): (Vec<NarCommit>, Vec<Reply<NarCommitted>>) =
         std::mem::take(&mut st.nars).into_iter().unzip();
     st.queued_rows = 0;
-    let (batches_ref, commits_ref) = (&batches, &commits);
+    let (groups_ref, commits_ref) = (&groups, &commits);
     let written = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
-        let mut recorded = Vec::with_capacity(batches_ref.len());
-        for batch in batches_ref {
-            recorded.push(escalate_retryable(record_one(&scoped, batch).await)?);
+        let mut recorded = Vec::with_capacity(groups_ref.len());
+        for group in groups_ref {
+            recorded.push(escalate_retryable(record_one(&scoped, group).await)?);
         }
 
         let committed = commit_nars(&scoped, commits_ref).await?;
@@ -243,31 +245,66 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
                     let _ = myself.send_message(GraphMsg::Flush);
                 }
             }
-            for ((batch, reply), outcome) in batches.into_iter().zip(replies).zip(outcomes) {
+            for ((group, group_replies), outcome) in groups.into_iter().zip(replies).zip(outcomes) {
                 match outcome {
                     Ok(report) => {
-                        record::after_commit(&st.ctx, myself, &batch, &report).await;
-                        let _ = reply.send(Ok(report));
+                        record::after_commit(&st.ctx, myself, &group, &report).await;
+                        for reply in group_replies {
+                            let _ = reply.send(Ok(report.clone()));
+                        }
                     }
                     Err(e) => {
-                        record::fail_evaluation(&st.ctx, batch.evaluation, &e.to_string()).await;
-                        let _ = reply.send(Err(e));
+                        record::fail_evaluation(&st.ctx, group.evaluation, &e.to_string()).await;
+                        for reply in group_replies {
+                            let _ = reply.send(Err(anyhow!("{e:#}")));
+                        }
                     }
                 }
             }
         }
         Err(e) => {
-            warn!(error = %e, batches = replies.len(), nars = commit_replies.len(), "record transaction failed; its evaluations are failed");
+            warn!(error = %e, groups = replies.len(), nars = commit_replies.len(), "record transaction failed; its evaluations are failed");
             st.record(&Err(anyhow!("{e}")));
             for reply in commit_replies {
                 let _ = reply.send(Err(anyhow!("{e}")));
             }
-            for (batch, reply) in batches.into_iter().zip(replies) {
-                record::fail_evaluation(&st.ctx, batch.evaluation, &e.to_string()).await;
-                let _ = reply.send(Err(anyhow!("{e}")));
+            for (group, group_replies) in groups.into_iter().zip(replies) {
+                record::fail_evaluation(&st.ctx, group.evaluation, &e.to_string()).await;
+                for reply in group_replies {
+                    let _ = reply.send(Err(anyhow!("{e}")));
+                }
             }
         }
     }
+}
+
+fn merge_queued(
+    queued: Vec<(RecordBatch, Reply<RecordReport>)>,
+) -> Vec<(RecordBatch, Vec<Reply<RecordReport>>)> {
+    let mut groups: Vec<(RecordBatch, Vec<Reply<RecordReport>>)> = Vec::new();
+    for (batch, reply) in queued {
+        let joinable = groups
+            .iter_mut()
+            .rev()
+            .find(|(group, _)| {
+                (group.evaluation, group.task, group.continuation)
+                    == (batch.evaluation, batch.task, batch.continuation)
+            })
+            .filter(|(group, _)| {
+                group.derivations.len() + batch.derivations.len() <= RECORD_ROW_BUDGET
+            });
+        match joinable {
+            Some((group, replies)) => {
+                group.derivations.extend(batch.derivations);
+                group.warnings.extend(batch.warnings);
+                group.errors.extend(batch.errors);
+                replies.push(reply);
+            }
+            None => groups.push((batch, vec![reply])),
+        }
+    }
+
+    groups
 }
 
 fn escalate_retryable<T>(outcome: anyhow::Result<T>) -> anyhow::Result<anyhow::Result<T>> {
@@ -507,6 +544,113 @@ mod tests {
         anyhow::Error::new(sea_orm::DbErr::Exec(sea_orm::RuntimeErr::SqlxError(
             Arc::new(sea_orm::sqlx::Error::Database(Box::new(Coded(code)))),
         )))
+    }
+
+    fn batch(
+        evaluation: gradient_types::EvaluationId,
+        task: Option<gradient_types::TaskId>,
+        continuation: Option<gradient_types::ExecJobId>,
+        paths: &[&str],
+    ) -> RecordBatch {
+        RecordBatch {
+            evaluation,
+            task,
+            continuation,
+            derivations: paths
+                .iter()
+                .map(|path| gradient_wire::types::DiscoveredDerivation {
+                    drv_path: (*path).to_owned(),
+                    ..Default::default()
+                })
+                .collect(),
+            warnings: paths.iter().map(|path| format!("warning {path}")).collect(),
+            errors: paths.iter().map(|path| format!("error {path}")).collect(),
+        }
+    }
+
+    fn queued(batches: Vec<RecordBatch>) -> Vec<(RecordBatch, Reply<RecordReport>)> {
+        batches
+            .into_iter()
+            .map(|batch| (batch, tokio::sync::oneshot::channel().0.into()))
+            .collect()
+    }
+
+    fn paths(batch: &RecordBatch) -> Vec<&str> {
+        batch
+            .derivations
+            .iter()
+            .map(|d| d.drv_path.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn batches_of_one_evaluation_merge_in_arrival_order() {
+        let (e1, e2) = (
+            gradient_types::EvaluationId::now_v7(),
+            gradient_types::EvaluationId::now_v7(),
+        );
+
+        let groups = merge_queued(queued(vec![
+            batch(e1, None, None, &["a"]),
+            batch(e2, None, None, &["c"]),
+            batch(e1, None, None, &["b"]),
+        ]));
+
+        assert_eq!(groups.len(), 2);
+        let (first, first_replies) = &groups[0];
+        assert_eq!(first.evaluation, e1);
+        assert_eq!(paths(first), vec!["a", "b"]);
+        assert_eq!(first.warnings, vec!["warning a", "warning b"]);
+        assert_eq!(first.errors, vec!["error a", "error b"]);
+        assert_eq!(first_replies.len(), 2);
+        let (second, second_replies) = &groups[1];
+        assert_eq!(second.evaluation, e2);
+        assert_eq!(paths(second), vec!["c"]);
+        assert_eq!(second_replies.len(), 1);
+    }
+
+    #[test]
+    fn a_different_task_or_continuation_keeps_its_own_group() {
+        let evaluation = gradient_types::EvaluationId::now_v7();
+        let task = Some(gradient_types::TaskId::now_v7());
+        let continuation = Some(gradient_types::ExecJobId::now_v7());
+
+        let groups = merge_queued(queued(vec![
+            batch(evaluation, task, None, &["a"]),
+            batch(evaluation, None, None, &["b"]),
+            batch(evaluation, None, continuation, &["c"]),
+            batch(evaluation, task, None, &["d"]),
+        ]));
+
+        let keys: Vec<_> = groups
+            .iter()
+            .map(|(group, replies)| (group.task, group.continuation, paths(group), replies.len()))
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                (task, None, vec!["a", "d"], 2),
+                (None, None, vec!["b"], 1),
+                (None, continuation, vec!["c"], 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_group_stops_at_the_row_budget() {
+        let evaluation = gradient_types::EvaluationId::now_v7();
+        let full: Vec<String> = (0..RECORD_ROW_BUDGET).map(|i| format!("p{i}")).collect();
+        let full: Vec<&str> = full.iter().map(String::as_str).collect();
+
+        let groups = merge_queued(queued(vec![
+            batch(evaluation, None, None, &full),
+            batch(evaluation, None, None, &full),
+        ]));
+
+        assert_eq!(groups.len(), 2);
+        assert!(groups.iter().all(|(group, replies)| {
+            group.derivations.len() == RECORD_ROW_BUDGET && replies.len() == 1
+        }));
     }
 
     #[test]
