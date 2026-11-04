@@ -96,7 +96,7 @@ The `cache-maintenance` pass in `gradient-cache/src/schedule.rs` runs on a sched
 
 | Pass | Reclaimed | Bound |
 |---|---|---|
-| Evaluation GC | Evaluations beyond the task's `keep_evaluations` newest terminal ones | Waiting during an active evaluation of the task, unless wedged longer than `gc.wedgedEvalHours` (24) |
+| Evaluation GC | Terminal evaluations beyond the task's `keep_evaluations`. Failed and aborted ones go before completed ones | The newest terminal evaluation stays. Active evaluations stay and never count toward the limit |
 | Derivation GC | `derivation` rows outside the keep-set, their attempt logs | Created before `gc.orphanDerivationHours` (24) |
 | Stale-path eviction | `cached_path` rows outside `live_cached_paths_cte`, then their objects | Last fetch (or commit) older than `max(gc.narTtlHours, gc.narUploadGraceHours)` (336 h) |
 | Zombie purge | Confirmed rows with the object missing from storage | Storage probe per row. A probe error will preserve the row |

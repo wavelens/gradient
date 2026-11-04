@@ -102,7 +102,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `gc.narTtlHours` | unsigned int | `336` | `GRADIENT_GC_NAR_TTL_HOURS` | Hours to keep a cached path outside the live closure of retained evaluations after its last fetch, or its upload if never fetched. These hours always come on top of `gc.narUploadGraceHours`. Set it to `0` to keep nothing beyond that grace. |
 | `gc.narUploadGraceHours` | unsigned int | `24` | `GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS` | Hours before the deletion of an unreferenced NAR object, covering the window between its upload and the commit of its database rows. |
 | `gc.orphanDerivationHours` | unsigned int | `24` | `GRADIENT_GC_ORPHAN_DERIVATION_HOURS` | Hours before the deletion of a derivation outside the build closure of every retained evaluation. Quick re-evaluations can reuse the derivation during this grace. Set it to `0` to delete such derivations on the next run. |
-| `gc.wedgedEvalHours` | unsigned int | `24` | `GRADIENT_GC_WEDGED_EVAL_HOURS` | Hours an evaluation can stay in one phase before counting as stuck. Stuck evaluations no longer block evaluation garbage collection. Set it to `0` to treat no evaluation as stuck. |
 
 ## `githubApp`
 

@@ -752,16 +752,6 @@
   },
   {
     "group": "gc",
-    "field": "wedged_eval_hours",
-    "flag": "gc-wedged-eval-hours",
-    "env": "GRADIENT_GC_WEDGED_EVAL_HOURS",
-    "type": "u32",
-    "description": "Hours an evaluation can stay in one phase before counting as stuck. Stuck evaluations no\nlonger block evaluation garbage collection. Set it to `0` to treat no evaluation as\nstuck.",
-    "default": "24",
-    "values": []
-  },
-  {
-    "group": "gc",
     "field": "deep_interval_secs",
     "flag": "gc-deep-interval-secs",
     "env": "GRADIENT_GC_DEEP_INTERVAL_SECS",

@@ -34,12 +34,6 @@ pub struct GcArgs {
     #[arg(default_value_t = 24)]
     pub orphan_derivation_hours: u32,
 
-    /// Hours an evaluation can stay in one phase before counting as stuck. Stuck evaluations no
-    /// longer block evaluation garbage collection. Set it to `0` to treat no evaluation as
-    /// stuck.
-    #[arg(default_value_t = 24)]
-    pub wedged_eval_hours: u32,
-
     /// Seconds from the end of one background deep garbage collection round to the start of the
     /// next. Set it to `0` to run rounds only on request.
     #[arg(default_value_t = 3600)]
