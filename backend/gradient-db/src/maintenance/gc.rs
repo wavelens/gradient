@@ -88,20 +88,12 @@ pub async fn evaluation_gc_plan(
         .await
         .context("GC: query evaluations")?;
 
-    let evals: Vec<(EvaluationStatus, chrono::NaiveDateTime)> = all_evals
-        .iter()
-        .map(|e| (e.status, last_progress_at(e)))
-        .collect();
+    let statuses: Vec<EvaluationStatus> = all_evals.iter().map(|e| e.status).collect();
 
-    Ok(evaluations_to_gc(
-        &evals,
-        keep,
-        i64::from(ctx.config.gc.wedged_eval_hours),
-        gradient_types::now(),
-    )
-    .into_iter()
-    .map(|i| all_evals[i].clone())
-    .collect())
+    Ok(evaluations_to_gc(&statuses, keep)
+        .into_iter()
+        .map(|i| all_evals[i].clone())
+        .collect())
 }
 
 pub async fn after_evaluation_delete(ctx: &DbContext, deleted: &[MEvaluation]) -> Result<()> {
@@ -191,51 +183,24 @@ pub async fn settle_after_delete(
     Ok((adopted.pairs.len(), changes))
 }
 
-/// A wedged run is still taking writes, and `updated_at` is never going stale for it.
-/// The phase stamps are only moving when the evaluation is entering a new phase.
-fn last_progress_at(e: &MEvaluation) -> chrono::NaiveDateTime {
-    [
-        e.fetch_started_at,
-        e.eval_flake_started_at,
-        e.eval_drv_started_at,
-        e.building_started_at,
-    ]
-    .into_iter()
-    .flatten()
-    .fold(e.created_at, std::cmp::max)
-}
-
-fn evaluations_to_gc(
-    evals: &[(EvaluationStatus, chrono::NaiveDateTime)],
-    keep: usize,
-    wedged_hours: i64,
-    now: chrono::NaiveDateTime,
-) -> Vec<usize> {
-    if keep == 0 {
+fn evaluations_to_gc(newest_first: &[EvaluationStatus], keep: usize) -> Vec<usize> {
+    let mut terminal = (0..newest_first.len()).filter(|&i| newest_first[i].is_terminal());
+    // Cleanup jobs never remove the latest terminal evaluation, even when it failed. The task page can still show the latest result.
+    if keep == 0 || terminal.next().is_none() {
         return Vec::new();
     }
 
-    let blocking_active = evals.iter().any(|(status, updated_at)| {
-        status.is_active()
-            && (wedged_hours <= 0 || now - *updated_at < ChronoDuration::hours(wedged_hours))
-    });
-    if blocking_active {
-        return Vec::new();
-    }
-
-    let mut kept = 0usize;
+    let (completed, unsuccessful): (Vec<usize>, Vec<usize>) =
+        terminal.partition(|&i| newest_first[i] == EvaluationStatus::Completed);
+    let mut room = keep - 1;
     let mut delete = Vec::new();
-    for (i, (status, _)) in evals.iter().enumerate() {
-        if status.is_active() {
-            continue;
-        }
-        if kept < keep {
-            kept += 1;
-        } else {
-            delete.push(i);
-        }
+    for older in [completed, unsuccessful] {
+        let kept = older.len().min(room);
+        room -= kept;
+        delete.extend_from_slice(&older[kept..]);
     }
 
+    delete.sort_unstable();
     delete
 }
 
@@ -318,94 +283,61 @@ mod tests {
         assert_eq!(stmt.values.as_ref().map(|v| v.0.len()), Some(1));
     }
 
-    const WEDGED_HOURS: i64 = 24;
-
-    fn at(
-        statuses: &[EvaluationStatus],
-        age_hours: i64,
-    ) -> Vec<(EvaluationStatus, chrono::NaiveDateTime)> {
-        let progressed = gradient_types::now() - ChronoDuration::hours(age_hours);
-        statuses.iter().map(|s| (*s, progressed)).collect()
-    }
-
-    fn gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
-        evaluations_to_gc(&at(statuses, 1), keep, WEDGED_HOURS, gradient_types::now())
-    }
+    use super::evaluations_to_gc as gc;
 
     #[test]
-    fn skips_gc_while_an_evaluation_is_active() {
-        assert!(gc(&[Building, Completed], 1).is_empty());
+    fn active_evaluations_are_never_deleted() {
         assert!(gc(&[Queued, Building, Waiting, Fetching], 1).is_empty());
-        assert!(gc(&[Building, Completed, Aborted, Completed], 1).is_empty());
+        assert!(gc(&[EvaluatingFlake, EvaluatingDerivation], 1).is_empty());
     }
 
     #[test]
-    fn wedged_active_evaluation_stops_blocking_but_is_never_deleted() {
-        let evals = at(&[Building, Completed, Failed, Completed], 48);
+    fn an_active_evaluation_neither_blocks_gc_nor_counts_toward_keep() {
+        assert_eq!(gc(&[Building, Completed, Failed, Completed], 2), vec![2]);
+        assert_eq!(gc(&[Completed, Building, Completed, Completed], 2), vec![3]);
+    }
+
+    #[test]
+    fn failed_and_aborted_evaluations_go_before_completed_ones() {
         assert_eq!(
-            evaluations_to_gc(&evals, 1, WEDGED_HOURS, gradient_types::now()),
-            vec![2, 3]
+            gc(&[Completed, Failed, Aborted, Completed, Completed], 3),
+            vec![1, 2]
         );
-        assert!(evaluations_to_gc(&evals, 1, 0, gradient_types::now()).is_empty());
     }
 
     #[test]
-    fn a_heartbeating_wedged_evaluation_still_goes_stale() {
-        let now = gradient_types::now();
-        let wedged = MEvaluation {
-            created_at: now - ChronoDuration::hours(72),
-            building_started_at: Some(now - ChronoDuration::hours(71)),
-            updated_at: now - ChronoDuration::minutes(39),
-            ..Default::default()
-        };
-
-        assert_eq!(last_progress_at(&wedged), now - ChronoDuration::hours(71));
-        assert!(now - last_progress_at(&wedged) > ChronoDuration::hours(WEDGED_HOURS));
-        assert!(now - wedged.updated_at < ChronoDuration::hours(WEDGED_HOURS));
+    fn the_newest_terminal_evaluation_is_kept_even_when_it_failed() {
+        assert_eq!(gc(&[Failed, Completed, Completed, Failed], 2), vec![2, 3]);
+        assert_eq!(gc(&[Building, Aborted, Completed], 1), vec![2]);
     }
 
     #[test]
-    fn entering_a_phase_is_progress_and_keeps_the_block() {
-        let now = gradient_types::now();
-        let moving = MEvaluation {
-            created_at: now - ChronoDuration::hours(72),
-            fetch_started_at: Some(now - ChronoDuration::hours(71)),
-            eval_flake_started_at: Some(now - ChronoDuration::hours(70)),
-            building_started_at: Some(now - ChronoDuration::hours(1)),
-            updated_at: now,
-            ..Default::default()
-        };
-
-        assert_eq!(last_progress_at(&moving), now - ChronoDuration::hours(1));
+    fn failures_fill_the_rest_when_too_few_evaluations_completed() {
+        assert_eq!(
+            gc(&[Failed, Aborted, Completed, Failed, Failed], 4),
+            vec![4]
+        );
     }
 
     #[test]
-    fn an_evaluation_with_no_phase_stamp_ages_from_its_creation() {
-        let now = gradient_types::now();
-        let queued = MEvaluation {
-            created_at: now - ChronoDuration::hours(48),
-            updated_at: now,
-            ..Default::default()
-        };
+    fn a_task_with_steady_input_updates_shrinks_to_keep() {
+        let mut task = vec![Building, Failed];
+        task.extend([Failed; 30]);
+        task.extend([Completed; 5]);
+        task.push(Aborted);
 
-        assert_eq!(last_progress_at(&queued), now - ChronoDuration::hours(48));
+        let survivors: Vec<EvaluationStatus> = (0..task.len())
+            .filter(|i| !gc(&task, 3).contains(i))
+            .map(|i| task[i])
+            .collect();
+
+        assert_eq!(survivors, vec![Building, Failed, Completed, Completed]);
     }
 
     #[test]
-    fn retains_keep_most_recent_terminal_regardless_of_outcome() {
-        assert_eq!(gc(&[Aborted, Completed], 1), vec![1]);
-        assert_eq!(gc(&[Completed, Aborted, Failed], 2), vec![2]);
-    }
-
-    #[test]
-    fn keeps_single_terminal_within_keep() {
+    fn evaluations_within_keep_stay() {
         assert!(gc(&[Aborted], 1).is_empty());
-        assert!(gc(&[Failed], 1).is_empty());
-    }
-
-    #[test]
-    fn deletes_terminal_evaluations_beyond_keep() {
-        assert_eq!(gc(&[Completed, Failed, Completed], 1), vec![1, 2]);
+        assert!(gc(&[Completed, Failed, Aborted], 3).is_empty());
     }
 
     #[test]
