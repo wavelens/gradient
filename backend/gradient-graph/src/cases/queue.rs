@@ -13,7 +13,7 @@ use super::{
     A, A_OUT, B, B_OUT, Case, X, X_OUT, Y, Y_OUT, assert_only_unstored_outputs, chain, chain_done,
     drv, drv_nar, nar, narinfo, pass, with_attr, with_output, with_references,
 };
-use crate::messages::{Demotion, GcRequest, Transition};
+use crate::messages::{Demotion, Transition};
 
 #[tokio::test]
 async fn q01_a_build_queues_only_after_the_walk_and_the_probe_answer() {
@@ -100,7 +100,7 @@ async fn q02_adoption_supplies_the_job_when_the_only_naming_evaluation_is_collec
     .await;
 
     let gv = case.gv(e2).await;
-    case.gc(GcRequest::Evaluations { ids: vec![e1] }).await;
+    case.collect_evaluations(&[e1]).await;
 
     let collected = case.db.find::<evaluation::Entity>(e1).await;
     assert!(collected.is_none(), "after 1: evaluation(E1) is gone");

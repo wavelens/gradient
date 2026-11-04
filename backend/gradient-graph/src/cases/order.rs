@@ -289,10 +289,9 @@ async fn o03_a_replay_of_every_mutating_operation_changes_nothing_the_second_tim
     assert_eq!(twice, once, "5: the second call changes no row");
     case.zero_drift("pair 5").await;
 
-    let collected = GcRequest::Evaluations { ids: vec![e1] };
-    case.gc(collected.clone()).await;
+    case.collect_evaluations(&[e1]).await;
     let once = state(&case, e1).await;
-    case.gc(collected).await;
+    case.gc(GcRequest::Evaluations { ids: vec![e1] }).await;
 
     let twice = state(&case, e1).await;
     assert_eq!(twice, once, "6: the second call changes no row");

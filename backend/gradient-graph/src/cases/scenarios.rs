@@ -250,7 +250,7 @@ async fn l01_full_life_of_a_small_project_a_second_evaluation_a_shared_failure_a
     );
     case.zero_drift("step 11").await;
 
-    case.gc(GcRequest::Evaluations { ids: vec![e1] }).await;
+    case.collect_evaluations(&[e1]).await;
     let collected = case
         .gc(GcRequest::Derivations {
             candidates: Vec::new(),
@@ -493,7 +493,7 @@ async fn l03_skip_and_thaw_over_three_evaluations_and_a_gc() {
     );
     case.zero_drift("step 2").await;
 
-    case.gc(GcRequest::Evaluations { ids: vec![e3] }).await;
+    case.collect_evaluations(&[e3]).await;
 
     let status = case.sb(B).await.status;
     assert_eq!(status, BuildStatus::Skipped, "after 3: sb(B)");

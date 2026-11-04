@@ -20,7 +20,7 @@ use gradient_wire::types::{BuildFailureKind, DiscoveredDerivation};
 
 use super::{A, A_OUT, B, B_OUT, Case, drv, nar, with_attr, with_output, with_references};
 use crate::messages::{
-    ClusterNext, ContinuationOutcome, ExecNodeEnd, GcRequest, Transition, TransitionReport,
+    ClusterNext, ContinuationOutcome, ExecNodeEnd, Transition, TransitionReport,
 };
 
 const ATTR: &str = "apps.x86_64-linux.a";
@@ -924,7 +924,7 @@ async fn deleting_an_evaluation_reports_its_exec_jobs() {
     let (case, e1) = queued_case(spec()).await;
     let exec_job = job(&case, e1).await.id;
 
-    let report = case.gc(GcRequest::Evaluations { ids: vec![e1] }).await;
+    let report = case.collect_evaluations(&[e1]).await;
 
     assert_eq!(
         report.deleted_exec_jobs,

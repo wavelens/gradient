@@ -18,7 +18,7 @@ use super::{
     assert_only_unstored_outputs, chain, drv, nar, narinfo, pass, with_attr, with_output,
     with_references,
 };
-use crate::messages::{Demotion, GcRequest, Transition};
+use crate::messages::{Demotion, Transition};
 
 #[tokio::test]
 async fn d01_any_wanted_build_passes_runtime_edges_and_only_a_builder_passes_build_edges() {
@@ -420,7 +420,7 @@ async fn d06_collecting_the_only_wanting_evaluation_leaves_its_builds_skipped() 
     let e1 = EvaluationId::now_v7();
     let case = Case::start(chain(e1)).await;
 
-    case.gc(GcRequest::Evaluations { ids: vec![e1] }).await;
+    case.collect_evaluations(&[e1]).await;
 
     let collected = case.db.find::<evaluation::Entity>(e1).await;
     assert!(collected.is_none(), "after 1: evaluation(E1) is gone");

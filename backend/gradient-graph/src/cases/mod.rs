@@ -620,6 +620,14 @@ impl Case {
         self.graph.gc(request).await.expect("the collection runs")
     }
 
+    pub async fn collect_evaluations(&self, ids: &[EvaluationId]) -> GcReport {
+        for id in ids {
+            self.set_evaluation_status(*id, EvaluationStatus::Aborted)
+                .await;
+        }
+        self.gc(GcRequest::Evaluations { ids: ids.to_vec() }).await
+    }
+
     pub async fn known(&self, paths: &[&str]) -> Vec<String> {
         let hashes = paths
             .iter()
