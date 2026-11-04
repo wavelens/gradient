@@ -25,8 +25,6 @@ pub(crate) enum CacheRefusal {
     TooManyConnectionsFromIp,
     #[error("missing ?hash=")]
     MissingHashQuery,
-    #[error("{0}")]
-    InvalidHashInUrl(String),
     #[error("max_storage_gb must be 0 (unlimited) or at least 1")]
     NegativeMaxStorage,
     #[error("Substituter URL is required.")]
@@ -83,7 +81,6 @@ impl Refusal for CacheRefusal {
             }
             Self::CacheDisabled
             | Self::MissingHashQuery
-            | Self::InvalidHashInUrl(_)
             | Self::NegativeMaxStorage
             | Self::UpstreamUrlRequired
             | Self::UpstreamUrlWithoutHttpScheme

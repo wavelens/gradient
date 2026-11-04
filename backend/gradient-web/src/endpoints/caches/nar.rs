@@ -5,7 +5,6 @@
  */
 
 use super::helpers::{CacheContext, cache_client_ip};
-use super::refusal::CacheRefusal;
 use crate::api_spec::Binary;
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
@@ -45,12 +44,11 @@ pub async fn nar(
     headers: HeaderMap,
     Path((cache, path)): Path<(String, String)>,
 ) -> WebResult<Response> {
-    let path_hash = get_hash_from_url(path.clone())
-        .map_err(|e| CacheRefusal::InvalidHashInUrl(e.to_string()))?;
-
     if !(path.ends_with(".nar") || path.contains(".nar.")) {
         return Err(WebError::not_found(Resource::Path));
     }
+    let path_hash =
+        get_hash_from_url(path.clone()).map_err(|_| WebError::not_found(Resource::Path))?;
 
     let client_ip = cache_client_ip(&state.config, &headers, peer);
     let ctx = CacheContext::load(
