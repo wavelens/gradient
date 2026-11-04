@@ -906,6 +906,7 @@ impl MessageLoopState {
         );
         let (log, abort, done_tx) = (registered.log, registered.abort, registered.done_tx);
         let exec_inbox = registered.exec_inbox;
+        let writer = self.jobs.writer.clone();
 
         #[expect(
             clippy::disallowed_methods,
@@ -923,7 +924,7 @@ impl MessageLoopState {
                 exec_member,
             )
             .await;
-            report_when_drained(log, done_tx, (job_id, result)).await;
+            report_when_drained(log, &writer, done_tx, (job_id, result)).await;
         });
     }
 

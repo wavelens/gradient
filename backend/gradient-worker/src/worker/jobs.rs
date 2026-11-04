@@ -36,7 +36,7 @@ use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::eval_shard_replies::EvalShardReplies;
 use crate::proto::job::JobUpdater;
-use crate::proto::job_log::{JOB_LOG_BUFFER_CAP, JobLog, file_key};
+use crate::proto::job_log::{JOB_LOG_BUFFER_CAP, JobLog, LogChunkSender, file_key};
 
 pub(super) type JobDone = (String, Result<()>);
 
@@ -284,9 +284,13 @@ pub(crate) struct WorkerJobs {
 
 pub(super) async fn report_when_drained(
     log: JobLog,
+    writer: &impl LogChunkSender,
     done_tx: mpsc::UnboundedSender<JobDone>,
     done: JobDone,
 ) {
+    if let Err(e) = log.flush(writer).await {
+        warn!(job_id = %done.0, error = %e, "Failed to send or buffer the last log line of the job");
+    }
     tokio::select! {
         () = log.drained() => {
             let _ = done_tx.send(done);
@@ -395,13 +399,14 @@ impl WorkerJobs {
         );
         let job = run(updater, registered.abort, registered.exec_inbox);
         let (log, done_tx) = (registered.log, registered.done_tx);
+        let writer = self.writer.clone();
         #[expect(
             clippy::disallowed_methods,
             reason = "reports back on done_tx and aborts through the registry"
         )]
         tokio::spawn(async move {
             let result = job.await;
-            report_when_drained(log, done_tx, (job_id, result)).await;
+            report_when_drained(log, &writer, done_tx, (job_id, result)).await;
         });
     }
 
@@ -987,19 +992,45 @@ mod tests {
     async fn a_job_of_a_dropped_worker_gives_up_its_buffered_log() {
         let dir = tempfile::tempdir().unwrap();
         let log = JobLog::open(dir.path(), "build:1", JOB_LOG_BUFFER_CAP);
-        log.send(&ReconnectingWriter::new(), b"unsent".to_vec())
-            .await
-            .unwrap();
+        let writer = ReconnectingWriter::new();
+        log.send(&writer, b"unsent".to_vec()).await.unwrap();
+        log.flush(&writer).await.unwrap();
         assert!(dir.path().join("build_1.log").exists());
         let (done_tx, done_rx) = mpsc::unbounded_channel();
         drop(done_rx);
 
         tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            report_when_drained(log, done_tx, ("build:1".to_owned(), Ok(()))),
+            report_when_drained(log, &writer, done_tx, ("build:1".to_owned(), Ok(()))),
         )
         .await
         .expect("nobody can replay the log once the worker is gone");
         assert!(!dir.path().join("build_1.log").exists());
+    }
+
+    #[derive(Clone, Default)]
+    struct SentChunks(Arc<Mutex<Vec<u8>>>);
+
+    impl LogChunkSender for SentChunks {
+        async fn send_now(&self, msg: ClientMessage) -> Result<()> {
+            if let ClientMessage::LogChunk { data, .. } = msg {
+                self.0.lock().extend_from_slice(&data);
+            }
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn the_last_lines_go_out_before_the_job_reports_done() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = JobLog::open(dir.path(), "build:1", JOB_LOG_BUFFER_CAP);
+        let sent = SentChunks::default();
+        log.send(&sent, b"last line\n".to_vec()).await.unwrap();
+        let (done_tx, mut done_rx) = mpsc::unbounded_channel();
+
+        report_when_drained(log, &sent, done_tx, ("build:1".to_owned(), Ok(()))).await;
+
+        assert!(done_rx.try_recv().is_ok());
+        assert_eq!(*sent.0.lock(), b"last line\n");
     }
 }
