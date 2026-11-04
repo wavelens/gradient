@@ -226,8 +226,14 @@ async fn retire_stale_paths(
     })
 }
 
-async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Result<GcReport> {
+async fn delete_evaluations(ctx: &DbContext, chosen: &[EvaluationId]) -> Result<GcReport> {
     let db = &ctx.worker_db;
+    if chosen.is_empty() {
+        return Ok(GcReport::default());
+    }
+    let evaluations = &still_finished(db, chosen)
+        .await
+        .context("GC: recheck the status of the evaluations to delete")?;
     if evaluations.is_empty() {
         return Ok(GcReport::default());
     }
@@ -271,6 +277,24 @@ async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Re
         deleted_exec_jobs,
         ..Default::default()
     })
+}
+
+async fn still_finished<C: ConnectionTrait>(
+    db: &C,
+    chosen: &[EvaluationId],
+) -> Result<Vec<EvaluationId>, sea_orm::DbErr> {
+    use gradient_entity::evaluation::EvaluationStatus;
+    use sea_orm::{ColumnTrait, QueryFilter, QuerySelect};
+
+    let terminal: Vec<i32> = EvaluationStatus::TERMINAL.map(i32::from).to_vec();
+    EEvaluation::find()
+        .select_only()
+        .column(CEvaluation::Id)
+        .filter(CEvaluation::Id.is_in(chosen.to_vec()))
+        .filter(CEvaluation::Status.is_in(terminal))
+        .into_tuple()
+        .all(db)
+        .await
 }
 
 async fn unlink<C: ConnectionTrait>(
