@@ -46,7 +46,7 @@ async fn gc_paths(case: &Case, hashes: impl IntoIterator<Item = String>) -> GcRe
 }
 
 async fn gc_evaluations(case: &Case, ids: &[EvaluationId]) -> GcReport {
-    case.gc(GcRequest::Evaluations { ids: ids.to_vec() }).await
+    case.collect_evaluations(ids).await
 }
 
 // Q23, Q24: the scan alone can tell a live path, so C05 and C07 pass its list to the writer.
@@ -432,7 +432,11 @@ async fn c11_evaluation_gc_skips_a_chosen_evaluation_that_runs_again() {
     )
     .await;
 
-    let report = gc_evaluations(&case, &[failed, reopened]).await;
+    let report = case
+        .gc(GcRequest::Evaluations {
+            ids: vec![failed, reopened],
+        })
+        .await;
 
     assert_eq!(report.deleted_evaluations, vec![failed]);
     assert_eq!(
