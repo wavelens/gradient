@@ -51,6 +51,7 @@ mod m20261114_000000_user_identity;
 mod m20261115_000000_drop_cached_path_file_hash_index;
 mod m20261116_000000_derivation_output_verified_by_upstream;
 mod m20261117_000000_only_evaluate;
+mod m20261119_000000_counter_trigger_columns;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -127,6 +128,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261115_000000_drop_cached_path_file_hash_index::Migration),
             Box::new(m20261116_000000_derivation_output_verified_by_upstream::Migration),
             Box::new(m20261117_000000_only_evaluate::Migration),
+            Box::new(m20261119_000000_counter_trigger_columns::Migration),
         ]
     }
 }
