@@ -146,12 +146,7 @@ impl HttpRevisionResolver {
         })
     }
 
-    async fn resolve_git(
-        &self,
-        url: &str,
-        ref_: &Option<String>,
-        progress: Arc<dyn InputProgressSink>,
-    ) -> Result<ResolvedRev> {
+    async fn resolve_git(&self, url: &str, ref_: &Option<String>) -> Result<ResolvedRev> {
         let url = url.to_owned();
         let ref_owned = ref_.clone();
         let ssh_key = self.ssh_key.clone();
@@ -160,7 +155,6 @@ impl HttpRevisionResolver {
                 &url,
                 ref_owned.as_deref(),
                 ssh_key.as_ref().map(SecretString::expose),
-                &*progress,
             )
         })
         .await
@@ -213,7 +207,7 @@ impl RevisionResolver for HttpRevisionResolver {
             LockedRef::Gitlab { owner, repo, ref_ } => {
                 self.resolve_gitlab(owner, repo, ref_, &*progress).await
             }
-            LockedRef::Git { url, ref_ } => self.resolve_git(url, ref_, progress).await,
+            LockedRef::Git { url, ref_ } => self.resolve_git(url, ref_).await,
             LockedRef::Tarball { .. } => {
                 bail!("tarball inputs are not yet supported by the updater")
             }
@@ -229,53 +223,20 @@ fn git_checkout(
     url: &str,
     ref_: Option<&str>,
     ssh_key: Option<&str>,
-    progress: &dyn InputProgressSink,
 ) -> Result<(String, i64, tempfile::TempDir)> {
-    crate::git::with_private_key(ssh_key, || clone_and_check_out(url, ref_, progress))
-}
-
-fn clone_and_check_out(
-    url: &str,
-    ref_: Option<&str>,
-    progress: &dyn InputProgressSink,
-) -> Result<(String, i64, tempfile::TempDir)> {
-    let tmp = tempfile::tempdir().context("create git temp dir")?;
-    let mut callbacks = git2::RemoteCallbacks::new();
-    callbacks.transfer_progress(|stats| {
-        progress.transfer(stats.received_bytes() as u64, None);
-        true
-    });
-    let mut fetch = git2::FetchOptions::new();
-    fetch.remote_callbacks(callbacks);
-    let repo = git2::build::RepoBuilder::new()
-        .fetch_options(fetch)
-        .clone(url, tmp.path())
-        .with_context(|| format!("clone {url}"))?;
-
-    let commit = match ref_ {
-        Some(r) => repo
-            .revparse_single(&format!("origin/{r}"))
-            .or_else(|_| repo.revparse_single(r))
-            .with_context(|| format!("resolve git ref `{r}`"))?
-            .peel_to_commit()
-            .context("ref does not point at a commit")?,
-        None => repo
-            .head()
-            .context("read HEAD")?
-            .peel_to_commit()
-            .context("HEAD commit")?,
-    };
-
-    let rev = commit.id().to_string();
-    let last_modified = commit.time().seconds();
-    let tree = commit.tree().context("commit tree")?;
-    let mut checkout = git2::build::CheckoutBuilder::new();
-    checkout.force();
-    repo.checkout_tree(tree.as_object(), Some(&mut checkout))
-        .context("git checkout")?;
+    let rev = crate::git::remote_ref_commit(url, ref_, ssh_key)
+        .with_context(|| format!("Resolve git ref `{}` for {url}", ref_.unwrap_or("HEAD")))?;
+    let tmp = crate::git::checkout_commit(url, &rev, ssh_key)?;
+    let last_modified = commit_time(tmp.path(), &rev)?;
     std::fs::remove_dir_all(tmp.path().join(".git")).ok();
 
     Ok((rev, last_modified, tmp))
+}
+
+fn commit_time(checkout: &std::path::Path, rev: &str) -> Result<i64> {
+    let repo = git2::Repository::open(checkout).context("open the checkout")?;
+    let commit = repo.find_commit(git2::Oid::from_str(rev)?)?;
+    Ok(commit.time().seconds())
 }
 
 fn parse_rfc3339(s: &str) -> Result<i64> {
@@ -309,66 +270,77 @@ struct GitlabCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use std::process::Command;
 
-    struct NoProgress;
-
-    impl InputProgressSink for NoProgress {
-        fn transfer(&self, _: u64, _: Option<u64>) {}
-    }
-
-    fn make_git_repo() -> (tempfile::TempDir, std::path::PathBuf) {
-        let tmp = tempfile::tempdir().unwrap();
-        let repo = tmp.path().join("r");
-        let rd = repo.to_str().unwrap();
-        Command::new("git")
-            .args(["init", rd, "-b", "main"])
-            .output()
-            .unwrap();
-        std::fs::write(repo.join("f"), "x").unwrap();
-        Command::new("git")
-            .args(["-C", rd, "add", "."])
-            .output()
-            .unwrap();
-        Command::new("git")
+    fn git(repo: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(repo)
             .args([
-                "-C",
-                rd,
                 "-c",
                 "user.name=t",
                 "-c",
                 "user.email=t@t",
                 "-c",
                 "commit.gpgsign=false",
-                "commit",
-                "-m",
-                "i",
             ])
+            .args(args)
             .output()
             .unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_owned()
+    }
+
+    fn commit_file(repo: &Path, name: &str) {
+        std::fs::write(repo.join(name), name).unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-m", name]);
+    }
+
+    fn make_git_repo() -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("r");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        commit_file(&repo, "f");
         (tmp, repo)
     }
 
     // `git_checkout` is called directly because a reqwest client cannot be built in the sandboxed
     // CI without system CA certificates.
     #[test]
-    fn git_checkout_clones_file_url_via_repobuilder() {
+    fn git_checkout_fetches_file_url() {
         let (_tmp, repo) = make_git_repo();
         let url = format!("file://{}", repo.display());
-        let out = git_checkout(&url, None, None, &NoProgress);
-        assert!(out.is_ok(), "file:// clone failed: {:?}", out.err());
+        let (rev, _, checkout) = git_checkout(&url, None, None).unwrap();
+        assert_eq!(rev, git(&repo, &["rev-parse", "main"]));
+        assert!(checkout.path().join("f").exists());
+        assert!(!checkout.path().join(".git").exists());
+    }
+
+    #[test]
+    fn git_checkout_resolves_a_branch_other_than_the_default() {
+        let (_tmp, repo) = make_git_repo();
+        git(&repo, &["checkout", "-b", "feature"]);
+        commit_file(&repo, "g");
+        git(&repo, &["checkout", "main"]);
+        let url = format!("file://{}", repo.display());
+
+        let (rev, last_modified, checkout) = git_checkout(&url, Some("feature"), None).unwrap();
+
+        assert_eq!(rev, git(&repo, &["rev-parse", "feature"]));
+        assert_eq!(
+            last_modified.to_string(),
+            git(&repo, &["log", "-1", "--format=%ct", "feature"])
+        );
+        assert!(checkout.path().join("g").exists());
     }
 
     #[test]
     fn git_checkout_with_ssh_key_still_clones_file_url() {
         let (_tmp, repo) = make_git_repo();
         let url = format!("file://{}", repo.display());
-        let out = git_checkout(
-            &url,
-            None,
-            Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"),
-            &NoProgress,
-        );
+        let out = git_checkout(&url, None, Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
         assert!(
             out.is_ok(),
             "file:// clone with an ssh key failed: {:?}",

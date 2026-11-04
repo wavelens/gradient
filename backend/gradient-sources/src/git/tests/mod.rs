@@ -10,7 +10,8 @@ use super::checkout::{checkout_commit, checkout_commit_into};
 use super::commit_info::{fetch_commit, head_refspec};
 use super::pktline::read_advertised_refs;
 use super::remote::{
-    AdvertisedRef, BranchHead, branch_head, list_remote_refs, ls_remote_head, tag_commit,
+    AdvertisedRef, BranchHead, branch_head, list_remote_refs, ls_remote_head, ref_commit,
+    tag_commit,
 };
 use super::url::{git_transport_url, parse_git_protocol_url};
 use crate::SourceError;
@@ -108,6 +109,40 @@ fn a_missing_tag_is_an_error() {
         tag_commit(&refs, "v1.0"),
         Err(SourceError::TagNotFound { tag }) if tag == "v1.0"
     ));
+}
+
+#[test]
+fn a_flake_ref_prefers_the_branch_over_a_tag_of_the_same_name() {
+    let refs = [
+        advertised("HEAD", 1, Some("refs/heads/main")),
+        advertised("refs/heads/release", 2, None),
+        advertised("refs/tags/release", 3, None),
+    ];
+    assert_eq!(ref_commit(&refs, Some("release")).unwrap(), vec![2; 20]);
+    assert_eq!(ref_commit(&refs, None).unwrap(), vec![1; 20]);
+}
+
+#[test]
+fn a_flake_ref_falls_back_to_the_peeled_tag_commit() {
+    let refs = [
+        advertised("refs/heads/main", 1, None),
+        advertised("refs/tags/v1.0", 3, None),
+        advertised("refs/tags/v1.0^{}", 2, None),
+    ];
+    assert_eq!(ref_commit(&refs, Some("v1.0")).unwrap(), vec![2; 20]);
+}
+
+#[test]
+fn a_flake_ref_accepts_a_full_ref_name() {
+    let refs = [
+        advertised("refs/heads/main", 1, None),
+        advertised("refs/heads/staging", 2, None),
+    ];
+    assert_eq!(
+        ref_commit(&refs, Some("refs/heads/staging")).unwrap(),
+        vec![2; 20]
+    );
+    assert!(ref_commit(&refs, Some("missing")).is_err());
 }
 
 #[test]

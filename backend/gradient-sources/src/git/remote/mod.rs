@@ -96,6 +96,28 @@ pub(in crate::git) fn tag_commit(
         })
 }
 
+pub(in crate::git) fn ref_commit(
+    refs: &[AdvertisedRef],
+    name: Option<&str>,
+) -> Result<Vec<u8>, SourceError> {
+    let Some(name) = name else {
+        return branch_head(refs, None).map(|head| head.commit);
+    };
+    branch_head(refs, Some(name))
+        .map(|head| head.commit)
+        .or_else(|_| tag_commit(refs, name))
+        .or_else(|_| {
+            let peeled = format!("{name}^{{}}");
+            refs.iter()
+                .find(|r| r.name == peeled)
+                .or_else(|| refs.iter().find(|r| r.name == name))
+                .map(|r| r.oid.clone())
+                .ok_or_else(|| SourceError::BranchNotFound {
+                    branch: name.to_owned(),
+                })
+        })
+}
+
 fn tip_of(refs: &[AdvertisedRef], name: String) -> Option<BranchHead> {
     let tip = refs.iter().find(|r| r.name == name)?;
     Some(BranchHead {
