@@ -13,7 +13,7 @@ use gradient_entity::ids::{CacheId, EvaluationId};
 use gradient_fixtures::shape::shape;
 
 use super::{
-    A, A_OUT, A2, A2_OUT, B, B_OUT, Case, SOURCE, X_OUT, batch, chain, drv, nar, with_attr,
+    A, A_OUT, A2, A2_OUT, B, B_OUT, Case, SOURCE, X_OUT, Y_OUT, batch, chain, drv, nar, with_attr,
     with_output,
 };
 use crate::messages::{NarCommit, SignTargets};
@@ -338,6 +338,40 @@ async fn k11_a_claimed_output_brings_the_cached_paths_it_references_into_the_cac
 
     signed(&case, B_OUT, c1, "after 1: C1 holds B").await;
     signed(&case, X_OUT, c1, "after 1: C1 holds what B references").await;
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn k12_a_claim_stops_expanding_at_a_path_the_cache_already_signed() {
+    let e1 = EvaluationId::now_v7();
+    let c1 = CacheId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .into_cache(c1)
+            .keyed(Case::key())
+            .derivation(B)
+            .walked()
+            .probed()
+            .drv_cached()
+            .output(B_OUT)
+            .build_status(BuildStatus::Completed)
+            .cached_path(Y_OUT, "y")
+            .cached_path(X_OUT, "x")
+            .references(&[(Y_OUT, "y")])
+            .cached_output(B)
+            .references(&[(B_OUT, "b"), (X_OUT, "x")]),
+    )
+    .await;
+    let earlier = vec![7; 64];
+    case.seed_signature(X_OUT, c1, Some(earlier.clone())).await;
+
+    walk_above_b(&case, e1, A, A_OUT, "pkg.a").await;
+
+    signed(&case, B_OUT, c1, "after 1: C1 holds B").await;
+    unchanged(&case, X_OUT, c1, &earlier, "after 1: X keeps its signature").await;
+    no_row(&case, Y_OUT, c1, "after 1: the claim stopped at X").await;
     case.zero_drift("step 1").await;
     case.finish().await;
 }

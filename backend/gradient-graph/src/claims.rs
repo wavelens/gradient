@@ -55,6 +55,9 @@ WITH RECURSIVE claim(hash, cache) AS (
     JOIN cached_path cp ON cp.hash = claim.hash AND cp.file_hash IS NOT NULL
     CROSS JOIN LATERAL unnest(string_to_array(cp."references", ' ')) r(token)
     WHERE r.token <> ''
+      AND NOT EXISTS (
+          SELECT 1 FROM cached_path_signature s
+          WHERE s.cached_path = cp.id AND s.cache = claim.cache AND s.signature IS NOT NULL)
 )
 SELECT cp.id AS cached_path, cp.hash, cp.package, cp.nar_hash, cp.nar_size, cp."references",
        claim.cache
