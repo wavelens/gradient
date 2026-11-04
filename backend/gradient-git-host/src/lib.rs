@@ -21,5 +21,5 @@ pub use registry::GitHostRegistry;
 pub use reporter::*;
 pub use webhook::{
     MergeGroupOutcome, ParsedMergeGroupEvent, ParsedPullRequestEvent, ParsedPullRequestReviewEvent,
-    ParsedPushEvent, ParsedReleaseEvent, PushCommit, PushOutcome, WebhookEventKind,
+    ParsedPushEvent, ParsedReleaseEvent, PushCommit, PushOutcome, ReleaseTarget, WebhookEventKind,
 };

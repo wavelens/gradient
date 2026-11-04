@@ -9,7 +9,9 @@ mod fixtures;
 use super::checkout::{checkout_commit, checkout_commit_into};
 use super::commit_info::{fetch_commit, head_refspec};
 use super::pktline::read_advertised_refs;
-use super::remote::{AdvertisedRef, BranchHead, branch_head, ls_remote_head};
+use super::remote::{
+    AdvertisedRef, BranchHead, branch_head, list_remote_refs, ls_remote_head, tag_commit,
+};
 use super::url::{git_transport_url, parse_git_protocol_url};
 use crate::SourceError;
 use fixtures::{FAKE_SHA, FLUSH, ref_line, ref_line_with_caps};
@@ -74,6 +76,37 @@ fn a_missing_branch_is_an_error() {
     assert!(matches!(
         branch_head(&refs, Some("feature")),
         Err(SourceError::BranchNotFound { branch }) if branch == "feature"
+    ));
+}
+
+#[test]
+fn a_lightweight_tag_resolves_to_the_commit_it_names() {
+    let refs = [
+        advertised("refs/heads/main", 1, None),
+        advertised("refs/tags/v1.0", 2, None),
+    ];
+    assert_eq!(tag_commit(&refs, "v1.0").unwrap(), vec![2; 20]);
+}
+
+#[test]
+fn an_annotated_tag_resolves_to_its_peeled_commit_not_the_tag_object() {
+    let refs = [
+        advertised("refs/tags/v1.0", 3, None),
+        advertised("refs/tags/v1.0^{}", 2, None),
+        advertised("refs/tags/v1.0.1", 4, None),
+    ];
+    assert_eq!(tag_commit(&refs, "v1.0").unwrap(), vec![2; 20]);
+}
+
+#[test]
+fn a_missing_tag_is_an_error() {
+    let refs = [
+        advertised("refs/heads/v1.0", 1, None),
+        advertised("refs/tags/v1.0.1", 2, None),
+    ];
+    assert!(matches!(
+        tag_commit(&refs, "v1.0"),
+        Err(SourceError::TagNotFound { tag }) if tag == "v1.0"
     ));
 }
 
@@ -308,6 +341,22 @@ fn the_default_branch_of_a_local_remote_follows_head() {
     let head = ls_remote_head(&url, None, None).unwrap();
     assert_eq!(head.branch, "refs/heads/main");
     assert_eq!(head.commit, main.as_bytes());
+}
+
+#[test]
+fn an_annotated_tag_on_a_local_remote_resolves_to_the_tagged_commit() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    let tagged = commit_on(&repo, "main", "release");
+    commit_on(&repo, "main", "after the release");
+    let sig = git2::Signature::now("Ada", "ada@example.com").unwrap();
+    let target = repo.find_object(tagged, None).unwrap();
+    repo.tag("v1.0", &target, &sig, "v1.0", false).unwrap();
+    let url = format!("file://{}", dir.path().display());
+
+    let refs = list_remote_refs(&url, None).unwrap();
+    assert_eq!(tag_commit(&refs, "v1.0").unwrap(), tagged.as_bytes());
 }
 
 #[test]

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{BranchHead, branch_head};
+use super::AdvertisedRef;
 use crate::SourceError;
 use crate::git::pktline::read_advertised_refs;
 use crate::git::url::parse_git_protocol_url;
@@ -12,10 +12,7 @@ use crate::git::url::parse_git_protocol_url;
 /// libgit2 is negotiating protocol v2 with git-daemon, and its `ls-refs` exchange can fail
 /// silently. This plain v0 request without `version=2` is getting an immediate ref advertisement
 /// with HEAD.
-pub(super) fn ls_remote_head_git_protocol(
-    url: &str,
-    branch: Option<&str>,
-) -> Result<BranchHead, SourceError> {
+pub(super) fn list_refs_git_protocol(url: &str) -> Result<Vec<AdvertisedRef>, SourceError> {
     use std::io::Write;
     use std::net::TcpStream;
     use std::time::Duration;
@@ -41,5 +38,5 @@ pub(super) fn ls_remote_head_git_protocol(
             stderr: e.to_string(),
         })?;
 
-    branch_head(&read_advertised_refs(&mut stream)?, branch)
+    read_advertised_refs(&mut stream)
 }

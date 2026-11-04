@@ -49,6 +49,18 @@ pub async fn remote_branch_head(
         .await
 }
 
+#[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
+pub async fn remote_tag_commit(
+    ctx: &DbContext,
+    task: &MTask,
+    tag: &str,
+) -> Result<Vec<u8>, SourceError> {
+    TaskGitContext::new(ctx, task)
+        .await?
+        .remote_tag_commit(tag)
+        .await
+}
+
 #[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name, commit_hash = %vec_to_hex(commit_hash)))]
 pub async fn get_commit_info(
     ctx: &DbContext,

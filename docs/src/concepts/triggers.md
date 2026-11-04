@@ -34,7 +34,8 @@ A task can have triggers in any combination. Use [declarative state reference](.
 ## Time (cron)
 
 - **Schedule**: `cron` expression. Always UTC. Schedule checks happen on the server every 5 seconds.
-- **Commit**: HEAD of the default branch. Fires evaluate that HEAD even without a new commit.
+- **First Fire**: The first scheduled time after trigger creation. A new trigger doesn't run right away.
+- **Commit**: The HEAD of the default branch. A fire can evaluate that HEAD even with no new commit.
 - **Downtime**: A restart can combine all schedule times missed while the server was down into one evaluation.
 
 | Position | Field | Values |
@@ -103,7 +104,7 @@ Pull request events from the Git host activate this trigger. Push events don't a
 
 | Option | Matches |
 |---|---|
-| `actions` | Action name of the event, by default `opened`, `synchronize`, `reopened` |
+| `actions` | Action names of the event, by default `opened`, `synchronize`, `reopened`. An empty list fires on every action. |
 | `branches` | The source branch of the pull request, not the target branch |
 | `require_approval` | Pull requests from forks wait for a maintainer, by default on. A pull request from the same repository or by a repository writer starts right away |
 
