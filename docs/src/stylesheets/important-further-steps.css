@@ -4,7 +4,6 @@
  */
 
 .md-typeset details.important-further-steps {
-  margin-top: 3em;
   border: none;
   box-shadow: none;
   background: none;
@@ -18,6 +17,9 @@
   font-weight: normal;
   color: var(--md-default-fg-color--lightest);
   opacity: 0.10;
+  cursor: default;
+  pointer-events: none;
+  user-select: none;
 }
 
 .md-typeset details.important-further-steps > summary::before,
