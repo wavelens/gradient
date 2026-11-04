@@ -400,3 +400,53 @@ async fn m09_an_entry_point_keeps_the_licenses_of_its_attribute() {
     );
     case.finish().await;
 }
+
+#[tokio::test]
+async fn m10_two_batches_of_one_evaluation_queued_together_are_written_in_one_pass() {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(shape().evaluation(e1)).await;
+    let gv = case.gv(e1).await;
+    let of_a = case.tasked(e1, vec![entry_point(A, A_OUT, "pkg.a")]).await;
+    let of_c = case.tasked(e1, vec![entry_point(C, C_OUT, "pkg.c")]).await;
+
+    let (first, second) = together(case.walk_result(of_a), case.walk_result(of_c)).await;
+
+    let first = first.expect("after 1: first result ok");
+    let second = second.expect("after 1: second result ok");
+    assert_eq!(first.walked, 2, "after 1: first report covers the group");
+    assert_eq!(second.walked, 2, "after 1: second report covers the group");
+    let (a, c) = (case.find_derivation(A).await, case.find_derivation(C).await);
+    assert!(a.is_some(), "after 1: derivation(A) present");
+    assert!(c.is_some(), "after 1: derivation(C) present");
+    assert_eq!(case.gv(e1).await, gv + 1, "after 1: gv(E1) +1");
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn m11_a_bad_batch_fails_the_whole_group_of_its_evaluation_and_every_reply() {
+    let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = Case::start(shape().evaluation(e1).evaluation(e2)).await;
+    let (gv1, gv2) = (case.gv(e1).await, case.gv(e2).await);
+    let above_bad = with_attr(with_output(drv(C, &["bad"]), C_OUT), "pkg.c");
+    let of_e1_good = case.tasked(e1, vec![entry_point(A, A_OUT, "pkg.a")]).await;
+    let of_e1_bad = case.tasked(e1, vec![above_bad]).await;
+    let of_e2 = case.tasked(e2, vec![entry_point(B, B_OUT, "pkg.b")]).await;
+
+    let (good, bad, other) = tokio::join!(
+        case.walk_result(of_e1_good),
+        case.walk_result(of_e1_bad),
+        case.walk_result(of_e2)
+    );
+
+    assert!(good.is_err(), "after 1: good batch of E1 error: {good:?}");
+    assert!(bad.is_err(), "after 1: bad batch of E1 error: {bad:?}");
+    assert!(other.is_ok(), "after 1: batch of E2 ok: {other:?}");
+    let (a, b) = (case.find_derivation(A).await, case.find_derivation(B).await);
+    assert_eq!(a, None, "after 1: no derivation(A)");
+    assert!(b.is_some(), "after 1: derivation(B) present");
+    assert_eq!(case.gv(e1).await, gv1, "after 1: gv(E1) unchanged");
+    assert_eq!(case.gv(e2).await, gv2 + 1, "after 1: gv(E2) +1");
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
