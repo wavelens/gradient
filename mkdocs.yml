@@ -42,6 +42,12 @@ extra_css:
   - stylesheets/roadmap.css
   - stylesheets/important-further-steps.css
 
+extra_javascript:
+  - javascripts/searchable-details.js
+
+hooks:
+  - docs/tools/searchable_details.py
+
 nav:
   - Home: index.md
   - Get Started:
