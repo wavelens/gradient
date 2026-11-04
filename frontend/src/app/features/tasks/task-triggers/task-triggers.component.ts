@@ -246,7 +246,7 @@ export class TaskTriggersComponent implements OnInit {
         const branches = this.splitList(this.form.branches);
         const actions = this.splitList(this.form.actions);
         if (branches.length) cfg.branches = branches;
-        if (actions.length) cfg.actions = actions;
+        cfg.actions = actions;
         cfg.require_approval = this.form.require_approval !== false;
         return cfg;
       }
