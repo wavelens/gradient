@@ -30,7 +30,7 @@ use super::eval::{
     drop_corrupt_cache, eval_cache_fingerprint, eval_cache_path, eval_input_overrides,
     evaluate_shard_with, plan_shards_with, report_failed_attrs,
 };
-use super::eval_cache_sharing::{EvalCacheSharing, share_eval_cache};
+use super::eval_cache_sharing::{EVAL_CACHE_FLUSH_INTERVAL, EvalCacheSharing, share_eval_cache};
 use super::progress_report::report_thunks_during;
 use crate::nix::store::LocalNixStore;
 use crate::nix::wildcard_walk;
@@ -120,8 +120,7 @@ pub(crate) async fn await_source(server: &dyn SplitServer) -> Result<Option<(Str
 
 pub(crate) async fn take_shards(server: &dyn SplitServer, work: &mut dyn ShardWork) -> Result<()> {
     let first = loop {
-        let (reply, ()) = tokio::join!(server.request(true, None, Vec::new()), work.flush());
-        match reply? {
+        match server.request(true, None, Vec::new()).await? {
             EvalShardOutcome::Plan => {
                 let planned = work.plan().await;
                 let shards = drop_cache_if_corrupt(work, planned).await?;
@@ -134,6 +133,10 @@ pub(crate) async fn take_shards(server: &dyn SplitServer, work: &mut dyn ShardWo
     };
 
     let taken = ShardTaker::new(server, &*work).run(first).await;
+    if taken.is_ok() {
+        work.flush().await;
+    }
+
     drop_cache_if_corrupt(work, taken).await
 }
 
@@ -226,12 +229,8 @@ impl<'a> ShardTaker<'a> {
     }
 
     async fn request(&mut self, finished: Option<FinishedShard>) -> Result<EvalShardOutcome> {
-        let (server, work) = (self.server, self.work);
-        let held = self.held.clone();
-        let request = async move {
-            let (reply, ()) = tokio::join!(server.request(true, finished, held), work.flush());
-            reply
-        };
+        let server = self.server;
+        let request = server.request(true, finished, self.held.clone());
         tokio::pin!(request);
 
         loop {
@@ -287,8 +286,9 @@ pub(super) async fn run_primary(
             .await
     };
     let mut work = PoolShardWork::open(context, Some(source_path), fingerprint, updater).await;
+    let sharing = work.sharing();
     let take = report_thunks_during(&*sink, || thunks.total(), take_shards(&server, &mut work));
-    tokio::try_join!(announce, take)?;
+    tokio::try_join!(announce, flushing_beside(sharing, take))?;
 
     work.report_stats(started).await;
     Ok(())
@@ -311,10 +311,26 @@ pub(super) async fn run_companion(
     crate::proto::prefetch::ensure_path(context.store, &source_path, updater).await?;
     let fingerprint = (!fingerprint.is_empty()).then_some(fingerprint);
     let mut work = PoolShardWork::open(context, Some(&source_path), fingerprint, updater).await;
-    report_thunks_during(&*sink, || thunks.total(), take_shards(&server, &mut work)).await?;
+    let sharing = work.sharing();
+    let take = report_thunks_during(&*sink, || thunks.total(), take_shards(&server, &mut work));
+    flushing_beside(sharing, take).await?;
 
     work.report_stats(started).await;
     Ok(())
+}
+
+async fn flushing_beside<T>(
+    sharing: Option<EvalCacheSharing>,
+    evaluation: impl Future<Output = T>,
+) -> T {
+    match sharing {
+        Some(sharing) => {
+            sharing
+                .beside_flusher(EVAL_CACHE_FLUSH_INTERVAL, evaluation)
+                .await
+        }
+        None => evaluation.await,
+    }
 }
 
 fn counted_thunks(evaluator: &WorkerEvaluator) -> Arc<LiveThunks> {
@@ -355,6 +371,10 @@ impl<'a> PoolShardWork<'a> {
             sharing,
             flake_nodes: Mutex::default(),
         }
+    }
+
+    fn sharing(&self) -> Option<EvalCacheSharing> {
+        self.sharing.as_ref().map(|(sharing, _)| sharing.clone())
     }
 
     async fn report_stats(self, started: Instant) {
@@ -783,6 +803,38 @@ mod tests {
                 (true, done("fast"), vec!["slow".to_owned()]),
                 (true, done("slow"), Vec::new()),
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_shard_request_no_longer_waits_for_a_flush() {
+        let events = Arc::default();
+        let server = ScriptedServer::new(vec![shard("s1"), EvalShardOutcome::Finished], &events);
+        let mut work = ScriptedWork {
+            deferred: Mutex::default(),
+            corrupt: false,
+            events: Arc::clone(&events),
+        };
+
+        take_shards(&server, &mut work).await.expect("taken");
+
+        let events = events.lock().clone();
+        let first_request = events
+            .iter()
+            .position(|e| *e == "request")
+            .expect("a request");
+        let last_shard = events.iter().rposition(|e| *e == "shard").expect("a shard");
+        assert!(
+            !events[first_request..last_shard].contains(&"flush"),
+            "{events:?}"
+        );
+        assert_eq!(
+            events[last_shard..]
+                .iter()
+                .filter(|e| **e == "flush")
+                .count(),
+            1,
+            "{events:?}"
         );
     }
 

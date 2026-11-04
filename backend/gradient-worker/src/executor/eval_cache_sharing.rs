@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use futures::StreamExt;
 use gradient_storage::eval_cache_segment::decode;
 use gradient_util::sync::Mutex;
 use tokio::sync::oneshot;
@@ -18,6 +19,7 @@ use super::eval_cache_sync::{self, EvalCacheFile, is_busy};
 use crate::proto::job::{JobUpdater, PulledSegments};
 
 pub const EVAL_CACHE_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
+const SEGMENT_PUSHES_IN_FLIGHT: usize = 4;
 
 type SharedEvalCacheFile = Arc<Mutex<EvalCacheFile>>;
 
@@ -114,14 +116,20 @@ impl SegmentSink for SegmentUpload {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct EvalCacheSharing {
     file: SharedEvalCacheFile,
     sink: Arc<dyn SegmentSink>,
+    flushing: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl EvalCacheSharing {
     fn new(file: SharedEvalCacheFile, sink: Arc<dyn SegmentSink>) -> Self {
-        Self { file, sink }
+        Self {
+            file,
+            sink,
+            flushing: Arc::default(),
+        }
     }
 
     pub(super) async fn pull(&self, updater: &JobUpdater, fingerprint: &str) {
@@ -154,6 +162,7 @@ impl EvalCacheSharing {
     }
 
     pub(super) async fn flush(&self) {
+        let _flushing = self.flushing.lock().await;
         let mut unsent = on_file(&self.file, |file| file.unsent_segments())
             .await
             .unwrap_or_else(|e| {
@@ -165,15 +174,21 @@ impl EvalCacheSharing {
             Err(e) => warn!(error = %e, "eval cache export failed; trying again at the next flush"),
         }
 
-        for (id, segment) in unsent {
-            if let Err(e) = self.sink.push(segment).await {
-                warn!(error = %e, "eval cache segment push failed; trying again at the next flush");
-                continue;
-            }
+        futures::stream::iter(unsent)
+            .map(|(id, segment)| self.push_segment(id, segment))
+            .buffered(SEGMENT_PUSHES_IN_FLIGHT)
+            .collect::<()>()
+            .await;
+    }
 
-            if let Err(e) = on_file(&self.file, move |file| file.mark_sent(id)).await {
-                warn!(error = %e, "marking an eval cache segment as sent failed");
-            }
+    async fn push_segment(&self, id: i64, segment: Vec<u8>) {
+        if let Err(e) = self.sink.push(segment).await {
+            warn!(error = %e, "eval cache segment push failed; trying again at the next flush");
+            return;
+        }
+
+        if let Err(e) = on_file(&self.file, move |file| file.mark_sent(id)).await {
+            warn!(error = %e, "marking an eval cache segment as sent failed");
         }
     }
 }
@@ -235,6 +250,7 @@ mod tests {
     struct RecordingSink {
         failures_left: AtomicUsize,
         pushed: Mutex<Vec<Vec<u8>>>,
+        delay: Duration,
     }
 
     impl RecordingSink {
@@ -258,8 +274,42 @@ mod tests {
             }
 
             self.pushed.lock().push(segment);
+            tokio::time::sleep(self.delay).await;
             Ok(())
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn segments_are_pushed_concurrently() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fp.sqlite");
+        let file = Arc::new(Mutex::new(eval_cache_sync::open(&path).unwrap()));
+        let sink = Arc::new(RecordingSink {
+            delay: Duration::from_secs(1),
+            ..RecordingSink::failing(3)
+        });
+        let sharing = EvalCacheSharing::new(file, sink.clone());
+        let nix = nix(&path);
+        let root = nix_write(&nix, 0, "");
+        sharing.flush().await;
+        nix_write(&nix, root, "a");
+        sharing.flush().await;
+        nix_write(&nix, root, "b");
+        let started = tokio::time::Instant::now();
+
+        sharing.flush().await;
+
+        assert_eq!(started.elapsed(), Duration::from_secs(1));
+        assert_eq!(sink.pushed.lock().len(), 3);
+        sharing.flush().await;
+        assert_eq!(
+            pushed_paths(&sink.pushed.lock()),
+            vec![
+                Vec::<String>::new(),
+                vec!["a".to_owned()],
+                vec!["b".to_owned()],
+            ]
+        );
     }
 
     #[test]
