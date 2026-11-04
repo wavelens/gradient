@@ -79,7 +79,7 @@ pub async fn fetch_repository(
             let flake_root = flake_root(checkout.path(), job.flake_dir.as_deref())?;
 
             if let Some(spec) = &job.input_update {
-                run_input_update(spec, &flake_root, ssh_key.as_ref(), updater).await?;
+                run_input_update(spec, &flake_root, ssh_key.as_ref(), updater, &mut abort).await?;
             }
 
             let source_path = super::source::add_git_tree(store, &checkout_path, &commit).await?;
@@ -265,18 +265,20 @@ struct InputBoard {
 
 impl InputBoard {
     fn new(rows: Vec<(String, InputFetchState)>) -> Arc<Self> {
-        let rows = rows
-            .into_iter()
+        Arc::new(Self {
+            rows: Mutex::new(Self::rows(rows)),
+        })
+    }
+
+    fn rows(rows: impl IntoIterator<Item = (String, InputFetchState)>) -> Vec<InputRow> {
+        rows.into_iter()
             .map(|(name, state)| InputRow {
                 name,
                 state,
                 downloaded_bytes: 0,
                 expected_bytes: None,
             })
-            .collect();
-        Arc::new(Self {
-            rows: Mutex::new(rows),
-        })
+            .collect()
     }
 
     fn set_state(&self, index: usize, state: InputFetchState) {
@@ -311,6 +313,41 @@ struct BoardRow {
 impl InputProgressSink for BoardRow {
     fn transfer(&self, bytes_done: u64, bytes_total: Option<u64>) {
         self.board.transfer(self.index, bytes_done, bytes_total);
+    }
+}
+
+struct ResolveBoard(Arc<InputBoard>);
+
+impl ResolveBoard {
+    fn progress(&self) -> Option<EvalProgress> {
+        let inputs = self.0.snapshot();
+        (!inputs.is_empty()).then_some(EvalProgress::Fetching { inputs })
+    }
+}
+
+impl gradient_sources::flake_lock::ResolveProgress for ResolveBoard {
+    fn queued(&self, inputs: &[String]) {
+        let queued = inputs
+            .iter()
+            .map(|name| (name.clone(), InputFetchState::Queued));
+        *self.0.rows.lock() = InputBoard::rows(queued);
+    }
+
+    fn started(&self, index: usize) -> Arc<dyn InputProgressSink> {
+        self.0.set_state(index, InputFetchState::Fetching);
+        Arc::new(BoardRow {
+            board: Arc::clone(&self.0),
+            index,
+        })
+    }
+
+    fn finished(&self, index: usize, resolved: bool) {
+        let state = if resolved {
+            InputFetchState::Done
+        } else {
+            InputFetchState::Failed
+        };
+        self.0.set_state(index, state);
     }
 }
 
@@ -404,9 +441,8 @@ async fn run_input_update(
     flake_root: &Path,
     ssh_key: Option<&SecretString>,
     updater: &mut dyn JobReporter,
+    abort: &mut AbortSignal,
 ) -> Result<()> {
-    use gradient_sources::flake_lock::PatchGenerator as _;
-
     if spec.discover_only {
         let lock_path = flake_root.join("flake.lock");
         let bytes = tokio::fs::read(&lock_path)
@@ -430,18 +466,9 @@ async fn run_input_update(
         return updater.report_input_expansion(matched).await;
     }
 
-    let resolver = gradient_sources::flake_lock::HttpRevisionResolver::new(
-        gradient_worker_client::http::download_client().clone(),
-    )
-    .with_ssh_key(ssh_key.cloned());
-    let generator = gradient_sources::flake_lock::FlakeLockGenerator::new(resolver);
-    let tracked: Vec<gradient_sources::flake_lock::InputName> =
-        spec.inputs.iter().cloned().map(Into::into).collect();
-
-    let Some(patch) = generator
-        .produce(flake_root, &tracked)
-        .await
-        .context("run the flake.lock update generator")?
+    report_input_sources(&spec.inputs, flake_root, updater).await;
+    let sink = updater.eval_progress_sink();
+    let Some(patch) = resolve_newest_revisions(spec, flake_root, ssh_key, &*sink, abort).await?
     else {
         return Ok(());
     };
@@ -471,6 +498,71 @@ async fn run_input_update(
         .collect();
 
     updater.report_input_update(candidate, bumped).await
+}
+
+async fn report_input_sources(
+    tracked: &[String],
+    flake_root: &Path,
+    updater: &mut dyn JobReporter,
+) {
+    let sent = match read_input_sources(tracked, flake_root).await {
+        Ok(sources) => updater.report_input_sources(sources).await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = sent {
+        tracing::warn!(error = %e, "Skip reports of repositories for tracked flake inputs");
+    }
+}
+
+async fn read_input_sources(
+    tracked: &[String],
+    flake_root: &Path,
+) -> Result<Vec<gradient_wire::messages::FlakeInputSourceWire>> {
+    use gradient_sources::flake_lock::{FlakeLock, input_source::tracked_input_sources};
+
+    let lock_path = flake_root.join("flake.lock");
+    let bytes = tokio::fs::read(&lock_path)
+        .await
+        .with_context(|| format!("read {}", lock_path.display()))?;
+    let lock = FlakeLock::parse(&bytes)?;
+    Ok(tracked_input_sources(&lock, tracked)
+        .into_iter()
+        .map(|s| gradient_wire::messages::FlakeInputSourceWire {
+            name: s.name,
+            repository_url: s.repository_url,
+            branch: s.branch,
+        })
+        .collect())
+}
+
+async fn resolve_newest_revisions(
+    spec: &gradient_wire::messages::InputUpdateSpec,
+    flake_root: &Path,
+    ssh_key: Option<&SecretString>,
+    sink: &dyn EvalProgressSink,
+    abort: &mut AbortSignal,
+) -> Result<Option<gradient_sources::flake_lock::Patch>> {
+    use gradient_sources::flake_lock::PatchGenerator as _;
+
+    let resolver = gradient_sources::flake_lock::HttpRevisionResolver::new(
+        gradient_worker_client::http::download_client().clone(),
+    )
+    .with_ssh_key(ssh_key.cloned());
+    let generator = gradient_sources::flake_lock::FlakeLockGenerator::new(resolver);
+    let tracked: Vec<gradient_sources::flake_lock::InputName> =
+        spec.inputs.iter().cloned().map(Into::into).collect();
+
+    let board = ResolveBoard(InputBoard::new(Vec::new()));
+    let snapshot = || board.progress();
+    let mut reporter = ChangeReporter::default();
+    let patch = tokio::select! {
+        biased;
+        () = abort.aborted() => anyhow::bail!(WorkerError::FlakeInputFetchAborted),
+        patch = generator.produce(flake_root, &tracked, &board) => patch,
+        never = reporter.run(sink, snapshot) => match never {},
+    };
+    reporter.flush(sink, &snapshot).await;
+    patch.context("run the flake.lock update generator")
 }
 
 async fn require_present(store: &dyn WorkerStore, paths: &[String]) -> Result<()> {
@@ -1118,6 +1210,30 @@ mod tests {
             vec![
                 ("a".to_owned(), InputFetchState::Done),
                 ("b".to_owned(), InputFetchState::Failed)
+            ]
+        );
+    }
+
+    #[test]
+    fn resolving_inputs_fill_the_input_board() {
+        use gradient_sources::flake_lock::ResolveProgress as _;
+
+        let board = ResolveBoard(InputBoard::new(Vec::new()));
+        assert_eq!(board.progress(), None);
+
+        board.queued(&["a".to_owned(), "b".to_owned(), "c".to_owned()]);
+        board.started(0).transfer(40, Some(90));
+        board.finished(0, true);
+        board.started(1).transfer(7, None);
+        board.started(2);
+        board.finished(2, false);
+
+        assert_eq!(
+            rows(board.progress()),
+            vec![
+                ("a".to_owned(), InputFetchState::Done, 40, 90),
+                ("b".to_owned(), InputFetchState::Fetching, 7, 0),
+                ("c".to_owned(), InputFetchState::Failed, 0, 0),
             ]
         );
     }

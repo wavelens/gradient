@@ -13,10 +13,11 @@ pub use crate::types::{
     CacheInfo, CachedPath, CandidateScore, ClusterAddress, ClusterMembership, ClusterPeer,
     CredentialKind, DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome,
     EvalMessageLevel, EvalProgress, EvalSetCost, EvalShard, EvalShardOutcome, EvalShardSpec,
-    EvalStatsReport, EvalSubtreeCost, FinishedShard, FlakeInputOverride, FlakeJob, FlakeOutputNode,
-    FlakeSource, FlakeStep, GradientCapabilities, GuestChannelKind, InputFetch, InputFetchState,
-    InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode,
-    Realisation, RequiredPath, RunningAssignment, VmStateKind,
+    EvalStatsReport, EvalSubtreeCost, FinishedShard, FlakeInputOverride, FlakeInputSourceWire,
+    FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep, GradientCapabilities, GuestChannelKind,
+    InputFetch, InputFetchState, InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase,
+    JobPhaseSpan, JobUpdateKind, QueryMode, Realisation, RequiredPath, RunningAssignment,
+    VmStateKind,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, SegmentFetch,
@@ -46,6 +47,8 @@ pub const EXEC_ABORT_REQUEST_SINCE: u16 = 52;
 pub const EXEC_KEEP_VM_RUNNING_SINCE: u16 = 52;
 
 pub const HELD_EVAL_SHARDS_SINCE: u16 = 55;
+
+pub const FLAKE_INPUT_SOURCES_SINCE: u16 = 56;
 
 pub const GUEST_CHANNEL_CHUNK: usize = 32 * 1024;
 

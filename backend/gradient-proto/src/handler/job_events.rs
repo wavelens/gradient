@@ -402,6 +402,11 @@ impl SchedulerJobEvents {
                     .persist_input_update_expansion(&job_id, matched)
                     .await;
             }
+            JobUpdateKind::InputSources { sources } => {
+                scheduler
+                    .persist_flake_input_sources(&job_id, sources)
+                    .await;
+            }
         }
     }
 

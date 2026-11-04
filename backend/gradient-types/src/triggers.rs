@@ -30,6 +30,8 @@ pub enum TriggerConfig {
         tags: Vec<String>,
         #[serde(default)]
         releases_only: bool,
+        #[serde(default)]
+        include_flake_inputs: bool,
     },
     ReporterPullRequest {
         integration_id: IntegrationId,
@@ -161,6 +163,7 @@ mod tests {
             branches: vec!["release/*".into(), "feat-[ab]".into(), "develop".into()],
             tags: vec![],
             releases_only: false,
+            include_flake_inputs: false,
         };
         assert_eq!(cfg.manual_branch(), Some("develop"));
     }

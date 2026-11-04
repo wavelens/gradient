@@ -46,6 +46,31 @@ fn held_shards_reach_only_a_server_of_version_55() {
 }
 
 #[test]
+fn flake_input_sources_reach_only_a_server_of_version_56() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{
+        ClientMessage, FLAKE_INPUT_SOURCES_SINCE, FlakeInputSourceWire, JobUpdateKind,
+    };
+
+    let sent = ClientMessage::JobUpdate {
+        job_id: "eval:e".into(),
+        assignment_id: "a".into(),
+        update: JobUpdateKind::InputSources {
+            sources: vec![FlakeInputSourceWire {
+                name: "nixpkgs".into(),
+                repository_url: "https://github.com/dennis/nixpkgs".into(),
+                branch: Some("nixos-unstable".into()),
+            }],
+        },
+    };
+    let since = FLAKE_INPUT_SOURCES_SINCE;
+
+    let bytes = to_bytes(&sent, since).unwrap();
+    assert_eq!(from_bytes::<ClientMessage>(bytes, since).unwrap(), sent);
+    assert!(to_bytes(&sent, since - 1).is_err());
+}
+
+#[test]
 fn split_evaluation_messages_round_trip_and_need_proto_40() {
     use crate::codec::{from_bytes, to_bytes};
     use crate::messages::{ClientMessage, ServerMessage};

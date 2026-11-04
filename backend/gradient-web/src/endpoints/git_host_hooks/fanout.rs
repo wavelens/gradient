@@ -5,6 +5,7 @@
  */
 
 use super::approval::{PullRequestApprovalContext, sender_is_trusted};
+use super::flake_input_push::trigger_input_updates_for_push;
 use super::installation::event_repo_matches_task;
 use super::response::{QueuedEvaluation, SkippedTask, WebhookTriggerOutcome};
 use gradient_ci::CiContext;
@@ -13,7 +14,7 @@ use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
 use gradient_entity::evaluation::WalkMode;
 use gradient_entity::task_trigger as ept;
-use gradient_git_host::ParsedMergeGroupEvent;
+use gradient_git_host::{ParsedMergeGroupEvent, ParsedPushEvent};
 use gradient_scheduler::Scheduler;
 use gradient_types::branch_key;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
@@ -22,12 +23,20 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 #[derive(Debug, Clone, Copy)]
-pub(super) enum PushRefKind<'a> {
+enum PushRefKind<'a> {
     Branch(&'a str),
     Tag(&'a str),
 }
 
-impl PushRefKind<'_> {
+impl<'a> PushRefKind<'a> {
+    fn of(push: &'a ParsedPushEvent) -> Self {
+        if push.is_tag {
+            Self::Tag(&push.ref_name)
+        } else {
+            Self::Branch(&push.ref_name)
+        }
+    }
+
     fn branch_key(self) -> String {
         match self {
             Self::Branch(name) => branch_key::branch(name),
@@ -36,30 +45,34 @@ impl PushRefKind<'_> {
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "arg-heavy; refactor tracked in #503"
-)]
 pub(super) async fn trigger_push_for_integration(
     ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
-    event_repo_urls: &[String],
-    ref_kind: PushRefKind<'_>,
-    commit_hash: Vec<u8>,
-    commit_message: Option<String>,
-    author_name: Option<String>,
+    push: &ParsedPushEvent,
 ) -> WebhookTriggerOutcome {
+    let mut outcome = trigger_task_repository_push(ci, scheduler, integration_id, push).await;
+    outcome.merge(trigger_input_updates_for_push(ci, integration_id, push).await);
+    outcome
+}
+
+async fn trigger_task_repository_push(
+    ci: &CiContext,
+    scheduler: &Arc<Scheduler>,
+    integration_id: IntegrationId,
+    push: &ParsedPushEvent,
+) -> WebhookTriggerOutcome {
+    let ref_kind = PushRefKind::of(push);
     fan_out_triggers(
         ci,
         scheduler,
         integration_id,
-        event_repo_urls,
+        &push.repository_urls,
         TriggerType::ReporterPush,
         ref_kind.branch_key(),
-        commit_hash,
-        commit_message,
-        author_name,
+        push.commit_hash.clone(),
+        push.commit_message.clone(),
+        push.author_name.clone(),
         |cfg| match cfg {
             TriggerConfig::ReporterPush {
                 branches,
@@ -379,7 +392,7 @@ where
     outcome
 }
 
-fn parse_trigger_config(trig: &ept::Model) -> Option<TriggerConfig> {
+pub(super) fn parse_trigger_config(trig: &ept::Model) -> Option<TriggerConfig> {
     match TriggerConfig::parse_row(trig.trigger_type, &trig.config) {
         Ok(c) => Some(c),
         Err(e) => {
@@ -389,7 +402,7 @@ fn parse_trigger_config(trig: &ept::Model) -> Option<TriggerConfig> {
     }
 }
 
-async fn load_trigger_task(db: &WebDb, trig: &ept::Model) -> Option<MTask> {
+pub(super) async fn load_trigger_task(db: &WebDb, trig: &ept::Model) -> Option<MTask> {
     match by_id::<ETask, _>(db, trig.task).await {
         Ok(Some(p)) => Some(p),
         Ok(None) => {
@@ -451,7 +464,7 @@ async fn apply_and_record(
     }
 }
 
-fn push_skipped(
+pub(super) fn push_skipped(
     outcome: &mut WebhookTriggerOutcome,
     task: &MTask,
     project_name: String,
@@ -492,7 +505,7 @@ fn gate_decision(ctx: &PullRequestApprovalContext, sender_trusted: bool) -> Opti
     })
 }
 
-async fn touch_trigger_last_fired(db: &WebDb, trig: &ept::Model) {
+pub(super) async fn touch_trigger_last_fired(db: &WebDb, trig: &ept::Model) {
     let now = gradient_types::now();
     if let Err(e) = gradient_db::triggers::set_last_fired(db, trig.clone(), now).await {
         warn!(error = %e, trigger_id = %trig.id, "failed to stamp trigger last_fired_at");
@@ -545,7 +558,7 @@ fn glob_match_recursive(p: &[char], t: &[char], pi: usize, ti: usize) -> bool {
     }
 }
 
-async fn project_name_for(db: &WebDb, project_id: ProjectId) -> Option<String> {
+pub(super) async fn project_name_for(db: &WebDb, project_id: ProjectId) -> Option<String> {
     by_id::<EProject, _>(db, project_id)
         .await
         .ok()

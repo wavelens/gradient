@@ -48,6 +48,14 @@ pub trait JobReporter: Send + Sync {
         let _ = matched;
         Ok(())
     }
+
+    async fn report_input_sources(
+        &mut self,
+        sources: Vec<crate::messages::FlakeInputSourceWire>,
+    ) -> Result<()> {
+        let _ = sources;
+        Ok(())
+    }
     async fn report_evaluating_flake(&mut self) -> Result<()>;
     async fn report_evaluating_derivations(&mut self) -> Result<()>;
     async fn report_eval_result(

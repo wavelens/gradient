@@ -100,6 +100,7 @@ pub(super) async fn apply<C: ConnectionTrait>(
             branches: vec![],
             tags: vec![],
             releases_only: false,
+            include_flake_inputs: false,
         };
         let trigger = MTaskTrigger {
             id: TaskTriggerId::now_v7(),

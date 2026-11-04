@@ -21070,6 +21070,8 @@ components:
               type: string
           releases_only:
             type: boolean
+          include_flake_inputs:
+            type: boolean
           type:
             type: string
             enum:

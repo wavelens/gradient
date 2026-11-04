@@ -10,6 +10,7 @@
 mod approval;
 mod commands;
 mod fanout;
+mod flake_input_push;
 mod installation;
 mod payloads;
 mod refusal;
@@ -43,8 +44,8 @@ use crate::helpers::ok_json;
 use refusal::GitHostHookRefusal;
 
 use fanout::{
-    PushRefKind, trigger_merge_group_for_integration, trigger_pr_for_integration,
-    trigger_push_for_integration, trigger_release_for_integration,
+    trigger_merge_group_for_integration, trigger_pr_for_integration, trigger_push_for_integration,
+    trigger_release_for_integration,
 };
 use gradient_git_host::{
     MergeGroupOutcome, ParsedMergeGroupEvent, ParsedPullRequestEvent, ParsedPushEvent,
@@ -226,28 +227,11 @@ async fn route_github_app_push(
     body: &[u8],
     client_ip: IpAddr,
 ) -> WebhookTriggerOutcome {
-    let ref_kind = if parsed.is_tag {
-        PushRefKind::Tag(&parsed.ref_name)
-    } else {
-        PushRefKind::Branch(&parsed.ref_name)
-    };
     let mut combined = WebhookTriggerOutcome::default();
     for integration_id in
         github_app_integrations(ci, body, &parsed.repository_urls, client_ip, "push").await
     {
-        combined.merge(
-            trigger_push_for_integration(
-                ci,
-                scheduler,
-                integration_id,
-                &parsed.repository_urls,
-                ref_kind,
-                parsed.commit_hash.clone(),
-                parsed.commit_message.clone(),
-                parsed.author_name.clone(),
-            )
-            .await,
-        );
+        combined.merge(trigger_push_for_integration(ci, scheduler, integration_id, &parsed).await);
     }
 
     combined
@@ -440,25 +424,9 @@ pub async fn git_host_webhook(
             None => return Err(GitHostHookRefusal::MalformedPayload.into()),
             Some(PushOutcome::Ignored) => IncomingWebhookResponse::empty("push"),
             Some(PushOutcome::Build(parsed)) => {
-                let urls = parsed.repository_urls.clone();
-                let ref_name = parsed.ref_name.clone();
-                let ref_kind = if parsed.is_tag {
-                    PushRefKind::Tag(&ref_name)
-                } else {
-                    PushRefKind::Branch(&ref_name)
-                };
-                let outcome = trigger_push_for_integration(
-                    &ci,
-                    &scheduler,
-                    integration_id,
-                    &urls,
-                    ref_kind,
-                    parsed.commit_hash,
-                    parsed.commit_message,
-                    parsed.author_name,
-                )
-                .await;
-                IncomingWebhookResponse::new("push", urls, outcome)
+                let outcome =
+                    trigger_push_for_integration(&ci, &scheduler, integration_id, &parsed).await;
+                IncomingWebhookResponse::new("push", parsed.repository_urls, outcome)
             }
         },
         WebhookEventKind::PullRequest => {

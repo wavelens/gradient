@@ -85,6 +85,7 @@ pub mod task;
 pub mod task_action;
 pub mod task_action_delivery;
 pub mod task_flake_input_override;
+pub mod task_flake_input_source;
 pub mod task_trigger;
 pub mod team;
 pub mod team_cache;

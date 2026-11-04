@@ -310,6 +310,7 @@ fn reporter_push_trigger(branches: Vec<&str>) -> TriggerConfig {
         branches: branches.into_iter().map(String::from).collect(),
         tags: vec![],
         releases_only: false,
+        include_flake_inputs: false,
     }
 }
 
@@ -319,6 +320,7 @@ fn reporter_push_releases_only_trigger() -> TriggerConfig {
         branches: vec![],
         tags: vec![],
         releases_only: true,
+        include_flake_inputs: false,
     }
 }
 

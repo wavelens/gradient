@@ -11,6 +11,7 @@ mod cluster;
 mod eval_status;
 mod exec_keep_vm;
 pub(crate) mod exec_status;
+mod flake_input_sources;
 pub(crate) mod guest_channel;
 pub(crate) mod import;
 mod input;

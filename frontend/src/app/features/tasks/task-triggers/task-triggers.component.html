@@ -136,7 +136,7 @@
   }
 
   <gr-form-field label="Type" for="trig-type">
-    <gr-label-help slot="label" doc="concepts/projects-and-tasks/#task" title="Trigger types" />
+    <gr-label-help slot="label" doc="concepts/triggers/" title="Trigger types" />
     <gr-select
       inputId="trig-type"
       [(ngModel)]="form.type"
@@ -204,6 +204,12 @@
         [(ngModel)]="form.releases_only"
         [binary]="true"
       label="Releases only - fire only on release events, not regular pushes"
+    />
+    <gr-checkbox
+        inputId="trig-include-flake-inputs"
+        [(ngModel)]="form.include_flake_inputs"
+        [binary]="true"
+      label="Flake input - Update the flake input on push to a tracked input too"
     />
   }
 

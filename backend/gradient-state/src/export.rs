@@ -499,11 +499,15 @@ fn export_trigger(
             branches,
             tags,
             releases_only,
+            include_flake_inputs,
         } => {
             let mut c = serde_json::Map::new();
             c.insert("branches".into(), branches.into());
             c.insert("tags".into(), tags.into());
             c.insert("releases_only".into(), releases_only.into());
+            if include_flake_inputs {
+                c.insert("include_flake_inputs".into(), include_flake_inputs.into());
+            }
             (
                 TriggerType::ReporterPush,
                 integration_name.get(&integration_id).cloned(),

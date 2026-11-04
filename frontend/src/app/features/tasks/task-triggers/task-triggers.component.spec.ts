@@ -9,6 +9,7 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
+import { vi } from 'vitest';
 import { TaskTriggersComponent } from './task-triggers.component';
 import { TriggersService } from '@core/services/triggers.service';
 import { IntegrationsService } from '@core/services/integrations.service';
@@ -43,6 +44,7 @@ const trigger = {
 function setup(
   access: AccessState,
   triggers: any[] = [trigger],
+  update: (...args: any[]) => unknown = () => of({}),
 ): ComponentFixture<TaskTriggersComponent> {
   TestBed.configureTestingModule({
     imports: [TaskTriggersComponent],
@@ -51,7 +53,7 @@ function setup(
       provideHttpClient(),
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
-      { provide: TriggersService, useValue: { list: () => of(triggers) } },
+      { provide: TriggersService, useValue: { list: () => of(triggers), update } },
       { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries: () => of([]) } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
@@ -151,5 +153,35 @@ describe('TaskTriggersComponent - default trigger', () => {
     const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
     expect(deleteBtn!.disabled).toBe(false);
     expect(findByText(fixture.nativeElement, 'make default')).not.toBeNull();
+  });
+});
+
+describe('TaskTriggersComponent - flake inputs', () => {
+  const pushTrigger = {
+    id: 't4',
+    type: 'reporter_push' as const,
+    active: true,
+    config: { type: 'reporter_push', integration_id: 'i1', include_flake_inputs: true },
+    last_fired_at: null,
+    integration: null,
+  };
+
+  it('keeps include_flake_inputs when an edited push trigger is saved', () => {
+    const update = vi.fn((..._args: any[]) => of({}));
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [pushTrigger], update);
+    const component = fixture.componentInstance;
+    component.startEdit(pushTrigger as any);
+    component.saveEdit();
+    expect(update.mock.calls[0][3].config.include_flake_inputs).toBe(true);
+  });
+
+  it('leaves include_flake_inputs out once the box is cleared', () => {
+    const update = vi.fn((..._args: any[]) => of({}));
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [pushTrigger], update);
+    const component = fixture.componentInstance;
+    component.startEdit(pushTrigger as any);
+    component.form.include_flake_inputs = false;
+    component.saveEdit();
+    expect(update.mock.calls[0][3].config.include_flake_inputs).toBeUndefined();
   });
 });

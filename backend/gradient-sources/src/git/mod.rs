@@ -37,6 +37,18 @@ pub async fn check_task_updates(
         .await
 }
 
+#[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
+pub async fn remote_branch_head(
+    ctx: &DbContext,
+    task: &MTask,
+    branch: Option<&str>,
+) -> Result<BranchHead, SourceError> {
+    TaskGitContext::new(ctx, task)
+        .await?
+        .remote_head(branch)
+        .await
+}
+
 #[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name, commit_hash = %vec_to_hex(commit_hash)))]
 pub async fn get_commit_info(
     ctx: &DbContext,

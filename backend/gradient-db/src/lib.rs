@@ -37,6 +37,7 @@ pub mod eval_shards;
 pub mod evaluations;
 pub mod exec_jobs;
 pub mod flake_input_overrides;
+pub mod flake_input_sources;
 pub mod flake_output_nodes;
 pub mod graph;
 pub mod integrations;
