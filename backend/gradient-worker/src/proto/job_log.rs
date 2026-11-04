@@ -9,6 +9,7 @@ use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -16,12 +17,17 @@ use gradient_wire::messages::ClientMessage;
 use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::{Mutex, watch};
+use tracing::debug;
 
 pub const JOB_LOG_BUFFER_CAP: u64 = 1 << 30;
 
 const REPLAY_CHUNK_BYTES: u64 = 256 * 1024;
 
-pub trait LogChunkSender: Sync {
+const BATCH_BYTES: usize = 64 * 1024;
+
+const BATCH_WINDOW: Duration = Duration::from_millis(100);
+
+pub trait LogChunkSender: Clone + Send + Sync + 'static {
     fn send_now(&self, msg: ClientMessage) -> impl Future<Output = Result<()>> + Send;
 }
 
@@ -55,6 +61,8 @@ struct State {
     offset: u64,
     marker_len: u64,
     dropped: u64,
+    batch: Vec<u8>,
+    batch_accepted: u64,
 }
 
 pub(crate) fn file_key(job_id: &str) -> String {
@@ -127,37 +135,89 @@ impl JobLog {
     }
 
     pub async fn send(&self, writer: &impl LogChunkSender, data: Vec<u8>) -> Result<()> {
-        self.deliver(writer, data, true).await
+        self.add_to_batch(writer, &data, true).await
     }
 
     pub async fn send_note(&self, writer: &impl LogChunkSender, data: Vec<u8>) -> Result<()> {
-        self.deliver(writer, data, false).await
+        self.add_to_batch(writer, &data, false).await
     }
 
     pub async fn skip(&self, bytes: u64) -> Result<()> {
-        let _state = self.inner.state.lock().await;
-        self.count_accepted(bytes).await
+        let mut state = self.inner.state.lock().await;
+        if state.batch.is_empty() {
+            self.count_accepted(bytes).await
+        } else {
+            state.batch_accepted += bytes;
+            Ok(())
+        }
+    }
+
+    pub async fn flush(&self, writer: &impl LogChunkSender) -> Result<()> {
+        let mut state = self.inner.state.lock().await;
+        self.send_batch(writer, &mut state).await
+    }
+
+    async fn add_to_batch(
+        &self,
+        writer: &impl LogChunkSender,
+        data: &[u8],
+        counted: bool,
+    ) -> Result<()> {
+        let mut state = self.inner.state.lock().await;
+        let opens_batch = state.batch.is_empty();
+        state.batch.extend_from_slice(data);
+        if counted {
+            state.batch_accepted += data.len() as u64;
+        }
+        if state.batch.len() >= BATCH_BYTES {
+            return self.send_batch(writer, &mut state).await;
+        }
+        if opens_batch {
+            self.flush_after_window(writer.clone());
+        }
+        Ok(())
+    }
+
+    fn flush_after_window(&self, writer: impl LogChunkSender) {
+        let log = self.clone();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "Run for one batch window, then exit. Completed jobs flush their own batch."
+        )]
+        tokio::spawn(async move {
+            tokio::time::sleep(BATCH_WINDOW).await;
+            if let Err(e) = log.flush(&writer).await {
+                debug!(error = %e, "Failed to send or buffer a batch of job logs");
+            }
+        });
+    }
+
+    async fn send_batch(&self, writer: &impl LogChunkSender, state: &mut State) -> Result<()> {
+        let mut rest = Bytes::from(std::mem::take(&mut state.batch));
+        while !rest.is_empty() {
+            let piece = rest.split_to(BATCH_BYTES.min(rest.len()));
+            self.deliver(writer, state, piece).await?;
+        }
+        let accepted = std::mem::take(&mut state.batch_accepted);
+        if accepted > 0 {
+            self.count_accepted(accepted).await?;
+        }
+        Ok(())
     }
 
     async fn deliver(
         &self,
         writer: &impl LogChunkSender,
-        data: Vec<u8>,
-        counted: bool,
+        state: &mut State,
+        data: Bytes,
     ) -> Result<()> {
-        let data = Bytes::from(data);
-        let len = data.len() as u64;
-        let mut state = self.inner.state.lock().await;
         let sent = !state.buffering && writer.send_now(self.chunk(data.clone())).await.is_ok();
         if !sent {
             if !state.buffering {
                 state.buffering = true;
                 self.inner.drained.send_replace(false);
             }
-            self.append(&mut state, &data).await?;
-        }
-        if counted {
-            self.count_accepted(len).await?;
+            self.append(state, &data).await?;
         }
         Ok(())
     }
@@ -174,13 +234,17 @@ impl JobLog {
         loop {
             let mut state = self.inner.state.lock().await;
             if !state.buffering {
-                return Ok(());
+                return self.send_batch(writer, &mut state).await;
             }
             if state.offset == state.file_len {
                 self.remove();
-                *state = State::default();
+                *state = State {
+                    batch: std::mem::take(&mut state.batch),
+                    batch_accepted: state.batch_accepted,
+                    ..State::default()
+                };
                 self.inner.drained.send_replace(true);
-                return Ok(());
+                continue;
             }
             let len = REPLAY_CHUNK_BYTES.min(state.file_len - state.offset);
             let chunk = self.read_at(state.offset, len).await?;
@@ -317,7 +381,18 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::Semaphore;
 
-    struct Recorder {
+    #[derive(Clone)]
+    struct Recorder(Arc<Recording>);
+
+    impl std::ops::Deref for Recorder {
+        type Target = Recording;
+
+        fn deref(&self) -> &Recording {
+            &self.0
+        }
+    }
+
+    struct Recording {
         accepts: AtomicUsize,
         received: SyncMutex<Vec<u8>>,
         chunks: AtomicUsize,
@@ -325,13 +400,17 @@ mod tests {
     }
 
     impl Recorder {
-        fn accepting(accepts: usize) -> Self {
-            Self {
+        fn recording(accepts: usize, permits: Option<Semaphore>) -> Self {
+            Self(Arc::new(Recording {
                 accepts: AtomicUsize::new(accepts),
                 received: SyncMutex::new(Vec::new()),
                 chunks: AtomicUsize::new(0),
-                permits: None,
-            }
+                permits,
+            }))
+        }
+
+        fn accepting(accepts: usize) -> Self {
+            Self::recording(accepts, None)
         }
 
         fn detached() -> Self {
@@ -343,10 +422,7 @@ mod tests {
         }
 
         fn gated() -> Self {
-            Self {
-                permits: Some(Semaphore::new(0)),
-                ..Self::attached()
-            }
+            Self::recording(usize::MAX, Some(Semaphore::new(0)))
         }
 
         fn received(&self) -> Vec<u8> {
@@ -380,12 +456,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn many_small_lines_travel_in_few_chunks_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP);
+        let attached = Recorder::attached();
+        let lines: Vec<Vec<u8>> = (0..20_000)
+            .map(|i| format!("line {i}\n").into_bytes())
+            .collect();
+
+        for line in &lines {
+            log.send(&attached, line.clone()).await.unwrap();
+        }
+        log.flush(&attached).await.unwrap();
+
+        assert_eq!(attached.received(), lines.concat());
+        let chunks = attached.chunks.load(Ordering::SeqCst);
+        assert!(chunks * 100 < lines.len(), "{chunks} chunks");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lines_followed_by_a_pause_go_out_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP);
+        let attached = Recorder::attached();
+
+        log.send(&attached, b"first\n".to_vec()).await.unwrap();
+        log.send(&attached, b"second\n".to_vec()).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        assert_eq!(attached.received(), b"first\nsecond\n");
+        assert_eq!(attached.chunks.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn chunks_sent_while_detached_replay_in_order_after_attach() {
         let dir = tempfile::tempdir().unwrap();
         let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP);
         let detached = Recorder::detached();
         log.send(&detached, b"a".to_vec()).await.unwrap();
         log.send(&detached, b"b".to_vec()).await.unwrap();
+        log.flush(&detached).await.unwrap();
         assert!(detached.received().is_empty());
 
         let attached = Recorder::attached();
@@ -405,6 +515,7 @@ mod tests {
         log.send(&attached, b"hello".to_vec()).await.unwrap();
         log.send_note(&attached, b"[note]".to_vec()).await.unwrap();
         log.skip(3).await.unwrap();
+        log.flush(&attached).await.unwrap();
 
         assert_eq!(attached.received(), b"hello[note]");
         assert_eq!(log.accepted(), 8);
@@ -416,9 +527,9 @@ mod tests {
     async fn accepted_bytes_survive_a_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let log = JobLog::open_resumable(dir.path(), "exec:x", JOB_LOG_BUFFER_CAP);
-        log.send(&Recorder::detached(), b"hello".to_vec())
-            .await
-            .unwrap();
+        let detached = Recorder::detached();
+        log.send(&detached, b"hello".to_vec()).await.unwrap();
+        log.flush(&detached).await.unwrap();
         drop(log);
 
         let log = JobLog::reopen(dir.path(), "exec:x", JOB_LOG_BUFFER_CAP).unwrap();
@@ -436,6 +547,7 @@ mod tests {
         for chunk in b"0123456789abcdef".chunks(4) {
             log.send(&detached, chunk.to_vec()).await.unwrap();
         }
+        log.flush(&detached).await.unwrap();
 
         let attached = Recorder::attached();
         log.replay(&attached).await.unwrap();
@@ -455,23 +567,24 @@ mod tests {
             .await
             .unwrap();
 
-        let attached = Arc::new(Recorder::gated());
+        let attached = Recorder::gated();
         let replay = tokio::spawn({
-            let (log, attached) = (log.clone(), Arc::clone(&attached));
-            async move { log.replay(&*attached).await }
+            let (log, attached) = (log.clone(), attached.clone());
+            async move { log.replay(&attached).await }
         });
         attached.permits.as_ref().unwrap().add_permits(1);
         while attached.chunks.load(Ordering::SeqCst) == 0 {
             tokio::task::yield_now().await;
         }
         let live = tokio::spawn({
-            let (log, attached) = (log.clone(), Arc::clone(&attached));
-            async move { log.send(&*attached, b"live".to_vec()).await }
+            let (log, attached) = (log.clone(), attached.clone());
+            async move { log.send(&attached, b"live".to_vec()).await }
         });
         tokio::time::sleep(Duration::from_millis(50)).await;
         attached.permits.as_ref().unwrap().add_permits(100);
         replay.await.unwrap().unwrap();
         live.await.unwrap().unwrap();
+        log.flush(&attached).await.unwrap();
 
         let received = attached.received();
         assert_eq!(&received[..buffered.len()], &buffered[..]);
@@ -503,9 +616,9 @@ mod tests {
     async fn drained_waits_until_the_buffer_is_replayed() {
         let dir = tempfile::tempdir().unwrap();
         let log = JobLog::open(dir.path(), "build:x", JOB_LOG_BUFFER_CAP);
-        log.send(&Recorder::detached(), b"pending".to_vec())
-            .await
-            .unwrap();
+        let detached = Recorder::detached();
+        log.send(&detached, b"pending".to_vec()).await.unwrap();
+        log.flush(&detached).await.unwrap();
         assert!(
             tokio::time::timeout(Duration::from_millis(100), log.drained())
                 .await

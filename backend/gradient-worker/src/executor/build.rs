@@ -373,13 +373,8 @@ pub(super) async fn forward_store_build_log(updater: &mut JobUpdater, drv_path: 
     let log_dir = crate::nix::log::nix_log_dir();
     match crate::nix::log::read_store_build_log(&log_dir, drv_path) {
         Ok(Some(text)) if !text.is_empty() => {
-            const SEND_CHUNK: usize = 256 * 1024;
-            let bytes = text.into_bytes();
-            for slice in bytes.chunks(SEND_CHUNK) {
-                if let Err(e) = updater.send_log_chunk(slice.to_vec()).await {
-                    warn!(error = %e, "failed to forward stored build log; continuing");
-                    break;
-                }
+            if let Err(e) = updater.send_log_chunk(text.into_bytes()).await {
+                warn!(error = %e, "failed to forward stored build log; continuing");
             }
             debug!(drv = %drv_path, "forwarded stored nix build log for already-built derivation");
         }
