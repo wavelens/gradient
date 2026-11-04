@@ -62,7 +62,8 @@ Supported input types: `github`, `gitlab` and `git`, including `git` over SSH wi
 ## Update Run
 
 - A trigger fire and a **Fire Now** click start the update evaluation alone.
-- Clicks on **Start Evaluation** start the update evaluation alongside the normal evaluation.
+- Click **Start Evaluation** to start the update evaluation in parallel with normal evaluation.
+- Only a Push trigger with `include_flake_inputs` can start update evaluation on a push to the repository of a tracked input. See [Pushes to Flake Inputs](../concepts/triggers.md#pushes-to-flake-inputs).
 
 ```mermaid
 flowchart LR

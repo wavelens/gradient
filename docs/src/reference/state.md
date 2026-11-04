@@ -84,7 +84,7 @@ services.gradient.state = {
 | `flake_input_overrides` | attrs of submodule | `{ }` | Overrides applied when fetching flake inputs, with one entry per input name. |
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference that replaces this input. |
-| `keep_evaluations` | int | `30` | How many finished evaluations, regardless of outcome, to keep for metrics and history. Must be at least 1 and at most `eval.maxKeep`. |
+| `keep_evaluations` | int | `30` | Count of finished evaluations to keep for metrics and history, regardless of result. Active evaluations don't block GC and don't count toward this number. The most recent finished evaluation stays, even a failed one. Remaining slots go to completed evaluations before failed or aborted ones. Set this number to at least 1 and at most `eval.maxKeep`. |
 | `multi_node_evaluation` | bool | `false` | Whether more than one eval worker may evaluate one evaluation of this task together. The server can split an evaluation only when past evaluations predict a gain. |
 | `name` | string | attribute name | Unique name of the task. |
 | `only_evaluate` | bool | `false` | Set to `true` to evaluate the task only. Evaluations end after evaluation. No build. No exec jobs run. |
@@ -210,9 +210,11 @@ Each worker registration has the following options.
 | `type` | `integration` | `config` |
 |---|---|---|
 | `polling` | - | `interval_secs` (minimum 10, default 300) and `branch` (default: the remote HEAD) |
-| `reporter_push` | Inbound integration | `branches`, `tags` (globs, an empty value matches all), `releases_only` |
+| `reporter_push` | Inbound integration | `branches`, `tags` (glob, an empty value can match all), `releases_only`, `include_flake_inputs` (default `false`: a push to the repository of a tracked flake input can start an input update, see [Pushes to Flake Inputs](../concepts/triggers.md#pushes-to-flake-inputs)) |
 | `reporter_pull_request` | Inbound integration | `branches`, `actions` (default `opened`, `synchronize`, `reopened`), `require_approval` (default `true`: pull requests from non-writers wait for a maintainer's approval) |
 | `time` | - | `cron` with six UTC fields, `sec min hour dom mon dow`, for example `"0 0 2 * * *"` |
+
+Trigger rules, cron syntax and pull request commands are in [Triggers](../concepts/triggers.md).
 
 `triggers = null` leaves the current triggers in place. New tasks without a `triggers` key start with a polling trigger as the default. An empty list or two default triggers count as invalid configuration.
 
