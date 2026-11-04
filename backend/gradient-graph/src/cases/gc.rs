@@ -11,6 +11,7 @@ use gradient_db::maintenance::gc::expired_cached_paths;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{self, AttemptOutcome};
 use gradient_entity::derivation_build;
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::EvaluationId;
 use gradient_fixtures::shape::shape;
 
@@ -410,6 +411,34 @@ async fn c09_without_an_adopter_a_queued_build_is_skipped_and_a_building_build_f
     let state = (built.status, built.fetchable);
     assert_eq!(state, (BuildStatus::Completed, true), "after 2: sb(C)");
     case.zero_drift("step 2").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn c11_evaluation_gc_skips_a_chosen_evaluation_that_runs_again() {
+    let (failed, reopened) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let case = Case::start(
+        shape()
+            .evaluation(failed)
+            .evaluation_status(EvaluationStatus::Failed)
+            .derivation(A)
+            .entry_point("pkg.a")
+            .job()
+            .evaluation(reopened)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(B)
+            .entry_point("pkg.b")
+            .job(),
+    )
+    .await;
+
+    let report = gc_evaluations(&case, &[failed, reopened]).await;
+
+    assert_eq!(report.deleted_evaluations, vec![failed]);
+    assert_eq!(
+        case.evaluation(reopened).await.status,
+        EvaluationStatus::Building
+    );
     case.finish().await;
 }
 
