@@ -121,6 +121,7 @@ Each build job contains a single `BuildSpec` and maps to one shared build (a `de
 | `EvalResult` | Store a batch of derivations in the graph |
 | `EvalStats` | Evaluation metrics |
 | `InputUpdateResult` | Flake update candidate lock and bumped inputs |
+| `InputSources` | Repository and branch of each tracked flake input (protocol 56 and later). These details match a push to the input repository. |
 | `InputUpdateExpansion` | Input names matched by a glob in a `discover_only` pass. A new evaluation per name |
 | `Building { build_id }` | Build turned `Building`. Already aborted builds get `AbortJob` instead |
 | `BuildOutput` | Output sizes, build products, metrics, the `substituted` flag |

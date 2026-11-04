@@ -58,6 +58,7 @@ nav:
   - Concepts:
       - Overview: concepts/overview.md
       - Projects and Tasks: concepts/projects-and-tasks.md
+      - Triggers: concepts/triggers.md
       - Teams: concepts/teams.md
       - Evaluations and Builds: concepts/evaluations-and-builds.md
       - Workers: concepts/workers.md

@@ -32,7 +32,7 @@ flowchart LR
 |---|---|
 | Repository URL | Location of the flake, see [Repository URL](#repository-url) |
 | Evaluation Wildcard | Which flake outputs to build, see [wildcards](../reference/wildcards.md) |
-| Triggers | Start condition and branch of an evaluation: push, pull request, polling (every 300 s by default) or a cron schedule |
+| [Triggers](triggers.md) | Start condition and branch of an evaluation: push, pull request, polling (every 300 s by default) or a cron schedule |
 | Actions | Follow-up steps: mail, web request, Git host status, flake update pull request |
 | Flake Input Overrides | Replace a flake input for every evaluation, e.g. a newer nixpkgs |
 | Keep Evaluations | How many finished evaluations stay, 30 by default |
