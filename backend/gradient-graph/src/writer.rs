@@ -255,8 +255,13 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
                     }
                     Err(e) => {
                         record::fail_evaluation(&st.ctx, group.evaluation, &e.to_string()).await;
+                        let mut group_replies = group_replies.into_iter();
+                        let first = group_replies.next();
                         for reply in group_replies {
                             let _ = reply.send(Err(anyhow!("{e:#}")));
+                        }
+                        if let Some(reply) = first {
+                            let _ = reply.send(Err(e));
                         }
                     }
                 }
