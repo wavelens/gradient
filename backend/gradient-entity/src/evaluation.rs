@@ -385,6 +385,8 @@ pub struct RunOptions {
     pub labels: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<u16>,
 }
 
 impl RunOptions {
@@ -401,7 +403,10 @@ impl RunOptions {
         set("labels", self.labels.clone().map(Into::into));
         set("timeout", self.timeout_secs.map(Into::into));
         set("maxSilent", self.timeout_secs.map(Into::into));
-        set("ssh", self.interactive.then_some(true.into()));
+        if !self.ports.is_empty() {
+            set("ports", Some(self.ports.clone().into()));
+            set("ssh", Some(true.into()));
+        }
         serde_json::Value::Object(block)
     }
 }
@@ -503,5 +508,27 @@ mod draining_tests {
         ] {
             assert_eq!(case.status_after_draining(), expected, "{case:?}");
         }
+    }
+
+    #[test]
+    fn an_interactive_run_leaves_terminal_access_to_job_creation() {
+        let options = RunOptions {
+            interactive: true,
+            cpus: Some(4),
+            ..Default::default()
+        };
+        assert_eq!(options.exec_block(), serde_json::json!({"cpus": 4}));
+    }
+
+    #[test]
+    fn forwarded_ports_need_terminal_access() {
+        let options = RunOptions {
+            ports: vec![8888, 6006],
+            ..Default::default()
+        };
+        assert_eq!(
+            options.exec_block(),
+            serde_json::json!({"ports": [8888, 6006], "ssh": true})
+        );
     }
 }

@@ -104,6 +104,7 @@ fn with_terminal_start(mut job: MExecJob) -> MExecJob {
         && let Some(spec) = job.spec.as_object_mut()
     {
         spec.insert("wait_for_terminal".to_owned(), true.into());
+        spec.insert("ssh".to_owned(), true.into());
     }
 
     job
@@ -328,17 +329,16 @@ mod tests {
                 .unwrap(),
             ),
         );
-        let waiting: Vec<bool> = jobs
+        let waiting: Vec<(bool, Option<bool>)> = jobs
             .into_iter()
             .map(with_terminal_start)
             .map(|job| {
-                serde_json::from_value::<ExecSpec>(job.spec)
-                    .unwrap()
-                    .wait_for_terminal
+                let spec = serde_json::from_value::<ExecSpec>(job.spec).unwrap();
+                (spec.wait_for_terminal, spec.ssh)
             })
             .collect();
 
-        assert_eq!(waiting, vec![true, false]);
+        assert_eq!(waiting, vec![(true, Some(true)), (false, None)]);
     }
 
     #[test]
