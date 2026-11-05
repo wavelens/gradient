@@ -3,7 +3,7 @@
 
 use crate::api::{
     BlobsResponse, ChunkReceived, DispatchRequest, DispatchResponse, InputOverrideBody,
-    ManifestRequest, ManifestResponse, SourceFinalize,
+    ManifestRequest, ManifestResponse, RunOptions, SourceFinalize,
 };
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
@@ -102,6 +102,7 @@ impl BuildRequestsApi<'_> {
         target: Option<&str>,
         system: Option<&str>,
         overrides: &[(String, String)],
+        run: Option<RunOptions>,
     ) -> Result<DispatchResponse, ConnectorError> {
         let body = SourceFinalize {
             target: target.map(str::to_owned),
@@ -113,6 +114,7 @@ impl BuildRequestsApi<'_> {
                     url: url.clone(),
                 })
                 .collect(),
+            run,
         };
         let req = http::request(
             self.0.http(),
@@ -154,6 +156,7 @@ mod tests {
             target: None,
             system: None,
             input_overrides: vec![],
+            run: None,
         };
         assert!(
             !serde_json::to_string(&empty)
@@ -167,6 +170,7 @@ mod tests {
                 input_name: "nixpkgs".into(),
                 url: "github:NixOS/nixpkgs".into(),
             }],
+            run: None,
         };
         assert!(serde_json::to_string(&set).unwrap().contains("nixpkgs"));
     }

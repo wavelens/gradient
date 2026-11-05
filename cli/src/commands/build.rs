@@ -13,7 +13,7 @@ use crate::tui::watch::eval_is_terminal;
 use connector::ConnectorError;
 #[cfg(not(feature = "nix"))]
 use connector::api::ArtefactTree;
-use connector::api::{DispatchResponse, EvaluationResponse, EvaluationStatus};
+use connector::api::{DispatchResponse, EvaluationResponse, EvaluationStatus, RunOptions};
 #[cfg(not(feature = "nix"))]
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -23,16 +23,68 @@ pub(crate) struct BuildParams {
     pub target: Option<String>,
     pub system: Option<String>,
     pub overrides: Vec<(String, String)>,
+    pub run: Option<RunOptions>,
 }
 
 pub async fn handle_build(
-    mut params: BuildParams,
+    params: BuildParams,
     project: Option<String>,
     background: bool,
     quiet: bool,
     no_link: bool,
     out: Output,
 ) {
+    let (client, started) = submit_build_request(params, project, quiet, out).await;
+    let evaluation = started.evaluation.to_string();
+
+    if background {
+        out.ok(&started);
+        out.human(evaluation.clone());
+        return;
+    }
+
+    if quiet {
+        out.human(evaluation.clone());
+    } else {
+        out.ok(&started);
+        out.human(format!("Evaluation: {}", evaluation));
+        out.human(format!("Task:    {}", started.task));
+        out.human(format!("Commit:     {}", started.commit));
+    }
+
+    if !quiet {
+        out.human("Streaming evaluation logs...");
+    }
+
+    crate::commands::logstream::stream_eval_logs(&client, &evaluation, out).await;
+
+    let eval = wait_for_terminal(&client, &evaluation, out).await;
+    if let Some(failure) = failure_message(eval.status, eval.error.as_deref()) {
+        out.err(ExitKind::Api, failure);
+    }
+
+    if no_link {
+        return;
+    }
+
+    let tree = client
+        .evals()
+        .artefacts(&evaluation)
+        .await
+        .unwrap_or_else(|e| out.err(ExitKind::Api, format!("Could not fetch artefacts: {e}")));
+
+    #[cfg(feature = "nix")]
+    crate::commands::build_nix::link_results(&client, &started, &tree, out).await;
+    #[cfg(not(feature = "nix"))]
+    download_result_dirs(&client, &tree, out).await;
+}
+
+pub(crate) async fn submit_build_request(
+    mut params: BuildParams,
+    project: Option<String>,
+    quiet: bool,
+    out: Output,
+) -> (connector::Client, DispatchResponse) {
     // A missing server or session must surface before the project check. An unconfigured first
     // invocation then points at `gradient login` (#498).
     let client = client_from_config(out);
@@ -113,51 +165,10 @@ pub async fn handle_build(
     }
 
     let started = upload_and_start(&client, &project, &entries, &params, quiet, out).await;
-    let evaluation = started.evaluation.to_string();
-
-    if background {
-        out.ok(&started);
-        out.human(evaluation.clone());
-        return;
-    }
-
-    if quiet {
-        out.human(evaluation.clone());
-    } else {
-        out.ok(&started);
-        out.human(format!("Evaluation: {}", evaluation));
-        out.human(format!("Task:    {}", started.task));
-        out.human(format!("Commit:     {}", started.commit));
-    }
-
-    if !quiet {
-        out.human("Streaming evaluation logs...");
-    }
-
-    crate::commands::logstream::stream_eval_logs(&client, &evaluation, out).await;
-
-    let eval = wait_for_terminal(&client, &evaluation, out).await;
-    if let Some(failure) = failure_message(eval.status, eval.error.as_deref()) {
-        out.err(ExitKind::Api, failure);
-    }
-
-    if no_link {
-        return;
-    }
-
-    let tree = client
-        .evals()
-        .artefacts(&evaluation)
-        .await
-        .unwrap_or_else(|e| out.err(ExitKind::Api, format!("Could not fetch artefacts: {e}")));
-
-    #[cfg(feature = "nix")]
-    crate::commands::build_nix::link_results(&client, &started, &tree, out).await;
-    #[cfg(not(feature = "nix"))]
-    download_result_dirs(&client, &tree, out).await;
+    (client, started)
 }
 
-fn failure_message(status: EvaluationStatus, error: Option<&str>) -> Option<String> {
+pub(crate) fn failure_message(status: EvaluationStatus, error: Option<&str>) -> Option<String> {
     if status == EvaluationStatus::Completed {
         return None;
     }
@@ -317,6 +328,7 @@ async fn start_via_manifest(
                 target: params.target.clone(),
                 system: params.system.clone(),
                 input_overrides,
+                run: params.run.clone(),
             },
         )
         .await

@@ -118,6 +118,8 @@ enum MainCommands {
         #[arg(long = "override-input", num_args = 2, value_names = ["INPUT", "FLAKE"], action = clap::ArgAction::Append)]
         override_input: Vec<String>,
     },
+    /// Run the flake program on an exec worker and stream the program output to this terminal
+    Run(run::RunArgs),
     /// Watch a running evaluation's live build logs and status
     Watch {
         /// Evaluation UUID to watch
@@ -360,9 +362,11 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                 target,
                 system,
                 overrides,
+                run: None,
             };
             build::handle_build(params, project, background, quiet, no_link, out).await
         }
+        MainCommands::Run(args) => run::handle_run(args, out).await,
         MainCommands::Watch { evaluation } => watch::handle_watch(&evaluation, out).await,
         MainCommands::Logs { evaluation } => logs::handle_logs(&evaluation, out).await,
         MainCommands::Download {
