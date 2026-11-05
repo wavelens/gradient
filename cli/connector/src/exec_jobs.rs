@@ -42,15 +42,23 @@ impl ExecJobsApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn attach_program_terminal(
+    pub async fn attach_program_terminal(&self, job: &str) -> Result<GuestSocket, ConnectorError> {
+        self.open_guest_socket(&format!("exec/{job}/shell?attach=true"))
+            .await
+    }
+
+    pub async fn open_port_forward(
         &self,
         job: &str,
-    ) -> Result<ProgramTerminal, ConnectorError> {
+        port: u16,
+    ) -> Result<GuestSocket, ConnectorError> {
+        self.open_guest_socket(&format!("exec/{job}/forward?port={port}"))
+            .await
+    }
+
+    async fn open_guest_socket(&self, endpoint: &str) -> Result<GuestSocket, ConnectorError> {
         let token = self.0.token().ok_or(ConnectorError::Unauthorized)?;
-        let url = websocket_url(&http::build_url(
-            self.0.base_url(),
-            &format!("exec/{job}/shell?attach=true"),
-        ));
+        let url = websocket_url(&http::build_url(self.0.base_url(), endpoint));
         let mut request = url.into_client_request().map_err(io_error)?;
         let bearer = HeaderValue::from_str(&format!("Bearer {token}")).map_err(io_error)?;
         request.headers_mut().insert("Authorization", bearer);
@@ -59,7 +67,7 @@ impl ExecJobsApi<'_> {
             tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(tls))
                 .await
                 .map_err(io_error)?;
-        Ok(ProgramTerminal { socket })
+        Ok(GuestSocket { socket })
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(
@@ -79,7 +87,7 @@ impl ExecJobsApi<'_> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum TerminalEvent {
+pub enum GuestEvent {
     Output(Vec<u8>),
     Closed {
         exit_code: Option<i32>,
@@ -87,12 +95,12 @@ pub enum TerminalEvent {
     },
 }
 
-pub struct ProgramTerminal {
+pub struct GuestSocket {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
 }
 
-impl ProgramTerminal {
-    pub async fn send_input(&mut self, bytes: Vec<u8>) -> Result<(), ConnectorError> {
+impl GuestSocket {
+    pub async fn send_bytes(&mut self, bytes: Vec<u8>) -> Result<(), ConnectorError> {
         self.socket
             .send(Message::Binary(bytes.into()))
             .await
@@ -107,10 +115,10 @@ impl ProgramTerminal {
             .map_err(io_error)
     }
 
-    pub async fn next_event(&mut self) -> Option<TerminalEvent> {
+    pub async fn next_event(&mut self) -> Option<GuestEvent> {
         while let Some(Ok(message)) = self.socket.next().await {
             match message {
-                Message::Binary(bytes) => return Some(TerminalEvent::Output(bytes.to_vec())),
+                Message::Binary(bytes) => return Some(GuestEvent::Output(bytes.to_vec())),
                 Message::Text(text) => {
                     if let Some(closed) = closed_frame(&text) {
                         return Some(closed);
@@ -133,10 +141,10 @@ enum ServerFrame {
     },
 }
 
-fn closed_frame(text: &str) -> Option<TerminalEvent> {
+fn closed_frame(text: &str) -> Option<GuestEvent> {
     match serde_json::from_str(text).ok()? {
         ServerFrame::Closed { exit_code, message } => {
-            Some(TerminalEvent::Closed { exit_code, message })
+            Some(GuestEvent::Closed { exit_code, message })
         }
     }
 }
@@ -173,7 +181,7 @@ mod tests {
     fn only_the_closed_frame_ends_the_terminal() {
         assert_eq!(
             closed_frame(r#"{"type":"closed","exit_code":3,"message":null}"#),
-            Some(TerminalEvent::Closed {
+            Some(GuestEvent::Closed {
                 exit_code: Some(3),
                 message: None
             })

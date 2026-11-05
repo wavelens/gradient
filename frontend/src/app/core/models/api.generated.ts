@@ -2183,6 +2183,7 @@ export interface RunOptions {
   network?: boolean | null;
   labels?: string[] | null;
   timeout_secs?: number | null;
+  ports?: number[];
 }
 
 export interface ScimErrorBody {

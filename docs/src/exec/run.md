@@ -77,7 +77,22 @@ gradient run --attach <job-id>
 | `--timeout <D>` | `timeout` and `maxSilent`, in seconds or like `30m` |
 
 - Flags override the same fields of an exec app. Worker limits still apply.
-- Jobs in interactive mode get `ssh = true`. Only workers with terminals can take the job.
+- Interactive jobs get `ssh = true`. Only workers with terminals can take them. Jobs in log mode keep the `ssh` value of the app or the worker.
+
+## 6. Forward Ports
+
+```sh
+gradient run -L 8888 .#notebook # (1)!
+gradient run --attach <job-id> -L 9000:8888 # (2)!
+```
+
+1. Local port 8888 -> guest port 8888.
+2. Local port 9000 -> guest port 8888 on the running job.
+
+- New jobs add each guest port to `ports` and get `ssh = true`.
+- Running jobs accept forwards only to ports in their own `ports`.
+- Forwards need exactly one matching job.
+- Forwards stay open until CLI shutdown. Skip SSH setup.
 
 ## Verify Deployment
 

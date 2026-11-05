@@ -6097,6 +6097,47 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/exec/{job}/forward:
+    get:
+      tags:
+      - exec-jobs
+      summary: Exec job port forward (WebSocket)
+      description: |-
+        Upgrade to a WebSocket bound to one TCP connection to `port` inside the job guest. Sockets open while the job is `running`, was not started with `ssh = false` and lists `port` in `ports`.
+
+        **Frames**
+        - Binary frames carry the raw TCP bytes both ways.
+        - The last server frame is the text frame `{"type":"closed","exit_code":null,"message":"..."}`, also when the channel is refused after the upgrade.
+
+        TCP connections each need their own WebSocket. Multi-node jobs use `node` to select a node by index (default node 0). Requests need `TriggerEvaluation` permission on the project.
+      operationId: execJobForward
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      - name: node
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: port
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      responses:
+        '101':
+          description: Protocol switch - successful WebSocket upgrade
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/exec/{job}/keep-vm-running:
     post:
       tags:
@@ -20082,6 +20123,12 @@ components:
           - 'null'
           format: int64
           minimum: 0
+        ports:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
     ScimErrorBody:
       type: object
       required:
