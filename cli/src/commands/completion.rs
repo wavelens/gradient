@@ -234,11 +234,11 @@ mod tests {
                 "message": {
                     "items": [
                         {"id": "00000000-0000-0000-0000-000000000005", "name": "acme", "display_name": "acme",
-                         "description": "", "hide_build_requests": false, "managed": true,
+                         "description": "", "allow_exec_in_build_requests": false, "hide_build_requests": false, "managed": true,
                          "public": false, "running_evaluations": 0,
                          "created_by": "00000000-0000-0000-0000-000000000006", "created_at": "2026-05-21T08:53:21"},
                         {"id": "00000000-0000-0000-0000-000000000007", "name": "acorn", "display_name": "acorn",
-                         "description": "", "hide_build_requests": false, "managed": true,
+                         "description": "", "allow_exec_in_build_requests": false, "hide_build_requests": false, "managed": true,
                          "public": false, "running_evaluations": 0,
                          "created_by": "00000000-0000-0000-0000-000000000006", "created_at": "2026-05-21T08:53:21"}
                     ],
