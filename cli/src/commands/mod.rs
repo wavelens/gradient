@@ -27,6 +27,7 @@ pub mod mcp;
 pub mod pr;
 pub mod project;
 pub mod run;
+mod run_forward;
 mod run_logs;
 mod run_terminal;
 pub mod task;

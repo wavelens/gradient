@@ -72,8 +72,26 @@ fn with_run_overrides(block: &str, run_overrides: &str) -> Result<String, String
         run_overrides,
         "gradient run: run overrides is not a JSON object",
     )?;
+    let declared_ports = block.remove("ports");
     block.extend(overrides);
+    merge_ports(&mut block, declared_ports);
     Ok(Value::Object(block).to_string())
+}
+
+fn merge_ports(block: &mut Map<String, Value>, declared: Option<Value>) {
+    let Some(Value::Array(declared)) = declared else {
+        return;
+    };
+    let ports = block
+        .entry("ports")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if let Value::Array(ports) = ports {
+        for port in declared {
+            if !ports.contains(&port) {
+                ports.push(port);
+            }
+        }
+    }
 }
 
 fn json_object(json: &str, refusal: &str) -> Result<Map<String, Value>, String> {
@@ -130,6 +148,16 @@ mod tests {
             merged,
             serde_json::json!({"cpus": 8, "env": {"A": "1"}, "ssh": true})
         );
+    }
+
+    #[test]
+    fn forwarded_ports_add_to_the_declared_ports() {
+        let block = r#"{"ports":[8080,6006]}"#;
+        let merged: Value =
+            serde_json::from_str(&with_run_overrides(block, r#"{"ports":[8888,8080]}"#).unwrap())
+                .unwrap();
+
+        assert_eq!(merged, serde_json::json!({"ports": [8888, 8080, 6006]}));
     }
 
     #[test]

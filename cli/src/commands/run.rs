@@ -7,6 +7,7 @@
 use crate::commands::build::{BuildParams, failure_message, submit_build_request};
 use crate::commands::completion;
 use crate::commands::logstream::stream_eval_logs;
+use crate::commands::run_forward::{self, PortForward, parse_forward};
 use crate::commands::{run_logs, run_terminal};
 use crate::input::client_from_config;
 use crate::output::{ExitKind, Output};
@@ -51,6 +52,9 @@ pub struct RunArgs {
     /// Connect this terminal to the program for a running job (no upload and no evaluation)
     #[arg(long, value_name = "JOB_ID", conflicts_with_all = ["target", "no_shell", "cpus", "memory", "network", "labels", "timeout", "system", "project"])]
     attach: Option<String>,
+    /// Forward a local port to a port in the guest (example: `ssh -L`, repeatable)
+    #[arg(short = 'L', long = "forward", value_name = "[LOCAL:]PORT", value_parser = parse_forward)]
+    forwards: Vec<PortForward>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,9 +71,9 @@ pub(crate) fn run_mode(wants_terminal: bool, jobs: usize) -> RunMode {
 }
 
 pub async fn handle_run(args: RunArgs, out: Output) {
-    if let Some(job) = args.attach {
+    if let Some(job) = &args.attach {
         let client = client_from_config(out);
-        run_terminal::reattach(&client, &job, out).await;
+        run_terminal::reattach(&client, job, &args.forwards, out).await;
     }
 
     let wants_terminal = !args.no_shell && !out.is_json() && has_terminal();
@@ -88,6 +92,18 @@ pub async fn handle_run(args: RunArgs, out: Output) {
     out.progress(format!("Evaluation: {evaluation}"));
 
     let jobs = follow_builds_until_started(&client, &evaluation, out).await;
+    if !args.forwards.is_empty() {
+        if jobs.len() > 1 {
+            for job in &jobs {
+                let _ = client.exec_jobs().abort(&job.id.to_string()).await;
+            }
+            out.err(
+                ExitKind::Api,
+                "Each port forward needs exactly one matching job. This run found several.",
+            );
+        }
+        run_forward::start(&client, &jobs[0].id.to_string(), &args.forwards, out).await;
+    }
     match run_mode(wants_terminal, jobs.len()) {
         RunMode::Interactive if !has_finished(jobs[0].status) => {
             run_terminal::attach(&client, &jobs[0].id.to_string(), out).await
@@ -112,6 +128,11 @@ fn run_options(args: &RunArgs, interactive: bool) -> RunOptions {
         timeout_secs: args
             .timeout
             .map(|secs| i64::try_from(secs).unwrap_or(i64::MAX)),
+        ports: args
+            .forwards
+            .iter()
+            .map(|forward| i32::from(forward.guest))
+            .collect(),
     }
 }
 

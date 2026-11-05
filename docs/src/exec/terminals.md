@@ -65,7 +65,8 @@ ssh -p 2222 -N -L 8888:127.0.0.1:8888 myproject/<job-id>@ci.example.com # (3)!
 3.  Forward the local port 8888 to port 8888 inside the guest.
 
 - Job pages show the `ssh` command and an `ssh -N -L` command per port once the job is `running`, ready to copy.
-- Forwards reach only ports listed in `ports`.
+- SSH forwards reach only the ports in `ports`.
+- `gradient run -L <port>` can forward ports without SSH keys. See [Run a Program from the CLI](run.md#6-forward-ports) for details.
 - Logins accept no command except `shell`.
 - Logins and forwards into a job before its start wait up to 30 minutes for the guest.
 - Waiting logins print `waiting for vm startup`. Sessions close on a job end during the wait.

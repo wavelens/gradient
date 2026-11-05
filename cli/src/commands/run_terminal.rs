@@ -5,9 +5,10 @@
  */
 
 use crate::commands::run::{has_finished, job_exit_code};
+use crate::commands::run_forward::{self, PortForward};
 use crate::output::{ExitKind, Output};
 use connector::api::ExecJobStatus;
-use connector::exec_jobs::{ProgramTerminal, TerminalEvent};
+use connector::exec_jobs::{GuestEvent, GuestSocket};
 use crossterm::terminal;
 use std::io::Write;
 use std::process::exit;
@@ -27,7 +28,12 @@ enum TerminalEnd {
     ConnectionLost,
 }
 
-pub(crate) async fn reattach(client: &connector::Client, job: &str, out: Output) -> ! {
+pub(crate) async fn reattach(
+    client: &connector::Client,
+    job: &str,
+    forwards: &[PortForward],
+    out: Output,
+) -> ! {
     let mut announced = false;
     loop {
         let current = client
@@ -40,6 +46,7 @@ pub(crate) async fn reattach(client: &connector::Client, job: &str, out: Output)
             exit(job_exit_code(current.status, current.program_exit_code));
         }
         if current.status == ExecJobStatus::Running {
+            run_forward::start(client, job, forwards, out).await;
             attach(client, job, out).await;
         }
         if !announced {
@@ -99,7 +106,7 @@ async fn finish(client: &connector::Client, job: &str, end: TerminalEnd, out: Ou
     }
 }
 
-async fn forward(mut program: ProgramTerminal) -> TerminalEnd {
+async fn forward(mut program: GuestSocket) -> TerminalEnd {
     let mut stdin = tokio::io::stdin();
     let mut stdout = std::io::stdout();
     let mut window_changes = signal(SignalKind::window_change()).ok();
@@ -113,11 +120,11 @@ async fn forward(mut program: ProgramTerminal) -> TerminalEnd {
     loop {
         tokio::select! {
             event = program.next_event() => match event {
-                Some(TerminalEvent::Output(bytes)) => {
+                Some(GuestEvent::Output(bytes)) => {
                     let _ = stdout.write_all(&bytes);
                     let _ = stdout.flush();
                 }
-                Some(TerminalEvent::Closed { exit_code, message }) => {
+                Some(GuestEvent::Closed { exit_code, message }) => {
                     return TerminalEnd::Closed { exit_code, message };
                 }
                 None => return TerminalEnd::ConnectionLost,
@@ -128,7 +135,7 @@ async fn forward(mut program: ProgramTerminal) -> TerminalEnd {
                     Typed::Abort => return TerminalEnd::EscapeRequested,
                     Typed::Forward(bytes) if bytes.is_empty() => {}
                     Typed::Forward(bytes) => {
-                        if program.send_input(bytes).await.is_err() {
+                        if program.send_bytes(bytes).await.is_err() {
                             return TerminalEnd::ConnectionLost;
                         }
                     }
@@ -143,7 +150,7 @@ async fn forward(mut program: ProgramTerminal) -> TerminalEnd {
     }
 }
 
-async fn send_size(program: &mut ProgramTerminal) -> Result<(), connector::ConnectorError> {
+async fn send_size(program: &mut GuestSocket) -> Result<(), connector::ConnectorError> {
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
     program.resize(cols, rows).await
 }

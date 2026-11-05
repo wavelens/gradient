@@ -43,6 +43,13 @@ pub struct TerminalQuery {
     pub attach: bool,
 }
 
+#[derive(Debug, PartialEq, Eq, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ForwardQuery {
+    pub node: Option<u32>,
+    pub port: u16,
+}
+
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum TerminalControl {
@@ -125,6 +132,37 @@ pub async fn get_exec_job_shell(
             pty: true,
             attach: query.attach,
         },
+    };
+    Ok(upgrade(&state.shutdown, scheduler, ws, request))
+}
+
+#[utoipa::path(
+    get,
+    path = "/exec/{job}/forward",
+    operation_id = "execJobForward",
+    tag = "exec-jobs",
+    summary = "Exec job port forward (WebSocket)",
+    description = "Upgrade to a WebSocket bound to one TCP connection to `port` inside the job guest. Sockets open while the job is `running`, was not started with `ssh = false` and lists `port` in `ports`.\n\n**Frames**\n- Binary frames carry the raw TCP bytes both ways.\n- The last server frame is the text frame `{\"type\":\"closed\",\"exit_code\":null,\"message\":\"...\"}`, also when the channel is refused after the upgrade.\n\nTCP connections each need their own WebSocket. Multi-node jobs use `node` to select a node by index (default node 0). Requests need `TriggerEvaluation` permission on the project.",
+    params(("job" = ExecJobId, Path), ForwardQuery),
+    responses(
+        (status = SWITCHING_PROTOCOLS, description = "Protocol switch - successful WebSocket upgrade"),
+        WebError
+    )
+)]
+pub async fn get_exec_job_forward(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+    Path(job): Path<ExecJobId>,
+    Query(query): Query<ForwardQuery>,
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+) -> WebResult<Response> {
+    authorize_terminal(&state.web_db, &user, &api_key, job).await?;
+    let request = TerminalRequest {
+        job,
+        node: query.node.unwrap_or(0),
+        kind: GuestChannelKind::Forward { port: query.port },
     };
     Ok(upgrade(&state.shutdown, scheduler, ws, request))
 }

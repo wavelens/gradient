@@ -99,7 +99,7 @@ gradient login https://gradient.example.com
 | Command | Options | Description |
 |---|---|---|
 | `gradient build [TARGET]` | `--system <SYSTEM>`, `--project <PROJECT>`, `--background`, `--quiet`, `--no-link`, `--override-input <INPUT> <FLAKE>` | Submit a build request from the current git repository |
-| `gradient run [TARGET]` | `--no-shell`, `--cpus <CPUS>`, `--memory <MB>`, `--network`, `--labels <LABELS>`, `--timeout <TIMEOUT>`, `--system <SYSTEM>`, `--project <PROJECT>`, `--attach <JOB_ID>` | Run the flake program on an exec worker and stream the program output to this terminal, see [Run a Program from the CLI](../exec/run.md) |
+| `gradient run [TARGET]` | `--no-shell`, `--cpus <CPUS>`, `--memory <MB>`, `--network`, `--labels <LABELS>`, `--timeout <TIMEOUT>`, `--system <SYSTEM>`, `--project <PROJECT>`, `--attach <JOB_ID>`, `-L, --forward <[LOCAL:]PORT>` | Run the flake program on an exec worker and stream the program output to this terminal, see [Run a Program from the CLI](../exec/run.md) |
 | `gradient watch <EVALUATION>` | - | Watch a running evaluation's live build logs and status |
 | `gradient logs <EVALUATION>` | - | Print the full logs of every build in an evaluation |
 | `gradient download [FLAKE_REF]` | `--evaluation <EVALUATION>`, `--task <TASK>`, `--products <PRODUCTS>`, `--out <OUT>` | Download evaluation artefacts |
