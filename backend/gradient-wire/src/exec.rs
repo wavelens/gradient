@@ -322,6 +322,8 @@ pub struct ExecJob {
     pub attempt: u32,
     #[proto(52, default)]
     pub keep_vm_running: bool,
+    #[proto(57, default)]
+    pub wait_for_terminal: bool,
 }
 
 #[derive(
@@ -394,6 +396,9 @@ pub struct ExecSpec {
     #[proto(52, default)]
     #[serde(default)]
     pub manual_start: bool,
+    #[proto(57, default)]
+    #[serde(default)]
+    pub wait_for_terminal: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

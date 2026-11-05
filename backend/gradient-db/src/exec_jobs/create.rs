@@ -32,12 +32,14 @@ struct Candidate {
     architecture: String,
     exec: serde_json::Value,
     image_derivation: Option<DerivationId>,
+    interactive_run: bool,
 }
 
 static CANDIDATES_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT e.id AS entry_point, e.derivation AS program_derivation, d.architecture, e.exec, \
-         img.derivation AS image_derivation \
+         img.derivation AS image_derivation, \
+         COALESCE((ev.run_options->>'interactive')::boolean, false) AS interactive_run \
          FROM entry_point e \
          JOIN derivation d ON d.id = e.derivation \
          JOIN evaluation ev ON ev.id = e.evaluation AND NOT ev.only_evaluate \
@@ -66,9 +68,15 @@ where
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
+
+    let waits_for_terminal = waits_for_terminal(&candidates);
     let rows: Vec<exec_job::ActiveModel> = candidates
         .into_iter()
         .flat_map(|candidate| created_jobs(evaluation, candidate))
+        .map(|job| match waits_for_terminal {
+            true => with_terminal_start(job),
+            false => job,
+        })
         .map(IntoActiveModel::into_active_model)
         .collect();
 
@@ -84,6 +92,21 @@ where
     insert_clusters(&txn, &created).await?;
     txn.commit().await?;
     Ok(created)
+}
+
+fn waits_for_terminal(candidates: &[Candidate]) -> bool {
+    matches!(candidates, [only] if only.interactive_run)
+}
+
+fn with_terminal_start(mut job: MExecJob) -> MExecJob {
+    if job.node_index == 0
+        && job.status == ExecJobStatus::Created
+        && let Some(spec) = job.spec.as_object_mut()
+    {
+        spec.insert("wait_for_terminal".to_owned(), true.into());
+    }
+
+    job
 }
 
 pub(crate) fn retries_of(spec: &ExecSpec) -> i32 {
@@ -234,6 +257,7 @@ mod tests {
             architecture: "x86_64-linux".into(),
             exec,
             image_derivation: None,
+            interactive_run: false,
         }
     }
 
@@ -278,6 +302,43 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(ExecJobStatus::Created, 2, 0)]
         );
+    }
+
+    #[test]
+    fn only_a_single_interactive_run_job_waits_for_its_terminal() {
+        let interactive = || Candidate {
+            interactive_run: true,
+            ..candidate(serde_json::json!({}))
+        };
+
+        assert!(waits_for_terminal(&[interactive()]));
+        assert!(!waits_for_terminal(&[interactive(), interactive()]));
+        assert!(!waits_for_terminal(&[candidate(serde_json::json!({}))]));
+    }
+
+    #[test]
+    fn node_zero_of_a_multi_node_job_holds_the_terminal_start() {
+        let jobs = created_jobs(
+            EvaluationId::now_v7(),
+            candidate(
+                serde_json::to_value(ExecSpec {
+                    nodes: 2,
+                    ..ExecSpec::default()
+                })
+                .unwrap(),
+            ),
+        );
+        let waiting: Vec<bool> = jobs
+            .into_iter()
+            .map(with_terminal_start)
+            .map(|job| {
+                serde_json::from_value::<ExecSpec>(job.spec)
+                    .unwrap()
+                    .wait_for_terminal
+            })
+            .collect();
+
+        assert_eq!(waiting, vec![true, false]);
     }
 
     #[test]

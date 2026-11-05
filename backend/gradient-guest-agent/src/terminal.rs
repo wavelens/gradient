@@ -46,19 +46,19 @@ impl PtyMaster {
     }
 }
 
-pub fn spawn_on_pty(
-    mut command: Command,
-    cols: u16,
-    rows: u16,
-) -> io::Result<(Child, Arc<PtyMaster>)> {
+pub fn spawn_on_pty(command: Command, cols: u16, rows: u16) -> io::Result<(Child, Arc<PtyMaster>)> {
     let (master, slave) = PtyMaster::open()?;
     master.resize(cols, rows)?;
+    let child = spawn_on_slave(command, slave)?;
+    Ok((child, master))
+}
+
+pub fn spawn_on_slave(mut command: Command, slave: OwnedFd) -> io::Result<Child> {
     command
         .stdin(Stdio::from(slave.try_clone()?))
         .stdout(Stdio::from(slave.try_clone()?))
         .stderr(Stdio::from(slave));
-    let child = command.spawn()?;
-    Ok((child, master))
+    command.spawn()
 }
 
 #[derive(Clone)]
@@ -66,6 +66,7 @@ pub struct ProgramTerminal {
     master: Arc<PtyMaster>,
     output: OutputReaders,
     exit: watch::Receiver<Option<i32>>,
+    attached: Arc<watch::Sender<bool>>,
 }
 
 impl ProgramTerminal {
@@ -78,6 +79,7 @@ impl ProgramTerminal {
             master,
             output,
             exit,
+            attached: Arc::new(watch::channel(false).0),
         }
     }
 
@@ -87,6 +89,18 @@ impl ProgramTerminal {
 
     pub fn follow(&self) -> OutputReader {
         self.output.reader_from(self.output.written())
+    }
+
+    pub fn mark_attached(&self) {
+        self.attached.send_replace(true);
+    }
+
+    pub async fn wait_until_attached(&self) {
+        let _ = self
+            .attached
+            .subscribe()
+            .wait_for(|attached| *attached)
+            .await;
     }
 
     pub fn exit_code(&self) -> Option<i32> {

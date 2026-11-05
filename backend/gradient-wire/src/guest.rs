@@ -19,7 +19,7 @@ use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{Proto, from_bytes, to_bytes};
 use crate::types::GuestChannelKind;
 
-pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=6;
+pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=7;
 pub const GUEST_CHANNELS_AGENT_SINCE: u16 = 2;
 pub const GUEST_JOB_SECRETS_SINCE: u16 = 2;
 pub const GUEST_UPLOADS_SINCE: u16 = 3;
@@ -84,6 +84,8 @@ pub struct RunJob {
     pub flake_dir: String,
     #[proto(5, default)]
     pub work_disk: bool,
+    #[proto(7, default)]
+    pub wait_for_terminal: bool,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq, Default)]
@@ -352,6 +354,7 @@ mod tests {
             program_pty: false,
             flake_dir: "nix/hosts".into(),
             work_disk: true,
+            wait_for_terminal: true,
         }
     }
 

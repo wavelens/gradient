@@ -244,6 +244,7 @@ fn an_exec_job_and_a_phase_round_trip() {
         max_silent_secs: None,
         attempt: 1,
         keep_vm_running: true,
+        wait_for_terminal: true,
     }));
     assert_eq!(
         from_bytes::<Job>(to_bytes(&job, newest).unwrap(), newest).unwrap(),
@@ -430,6 +431,7 @@ fn a_flake_job_carries_its_flake_directory() {
         input_overrides: vec![],
         input_update: None,
         flake_dir: Some("nix".into()),
+        run_overrides: None,
     };
     assert_eq!(
         from_bytes::<FlakeJob>(to_bytes(&job, 48).unwrap(), 48).unwrap(),
@@ -644,6 +646,7 @@ fn the_keep_vm_running_switch_reaches_only_a_worker_of_version_52() {
         max_silent_secs: None,
         attempt: 1,
         keep_vm_running: true,
+        wait_for_terminal: false,
     };
     assert_eq!(
         from_bytes::<ExecJob>(to_bytes(&job, since).unwrap(), since).unwrap(),

@@ -117,6 +117,7 @@ fn spec_of(app: ExecApp) -> Result<ExecSpec, String> {
         retries: block.retries,
         guest,
         manual_start: !block.autostart,
+        wait_for_terminal: false,
     })
 }
 

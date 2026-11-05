@@ -5,9 +5,11 @@
  */
 
 use std::collections::BTreeMap;
+use std::os::fd::OwnedFd;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
+use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_redact::{SecretRedactor, StreamRedactor};
@@ -24,7 +26,9 @@ use crate::context::{UnknownPlaceholder, resolve_placeholders};
 use crate::http::HttpState;
 use crate::output::OutputLog;
 use crate::setup::{PROGRAM_USER, PreparedJob};
-use crate::terminal::{DEFAULT_COLS, DEFAULT_ROWS, ProgramTerminal, TERMINAL_TYPE, spawn_on_pty};
+use crate::terminal::{
+    DEFAULT_COLS, DEFAULT_ROWS, ProgramTerminal, PtyMaster, TERMINAL_TYPE, spawn_on_slave,
+};
 use crate::tree_patch::upload_tree_patch;
 
 pub const WORK_DIR: &str = "/work";
@@ -100,6 +104,7 @@ pub async fn run(
         program,
         env,
         terminal,
+        wait_for_terminal,
         redactor,
         start_commit,
     } = prepared;
@@ -109,7 +114,17 @@ pub async fn run(
             note(output, "killed before the program started").await;
             KILLED
         }
-        0 if terminal => run_program_on_terminal(program, output, &redactor, started, &kill).await,
+        0 if terminal => {
+            run_program_on_terminal(
+                program,
+                wait_for_terminal,
+                output,
+                &redactor,
+                started,
+                &kill,
+            )
+            .await
+        }
         0 => run_program(program, output, &redactor, started, &kill).await,
         code => {
             note(output, &format!("pre-script exited with code {code}")).await;
@@ -147,26 +162,45 @@ async fn run_program(
 
 async fn run_program_on_terminal(
     program: Command,
+    wait_for_terminal: bool,
     output: &Mutex<OutputLog>,
     redactor: &SecretRedactor,
     started: oneshot::Sender<Option<ProgramTerminal>>,
     kill: &CancellationToken,
 ) -> i32 {
-    let spawned = spawn_on_pty(program, DEFAULT_COLS, DEFAULT_ROWS)
-        .and_then(|(child, master)| Ok((child, master.stream()?, master)));
-    let (child, terminal_output, master) = match spawned {
-        Ok(spawned) => spawned,
+    let (master, slave) = match open_program_pty() {
+        Ok(opened) => opened,
         Err(e) => {
             note(output, &format!("cannot start the program: {e}")).await;
             return SPAWN_FAILED;
         }
     };
     let (exit, exit_watch) = watch::channel(None);
-    let _ = started.send(Some(ProgramTerminal::new(
-        master,
-        output.lock().await.readers(),
-        exit_watch,
-    )));
+    let terminal = ProgramTerminal::new(master, output.lock().await.readers(), exit_watch);
+    let _ = started.send(Some(terminal.clone()));
+    if wait_for_terminal {
+        tokio::select! {
+            () = terminal.wait_until_attached() => {}
+            () = kill.cancelled() => {
+                note(output, "Forced termination before the terminal connected.").await;
+                exit.send_replace(Some(KILLED));
+                return KILLED;
+            }
+        }
+    }
+
+    let spawned = terminal
+        .master()
+        .stream()
+        .and_then(|stream| Ok((spawn_on_slave(program, slave)?, stream)));
+    let (child, terminal_output) = match spawned {
+        Ok(spawned) => spawned,
+        Err(e) => {
+            note(output, &format!("cannot start the program: {e}")).await;
+            exit.send_replace(Some(SPAWN_FAILED));
+            return SPAWN_FAILED;
+        }
+    };
     let status = stream_streams_until_exit(
         child,
         Some(terminal_output),
@@ -179,6 +213,12 @@ async fn run_program_on_terminal(
     let code = exit_code(status);
     exit.send_replace(Some(code));
     code
+}
+
+fn open_program_pty() -> std::io::Result<(Arc<PtyMaster>, OwnedFd)> {
+    let (master, slave) = PtyMaster::open()?;
+    master.resize(DEFAULT_COLS, DEFAULT_ROWS)?;
+    Ok((master, slave))
 }
 
 async fn run_script(
@@ -375,7 +415,7 @@ mod tests {
 
     use super::{
         HttpState, KILLED, OutputLog, PreparedJob, exit_code, program_command, pump, run,
-        spawn_piped, stream_until_exit,
+        run_program_on_terminal, spawn_piped, stream_until_exit,
     };
 
     fn job() -> RunJob {
@@ -562,6 +602,7 @@ mod tests {
             program: Command::new("true"),
             env: BTreeMap::new(),
             terminal: false,
+            wait_for_terminal: false,
             redactor: SecretRedactor::default(),
             start_commit: String::new(),
         };
@@ -569,5 +610,36 @@ mod tests {
 
         assert_eq!(run(prepared, &http, started, kill).await, KILLED);
         assert!(started_rx.await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_terminal_program_waiting_for_an_attach_prints_nothing_before_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = output_log(&dir).await;
+        let log = dir.path().join("output.log");
+        let (started, started_rx) = oneshot::channel();
+        let kill = CancellationToken::new();
+        let mut program = Command::new("sh");
+        program.args(["-c", "echo early"]);
+        let redactor = SecretRedactor::default();
+
+        let running = run_program_on_terminal(program, true, &output, &redactor, started, &kill);
+        let attach = async {
+            let terminal = started_rx.await.expect("started").expect("a terminal");
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let before = tokio::fs::read(&log).await.unwrap();
+            terminal.mark_attached();
+            before
+        };
+        let (code, before) = timeout(Duration::from_secs(20), async {
+            tokio::join!(running, attach)
+        })
+        .await
+        .expect("the program ends after the attach");
+
+        assert_eq!(code, 0);
+        assert!(before.is_empty());
+        let after = tokio::fs::read(&log).await.unwrap();
+        assert!(String::from_utf8_lossy(&after).contains("early"));
     }
 }
