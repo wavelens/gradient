@@ -771,6 +771,7 @@ export interface DispatchRequest {
   target?: string | null;
   system?: string | null;
   input_overrides?: InputOverrideBody[];
+  run?: RunOptions | null;
 }
 
 export interface DispatchResponse {
@@ -1839,6 +1840,7 @@ export interface PatchProjectRequest {
   display_name?: string | null;
   description?: string | null;
   hide_build_requests?: boolean | null;
+  allow_exec_in_build_requests?: boolean | null;
 }
 
 export interface PatchRequest {
@@ -1959,6 +1961,7 @@ export interface Project {
   private_key: string;
   public: boolean;
   hide_build_requests: boolean;
+  allow_exec_in_build_requests: boolean;
   created_by: UserId;
   created_at: string;
   managed: boolean;
@@ -1974,6 +1977,7 @@ export interface ProjectResponse {
   public_key?: string | null;
   public: boolean;
   hide_build_requests: boolean;
+  allow_exec_in_build_requests: boolean;
   managed: boolean;
   created_by: UserId;
   created_at: string;
@@ -2001,6 +2005,7 @@ export interface ProjectSummary {
   public_key?: string | null;
   public: boolean;
   hide_build_requests: boolean;
+  allow_exec_in_build_requests: boolean;
   managed: boolean;
   created_by: UserId;
   created_at: string;
@@ -2171,6 +2176,15 @@ export interface RuleDescription {
   description: string;
 }
 
+export interface RunOptions {
+  interactive?: boolean;
+  cpus?: number | null;
+  memory_mb?: number | null;
+  network?: boolean | null;
+  labels?: string[] | null;
+  timeout_secs?: number | null;
+}
+
 export interface ScimErrorBody {
   schemas: string[];
   status: string;
@@ -2267,6 +2281,7 @@ export interface SourceFinalize {
   target?: string | null;
   system?: string | null;
   input_overrides?: InputOverrideBody[];
+  run?: RunOptions | null;
 }
 
 export interface SourceUploadForm {
