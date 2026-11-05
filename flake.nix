@@ -54,6 +54,7 @@
       store-spec = import ./nix/tests/store-spec/check.nix { inherit pkgs; inherit (pkgs) lib; };
       whats-new = import ./nix/tests/whats-new/check.nix { inherit pkgs; inherit (pkgs) lib; };
       repeated-keys = import ./nix/tests/repeated-keys/check.nix { inherit pkgs; inherit (pkgs) lib; };
+      run-wrapping = import ./nix/tests/run-wrapping/check.nix { inherit pkgs; inherit (pkgs) lib; };
       test-topologies = import ./nix/tests/harness/check.nix { inherit pkgs; inherit (pkgs) lib; };
       evalbench-summarize = import ./nix/tests/bench/evalbench/check.nix { inherit pkgs; };
       evalbench-multinode-report = import ./nix/tests/bench/evalbench-multinode/check.nix { inherit pkgs; };

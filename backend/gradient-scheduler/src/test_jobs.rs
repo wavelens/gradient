@@ -67,6 +67,7 @@ pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
             input_overrides: vec![],
             input_update: None,
             flake_dir: None,
+            run_overrides: None,
         },
         required_paths: vec![],
         queued_at: gradient_types::now(),

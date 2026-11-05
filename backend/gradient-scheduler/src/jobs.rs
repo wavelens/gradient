@@ -2311,6 +2311,7 @@ mod tests {
                 input_overrides: vec![],
                 input_update: None,
                 flake_dir: None,
+                run_overrides: None,
             },
             required_paths: vec![],
             queued_at: gradient_types::now(),
@@ -2347,6 +2348,7 @@ mod tests {
                 input_overrides: vec![],
                 input_update: None,
                 flake_dir: None,
+                run_overrides: None,
             },
             required_paths: vec![],
             queued_at: gradient_types::now(),
@@ -2705,6 +2707,7 @@ mod tests {
             input_overrides: vec![],
             input_update: None,
             flake_dir: None,
+            run_overrides: None,
         }
     }
 
@@ -3774,6 +3777,7 @@ mod tests {
             input_overrides: vec![],
             input_update: None,
             flake_dir: None,
+            run_overrides: None,
         };
         assert!(is_fetch_only(&fetch_only));
 

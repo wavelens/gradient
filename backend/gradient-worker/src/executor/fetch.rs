@@ -714,6 +714,7 @@ mod tests {
             input_overrides: vec![],
             input_update: None,
             flake_dir: None,
+            run_overrides: None,
         }
     }
 
@@ -753,6 +754,7 @@ mod tests {
             input_overrides: vec![],
             input_update: None,
             flake_dir: None,
+            run_overrides: None,
         };
         let credentials = crate::proto::credentials::CredentialStore::new();
         let mut reporter = RecordingJobReporter::new();

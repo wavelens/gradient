@@ -88,6 +88,7 @@ impl DerivationResolver for FakeDerivationResolver {
         repository: String,
         _wildcards: Vec<String>,
         _overrides: &[(String, String)],
+        _run_overrides: Option<&str>,
         _dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery> {

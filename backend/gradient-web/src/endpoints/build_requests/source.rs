@@ -116,6 +116,7 @@ pub async fn post_source(
         BuildRequestOptions {
             target,
             input_overrides: Vec::new(),
+            run: None,
             session: None,
             parent_job: parent_job(principal),
         },
@@ -139,6 +140,8 @@ pub struct SourceFinalize {
     pub system: Option<String>,
     #[serde(default)]
     pub input_overrides: Vec<InputOverrideBody>,
+    #[serde(default)]
+    pub run: Option<gradient_entity::evaluation::RunOptions>,
 }
 
 fn source_partial_store(config: &RuntimeConfig) -> WebResult<PartialStore> {
@@ -260,6 +263,7 @@ pub async fn source_finalize(
         BuildRequestOptions {
             target: body.target,
             input_overrides,
+            run: body.run,
             session: None,
             parent_job: parent_job(principal),
         },

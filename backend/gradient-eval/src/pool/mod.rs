@@ -139,6 +139,7 @@ impl EvalPool {
                 calls,
                 &[],
                 overrides,
+                None,
                 dependencies,
                 &recording,
                 false,
@@ -165,6 +166,7 @@ impl EvalPool {
         repository: String,
         wildcards: Vec<String>,
         overrides: &[(String, String)],
+        run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
@@ -190,6 +192,7 @@ impl EvalPool {
                 calls,
                 &excludes,
                 overrides,
+                run_overrides,
                 dependencies,
                 found,
                 false,
@@ -230,12 +233,17 @@ impl EvalPool {
             .collect();
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "given shards arrive with their repository, both override kinds and the sink"
+    )]
     pub async fn list_given(
         &self,
         repository: String,
         shards: Vec<DiscoveryShard>,
         wildcards: &[String],
         overrides: &[(String, String)],
+        run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
@@ -247,6 +255,7 @@ impl EvalPool {
             calls,
             &excludes,
             overrides,
+            run_overrides,
             dependencies,
             found,
             true,
@@ -264,6 +273,7 @@ impl EvalPool {
         calls: Vec<DiscoveryCall>,
         excludes: &[String],
         overrides: &[(String, String)],
+        run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
         return_deferred: bool,
@@ -278,8 +288,9 @@ impl EvalPool {
             let (listed_attrs, warnings, errors, calls_seen, deferred) =
                 (&listed_attrs, &warnings, &errors, &calls_seen, &deferred);
             pooled_fan_out(self.workers.max(), calls, |call| async move {
-                let (listing, call_stats) =
-                    self.list_shard(repo, call, overrides, dependencies).await?;
+                let (listing, call_stats) = self
+                    .list_shard(repo, call, overrides, run_overrides, dependencies)
+                    .await?;
                 let fresh: Vec<ResolvedItem> = {
                     let mut listed = lock(listed_attrs);
                     listing
@@ -328,12 +339,19 @@ impl EvalPool {
         repository: &str,
         call: DiscoveryCall,
         overrides: &[(String, String)],
+        run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Listing, Option<CallStats>)> {
         let mut attempt = 0;
         loop {
             match self
-                .list_once(repository, call.clone(), overrides, dependencies)
+                .list_once(
+                    repository,
+                    call.clone(),
+                    overrides,
+                    run_overrides,
+                    dependencies,
+                )
                 .await
             {
                 Ok((listing, stats)) => return Ok((listing, Some(stats))),
@@ -355,6 +373,7 @@ impl EvalPool {
         repository: &str,
         call: DiscoveryCall,
         overrides: &[(String, String)],
+        run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Listing, CallStats)> {
         let pattern = call.wildcards.first().cloned().unwrap_or_default();
@@ -368,6 +387,7 @@ impl EvalPool {
                 call.wildcards,
                 call.only,
                 overrides.to_vec(),
+                run_overrides.map(str::to_owned),
                 dependencies,
             )
             .await
@@ -500,6 +520,7 @@ mod tests {
                 vec![given],
                 &[],
                 &[],
+                None,
                 &RefuseDependencies("the test"),
                 &move |items| lock(found_ref).extend(items),
             )
@@ -529,6 +550,7 @@ mod tests {
                 vec![given],
                 &["hydraJobs.**".into(), "!hydraJobs.perl.broken".into()],
                 &[],
+                None,
                 &RefuseDependencies("the test"),
                 &|_| {},
             )
@@ -571,6 +593,7 @@ mod tests {
                 "repo".into(),
                 vec!["legacyPackages.x86_64-linux.*".into()],
                 &[],
+                None,
                 &RefuseDependencies("the test"),
                 &move |items| lock(found_ref).extend(items),
             )

@@ -68,12 +68,17 @@ impl EvalDependencies for RefuseDependencies {
 /// Production impls must run inside `tokio::task::spawn_blocking`. The embedded Nix C API with
 /// Boehm GC cannot run on signal-blocked Tokio workers.
 #[async_trait]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Shard lists pass the repository, both override types, dependencies and sinks."
+)]
 pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
     async fn list_flake_derivations(
         &self,
         repository: String,
         wildcards: Vec<String>,
         overrides: &[(String, String)],
+        run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery>;
@@ -94,6 +99,7 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
         _shards: Vec<ShardSpec>,
         _wildcards: &[String],
         _overrides: &[(String, String)],
+        _run_overrides: Option<&str>,
         _dependencies: &dyn EvalDependencies,
         _found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery> {

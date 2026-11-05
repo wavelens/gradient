@@ -12,6 +12,7 @@ pub mod ipc;
 mod license;
 pub mod nix_eval;
 pub mod pool;
+pub mod run_app;
 pub mod stats;
 pub mod wildcard_walk;
 
