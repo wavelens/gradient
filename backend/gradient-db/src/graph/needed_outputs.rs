@@ -34,11 +34,12 @@ fn needed_outputs_sql() -> String {
 fn unneeded_outputs_now_needed_sql() -> String {
     format!(
         "SELECT db.derivation FROM derivation_build db \
-         WHERE db.unneeded_outputs <> '{{}}' AND {idle} \
+         WHERE db.unneeded_outputs <> '{{}}' AND db.status <> {building} AND {idle} \
            AND EXISTS (SELECT 1 FROM derivation_output o \
                        WHERE o.derivation = db.derivation AND o.name = ANY(db.unneeded_outputs) \
                          AND {needed}) \
          ORDER BY db.derivation",
+        building = crate::sql::status::build(gradient_entity::build::BuildStatus::Building),
         idle = no_open_assignment_predicate(&build_job_key_sql("db.id")),
         needed = output_needed_predicate("o"),
     )

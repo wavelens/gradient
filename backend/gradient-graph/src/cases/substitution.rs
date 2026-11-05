@@ -474,3 +474,63 @@ async fn s10_a_producer_whose_every_output_our_cache_already_holds_is_not_built(
     case.zero_drift("step 1").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn s12_a_missing_output_needed_while_the_fetch_result_is_pending_turns_its_producer_after_the_result()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        a_builds_with(e1, &["out"])
+            .derivation(D)
+            .walked()
+            .entry_point("pkg.d")
+            .job()
+            .drv_cached()
+            .output(D_OUT)
+            .depends_on_outputs(B, &["dev"]),
+    )
+    .await;
+    upstream_holds(&case, &[(B_OUT, "b")]).await;
+    case.assigned(e1, B, true)
+        .await
+        .expect("a worker claims the passthrough B");
+    case.build_started(B).await;
+    case.commit_nar(commit_of(B_OUT, "b", &[(B_OUT, "b")]))
+        .await;
+    case.close_assignment(B).await;
+    case.upstream_probed(&[D]).await;
+
+    let turned = case.requeue_needed_outputs().await;
+
+    assert_eq!(turned, 0, "after 1: shared builds asked about again");
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.cache_available, b.unneeded_outputs),
+        (BuildStatus::Building, true, vec!["dev".to_owned()]),
+        "after 1: sb(B) keeps the outputs its pending fetch left out"
+    );
+    case.zero_drift("step 1").await;
+
+    case.build_output(B, true).await;
+    case.build_completed(B).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.fetchable),
+        (BuildStatus::Substituted, true),
+        "after 2: sb(B) status, fetchable without its dev output"
+    );
+    case.zero_drift("step 2").await;
+
+    let turned = case.requeue_needed_outputs().await;
+
+    assert_eq!(turned, 1, "after 3: shared builds asked about again");
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.cache_available, b.unneeded_outputs, b.probed),
+        (BuildStatus::Created, false, Vec::<String>::new(), false),
+        "after 3: sb(B) status, cache_available, unneeded_outputs, probed"
+    );
+    case.zero_drift("step 3").await;
+    case.finish().await;
+}
