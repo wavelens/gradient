@@ -34,7 +34,7 @@ async fn projects_mock(names: &[&str]) -> MockServer {
                 "description": "",
                 "created_by": "00000000-0000-0000-0000-000000000002",
                 "created_at": "2026-01-01T00:00:00",
-                "hide_build_requests": false,
+                "allow_exec_in_build_requests": false, "hide_build_requests": false,
                 "managed": false,
                 "public": false,
                 "public_key": null,
