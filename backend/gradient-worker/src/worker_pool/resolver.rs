@@ -151,6 +151,7 @@ impl DerivationResolver for WorkerPoolResolver {
         repository: String,
         wildcards: Vec<String>,
         overrides: &[(String, String)],
+        run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery> {
@@ -163,6 +164,7 @@ impl DerivationResolver for WorkerPoolResolver {
                 repository,
                 wildcards,
                 overrides,
+                run_overrides,
                 &SourceDependencies(dependencies),
                 &found_items,
             )
@@ -204,6 +206,7 @@ impl DerivationResolver for WorkerPoolResolver {
         shards: Vec<ShardSpec>,
         wildcards: &[String],
         overrides: &[(String, String)],
+        run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery> {
@@ -224,6 +227,7 @@ impl DerivationResolver for WorkerPoolResolver {
                 shards,
                 wildcards,
                 overrides,
+                run_overrides,
                 &SourceDependencies(dependencies),
                 &found_items,
             )

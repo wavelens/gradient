@@ -34,6 +34,7 @@ let
       (craneLib.fileset.commonCargoSources cliSrc)
       (mdFiles cliSrc)
       (craneLib.fileset.commonCargoSources evalSrc)
+      (lib.fileset.fileFilter (f: f.hasExt "nix") evalSrc)
       (mdFiles evalSrc)
       (repoRoot + "/docs/gradient-api.yaml")
     ];

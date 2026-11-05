@@ -228,6 +228,7 @@ fn answer_requests<R: Read, W: Write>(
                 wildcards,
                 only,
                 input_overrides,
+                run_overrides,
             } => with_evaluator(evaluator, |ev| {
                 frames.begin();
                 // The derivation path is resolved where the attribute was forced, so a member
@@ -241,7 +242,7 @@ fn answer_requests<R: Read, W: Write>(
                             .map(|attr| {
                                 measured(
                                     || read_stats(ev, collect_stats),
-                                    || resolve_item(walker, attr),
+                                    || resolve_item(walker, attr, run_overrides.as_deref()),
                                 )
                             })
                             .collect();
@@ -356,8 +357,12 @@ fn measured(
     item
 }
 
-fn resolve_item(walker: &FlakeWalker<'_>, attr: String) -> ResolvedItem {
-    match walker.resolve(&attr) {
+fn resolve_item(
+    walker: &FlakeWalker<'_>,
+    attr: String,
+    run_overrides: Option<&str>,
+) -> ResolvedItem {
+    match walker.resolve(&attr, run_overrides) {
         Ok(Resolved {
             drv_path,
             licenses,

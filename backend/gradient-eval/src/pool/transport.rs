@@ -391,6 +391,7 @@ impl EvalWorker {
         wildcards: Vec<String>,
         only: Option<Vec<String>>,
         input_overrides: Vec<(String, String)>,
+        run_overrides: Option<String>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<Listing> {
         self.served = true;
@@ -400,6 +401,7 @@ impl EvalWorker {
                 wildcards,
                 only,
                 input_overrides,
+                run_overrides,
             },
             "List",
             dependencies,

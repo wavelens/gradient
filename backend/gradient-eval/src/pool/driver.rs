@@ -63,8 +63,16 @@ pub async fn run_eval_driver(
                 wildcards,
                 only,
                 input_overrides,
+                run_overrides,
             } => worker
-                .list(repository, wildcards, only, input_overrides, &dependencies)
+                .list(
+                    repository,
+                    wildcards,
+                    only,
+                    input_overrides,
+                    run_overrides,
+                    &dependencies,
+                )
                 .await
                 .map(|l| {
                     json!({

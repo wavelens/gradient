@@ -121,7 +121,7 @@ async fn evaluate(
         pool.list_attrs(flake_ref, wildcards, &[], &dependencies, &found)
             .await
     } else {
-        pool.list_shards(flake_ref, wildcards, &[], &dependencies, &found)
+        pool.list_shards(flake_ref, wildcards, &[], None, &dependencies, &found)
             .await
     };
 

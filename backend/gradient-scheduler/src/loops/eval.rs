@@ -183,7 +183,7 @@ fn continuation_eval_job(
     let eval = &continuation.evaluation;
     let pending = assemble_eval_job(eval, maps, false, eval_history)?;
     let source = eval.flake_source.as_deref().unwrap_or(&eval.repository);
-    let (job, required_paths) = flake_job_for_eval_source(
+    let (mut job, required_paths) = flake_job_for_eval_source(
         source,
         continuation.commit_sha.clone(),
         continuation.attributes.clone(),
@@ -191,6 +191,7 @@ fn continuation_eval_job(
         pending.job.input_overrides.clone(),
         None,
     );
+    job.run_overrides = pending.job.run_overrides.clone();
     Some(PendingEvalJob {
         job,
         required_paths,
@@ -285,7 +286,7 @@ fn assemble_eval_job(
         .parse::<Wildcard>()
         .map(|w| w.patterns().to_vec())
         .unwrap_or_else(|_| vec![eval.wildcard.clone()]);
-    let (flake_job, required_paths) = flake_job_for_eval_source(
+    let (mut flake_job, required_paths) = flake_job_for_eval_source(
         &eval.repository,
         commit_sha,
         wildcards,
@@ -293,6 +294,10 @@ fn assemble_eval_job(
         input_overrides,
         input_update,
     );
+    flake_job.run_overrides = eval
+        .run_options
+        .as_ref()
+        .map(|options| options.exec_block().to_string());
 
     let Some(task_id) = eval.task else {
         error!(evaluation_id = %eval.id, "evaluation has no task");
@@ -459,6 +464,7 @@ pub(crate) fn flake_job_for_eval_source(
             input_overrides,
             input_update,
             flake_dir: None,
+            run_overrides: None,
         };
         let required = vec![RequiredPath {
             path: repository.to_owned(),
@@ -489,6 +495,7 @@ pub(crate) fn flake_job_for_eval_source(
         input_overrides,
         input_update,
         flake_dir: location.flake_dir.map(str::to_owned),
+        run_overrides: None,
     };
 
     (job, Vec::new())

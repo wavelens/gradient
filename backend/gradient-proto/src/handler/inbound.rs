@@ -1518,6 +1518,7 @@ pub(in crate::handler) mod fixture {
                 input_overrides: vec![],
                 input_update: None,
                 flake_dir: None,
+                run_overrides: None,
             },
             required_paths: vec![],
             queued_at: gradient_types::now(),

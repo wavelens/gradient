@@ -1101,6 +1101,7 @@ async fn discover(
                         repo,
                         job.wildcards.clone(),
                         &eval_overrides,
+                        job.run_overrides.as_deref(),
                         &imports,
                         &send,
                     )
@@ -1113,6 +1114,7 @@ async fn discover(
                         shards,
                         &job.wildcards,
                         &eval_overrides,
+                        job.run_overrides.as_deref(),
                         &imports,
                         &send,
                     )
@@ -1330,6 +1332,7 @@ mod tests {
             input_overrides: vec![],
             input_update: None,
             flake_dir: None,
+            run_overrides: None,
         }
     }
 
@@ -1757,6 +1760,7 @@ mod tests {
             _: String,
             _: Vec<String>,
             _: &[(String, String)],
+            _: Option<&str>,
             _: &dyn gradient_sources::EvalDependencies,
             _: gradient_sources::FoundDerivations<'_>,
         ) -> Result<FlakeDiscovery> {
@@ -1942,6 +1946,7 @@ mod tests {
             _: String,
             _: Vec<String>,
             _: &[(String, String)],
+            _: Option<&str>,
             _: &dyn gradient_sources::EvalDependencies,
             found: gradient_sources::FoundDerivations<'_>,
         ) -> Result<FlakeDiscovery> {
@@ -2067,6 +2072,7 @@ mod tests {
             _: String,
             _: Vec<String>,
             _: &[(String, String)],
+            _: Option<&str>,
             _: &dyn gradient_sources::EvalDependencies,
             found: gradient_sources::FoundDerivations<'_>,
         ) -> Result<FlakeDiscovery> {

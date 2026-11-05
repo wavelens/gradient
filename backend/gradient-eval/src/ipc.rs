@@ -14,7 +14,7 @@ use crate::stats::{AttrCost, StatsDelta};
 
 /// The version must be bumped whenever the frame layout or a type's rkyv shape changes.
 /// A mismatch can only happen when the binary is replaced mid-run.
-pub const EVAL_IPC_VERSION: u8 = 17;
+pub const EVAL_IPC_VERSION: u8 = 18;
 
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
@@ -73,6 +73,8 @@ pub enum EvalRequest {
         only: Option<Vec<String>>,
         #[serde(default)]
         input_overrides: Vec<(String, String)>,
+        #[serde(default)]
+        run_overrides: Option<String>,
     },
     Fingerprint {
         repository: String,

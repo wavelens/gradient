@@ -43,7 +43,7 @@ enum AppJson {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ReadApp {
+pub(crate) struct ReadApp {
     block: serde_json::Value,
     program: String,
     program_drvs: Vec<String>,
@@ -106,7 +106,7 @@ fn image_drv(cursor: &AttrCursor, state: &EvalState) -> Result<Option<String>> {
     Ok(Some(at.drv_path(state)?))
 }
 
-fn parse_app(json: &str) -> Result<ReadApp, String> {
+pub(crate) fn parse_app(json: &str) -> Result<ReadApp, String> {
     match serde_json::from_str(json) {
         Ok(AppJson::Read(app)) => Ok(app),
         Ok(AppJson::Refused { problem }) => Err(format!("passthru.gradient: {problem}")),
@@ -114,7 +114,7 @@ fn parse_app(json: &str) -> Result<ReadApp, String> {
     }
 }
 
-fn exec_app(app: ReadApp, image_drv: Option<&str>) -> Result<ExecApp, String> {
+pub(crate) fn exec_app(app: ReadApp, image_drv: Option<&str>) -> Result<ExecApp, String> {
     if !app.program.starts_with("/nix/store/") {
         return Err(format!(
             "passthru.gradient: program {:?} is not a store path",

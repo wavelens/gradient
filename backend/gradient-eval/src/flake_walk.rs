@@ -17,6 +17,7 @@ use nix_bindings::{Context, EvalState, Store};
 use crate::exec_app;
 use crate::ipc::{AttrError, DiscoveryShard, ExecApp, License};
 use crate::license::licenses_of;
+use crate::run_app::{RunProgram, read_run_app};
 use crate::strip_nix_store_prefix;
 use crate::wildcard_walk::{self, WalkNode};
 
@@ -108,7 +109,7 @@ impl<'a> FlakeWalker<'a> {
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(attr = attr_path))]
-    pub fn resolve(&self, attr_path: &str) -> Result<Resolved> {
+    pub fn resolve(&self, attr_path: &str, run_overrides: Option<&str>) -> Result<Resolved> {
         let (_, segs) = wildcard_walk::parse_pattern(attr_path);
         let mut cursor = self.cache.root()?;
         for seg in &segs {
@@ -118,6 +119,16 @@ impl<'a> FlakeWalker<'a> {
         }
 
         let licenses = licenses_of(&cursor, self.state);
+        if let Some(run_overrides) = run_overrides {
+            let program = RunProgram::of(&segs, exec_app::is_exec_app(&cursor)?);
+            let app = read_run_app(&cursor, self.state, program, run_overrides)?;
+            return Ok(Resolved {
+                drv_path: app.program_drv.clone(),
+                licenses,
+                exec: Some(app),
+            });
+        }
+
         if exec_app::is_exec_app(&cursor)? {
             let app = exec_app::read_exec_app(&cursor, self.state)?;
             return Ok(Resolved {

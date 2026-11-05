@@ -87,6 +87,8 @@ pub struct FlakeJob {
     pub input_update: Option<InputUpdateSpec>,
     #[proto(48, default)]
     pub flake_dir: Option<String>,
+    #[proto(57, default)]
+    pub run_overrides: Option<String>,
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

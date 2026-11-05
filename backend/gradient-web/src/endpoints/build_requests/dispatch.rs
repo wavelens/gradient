@@ -21,6 +21,7 @@ use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_db::caches::capacity::project_caches_all_full;
 use gradient_db::lookup::by_id;
+use gradient_entity::evaluation::RunOptions;
 use gradient_graph::Graph;
 use gradient_proto::import::{NarCommit, SignTargets};
 use gradient_storage::NarStore;
@@ -54,6 +55,8 @@ pub struct DispatchRequest {
     pub system: Option<String>,
     #[serde(default)]
     pub input_overrides: Vec<InputOverrideBody>,
+    #[serde(default)]
+    pub run: Option<RunOptions>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -70,7 +73,7 @@ pub struct DispatchResponse {
     operation_id = "postBuildRequestDispatch",
     tag = "build-requests",
     summary = "Finalise an upload session and queue an evaluation",
-    description = "Step 3. After all `missing` blobs have been uploaded, the client posts\nhere to materialise `/nix/store/<hash>-source` from the staged files,\nsign it with the project's cache key, lazily create the per-project reserved\n`build-request` task on first use, and queue a new evaluation\ntargeting the supplied `target` attribute path (or the task's\nwildcard when omitted).",
+    description = "Step 3. After all `missing` blobs have been uploaded, the client posts\nhere to materialise `/nix/store/<hash>-source` from the staged files,\nsign it with the project's cache key, lazily create the per-project reserved\n`build-request` task on first use, and queue a new evaluation\ntargeting the supplied `target` attribute path (or the task's\nwildcard when omitted).\n\nRequests from `gradient run` use `run`. All matched attributes become exec jobs. Exec apps run as declared. Jobs for `devShells.*` run bash interactively in a shell environment. Other derivations run through their main program. That field can override job resources. `interactive` can store the program of the single matched job until a terminal connects. Exec jobs in build requests need the project setting \"Allow Exec Jobs in Build-Requests\".",
     params(("session" = UploadSessionId, Path)),
     request_body = DispatchRequest,
     responses((status = OK, description = "Evaluation queued", body = DispatchResponse), WebError)
@@ -147,6 +150,7 @@ pub async fn post_dispatch(
         BuildRequestOptions {
             target: body.target,
             input_overrides,
+            run: body.run,
             session: Some(session),
             parent_job: parent_job(principal),
         },
@@ -159,6 +163,7 @@ pub async fn post_dispatch(
 pub(super) struct BuildRequestOptions {
     pub target: Option<String>,
     pub input_overrides: Vec<(String, String)>,
+    pub run: Option<RunOptions>,
     pub session: Option<MUploadSession>,
     pub parent_job: Option<gradient_types::ExecJobId>,
 }
@@ -216,6 +221,7 @@ pub(super) async fn finalize_build_request(
             commit_message: format!("Build request {}", nar.store_hash),
             target: options.target,
             input_overrides: options.input_overrides,
+            run_options: options.run,
             parent_exec_job: options.parent_job,
         },
     )
@@ -256,6 +262,7 @@ pub(super) struct BuildRequestSource {
     pub commit_message: String,
     pub target: Option<String>,
     pub input_overrides: Vec<(String, String)>,
+    pub run_options: Option<RunOptions>,
     pub parent_exec_job: Option<gradient_types::ExecJobId>,
 }
 
@@ -305,6 +312,7 @@ pub(super) async fn queue_build_request<C: ConnectionTrait>(
             concurrent: true,
             branch: gradient_types::branch_key::NO_BRANCH.to_owned(),
             parent_exec_job: source.parent_exec_job,
+            run_options: source.run_options,
             created_at: now_ts,
             updated_at: now_ts,
             ..Default::default()
