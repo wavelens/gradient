@@ -83,6 +83,7 @@ mod tests {
                 .collect::<BTreeMap<_, _>>(),
             public: false,
             hide_build_requests: false,
+            allow_exec_in_build_requests: false,
             created_by: "alice".into(),
             members: vec![],
             teams: vec![],

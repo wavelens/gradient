@@ -357,6 +357,53 @@ pub struct Model {
     pub prioritized: bool,
     pub parent_exec_job: Option<ExecJobId>,
     pub only_evaluate: bool,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub run_options: Option<RunOptions>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    FromJsonQueryResult,
+    utoipa::ToSchema,
+)]
+pub struct RunOptions {
+    #[serde(default)]
+    pub interactive: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpus: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_mb: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+}
+
+impl RunOptions {
+    pub fn exec_block(&self) -> serde_json::Value {
+        let mut block = serde_json::Map::new();
+        let mut set = |key: &str, value: Option<serde_json::Value>| {
+            if let Some(value) = value {
+                block.insert(key.to_owned(), value);
+            }
+        };
+        set("cpus", self.cpus.map(Into::into));
+        set("memoryMb", self.memory_mb.map(Into::into));
+        set("network", self.network.map(Into::into));
+        set("labels", self.labels.clone().map(Into::into));
+        set("timeout", self.timeout_secs.map(Into::into));
+        set("maxSilent", self.timeout_secs.map(Into::into));
+        set("ssh", self.interactive.then_some(true.into()));
+        serde_json::Value::Object(block)
+    }
 }
 
 impl Model {

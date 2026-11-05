@@ -10,9 +10,10 @@ use gradient_types::{ExecJobId, MExecJob};
 use sea_orm::{ConnectionTrait, DbErr, FromQueryResult, Value};
 use std::sync::LazyLock;
 
+use crate::build_request_task::{build_request_task_sql, task_exec_switch_sql};
 use crate::sql::StatusWrite;
 use crate::sql::status::{build_in, exec, exec_in};
-use gradient_types::exec::{DISABLED_FOR_TASK, DISABLED_ON_INSTANCE};
+use gradient_types::exec::{DISABLED_FOR_BUILD_REQUESTS, DISABLED_FOR_TASK, DISABLED_ON_INSTANCE};
 
 #[derive(Debug, Default)]
 pub struct Settled {
@@ -70,9 +71,16 @@ static REFUSE_ALL_SQL: LazyLock<String> =
 
 static REFUSE_DISABLED_TASKS_SQL: LazyLock<String> = LazyLock::new(|| {
     refuse_sql(
-        &format!("'{DISABLED_FOR_TASK}'"),
-        "FROM evaluation ev JOIN task t ON t.id = ev.task",
-        "AND ev.id = r.evaluation AND NOT t.exec_enabled",
+        &format!(
+            "CASE WHEN {build_requests} THEN '{}' ELSE '{DISABLED_FOR_TASK}' END",
+            DISABLED_FOR_BUILD_REQUESTS.replace('\'', "''"),
+            build_requests = build_request_task_sql("t"),
+        ),
+        "FROM evaluation ev JOIN task t ON t.id = ev.task JOIN project p ON p.id = t.project",
+        &format!(
+            "AND ev.id = r.evaluation AND NOT ({})",
+            task_exec_switch_sql("t", "p")
+        ),
     )
 });
 

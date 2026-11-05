@@ -7,7 +7,7 @@
 use gradient_entity::build::BuildStatus;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::exec_job::ExecJobStatus;
-use gradient_types::exec::{ExecSpec, exec_refusal};
+use gradient_types::exec::{ExecSpec, TaskExecSwitch, exec_refusal};
 use gradient_types::{ExecJobId, MExecJob};
 use sea_orm::{
     ConnectionTrait, DatabaseTransaction, DbErr, FromQueryResult, TransactionTrait, Value,
@@ -16,6 +16,7 @@ use std::sync::LazyLock;
 
 use super::create::{insert_clusters, retries_of};
 use super::settle::build_in_state;
+use crate::build_request_task::{build_request_task_sql, task_exec_switch_sql};
 use crate::sql::StatusWrite;
 use crate::sql::status::{exec, exec_in};
 
@@ -44,6 +45,7 @@ struct RunState {
     built: bool,
     waits_for_manual_start: bool,
     task_enabled: bool,
+    build_request_task: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +56,7 @@ enum Run {
 
 static RUN_STATE_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "SELECT r.spec, t.exec_enabled AS task_enabled, \
+        "SELECT r.spec, {task_enabled} AS task_enabled, {build_request_task} AS build_request_task, \
          NOT EXISTS (SELECT 1 FROM exec_job o \
               WHERE o.entry_point = r.entry_point AND o.status IN ({open})) \
          AND NOT EXISTS (SELECT 1 FROM cluster_member m \
@@ -64,8 +66,10 @@ static RUN_STATE_SQL: LazyLock<String> = LazyLock::new(|| {
               AND o.status = {created} AND o.waits_for_manual_start) AS waits_for_manual_start, \
          {program_done} AND (r.image_derivation IS NULL OR {image_done}) AS built \
          FROM exec_job r JOIN evaluation ev ON ev.id = r.evaluation \
-         JOIN task t ON t.id = ev.task \
+         JOIN task t ON t.id = ev.task JOIN project p ON p.id = t.project \
          WHERE r.id = $1",
+        task_enabled = task_exec_switch_sql("t", "p"),
+        build_request_task = build_request_task_sql("t"),
         open = exec_in(&ExecJobStatus::OPEN),
         created = exec(ExecJobStatus::Created),
         cluster_running = i16::from(ClusterJobStatus::Running),
@@ -176,7 +180,16 @@ fn next_run(state: &RunState, instance_enabled: bool) -> Result<Run, RunRefusal>
 }
 
 fn switches_on(state: &RunState, instance_enabled: bool) -> Result<(), RunRefusal> {
-    match exec_refusal(instance_enabled, state.task_enabled) {
+    let switch = if state.build_request_task {
+        TaskExecSwitch::BuildRequests {
+            allowed: state.task_enabled,
+        }
+    } else {
+        TaskExecSwitch::Task {
+            enabled: state.task_enabled,
+        }
+    };
+    match exec_refusal(instance_enabled, switch) {
         Some(message) => Err(RunRefusal::Disabled(message)),
         None => Ok(()),
     }
@@ -197,6 +210,7 @@ mod tests {
             built: true,
             waits_for_manual_start: false,
             task_enabled: true,
+            build_request_task: false,
         }
     }
 

@@ -17,7 +17,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::entry_point::{self, Licenses};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
-use gradient_types::exec::{exec_image_attr, exec_refusal};
+use gradient_types::exec::{TaskExecSwitch, exec_image_attr, exec_refusal};
 use gradient_types::*;
 use gradient_wire::types::{DiscoveredDerivation, License, attr_eval_source};
 use sea_orm::{
@@ -1044,14 +1044,14 @@ impl BatchWriter<'_> {
         }
 
         let instance_enabled = self.ctx.config.exec.enable;
-        let task_enabled = self.task_exec_enabled(task_id).await?;
+        let task_switch = self.task_exec_switch(task_id).await?;
         let mut refused = HashSet::new();
         let mut accepted = HashSet::new();
         for d in derivations {
             if d.exec.is_none() {
                 continue;
             }
-            match exec_refusal(instance_enabled, task_enabled) {
+            match exec_refusal(instance_enabled, task_switch) {
                 Some(message) => {
                     self.refuse_exec(&d.attr, message).await;
                     refused.insert(d.attr.clone());
@@ -1096,13 +1096,20 @@ impl BatchWriter<'_> {
         Ok(stored.into_iter().collect())
     }
 
-    async fn task_exec_enabled(&self, task_id: TaskId) -> Result<bool> {
+    async fn task_exec_switch(&self, task_id: TaskId) -> Result<TaskExecSwitch> {
         let task = ETask::find_by_id(task_id)
             .one(self.db())
             .await
             .context("fetch the task of an exec entry point")?
             .with_context(|| format!("task {task_id} not found"))?;
-        Ok(task.exec_enabled)
+        let project = EProject::find_by_id(task.project)
+            .one(self.db())
+            .await
+            .context("Get the project for the exec entry point.")?
+            .with_context(|| format!("project {} not found", task.project))?;
+        Ok(gradient_db::build_request_task::task_exec_switch(
+            &task, &project,
+        ))
     }
 
     async fn refuse_exec(&self, attr: &str, message: &str) {
