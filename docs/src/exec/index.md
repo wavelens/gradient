@@ -37,6 +37,10 @@ flowchart LR
 
     Browser terminals, SSH logins and port forwards into a job.
 
+-   :material-play: **[Run a Program from the CLI](run.md)**
+
+    Packages, exec apps and devShells, started from the working tree.
+
 -   :material-disc: **[Boot a Custom Image](custom-images.md)**
 
     A `nixosConfiguration` as the guest system of one app.

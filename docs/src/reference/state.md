@@ -50,6 +50,7 @@ services.gradient.state = {
 | `created_by` | string | - | Name of the user who created the project. |
 | `description` | null or string | `null` | Free-text description of the project. |
 | `display_name` | string | `name` | Name shown for the project in the UI. |
+| `allow_exec_in_build_requests` | bool | `false` | Build requests from `gradient build` and `gradient run` start the exec jobs that match them. The instance and worker switches still apply. |
 | `hide_build_requests` | bool | `false` | Set to `true` to keep the project's automatic `build-request` task out of task listings in the web UI. |
 | `id` | null or string | `null` | UUID of the project. |
 | `members` | list of submodule | `[ ]` | Users that hold a role on the project. |

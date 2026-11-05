@@ -95,6 +95,7 @@ nav:
       - Declare an Exec App: exec/apps.md
       - Pass Secrets: exec/secrets.md
       - Open a Terminal: exec/terminals.md
+      - Run a Program from the CLI: exec/run.md
       - Boot a Custom Image: exec/custom-images.md
       - Spread a Job over Workers: exec/multi-node.md
       - Report Phases and Upload Outputs: exec/phases-and-outputs.md

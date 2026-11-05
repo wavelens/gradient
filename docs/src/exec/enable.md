@@ -22,6 +22,8 @@ Exec jobs need three switches. A repository alone can never start code on a work
 | Task | off | Task **Settings -> Run exec jobs**, or `exec_enabled` in the state |
 | Worker | off | `services.gradient.worker.capabilities.exec` and `enable_exec` on the worker registration |
 
+Build requests check the project setting **Allow Exec Jobs in Build-Requests** in place of the task switch.
+
 ## 2. Turn On Task and Worker
 
 === "UI"
@@ -45,6 +47,7 @@ Exec apps fail with a message on the task page while the instance or task switch
 |---|---|
 | `exec jobs are disabled on this instance` | `exec.enable` is off |
 | `exec jobs are disabled for this task` | The task switch is off |
+| `Exec jobs don't run in build requests for this project. Enable "Allow Exec Jobs in Build-Requests" in project settings.` | A build request without the project setting, see [Run a Program from the CLI](run.md) |
 
 A finished job can start again with `runExecJob` from the [API reference](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/main/docs/gradient-api.yaml) once every switch is on. An app refused during evaluation has no job and needs a new evaluation.
 
