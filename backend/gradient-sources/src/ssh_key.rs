@@ -124,6 +124,7 @@ mod tests {
             private_key: String::new(),
             public: false,
             hide_build_requests: false,
+            allow_exec_in_build_requests: false,
             created_by: gradient_types::ids::UserId::nil(),
             created_at: NaiveDateTime::default(),
             managed: false,

@@ -15,6 +15,29 @@ pub fn is_build_request_task(task: &MTask) -> bool {
     task.managed && task.name == BUILD_REQUEST_TASK_NAME
 }
 
+pub fn task_exec_switch(task: &MTask, project: &MProject) -> exec::TaskExecSwitch {
+    if is_build_request_task(task) {
+        exec::TaskExecSwitch::BuildRequests {
+            allowed: project.allow_exec_in_build_requests,
+        }
+    } else {
+        exec::TaskExecSwitch::Task {
+            enabled: task.exec_enabled,
+        }
+    }
+}
+
+pub fn task_exec_switch_sql(task: &str, project: &str) -> String {
+    format!(
+        "CASE WHEN {task}.managed AND {task}.name = '{BUILD_REQUEST_TASK_NAME}' \
+         THEN {project}.allow_exec_in_build_requests ELSE {task}.exec_enabled END"
+    )
+}
+
+pub fn build_request_task_sql(task: &str) -> String {
+    format!("({task}.managed AND {task}.name = '{BUILD_REQUEST_TASK_NAME}')")
+}
+
 pub async fn ensure_build_request_task<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -138,12 +161,55 @@ mod tests {
             .await
             .expect("task");
         assert_eq!(task.id, winner.id);
+
         let log = db.into_transaction_log();
         assert!(
             log.iter().flat_map(|t| t.statements()).any(|s| s
                 .sql
                 .contains(r#"ON CONFLICT ("project", "name") DO NOTHING"#)),
             "{log:?}"
+        );
+    }
+
+    #[test]
+    fn the_build_request_task_follows_the_project_checkbox_not_its_own_switch() {
+        let build_requests = MTask {
+            name: BUILD_REQUEST_TASK_NAME.to_string(),
+            managed: true,
+            exec_enabled: true,
+            ..Default::default()
+        };
+        let allowed = |allow_exec_in_build_requests| MProject {
+            allow_exec_in_build_requests,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            task_exec_switch(&build_requests, &allowed(false)),
+            exec::TaskExecSwitch::BuildRequests { allowed: false }
+        );
+        assert_eq!(
+            task_exec_switch(&build_requests, &allowed(true)),
+            exec::TaskExecSwitch::BuildRequests { allowed: true }
+        );
+    }
+
+    #[test]
+    fn a_user_task_named_like_the_build_request_task_keeps_its_own_switch() {
+        let user_task = MTask {
+            name: BUILD_REQUEST_TASK_NAME.to_string(),
+            managed: false,
+            exec_enabled: false,
+            ..Default::default()
+        };
+        let project = MProject {
+            allow_exec_in_build_requests: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            task_exec_switch(&user_task, &project),
+            exec::TaskExecSwitch::Task { enabled: false }
         );
     }
 }

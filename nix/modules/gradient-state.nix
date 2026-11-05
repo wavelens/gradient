@@ -180,6 +180,14 @@
         '';
       };
 
+      allow_exec_in_build_requests = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Build requests from {command}`gradient build` and {command}`gradient run` start the exec jobs that match them. The instance and worker switches still apply.
+        '';
+      };
+
       created_by = mkOption {
         type = types.str;
         description = "User name of the project's creator.";

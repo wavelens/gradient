@@ -386,6 +386,7 @@ fn export_project(
         secret_files: Default::default(),
         public: project.public,
         hide_build_requests: project.hide_build_requests,
+        allow_exec_in_build_requests: project.allow_exec_in_build_requests,
         created_by: name_or_blank(username, project.created_by),
         members,
         teams,

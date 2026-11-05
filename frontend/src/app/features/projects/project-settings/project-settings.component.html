@@ -59,6 +59,16 @@
       />
     </gr-form-field>
 
+    <gr-form-field>
+      <gr-checkbox
+        inputId="allow-exec-in-build-requests"
+        [(ngModel)]="formData.allow_exec_in_build_requests"
+        [binary]="true"
+        [appManagedDisable]="access()"
+        label="Allow Exec Jobs in Build-Requests"
+      />
+    </gr-form-field>
+
     @if (saveError()) {
       <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
     }
