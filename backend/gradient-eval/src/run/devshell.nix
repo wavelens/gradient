@@ -11,7 +11,8 @@ let
     source "$stdenv/setup"
     mkdir -p "$out/bin"
     {
-      for name in $(compgen -e); do
+      while IFS= read -r -d "" entry; do
+        name="''${entry%%=*}"
         case "$name" in
           HOME|PWD|OLDPWD|SHLVL|TERM|TZ|PATH|_|out|outputs|builder|shell|stdenv) ;;
           TMP|TMPDIR|TEMP|TEMPDIR|NIX_BUILD_TOP|NIX_BUILD_CORES|NIX_LOG_FD|NIX_STORE) ;;
@@ -19,7 +20,7 @@ let
           SSL_CERT_FILE|NIX_SSL_CERT_FILE|SHELLOPTS|BASHOPTS|PPID|UID|EUID) ;;
           *) printf 'export %s=%q\n' "$name" "''${!name}" ;;
         esac
-      done
+      done < <(env -0)
       printf 'export PATH=%q:"$PATH"\n' "$PATH"
       printf 'export IN_NIX_SHELL=impure\n'
       declare -f
