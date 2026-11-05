@@ -83,6 +83,7 @@ pub async fn start_via_nar(
             params.target.as_deref(),
             params.system.as_deref(),
             &params.overrides,
+            params.run.clone(),
         )
         .await
     {

@@ -11,6 +11,7 @@ pub mod builds;
 pub mod caches;
 pub mod commits;
 pub mod evals;
+pub mod exec_jobs;
 pub mod integrations;
 pub mod projects;
 pub mod pull_requests;
@@ -79,6 +80,9 @@ impl Client {
     }
     pub fn evals(&self) -> evals::EvalsApi<'_> {
         evals::EvalsApi(self)
+    }
+    pub fn exec_jobs(&self) -> exec_jobs::ExecJobsApi<'_> {
+        exec_jobs::ExecJobsApi(self)
     }
     pub fn integrations(&self) -> integrations::IntegrationsApi<'_> {
         integrations::IntegrationsApi(self)
@@ -179,7 +183,7 @@ fn rustls_root_store() -> rustls::RootCertStore {
     roots
 }
 
-fn rustls_config() -> rustls::ClientConfig {
+pub(crate) fn rustls_config() -> rustls::ClientConfig {
     init_crypto_provider();
     rustls::ClientConfig::builder()
         .with_root_certificates(rustls_root_store())
