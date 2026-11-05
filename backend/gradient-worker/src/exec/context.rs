@@ -220,6 +220,7 @@ mod tests {
             max_silent_secs: None,
             attempt: 2,
             keep_vm_running: false,
+            wait_for_terminal: false,
         }
     }
 

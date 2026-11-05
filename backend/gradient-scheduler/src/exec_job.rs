@@ -149,6 +149,7 @@ impl PendingExecJob {
             max_silent_secs: limits.max_silent_secs,
             attempt: assignment.number,
             keep_vm_running: self.keep_vm_running,
+            wait_for_terminal: self.spec.wait_for_terminal,
         }
     }
 

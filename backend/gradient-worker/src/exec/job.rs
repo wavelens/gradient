@@ -442,9 +442,10 @@ pub async fn follow<R: ExecReport>(
                     () = answer_open_uploads(agent, uploads) => {}
                 }
                 exited = Some(code);
+                report_program_exit(reporter, code).await;
                 if keep_vm_running.requested() {
                     watchdog.program_exited();
-                    hold_after_exit(reporter, code).await;
+                    info!(code, "the program exited, the guest keeps running");
                 }
             }
             Ok(Some(end)) => return end,
@@ -461,10 +462,9 @@ fn agent_lost(watched: Watched<Result<AgentToWorker>>) -> Followed {
     Followed::Ended(BuildError::transient(error))
 }
 
-async fn hold_after_exit<R: ExecReport>(reporter: &mut R, code: i32) {
-    info!(code, "the program exited, the guest keeps running");
+async fn report_program_exit<R: ExecReport>(reporter: &mut R, code: i32) {
     if let Err(e) = reporter.program_exited(code).await {
-        warn!(error = %e, "could not report the program exit of a kept guest");
+        warn!(error = %e, "Failed to report program exit");
     }
 }
 
@@ -875,6 +875,7 @@ impl ExecRun<'_> {
             program_pty: self.job.requirement.ssh,
             flake_dir,
             work_disk: matches!(work, WorkVolume::Disk(_)),
+            wait_for_terminal: self.job.wait_for_terminal,
         }
     }
 
@@ -1339,7 +1340,19 @@ mod tests {
         .await;
 
         assert!(matches!(followed, Followed::Exited(0)), "{followed:?}");
-        assert!(reported.is_empty(), "{reported:?}");
+        assert_eq!(reported, [Reported::Exited(0)]);
+    }
+
+    #[tokio::test]
+    async fn every_program_exit_is_reported_with_its_code() {
+        let (followed, reported) = followed(vec![
+            AgentToWorker::ProgramStarted,
+            AgentToWorker::Exited { code: 4 },
+        ])
+        .await;
+
+        assert!(matches!(followed, Followed::Exited(4)), "{followed:?}");
+        assert_eq!(reported, [Reported::Started, Reported::Exited(4)]);
     }
 
     #[tokio::test]
@@ -1525,7 +1538,7 @@ mod tests {
         .await;
 
         assert!(matches!(followed, Followed::Exited(0)), "{followed:?}");
-        assert_eq!(reported, [Reported::Dropped(4096)]);
+        assert_eq!(reported, [Reported::Dropped(4096), Reported::Exited(0)]);
     }
 
     #[tokio::test]
@@ -1543,7 +1556,10 @@ mod tests {
         ])
         .await;
 
-        assert_eq!(reported, [Reported::Phase("small".into())]);
+        assert_eq!(
+            reported,
+            [Reported::Phase("small".into()), Reported::Exited(0)]
+        );
     }
 
     #[test]
@@ -1583,6 +1599,7 @@ mod tests {
             max_silent_secs: None,
             attempt: 1,
             keep_vm_running: false,
+            wait_for_terminal: false,
         };
         let with_image = ExecJob {
             image: Some(image.into()),

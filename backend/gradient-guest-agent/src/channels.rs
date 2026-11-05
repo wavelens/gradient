@@ -182,6 +182,7 @@ impl AgentChannels {
             self.outbound.clone(),
             channel.ended.clone(),
         ));
+        program.mark_attached();
         Ok(channel)
     }
 

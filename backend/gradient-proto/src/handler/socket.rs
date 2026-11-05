@@ -209,6 +209,7 @@ mod tests {
             input_overrides: vec![],
             input_update: None,
             flake_dir: None,
+            run_overrides: None,
         })
     }
 
@@ -247,6 +248,7 @@ mod tests {
             max_silent_secs: None,
             attempt: 1,
             keep_vm_running: false,
+            wait_for_terminal: false,
         }))
     }
 

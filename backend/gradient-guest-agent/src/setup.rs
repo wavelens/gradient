@@ -42,6 +42,7 @@ pub struct PreparedJob {
     pub program: Command,
     pub env: BTreeMap<String, String>,
     pub terminal: bool,
+    pub wait_for_terminal: bool,
     pub redactor: SecretRedactor,
     pub start_commit: String,
 }
@@ -72,6 +73,7 @@ async fn prepare_steps(job: &RunJob, tasks: &Shutdown) -> Result<PreparedJob> {
         program,
         env,
         terminal: job.program_pty,
+        wait_for_terminal: job.wait_for_terminal,
         redactor: job_redactor(job),
         start_commit: job.context.job.get("commit").cloned().unwrap_or_default(),
     })
