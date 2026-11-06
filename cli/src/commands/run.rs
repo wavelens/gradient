@@ -24,7 +24,7 @@ const LAST_MESSAGES_WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    /// Match an attribute like `gradient build` does (default: `packages.<system>.default`)
+    /// Flake attribute to run. A bare `.#name` means `apps.<system>.name` (default: `apps.<system>.default`)
     target: Option<String>,
     /// Track the job log instead of connecting this terminal to the program
     #[arg(long)]

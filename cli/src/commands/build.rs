@@ -109,7 +109,11 @@ pub(crate) async fn submit_build_request(
             .system
             .clone()
             .unwrap_or_else(attr_spec::default_nix_system);
-        let normalized = normalize_target(&raw, &system);
+        let category = match params.run {
+            Some(_) => "apps",
+            None => "packages",
+        };
+        let normalized = normalize_target(&raw, &system, category);
         if !quiet && normalized != raw {
             out.progress(format!("Building '{}' (from '{}')", normalized, raw));
         }
@@ -361,18 +365,20 @@ async fn wait_for_terminal(
 
 /// The flake ref is always the uploaded repo. A leading local ref before `#` is dropped, and a bare
 /// attr is qualified like `nix build`.
-fn normalize_target(raw: &str, system: &str) -> String {
+fn normalize_target(raw: &str, system: &str, category: &str) -> String {
     raw.split(',')
-        .map(|pat| normalize_installable(pat.trim(), system))
+        .map(|pat| normalize_installable(pat.trim(), system, category))
         .collect::<Vec<_>>()
         .join(",")
 }
 
-fn normalize_installable(pat: &str, system: &str) -> String {
+fn normalize_installable(pat: &str, system: &str, category: &str) -> String {
     let (excl, body) = pat.strip_prefix('!').map(|r| ("!", r)).unwrap_or(("", pat));
 
     match body.split_once('#') {
-        Some(("" | "." | "./", attr)) => attr_spec::qualify_attr(&format!("{excl}{attr}"), system),
+        Some(("" | "." | "./", attr)) => {
+            attr_spec::qualify_attr(&format!("{excl}{attr}"), system, category)
+        }
         _ => pat.to_string(),
     }
 }
@@ -585,15 +591,15 @@ mod tests {
     #[test]
     fn bare_installable_qualifies_to_packages() {
         assert_eq!(
-            normalize_installable(".#uxc", "x86_64-linux"),
+            normalize_installable(".#uxc", "x86_64-linux", "packages"),
             "packages.x86_64-linux.uxc"
         );
         assert_eq!(
-            normalize_installable("#uxc", "aarch64-darwin"),
+            normalize_installable("#uxc", "aarch64-darwin", "packages"),
             "packages.aarch64-darwin.uxc"
         );
         assert_eq!(
-            normalize_installable(".#", "x86_64-linux"),
+            normalize_installable(".#", "x86_64-linux", "packages"),
             "packages.x86_64-linux.*"
         );
     }
@@ -601,20 +607,20 @@ mod tests {
     #[test]
     fn qualified_and_wildcard_targets_pass_through() {
         assert_eq!(
-            normalize_installable("packages.x86_64-linux.*", "x86_64-linux"),
+            normalize_installable("packages.x86_64-linux.*", "x86_64-linux", "packages"),
             "packages.x86_64-linux.*"
         );
         assert_eq!(
-            normalize_installable("checks.x86_64-linux.*", "x86_64-linux"),
+            normalize_installable("checks.x86_64-linux.*", "x86_64-linux", "packages"),
             "checks.x86_64-linux.*"
         );
-        assert_eq!(normalize_installable("*", "x86_64-linux"), "*");
+        assert_eq!(normalize_installable("*", "x86_64-linux", "packages"), "*");
         assert_eq!(
-            normalize_installable(".#packages.aarch64-linux.uxc", "x86_64-linux"),
+            normalize_installable(".#packages.aarch64-linux.uxc", "x86_64-linux", "packages"),
             "packages.aarch64-linux.uxc"
         );
         assert_eq!(
-            normalize_installable(".#nixosConfigurations.foo", "x86_64-linux"),
+            normalize_installable(".#nixosConfigurations.foo", "x86_64-linux", "packages"),
             "nixosConfigurations.foo"
         );
     }
@@ -622,16 +628,24 @@ mod tests {
     #[test]
     fn exclusions_and_comma_lists_preserved() {
         assert_eq!(
-            normalize_installable("!.#uxc", "x86_64-linux"),
+            normalize_installable("!.#uxc", "x86_64-linux", "packages"),
             "!packages.x86_64-linux.uxc"
         );
         assert_eq!(
-            normalize_installable("!nixosConfigurations.foo", "x86_64-linux"),
+            normalize_installable("!nixosConfigurations.foo", "x86_64-linux", "packages"),
             "!nixosConfigurations.foo"
         );
         assert_eq!(
-            normalize_target(".#uxc,.#cli", "x86_64-linux"),
+            normalize_target(".#uxc,.#cli", "x86_64-linux", "packages"),
             "packages.x86_64-linux.uxc,packages.x86_64-linux.cli"
+        );
+    }
+
+    #[test]
+    fn run_targets_qualify_to_apps() {
+        assert_eq!(
+            normalize_target(".#default,.#frontend", "x86_64-linux", "apps"),
+            "apps.x86_64-linux.default,apps.x86_64-linux.frontend"
         );
     }
 }
