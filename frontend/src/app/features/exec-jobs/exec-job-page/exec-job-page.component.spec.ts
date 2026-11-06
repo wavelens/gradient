@@ -58,6 +58,13 @@ function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobRes
     labels: [],
     devices: [],
     guest: { cpus: 2, memory_mb: 500, disk_mb: 2048 },
+    architecture: 'x86_64-linux',
+    mounts: [],
+    secrets: [],
+    network: false,
+    ssh: true,
+    ports: [6006],
+    retries: 0,
     retries_left: 0,
     autostart: true,
     keep_vm_running: false,
@@ -261,6 +268,34 @@ describe('ExecJobPageComponent', () => {
     fixture.detectChanges();
     expect(root.querySelector('gr-log-viewer')).toBeNull();
     expect(root.querySelector('gr-job-timeline .phases')?.textContent).toContain('epoch-3');
+  });
+
+  it('keeps the info tab of a waiting job open across polls', async () => {
+    vi.useFakeTimers();
+    try {
+      const queued: ExecJobResponse = {
+        ...job('queued'),
+        worker: null,
+        attempts: [],
+        waiting_reason: {
+          kind: 'exec_workers',
+          unmet: { labels: [], devices: [], mounts: [], nodes: 0, custom_image: false, ssh: true },
+          connected_workers: 1,
+          matching_workers: 0,
+        },
+      };
+      const { fixture } = setup('queued', SSH, {}, queued);
+      const root = fixture.nativeElement as HTMLElement;
+      Array.from(root.querySelectorAll<HTMLElement>('.log-sidebar .sidebar-item'))
+        .find((item) => item.textContent?.includes('Info'))
+        ?.click();
+      await vi.advanceTimersByTimeAsync(2000);
+      fixture.detectChanges();
+      expect(root.querySelector('gr-log-viewer')).toBeNull();
+      expect(root.querySelector('app-exec-job-info .waiting')?.textContent).toContain('needs a worker that allows SSH');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows the guest size of the job', () => {

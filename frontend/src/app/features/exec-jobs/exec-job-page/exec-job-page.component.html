@@ -206,6 +206,11 @@
               }
             </div>
           }
+        } @else if (view() === 'info') {
+          <div class="log-header">
+            <span class="log-header-title">Requested</span>
+          </div>
+          <app-exec-job-info [job]="job" />
         } @else if (view() === 'timeline') {
           <div class="log-header">
             <span class="log-header-title">Worker timeline</span>

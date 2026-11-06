@@ -20,7 +20,7 @@ use gradient_db::scheduling::cluster::clusters_of_assignments;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
-use gradient_types::exec::{DeviceRequest, ExecSpec, GuestSize};
+use gradient_types::exec::{DeviceRequest, ExecRequirement, ExecSpec, GuestSize};
 use gradient_types::*;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -91,6 +91,16 @@ pub struct ExecJobResponse {
     pub labels: Vec<String>,
     pub devices: Vec<DeviceRequest>,
     pub guest: GuestSize,
+    pub architecture: String,
+    pub mounts: Vec<String>,
+    pub secrets: Vec<String>,
+    pub network: bool,
+    pub ssh: bool,
+    pub ports: Vec<u16>,
+    pub image: Option<String>,
+    pub timeout_secs: Option<u64>,
+    pub max_silent_secs: Option<u64>,
+    pub retries: u32,
     pub waiting_reason: Option<WaitingReason>,
     pub message: Option<String>,
     pub retries_left: i32,
@@ -246,6 +256,8 @@ fn response(
         ..
     } = ctx.detail;
     let spec = spec_of(&job);
+    let requirement: ExecRequirement =
+        serde_json::from_value(job.requirement.clone()).unwrap_or_default();
     let (ssh_command, forward_commands) = ssh_access(config, &ctx.project.name, &job, &spec);
     let worker = placed_attempt(&job, &attempts).map(|a| a.worker);
     let number_of = |attempt: ExecJobAttemptId| {
@@ -273,6 +285,16 @@ fn response(
         labels: spec.labels,
         devices: spec.devices,
         guest: spec.guest,
+        architecture: requirement.architecture,
+        mounts: requirement.mounts,
+        secrets: spec.secrets,
+        network: requirement.network,
+        ssh: requirement.ssh,
+        ports: spec.ports,
+        image: spec.image,
+        timeout_secs: spec.timeout_secs,
+        max_silent_secs: spec.max_silent_secs,
+        retries: spec.retries,
         waiting_reason: waiting_reason_of(&job),
         message: job.message,
         retries_left: job.retries_left,
@@ -331,7 +353,7 @@ fn summary(row: ExecJobRow, clusters: &HashMap<DispatchedJobId, ClusterJobId>) -
     operation_id = "getExecJob",
     tag = "exec-jobs",
     summary = "Get exec job",
-    description = "Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `dispatched_job` is the job board assignment of the latest attempt and `cluster_job` the cluster job of a multi-node job. `timeline` holds the worker timeline of the latest attempt, each reported phase as a span lasting until the next phase or the end of the attempt. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the job is `running`, the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` is true when the guest did not exit with the program. `program_exit_code` is the exit code at the time of program exit. The same can apply to a retained guest that did not exit.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns an exec job with its status, wait reason, the requested architecture, labels, devices, guest size, mounts, secret names, network, SSH, ports, image, timeouts and retries, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `dispatched_job` is the job board assignment of the latest attempt and `cluster_job` the cluster job of a multi-node job. `timeline` holds the worker timeline of the latest attempt, each reported phase as a span lasting until the next phase or the end of the attempt. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the job is `running`, the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` is true when the guest did not exit with the program. `program_exit_code` is the exit code at the time of program exit. The same can apply to a retained guest that did not exit.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Exec job", body = ExecJobResponse), WebError)
 )]

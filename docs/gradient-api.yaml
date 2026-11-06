@@ -5999,7 +5999,7 @@ paths:
       - exec-jobs
       summary: Get exec job
       description: |-
-        Returns an exec job with its status, wait reason, requested labels, devices and guest size, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `dispatched_job` is the job board assignment of the latest attempt and `cluster_job` the cluster job of a multi-node job. `timeline` holds the worker timeline of the latest attempt, each reported phase as a span lasting until the next phase or the end of the attempt. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the job is `running`, the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` is true when the guest did not exit with the program. `program_exit_code` is the exit code at the time of program exit. The same can apply to a retained guest that did not exit.
+        Returns an exec job with its status, wait reason, the requested architecture, labels, devices, guest size, mounts, secret names, network, SSH, ports, image, timeouts and retries, attempts, phases, job tokens (never their value), the evaluations it started and the total size of its outputs. Any node id of a multi-node job answers the job: `id`, the attempts, phases, tokens and outputs are node 0's, `status` follows every node and `node_jobs` lists each node with its status, worker, guest address, master port and attempts. `worker` is the worker of the latest attempt and empty while the job waits to start and `worker_name` its display name when the caller can see the worker. `dispatched_job` is the job board assignment of the latest attempt and `cluster_job` the cluster job of a multi-node job. `timeline` holds the worker timeline of the latest attempt, each reported phase as a span lasting until the next phase or the end of the attempt. `ssh_command` and `forward_commands` hold the `ssh` login and one `ssh -N -L` command per declared port while the job is `running`, the SSH server is enabled and the job does not set `ssh = false`. `keep_vm_running` is true when the guest did not exit with the program. `program_exit_code` is the exit code at the time of program exit. The same can apply to a retained guest that did not exit.
 
         **Access:** Public projects, or members of the project.
       operationId: getExecJob
@@ -16889,6 +16889,13 @@ components:
       - labels
       - devices
       - guest
+      - architecture
+      - mounts
+      - secrets
+      - network
+      - ssh
+      - ports
+      - retries
       - retries_left
       - autostart
       - keep_vm_running
@@ -16928,6 +16935,46 @@ components:
             $ref: '#/components/schemas/DeviceRequest'
         guest:
           $ref: '#/components/schemas/GuestSize'
+        architecture:
+          type: string
+        mounts:
+          type: array
+          items:
+            type: string
+        secrets:
+          type: array
+          items:
+            type: string
+        network:
+          type: boolean
+        ssh:
+          type: boolean
+        ports:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+        image:
+          type:
+          - string
+          - 'null'
+        timeout_secs:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        max_silent_secs:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        retries:
+          type: integer
+          format: int32
+          minimum: 0
         waiting_reason:
           oneOf:
           - $ref: '#/components/schemas/WaitingReason'
