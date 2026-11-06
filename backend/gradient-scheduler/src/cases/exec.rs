@@ -183,9 +183,10 @@ async fn an_exec_offer_carries_the_program_closure_with_its_sizes() {
         paths,
         vec![
             (format!("/nix/store/{A_OUT}-a"), Some(5)),
+            ("/nix/store/abc-source".into(), None),
             (format!("/nix/store/{B_OUT}-b"), Some(5)),
         ],
-        "after 1: the program and its runtime dependency with their sizes"
+        "after 1: the program and its runtime dependency with their sizes, plus the uploaded source without a size"
     );
     case.finish().await;
 }
