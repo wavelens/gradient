@@ -11,6 +11,7 @@ use std::str::FromStr;
 use clap::{Args, Parser};
 use gradient_derive::config_group;
 use gradient_vm::{DeviceConfig, MountConfig, check_device};
+use gradient_wire::types::PortRanges;
 use serde::de::DeserializeOwned;
 
 /// CLI arguments and environment variables for `gradient-worker`.
@@ -438,10 +439,11 @@ pub struct ExecArgs {
     #[arg(default_value = "false")]
     pub allow_ssh: bool,
 
-    /// Lowest and highest guest port exec jobs may forward, as `low,high`. `null` allows
+    /// Guest ports exec jobs may forward, as a comma-separated list of single ports and
+    /// `first-last` ranges such as `22,8000-8100`. An empty list allows none. `null` allows
     /// ports 1024 to 65535.
-    #[arg(value_parser = PortRange::from_str)]
-    pub allow_ports: Option<PortRange>,
+    #[arg(value_parser = PortRanges::from_str)]
+    pub allow_ports: Option<PortRanges>,
 
     /// Most nodes an exec job may span.
     #[arg(default_value_t = 1)]
@@ -494,30 +496,6 @@ pub struct ExecArgs {
     /// SSH private key decrypting {option}`services.gradient.worker.exec.sops.files`, an
     /// Ed25519 or RSA key. The age recipient derives from it. `null` decrypts no file.
     pub sops_key_file: Option<PathBuf>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PortRange(pub u16, pub u16);
-
-impl FromStr for PortRange {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, String> {
-        let (low, high) = s
-            .split_once(',')
-            .ok_or_else(|| format!("{s:?} is not a `low,high` port range"))?;
-        let port = |p: &str| {
-            p.trim()
-                .parse::<u16>()
-                .map_err(|e| format!("port {p:?}: {e}"))
-        };
-        let (low, high) = (port(low)?, port(high)?);
-        if low > high {
-            return Err(format!("port range {low},{high} is reversed"));
-        }
-
-        Ok(Self(low, high))
-    }
 }
 
 fn json_list<T: DeserializeOwned>(s: &str) -> Result<Vec<T>, String> {

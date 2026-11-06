@@ -1127,6 +1127,9 @@ export interface ExecUnmet {
   custom_image: boolean;
   secrets?: string[];
   guest?: GuestSize;
+  network?: boolean;
+  ssh?: boolean;
+  ports?: number[];
 }
 
 export interface ExpensiveBuild {

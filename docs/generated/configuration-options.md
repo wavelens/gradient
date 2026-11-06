@@ -376,7 +376,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `worker.exec.allow.mounts` | list of string | `[ ]` | `GRADIENT_WORKER_EXEC_ALLOW_MOUNTS` | Mount names from `worker.exec.mounts` exec jobs may request. An empty list allows none. |
 | `worker.exec.allow.network` | bool | `false` | `GRADIENT_WORKER_EXEC_ALLOW_NETWORK` | Whether exec jobs may reach the network through `worker.exec.bridge`. |
 | `worker.exec.allow.nodes` | unsigned int | `1` | `GRADIENT_WORKER_EXEC_ALLOW_NODES` | Most nodes an exec job may span. |
-| `worker.exec.allow.ports` | null or (list of port) | `null` | `GRADIENT_WORKER_EXEC_ALLOW_PORTS` | First and last port of the range that exec jobs can ask for. `null` allows ports 1024 to 65535. |
+| `worker.exec.allow.ports` | null or (list of (port or list of port)) | `null` | `GRADIENT_WORKER_EXEC_ALLOW_PORTS` | Guest ports that exec jobs can request. Each entry can be a single port or `[ first last ]` range. No ports pass with an empty list. `null` stands for ports 1024 to 65535. |
 | `worker.exec.allow.retries` | unsigned int | `0` | `GRADIENT_WORKER_EXEC_ALLOW_RETRIES` | Most retries an exec job may request. |
 | `worker.exec.allow.ssh` | bool | `false` | `GRADIENT_WORKER_EXEC_ALLOW_SSH` | Whether exec jobs may accept SSH sessions into their guest. |
 | `worker.exec.allow.timeout` | null or (unsigned int) | `null` | `GRADIENT_WORKER_EXEC_ALLOW_TIMEOUT` | Most seconds an exec job may run. The server lowers a larger request to this value. `null` sets no cap. |

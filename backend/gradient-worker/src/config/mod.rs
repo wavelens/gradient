@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use gradient_eval::pool::MemoryGuard;
 use gradient_vm::{SupervisorConfig, VmConfig};
-use gradient_wire::types::{ExecAllow, ExecDefaults, GradientCapabilities, GuestSize};
+use gradient_wire::types::{ExecAllow, ExecDefaults, GradientCapabilities, GuestSize, PortRanges};
 
 pub fn host_system() -> String {
     let arch = std::env::consts::ARCH;
@@ -186,11 +186,13 @@ impl ExecArgs {
     }
 
     pub fn allow(&self) -> ExecAllow {
-        let PortRange(lowest, highest) = self.allow_ports.unwrap_or(PortRange(1024, 65535));
         ExecAllow {
             network: self.allow_network,
             ssh: self.allow_ssh,
-            ports: (lowest, highest),
+            ports: self
+                .allow_ports
+                .clone()
+                .unwrap_or_else(PortRanges::unprivileged),
             nodes: self.allow_nodes,
             devices: self.allow_devices.clone(),
             mounts: self.allow_mounts.clone(),
@@ -312,7 +314,21 @@ mod tests {
 
     #[test]
     fn a_reversed_port_range_is_refused() {
-        assert!(parse(&["--exec-allow-ports", "65535,1024"]).is_err());
+        assert!(parse(&["--exec-allow-ports", "65535-1024"]).is_err());
+    }
+
+    #[test]
+    fn allowed_ports_mix_single_ports_and_ranges() {
+        let port = |first, last| gradient_wire::types::PortRange { first, last };
+        let config = parse(&["--exec-allow-ports", "22,8000-8100,6006"]).expect("valid ports");
+        assert_eq!(
+            config.exec.allow().ports,
+            PortRanges(vec![port(22, 22), port(8000, 8100), port(6006, 6006)])
+        );
+        let none = parse(&["--exec-allow-ports", ""]).expect("an empty list");
+        assert_eq!(none.exec.allow().ports, PortRanges::default());
+        let unset = parse(&[]).expect("defaults");
+        assert_eq!(unset.exec.allow().ports, PortRanges::unprivileged());
     }
 
     #[test]

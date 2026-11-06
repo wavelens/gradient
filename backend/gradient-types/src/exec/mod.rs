@@ -12,8 +12,8 @@ pub use job_token::{JOB_TOKEN_PREFIX, hash_job_token, job_token_expiry, mint_job
 
 pub use gradient_wire::types::{
     DeviceClass, DeviceRequest, DeviceRequestError, ExecAllow, ExecDefaults, ExecInventory,
-    ExecLimits, ExecRequirement, ExecSpec, GuestCapacity, GuestSize, Phase, ResourceAmount,
-    SecretNameError, SopsFile, WarmGuests, count_warm_guests, exec_image_attr,
+    ExecLimits, ExecRequirement, ExecSpec, GuestCapacity, GuestSize, Phase, PortRange, PortRanges,
+    ResourceAmount, SecretNameError, SopsFile, WarmGuests, count_warm_guests, exec_image_attr,
     validate_secret_name,
 };
 

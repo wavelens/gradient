@@ -311,12 +311,11 @@ in {
       };
 
       allow.ports = lib.mkOption {
-        type = lib.types.nullOr (lib.types.listOf lib.types.port);
+        type = lib.types.nullOr (lib.types.listOf (lib.types.either lib.types.port (lib.types.listOf lib.types.port)));
         default = null;
-        example = [ 1024 65535 ];
+        example = lib.literalExpression "[ 22 [ 8000 8100 ] 6006 ]";
         description = ''
-          First and last port of the range that exec jobs can ask for. `null` allows ports
-          1024 to 65535.
+          Guest ports that exec jobs can request. Each entry can be a single port or `[ first last ]` range. No ports pass with an empty list. `null` stands for ports 1024 to 65535.
         '';
       };
 
@@ -560,8 +559,8 @@ in {
         message = "The services.gradient.worker.exec options depend on capabilities.exec. Enable capabilities.exec or unset services.gradient.worker.exec.";
       }
       {
-        assertion = exec.allow.ports == null || lib.length exec.allow.ports == 2;
-        message = "services.gradient.worker.exec.allow.ports: a list of the first and last port, not ${toString (lib.length exec.allow.ports)} ports";
+        assertion = exec.allow.ports == null || lib.all (entry: !lib.isList entry || (lib.length entry == 2 && lib.head entry <= lib.last entry)) exec.allow.ports;
+        message = "services.gradient.worker.exec.allow.ports: Write each range in the form [ first last ]. Ensure first <= last.";
       }
       {
         assertion = exec.sops.files != [ ] -> exec.sops.keyFile != null;
@@ -660,7 +659,7 @@ in {
           } // lib.optionalAttrs (cfg.capabilities.exec && exec.sops.keyFile != null) {
             GRADIENT_WORKER_EXEC_SOPS_KEY_FILE = "%d/gradient_worker_exec_sops_key";
           } // lib.optionalAttrs (cfg.capabilities.exec && exec.allow.ports != null) {
-            GRADIENT_WORKER_EXEC_ALLOW_PORTS = lib.concatMapStringsSep "," toString exec.allow.ports;
+            GRADIENT_WORKER_EXEC_ALLOW_PORTS = lib.concatMapStringsSep "," (entry: if lib.isList entry then "${toString (lib.head entry)}-${toString (lib.last entry)}" else toString entry) exec.allow.ports;
           } // workerOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
         };
       };

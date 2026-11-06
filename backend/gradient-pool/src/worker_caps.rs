@@ -5,12 +5,13 @@
  */
 
 use gradient_types::input::check_repository_url_is_ssh;
-use std::collections::BTreeMap;
 
 use gradient_wire::types::{
     BuildJob, BuildSpecKind, DeviceClass, ExecInventory, ExecRequirement, FlakeJob, FlakeSource,
-    FlakeStep, GuestCapacity, GuestSize, JobKind, ResourceAmount,
+    FlakeStep, JobKind, ResourceAmount,
 };
+
+use crate::exec_fit::ExecFit;
 
 pub fn build_needs_network(kind: BuildSpecKind, is_fixed_output: bool) -> bool {
     kind != BuildSpecKind::Build || is_fixed_output
@@ -31,26 +32,19 @@ pub enum DeviceCount {
 }
 
 impl DeviceCount {
-    fn of(self, class: &DeviceClass) -> u32 {
+    pub(crate) fn of(self, class: &DeviceClass) -> u32 {
         match self {
             Self::Free => class.free,
             Self::Total => class.total,
         }
     }
 
-    fn amount(self, amount: &ResourceAmount) -> u64 {
+    pub(crate) fn amount(self, amount: &ResourceAmount) -> u64 {
         match self {
             Self::Free => amount.free,
             Self::Total => amount.total,
         }
     }
-}
-
-pub fn guest_fits(size: &GuestSize, capacity: &GuestCapacity, count: DeviceCount) -> bool {
-    capacity.is_unset()
-        || (u64::from(size.cpus) <= count.amount(&capacity.cpus)
-            && size.memory_mb <= count.amount(&capacity.memory_mb)
-            && size.disk_mb <= count.amount(&capacity.disk_mb))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -74,7 +68,7 @@ impl WorkerCaps {
         }
     }
 
-    fn runs_architecture(&self, architecture: &str) -> bool {
+    pub(crate) fn runs_architecture(&self, architecture: &str) -> bool {
         architecture == gradient_types::BUILTIN_ARCH
             || self.architectures.iter().any(|a| a == architecture)
     }
@@ -91,40 +85,7 @@ impl WorkerCaps {
     }
 
     pub fn fits_exec(&self, req: &ExecRequirement, devices: DeviceCount) -> bool {
-        let Some(inventory) = self.exec.as_ref() else {
-            return false;
-        };
-        let allow = &inventory.allow;
-        let (lowest_port, highest_port) = allow.ports;
-        self.takes_jobs_of(&JobKind::Exec)
-            && self.runs_architecture(&req.architecture)
-            && req.labels.iter().all(|l| inventory.labels.contains(l))
-            && devices_fit(req, inventory, devices)
-            && guest_fits(&req.guest, &inventory.guest_capacity, devices)
-            && req
-                .mounts
-                .iter()
-                .all(|m| inventory.mounts.contains(m) && allow.mounts.contains(m))
-            && (!req.network || allow.network)
-            && (!req.ssh || allow.ssh)
-            && req
-                .ports
-                .iter()
-                .all(|p| (lowest_port..=highest_port).contains(p))
-            && (!req.custom_image || allow.custom_images)
-            && allow.nodes >= req.nodes.max(1)
-            && self.holds_secrets(req, inventory)
-    }
-
-    fn holds_secrets(&self, req: &ExecRequirement, inventory: &ExecInventory) -> bool {
-        req.secrets
-            .iter()
-            .all(|name| inventory.secrets.contains(name))
-            && (req.server_secrets.is_empty() || self.capabilities.secrets)
-            && !req
-                .server_secrets
-                .iter()
-                .any(|name| inventory.secrets.contains(name))
+        ExecFit::of(self, devices).is_some_and(|fit| fit.fits(req))
     }
 
     pub fn can_run_build(&self, job: &BuildJob) -> bool {
@@ -158,25 +119,12 @@ impl WorkerCaps {
     }
 }
 
-fn devices_fit(req: &ExecRequirement, inventory: &ExecInventory, devices: DeviceCount) -> bool {
-    let mut wanted: BTreeMap<&str, u32> = BTreeMap::new();
-    for device in &req.devices {
-        *wanted.entry(device.name.as_str()).or_default() += device.count;
-    }
-    wanted.into_iter().all(|(name, count)| {
-        inventory.allow.devices.iter().any(|d| d == name)
-            && inventory
-                .devices
-                .iter()
-                .any(|class| class.name == name && devices.of(class) >= count)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use gradient_wire::types::{
-        DeviceClass, DeviceRequest, ExecAllow, ExecInventory, ExecRequirement, GradientCapabilities,
+        DeviceClass, DeviceRequest, ExecAllow, ExecInventory, ExecRequirement,
+        GradientCapabilities, GuestCapacity, GuestSize,
     };
 
     fn x86_worker(build: bool) -> WorkerCaps {
@@ -307,7 +255,7 @@ mod tests {
                 allow: ExecAllow {
                     network: true,
                     ssh: false,
-                    ports: (1024, 65535),
+                    ports: gradient_wire::types::PortRanges::unprivileged(),
                     nodes: 8,
                     devices: vec!["gpu:h100".into(), "kvm".into()],
                     mounts: vec!["datasets".into(), "scratch".into()],
@@ -446,6 +394,21 @@ mod tests {
         );
         assert!(!w.can_run_exec(&req(|r| r.ports = vec![80])));
         assert!(w.can_run_exec(&req(|r| r.ports = vec![6006])));
+    }
+
+    #[test]
+    fn every_port_must_lie_in_some_allowed_range() {
+        let range = |first, last| gradient_wire::types::PortRange { first, last };
+        let mut w = exec_worker();
+        if let Some(inventory) = w.exec.as_mut() {
+            inventory.allow.ports = gradient_wire::types::PortRanges(vec![
+                range(22, 22),
+                range(8000, 8100),
+                range(6006, 6006),
+            ]);
+        }
+        assert!(w.can_run_exec(&req(|r| r.ports = vec![22, 8080, 6006])));
+        assert!(!w.can_run_exec(&req(|r| r.ports = vec![22, 8101])));
     }
 
     #[test]
