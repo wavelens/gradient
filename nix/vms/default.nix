@@ -20,5 +20,10 @@ in builtins.listToAttrs (map (vm: {
   in {
     type = "app";
     program = "${driver}/bin/nixos-test-driver";
+    passthru.gradient = {
+      ssh = true;
+      network = true;
+      memoryMb = 8192;
+    };
   };
 }) vms)
