@@ -106,6 +106,13 @@ in {
         '';
       };
 
+      trustedUsers = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [ "alice" ];
+        description = "Users who can run `gradient-update` without root. Polkit rules grant those users permission to start `gradient-deploy.service` and nothing else.";
+      };
+
       dates = lib.mkOption {
         type = lib.types.str;
         default = "04:00";
@@ -149,6 +156,20 @@ in {
         systemctl start -v gradient-deploy.service
       '')
     ];
+
+    security.polkit = lib.mkIf (cfg.trustedUsers != [ ]) {
+      enable = true;
+      extraConfig = ''
+        polkit.addRule(function(action, subject) {
+          if (action.id == "org.freedesktop.systemd1.manage-units" &&
+              action.lookup("unit") == "gradient-deploy.service" &&
+              action.lookup("verb") == "start" &&
+              ${builtins.toJSON (lib.unique cfg.trustedUsers)}.indexOf(subject.user) >= 0) {
+            return polkit.Result.YES;
+          }
+        });
+      '';
+    };
 
     systemd = {
       services.gradient-deploy = {

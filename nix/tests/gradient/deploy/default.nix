@@ -27,7 +27,13 @@
         server = "http://127.0.0.1:8090";
         apiKeyFile = "/etc/gradient-deploy-api-key";
         task = "wavelens/dotfiles";
+        trustedUsers = [ "trusted" ];
       };
+    };
+
+    users.users = {
+      trusted.isNormalUser = true;
+      untrusted.isNormalUser = true;
     };
 
     specialisation.deployed.configuration = {
