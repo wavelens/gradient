@@ -48,7 +48,7 @@ passthru.gradient = {
 ```
 
 - `args` and `env` accept the keys as `@gradient.cluster.<key>@`.
-- The master port defaults to 29500. Blocked ports fall back to the lowest free port in the master worker's `exec.allow.ports`. These ports lie outside that list, or `ports` can occupy them.
+- The default for the master port is 29500. A value of 29500 outside the ``exec.allow.ports`` range of the master worker, or already present in the job's ``ports``, can make the job use the lowest free port in ``exec.allow.ports`` instead.
 
 ## 3. Connect the Workers
 

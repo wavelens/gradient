@@ -93,7 +93,7 @@ services.gradient.state = {
 | `repository` | string | - | Git repository URL of the task. |
 | `retry_failed_builds` | bool | `true` | Whether a new evaluation of this task re-queues its permanently failed builds and their dependents. With `false`, they remain failed until a user retries the build or the evaluation. |
 | `sign_cache` | bool | `true` | Whether to sign the narinfo of outputs pushed by this task. |
-| `wait_for_workers` | bool | `false` | Whether an evaluation waits for a worker when its builds need an architecture or system features that no connected worker provides. Without this field, the server can abort such an evaluation and show a warning about what is missing. Exec jobs that no connected worker can process fail as well. |
+| `wait_for_workers` | bool | `false` | Whether to wait for workers when an evaluation can require an architecture or system feature that no connected worker can offer for its builds. The server can abort that evaluation and show a warning about what is missing when this field is absent. Exec jobs that no connected worker can run have the same behavior. |
 | `triggers` | null or list of submodule | `null` | Evaluation triggers of the task: polling, Git host push, Git host pull request or cron schedule. |
 | `triggers.*.active` | bool | `true` | Whether this trigger is active. |
 | `triggers.*.config` | attribute set | `{ }` | Configuration specific to the trigger type. |

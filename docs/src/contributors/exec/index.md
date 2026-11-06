@@ -62,7 +62,7 @@ flowchart LR
 - Only workers without draining and with access to the job's project count, for placement and for wait reasons.
 - `WaitingReason::ExecWorkers` can specify unmet labels, devices, mounts, guest size, node count, custom image, network, SSH, or ports.
 - `fits_exec` and `exec_unmet` share the field checks of `ExecFit` in `gradient-pool/src/exec_fit.rs`.
-- `UnplaceableExecJobs` can fail the job after 300 seconds with the same unmet set or when zero matching workers exist. The task can set `wait_for_workers` to avoid that failure. The timer is in memory and can restart with the server.
+- Jobs under `UnplaceableExecJobs` fail after 300 seconds when unmet requirements stay the same or no matching worker can take the job. Set task option `wait_for_workers` to disable this. The timer does not write state to disk. Server restarts start the count again.
 - `ExecUnmet` can hold only the architecture when zero exec workers of the job's architecture connect.
 
 ### Scoring
