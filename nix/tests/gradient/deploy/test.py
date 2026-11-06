@@ -11,6 +11,7 @@
 
 import base64
 import json
+import re
 
 API = "http://127.0.0.1:8090"
 
@@ -80,12 +81,11 @@ def await_deploy(node):
 
 def await_deploy_failure_from_journal(node, message):
     node.wait_until_succeeds(
-        f"journalctl -u gradient-deploy --no-pager | grep -q 'Error: {message}'"
+        "systemctl show gradient-deploy.service -p ActiveState --value | grep -qx failed"
     )
-    node.wait_until_succeeds(
-        "journalctl -u gradient-deploy --no-pager | grep -q 'Failed with result'"
-    )
-    return deploy_log(node)
+    log = deploy_log(node)
+    assert re.search(f"Error: {message}", log), log
+    return log
 
 
 def await_connected(node):
@@ -368,3 +368,26 @@ assert microvm_runner(microvm, "guest", "old") == MICROVM_NEW_RUNNER
 microvm.succeed(
     f"test \"$(readlink -f /nix/var/nix/gcroots/microvm/old-guest)\" = {MICROVM_NEW_RUNNER}"
 )
+
+banner("System and MicroVMs deploy from the same evaluation")
+COMBINED_BASE, COMBINED_DEPLOY = boot(combined)
+combined_vms = [
+    microvm_entry_point("guest", MICROVM_NEW_RUNNER, "Completed"),
+    microvm_entry_point("second-guest", MICROVM_NEWER_RUNNER, "Completed"),
+]
+post(combined, "/control/reset")
+set_state(combined, "Building", [entry_point(COMBINED_DEPLOY, "Queued"), *combined_vms])
+start_deploy(combined)
+await_connected(combined)
+combined.wait_until_succeeds(
+    f"test \"$(readlink -f /var/lib/microvms/second-guest/booted)\" = {MICROVM_NEWER_RUNNER}"
+)
+assert microvm_runner(combined, "guest", "booted") == MICROVM_NEW_RUNNER
+assert deploy_state(combined) == "activating", "must keep waiting for the system build"
+assert current_system(combined) == COMBINED_BASE
+
+set_state(combined, "Building", [entry_point(COMBINED_DEPLOY, "Completed"), *combined_vms])
+log = await_deploy(combined)
+assert f"Deployment to {COMBINED_DEPLOY} completed successfully" in log, log
+assert "MicroVM guest is already up-to-date" in log, log
+assert current_system(combined) == COMBINED_DEPLOY

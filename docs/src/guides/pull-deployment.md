@@ -38,7 +38,7 @@ and the MicroVM's host-side name:
 ```nix
 system.gradient-deploy = {
   enable = true;
-  type = "microvm";
+  type = [ "microvm" ];
   microvm.hostnames = [ "guest" "second-guest" ];
   server = "https://gradient.example.com";
   task = "acme/machines";
@@ -48,6 +48,7 @@ system.gradient-deploy = {
 
 For each hostname, the build result of `nixosConfigurations.<hostname>.config.microvm.declaredRunner` is being fetched into the host's Nix store,
 updates the matching MicroVM's `current` runner link and restarts `microvm@<hostname>.service`.
+With `type = [ "system" "microvm" ]`, the same evaluation also deploys the host system.
 Each MicroVM must already exist under `microvm.stateDir` (default `/var/lib/microvms`) and must not be declarative.
 
 ## 2. Create an API Key
@@ -115,8 +116,8 @@ The waiting outcomes keep the unit in a successful state. The waiting service ca
 
 | Option | Default | Effect |
 |---|---|---|
-| `type` | `"system"` | Deploy the host system or an imperative MicroVM |
-| `deployFor` | host name | System output name when `type = "system"` |
+| `type` | `[ "system" ]` | Deploy the host system, imperative MicroVMs, or both |
+| `deployFor` | host name | System output name when `type` contains `"system"` |
 | `microvm.hostnames` | `[]` | NixOS configuration and host-side MicroVM names to deploy |
 | `microvm.stateDir` | `"/var/lib/microvms"` | Host-side MicroVM state directory |
 | `waitForBuild` | `true` | `false` stops at once if a selected output has not been built yet |
