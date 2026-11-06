@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::require_project_permission;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
-use crate::resource::Resource;
 use axum::Extension;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -15,10 +13,8 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use futures::{SinkExt, StreamExt};
 use gradient_core::ServerState;
-use gradient_db::WebDb;
 use gradient_pool::guest_channels::{GuestChannelEvent, GuestChannelHandle};
 use gradient_scheduler::{GuestChannelOpened, Scheduler};
-use gradient_types::permissions::Permission;
 use gradient_types::*;
 use gradient_util::shutdown::{CancellationToken, Shutdown};
 use gradient_wire::types::GuestChannelKind;
@@ -93,7 +89,7 @@ pub async fn get_exec_job_console(
     Query(query): Query<ConsoleQuery>,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> WebResult<Response> {
-    authorize_terminal(&state.web_db, &user, &api_key, job).await?;
+    ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
     let request = TerminalRequest {
         job,
         node: query.node.unwrap_or(0),
@@ -124,7 +120,7 @@ pub async fn get_exec_job_shell(
     Query(query): Query<TerminalQuery>,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> WebResult<Response> {
-    authorize_terminal(&state.web_db, &user, &api_key, job).await?;
+    ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
     let request = TerminalRequest {
         job,
         node: query.node.unwrap_or(0),
@@ -158,34 +154,13 @@ pub async fn get_exec_job_forward(
     Query(query): Query<ForwardQuery>,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> WebResult<Response> {
-    authorize_terminal(&state.web_db, &user, &api_key, job).await?;
+    ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
     let request = TerminalRequest {
         job,
         node: query.node.unwrap_or(0),
         kind: GuestChannelKind::Forward { port: query.port },
     };
     Ok(upgrade(&state.shutdown, scheduler, ws, request))
-}
-
-async fn authorize_terminal(
-    db: &WebDb,
-    user: &MUser,
-    api_key: &MaybeApiKey,
-    job: ExecJobId,
-) -> WebResult<()> {
-    let ctx = ExecJobAccessContext::load_unguarded(db, job).await?;
-    if user.superuser {
-        return Ok(());
-    }
-    require_project_permission(
-        db,
-        user.id,
-        ctx.project.id,
-        Permission::TriggerEvaluation,
-        Resource::ExecJob,
-        api_key.as_ref(),
-    )
-    .await
 }
 
 fn upgrade(

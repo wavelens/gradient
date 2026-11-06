@@ -220,6 +220,42 @@ async fn a_member_without_task_write_cannot_open_a_shell() {
 }
 
 #[tokio::test]
+async fn a_member_without_trigger_permission_cannot_control_an_exec_job() {
+    for (delete, action) in [
+        (false, "abort"),
+        (false, "run"),
+        (false, "keep-vm-running"),
+        (true, "keep-vm-running"),
+    ] {
+        let (db, auth) = signed_in_as(user());
+        let db = with_job(db, ExecJobStatus::Running)
+            .append_query_results([vec![project()]])
+            .append_query_results([vec![project_access::Model {
+                project: project().id,
+                user: user().id,
+                role: view_role().id,
+            }]])
+            .append_query_results([vec![view_role()]]);
+        let server = make_test_server(db.into_connection());
+        let url = format!("/api/v1/exec/{}/{action}", job_id());
+
+        let res = if delete {
+            server.delete(&url)
+        } else {
+            server.post(&url)
+        }
+        .add_header("authorization", auth)
+        .await;
+
+        assert_eq!(
+            res.status_code(),
+            StatusCode::FORBIDDEN,
+            "delete={delete} {action}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn an_outsider_cannot_open_a_console() {
     let (db, auth) = signed_in_as(user());
     let db = with_job(db, ExecJobStatus::Running)

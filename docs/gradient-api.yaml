@@ -6034,7 +6034,7 @@ paths:
       tags:
       - exec-jobs
       summary: Abort exec job
-      description: Stops an exec job that has not finished. The job becomes `Aborted`, its worker gets an abort for the running attempt and the job never restarts. Requires project membership or a superuser. Answers 409 when the job has already finished.
+      description: Stops an exec job that has not finished. The job becomes `Aborted`, its worker gets an abort for the running attempt and the job never restarts. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 when the job has already finished.
       operationId: abortExecJob
       parameters:
       - name: job
@@ -6143,7 +6143,7 @@ paths:
       tags:
       - exec-jobs
       summary: Keep the VM of an exec job running
-      description: Keeps the guest of an exec job running after its program exits, every node of a multi-node job included. The job stays `Running` with the program's exit code in `program_exit_code`, terminals keep working and `maxSilent` no longer applies; the overall timeout still does. The job ends when the switch is released, when it is aborted or when the guest shuts down. Works before the job starts too. Requires project membership or a superuser. Answers 409 when the job has already finished.
+      description: Keeps the guest of an exec job running after its program exits, every node of a multi-node job included. The job stays `Running` with the program's exit code in `program_exit_code`, terminals keep working and `maxSilent` no longer applies; the overall timeout still does. The job ends when the switch is released, when it is aborted or when the guest shuts down. Works before the job starts too. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 when the job has already finished.
       operationId: keepExecJobVmRunning
       parameters:
       - name: job
@@ -6174,7 +6174,7 @@ paths:
       tags:
       - exec-jobs
       summary: Let the VM of an exec job stop
-      description: Releases the keep VM running switch. A job whose program already exited ends `Completed` or `Failed` by the recorded exit code; a job whose program still runs only loses the switch. Requires project membership or a superuser. Answers 409 when the job has already finished.
+      description: Releases the keep VM running switch. A job whose program already exited ends `Completed` or `Failed` by the recorded exit code; a job whose program still runs only loses the switch. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 when the job has already finished.
       operationId: releaseExecJobVm
       parameters:
       - name: job
@@ -6386,7 +6386,7 @@ paths:
       tags:
       - exec-jobs
       summary: Run exec job
-      description: Starts an exec job, every node of a multi-node job included. A job without `autostart` that waits for its manual start is queued once its program and image are built, at once when they already are. A finished job is queued again; the next attempt gets the next number and earlier attempts, logs, phases and outputs stay. Requires project membership or a superuser. Answers 409 while the job is open and not waiting for its manual start, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.
+      description: Starts an exec job, every node of a multi-node job included. A job without `autostart` that waits for its manual start is queued once its program and image are built, at once when they already are. A finished job is queued again; the next attempt gets the next number and earlier attempts, logs, phases and outputs stay. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 while the job is open and not waiting for its manual start, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.
       operationId: runExecJob
       parameters:
       - name: job

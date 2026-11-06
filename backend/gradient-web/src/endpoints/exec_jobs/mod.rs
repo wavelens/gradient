@@ -24,7 +24,7 @@ pub use self::query::{
     ExecJobTokenView, StartedEvaluationView, get_exec_job, list_evaluation_exec_jobs,
 };
 
-use crate::access::is_project_member;
+use crate::access::{is_project_member, require_project_permission};
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::refusal::{Refusal, RefusalStatus};
@@ -32,6 +32,7 @@ use crate::resource::Resource;
 use gradient_db::WebDb;
 use gradient_db::exec_jobs::reads::{self, ExecJobDetail, ExecNodeDetail};
 use gradient_db::lookup::by_id;
+use gradient_types::permissions::Permission;
 use gradient_types::*;
 
 #[derive(Debug, thiserror::Error)]
@@ -84,6 +85,27 @@ impl ExecJobAccessContext {
             task,
             project,
         })
+    }
+
+    pub(super) async fn load_triggerable(
+        db: &WebDb,
+        job: ExecJobId,
+        user: &MUser,
+        api_key: Option<&ApiKeyContext>,
+    ) -> WebResult<Self> {
+        let ctx = Self::load_unguarded(db, job).await?;
+        if !user.superuser {
+            require_project_permission(
+                db,
+                user.id,
+                ctx.project.id,
+                Permission::TriggerEvaluation,
+                Resource::ExecJob,
+                api_key,
+            )
+            .await?;
+        }
+        Ok(ctx)
     }
 
     pub(super) async fn load(

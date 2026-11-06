@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::is_project_member;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
-use crate::resource::Resource;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -24,7 +22,7 @@ use super::{ExecJobAccessContext, ExecJobRefusal};
     operation_id = "abortExecJob",
     tag = "exec-jobs",
     summary = "Abort exec job",
-    description = "Stops an exec job that has not finished. The job becomes `Aborted`, its worker gets an abort for the running attempt and the job never restarts. Requires project membership or a superuser. Answers 409 when the job has already finished.",
+    description = "Stops an exec job that has not finished. The job becomes `Aborted`, its worker gets an abort for the running attempt and the job never restarts. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 when the job has already finished.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
 )]
@@ -35,7 +33,8 @@ pub async fn post_exec_job_abort(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(job): Path<ExecJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = member_context(&state.web_db, &user, &api_key, job).await?;
+    let ctx =
+        ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
     if ctx.detail.status.is_terminal() || !scheduler.abort_exec_job(ctx.detail.job.id).await? {
         return Err(ExecJobRefusal::Finished.into());
     }
@@ -49,7 +48,7 @@ pub async fn post_exec_job_abort(
     operation_id = "runExecJob",
     tag = "exec-jobs",
     summary = "Run exec job",
-    description = "Starts an exec job, every node of a multi-node job included. A job without `autostart` that waits for its manual start is queued once its program and image are built, at once when they already are. A finished job is queued again; the next attempt gets the next number and earlier attempts, logs, phases and outputs stay. Requires project membership or a superuser. Answers 409 while the job is open and not waiting for its manual start, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.",
+    description = "Starts an exec job, every node of a multi-node job included. A job without `autostart` that waits for its manual start is queued once its program and image are built, at once when they already are. A finished job is queued again; the next attempt gets the next number and earlier attempts, logs, phases and outputs stay. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 while the job is open and not waiting for its manual start, while exec jobs are disabled on the instance, project or task (the message names the switch), when the program is no longer built or when the exec spec cannot be read.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
 )]
@@ -60,7 +59,8 @@ pub async fn post_exec_job_run(
     Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
     Path(job): Path<ExecJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = member_context(&state.web_db, &user, &api_key, job).await?;
+    let ctx =
+        ExecJobAccessContext::load_triggerable(&state.web_db, job, &user, api_key.as_ref()).await?;
     scheduler.run_exec_job(ctx.detail.job.id).await??;
 
     Ok(ok_json("Success".to_string()))
@@ -72,7 +72,7 @@ pub async fn post_exec_job_run(
     operation_id = "keepExecJobVmRunning",
     tag = "exec-jobs",
     summary = "Keep the VM of an exec job running",
-    description = "Keeps the guest of an exec job running after its program exits, every node of a multi-node job included. The job stays `Running` with the program's exit code in `program_exit_code`, terminals keep working and `maxSilent` no longer applies; the overall timeout still does. The job ends when the switch is released, when it is aborted or when the guest shuts down. Works before the job starts too. Requires project membership or a superuser. Answers 409 when the job has already finished.",
+    description = "Keeps the guest of an exec job running after its program exits, every node of a multi-node job included. The job stays `Running` with the program's exit code in `program_exit_code`, terminals keep working and `maxSilent` no longer applies; the overall timeout still does. The job ends when the switch is released, when it is aborted or when the guest shuts down. Works before the job starts too. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 when the job has already finished.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
 )]
@@ -92,7 +92,7 @@ pub async fn post_exec_job_keep_vm_running(
     operation_id = "releaseExecJobVm",
     tag = "exec-jobs",
     summary = "Let the VM of an exec job stop",
-    description = "Releases the keep VM running switch. A job whose program already exited ends `Completed` or `Failed` by the recorded exit code; a job whose program still runs only loses the switch. Requires project membership or a superuser. Answers 409 when the job has already finished.",
+    description = "Releases the keep VM running switch. A job whose program already exited ends `Completed` or `Failed` by the recorded exit code; a job whose program still runs only loses the switch. Grant the `TriggerEvaluation` permission on the project or use a superuser account. Answers 409 when the job has already finished.",
     params(("job" = ExecJobId, Path)),
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
 )]
@@ -114,7 +114,7 @@ async fn switch_keep_vm_running(
     job: ExecJobId,
     keep: bool,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let ctx = member_context(db, user, api_key, job).await?;
+    let ctx = ExecJobAccessContext::load_triggerable(db, job, user, api_key.as_ref()).await?;
     if ctx.detail.status.is_terminal()
         || !scheduler
             .keep_exec_vm_running(ctx.detail.job.id, keep)
@@ -124,17 +124,4 @@ async fn switch_keep_vm_running(
     }
 
     Ok(ok_json("Success".to_string()))
-}
-
-async fn member_context(
-    db: &WebDb,
-    user: &MUser,
-    api_key: &MaybeApiKey,
-    job: ExecJobId,
-) -> WebResult<ExecJobAccessContext> {
-    let ctx = ExecJobAccessContext::load_unguarded(db, job).await?;
-    if !user.superuser && !is_project_member(db, user.id, ctx.project.id, api_key.as_ref()).await? {
-        return Err(WebError::not_found(Resource::ExecJob));
-    }
-    Ok(ctx)
 }
