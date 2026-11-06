@@ -6,10 +6,13 @@
 
 import { ApplicationConfig, APP_INITIALIZER, provideBrowserGlobalErrorListeners, inject } from '@angular/core';
 import {
+  RedirectCommand,
   RouteReuseStrategy,
+  Router,
   provideRouter,
   TitleStrategy,
   withInMemoryScrolling,
+  withNavigationErrorHandler,
   withRouterConfig,
 } from '@angular/router';
 import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/http';
@@ -21,6 +24,7 @@ import { ConfigService } from '@core/services/config.service';
 import { GradientTitleStrategy } from '@core/title/gradient-title-strategy';
 import { ParamReuseStrategy } from '@core/routing/param-reuse-strategy';
 import { provideScrollToTopOnPageChange } from '@core/routing/scroll-to-top';
+import { ApiError } from '@core/services/api.service';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -29,6 +33,11 @@ export const appConfig: ApplicationConfig = {
       routes,
       withRouterConfig({ paramsInheritanceStrategy: 'always' }),
       withInMemoryScrolling(),
+      withNavigationErrorHandler(({ error, url }) => {
+        if (error instanceof ApiError && error.unreachable) return;
+        const router = inject(Router);
+        return new RedirectCommand(router.createUrlTree(['/error/500'], { queryParams: { from: url } }), { skipLocationChange: true });
+      }),
     ),
     provideScrollToTopOnPageChange(),
     { provide: TitleStrategy, useClass: GradientTitleStrategy },

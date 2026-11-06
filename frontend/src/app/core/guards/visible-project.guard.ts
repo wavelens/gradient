@@ -5,32 +5,24 @@
  */
 
 import { inject } from '@angular/core';
-import { CanActivateFn, Router } from '@angular/router';
+import { CanActivateFn } from '@angular/router';
 import { of } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
-import { ApiError } from '@core/services/api.service';
+import { map, switchMap } from 'rxjs/operators';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { denyOnRefusal } from '@core/routing/access-denied';
 
-// Private and missing projects are the same 404 to anonymous visitors: send both to login, so project names stay secret.
 export const visibleProjectGuard: CanActivateFn = (route, state) => {
   const authService = inject(AuthService);
   const projects = inject(ProjectsService);
-  const login = inject(Router).createUrlTree(['/account/login'], { queryParams: { next: state.url } });
+  const name = route.paramMap.get('project') ?? '';
+  const deny = denyOnRefusal<true>({ kind: 'project', name, back: '/projects' }, state.url);
 
   return authService.initialized$.pipe(
     switchMap(() => authService.resolveSession()),
-    switchMap((authenticated) => {
-      if (authenticated) {
-        return of(true);
-      }
-      if (authService.serverUnreachable()) {
-        return of(false);
-      }
-      return projects.getProject(route.paramMap.get('project') ?? '').pipe(
-        map(() => true),
-        catchError((error: unknown) => of(error instanceof ApiError && error.status === 404 ? login : true)),
-      );
+    switchMap(() => {
+      if (authService.serverUnreachable()) return of(false);
+      return projects.getProject(name).pipe(map(() => true as const), deny);
     }),
   );
 };

@@ -11,13 +11,14 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import { TaskDetailsResponse } from '@core/models';
+import { denyOnRefusal } from '@core/routing/access-denied';
 
 export interface TaskAccessData {
   task: TaskDetailsResponse;
   access: AccessState;
 }
 
-export const taskAccessResolver: ResolveFn<TaskAccessData> = (route) => {
+export const taskAccessResolver: ResolveFn<TaskAccessData> = (route, state) => {
   const tasks = inject(TasksService);
   const crumbs = inject(BreadcrumbsService);
   const project = route.paramMap.get('project') ?? '';
@@ -25,5 +26,6 @@ export const taskAccessResolver: ResolveFn<TaskAccessData> = (route) => {
   return tasks.getTask(project, task).pipe(
     tap((p) => crumbs.rememberTask(project, task, p.display_name)),
     map((p) => ({ task: p, access: accessFromEntity(p) })),
+    denyOnRefusal({ kind: 'task', name: task, back: `/project/${project}` }, state.url),
   );
 };

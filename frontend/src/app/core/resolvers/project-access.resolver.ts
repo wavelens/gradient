@@ -6,23 +6,23 @@
 
 import { inject } from '@angular/core';
 import { ResolveFn } from '@angular/router';
-import { catchError, map, of, tap } from 'rxjs';
+import { map, tap } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectResponse } from '@core/models';
+import { denyOnRefusal } from '@core/routing/access-denied';
 
 export interface ProjectAccessData {
-  project: ProjectResponse | null;
+  project: ProjectResponse;
 }
 
-export const projectAccessResolver: ResolveFn<ProjectAccessData> = (route) => {
+export const projectAccessResolver: ResolveFn<ProjectAccessData> = (route, state) => {
   const projects = inject(ProjectsService);
   const crumbs = inject(BreadcrumbsService);
   const name = route.paramMap.get('project') ?? '';
-  if (!name) return of({ project: null });
   return projects.getProject(name).pipe(
     tap((project) => crumbs.rememberProject(name, project.display_name)),
     map((project) => ({ project })),
-    catchError(() => of({ project: null })),
+    denyOnRefusal({ kind: 'project', name, back: '/projects' }, state.url),
   );
 };

@@ -99,12 +99,12 @@ export class AuthService {
   /**
    * Logout the current user
    */
-  logout() {
+  logout(returnUrl?: string) {
     return this.api.post('auth/logout', {}).pipe(
       finalize(() => {
         this.forget();
         localStorage.setItem(SIGNED_OUT_KEY, String(Date.now()));
-        this.router.navigate(['/account/login']);
+        this.router.navigate(['/account/login'], returnUrl ? { queryParams: { next: returnUrl } } : {});
       })
     );
   }

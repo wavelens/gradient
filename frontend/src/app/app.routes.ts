@@ -9,6 +9,12 @@ import { authGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
 import { publicListingGuard } from '@core/guards/public-listing.guard';
 import { visibleProjectGuard } from '@core/guards/visible-project.guard';
+import {
+  evaluationInProjectGuard,
+  execJobInTaskGuard,
+  visibleTeamGuard,
+  workerInProjectGuard,
+} from '@core/guards/entity.guards';
 import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
 import { taskAccessResolver } from '@core/resolvers/task-access.resolver';
 import { cacheAccessResolver } from '@core/resolvers/cache-access.resolver';
@@ -19,6 +25,7 @@ export const routes: Routes = [
   {
     path: 'account',
     children: [
+      { path: '', pathMatch: 'full', redirectTo: 'login' },
       {
         path: 'login',
         title: 'Sign In',
@@ -129,6 +136,7 @@ export const routes: Routes = [
           {
             path: 'exec/:job',
             title: 'Exec Job',
+            canActivate: [execJobInTaskGuard],
             data: { hideFooter: true },
             loadComponent: () =>
               import('./features/exec-jobs/exec-job-page/exec-job-page.component').then(
@@ -178,6 +186,7 @@ export const routes: Routes = [
       {
         path: 'log/:evaluationId',
         title: 'Evaluation Log',
+        canActivate: [evaluationInProjectGuard],
         data: { hideFooter: true },
         loadComponent: () =>
           import('./features/evaluations/evaluation-log/evaluation-log.component').then(
@@ -187,6 +196,7 @@ export const routes: Routes = [
       {
         path: 'summary/:evaluationId',
         title: 'Evaluation Summary',
+        canActivate: [evaluationInProjectGuard],
         loadComponent: () =>
           import('./features/evaluations/evaluation-summary/evaluation-summary.component').then(
             (m) => m.EvaluationSummaryComponent
@@ -454,6 +464,7 @@ export const routes: Routes = [
       {
         path: 'project/:project/workers/:workerId/metrics',
         title: 'Worker Statistics',
+        canActivate: [workerInProjectGuard],
         resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
           import('./features/projects/workers/worker-metrics/worker-metrics.component').then(
@@ -471,18 +482,21 @@ export const routes: Routes = [
       {
         path: 'team/:team',
         title: 'Team',
+        canActivate: [visibleTeamGuard],
         loadComponent: () =>
           import('./features/teams/team-overview/team-overview.component').then((m) => m.TeamOverviewComponent),
       },
       {
         path: 'team/:team/settings',
         title: 'Team Settings',
+        canActivate: [visibleTeamGuard],
         loadComponent: () =>
           import('./features/teams/team-settings/team-settings.component').then((m) => m.TeamSettingsComponent),
       },
       {
         path: 'team/:team/webhooks',
         title: 'Team Webhooks',
+        canActivate: [visibleTeamGuard],
         data: { webhookScope: 'team' },
         loadComponent: () =>
           import('./features/webhooks/webhooks.component').then((m) => m.WebhooksComponent),
@@ -599,6 +613,20 @@ export const routes: Routes = [
   },
 
   // Error pages
+  {
+    path: 'error/403',
+    title: 'Admin Only',
+    data: { code: 403 },
+    loadComponent: () =>
+      import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),
+  },
+  {
+    path: 'error/404',
+    title: 'Not Found or Access Denied',
+    data: { code: 404 },
+    loadComponent: () =>
+      import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),
+  },
   {
     path: 'error/429',
     title: 'Too Many Requests',

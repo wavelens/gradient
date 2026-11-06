@@ -5,8 +5,9 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRouteSnapshot, convertToParamMap } from '@angular/router';
+import { ActivatedRouteSnapshot, RedirectCommand, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { Observable, firstValueFrom, of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { projectAccessResolver, ProjectAccessData } from './project-access.resolver';
 import { ProjectResponse } from '@core/models';
@@ -42,7 +43,7 @@ describe('projectAccessResolver', () => {
   beforeEach(() => {
     getProject = vi.fn(() => of(baseProject));
     TestBed.configureTestingModule({
-      providers: [{ provide: ProjectsService, useValue: { getProject } }],
+      providers: [provideRouter([]), { provide: ProjectsService, useValue: { getProject } }],
     });
   });
 
@@ -52,15 +53,11 @@ describe('projectAccessResolver', () => {
     expect(data.project).toBe(baseProject);
   });
 
-  it('returns null when the project param is missing', async () => {
-    const data = await runResolver(snap({}));
-    expect(getProject).not.toHaveBeenCalled();
-    expect(data.project).toBeNull();
-  });
-
-  it('falls back to null when the fetch errors so navigation still proceeds', async () => {
-    getProject.mockReturnValue(throwError(() => new Error('boom')));
-    const data = await runResolver(snap({ project: 'missing' }));
-    expect(data.project).toBeNull();
+  it('shows the shared not-found page in place for a hidden or missing project', async () => {
+    getProject.mockReturnValue(throwError(() => new ApiError('Project not found', 404)));
+    const result = (await runResolver(snap({ project: 'missing' }))) as unknown as RedirectCommand;
+    expect(result).toBeInstanceOf(RedirectCommand);
+    expect(result.navigationBehaviorOptions?.skipLocationChange).toBe(true);
+    expect(TestBed.inject(Router).serializeUrl(result.redirectTo)).toContain('/error/404?kind=project&name=missing&back=%2Fprojects');
   });
 });

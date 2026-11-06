@@ -7,11 +7,32 @@
 <div class="error-page">
   <div class="error-card">
     <gr-icon [name]="meta().icon" class="error-icon" size="xl" />
-    <div class="error-code">{{ code() || '' }}</div>
+    @if (!denied()) {
+      <div class="error-code">{{ code() || '' }}</div>
+    }
     <h1 class="error-title">{{ meta().title }}</h1>
-    <p class="error-description">{{ meta().description }}</p>
+    <p class="error-description">{{ denied()?.description ?? meta().description }}</p>
+    @if (restricted()) {
+      <p class="error-account">
+        @if (user(); as signedIn) {
+          Signed in as {{ signedIn.username }}.
+        } @else {
+          Private items require sign-in.
+        }
+      </p>
+    }
     <div class="error-actions">
-      <a routerLink="/" class="btn btn-primary">Go Home</a>
+      @if (restricted() && !user()) {
+        <a routerLink="/account/login" [queryParams]="from ? { next: from } : {}" class="btn btn-primary">Sign In</a>
+      }
+      @if (denied(); as view) {
+        <a [routerLink]="view.backLink" class="btn" [class.btn-primary]="!!user()" [class.btn-secondary]="!user()">{{ view.backLabel }}</a>
+      } @else {
+        <a routerLink="/" class="btn" [class.btn-primary]="!restricted() || !!user()" [class.btn-secondary]="restricted() && !user()">Go Home</a>
+      }
+      @if (restricted() && user()) {
+        <button class="btn btn-secondary" (click)="switchAccount()">Switch Account</button>
+      }
       @if (meta().retryable) {
         <button class="btn btn-secondary" (click)="retry()">Try Again</button>
       }

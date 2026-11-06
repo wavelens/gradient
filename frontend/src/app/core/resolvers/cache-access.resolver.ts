@@ -11,18 +11,20 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import { CacheResponse } from '@core/models';
+import { denyOnRefusal } from '@core/routing/access-denied';
 
 export interface CacheAccessData {
   cache: CacheResponse;
   access: AccessState;
 }
 
-export const cacheAccessResolver: ResolveFn<CacheAccessData> = (route) => {
+export const cacheAccessResolver: ResolveFn<CacheAccessData> = (route, state) => {
   const caches = inject(CachesService);
   const crumbs = inject(BreadcrumbsService);
   const cache = route.paramMap.get('cache') ?? '';
   return caches.getCache(cache).pipe(
     tap((c) => crumbs.rememberCache(cache, c.display_name)),
     map((c) => ({ cache: c, access: accessFromEntity(c) })),
+    denyOnRefusal({ kind: 'cache', name: cache, back: '/caches' }, state.url),
   );
 };

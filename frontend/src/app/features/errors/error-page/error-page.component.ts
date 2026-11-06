@@ -7,6 +7,8 @@
 import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { IconComponent } from '@gradient/ui/ui';
+import { AuthService } from '@core/services/auth.service';
+import { DeniedKind } from '@core/routing/access-denied';
 
 interface ErrorMeta {
   title: string;
@@ -16,6 +18,12 @@ interface ErrorMeta {
 }
 
 const ERROR_META: Record<number, ErrorMeta> = {
+  403: {
+    title: 'Admin Only',
+    description: 'Instance administrators only. Ask an administrator for access.',
+    icon: 'admin_panel_settings',
+    retryable: false,
+  },
   404: {
     title: 'Page Not Found',
     description: "The page you're looking for doesn't exist or has been moved.",
@@ -61,6 +69,22 @@ const FALLBACK_META: ErrorMeta = {
   retryable: true,
 };
 
+const DENIED_KINDS: Record<DeniedKind, { label: string; back: string }> = {
+  project: { label: 'Project', back: 'Back to Projects' },
+  task: { label: 'Task', back: 'Back to Project' },
+  cache: { label: 'Cache', back: 'Back to Caches' },
+  team: { label: 'Team', back: 'Back to Teams' },
+  evaluation: { label: 'Evaluation', back: 'Back to Project' },
+  execJob: { label: 'Exec job', back: 'Back to Task' },
+  worker: { label: 'Worker', back: 'Back to Workers' },
+};
+
+export interface DeniedView {
+  description: string;
+  backLabel: string;
+  backLink: string;
+}
+
 @Component({
   selector: 'app-error-page',
   standalone: true,
@@ -72,16 +96,42 @@ const FALLBACK_META: ErrorMeta = {
 export class ErrorPageComponent {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private auth = inject(AuthService);
+
+  private query = this.route.snapshot.queryParamMap;
+  protected readonly from = this.safeFrom();
+  protected readonly user = this.auth.user;
 
   code = computed<number>(() => this.route.snapshot.data['code'] ?? 0);
-  meta = computed<ErrorMeta>(() => ERROR_META[this.code()] ?? FALLBACK_META);
+  denied = computed<DeniedView | null>(() => {
+    const kind = DENIED_KINDS[this.query.get('kind') as DeniedKind];
+    if (this.code() !== 404 || !kind) return null;
+    return {
+      description: `${kind.label} "${this.query.get('name') ?? ''}" not found. It doesn't exist, or you don't have access to it.`,
+      backLabel: kind.back,
+      backLink: this.query.get('back') ?? '/',
+    };
+  });
+  meta = computed<ErrorMeta>(() => {
+    const base = ERROR_META[this.code()] ?? FALLBACK_META;
+    return this.denied() ? { ...base, title: 'Not Found or Access Denied', icon: 'lock' } : base;
+  });
+  restricted = computed(() => this.code() === 403 || this.denied() !== null);
 
   retry(): void {
-    const from = this.route.snapshot.queryParamMap.get('from');
-    if (from && from.startsWith('/') && !from.startsWith('/error/')) {
-      this.router.navigateByUrl(from);
+    if (this.from) {
+      this.router.navigateByUrl(this.from);
     } else {
       window.location.reload();
     }
+  }
+
+  switchAccount(): void {
+    this.auth.logout(this.from ?? undefined).subscribe();
+  }
+
+  private safeFrom(): string | null {
+    const from = this.query.get('from');
+    return from && from.startsWith('/') && !from.startsWith('/error/') ? from : null;
   }
 }

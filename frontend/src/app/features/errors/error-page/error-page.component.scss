@@ -51,6 +51,14 @@
   color: var(--gr-text-secondary);
   line-height: 1.6;
   margin: 0 0 $spacing-xxl;
+
+  &:has(+ .error-account) { margin-bottom: $spacing-md; }
+}
+
+.error-account {
+  font-size: $font-size-sm;
+  color: var(--gr-text-secondary);
+  margin: 0 0 $spacing-xxl;
 }
 
 .error-actions {
