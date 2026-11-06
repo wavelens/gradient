@@ -59,6 +59,16 @@
   proxyMaxBodyBytes = lib.max cfg.http.maxRequestSize
     (lib.max cfg.nar.maxUploadSize cfg.http.maxSourceUploadSize);
 
+  # Rate limiting and the audit log use X-Forwarded-For from this proxy. Replace the value from the client in nginx. Don't append to it.
+  serverLocation = extraConfig: {
+    proxyPass = "http://${cfg.listenAddr}:${toString cfg.port}";
+    proxyWebsockets = true;
+    recommendedProxySettings = false;
+    extraConfig = ''
+      proxy_set_header X-Forwarded-For $remote_addr;
+    '' + extraConfig;
+  };
+
   augmentedIntegrations = lib.mapAttrs (_: int: builtins.removeAttrs int [ "forge_type" ] // {
     has_secret_file = int.secret_file != null;
     has_access_token_file = int.access_token_file != null;
@@ -716,55 +726,39 @@ in {
               tryFiles = "$uri $uri/ /index.html";
             };
 
-            "/api/" = {
-              proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
-              proxyWebsockets = true;
-              extraConfig = ''
-                client_max_body_size ${toString proxyMaxBodyBytes};
-                proxy_buffering off;
-                proxy_request_buffering off;
-                proxy_connect_timeout 1h;
-                proxy_send_timeout 1h;
-                proxy_read_timeout 1h;
-              '';
-            };
+            "/api/" = serverLocation ''
+              client_max_body_size ${toString proxyMaxBodyBytes};
+              proxy_buffering off;
+              proxy_request_buffering off;
+              proxy_connect_timeout 1h;
+              proxy_send_timeout 1h;
+              proxy_read_timeout 1h;
+            '';
 
-            "/proto" = lib.mkIf (cfg.proto.discoverable && cfg.proto.public) {
-              proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
-              proxyWebsockets = true;
-              extraConfig = ''
-                proxy_buffer_size 256k;
-                proxy_buffers 4 256k;
-                proxy_connect_timeout 90d;
-                proxy_send_timeout 90d;
-                proxy_read_timeout 90d;
-              '';
-            };
+            "/proto" = lib.mkIf (cfg.proto.discoverable && cfg.proto.public) (serverLocation ''
+              proxy_buffer_size 256k;
+              proxy_buffers 4 256k;
+              proxy_connect_timeout 90d;
+              proxy_send_timeout 90d;
+              proxy_read_timeout 90d;
+            '');
 
-            "~ ^/cache/[^/]+/proto$" = {
-              proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
-              proxyWebsockets = true;
-              extraConfig = ''
-                proxy_buffer_size 256k;
-                proxy_buffers 4 256k;
-                proxy_connect_timeout 1d;
-                proxy_send_timeout 1d;
-                proxy_read_timeout 1d;
-              '';
-            };
+            "~ ^/cache/[^/]+/proto$" = serverLocation ''
+              proxy_buffer_size 256k;
+              proxy_buffers 4 256k;
+              proxy_connect_timeout 1d;
+              proxy_send_timeout 1d;
+              proxy_read_timeout 1d;
+            '';
 
-            "/cache/" = {
-              proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
-              proxyWebsockets = true;
-              extraConfig = ''
-                client_max_body_size ${toString proxyMaxBodyBytes};
-                proxy_buffering off;
-                proxy_request_buffering off;
-                proxy_connect_timeout 1h;
-                proxy_send_timeout 1h;
-                proxy_read_timeout 1h;
-              '';
-            };
+            "/cache/" = serverLocation ''
+              client_max_body_size ${toString proxyMaxBodyBytes};
+              proxy_buffering off;
+              proxy_request_buffering off;
+              proxy_connect_timeout 1h;
+              proxy_send_timeout 1h;
+              proxy_read_timeout 1h;
+            '';
           };
         };
       };

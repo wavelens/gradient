@@ -674,7 +674,9 @@ in {
           locations."/proto" = {
             proxyPass = "http://${cfg.listenAddr}:${toString cfg.port}";
             proxyWebsockets = true;
+            recommendedProxySettings = false;
             extraConfig = ''
+              proxy_set_header X-Forwarded-For $remote_addr;
               proxy_buffer_size 256k;
               proxy_buffers 4 256k;
               proxy_connect_timeout 90d;

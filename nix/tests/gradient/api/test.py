@@ -693,4 +693,16 @@ machine.succeed(f"grep -q ssh-copy {copied}")
 banner("Phase 9: logout")
 api("POST", "auth/logout", token=token)
 
+# ── Phase 10: a forged X-Forwarded-For header shares the client's rate limit ──
+banner("Phase 10: a forged X-Forwarded-For header shares the client's rate limit")
+forged_codes = [
+    machine.succeed(
+        f"curl -sS -o /dev/null -w '%{{http_code}}' -X POST {API}/auth/check-username"
+        f" -H 'X-Forwarded-For: 203.0.113.{n}' -H 'Content-Type: application/json'"
+        " -d '{\"username\": \"forged\"}'"
+    ).strip()
+    for n in range(1, 9)
+]
+assert forged_codes[-1] == "429", forged_codes
+
 banner("API test PASSED")
