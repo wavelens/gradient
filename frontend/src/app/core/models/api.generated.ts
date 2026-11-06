@@ -1062,6 +1062,16 @@ export interface ExecJobResponse {
   labels: string[];
   devices: DeviceRequest[];
   guest: GuestSize;
+  architecture: string;
+  mounts: string[];
+  secrets: string[];
+  network: boolean;
+  ssh: boolean;
+  ports: number[];
+  image?: string | null;
+  timeout_secs?: number | null;
+  max_silent_secs?: number | null;
+  retries: number;
   waiting_reason?: WaitingReason | null;
   message?: string | null;
   retries_left: number;

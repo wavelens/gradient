@@ -1,0 +1,38 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+@if (waiting(); as reason) {
+  <section class="waiting">
+    <div class="waiting-reason">
+      <gr-status-icon size="sm" [phase]="phase(job().status)" [label]="job().status" />
+      <span>{{ reason }}</span>
+    </div>
+    @if (missing().length > 0) {
+      <div class="badges">
+        @for (feature of missing(); track feature) { <gr-badge severity="warning">{{ feature }}</gr-badge> }
+      </div>
+    }
+  </section>
+}
+
+<gr-table class="kv requested">
+  <tbody>
+    @for (field of fields(); track field.label) {
+      <tr>
+        <td class="label">{{ field.label }}</td>
+        <td class="value">
+          <div class="values">
+            @for (value of field.values; track value) {
+              <span class="mono">{{ value }}</span>
+            } @empty {
+              <span class="unset">{{ field.unset }}</span>
+            }
+          </div>
+        </td>
+      </tr>
+    }
+  </tbody>
+</gr-table>
