@@ -11,13 +11,13 @@ pub trait WalkNode: Sized {
     fn child_names(&self) -> Result<Vec<String>>;
     fn child(&self, name: &str) -> Result<Option<Self>>;
     fn is_derivation(&self) -> Result<bool>;
-    fn is_exec_app(&self) -> Result<bool>;
+    fn is_app(&self) -> Result<bool>;
     /// Opaque sets like NixOS options stay out of a `**` traversal.
     fn is_opaque(&self) -> Result<bool>;
 }
 
 pub fn is_leaf<N: WalkNode>(node: &N) -> Result<bool> {
-    Ok(node.is_derivation()? || node.is_exec_app()?)
+    Ok(node.is_derivation()? || node.is_app()?)
 }
 
 pub fn collapse_deep(segs: &[String]) -> Vec<String> {
@@ -473,7 +473,7 @@ mod tests {
     #[derive(Default)]
     struct StubNode {
         derivation: bool,
-        exec_app: bool,
+        app: bool,
         opaque: bool,
         throws: bool,
         type_set: bool,
@@ -491,7 +491,7 @@ mod tests {
 
         fn app() -> Self {
             StubNode {
-                exec_app: true,
+                app: true,
                 opaque: true,
                 ..Default::default()
             }
@@ -557,9 +557,9 @@ mod tests {
             Ok(self.derivation)
         }
 
-        fn is_exec_app(&self) -> Result<bool> {
+        fn is_app(&self) -> Result<bool> {
             self.force()?;
-            Ok(self.exec_app)
+            Ok(self.app)
         }
 
         fn is_opaque(&self) -> Result<bool> {
@@ -603,7 +603,7 @@ mod tests {
                     "x86_64-linux",
                     StubNode::set(vec![
                         ("curl", StubNode::app()),
-                        ("plain", StubNode::opaque(vec![])),
+                        ("option", StubNode::opaque(vec![])),
                     ]),
                 )]),
             ),
@@ -810,23 +810,28 @@ mod tests {
     }
 
     #[test]
-    fn an_app_with_a_gradient_block_is_a_leaf_and_a_plain_app_is_not() {
+    fn every_app_is_a_leaf_and_a_typed_set_is_not() {
         let root = StubNode::set(vec![(
             "apps",
             StubNode::set(vec![(
                 "x86_64-linux",
                 StubNode::set(vec![
                     ("curl", StubNode::app()),
-                    ("plain", StubNode::opaque(vec![])),
+                    ("plain", StubNode::app()),
+                    ("option", StubNode::opaque(vec![])),
                 ]),
             )]),
         )]);
+        let expected = vec![
+            "apps.x86_64-linux.curl".to_owned(),
+            "apps.x86_64-linux.plain".to_owned(),
+        ];
         let (found, errors) = discover(&&root, &[segs(&["apps", "x86_64-linux", "*"])], &[]);
-        assert_eq!(found, vec!["apps.x86_64-linux.curl".to_owned()]);
+        assert_eq!(found, expected);
         assert!(errors.is_empty());
 
-        let deep = discover(&&tree(), &[segs(&["apps", "**"])], &[]).0;
-        assert_eq!(deep, vec!["apps.x86_64-linux.curl".to_owned()]);
+        let deep = discover(&&root, &[segs(&["apps", "**"])], &[]).0;
+        assert_eq!(deep, expected);
     }
 
     #[test]

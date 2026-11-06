@@ -127,10 +127,11 @@
       refusal = "import from derivation is not available during the eval driver"
       assert ifd_errors and refusal in ifd_errors[0]["message"], f"the driver must refuse the import: {responses[0]['errors']}"
 
-      banner("Assert exec apps are leaves and plain apps are skipped")
+      banner("Assert every app is a leaf and a plain app builds its program")
       assert responses[3]["kind"] == "list_ok", responses[3]
       apps = {it["attr"].rsplit(".", 1)[1]: it for it in responses[3]["items"]}
-      assert set(apps) == {"curl", "outside", "trainer"}, f"app leaves mismatch: {sorted(apps)}"
+      assert set(apps) == {"curl", "plain", "outside", "trainer"}, f"app leaves mismatch: {sorted(apps)}"
+      assert apps["plain"]["drv_path"].endswith("-check.drv") and apps["plain"].get("exec") is None, apps["plain"]
       curl = apps["curl"]["exec"]
       assert curl["program_drv"].endswith("-check.drv"), curl
       assert json.loads(curl["block"]) == {"network": True, "devices": ["gpu:h100:8"]}, curl
