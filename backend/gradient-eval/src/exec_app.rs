@@ -57,20 +57,30 @@ struct ReadSopsFile {
     content: String,
 }
 
-pub fn is_exec_app(cursor: &AttrCursor) -> Result<bool> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppKind {
+    Plain,
+    Exec,
+}
+
+pub fn app_kind(cursor: &AttrCursor) -> Result<Option<AppKind>> {
     let Some(kind) = cursor.maybe_get_attr("type")? else {
-        return Ok(false);
+        return Ok(None);
     };
     if kind.string()? != "app" {
-        return Ok(false);
+        return Ok(None);
     }
 
-    Ok(cursor
+    let has_gradient_block = cursor
         .maybe_get_attr("passthru")?
         .map(|passthru| passthru.maybe_get_attr("gradient"))
         .transpose()?
         .flatten()
-        .is_some())
+        .is_some();
+    Ok(Some(match has_gradient_block {
+        true => AppKind::Exec,
+        false => AppKind::Plain,
+    }))
 }
 
 pub fn read_exec_app(cursor: &AttrCursor, state: &EvalState) -> Result<ExecApp> {

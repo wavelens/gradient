@@ -14,7 +14,7 @@ A flake app turned into an exec job, with the hardware and context the program n
 
 ## 1. Add `passthru.gradient`
 
-Apps with `passthru.gradient` turn into exec jobs. Apps without the block stay plain `nix run` apps.
+Apps with `passthru.gradient` turn into exec jobs. An app without a block can build only its own `program`.
 
 ```nix
 # flake.nix

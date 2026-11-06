@@ -37,7 +37,7 @@ flowchart LR
 
 ## Entry Points
 
-- Attrsets with `type = "app"` and `passthru.gradient` are walk leaves. Other apps stay opaque.
+- Attribute sets with `type = "app"` are leaves of the traversal. Apps without `passthru.gradient` build the `program` derivation and don't get exec jobs.
 - `EXEC_APP_EXPR` can read the block. Apps without exactly one derivation output in the string context of `program` fail with a message.
 - The eval cache can resolve `image` to `config.system.build.gradientGuest`. Images get a second entry point, `<attr>.passthru.gradient.image`.
 - Specs live as JSON in `entry_point.exec`. Exec entry points reference the program derivation in `entry_point.derivation`.

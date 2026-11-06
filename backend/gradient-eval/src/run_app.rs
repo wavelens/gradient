@@ -9,23 +9,27 @@ use nix_bindings::EvalState;
 use nix_bindings::eval_cache::AttrCursor;
 use serde_json::{Map, Value};
 
-use crate::exec_app::{self, EXEC_APP_EXPR};
+use crate::exec_app::{self, AppKind, EXEC_APP_EXPR};
 use crate::ipc::ExecApp;
 
 const PACKAGE_PROGRAM_EXPR: &str = include_str!("run/package.nix");
 const DEVSHELL_PROGRAM_EXPR: &str = include_str!("run/devshell.nix");
+const PLAIN_APP_PROGRAM_EXPR: &str = "app: app.program";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunProgram {
     AsDeclared,
+    AppProgram,
     Package,
     DevShell,
 }
 
 impl RunProgram {
-    pub fn of(attr_segments: &[String], is_exec_app: bool) -> Self {
-        if is_exec_app {
+    pub fn of(attr_segments: &[String], app: Option<AppKind>) -> Self {
+        if app == Some(AppKind::Exec) {
             Self::AsDeclared
+        } else if app == Some(AppKind::Plain) {
+            Self::AppProgram
         } else if attr_segments
             .first()
             .is_some_and(|first| first == "devShells")
@@ -45,11 +49,16 @@ pub fn read_run_app(
 ) -> Result<ExecApp> {
     let mut app = match program {
         RunProgram::AsDeclared => exec_app::read_exec_app(cursor, state)?,
+        RunProgram::AppProgram => read_plain_app(cursor, state)?,
         RunProgram::Package => wrapped_app(cursor, state, PACKAGE_PROGRAM_EXPR)?,
         RunProgram::DevShell => wrapped_app(cursor, state, DEVSHELL_PROGRAM_EXPR)?,
     };
     app.block = with_run_overrides(&app.block, run_overrides).map_err(|e| anyhow!(e))?;
     Ok(app)
+}
+
+pub fn read_plain_app(cursor: &AttrCursor, state: &EvalState) -> Result<ExecApp> {
+    wrapped_app(cursor, state, PLAIN_APP_PROGRAM_EXPR)
 }
 
 fn wrapped_app(cursor: &AttrCursor, state: &EvalState, program_expr: &str) -> Result<ExecApp> {
@@ -112,27 +121,45 @@ mod tests {
     #[test]
     fn an_exec_app_runs_as_declared_even_under_dev_shells() {
         assert_eq!(
-            RunProgram::of(&segments("apps.x86_64-linux.train"), true),
+            RunProgram::of(&segments("apps.x86_64-linux.train"), Some(AppKind::Exec)),
             RunProgram::AsDeclared
         );
         assert_eq!(
-            RunProgram::of(&segments("devShells.x86_64-linux.gpu"), true),
+            RunProgram::of(&segments("devShells.x86_64-linux.gpu"), Some(AppKind::Exec)),
             RunProgram::AsDeclared
+        );
+    }
+
+    #[test]
+    fn a_plain_app_runs_its_declared_program_even_under_dev_shells() {
+        assert_eq!(
+            RunProgram::of(
+                &segments("apps.x86_64-linux.frontend"),
+                Some(AppKind::Plain)
+            ),
+            RunProgram::AppProgram
+        );
+        assert_eq!(
+            RunProgram::of(
+                &segments("devShells.x86_64-linux.tool"),
+                Some(AppKind::Plain)
+            ),
+            RunProgram::AppProgram
         );
     }
 
     #[test]
     fn a_dev_shell_attribute_runs_its_environment_and_others_their_main_program() {
         assert_eq!(
-            RunProgram::of(&segments("devShells.x86_64-linux.default"), false),
+            RunProgram::of(&segments("devShells.x86_64-linux.default"), None),
             RunProgram::DevShell
         );
         assert_eq!(
-            RunProgram::of(&segments("packages.x86_64-linux.hello"), false),
+            RunProgram::of(&segments("packages.x86_64-linux.hello"), None),
             RunProgram::Package
         );
         assert_eq!(
-            RunProgram::of(&segments("checks.x86_64-linux.devShells"), false),
+            RunProgram::of(&segments("checks.x86_64-linux.devShells"), None),
             RunProgram::Package
         );
     }
