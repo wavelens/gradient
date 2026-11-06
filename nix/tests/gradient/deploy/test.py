@@ -129,6 +129,13 @@ log = await_deploy(machine)
 assert "already up-to-date" in log, log
 assert stats(machine)["connections"] == 0, f"must not open the live socket: {stats(machine)}"
 
+banner("Only trusted users run gradient-update")
+machine.fail("su untrusted -c 'systemctl start --no-ask-password gradient-deploy.service'")
+machine.fail("su trusted -c 'systemctl stop --no-ask-password gradient-deploy.service'")
+machine.succeed("su trusted -c gradient-update")
+log = await_deploy(machine)
+assert "already up-to-date" in log, log
+
 # ── Evaluation fails part-way through the build ───────────────────────────────
 banner("Evaluation failing mid-build stops the wait without deploying")
 post(machine, "/control/reset")

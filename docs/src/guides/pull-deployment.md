@@ -100,6 +100,12 @@ An `Error:` line in the journal means a failed fetch or activation.
 
 A failed MicroVM restart leaves the new runner symlink installed and, like normally, preserves the previous runner under `old`.
 
+To allow users other than root to run `gradient-update`, list them in `trustedUsers`. Those users can start the deploy service, but they can't stop or change it.
+
+```nix
+system.gradient-deploy.trustedUsers = [ "alice" ];
+```
+
 ## Run Behavior
 
 Each round evaluates the task's latest evaluation and reacts to the result.
@@ -124,6 +130,7 @@ The waiting outcomes keep the unit in a successful state. The waiting service ca
 | `websockets` | `true` | `false` checks every `pollIntervalSec` instead, for networks that block WebSocket upgrades |
 | `pollIntervalSec` | `60` | Check interval without WebSockets |
 | `randomizedDelaySec` | `"0"` | Spread out deployments across many machines |
+| `trustedUsers` | `[]` | Users who can run `gradient-update` without root |
 
 ## Next Steps
 
