@@ -32,16 +32,18 @@ Programs from `gradient run` arrive as build requests on the server. Exec jobs i
 ## 2. Start the Program
 
 ```sh
-gradient run .#hello
+gradient run .#packages.x86_64-linux.hello
 ```
 
 | Attribute | Program |
 |---|---|
 | Exec app with `passthru.gradient` | As declared, see [Declare an Exec App](apps.md) |
+| Other apps with `type = "app"` | The declared `program`, like `nix run` |
 | `devShells.*` | Interactive `bash` inside the shell environment, like `nix develop` |
 | Other derivations | `bin/<name>` of the package, with `meta.mainProgram`, `pname` or the package name as `<name>` |
 
-- Commands without an attribute run `packages.<system>.default`.
+- Commands without an attribute run `apps.<system>.default`.
+- A bare `.#name` stands for `apps.<system>.name`.
 - Build logs of the program stay visible until the job start.
 
 ## 3. Pick a Mode
@@ -96,7 +98,7 @@ gradient run --attach <job-id> -L 9000:8888 # (2)!
 
 ## Verify Deployment
 
-- The output of `gradient run .#hello` is `Hello, world!` together with a zero exit code.
+- The output of `gradient run .#packages.x86_64-linux.hello` is `Hello, world!` together with a zero exit code.
 - Refused jobs show the message `Exec jobs don't run in build requests for this project.` with the name of the setting.
 
 ## Next Steps

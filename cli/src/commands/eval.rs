@@ -190,7 +190,11 @@ fn split_installables(patterns: &[String], system: &str) -> (String, Vec<String>
             }
             None => body,
         };
-        wildcards.push(attr_spec::qualify_attr(&format!("{excl}{attr}"), system));
+        wildcards.push(attr_spec::qualify_attr(
+            &format!("{excl}{attr}"),
+            system,
+            "packages",
+        ));
     }
     (flake_ref, wildcards)
 }

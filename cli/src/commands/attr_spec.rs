@@ -26,22 +26,20 @@ pub fn default_nix_system() -> String {
     format!("{}-{}", std::env::consts::ARCH, os)
 }
 
-/// Resolution mirrors `nix` default installables. A bare package name gets `packages.<system>.`
-/// in front. An empty attr becomes the wildcard `packages.<system>.*`.
-pub fn qualify_attr(attr: &str, system: &str) -> String {
+pub fn qualify_attr(attr: &str, system: &str, category: &str) -> String {
     let (excl, body) = attr
         .strip_prefix('!')
         .map(|r| ("!", r))
         .unwrap_or(("", attr));
     if body.is_empty() {
-        return format!("{excl}packages.{system}.*");
+        return format!("{excl}{category}.{system}.*");
     }
 
     let head = body.split('.').next().unwrap_or("");
     if matches!(head, "*" | "**") || OUTPUT_CATEGORIES.contains(&head) {
         format!("{excl}{body}")
     } else {
-        format!("{excl}packages.{system}.{body}")
+        format!("{excl}{category}.{system}.{body}")
     }
 }
 
@@ -102,7 +100,7 @@ mod tests {
     #[test]
     fn qualify_bare_package_gets_packages_prefix() {
         assert_eq!(
-            qualify_attr("gradient-cli-full", "x86_64-linux"),
+            qualify_attr("gradient-cli-full", "x86_64-linux", "packages"),
             "packages.x86_64-linux.gradient-cli-full"
         );
     }
@@ -110,30 +108,45 @@ mod tests {
     #[test]
     fn qualify_known_category_and_wildcards_pass_through() {
         assert_eq!(
-            qualify_attr("packages.aarch64-linux.uxc", "x86_64-linux"),
+            qualify_attr("packages.aarch64-linux.uxc", "x86_64-linux", "packages"),
             "packages.aarch64-linux.uxc"
         );
         assert_eq!(
-            qualify_attr("checks.x86_64-linux.*", "x86_64-linux"),
+            qualify_attr("checks.x86_64-linux.*", "x86_64-linux", "packages"),
             "checks.x86_64-linux.*"
         );
-        assert_eq!(qualify_attr("*", "x86_64-linux"), "*");
-        assert_eq!(qualify_attr("**", "x86_64-linux"), "**");
+        assert_eq!(qualify_attr("*", "x86_64-linux", "packages"), "*");
+        assert_eq!(qualify_attr("**", "x86_64-linux", "packages"), "**");
         assert_eq!(
-            qualify_attr("hello-*", "x86_64-linux"),
+            qualify_attr("hello-*", "x86_64-linux", "packages"),
             "packages.x86_64-linux.hello-*"
         );
         assert_eq!(
-            qualify_attr("nixosConfigurations.foo", "x86_64-linux"),
+            qualify_attr("nixosConfigurations.foo", "x86_64-linux", "packages"),
             "nixosConfigurations.foo"
         );
     }
 
     #[test]
-    fn qualify_empty_attr_is_all_packages_and_keeps_exclusion() {
-        assert_eq!(qualify_attr("", "x86_64-linux"), "packages.x86_64-linux.*");
+    fn qualify_bare_name_uses_the_given_category() {
         assert_eq!(
-            qualify_attr("!uxc", "x86_64-linux"),
+            qualify_attr("frontend", "x86_64-linux", "apps"),
+            "apps.x86_64-linux.frontend"
+        );
+        assert_eq!(
+            qualify_attr("packages.x86_64-linux.hello", "x86_64-linux", "apps"),
+            "packages.x86_64-linux.hello"
+        );
+    }
+
+    #[test]
+    fn qualify_empty_attr_is_all_packages_and_keeps_exclusion() {
+        assert_eq!(
+            qualify_attr("", "x86_64-linux", "packages"),
+            "packages.x86_64-linux.*"
+        );
+        assert_eq!(
+            qualify_attr("!uxc", "x86_64-linux", "packages"),
             "!packages.x86_64-linux.uxc"
         );
     }
