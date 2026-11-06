@@ -77,7 +77,8 @@ Workers provide a budget for guest CPUs, memory and disk. Both running guests an
 | `exec.guestDiskMb` | 80 % of the free space under `<worker.baseDir>/guests` at worker start |
 
 - Only workers with enough free budget start jobs. Jobs with no such worker stay queued, the same way jobs wait on busy devices.
-- Sizes beyond the budget of every worker show in the wait reason, for example `needs 64 CPUs`.
+- Sizes above the budget of all workers appear in the wait reason (example: `needs 64 CPUs`).
+- Jobs with no connected worker that can fit them fail after 300 seconds. Set task option `wait_for_workers` to keep those jobs queued instead.
 - `exec.preWarm` guests boot with `gradient.guest.cpus` and `gradient.guest.memoryMb` of the image, `2` and `500` by default.
 - Queued jobs of other sizes get warm guests of their own size too. `exec.maxPreWarm` can cap the warm guests of all sizes together.
 - Jobs take a warm guest only with exactly its CPU count and memory. Other sizes boot a new guest.

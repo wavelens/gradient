@@ -20,6 +20,7 @@ pub struct ExecDispatchRow {
     pub node_index: u32,
     pub entry_point: String,
     pub task: TaskId,
+    pub wait_for_workers: bool,
     pub project: ProjectId,
     pub project_name: String,
     pub task_name: String,
@@ -42,7 +43,7 @@ pub struct OpenAttempt {
 fn dispatch_rows_sql(filter: &str) -> String {
     format!(
         "SELECT r.*, e.eval AS entry_point_name, ev.task AS task_id, t.project AS project_id, \
-         pr.name AS project_name, t.name AS task_name, ev.parent_exec_job AS parent_job, \
+         t.wait_for_workers, pr.name AS project_name, t.name AS task_name, ev.parent_exec_job AS parent_job, \
          ev.repository, encode(c.hash, 'hex') AS commit_hash, d.architecture, \
          img.hash AS image_hash, img.package AS image_package, \
          (SELECT count(*) FROM exec_job_attempt a WHERE a.exec_job = r.id)::integer \
@@ -134,6 +135,7 @@ fn dispatch_row(row: &QueryResult) -> Result<ExecDispatchRow, DbErr> {
         job,
         entry_point: row.try_get("", "entry_point_name")?,
         task: row.try_get("", "task_id")?,
+        wait_for_workers: row.try_get("", "wait_for_workers")?,
         project: row.try_get("", "project_id")?,
         project_name: row.try_get("", "project_name")?,
         task_name: row.try_get("", "task_name")?,

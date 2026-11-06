@@ -39,6 +39,7 @@ mod scoring;
 mod supersede;
 pub mod trigger_firing;
 mod unbuildable;
+mod unplaceable_exec_jobs;
 mod worker_lifecycle;
 mod worker_memory;
 
@@ -89,6 +90,7 @@ pub struct Scheduler {
     pub(crate) workers: worker_memory::WorkerMemory,
     pub(crate) split_decisions: eval_split::create::SplitDecisions,
     pub(crate) pre_warm: pre_warm::PreWarmCounts,
+    pub(crate) unplaceable_exec_jobs: unplaceable_exec_jobs::UnplaceableExecJobs,
     expected_reclaims: Arc<gradient_util::sync::Mutex<Vec<KeptAssignment>>>,
     pub guest_channels: Arc<GuestChannels>,
 }
@@ -119,6 +121,7 @@ impl Scheduler {
             workers: worker_memory::WorkerMemory::default(),
             split_decisions: Default::default(),
             pre_warm: pre_warm::PreWarmCounts::default(),
+            unplaceable_exec_jobs: Default::default(),
             guest_channels: GuestChannels::new(),
             expected_reclaims: Arc::default(),
         }

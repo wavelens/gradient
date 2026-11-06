@@ -65,6 +65,9 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
     let closures = ProgramClosures::load(&scheduler.db.worker_db, new_rows.iter().copied()).await?;
     let new_ids: Vec<ExecJobId> = new_rows.iter().map(|row| row.job.id).collect();
     let membership = Membership::load(&scheduler.db.worker_db, &[], &[], &new_ids).await?;
+    let queued: HashSet<ExecJobId> = rows.iter().map(|row| row.job.id).collect();
+    scheduler.unplaceable_exec_jobs.retain(&queued);
+    let now = gradient_types::now();
 
     for row in rows {
         let key = exec_job_key(row.job.id);
@@ -88,6 +91,15 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
 
         let caps: Vec<WorkerCaps> = project_workers.iter().map(caps_of).collect();
         let reason = exec_waiting_reason(&pending, &caps);
+        if let Some(message) = scheduler.unplaceable_exec_jobs.overdue(
+            row.job.id,
+            reason.as_ref(),
+            row.wait_for_workers,
+            now,
+        ) {
+            fail_queued_job(scheduler, &row, &key, tracked, message).await?;
+            continue;
+        }
         dispatch::set_waiting_reason(&scheduler.db.worker_db, row.job.id, reason.as_ref()).await?;
 
         if tracked {

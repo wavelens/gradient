@@ -220,6 +220,125 @@ async fn an_unplaceable_job_stores_its_wait_reason() {
     case.finish().await;
 }
 
+fn no_ssh_inventory() -> ExecInventory {
+    let mut inventory = inventory();
+    inventory.allow.ssh = false;
+    inventory
+}
+
+fn ssh_spec() -> ExecSpec {
+    ExecSpec {
+        ssh: Some(true),
+        ..spec()
+    }
+}
+
+#[tokio::test]
+async fn a_job_no_worker_can_run_fails_after_the_grace() {
+    let e1 = EvaluationId::now_v7();
+    let case = with_queued_job(e1, ssh_spec()).await;
+    case.connect(W1, w_exec(no_ssh_inventory()), &[]).await;
+
+    case.assign_exec_jobs().await;
+    assert_eq!(
+        the_job(&case).await.status,
+        ExecJobStatus::Queued,
+        "after 1: waits out the grace"
+    );
+
+    case.backdate_unplaceable_exec_jobs(301);
+    case.assign_exec_jobs().await;
+    let job = the_job(&case).await;
+    assert_eq!(
+        (job.status, job.waiting_reason, job.message.as_deref()),
+        (
+            ExecJobStatus::Failed,
+            None,
+            Some(
+                "No connected worker offers ssh. Enable waiting for workers on the task to wait instead."
+            )
+        ),
+        "after 2: the job"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_task_waiting_for_workers_keeps_a_job_no_worker_can_run() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start_then(exec_shape(e1), async |case| {
+        seed_queued_job(case, &ssh_spec()).await;
+        case.db
+            .execute("UPDATE task SET wait_for_workers = true")
+            .await;
+    })
+    .await;
+    case.connect(W1, w_exec(no_ssh_inventory()), &[]).await;
+
+    case.assign_exec_jobs().await;
+    case.backdate_unplaceable_exec_jobs(301);
+    case.assign_exec_jobs().await;
+
+    let job = the_job(&case).await;
+    let reason = job
+        .waiting_reason
+        .as_ref()
+        .and_then(WaitingReason::from_json);
+    assert_eq!(job.status, ExecJobStatus::Queued, "after 1: the job");
+    assert!(
+        matches!(&reason, Some(WaitingReason::ExecWorkers { unmet, .. }) if unmet.ssh),
+        "after 1: the wait reason names ssh: {reason:?}"
+    );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_job_waiting_for_a_busy_worker_is_kept_past_the_grace() {
+    let e1 = EvaluationId::now_v7();
+    let two_cpus = ExecSpec {
+        guest: gradient_types::exec::GuestSize::default_request(),
+        ..spec()
+    };
+    let case = with_queued_job(e1, two_cpus).await;
+    let busy = ExecInventory {
+        guest_capacity: gradient_types::exec::GuestCapacity {
+            cpus: gradient_types::exec::ResourceAmount { total: 4, free: 0 },
+            memory_mb: gradient_types::exec::ResourceAmount {
+                total: 64_000,
+                free: 64_000,
+            },
+            disk_mb: gradient_types::exec::ResourceAmount {
+                total: 100_000,
+                free: 100_000,
+            },
+        },
+        ..inventory()
+    };
+    case.connect(W1, w_exec(busy), &[]).await;
+
+    case.assign_exec_jobs().await;
+    case.backdate_unplaceable_exec_jobs(301);
+    case.assign_exec_jobs().await;
+
+    let job = the_job(&case).await;
+    let reason = job
+        .waiting_reason
+        .as_ref()
+        .and_then(WaitingReason::from_json);
+    assert_eq!(job.status, ExecJobStatus::Queued, "after 1: the job");
+    assert!(
+        matches!(
+            reason,
+            Some(WaitingReason::ExecWorkers {
+                matching_workers: 1,
+                ..
+            })
+        ),
+        "after 1: the worker fits once it is free: {reason:?}"
+    );
+    case.finish().await;
+}
+
 #[tokio::test]
 async fn a_lost_worker_requeues_its_exec_job_without_a_retry() {
     let e1 = EvaluationId::now_v7();
