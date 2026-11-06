@@ -43,7 +43,8 @@ gradient run .#packages.x86_64-linux.hello
 | Other derivations | `bin/<name>` of the package, with `meta.mainProgram`, `pname` or the package name as `<name>` |
 
 - Commands without an attribute run `apps.<system>.default`.
-- A bare `.#name` stands for `apps.<system>.name`.
+- Bare `.#name` values map to `apps.<system>.name`.
+- A job can retry once unless apps declare their own `retries`.
 - Build logs of the program stay visible until the job start.
 
 ## 3. Pick a Mode

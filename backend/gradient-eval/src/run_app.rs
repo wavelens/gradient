@@ -15,6 +15,7 @@ use crate::ipc::ExecApp;
 const PACKAGE_PROGRAM_EXPR: &str = include_str!("run/package.nix");
 const DEVSHELL_PROGRAM_EXPR: &str = include_str!("run/devshell.nix");
 const PLAIN_APP_PROGRAM_EXPR: &str = "app: app.program";
+const DEFAULT_RUN_RETRIES: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunProgram {
@@ -84,6 +85,9 @@ fn with_run_overrides(block: &str, run_overrides: &str) -> Result<String, String
     let declared_ports = block.remove("ports");
     block.extend(overrides);
     merge_ports(&mut block, declared_ports);
+    block
+        .entry("retries")
+        .or_insert_with(|| DEFAULT_RUN_RETRIES.into());
     Ok(Value::Object(block).to_string())
 }
 
@@ -173,7 +177,7 @@ mod tests {
 
         assert_eq!(
             merged,
-            serde_json::json!({"cpus": 8, "env": {"A": "1"}, "ssh": true})
+            serde_json::json!({"cpus": 8, "env": {"A": "1"}, "ssh": true, "retries": 1})
         );
     }
 
@@ -184,15 +188,29 @@ mod tests {
             serde_json::from_str(&with_run_overrides(block, r#"{"ports":[8888,8080]}"#).unwrap())
                 .unwrap();
 
-        assert_eq!(merged, serde_json::json!({"ports": [8888, 8080, 6006]}));
+        assert_eq!(
+            merged,
+            serde_json::json!({"ports": [8888, 8080, 6006], "retries": 1})
+        );
     }
 
     #[test]
-    fn empty_run_overrides_leave_an_exec_app_untouched() {
+    fn empty_run_overrides_add_only_the_default_retry() {
         let block = r#"{"nodes":2,"network":true}"#;
         let merged: Value =
             serde_json::from_str(&with_run_overrides(block, "{}").unwrap()).unwrap();
 
-        assert_eq!(merged, serde_json::json!({"nodes": 2, "network": true}));
+        assert_eq!(
+            merged,
+            serde_json::json!({"nodes": 2, "network": true, "retries": 1})
+        );
+    }
+
+    #[test]
+    fn declared_retries_win_over_the_run_default() {
+        let merged: Value =
+            serde_json::from_str(&with_run_overrides(r#"{"retries":3}"#, "{}").unwrap()).unwrap();
+
+        assert_eq!(merged, serde_json::json!({"retries": 3}));
     }
 }
