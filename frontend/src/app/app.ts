@@ -9,6 +9,7 @@ import { Router, RouterOutlet, NavigationEnd } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map } from 'rxjs/operators';
 import { FooterComponent, FooterLink } from '@gradient/ui/chrome';
+import { ToastComponent } from '@gradient/ui/ui';
 import { AppHeaderComponent } from '@shared/chrome/header/header.component';
 import { CommandPaletteComponent } from '@shared/chrome/command-palette/command-palette.component';
 import { AuthService } from '@core/services/auth.service';
@@ -29,7 +30,7 @@ const FOOTER_LINKS: FooterLink[] = [
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent, WhatsNewDialogComponent],
+  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent, WhatsNewDialogComponent, ToastComponent],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './app.scss'

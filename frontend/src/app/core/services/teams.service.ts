@@ -6,7 +6,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { ApiService } from './api.service';
+import { ApiService, RequestOptions } from './api.service';
 import {
   TeamSummary,
   TeamResponse,
@@ -77,8 +77,8 @@ export class TeamsService {
     return this.api.delete<string>(`teams/${team}/invitations`, { user });
   }
 
-  workers(team: string): Observable<TeamWorkerEntry[]> {
-    return this.api.get<TeamWorkerEntry[]>(`teams/${team}/workers`);
+  workers(team: string, options?: RequestOptions): Observable<TeamWorkerEntry[]> {
+    return this.api.get<TeamWorkerEntry[]>(`teams/${team}/workers`, options);
   }
 
   registerWorker(team: string, worker: RegisterWorkerRequest): Observable<RegisteredTeamWorker> {

@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { Router, RouterStateSnapshot, ActivatedRouteSnapshot, provideRouter } from '@angular/router';
-import { firstValueFrom, isObservable, of } from 'rxjs';
+import { Subject, firstValueFrom, isObservable, of } from 'rxjs';
 import { publicListingGuard } from './public-listing.guard';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -39,6 +39,25 @@ describe('publicListingGuard', () => {
     const { allowed, navigate } = await run(true);
     expect(allowed).toBe(true);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('waits for the session check before a list page reads who is signed in', () => {
+    const initialized = new Subject<boolean>();
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        { provide: ConfigService, useValue: { publicListing: true } },
+        { provide: AuthService, useValue: { initialized$: initialized } },
+      ],
+    });
+    const result = TestBed.runInInjectionContext(() =>
+      publicListingGuard({} as ActivatedRouteSnapshot, { url: '/caches' } as RouterStateSnapshot)
+    );
+    let allowed: unknown;
+    if (isObservable(result)) result.subscribe((value) => (allowed = value));
+    expect(allowed).toBeUndefined();
+    initialized.next(true);
+    expect(allowed).toBe(true);
   });
 
   it('sends a logged-out visitor to login while public listing is off', async () => {

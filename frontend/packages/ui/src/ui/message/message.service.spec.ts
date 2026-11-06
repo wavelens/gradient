@@ -49,6 +49,13 @@ describe('MessageService', () => {
     expect(service.messages().length).toBe(1);
   });
 
+  it('replaces a visible message with the same key', () => {
+    service.add({ summary: 'busy', detail: '5 s', key: 'throttle', life: 0 });
+    service.add({ summary: 'other', life: 0 });
+    service.add({ summary: 'busy', detail: '30 s', key: 'throttle', life: 0 });
+    expect(service.messages().map((m) => m.detail ?? m.summary)).toEqual(['other', '30 s']);
+  });
+
   it('removes by id and clears all', () => {
     service.add({ summary: 'a', life: 0 });
     service.add({ summary: 'b', life: 0 });

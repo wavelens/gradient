@@ -48,6 +48,7 @@ export class LoginComponent {
 
   loginForm: FormGroup;
   errorMessage = signal<string | null>(null);
+  readonly sessionExpired = this.route.snapshot.queryParamMap.get('reason') === 'expired';
   loading = signal(false);
   showPassword = signal(false);
   get oidcEnabled() { return this.config.oidcEnabled; }

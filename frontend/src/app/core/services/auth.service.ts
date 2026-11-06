@@ -5,13 +5,14 @@
  */
 
 import { Injectable, signal, computed, inject } from '@angular/core';
-import { HttpContext } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { BehaviorSubject, Observable, filter, of, take } from 'rxjs';
-import { tap, switchMap, finalize, catchError, map } from 'rxjs/operators';
+import { tap, switchMap, finalize, catchError, map, shareReplay } from 'rxjs/operators';
 import { ApiError, ApiService } from './api.service';
 import { MakeUserRequest, UserInfoResponse } from '@core/models';
-import { SESSION_PROBE } from '@core/interceptors/error.interceptor';
+import { asSessionProbe } from '@core/interceptors/request-context';
+
+const SIGNED_OUT_KEY = 'gradient-signed-out';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -38,9 +39,16 @@ export class AuthService {
   serverUnreachable = this.unreachableSignal.asReadonly();
   isAuthenticated = computed(() => !!this.userSignal());
 
+  private sessionCheck?: Observable<boolean>;
+
   constructor() {
-    // Restore session from storage on initialization
     this.initializeAuth();
+    globalThis.addEventListener?.('storage', (event: StorageEvent) => {
+      if (event.key === SIGNED_OUT_KEY && this.isAuthenticated()) {
+        this.forget();
+        this.toLogin(this.router.url);
+      }
+    });
   }
 
   /**
@@ -94,11 +102,42 @@ export class AuthService {
   logout() {
     return this.api.post('auth/logout', {}).pipe(
       finalize(() => {
-        this.userSignal.set(null);
-        this.tokenSignal.set(null);
+        this.forget();
+        localStorage.setItem(SIGNED_OUT_KEY, String(Date.now()));
         this.router.navigate(['/account/login']);
       })
     );
+  }
+
+  sessionLost(returnUrl: string): void {
+    const wasSignedIn = this.isAuthenticated();
+    this.forget();
+    if (wasSignedIn) this.api.post('auth/logout', {}, asSessionProbe()).subscribe({ error: () => undefined });
+    this.toLogin(returnUrl, wasSignedIn ? 'expired' : undefined);
+  }
+
+  stillSignedIn(): Observable<boolean> {
+    this.sessionCheck ??= this.api.get<UserInfoResponse>('user', asSessionProbe()).pipe(
+      map(() => true),
+      catchError((error: unknown) => of(error instanceof ApiError && error.unreachable)),
+      finalize(() => (this.sessionCheck = undefined)),
+      shareReplay(1),
+    );
+    return this.sessionCheck;
+  }
+
+  private forget(): void {
+    this.userSignal.set(null);
+    this.tokenSignal.set(null);
+  }
+
+  private toLogin(returnUrl: string, reason?: 'expired'): void {
+    const pending = this.router.currentNavigation()?.finalUrl;
+    const target = pending ? this.router.serializeUrl(pending) : this.router.url;
+    if (target.startsWith('/account/')) return;
+    const carry = returnUrl && returnUrl !== '/' && !returnUrl.startsWith('/account/');
+    const queryParams = { ...(carry ? { next: returnUrl } : {}), ...(reason ? { reason } : {}) };
+    this.router.navigate(['/account/login'], Object.keys(queryParams).length ? { queryParams } : {});
   }
 
   /**
@@ -113,7 +152,7 @@ export class AuthService {
   /// outage into a login screen; the state stays unknown until a real answer
   /// comes back.
   private probe(): Observable<boolean> {
-    return this.api.get<UserInfoResponse>('user', { context: new HttpContext().set(SESSION_PROBE, true) }).pipe(
+    return this.api.get<UserInfoResponse>('user', asSessionProbe()).pipe(
       tap((user) => {
         this.userSignal.set(user);
         this.unreachableSignal.set(false);

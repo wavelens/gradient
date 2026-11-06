@@ -7,6 +7,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, catchError, interval, of, startWith, switchMap } from 'rxjs';
+import { inBackground } from '@core/interceptors/request-context';
 import { clockTime, formatBytes } from '@shared/text';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import type { ExecJobOutputView, ExecJobResponse } from '@core/models';
@@ -53,6 +54,6 @@ export class ExecJobOutputsComponent {
 
   private watch({ id, node, open }: PollTarget): Observable<ExecJobOutputView[]> {
     const ticks = open ? interval(POLL_MS).pipe(startWith(0)) : of(0);
-    return ticks.pipe(switchMap(() => this.execJobs.outputs(id, node).pipe(catchError(() => EMPTY))));
+    return ticks.pipe(switchMap(() => this.execJobs.outputs(id, node, inBackground()).pipe(catchError(() => EMPTY))));
   }
 }

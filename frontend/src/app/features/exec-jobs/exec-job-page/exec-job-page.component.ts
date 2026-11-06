@@ -9,6 +9,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Subscription, catchError, forkJoin, interval, startWith, switchMap, takeWhile } from 'rxjs';
+import { inBackground } from '@core/interceptors/request-context';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -196,11 +197,11 @@ export class ExecJobPageComponent implements OnInit {
   private watch(): void {
     this.poll?.unsubscribe();
     this.poll = interval(POLL_MS).pipe(
-      startWith(0),
-      switchMap(() => forkJoin({
-        job: this.execJobs.get(this.jobId),
-        log: this.execJobs.log(this.jobId, undefined, this.node()),
-        pullRequests: this.execJobs.pullRequests(this.jobId),
+      startWith(-1),
+      switchMap((tick) => forkJoin({
+        job: this.execJobs.get(this.jobId, tick >= 0 ? inBackground() : undefined),
+        log: this.execJobs.log(this.jobId, undefined, this.node(), inBackground()),
+        pullRequests: this.execJobs.pullRequests(this.jobId, inBackground()),
       }).pipe(
         catchError((error: Error) => {
           this.errorMessage.set(error.message);

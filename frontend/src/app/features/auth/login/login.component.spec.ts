@@ -50,6 +50,11 @@ describe('LoginComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('The username is taken');
   });
 
+  it('explains that an expired session brought the user here', () => {
+    const fixture = setup({ loginProviders: [], passwordLoginEnabled: true }, { reason: 'expired' });
+    expect(fixture.nativeElement.textContent).toContain('Session expired');
+  });
+
   it('falls back to a generic message for unknown errors', () => {
     const fixture = setup({ loginProviders: [EXAMPLE], passwordLoginEnabled: true }, { login_error: 'whatever' });
     expect(fixture.nativeElement.textContent).toContain('Sign-in failed');

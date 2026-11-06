@@ -13,7 +13,7 @@ export interface ToastMessage extends Message {
 
 const DEFAULT_LIFE = 3000;
 
-@Injectable()
+@Injectable({ providedIn: 'root' })
 export class MessageService {
   private next = 0;
   private queue = signal<ToastMessage[]>([]);
@@ -21,7 +21,7 @@ export class MessageService {
 
   add(message: Message): void {
     const entry: ToastMessage = { severity: 'info', ...message, id: this.next++ };
-    this.queue.update((all) => [...all, entry]);
+    this.queue.update((all) => [...all.filter((m) => !message.key || m.key !== message.key), entry]);
     const life = message.life ?? DEFAULT_LIFE;
     if (life > 0) setTimeout(() => this.remove(entry.id), life);
   }

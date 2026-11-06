@@ -7,7 +7,8 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { AuthService } from './auth.service';
 import { environment } from '@environments/environment';
 
@@ -87,6 +88,52 @@ describe('AuthService session probe', () => {
     expect(await resolved).toBe(true);
     expect(service.isAuthenticated()).toBe(true);
     expect(service.serverUnreachable()).toBe(false);
+  });
+
+  it('forgets an expired session and returns to the page after sign-in', () => {
+    boot(() => httpMock.expectOne(userUrl).flush({ error: false, message: user }));
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    service.sessionLost('/teams');
+    expect(service.isAuthenticated()).toBe(false);
+    httpMock.expectOne(`${environment.apiUrl}/auth/logout`).flush({ error: false, message: 'ok' });
+    expect(navigate).toHaveBeenCalledWith(['/account/login'], { queryParams: { next: '/teams', reason: 'expired' } });
+  });
+
+  it('sends a visitor without a session to sign in without claiming it expired', () => {
+    boot(() => httpMock.expectOne(userUrl).flush({ error: true, message: 'no' }, { status: 401, statusText: 'Unauthorized' }));
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    service.sessionLost('/settings/keys');
+    httpMock.expectNone(`${environment.apiUrl}/auth/logout`);
+    expect(navigate).toHaveBeenCalledWith(['/account/login'], { queryParams: { next: '/settings/keys' } });
+  });
+
+  it('redirects once while the sign-in page is already on its way', () => {
+    boot(() => httpMock.expectOne(userUrl).flush({ error: false, message: user }));
+    const router = TestBed.inject(Router);
+    const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+    vi.spyOn(router, 'currentNavigation').mockReturnValue({
+      finalUrl: router.parseUrl('/account/login?next=%2Fteams'),
+    } as ReturnType<Router['currentNavigation']>);
+    service.sessionLost('/teams');
+    httpMock.expectOne(`${environment.apiUrl}/auth/logout`).flush({ error: false, message: 'ok' });
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('signs out when another tab signs out', () => {
+    boot(() => httpMock.expectOne(userUrl).flush({ error: false, message: user }));
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    window.dispatchEvent(new StorageEvent('storage', { key: 'gradient-signed-out', newValue: '1' }));
+    expect(service.isAuthenticated()).toBe(false);
+    expect(navigate).toHaveBeenCalledWith(['/account/login'], {});
+  });
+
+  it('asks the server once for overlapping session checks', async () => {
+    boot(() => httpMock.expectOne(userUrl).flush({ error: false, message: user }));
+    const first = firstValueFrom(service.stillSignedIn());
+    const second = firstValueFrom(service.stillSignedIn());
+    httpMock.expectOne(userUrl).flush({ error: true, message: 'no' }, { status: 401, statusText: 'Unauthorized' });
+    expect(await first).toBe(false);
+    expect(await second).toBe(false);
   });
 
   it('does not re-probe when the last answer was conclusive', async () => {

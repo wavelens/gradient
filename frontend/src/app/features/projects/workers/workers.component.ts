@@ -11,6 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { Observable, map } from 'rxjs';
 import { ConfigService } from '@core/services/config.service';
 import { WorkersService } from '@core/services/workers.service';
+import { inBackground } from '@core/interceptors/request-context';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
@@ -185,7 +186,7 @@ export class WorkersComponent implements OnInit {
 
   statusOf = (workerId: string): Observable<WorkerConnection | undefined> =>
     this.workersService
-      .getWorkers(this.projectName)
+      .getWorkers(this.projectName, inBackground())
       .pipe(map((workers) => workers.find((w) => w.worker_id === workerId)));
 
   get gradientCiLabel(): string {

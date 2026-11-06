@@ -64,7 +64,7 @@ describe('ExecJobOutputsComponent', () => {
     const { fixture, outputs } = setup('completed');
     fixture.componentRef.setInput('node', 1);
     fixture.detectChanges();
-    expect(outputs).toHaveBeenLastCalledWith('exec/j1/outputs?node=1');
+    expect(outputs).toHaveBeenLastCalledWith('exec/j1/outputs?node=1', expect.objectContaining({ context: expect.anything() }));
     const link = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('a');
     expect(link?.getAttribute('href')).toBe('/api/v1/exec/j1/outputs/model/w.bin?node=1');
   });

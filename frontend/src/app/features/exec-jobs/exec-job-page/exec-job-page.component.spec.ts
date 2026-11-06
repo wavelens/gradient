@@ -467,10 +467,10 @@ describe('ExecJobPageComponent', () => {
 
     it('loads the log of a picked node and sets ?node=1', () => {
       const { fixture, log, navigate } = setup('completed', SSH, {}, twoNodeJob('completed'));
-      expect(log).toHaveBeenLastCalledWith('j1', undefined, 0);
+      expect(log).toHaveBeenLastCalledWith('j1', undefined, 0, expect.anything());
       nodeItem(fixture.nativeElement, 1)?.click();
       fixture.detectChanges();
-      expect(log).toHaveBeenLastCalledWith('j1', undefined, 1);
+      expect(log).toHaveBeenLastCalledWith('j1', undefined, 1, expect.anything());
       expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { node: 1 } }));
       expect(nodeItem(fixture.nativeElement, 1)?.classList).toContain('selected');
     });

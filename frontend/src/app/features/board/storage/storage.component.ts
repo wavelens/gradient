@@ -7,6 +7,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, Subject, catchError, interval, map, startWith, switchMap } from 'rxjs';
+import { inBackground } from '@core/interceptors/request-context';
 import { BoardService } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/ui';
 import { oneOf, queryParamSignal } from '@shared/routing';
@@ -157,8 +158,8 @@ export class BoardStorageComponent implements OnInit {
   ngOnInit(): void {
     this.reload
       .pipe(
-        switchMap(() => interval(REFRESH_MS).pipe(startWith(0))),
-        switchMap(() => this.fetch(this.hours())),
+        switchMap(() => interval(REFRESH_MS).pipe(startWith(-1))),
+        switchMap((tick) => this.fetch(this.hours(), tick >= 0)),
         takeUntilDestroyed(this.destroyRef)
       )
       .subscribe((v) => this.view.set(v));
@@ -170,8 +171,8 @@ export class BoardStorageComponent implements OnInit {
     this.reload.next();
   }
 
-  private fetch(hours: number): Observable<StorageView> {
-    return this.board.getStorage(hours).pipe(
+  private fetch(hours: number, poll: boolean): Observable<StorageView> {
+    return this.board.getStorage(hours, poll ? inBackground() : undefined).pipe(
       map((stats) => ({ stats, buckets: windowBuckets(stats.granularity, hours, Date.now()) })),
       catchError(() => EMPTY)
     );

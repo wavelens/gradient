@@ -30,7 +30,7 @@ export class ApiError extends Error {
   }
 }
 
-interface RequestOptions {
+export interface RequestOptions {
   headers?: HttpHeaders;
   context?: HttpContext;
 }
