@@ -6972,7 +6972,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/Paginated_Project'
+                    $ref: '#/components/schemas/Paginated_PublicProjectSummary'
         default:
           $ref: '#/components/responses/Error'
       security: []
@@ -19021,30 +19021,6 @@ components:
           type: integer
           format: int64
           minimum: 0
-    Paginated_Project:
-      type: object
-      required:
-      - items
-      - total
-      - page
-      - per_page
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/Project'
-        total:
-          type: integer
-          format: int64
-          minimum: 0
-        page:
-          type: integer
-          format: int64
-          minimum: 0
-        per_page:
-          type: integer
-          format: int64
-          minimum: 0
     Paginated_ProjectSummary:
       type: object
       required:
@@ -19057,6 +19033,30 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProjectSummary'
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        page:
+          type: integer
+          format: int64
+          minimum: 0
+        per_page:
+          type: integer
+          format: int64
+          minimum: 0
+    Paginated_PublicProjectSummary:
+      type: object
+      required:
+      - items
+      - total
+      - page
+      - per_page
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicProjectSummary'
         total:
           type: integer
           format: int64
@@ -19568,47 +19568,6 @@ components:
           - integer
           - 'null'
           format: int64
-    Project:
-      type: object
-      required:
-      - id
-      - name
-      - display_name
-      - description
-      - public_key
-      - private_key
-      - public
-      - hide_build_requests
-      - allow_exec_in_build_requests
-      - created_by
-      - created_at
-      - managed
-      properties:
-        id:
-          $ref: '#/components/schemas/ProjectId'
-        name:
-          type: string
-        display_name:
-          type: string
-        description:
-          type: string
-        public_key:
-          type: string
-        private_key:
-          type: string
-        public:
-          type: boolean
-        hide_build_requests:
-          type: boolean
-        allow_exec_in_build_requests:
-          type: boolean
-        created_by:
-          $ref: '#/components/schemas/UserId'
-        created_at:
-          type: string
-          format: date-time
-        managed:
-          type: boolean
     ProjectId:
       type: string
       format: uuid
@@ -19809,6 +19768,26 @@ components:
           type:
           - string
           - 'null'
+    PublicProjectSummary:
+      type: object
+      required:
+      - id
+      - name
+      - display_name
+      - description
+      - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/ProjectId'
+        name:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     PullRequestResponse:
       type: object
       required:

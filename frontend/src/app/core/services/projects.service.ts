@@ -20,7 +20,7 @@ import {
   PatchProjectRequest,
   CreateRoleRequest,
   PatchRoleRequest,
-  Project,
+  PublicProjectSummary,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -31,8 +31,8 @@ export class ProjectsService {
     return this.api.get<Paginated<ProjectSummary[]>>(`projects?page=${page}&per_page=${perPage}`);
   }
 
-  getPublicProjects(page = 1, perPage = 50): Observable<Paginated<Project[]>> {
-    return this.api.get<Paginated<Project[]>>(`projects/public?page=${page}&per_page=${perPage}`);
+  getPublicProjects(page = 1, perPage = 50): Observable<Paginated<PublicProjectSummary[]>> {
+    return this.api.get<Paginated<PublicProjectSummary[]>>(`projects/public?page=${page}&per_page=${perPage}`);
   }
 
   setPublic(name: string): Observable<string> {

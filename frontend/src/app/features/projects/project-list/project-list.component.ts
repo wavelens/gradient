@@ -26,7 +26,7 @@ import {
   SelectComponent,
 } from '@gradient/ui/ui';
 import { NameFieldsComponent, nameAvailability } from '@shared/forms';
-import { Project, ProjectSummary } from '@core/models';
+import { ProjectSummary, PublicProjectSummary } from '@core/models';
 
 @Component({
   selector: 'app-project-list',
@@ -85,7 +85,7 @@ export class ProjectListComponent implements OnInit {
     public: false,
   };
 
-  publicProjects = signal<Project[]>([]);
+  publicProjects = signal<PublicProjectSummary[]>([]);
   publicTotal = signal(0);
   publicPage = signal(1);
   publicLoading = signal(false);
@@ -137,7 +137,7 @@ export class ProjectListComponent implements OnInit {
     this.showCreateDialog.set(true);
   }
 
-  get filteredPublicProjects(): Project[] {
+  get filteredPublicProjects(): PublicProjectSummary[] {
     const ownedIds = new Set(this.projects().map((o) => o.id));
     return this.publicProjects().filter((o) => !ownedIds.has(o.id));
   }

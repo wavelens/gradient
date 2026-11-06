@@ -1782,15 +1782,15 @@ export interface Paginated_NarSummary {
   per_page: number;
 }
 
-export interface Paginated_Project {
-  items: Project[];
+export interface Paginated_ProjectSummary {
+  items: ProjectSummary[];
   total: number;
   page: number;
   per_page: number;
 }
 
-export interface Paginated_ProjectSummary {
-  items: ProjectSummary[];
+export interface Paginated_PublicProjectSummary {
+  items: PublicProjectSummary[];
   total: number;
   page: number;
   per_page: number;
@@ -1965,21 +1965,6 @@ export interface ProductArtefact {
   size?: number | null;
 }
 
-export interface Project {
-  id: ProjectId;
-  name: string;
-  display_name: string;
-  description: string;
-  public_key: string;
-  private_key: string;
-  public: boolean;
-  hide_build_requests: boolean;
-  allow_exec_in_build_requests: boolean;
-  created_by: UserId;
-  created_at: string;
-  managed: boolean;
-}
-
 export type ProjectId = string;
 
 export interface ProjectResponse {
@@ -2048,6 +2033,14 @@ export interface ProtocolProbe {
   status?: number | null;
   latency_ms: number;
   error?: string | null;
+}
+
+export interface PublicProjectSummary {
+  id: ProjectId;
+  name: string;
+  display_name: string;
+  description: string;
+  created_at: string;
 }
 
 export interface PullRequestResponse {

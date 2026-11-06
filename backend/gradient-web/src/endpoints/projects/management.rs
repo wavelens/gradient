@@ -86,6 +86,27 @@ impl ProjectSummary {
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
+pub struct PublicProjectSummary {
+    pub id: ProjectId,
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+impl From<MProject> for PublicProjectSummary {
+    fn from(project: MProject) -> Self {
+        Self {
+            id: project.id,
+            name: project.name,
+            display_name: project.display_name,
+            description: project.description,
+            created_at: project.created_at,
+        }
+    }
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ProjectResponse {
     pub id: ProjectId,
     pub name: String,
@@ -282,7 +303,7 @@ pub async fn put(
     }))
 }
 
-type PaginatedProject = Paginated<MProject>;
+type PaginatedPublicProjectSummary = Paginated<PublicProjectSummary>;
 
 #[utoipa::path(
     get,
@@ -292,15 +313,15 @@ type PaginatedProject = Paginated<MProject>;
     summary = "List public projects",
     description = "Returns a paginated list of all public projects, ordered by name. Does not require authentication. Servers that run with `GRADIENT_PUBLIC_LISTING=false` return `404`.",
     params(PaginationParams),
-    responses((status = OK, description = "Paginated public project list", body = PaginatedProject), WebError)
+    responses((status = OK, description = "Paginated public project list", body = PaginatedPublicProjectSummary), WebError)
 )]
 pub async fn get_public_projects(
     state: State<Arc<ServerState>>,
     Query(params): Query<PaginationParams>,
-) -> WebResult<Json<BaseResponse<Paginated<MProject>>>> {
+) -> WebResult<Json<BaseResponse<Paginated<PublicProjectSummary>>>> {
     let listing = paginate(gradient_db::projects::all_public(), &state.web_db, &params).await?;
 
-    Ok(ok_json(listing))
+    Ok(ok_json(listing.map(PublicProjectSummary::from)))
 }
 
 #[utoipa::path(
