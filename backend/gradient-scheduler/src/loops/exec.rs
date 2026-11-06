@@ -240,6 +240,7 @@ fn exec_roots(spec: &ExecSpec, row: &ExecDispatchRow) -> Vec<String> {
     store_root(&spec.program)
         .into_iter()
         .chain(row.image_path.clone())
+        .chain(store_root(&row.repository))
         .collect()
 }
 

@@ -83,7 +83,7 @@ Apps with `autostart = false` get a job without a start after the build.
 
 ## 4. Read the Job Context
 
-There is a checkout of the evaluated commit in `/work`. Programs start as the user `gradient` in that directory. Task URLs with `?dir=<rel-dir>` start the program in `/work/<rel-dir>`, see [Repository URL](../concepts/projects-and-tasks.md#repository-url). Context values arrive as environment variables and in `/run/gradient/context.json`.
+Find a checkout of the commit under evaluation in `/work`. Build requests that include uploaded source get a writable copy of that source instead, without `.git`. Programs start as the user `gradient` in that directory. Task URLs with `?dir=<rel-dir>` start the program in `/work/<rel-dir>`, see [Repository URL](../concepts/projects-and-tasks.md#repository-url). Context values arrive as environment variables and in `/run/gradient/context.json`.
 
 | Variable | Value |
 |---|---|

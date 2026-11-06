@@ -29,7 +29,7 @@ use tracing::{debug, info, warn};
 
 use super::agent_client::AgentClient;
 use super::channels::GuestChannelMux;
-use super::checkout::checkout_work;
+use super::checkout::{WorkSource, checkout_work};
 use super::context::{ClusterContext, cluster_context, context_layers};
 use super::host::ExecHost;
 use super::inventory::device_requests;
@@ -218,6 +218,7 @@ pub async fn execute(
         secrets,
         redactor,
         updater,
+        nix,
         abort,
         cluster,
     };
@@ -228,7 +229,7 @@ pub async fn execute(
         Some(address) => Some(address),
         None => run.lease_address()?,
     };
-    let (mut guest, budget, image_root) = run.take_guest(source, &nix).await?;
+    let (mut guest, budget, image_root) = run.take_guest(source).await?;
     let outcome = run
         .run_in_guest(&mut guest, &devices, address.as_ref(), credentials, inbox)
         .await;
@@ -634,6 +635,7 @@ struct ExecRun<'a> {
     secrets: Vec<GuestSecret>,
     redactor: SecretRedactor,
     updater: &'a mut JobUpdater,
+    nix: StoreAccess<'a>,
     abort: AbortSignal,
     cluster: Option<ClusterContext>,
 }
@@ -680,7 +682,6 @@ impl ExecRun<'_> {
     async fn take_guest(
         &mut self,
         source: GuestSource,
-        nix: &StoreAccess<'_>,
     ) -> Result<(Guest, BudgetHold, Option<GcRootHandle>)> {
         let job_id = self.updater.job_id.clone();
         let size = self.job.requirement.guest;
@@ -690,7 +691,7 @@ impl ExecRun<'_> {
                 (unless_aborted(&self.abort, warm).await?, None)
             }
             GuestSource::Custom(image) => {
-                let root = self.realise_image(&image, nix).await?;
+                let root = self.realise_image(&image).await?;
                 let custom = self.host.pool.boot_custom(&image, job_id, size);
                 (unless_aborted(&self.abort, custom).await?, Some(root))
             }
@@ -699,11 +700,11 @@ impl ExecRun<'_> {
         Ok((guest, budget, image_root))
     }
 
-    async fn realise_image(&mut self, image: &Path, nix: &StoreAccess<'_>) -> Result<GcRootHandle> {
+    async fn realise_image(&mut self, image: &Path) -> Result<GcRootHandle> {
         let image = image.to_string_lossy();
-        let root = nix.gcroots.add(&image).await;
+        let root = self.nix.gcroots.add(&image).await;
         let abort = self.abort.clone();
-        let fetch = crate::proto::prefetch::ensure_path(nix.store, &image, self.updater);
+        let fetch = crate::proto::prefetch::ensure_path(self.nix.store, &image, self.updater);
         unless_aborted(&abort, fetch)
             .await?
             .map_err(BuildError::transient)?;
@@ -790,7 +791,7 @@ impl ExecRun<'_> {
     }
 
     async fn check_out(
-        &self,
+        &mut self,
         guest: &Guest,
         credentials: &CredentialStore,
     ) -> Result<PathBuf, BuildError> {
@@ -798,14 +799,8 @@ impl ExecRun<'_> {
         std::fs::create_dir_all(&staging)
             .with_context(|| format!("create {}", staging.display()))
             .map_err(BuildError::transient)?;
-        checkout_work(
-            &staging,
-            &self.job.context,
-            credentials,
-            &mut self.abort.clone(),
-        )
-        .await
-        .map_err(BuildError::transient)?;
+        let source = WorkSource::of(&self.job.context);
+        checkout_work(&staging, source, &self.nix, credentials, self.updater).await?;
         Ok(staging)
     }
 
