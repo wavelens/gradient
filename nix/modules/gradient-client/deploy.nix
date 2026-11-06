@@ -6,6 +6,7 @@
 
 { lib, pkgs, config, ... }: let
   cfg = config.system.gradient-deploy;
+  deploysMicrovms = builtins.elem "microvm" cfg.type;
 
   apiUrl = "${cfg.server}/api/v1";
 
@@ -20,9 +21,10 @@ in {
     system.gradient-deploy = {
       enable = lib.mkEnableOption "pull deployments from Gradient";
       type = lib.mkOption {
-        type = lib.types.enum [ "system" "microvm" ];
-        default = "system";
-        description = "Deploy the host system or an imperative MicroVM on this host.";
+        type = lib.types.listOf (lib.types.enum [ "system" "microvm" ]);
+        default = [ "system" ];
+        example = [ "system" "microvm" ];
+        description = "Deployment target: the host system, imperative MicroVMs on this host, or both.";
       };
 
       deployFor = lib.mkOption {
@@ -129,12 +131,15 @@ in {
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = cfg.type != "microvm" || cfg.microvm.hostnames != [ ];
+        assertion = cfg.type != [ ];
+        message = "Add at least one entry to `system.gradient-deploy.type`.";
+      }
+      {
+        assertion = !deploysMicrovms || cfg.microvm.hostnames != [ ];
         message = "MicroVM deployment requires at least one system.gradient-deploy.microvm.hostnames entry";
       }
       {
-        assertion = cfg.type != "microvm" ||
-          lib.hasPrefix "/" cfg.microvm.stateDir;
+        assertion = !deploysMicrovms || lib.hasPrefix "/" cfg.microvm.stateDir;
         message = "MicroVM deployment requires an absolute stateDir";
       }
     ];
@@ -163,7 +168,7 @@ in {
         // {
           GRADIENT_API_URL = apiUrl;
           GRADIENT_DEPLOY_FOR = cfg.deployFor;
-          GRADIENT_DEPLOY_TYPE = cfg.type;
+          GRADIENT_DEPLOY_TYPES = lib.concatStringsSep " " (lib.unique cfg.type);
           GRADIENT_LIVE_URL = liveUrl;
           GRADIENT_MICROVM_HOSTNAMES = builtins.toJSON (lib.unique cfg.microvm.hostnames);
           GRADIENT_MICROVM_STATE_DIR = cfg.microvm.stateDir;

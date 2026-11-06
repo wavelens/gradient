@@ -8,7 +8,11 @@ die() {
   exit 1
 }
 
-if [[ "$GRADIENT_DEPLOY_TYPE" == "microvm" ]]; then
+deploys() {
+  [[ " ${GRADIENT_DEPLOY_TYPES} " == *" $1 "* ]]
+}
+
+if deploys microvm; then
   while IFS= read -r name; do
     vm_dir="${GRADIENT_MICROVM_STATE_DIR}/${name}"
     if [[ -e "${vm_dir}/toplevel" || -L "${vm_dir}/toplevel" ]]; then
@@ -69,7 +73,7 @@ resolve_microvms() {
 
     case "$status" in
       Completed|Substituted)
-        printf 'deploy\t%s\t%s\n' "$name" "$path"
+        printf 'deploy-microvm\t%s\t%s\n' "$name" "$path"
         ;;
       FailedPermanent|FailedTimeout|DependencyFailed|Aborted)
         printf 'done\tBuild of MicroVM %s runner %s finished %s\n' "$name" "$path" "$status"
@@ -89,24 +93,9 @@ resolve_microvms() {
   done < <(jq -r '.[]' <<< "$GRADIENT_MICROVM_HOSTNAMES")
 }
 
-resolve() {
-  local evaluation entry_points evaluation_id evaluation_status path status current booted
-
-  evaluation=$(api "${GRADIENT_API_URL}/tasks/${GRADIENT_TASK}/evaluations?limit=1") || { echo "wait"; return; }
-  evaluation_id=$(jq -r '.message[0].id // empty' <<< "$evaluation")
-  evaluation_status=$(jq -r '.message[0].status // empty' <<< "$evaluation")
-
-  if [[ -z "$evaluation_id" ]]; then
-    echo "done task ${GRADIENT_TASK} has no evaluations"
-    return
-  fi
-
-  entry_points=$(api "${GRADIENT_API_URL}/tasks/${GRADIENT_TASK}/entry-points?evaluation_id=$evaluation_id&limit=500") || { echo "wait"; return; }
-
-  if [[ "$GRADIENT_DEPLOY_TYPE" == "microvm" ]]; then
-    resolve_microvms "$evaluation_status" "$entry_points"
-    return
-  fi
+resolve_system() {
+  local evaluation_id="$1" evaluation_status="$2" entry_points="$3"
+  local path status current
 
   # Output paths are written at evaluation time from the resolved .drv. The deployment is
   # identifiable before its build. Entry points are absent until derivations are resolved.
@@ -119,17 +108,17 @@ resolve() {
   if [[ -n "$path" ]]; then
     current=$(readlink /run/current-system || true)
     if [[ "$path" == "$current" ]]; then
-      echo "done system is already up-to-date with $path"
+      printf 'done\tsystem is already up-to-date with %s\n' "$path"
       return
     fi
 
     case "$status" in
       Completed|Substituted)
-        echo "deploy $path"
+        printf 'deploy-system\t%s\n' "$path"
         return
         ;;
       FailedPermanent|FailedTimeout|DependencyFailed|Aborted)
-        echo "done build of $path finished $status"
+        printf 'done\tbuild of %s finished %s\n' "$path" "$status"
         return
         ;;
     esac
@@ -137,12 +126,36 @@ resolve() {
 
   case "$evaluation_status" in
     Completed|Failed|Aborted)
-      echo "done evaluation $evaluation_id finished: $evaluation_status without a deployment for ${GRADIENT_DEPLOY_FOR}"
+      printf 'done\tevaluation %s finished: %s without a deployment for %s\n' \
+        "$evaluation_id" "$evaluation_status" "$GRADIENT_DEPLOY_FOR"
       ;;
     *)
-      echo "wait"
+      printf 'wait\n'
       ;;
   esac
+}
+
+resolve() {
+  local evaluation entry_points evaluation_id evaluation_status
+
+  evaluation=$(api "${GRADIENT_API_URL}/tasks/${GRADIENT_TASK}/evaluations?limit=1") || { printf 'wait\n'; return; }
+  evaluation_id=$(jq -r '.message[0].id // empty' <<< "$evaluation")
+  evaluation_status=$(jq -r '.message[0].status // empty' <<< "$evaluation")
+
+  if [[ -z "$evaluation_id" ]]; then
+    printf 'done\ttask %s has no evaluations\n' "$GRADIENT_TASK"
+    return
+  fi
+
+  entry_points=$(api "${GRADIENT_API_URL}/tasks/${GRADIENT_TASK}/entry-points?evaluation_id=$evaluation_id&limit=500") || { printf 'wait\n'; return; }
+
+  if deploys system; then
+    resolve_system "$evaluation_id" "$evaluation_status" "$entry_points"
+  fi
+
+  if deploys microvm; then
+    resolve_microvms "$evaluation_status" "$entry_points"
+  fi
 }
 
 deploy() {
@@ -191,40 +204,28 @@ deploy_microvm() {
 }
 
 settle() {
-  local verdict
+  local verdict action target path pending=0
   verdict=$(resolve)
 
-  if [[ "$GRADIENT_DEPLOY_TYPE" == "microvm" ]]; then
-    local action name path pending=0
-    while IFS=$'\t' read -r action name path; do
-      case "$action" in
-        deploy)
-          echo "New deployment found for MicroVM $name: $path"
-          deploy_microvm "$name" "$path"
-          ;;
-        done)
-          echo "$name"
-          ;;
-        wait)
-          pending=1
-          ;;
-      esac
-    done <<< "$verdict"
-    (( pending )) && return 1
-    return 0
-  fi
+  while IFS=$'\t' read -r action target path; do
+    case "$action" in
+      deploy-system)
+        deploy "$target"
+        ;;
+      deploy-microvm)
+        echo "New deployment found for MicroVM $target: $path"
+        deploy_microvm "$target" "$path"
+        ;;
+      done)
+        echo "$target"
+        ;;
+      wait)
+        pending=1
+        ;;
+    esac
+  done <<< "$verdict"
 
-  case "$verdict" in
-    "deploy "*)
-      deploy "${verdict#deploy }"
-      ;;
-    "done "*)
-      echo "${verdict#done }"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+  (( ! pending ))
 }
 
 if settle; then

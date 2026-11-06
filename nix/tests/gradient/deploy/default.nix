@@ -73,7 +73,7 @@
       (builtins.mapAttrs (_: runner: toString runner) microvmRunners);
 
     system.gradient-deploy = {
-      type = "microvm";
+      type = [ "microvm" ];
       microvm.hostnames = [ "guest" "second-guest" ];
     };
 
@@ -116,6 +116,10 @@ in {
     nodes = {
       machine = target;
       microvm = microvmTarget;
+      combined = { ... }: {
+        imports = [ microvmTarget ];
+        system.gradient-deploy.type = lib.mkForce [ "system" "microvm" ];
+      };
 
       # The same target with the live socket off is covering the fallback for networks without
       # WebSocket upgrades.
