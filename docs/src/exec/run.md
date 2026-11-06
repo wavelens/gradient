@@ -46,6 +46,8 @@ gradient run .#packages.x86_64-linux.hello
 - Bare `.#name` values map to `apps.<system>.name`.
 - A job can retry once unless apps declare their own `retries`.
 - Build logs of the program stay visible until the job start.
+- Waiting jobs print their status and wait reason on every change, missing worker features included.
+- Jobs aborted before the start end the CLI with the reason and a non-zero exit code.
 
 ## 3. Pick a Mode
 
