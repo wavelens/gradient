@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::codec::Proto;
+use crate::port_ranges::PortRanges;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
 #[derive(
@@ -222,7 +223,7 @@ pub struct DeviceClass {
 pub struct ExecAllow {
     pub network: bool,
     pub ssh: bool,
-    pub ports: (u16, u16),
+    pub ports: PortRanges,
     pub nodes: u32,
     pub devices: Vec<String>,
     pub mounts: Vec<String>,

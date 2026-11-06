@@ -15,7 +15,9 @@ use tokio::sync::mpsc;
 
 use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingExecJob};
 use gradient_pool::{WorkerCaps, WorkerInfo, WorkerJob, WorkerJobPolicy};
-use gradient_types::exec::{DeviceClass, ExecAllow, ExecDefaults, ExecInventory, ExecSpec};
+use gradient_types::exec::{
+    DeviceClass, ExecAllow, ExecDefaults, ExecInventory, ExecSpec, PortRange, PortRanges,
+};
 
 pub(crate) const TRUSTED_KEY: &str = "trusted-1:t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t0t=";
 pub(crate) const RESTRICTED_WORKER: &str = "restricted";
@@ -170,7 +172,10 @@ pub(crate) fn allow_all() -> ExecAllow {
         retries: u32::MAX,
         network: true,
         ssh: true,
-        ports: (1, u16::MAX),
+        ports: PortRanges(vec![PortRange {
+            first: 1,
+            last: u16::MAX,
+        }]),
         nodes: 1,
         custom_images: true,
         ..ExecAllow::default()

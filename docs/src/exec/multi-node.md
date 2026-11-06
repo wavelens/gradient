@@ -48,7 +48,7 @@ passthru.gradient = {
 ```
 
 - `args` and `env` accept the keys as `@gradient.cluster.<key>@`.
-- The master port defaults to 29500. Ports outside `exec.allow.ports` of the master worker or listed in `ports` give way to the lowest free port of that range.
+- The master port defaults to 29500. Blocked ports fall back to the lowest free port in the master worker's `exec.allow.ports`. These ports lie outside that list, or `ports` can occupy them.
 
 ## 3. Connect the Workers
 
@@ -59,7 +59,7 @@ Nodes connect to each other on their guest addresses. The operator provides the 
 | Own subnet | A distinct `exec.subnet` on every exec worker |
 | Routes | A route to the subnet of every other exec worker, via that worker. Static routes or the LAN router both work |
 | Forwarding | No drop rule for traffic between the LAN interface and `exec.bridge` |
-| Ports | The `exec.allow.ports` range open between the workers |
+| Ports | The `exec.allow.ports` ports open between the workers |
 
 ```nix
 # configuration.nix of worker a, LAN address 192.168.1.11

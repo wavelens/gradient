@@ -17156,6 +17156,16 @@ components:
             type: string
         guest:
           $ref: '#/components/schemas/GuestSize'
+        network:
+          type: boolean
+        ssh:
+          type: boolean
+        ports:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
     ExpensiveBuild:
       type: object
       required:

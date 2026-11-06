@@ -8,6 +8,7 @@ use crate::codec::Proto;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
 pub use crate::exec::*;
+pub use crate::port_ranges::*;
 
 #[derive(
     Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default, utoipa::ToSchema,

@@ -60,7 +60,8 @@ flowchart LR
 - Exec jobs skip the build scoring rules, see [Scoring](#scoring).
 - Exec jobs count as `RamNeed::Predicted(memory_mb)` for builds placed on the same worker.
 - Only workers without draining and with access to the job's project count, for placement and for wait reasons.
-- `WaitingReason::ExecWorkers` can name the unmet labels, devices, mounts, guest size, node count or custom image.
+- `WaitingReason::ExecWorkers` can specify unmet labels, devices, mounts, guest size, node count, custom image, network, SSH, or ports.
+- `fits_exec` and `exec_unmet` share the field checks of `ExecFit` in `gradient-pool/src/exec_fit.rs`.
 - `ExecUnmet` can hold only the architecture when zero exec workers of the job's architecture connect.
 
 ### Scoring
@@ -306,7 +307,7 @@ Guest sizes follow the device path. `GuestSize { cpus, memory_mb, disk_mb }` tra
 | Worker | `GuestBudget` in `gradient-vm/src/budget.rs` with the total from `ExecArgs::guest_budget`. `hold` returns a `BudgetHold` or `None` |
 | Report | `ExecInventory.guest_capacity` with `{ total, free }` per resource |
 | Server hold | `AssignedJob.guest` through `WorkerPool::hold_exec`, subtracted by `effective_free_amount` |
-| Fit | `guest_fits` in `fits_exec`, free for placement, total for wait reasons and pre-warm counts |
+| Fit | `ExecFit::guest` in `fits_exec`, free for placement, total for wait reasons and pre-warm counts |
 
 - Old workers report all-zero capacity. Such workers fit every size.
 - Old servers send all-zero `ExecRequirement.guest`. Workers then boot the image size with the virtiofs `work` share.

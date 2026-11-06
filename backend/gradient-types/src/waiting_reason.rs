@@ -65,10 +65,16 @@ pub struct ExecUnmet {
     pub secrets: Vec<String>,
     #[serde(default)]
     pub guest: GuestSize,
+    #[serde(default)]
+    pub network: bool,
+    #[serde(default)]
+    pub ssh: bool,
+    #[serde(default)]
+    pub ports: Vec<u16>,
 }
 
 impl ExecUnmet {
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self == &Self::default()
     }
 }
@@ -99,6 +105,15 @@ impl std::fmt::Display for ExecUnmet {
         let mut secrets: Vec<String> = self.secrets.iter().map(|s| format!("secret:{s}")).collect();
         secrets.sort();
         parts.extend(secrets);
+        if self.network {
+            parts.push("network".to_owned());
+        }
+        if self.ssh {
+            parts.push("ssh".to_owned());
+        }
+        let mut ports = self.ports.clone();
+        ports.sort_unstable();
+        parts.extend(ports.iter().map(|port| format!("port:{port}")));
         f.write_str(&parts.join(","))
     }
 }
@@ -247,6 +262,36 @@ mod tests {
         assert_eq!(a.worker_gap(), b.worker_gap());
         assert_eq!(WaitingReason::workers(vec![], 1, vec![]).worker_gap(), None);
         assert_eq!(WaitingReason::Draining.worker_gap(), None);
+    }
+
+    #[test]
+    fn an_exec_row_stored_before_ssh_network_and_ports_still_decodes() {
+        let stored = serde_json::json!({
+            "kind": "exec_workers",
+            "unmet": {"labels": ["3d-printer"], "devices": [], "mounts": [], "nodes": 0, "custom_image": false},
+            "connected_workers": 1,
+            "matching_workers": 0,
+        });
+        let Some(WaitingReason::ExecWorkers { unmet, .. }) = WaitingReason::from_json(&stored)
+        else {
+            panic!("the stored row decodes");
+        };
+        assert_eq!(
+            (unmet.ssh, unmet.network, unmet.ports),
+            (false, false, vec![])
+        );
+    }
+
+    #[test]
+    fn the_wait_reason_names_missing_ssh_network_and_ports() {
+        let unmet = ExecUnmet {
+            ssh: true,
+            network: true,
+            ports: vec![8080, 22],
+            ..ExecUnmet::default()
+        };
+        assert_eq!(unmet.to_string(), "network,ssh,port:22,port:8080");
+        assert!(!unmet.is_empty());
     }
 
     #[test]

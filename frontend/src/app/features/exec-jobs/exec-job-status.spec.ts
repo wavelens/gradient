@@ -63,6 +63,16 @@ describe('waitingReasonText', () => {
     expect(waitingReasonText(reason)).toBe('needs worker secret lab-key');
   });
 
+  it('names missing network, SSH and ports', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { labels: [], devices: [], mounts: [], nodes: 0, custom_image: false, network: true, ssh: true, ports: [6006] },
+      connected_workers: 1,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('needs a worker that allows network, a worker that allows SSH, port 6006');
+  });
+
   it('names a worker that allows custom images', () => {
     const reason: WaitingReason = {
       kind: 'exec_workers',

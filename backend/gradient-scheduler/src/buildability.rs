@@ -17,11 +17,9 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use crate::assign_mode::decide_build_spec_kind;
 use crate::count::clamp_to_u32;
 use crate::jobs::PendingExecJob;
-use gradient_pool::{DeviceCount, WorkerCaps, build_needs_network};
-use gradient_types::exec::{
-    DeviceRequest, ExecInventory, ExecSpec, GuestCapacity, GuestSize, ResourceAmount,
-};
-use gradient_types::waiting_reason::{EvalCapability, ExecUnmet};
+use gradient_pool::{DeviceCount, WorkerCaps, build_needs_network, exec_unmet};
+use gradient_types::exec::ExecRequirement;
+use gradient_types::waiting_reason::EvalCapability;
 use gradient_wire::types::{BuildSpecKind, JobKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,7 +250,11 @@ pub(crate) fn exec_waiting_reason(
         return None;
     }
 
-    let mut unmet = exec_unmet(&job.spec, &job.architecture, &job.secrets.worker, workers);
+    let candidates: Vec<(&WorkerCaps, ExecRequirement)> = workers
+        .iter()
+        .filter_map(|worker| Some((worker, job.requirement_for(worker)?)))
+        .collect();
+    let mut unmet = exec_unmet(&job.architecture, &candidates);
     if nodes > 1 && !one_zone_fits(DeviceCount::Total) {
         unmet.nodes = nodes;
     }
@@ -268,89 +270,6 @@ pub(crate) fn exec_waiting_reason(
     })
 }
 
-pub(crate) fn exec_unmet(
-    spec: &ExecSpec,
-    architecture: &str,
-    secrets: &[String],
-    workers: &[WorkerCaps],
-) -> ExecUnmet {
-    let inventories: Vec<&ExecInventory> = workers
-        .iter()
-        .filter(|w| runs_exec_jobs(w) && w.architectures.iter().any(|a| a == architecture))
-        .filter_map(|w| w.exec.as_ref())
-        .collect();
-    if inventories.is_empty() {
-        return ExecUnmet {
-            architecture: Some(architecture.to_owned()),
-            ..ExecUnmet::default()
-        };
-    }
-    let offered = |offers: &dyn Fn(&ExecInventory) -> bool| inventories.iter().any(|i| offers(i));
-
-    ExecUnmet {
-        architecture: None,
-        labels: spec
-            .labels
-            .iter()
-            .filter(|label| !offered(&|i| i.labels.contains(label)))
-            .cloned()
-            .collect(),
-        devices: spec
-            .devices
-            .iter()
-            .filter(|device| !offered(&|i| offers_device(i, device)))
-            .cloned()
-            .collect(),
-        mounts: spec
-            .mounts
-            .iter()
-            .flatten()
-            .filter(|mount| {
-                !offered(&|i| i.mounts.contains(mount) && i.allow.mounts.contains(mount))
-            })
-            .cloned()
-            .collect(),
-        nodes: if offered(&|i| i.allow.nodes >= spec.nodes) {
-            0
-        } else {
-            spec.nodes
-        },
-        custom_image: spec.image.is_some() && !offered(&|i| i.allow.custom_images),
-        secrets: secrets
-            .iter()
-            .filter(|name| !offered(&|i| i.secrets.contains(name)))
-            .cloned()
-            .collect(),
-        guest: unmet_guest(&spec.guest, &inventories),
-    }
-}
-
-fn unmet_guest(size: &GuestSize, inventories: &[&ExecInventory]) -> GuestSize {
-    let held = |asked: u64, amount: fn(&GuestCapacity) -> ResourceAmount| {
-        inventories.iter().any(|inventory| {
-            let capacity = &inventory.guest_capacity;
-            capacity.is_unset() || asked <= amount(capacity).total
-        })
-    };
-    GuestSize {
-        cpus: if held(u64::from(size.cpus), |c| c.cpus) {
-            0
-        } else {
-            size.cpus
-        },
-        memory_mb: if held(size.memory_mb, |c| c.memory_mb) {
-            0
-        } else {
-            size.memory_mb
-        },
-        disk_mb: if held(size.disk_mb, |c| c.disk_mb) {
-            0
-        } else {
-            size.disk_mb
-        },
-    }
-}
-
 fn one_zone_holds(workers: &[&WorkerCaps], nodes: u32, fits: impl Fn(&WorkerCaps) -> bool) -> bool {
     let mut per_zone: HashMap<Option<&str>, u32> = HashMap::new();
     for worker in workers.iter().filter(|worker| fits(worker)) {
@@ -364,17 +283,11 @@ fn runs_exec_jobs(worker: &WorkerCaps) -> bool {
     worker.takes_jobs_of(&JobKind::Exec) && worker.exec.is_some()
 }
 
-fn offers_device(inventory: &ExecInventory, device: &DeviceRequest) -> bool {
-    inventory.allow.devices.contains(&device.name)
-        && inventory
-            .devices
-            .iter()
-            .any(|class| class.name == device.name && class.total >= device.count)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_types::exec::{DeviceRequest, ExecSpec, GuestCapacity, GuestSize, ResourceAmount};
+    use gradient_types::waiting_reason::ExecUnmet;
 
     fn job_on(spec: ExecSpec, architecture: &str) -> PendingExecJob {
         PendingExecJob {
@@ -773,13 +686,63 @@ mod tests {
     #[test]
     fn a_missing_worker_secret_shows_in_the_wait_reason() {
         use crate::test_jobs::eight_gpu_exec_caps;
-        let unmet = exec_unmet(
-            &ExecSpec::default(),
-            "x86_64-linux",
-            &["lab-key".to_owned()],
-            &[eight_gpu_exec_caps()],
-        );
+        let mut job = job_on(ExecSpec::default(), "x86_64-linux");
+        job.secrets.worker = vec!["lab-key".to_owned()];
+        let Some(WaitingReason::ExecWorkers { unmet, .. }) =
+            exec_waiting_reason(&job, &[eight_gpu_exec_caps()])
+        else {
+            panic!("exec wait")
+        };
         assert_eq!(unmet.secrets, vec!["lab-key".to_owned()]);
+    }
+
+    #[test]
+    fn ssh_without_an_ssh_worker_is_named_in_the_wait_reason() {
+        use crate::test_jobs::{allow_all, exec_caps};
+        let no_ssh = gradient_types::exec::ExecAllow {
+            ssh: false,
+            ..allow_all()
+        };
+        let spec = ExecSpec {
+            ssh: Some(true),
+            ..ExecSpec::default()
+        };
+        let Some(WaitingReason::ExecWorkers {
+            unmet,
+            matching_workers,
+            ..
+        }) = exec_waiting_reason(
+            &job_on(spec, "x86_64-linux"),
+            &[exec_caps(
+                no_ssh,
+                gradient_types::exec::ExecDefaults::default(),
+            )],
+        )
+        else {
+            panic!("exec wait")
+        };
+        assert_eq!(unmet.to_string(), "ssh");
+        assert_eq!(matching_workers, 0);
+    }
+
+    #[test]
+    fn a_worker_default_ssh_counts_like_a_requested_ssh() {
+        use crate::test_jobs::{allow_all, exec_caps};
+        let no_ssh = gradient_types::exec::ExecAllow {
+            ssh: false,
+            ..allow_all()
+        };
+        let ssh_by_default = gradient_types::exec::ExecDefaults {
+            ssh: true,
+            ..Default::default()
+        };
+        let Some(WaitingReason::ExecWorkers { unmet, .. }) = exec_waiting_reason(
+            &job_on(ExecSpec::default(), "x86_64-linux"),
+            &[exec_caps(no_ssh, ssh_by_default)],
+        ) else {
+            panic!("exec wait")
+        };
+        assert!(unmet.ssh, "{unmet:?}");
     }
 
     #[test]

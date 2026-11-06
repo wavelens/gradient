@@ -77,6 +77,9 @@ export function unmetParts(unmet: ExecUnmet): string[] {
     ...(unmet.nodes > 1 ? [`${unmet.nodes} workers in one zone`] : []),
     ...(unmet.custom_image ? ['a worker that allows custom images'] : []),
     ...(unmet.secrets ?? []).map((name) => `worker secret ${name}`),
+    ...(unmet.network ? ['a worker that allows network'] : []),
+    ...(unmet.ssh ? ['a worker that allows SSH'] : []),
+    ...(unmet.ports ?? []).map((port) => `port ${port}`),
   ];
 }
 

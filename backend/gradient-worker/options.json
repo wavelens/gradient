@@ -739,8 +739,8 @@
     "field": "allow_ports",
     "flag": "exec-allow-ports",
     "env": "GRADIENT_WORKER_EXEC_ALLOW_PORTS",
-    "type": "Option<PortRange>",
-    "description": "Lowest and highest guest port exec jobs may forward, as `low,high`. `null` allows\nports 1024 to 65535.",
+    "type": "Option<PortRanges>",
+    "description": "Guest ports exec jobs may forward, as a comma-separated list of single ports and\n`first-last` ranges such as `22,8000-8100`. An empty list allows none. `null` allows\nports 1024 to 65535.",
     "default": null,
     "values": []
   },

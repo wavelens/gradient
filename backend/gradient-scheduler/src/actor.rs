@@ -785,7 +785,7 @@ impl SchedulerCore {
             return Some(None);
         };
         let allow = self.pool.worker_caps(worker)?.exec?.allow.ports;
-        let port = crate::cluster::master_port(allow, forwarded);
+        let port = crate::cluster::master_port(&allow, forwarded);
         if port.is_none() {
             warn!(cluster = %cluster.id, %worker, "every port of the master's allow.ports is forwarded; the cluster waits");
         }
