@@ -8,6 +8,7 @@ use crate::commands::build::{BuildParams, failure_message, submit_build_request}
 use crate::commands::completion;
 use crate::commands::logstream::stream_eval_logs;
 use crate::commands::run_forward::{self, PortForward, parse_forward};
+use crate::commands::run_waiting::{WaitingLines, ended_before_start};
 use crate::commands::{run_logs, run_terminal};
 use crate::input::client_from_config;
 use crate::output::{ExitKind, Output};
@@ -144,11 +145,12 @@ async fn follow_builds_until_started(
     let builds = stream_eval_logs(client, evaluation, out);
     tokio::pin!(builds);
     let mut builds_followed = false;
+    let mut lines = WaitingLines::default();
     let started = tokio::select! {
-        started = wait_until_started(client, evaluation) => started,
+        started = wait_until_started(client, evaluation, &mut lines, out) => started,
         () = &mut builds => {
             builds_followed = true;
-            wait_until_started(client, evaluation).await
+            wait_until_started(client, evaluation, &mut lines, out).await
         }
     };
     let failure = match started {
@@ -164,6 +166,8 @@ async fn follow_builds_until_started(
 async fn wait_until_started(
     client: &connector::Client,
     evaluation: &str,
+    lines: &mut WaitingLines,
+    out: Output,
 ) -> Result<Vec<ExecJobSummary>, String> {
     loop {
         let jobs = client
@@ -175,8 +179,14 @@ async fn wait_until_started(
             if let Some(failure) = failure_without_jobs(client, evaluation).await {
                 return Err(failure);
             }
+        } else if let Some(failure) = ended_before_start(&jobs) {
+            return Err(failure);
         } else if jobs.iter().all(|job| has_started(job.status)) {
             return Ok(jobs);
+        } else {
+            for line in lines.changed(&jobs) {
+                out.progress(line);
+            }
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }
