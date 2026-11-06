@@ -221,6 +221,9 @@ fn outbound_fields(
             }
             Job::Exec(exec) => {
                 paths.path(&mut exec.program)?;
+                exec.context.repository = paths
+                    .mapper
+                    .outbound_if_store_path(&exec.context.repository);
                 if let Some(image) = &mut exec.image {
                     paths.path(image)?;
                 }
@@ -332,7 +335,8 @@ mod tests {
     use gradient_wire::messages::ServerMessage;
     use gradient_wire::types::{
         BuildJob, BuildOutput, BuildProduct, BuildSpec, DerivationOutput, DiscoveredDerivation,
-        Job, JobCandidate, JobUpdateKind, NarUploadMetadata, RequiredPath, UploadMetadata,
+        ExecJob, Job, JobCandidate, JobContext, JobUpdateKind, NarUploadMetadata, RequiredPath,
+        UploadMetadata,
     };
     use std::sync::Arc;
 
@@ -626,5 +630,49 @@ mod tests {
         );
         assert_eq!(candidate.drv_paths, vec![format!("/nix/store/{O}-a.drv")]);
         assert_eq!(candidate.output_paths, vec![format!("/nix/store/{O}-a")]);
+    }
+
+    fn assigned_exec_repository(repository: String) -> String {
+        let msg = ServerMessage::AssignJob {
+            job_id: "exec:1".into(),
+            assignment_id: "a1".into(),
+            job: Job::Exec(Box::new(ExecJob {
+                program: format!("/nix/store/{S}-app/bin/app"),
+                args: vec![],
+                env: Default::default(),
+                image: None,
+                requirement: Default::default(),
+                context: JobContext {
+                    repository,
+                    ..Default::default()
+                },
+                secrets: vec![],
+                keep_running: false,
+                timeout_secs: None,
+                max_silent_secs: None,
+                attempt: 1,
+                keep_vm_running: false,
+                wait_for_terminal: false,
+            })),
+            cluster: None,
+        };
+        let ServerMessage::AssignJob {
+            job: Job::Exec(job),
+            ..
+        } = outbound_message(msg, &mapper())
+        else {
+            panic!("an AssignJob stays an AssignJob")
+        };
+        job.context.repository
+    }
+
+    #[test]
+    fn an_exec_job_names_the_original_path_of_an_uploaded_source() {
+        assert_eq!(
+            assigned_exec_repository(format!("/nix/store/{S}-source")),
+            format!("/nix/store/{O}-source")
+        );
+        let url = "https://gitea.example/c3d2/site.git".to_owned();
+        assert_eq!(assigned_exec_repository(url.clone()), url);
     }
 }
