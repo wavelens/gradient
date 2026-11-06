@@ -56,6 +56,12 @@ impl SchedulerCase {
             .expect("the exec pass runs");
     }
 
+    pub fn backdate_unplaceable_exec_jobs(&self, secs: i64) {
+        self.scheduler
+            .unplaceable_exec_jobs
+            .backdate(chrono::Duration::seconds(secs));
+    }
+
     pub async fn assign_queued_evals(&self) {
         crate::loops::assign_queued_evals(&self.scheduler)
             .await
