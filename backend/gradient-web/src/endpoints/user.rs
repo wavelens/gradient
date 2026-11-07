@@ -975,6 +975,7 @@ pub async fn patch_settings(
         return Err(UserRefusal::ModifyOidcUserProfile.into());
     }
 
+    let user_id = user.id;
     let mut auser: AUser = user.into();
 
     if let Some(username) = body.username {
@@ -984,7 +985,7 @@ pub async fn patch_settings(
 
         let existing_user = gradient_db::users::by_username(&state.web_db, &username).await?;
 
-        if existing_user.is_some() {
+        if existing_user.is_some_and(|other| other.id != user_id) {
             return Err(WebError::already_exists(Resource::Username));
         }
 
@@ -998,7 +999,7 @@ pub async fn patch_settings(
     if let Some(email) = body.email {
         let existing_user = gradient_db::users::by_email(&state.web_db, &email).await?;
 
-        if existing_user.is_some() {
+        if existing_user.is_some_and(|other| other.id != user_id) {
             return Err(WebError::already_exists(Resource::Email));
         }
 
