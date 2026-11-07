@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, afterRenderEffect, input, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, type UrlTree } from '@angular/router';
 
 export interface LinkTab {
@@ -20,7 +20,8 @@ export interface LinkTab {
   template: `
     <nav class="link-tabs" [attr.aria-label]="ariaLabel()">
       @for (tab of tabs(); track tab.label) {
-        <a class="link-tab" [routerLink]="tab.link" routerLinkActive="is-active" ariaCurrentWhenActive="page">{{ tab.label }}</a>
+        <a #link class="link-tab" [routerLink]="tab.link" routerLinkActive="is-active" ariaCurrentWhenActive="page"
+          (isActiveChange)="$event && activeLink.set(link)">{{ tab.label }}</a>
       }
     </nav>
   `,
@@ -30,4 +31,13 @@ export interface LinkTab {
 export class LinkTabsComponent {
   tabs = input.required<LinkTab[]>();
   ariaLabel = input.required<string>();
+
+  protected activeLink = signal<HTMLElement | null>(null);
+
+  constructor() {
+    afterRenderEffect(() => {
+      this.tabs();
+      this.activeLink()?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    });
+  }
 }

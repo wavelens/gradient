@@ -10,12 +10,48 @@
   display: block;
 }
 
+@property --link-tabs-fade-start {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --link-tabs-fade-end {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes link-tabs-fade-start {
+  to { --link-tabs-fade-start: #{$spacing-xl}; }
+}
+
+@keyframes link-tabs-fade-end {
+  from { --link-tabs-fade-end: #{$spacing-xl}; }
+}
+
 .link-tabs {
   display: flex;
   gap: $spacing-xs;
   border-bottom: 1px solid var(--gr-border-subtle);
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+// Tabs that are cut off at a scrollable edge fade out. The row can look like more tabs continue there instead of clipped text.
+@supports (animation-timeline: scroll()) {
+  .link-tabs {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      var(--gr-text-primary) var(--link-tabs-fade-start),
+      var(--gr-text-primary) calc(100% - var(--link-tabs-fade-end)),
+      transparent
+    );
+    animation: link-tabs-fade-start linear both, link-tabs-fade-end linear both;
+    animation-timeline: scroll(self inline);
+    animation-range: 0 $spacing-xl, calc(100% - #{$spacing-xl}) 100%;
+  }
 }
 
 .link-tab {

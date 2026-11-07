@@ -136,7 +136,7 @@
         <button grButton class="sidebar-toggle" icon="view_list" severity="secondary" size="small"
           aria-label="Builds" aria-controls="builds-drawer" [attr.aria-expanded]="buildsOpen()"
           (click)="buildsOpen.set(!buildsOpen())"></button>
-        <div class="info-bar-left" grScrollRegion>
+        <div class="info-bar-left">
           <div class="info-metric">
             <gr-eval-status-badge [status]="ev.status" [prioritized]="ev.prioritized" />
           </div>

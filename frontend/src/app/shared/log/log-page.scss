@@ -151,7 +151,7 @@
   align-items: center;
   gap: $spacing-xs;
   padding: $spacing-sm $spacing-md;
-  font-size: $font-size-xs;
+  font-size: $font-size-sm;
   color: var(--gr-text-muted);
 
   .breadcrumb-sep { color: var(--gr-text-muted); }
@@ -175,8 +175,16 @@
 
 @media (max-width: $breakpoint-md) {
   .info-bar {
-    padding-inline: $spacing-md;
+    padding: $spacing-xs $spacing-md;
     gap: $spacing-sm;
+  }
+
+  .info-bar-left { gap: 0 $spacing-md; }
+
+  .info-metric {
+    height: 32px;
+    padding: 0;
+    border-right: none;
   }
 
   .sidebar-toggle {
@@ -184,14 +192,7 @@
     flex-shrink: 0;
   }
 
-  .info-bar-left {
-    flex-wrap: nowrap;
-    margin-left: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .info-metric:first-child { padding-left: 0; }
+  .info-bar-left { margin-left: 0; }
 
   .log-sidebar {
     position: absolute;

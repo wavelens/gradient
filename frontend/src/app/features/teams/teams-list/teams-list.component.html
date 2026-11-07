@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Teams">
+<gr-page-layout title="Teams" subtitle="Manage teams">
   @if (canCreateTeam()) {
     <button slot="actions" grButton label="New Team" icon="add" (click)="openCreate()"></button>
   }
@@ -26,8 +26,8 @@
       @for (team of items(); track team.name) {
         <gr-row icon="groups" [link]="links.team(team.name)" linkLabel="Open team">
           {{ team.display_name }}
+          <gr-badge severity="info">{{ team.role }}</gr-badge>
           <span slot="meta">{{ team.name }}</span>
-          <div slot="actions"><gr-badge severity="info">{{ team.role }}</gr-badge></div>
         </gr-row>
       }
     </gr-row-list>

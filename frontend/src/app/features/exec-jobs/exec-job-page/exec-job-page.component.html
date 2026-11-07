@@ -113,7 +113,7 @@
         <button grButton class="sidebar-toggle" icon="view_list" severity="secondary" size="small"
                 aria-label="Job details" aria-controls="job-drawer" [attr.aria-expanded]="sidebarOpen()"
                 (click)="sidebarOpen.set(!sidebarOpen())"></button>
-        <div class="info-bar-left" grScrollRegion>
+        <div class="info-bar-left">
           <div class="info-metric">
             <gr-status-badge [phase]="phase(job.status)" [label]="job.status" />
           </div>

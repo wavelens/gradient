@@ -19,31 +19,5 @@ h1 {
 }
 
 .board-nav {
-  display: flex;
-  gap: $spacing-xs;
   margin-bottom: $spacing-lg;
-  border-bottom: 1px solid var(--gr-border-subtle);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.board-nav a {
-  flex-shrink: 0;
-  white-space: nowrap;
-  color: var(--gr-text-secondary);
-  padding: $spacing-sm $spacing-md;
-  text-decoration: none;
-  border-bottom: 2px solid transparent;
-  border-radius: $border-radius-sm $border-radius-sm 0 0;
-  transition: color $transition-fast, background $transition-fast;
-}
-
-.board-nav a:hover {
-  color: var(--gr-text-primary);
-  background: var(--gr-surface-raised);
-}
-
-.board-nav a.active {
-  color: var(--gr-text-primary);
-  border-bottom-color: var(--gr-accent);
 }

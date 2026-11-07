@@ -17,7 +17,7 @@ function tabs(superuser: boolean): string[] {
   });
   const fixture = TestBed.createComponent(BoardLayoutComponent);
   fixture.detectChanges();
-  return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.board-nav a')).map((a) => a.textContent!.trim());
+  return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.board-nav a.link-tab')).map((a) => a.textContent!.trim());
 }
 
 describe('BoardLayoutComponent', () => {

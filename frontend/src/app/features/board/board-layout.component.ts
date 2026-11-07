@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ChangeDetectionStrategy, afterRenderEffect, computed, inject, signal } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { Component, ChangeDetectionStrategy, computed, inject } from '@angular/core';
+import { RouterOutlet } from '@angular/router';
+import { LinkTabsComponent, type LinkTab } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
+import { links, type BoardTab } from '@shared/routing';
 
-const TABS = [
+const TABS: { path: BoardTab; label: string; superuser?: boolean }[] = [
   { path: 'overview', label: 'Overview' },
   { path: 'live', label: 'Live Jobs' },
   { path: 'scheduler', label: 'Scheduler' },
@@ -26,15 +28,11 @@ const TABS = [
 @Component({
   selector: 'app-board-layout',
   standalone: true,
-  imports: [RouterModule],
+  imports: [RouterOutlet, LinkTabsComponent],
   template: `
     <div class="board">
       <h1>Job Board</h1>
-      <nav class="board-nav" aria-label="Pages of Job Board">
-        @for (tab of tabs(); track tab.path) {
-          <a #link [routerLink]="tab.path" routerLinkActive="active" ariaCurrentWhenActive="page" (isActiveChange)="$event && activeLink.set(link)">{{ tab.label }}</a>
-        }
-      </nav>
+      <gr-link-tabs class="board-nav" [tabs]="tabs()" ariaLabel="Pages of Job Board" />
       <router-outlet></router-outlet>
     </div>
   `,
@@ -43,17 +41,8 @@ const TABS = [
 })
 export class BoardLayoutComponent {
   private auth = inject(AuthService);
-  protected tabs = computed(() => {
+  protected tabs = computed<LinkTab[]>(() => {
     const superuser = this.auth.user()?.superuser === true;
-    return TABS.filter((tab) => superuser || !tab.superuser);
+    return TABS.filter((tab) => superuser || !tab.superuser).map((tab) => ({ label: tab.label, link: links.board(tab.path) }));
   });
-
-  protected activeLink = signal<HTMLElement | null>(null);
-
-  constructor() {
-    afterRenderEffect(() => {
-      this.tabs();
-      this.activeLink()?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    });
-  }
 }

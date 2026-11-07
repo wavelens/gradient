@@ -18,7 +18,7 @@
   box-shadow: var(--gr-shadow-raised);
   padding: $spacing-lg;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: $spacing-md;
 }
 
