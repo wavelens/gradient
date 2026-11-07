@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" title="Profile Settings" subtitle="Manage your personal information">
+<gr-page-layout width="settings" [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'Profile' }]" title="Profile Settings" subtitle="Manage your personal information">
   <app-settings-nav slot="banner" />
   @if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading profile..."

@@ -260,6 +260,15 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   .panel-head {
     flex-wrap: wrap;
     gap: $spacing-sm;
+
+    > div:first-child { flex: 1 1 100%; }
+  }
+
+  .panel-title .title-line { flex-wrap: wrap; }
+
+  .eval-bar {
+    width: 100%;
+    max-width: none;
   }
 
   .pp-head {
