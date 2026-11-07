@@ -43,6 +43,7 @@ import {
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, missingPermissionText } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
+import { IncomingDeliveriesComponent } from '@shared/git';
 import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
 
 interface Option<T> {
@@ -75,6 +76,7 @@ interface Option<T> {
     CopyFieldComponent,
     TabSwitchComponent,
     FieldRowComponent,
+    IncomingDeliveriesComponent,
   ],
   templateUrl: './integrations.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -21,6 +21,7 @@ use anyhow::Context;
 use axum::Json;
 use axum::extract::State;
 use gradient_db::lookup::by_id;
+use gradient_entity::incoming_webhook_delivery::DeliveryResult;
 
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_secret_with_file;
@@ -142,6 +143,37 @@ impl From<MIntegration> for IntegrationSummaryResponse {
         }
     }
 }
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct IncomingWebhookDeliveryResponse {
+    pub id: IncomingWebhookDeliveryId,
+    pub event: String,
+    pub status_code: i16,
+    pub result: DeliveryResult,
+    pub detail: Option<String>,
+    pub repository: Option<String>,
+    pub tasks_scanned: i32,
+    pub queued: i32,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+impl From<gradient_entity::incoming_webhook_delivery::Model> for IncomingWebhookDeliveryResponse {
+    fn from(m: gradient_entity::incoming_webhook_delivery::Model) -> Self {
+        Self {
+            id: m.id,
+            event: m.event,
+            status_code: m.status_code,
+            result: m.result,
+            detail: m.detail,
+            repository: m.repository,
+            tasks_scanned: m.tasks_scanned,
+            queued: m.queued,
+            created_at: m.created_at,
+        }
+    }
+}
+
+const DELIVERY_LIST_LIMIT: u64 = 50;
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct PatchIntegrationRequest {
@@ -393,6 +425,35 @@ pub async fn get_integration(
     Ok(ok_json(
         integration_response(&db.web_db, integration).await?,
     ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/integrations/{id}/deliveries",
+    operation_id = "listIntegrationDeliveries",
+    tag = "integrations",
+    summary = "List incoming webhook deliveries",
+    description = "List the latest webhook deliveries that reach an inbound integration, newest first. The HTTP status that Gradient returned and the result appear in every entry. Results cover a queued evaluation, a skipped task, no task for the repository, an ignored event, or a refusal with a reason. Only the latest 50 deliveries for each integration stay in Gradient. All project members can access these deliveries.",
+    params(ProjectPath, ("id" = IntegrationId, Path)),
+    responses((status = OK, description = "Delivery, newest first", body = Vec<IncomingWebhookDeliveryResponse>), WebError)
+)]
+pub async fn get_integration_deliveries(
+    ProjectScope {
+        project,
+        db,
+        params,
+        ..
+    }: ProjectScope<Member>,
+) -> WebResult<Json<BaseResponse<Vec<IncomingWebhookDeliveryResponse>>>> {
+    let integration_id: IntegrationId = params.param("id")?;
+    load_integration_in_project(&db.web_db, project.id, integration_id).await?;
+    let rows = gradient_db::incoming_deliveries::of_integration(
+        &db.web_db,
+        integration_id,
+        DELIVERY_LIST_LIMIT,
+    )
+    .await?;
+    Ok(ok_json(rows.into_iter().map(Into::into).collect()))
 }
 
 #[utoipa::path(

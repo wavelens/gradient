@@ -8,6 +8,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
+  IncomingWebhookDeliveryResponse,
   IntegrationResponse,
   IntegrationSummaryResponse,
   CreateIntegrationRequest,
@@ -39,6 +40,10 @@ export class IntegrationsService {
 
   patchProjectIntegration(project: string, id: string, body: PatchIntegrationRequest): Observable<IntegrationResponse> {
     return this.api.patch<IntegrationResponse>(`projects/${project}/integrations/${id}`, body);
+  }
+
+  listIntegrationDeliveries(project: string, id: string): Observable<IncomingWebhookDeliveryResponse[]> {
+    return this.api.get<IncomingWebhookDeliveryResponse[]>(`projects/${project}/integrations/${id}/deliveries`);
   }
 
   deleteProjectIntegration(project: string, id: string): Observable<boolean> {

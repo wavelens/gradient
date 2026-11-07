@@ -135,6 +135,7 @@
                   <gr-form-field label="Events to enable">
                     <small class="text-secondary">Enable {{ requiredWebhookEvents(integration.id) }} on the Git host webhook. A push-only webhook never delivers PR CI or the <code>/gradient</code> comment commands.</small>
                   </gr-form-field>
+                  <app-incoming-deliveries [project]="projectName" [integrationId]="integration.id" />
                 </div>
               } @else {
                 <div class="integration-body">

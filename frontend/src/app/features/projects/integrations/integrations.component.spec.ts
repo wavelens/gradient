@@ -85,6 +85,7 @@ function setup(
         provide: IntegrationsService,
         useValue: {
           listProjectIntegrations: () => of(integrations),
+          listIntegrationDeliveries: () => of([]),
         },
       },
       { provide: ConfirmService, useValue: { confirm } },
@@ -261,6 +262,7 @@ describe('IntegrationsComponent - create github integration', () => {
           provide: IntegrationsService,
           useValue: {
             listProjectIntegrations: () => of([]),
+            listIntegrationDeliveries: () => of([]),
             createProjectIntegration: createSpy,
           },
         },
@@ -300,6 +302,7 @@ describe('IntegrationsComponent - create github integration', () => {
           provide: IntegrationsService,
           useValue: {
             listProjectIntegrations: () => of([]),
+            listIntegrationDeliveries: () => of([]),
             createProjectIntegration: createSpy,
           },
         },

@@ -567,6 +567,51 @@ async fn git_host_webhook_without_secret_names_the_missing_secret() {
 }
 
 #[tokio::test]
+async fn a_refused_delivery_is_logged_for_the_integration() {
+    let secretless = gradient_entity::integration::Model {
+        secret: None,
+        ..integration_row("unused")
+    };
+    let db = mock_db()
+        .append_query_results([vec![project_row("test-project")]])
+        .append_query_results([vec![secretless]])
+        .append_exec_results([
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            },
+        ])
+        .into_connection();
+    let log = db.clone();
+
+    let state = make_state(
+        db,
+        Some(temp_secret_file("any-32-byte-secret-here!!!!!!!!")),
+        None,
+    );
+    let server = TestServer::new(create_router(state).expect("router"));
+    server
+        .post("/api/v1/hooks/forgejo/test-project/my-hook")
+        .add_header("X-Gitea-Event", "push")
+        .add_header("X-Gitea-Signature", "doesnotmatter")
+        .bytes(GITEA_PUSH_BODY.as_bytes().into())
+        .await
+        .assert_status_unauthorized();
+    drop(server);
+
+    let statements = format!("{:?}", log.into_transaction_log());
+    assert!(
+        statements.contains("incoming_webhook_delivery"),
+        "{statements}"
+    );
+    assert!(statements.contains("no webhook secret"), "{statements}");
+}
+
+#[tokio::test]
 async fn git_host_webhook_branch_glob_no_match_skipped() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");

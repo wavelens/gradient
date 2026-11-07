@@ -40,6 +40,7 @@ pub mod flake_input_overrides;
 pub mod flake_input_sources;
 pub mod flake_output_nodes;
 pub mod graph;
+pub mod incoming_deliveries;
 pub mod integrations;
 pub mod invitations;
 pub mod lookup;

@@ -225,17 +225,10 @@ impl From<JsonRejection> for WebError {
     }
 }
 
-impl IntoResponse for WebError {
-    fn into_response(self) -> Response {
-        let status = self.status();
-        let code = self.code();
-
-        let message: String = match &self {
-            Self::Internal(err) => {
-                tracing::error!(error = format!("{err:#}"), "Internal error");
-                "Internal server error".to_string()
-            }
-            Self::DataInconsistency(_) => "Internal server error".to_string(),
+impl WebError {
+    pub fn public_message(&self) -> String {
+        match self {
+            Self::Internal(_) | Self::DataInconsistency(_) => "Internal server error".to_string(),
             Self::BadRequest(_, m)
             | Self::Unauthorized(_, m)
             | Self::Forbidden(_, m)
@@ -247,7 +240,18 @@ impl IntoResponse for WebError {
             | Self::BadGateway(_, m)
             | Self::ServiceUnavailable(_, m) => m.clone(),
             Self::UploadBusy { .. } => "upload capacity exhausted".to_string(),
-        };
+        }
+    }
+}
+
+impl IntoResponse for WebError {
+    fn into_response(self) -> Response {
+        let status = self.status();
+        let code = self.code();
+        let message = self.public_message();
+        if let Self::Internal(err) = &self {
+            tracing::error!(error = format!("{err:#}"), "Internal error");
+        }
 
         let body = Json(ErrorResponseBody {
             error: true,

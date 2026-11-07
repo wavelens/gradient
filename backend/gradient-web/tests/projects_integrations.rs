@@ -300,6 +300,42 @@ async fn delete_unmanaged_integration_of_state_managed_project_succeeds() {
     assert_eq!(body["message"], true);
 }
 
+#[tokio::test]
+async fn members_list_incoming_deliveries_of_an_integration() {
+    use gradient_entity::incoming_webhook_delivery::{self, DeliveryResult};
+
+    let session_id = SessionId::now_v7();
+    let row = gitea_inbound_row();
+    let delivery = incoming_webhook_delivery::Model {
+        id: IncomingWebhookDeliveryId::now_v7(),
+        integration: row.id,
+        event: "push".into(),
+        status_code: 401,
+        result: DeliveryResult::Refused,
+        detail: Some("invalid webhook signature".into()),
+        created_at: test_date(),
+        ..Default::default()
+    };
+    let db = with_project_member(with_auth(mock_db(), session_id))
+        .append_query_results([vec![row.clone()]])
+        .append_query_results([vec![delivery]]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("{}/deliveries", delete_url(row.id)))
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    let first = &body["message"][0];
+    assert_eq!(first["result"], "refused");
+    assert_eq!(first["status_code"], 401);
+    assert_eq!(first["detail"], "invalid webhook signature");
+}
+
 fn server_with_crypt_key(db: MockDatabase) -> axum_test::TestServer {
     let path = std::env::temp_dir().join(format!("gradient-test-crypt-{}", Uuid::now_v7()));
     std::fs::write(&path, "this-is-a-32-byte-crypt-key!!!!").unwrap();

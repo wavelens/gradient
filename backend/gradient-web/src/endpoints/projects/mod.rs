@@ -13,9 +13,10 @@ pub mod ssh;
 pub mod workers;
 
 pub use self::integrations::{
-    CreateIntegrationRequest, IntegrationResponse, IntegrationSummaryResponse,
-    PatchIntegrationRequest, delete_integration, get_integration, get_integration_summaries,
-    get_integrations, patch_integration, put_integration,
+    CreateIntegrationRequest, IncomingWebhookDeliveryResponse, IntegrationResponse,
+    IntegrationSummaryResponse, PatchIntegrationRequest, delete_integration, get_integration,
+    get_integration_deliveries, get_integration_summaries, get_integrations, patch_integration,
+    put_integration,
 };
 pub use self::management::{
     MakeProjectRequest, PatchProjectRequest, ProjectResponse, ProjectSummary, delete_project, get,

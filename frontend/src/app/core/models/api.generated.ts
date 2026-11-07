@@ -754,6 +754,8 @@ export interface DeliveryListItem_WebhookDeliveryId {
   delivered_at: string;
 }
 
+export type DeliveryResult = "queued" | "skipped" | "no_matching_task" | "ignored" | "refused";
+
 export interface DependencyEdge {
   source: DerivationId;
   target: DerivationId;
@@ -1357,6 +1359,20 @@ export interface HttpRouteStat {
   count: number;
   avg_ms: number;
   errors: number;
+}
+
+export type IncomingWebhookDeliveryId = string;
+
+export interface IncomingWebhookDeliveryResponse {
+  id: IncomingWebhookDeliveryId;
+  event: string;
+  status_code: number;
+  result: DeliveryResult;
+  detail?: string | null;
+  repository?: string | null;
+  tasks_scanned: number;
+  queued: number;
+  created_at: string;
 }
 
 export interface IncomingWebhookResponse {

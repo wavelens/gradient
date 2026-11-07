@@ -5,4 +5,5 @@
  */
 
 export * from './fetch-failure-hint';
+export * from './incoming-deliveries.component';
 export * from './repository-fetch-banner.component';

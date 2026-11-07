@@ -7366,6 +7366,45 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/projects/{project}/integrations/{id}/deliveries:
+    get:
+      tags:
+      - integrations
+      summary: List incoming webhook deliveries
+      description: List the latest webhook deliveries that reach an inbound integration, newest first. The HTTP status that Gradient returned and the result appear in every entry. Results cover a queued evaluation, a skipped task, no task for the repository, an ignored event, or a refusal with a reason. Only the latest 50 deliveries for each integration stay in Gradient. All project members can access these deliveries.
+      operationId: listIntegrationDeliveries
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/IntegrationId'
+      responses:
+        '200':
+          description: Delivery, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/projects/{project}/invitations:
     get:
       tags:
@@ -16012,6 +16051,14 @@ components:
         delivered_at:
           type: string
           format: date-time
+    DeliveryResult:
+      type: string
+      enum:
+      - queued
+      - skipped
+      - no_matching_task
+      - ignored
+      - refused
     DependencyEdge:
       type: object
       required:
@@ -17861,6 +17908,46 @@ components:
           type: integer
           format: int64
           minimum: 0
+    IncomingWebhookDeliveryId:
+      type: string
+      format: uuid
+    IncomingWebhookDeliveryResponse:
+      type: object
+      required:
+      - id
+      - event
+      - status_code
+      - result
+      - tasks_scanned
+      - queued
+      - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/IncomingWebhookDeliveryId'
+        event:
+          type: string
+        status_code:
+          type: integer
+          format: int32
+        result:
+          $ref: '#/components/schemas/DeliveryResult'
+        detail:
+          type:
+          - string
+          - 'null'
+        repository:
+          type:
+          - string
+          - 'null'
+        tasks_scanned:
+          type: integer
+          format: int32
+        queued:
+          type: integer
+          format: int32
+        created_at:
+          type: string
+          format: date-time
     IncomingWebhookResponse:
       type: object
       required:
