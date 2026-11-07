@@ -583,7 +583,7 @@ pub async fn delete_task_active(
     operation_id = "checkTaskRepository",
     tag = "tasks",
     summary = "Check repository accessibility",
-    description = "Tests whether Gradient can clone the task's repository using the project's SSH key and returns the remote head commit. A `repository` in the body is tested instead of the saved URL, so a new URL can be checked before saving it. Requires Admin or Write role; rejects state-managed tasks.\nReturns `400` with `code: \"repository_unreachable\"` and the underlying git error when the repository cannot be fetched.",
+    description = "Tests whether Gradient can clone the task's repository using the project's SSH key and returns the remote head commit. A `repository` in the body is tested instead of the saved URL, so a new URL can be checked before saving it. A check of the saved URL updates the `repository_fetch` of the task. Requires Admin or Write role; rejects state-managed tasks.\nReturns `400` with `code: \"repository_unreachable\"` and the underlying git error when the repository cannot be fetched.",
     params(TaskPath),
     request_body = Option<CheckRepositoryRequest>,
     responses((status = OK, description = "Repository is accessible", body = String, content_type = "application/json"), WebError)
@@ -594,15 +594,24 @@ pub async fn post_task_check_repository(
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
     body: Option<Json<CheckRepositoryRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let repository = validated_repository(
-        body.and_then(|Json(b)| b.repository)
-            .unwrap_or(task.repository),
-    )?;
-    let head = resolve_remote_ref(&db, &project, &repository, None)
+    let requested = body.and_then(|Json(b)| b.repository);
+    let checks_saved_url = requested
+        .as_deref()
+        .is_none_or(|url| url.trim() == task.repository);
+    let repository = validated_repository(requested.unwrap_or_else(|| task.repository.clone()))?;
+    let result = resolve_remote_ref(&db, &project, &repository, None)
         .await
-        .map_err(|e| TaskRefusal::RepositoryCheckFailed {
-            reason: e.to_string(),
-        })?;
+        .map_err(|e| e.to_string());
+    if checks_saved_url {
+        gradient_db::tasks::record_fetch(
+            &db.web_db,
+            task.id,
+            gradient_types::now(),
+            result.as_ref().err().map(String::as_str),
+        )
+        .await?;
+    }
+    let head = result.map_err(|reason| TaskRefusal::RepositoryCheckFailed { reason })?;
 
     let res = BaseResponse {
         error: false,

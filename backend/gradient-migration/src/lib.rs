@@ -54,6 +54,7 @@ mod m20261117_000000_only_evaluate;
 mod m20261119_000000_counter_trigger_early_exit;
 mod m20261120_000000_task_flake_input_source;
 mod m20261121_000000_gradient_run;
+mod m20261122_000000_task_repository_fetch;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -133,6 +134,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261119_000000_counter_trigger_early_exit::Migration),
             Box::new(m20261120_000000_task_flake_input_source::Migration),
             Box::new(m20261121_000000_gradient_run::Migration),
+            Box::new(m20261122_000000_task_repository_fetch::Migration),
         ]
     }
 }

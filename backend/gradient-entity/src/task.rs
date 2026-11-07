@@ -71,6 +71,10 @@ pub struct Model {
     pub multi_node_evaluation: bool,
     pub exec_enabled: bool,
     pub only_evaluate: bool,
+    pub last_fetch_at: Option<NaiveDateTime>,
+    pub last_fetch_ok_at: Option<NaiveDateTime>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub last_fetch_error: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

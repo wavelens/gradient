@@ -2147,6 +2147,13 @@ export interface ReportGap {
   transit_ms?: number | null;
 }
 
+export interface RepositoryFetchStatus {
+  checked_at: string;
+  ok_at?: string | null;
+  failed: boolean;
+  error?: string | null;
+}
+
 export type RequestKind = "project" | "cache";
 
 export interface RevokeInvitationRequest {
@@ -2395,6 +2402,7 @@ export interface TaskDetailsResponse {
   created_at: string;
   keep_evaluations: number;
   last_check_at?: string | null;
+  repository_fetch?: RepositoryFetchStatus | null;
   queue: QueueSummary;
   last_evaluations: EvaluationSummary[];
   can_edit: boolean;
@@ -2444,6 +2452,7 @@ export interface TaskResponse {
   multi_node_evaluation: boolean;
   exec_enabled: boolean;
   only_evaluate: boolean;
+  repository_fetch?: RepositoryFetchStatus | null;
   can_edit: boolean;
   can_trigger: boolean;
   permissions: Permission[];

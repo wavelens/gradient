@@ -20,6 +20,7 @@ import { EvaluationsService } from '@core/services/evaluations.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
+import { RepositoryFetchBannerComponent } from '@shared/git';
 import {
   BadgeComponent,
   BreadcrumbComponent,
@@ -65,6 +66,7 @@ import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, build
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, StarButtonComponent,
     ExecJobListComponent, WaitingNoticeComponent, ScrollRegionDirective,
+    RepositoryFetchBannerComponent,
   ],
   templateUrl: './task-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

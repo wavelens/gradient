@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use chrono::NaiveDateTime;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter, QueryOrder, Select,
@@ -52,6 +54,28 @@ pub async fn move_to_project<C: ConnectionTrait>(
         Condition::all().add(CTask::Project.eq(read_project)),
     )
     .await
+}
+
+const FETCH_ERROR_LIMIT: usize = 2000;
+
+pub async fn record_fetch<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+    at: NaiveDateTime,
+    error: Option<&str>,
+) -> Result<(), DbErr> {
+    let error = error.map(|e| e.chars().take(FETCH_ERROR_LIMIT).collect::<String>());
+    let mut update = ETask::update_many()
+        .col_expr(CTask::LastFetchAt, Expr::value(at))
+        .filter(CTask::Id.eq(task));
+    if error.is_none() {
+        update = update.col_expr(CTask::LastFetchOkAt, Expr::value(at));
+    }
+    update
+        .col_expr(CTask::LastFetchError, Expr::value(error))
+        .exec(db)
+        .await?;
+    Ok(())
 }
 
 pub async fn delete<C: ConnectionTrait>(db: &C, task: MTask) -> Result<(), DbErr> {

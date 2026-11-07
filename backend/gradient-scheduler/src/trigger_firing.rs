@@ -129,7 +129,18 @@ pub async fn fire(scheduler: &Scheduler, fire: &TriggerFire) -> anyhow::Result<(
     let sources = &scheduler.db;
     let branch = polling_branch(&cfg);
     let resolve = check_task_updates(sources, &task, branch.as_deref());
-    if let Some((has_update, head)) = resolve_head(resolve, &task.name).await {
+    let resolved = resolve_head(resolve, &task.name).await;
+    if let Err(e) = gradient_db::tasks::record_fetch(
+        &scheduler.db.worker_db,
+        task.id,
+        now,
+        resolved.as_ref().err().map(String::as_str),
+    )
+    .await
+    {
+        warn!(error = %e, task = %task.name, "Failed to record the repository fetch result");
+    }
+    if let Ok((has_update, head)) = resolved {
         apply_resolved_head(scheduler, &trig, &task, &cfg, has_update, head).await;
     }
 
@@ -314,20 +325,23 @@ async fn commit_metadata(
     }
 }
 
-async fn resolve_head<F, T, E>(resolve: F, task: &str) -> Option<T>
+async fn resolve_head<F, T, E>(resolve: F, task: &str) -> Result<T, String>
 where
     F: std::future::Future<Output = Result<T, E>>,
     E: std::fmt::Display,
 {
     match tokio::time::timeout(HEAD_RESOLVE_BUDGET, resolve).await {
-        Ok(Ok(v)) => Some(v),
+        Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => {
             warn!(error = %e, %task, "trigger commit resolution failed");
-            None
+            Err(e.to_string())
         }
         Err(_) => {
             warn!(%task, budget_secs = HEAD_RESOLVE_BUDGET.as_secs(), "trigger commit resolution timed out");
-            None
+            Err(format!(
+                "repository did not respond within {} seconds",
+                HEAD_RESOLVE_BUDGET.as_secs()
+            ))
         }
     }
 }
@@ -368,12 +382,14 @@ mod tests {
     async fn a_hanging_remote_gives_up_its_slot_instead_of_the_pass() {
         let hang = std::future::pending::<Result<(bool, Vec<u8>), std::io::Error>>();
         assert!(
-            resolve_head(hang, "never-answers").await.is_none(),
-            "the pass moves on to the next trigger"
+            resolve_head(hang, "never-answers")
+                .await
+                .is_err_and(|e| e.contains("did not respond")),
+            "the pass moves on to the next trigger and stores why"
         );
 
         let ok = std::future::ready(Ok::<_, std::io::Error>((true, vec![1u8])));
-        assert_eq!(resolve_head(ok, "answers").await, Some((true, vec![1u8])));
+        assert_eq!(resolve_head(ok, "answers").await, Ok((true, vec![1u8])));
     }
 
     #[test]

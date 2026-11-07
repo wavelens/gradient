@@ -9802,7 +9802,7 @@ paths:
       - tasks
       summary: Check repository accessibility
       description: |-
-        Tests whether Gradient can clone the task's repository using the project's SSH key and returns the remote head commit. A `repository` in the body is tested instead of the saved URL, so a new URL can be checked before saving it. Requires Admin or Write role; rejects state-managed tasks.
+        Tests whether Gradient can clone the task's repository using the project's SSH key and returns the remote head commit. A `repository` in the body is tested instead of the saved URL, so a new URL can be checked before saving it. A check of the saved URL updates the `repository_fetch` of the task. Requires Admin or Write role; rejects state-managed tasks.
         Returns `400` with `code: "repository_unreachable"` and the underlying git error when the repository cannot be fetched.
       operationId: checkTaskRepository
       parameters:
@@ -20098,6 +20098,26 @@ components:
           - integer
           - 'null'
           format: int64
+    RepositoryFetchStatus:
+      type: object
+      required:
+      - checked_at
+      - failed
+      properties:
+        checked_at:
+          type: string
+          format: date-time
+        ok_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        failed:
+          type: boolean
+        error:
+          type:
+          - string
+          - 'null'
     RequestKind:
       type: string
       enum:
@@ -20763,6 +20783,10 @@ components:
           - string
           - 'null'
           format: date-time
+        repository_fetch:
+          oneOf:
+          - $ref: '#/components/schemas/RepositoryFetchStatus'
+          - type: 'null'
         queue:
           $ref: '#/components/schemas/QueueSummary'
         last_evaluations:
@@ -20910,6 +20934,10 @@ components:
           type: boolean
         only_evaluate:
           type: boolean
+        repository_fetch:
+          oneOf:
+          - $ref: '#/components/schemas/RepositoryFetchStatus'
+          - type: 'null'
         can_edit:
           type: boolean
         can_trigger:

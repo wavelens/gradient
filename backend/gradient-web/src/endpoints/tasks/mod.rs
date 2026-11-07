@@ -60,9 +60,30 @@ pub struct TaskResponse {
     pub multi_node_evaluation: bool,
     pub exec_enabled: bool,
     pub only_evaluate: bool,
+    pub repository_fetch: Option<RepositoryFetchStatus>,
     pub can_edit: bool,
     pub can_trigger: bool,
     pub permissions: Vec<Permission>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
+pub struct RepositoryFetchStatus {
+    pub checked_at: chrono::NaiveDateTime,
+    pub ok_at: Option<chrono::NaiveDateTime>,
+    pub failed: bool,
+    pub error: Option<String>,
+}
+
+impl RepositoryFetchStatus {
+    /// Only members who can edit the task can view those errors. Git errors can contain internal hostnames.
+    pub fn of(task: &MTask, can_edit: bool) -> Option<Self> {
+        Some(Self {
+            checked_at: task.last_fetch_at?,
+            ok_at: task.last_fetch_ok_at,
+            failed: task.last_fetch_error.is_some(),
+            error: task.last_fetch_error.clone().filter(|_| can_edit),
+        })
+    }
 }
 
 impl TaskResponse {
@@ -71,6 +92,8 @@ impl TaskResponse {
         last_evaluation_status: Option<EvaluationStatus>,
         permissions: PermissionMask,
     ) -> Self {
+        let repository_fetch =
+            RepositoryFetchStatus::of(&task, mask_grants(permissions, Permission::EditTask));
         Self {
             id: task.id,
             project: task.project,
@@ -94,6 +117,7 @@ impl TaskResponse {
             multi_node_evaluation: task.multi_node_evaluation,
             exec_enabled: task.exec_enabled,
             only_evaluate: task.only_evaluate,
+            repository_fetch,
             can_edit: mask_grants(permissions, Permission::EditTask),
             can_trigger: mask_grants(permissions, Permission::TriggerEvaluation),
             permissions: mask_to_vec(permissions),
@@ -208,6 +232,7 @@ pub struct TaskDetailsResponse {
     pub created_at: chrono::NaiveDateTime,
     pub keep_evaluations: i32,
     pub last_check_at: Option<chrono::NaiveDateTime>,
+    pub repository_fetch: Option<RepositoryFetchStatus>,
     pub queue: QueueSummary,
     pub last_evaluations: Vec<EvaluationSummary>,
     pub can_edit: bool,
@@ -223,6 +248,8 @@ impl TaskDetailsResponse {
         last_evaluations: Vec<EvaluationSummary>,
         permissions: PermissionMask,
     ) -> Self {
+        let repository_fetch =
+            RepositoryFetchStatus::of(&task, mask_grants(permissions, Permission::EditTask));
         Self {
             id: task.id,
             name: task.name,
@@ -234,6 +261,7 @@ impl TaskDetailsResponse {
             created_at: task.created_at,
             keep_evaluations: task.keep_evaluations,
             last_check_at: checked_at(task.last_check_at),
+            repository_fetch,
             queue,
             last_evaluations,
             can_edit: mask_grants(permissions, Permission::EditTask),
@@ -404,5 +432,38 @@ mod summary_tests {
             .and_hms_opt(12, 0, 0)
             .unwrap();
         assert_eq!(checked_at(t), Some(t));
+    }
+}
+
+#[cfg(test)]
+mod repository_fetch_tests {
+    use super::*;
+
+    fn task(error: Option<&str>) -> MTask {
+        MTask {
+            last_fetch_at: Some(chrono::NaiveDateTime::default()),
+            last_fetch_error: error.map(str::to_owned),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn never_fetched_has_no_status() {
+        assert_eq!(RepositoryFetchStatus::of(&MTask::default(), true), None);
+    }
+
+    #[test]
+    fn failure_text_only_reaches_editors() {
+        let failed = task(Some("Permission denied (publickey)"));
+        let editor = RepositoryFetchStatus::of(&failed, true).unwrap_or_else(|| panic!("status"));
+        assert!(editor.failed);
+        assert_eq!(
+            editor.error.as_deref(),
+            Some("Permission denied (publickey)")
+        );
+
+        let viewer = RepositoryFetchStatus::of(&failed, false).unwrap_or_else(|| panic!("status"));
+        assert!(viewer.failed);
+        assert_eq!(viewer.error, None);
     }
 }
