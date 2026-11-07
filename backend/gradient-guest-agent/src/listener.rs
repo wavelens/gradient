@@ -27,7 +27,7 @@ use crate::redaction::JobSecrets;
 use crate::run::run;
 use crate::setup::{PreparedJob, prepare};
 use crate::shell::ShellContext;
-use crate::terminal::ProgramTerminal;
+use crate::terminal::{ProgramTerminal, SERIAL_CONSOLE, resize_console};
 
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 const SETUP_TIMEOUT: Duration = Duration::from_secs(300);
@@ -201,6 +201,11 @@ async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> 
                 cols,
                 rows,
             } => channels.resize(channel_id, cols, rows),
+            WorkerToAgent::ResizeConsole { cols, rows } => {
+                if let Err(e) = resize_console(SERIAL_CONSOLE.as_ref(), cols, rows) {
+                    tracing::debug!(error = %e, "cannot resize the serial console");
+                }
+            }
             WorkerToAgent::CloseChannel { channel_id } => channels.close(channel_id),
             WorkerToAgent::UploadSettled { upload_id, error } => {
                 agent.http.uploads.settled(upload_id, error);

@@ -19,12 +19,13 @@ use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{Proto, from_bytes, to_bytes};
 use crate::types::GuestChannelKind;
 
-pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=7;
+pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=8;
 pub const GUEST_CHANNELS_AGENT_SINCE: u16 = 2;
 pub const GUEST_JOB_SECRETS_SINCE: u16 = 2;
 pub const GUEST_UPLOADS_SINCE: u16 = 3;
 pub const GUEST_WORK_DISK_SINCE: u16 = 5;
 pub const GUEST_SHUTDOWN_SINCE: u16 = 6;
+pub const GUEST_CONSOLE_RESIZE_SINCE: u16 = 8;
 pub const AGENT_VSOCK_PORT: u32 = 7000;
 pub const GUEST_STORE_VSOCK_PORT: u32 = 7001;
 pub const AGENT_RELAY_PORT_BASE: u32 = 7100;
@@ -62,6 +63,11 @@ pub enum WorkerToAgent {
     UploadSettled {
         upload_id: u64,
         error: Option<String>,
+    },
+    #[proto(8)]
+    ResizeConsole {
+        cols: u16,
+        rows: u16,
     },
 }
 

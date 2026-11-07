@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use gradient_redact::{SecretRedactor, StreamRedactor};
-use gradient_wire::guest::{GUEST_CHANNELS_AGENT_SINCE, WorkerToAgent};
+use gradient_wire::guest::{GUEST_CHANNELS_AGENT_SINCE, GUEST_CONSOLE_RESIZE_SINCE, WorkerToAgent};
 use gradient_wire::messages::{GUEST_CHANNEL_CHUNK, GuestChannelKind};
 
 pub const CONSOLE_SCROLLBACK: usize = 64 * 1024;
@@ -59,7 +59,7 @@ pub enum MuxAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Route {
     Agent { attached: bool },
-    Console,
+    Console { size: Option<(u16, u16)> },
 }
 
 pub struct GuestChannelMux {
@@ -97,13 +97,17 @@ impl GuestChannelMux {
                 channel_id,
                 cols,
                 rows,
-            } => match self.routes.get(&channel_id) {
+            } => match self.routes.get_mut(&channel_id) {
                 Some(Route::Agent { .. }) => vec![MuxAction::ToAgent(WorkerToAgent::Resize {
                     channel_id,
                     cols,
                     rows,
                 })],
-                Some(Route::Console) | None => Vec::new(),
+                Some(Route::Console { size }) => {
+                    *size = Some((cols, rows));
+                    self.resize_console_for_holder(channel_id)
+                }
+                None => Vec::new(),
             },
             GuestChannelCommand::Close { channel_id } => self.close_from_server(channel_id),
             GuestChannelCommand::CloseAll => self.close_all(),
@@ -113,7 +117,7 @@ impl GuestChannelMux {
     pub fn on_agent_data(&mut self, channel_id: u64, data: Vec<u8>) -> Vec<MuxAction> {
         match self.routes.get(&channel_id) {
             Some(Route::Agent { .. }) => vec![MuxAction::ToServerData { channel_id, data }],
-            Some(Route::Console) | None => Vec::new(),
+            Some(Route::Console { .. }) | None => Vec::new(),
         }
     }
 
@@ -198,8 +202,29 @@ impl GuestChannelMux {
             actions.extend(data_actions(channel_id, READ_ONLY_NOTICE));
         }
         self.console_viewers.push(channel_id);
-        self.routes.insert(channel_id, Route::Console);
+        self.routes
+            .insert(channel_id, Route::Console { size: None });
         actions
+    }
+
+    fn holds_console_input(&self, channel_id: u64) -> bool {
+        self.console_viewers.first() == Some(&channel_id)
+    }
+
+    fn resize_console_for_holder(&self, channel_id: u64) -> Vec<MuxAction> {
+        match self.routes.get(&channel_id) {
+            Some(&Route::Console {
+                size: Some((cols, rows)),
+            }) if self.holds_console_input(channel_id)
+                && self.agent_version >= GUEST_CONSOLE_RESIZE_SINCE =>
+            {
+                vec![MuxAction::ToAgent(WorkerToAgent::ResizeConsole {
+                    cols,
+                    rows,
+                })]
+            }
+            _ => Vec::new(),
+        }
     }
 
     fn data(&mut self, channel_id: u64, data: Vec<u8>) -> Vec<MuxAction> {
@@ -208,10 +233,10 @@ impl GuestChannelMux {
                 channel_id,
                 data,
             })],
-            Some(Route::Console) if self.console_viewers.first() == Some(&channel_id) => {
+            Some(Route::Console { .. }) if self.holds_console_input(channel_id) => {
                 vec![MuxAction::ConsoleInput(data)]
             }
-            Some(Route::Console) | None => Vec::new(),
+            Some(Route::Console { .. }) | None => Vec::new(),
         }
     }
 
@@ -222,18 +247,22 @@ impl GuestChannelMux {
                     channel_id,
                 })]
             }
-            Some(Route::Console) => self.leave_console(channel_id),
+            Some(Route::Console { .. }) => self.leave_console(channel_id),
             None => Vec::new(),
         }
     }
 
     fn leave_console(&mut self, channel_id: u64) -> Vec<MuxAction> {
+        let held_input = self.holds_console_input(channel_id);
         self.console_viewers.retain(|&viewer| viewer != channel_id);
-        if !self.console_viewers.is_empty() {
-            return Vec::new();
+        match self.console_viewers.first() {
+            Some(&next) if held_input => self.resize_console_for_holder(next),
+            Some(_) => Vec::new(),
+            None => {
+                self.end_console();
+                vec![MuxAction::DisconnectConsole]
+            }
         }
-        self.end_console();
-        vec![MuxAction::DisconnectConsole]
     }
 
     fn close_all(&mut self) -> Vec<MuxAction> {
@@ -367,26 +396,56 @@ mod tests {
         assert!(mux.on_command(data(9, b"x")).is_empty());
     }
 
+    fn resize(channel_id: u64, cols: u16) -> GuestChannelCommand {
+        GuestChannelCommand::Resize {
+            channel_id,
+            cols,
+            rows: 40,
+        }
+    }
+
+    fn console_resized(cols: u16) -> Vec<MuxAction> {
+        vec![MuxAction::ToAgent(WorkerToAgent::ResizeConsole {
+            cols,
+            rows: 40,
+        })]
+    }
+
     #[test]
-    fn a_resize_reaches_shells_but_not_the_console() {
+    fn a_resize_reaches_shells_by_their_id() {
         let mut mux = mux();
         mux.on_command(open(4, new_shell()));
-        mux.on_command(open(5, GuestChannelKind::Console));
-        let resize = |channel_id| GuestChannelCommand::Resize {
-            channel_id,
-            cols: 120,
-            rows: 40,
-        };
 
         assert_eq!(
-            mux.on_command(resize(4)),
+            mux.on_command(resize(4, 120)),
             [MuxAction::ToAgent(WorkerToAgent::Resize {
                 channel_id: 4,
                 cols: 120,
                 rows: 40
             })]
         );
-        assert!(mux.on_command(resize(5)).is_empty());
+    }
+
+    #[test]
+    fn only_the_console_input_holder_resizes_the_console() {
+        let mut mux = GuestChannelMux::new(false, Vec::new(), GUEST_CONSOLE_RESIZE_SINCE);
+        mux.on_command(open(1, GuestChannelKind::Console));
+        mux.on_command(open(2, GuestChannelKind::Console));
+
+        assert_eq!(mux.on_command(resize(1, 120)), console_resized(120));
+        assert!(mux.on_command(resize(2, 90)).is_empty());
+        assert_eq!(
+            mux.on_command(GuestChannelCommand::Close { channel_id: 1 }),
+            console_resized(90)
+        );
+    }
+
+    #[test]
+    fn an_old_agent_keeps_the_console_size() {
+        let mut mux = GuestChannelMux::new(false, Vec::new(), GUEST_CONSOLE_RESIZE_SINCE - 1);
+        mux.on_command(open(1, GuestChannelKind::Console));
+
+        assert!(mux.on_command(resize(1, 120)).is_empty());
     }
 
     #[test]

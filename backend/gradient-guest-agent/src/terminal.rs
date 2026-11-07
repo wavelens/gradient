@@ -5,10 +5,13 @@
  */
 
 use std::io;
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsFd, OwnedFd};
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
 
+use nix::fcntl::OFlag;
 use rustix::termios::{Winsize, tcsetwinsize};
 use tokio::fs::File;
 use tokio::process::{Child, Command};
@@ -19,6 +22,27 @@ use crate::output::{OutputReader, OutputReaders};
 pub const TERMINAL_TYPE: &str = "xterm-256color";
 pub const DEFAULT_COLS: u16 = 80;
 pub const DEFAULT_ROWS: u16 = 24;
+pub const SERIAL_CONSOLE: &str = "/dev/ttyS0";
+
+fn set_size(tty: impl AsFd, cols: u16, rows: u16) -> io::Result<()> {
+    let size = Winsize {
+        ws_row: rows,
+        ws_col: cols,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    tcsetwinsize(tty, size)?;
+    Ok(())
+}
+
+/// A serial line can't transmit terminal size, so the agent can set the viewer size on the tty. The foreground program can then receive `SIGWINCH`.
+pub fn resize_console(tty: &Path, cols: u16, rows: u16) -> io::Result<()> {
+    let console = std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags((OFlag::O_NOCTTY | OFlag::O_NONBLOCK).bits())
+        .open(tty)?;
+    set_size(console, cols, rows)
+}
 
 pub struct PtyMaster {
     fd: OwnedFd,
@@ -31,14 +55,7 @@ impl PtyMaster {
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
-        let size = Winsize {
-            ws_row: rows,
-            ws_col: cols,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
-        tcsetwinsize(&self.fd, size)?;
-        Ok(())
+        set_size(&self.fd, cols, rows)
     }
 
     pub fn stream(&self) -> io::Result<File> {
@@ -105,5 +122,21 @@ impl ProgramTerminal {
 
     pub fn exit_code(&self) -> Option<i32> {
         *self.exit.borrow()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_console_resize_sets_the_size_of_the_tty_at_the_path() {
+        let pty = nix::pty::openpty(None, None).expect("openpty");
+        let path = nix::unistd::ttyname(&pty.slave).expect("ttyname");
+
+        resize_console(&path, 132, 43).expect("resize");
+
+        let size = rustix::termios::tcgetwinsize(&pty.master).expect("size");
+        assert_eq!((size.ws_col, size.ws_row), (132, 43));
     }
 }

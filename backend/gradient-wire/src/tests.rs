@@ -673,3 +673,21 @@ fn a_guest_shutdown_needs_the_sixth_guest_version() {
     );
     assert!(to_bytes(&AgentToWorker::GuestShutdown, since - 1).is_err());
 }
+
+#[test]
+fn a_console_resize_needs_the_eighth_guest_version() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::guest::{GUEST_CONSOLE_RESIZE_SINCE, GUEST_PROTO_VERSIONS, WorkerToAgent};
+
+    let since = GUEST_CONSOLE_RESIZE_SINCE;
+    let resize = WorkerToAgent::ResizeConsole {
+        cols: 120,
+        rows: 40,
+    };
+    assert!(GUEST_PROTO_VERSIONS.contains(&since));
+    assert_eq!(
+        from_bytes::<WorkerToAgent>(to_bytes(&resize, since).unwrap(), since).unwrap(),
+        resize
+    );
+    assert!(to_bytes(&resize, since - 1).is_err());
+}
