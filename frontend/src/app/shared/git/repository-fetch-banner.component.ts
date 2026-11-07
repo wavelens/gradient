@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { RouterLink, UrlTree } from '@angular/router';
 import { MessageBannerComponent } from '@gradient/ui/ui';
 import { RepositoryFetchStatus } from '@core/models';
 import { relativeTime } from '@shared/text';
@@ -48,7 +48,7 @@ import { fetchFailureHint } from './fetch-failure-hint';
 export class RepositoryFetchBannerComponent {
   status = input<RepositoryFetchStatus | null | undefined>(null);
   canEdit = input(false);
-  fixLink = input<unknown[] | null>(null);
+  fixLink = input<UrlTree | null>(null);
 
   hint = computed(() => fetchFailureHint(this.status()?.error));
 

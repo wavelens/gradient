@@ -7,6 +7,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { links } from '@shared/routing';
 import {
   ButtonComponent,
   FormFieldComponent,
@@ -68,6 +69,7 @@ function repositoryName(url: string): string {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ConnectRepositoryComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private tasks = inject(TasksService);
@@ -206,7 +208,7 @@ export class ConnectRepositoryComponent implements OnInit {
       next: () => {
         this.starting.set(false);
         this.notify.success('Evaluation start succeeded');
-        this.router.navigate(['/project', this.projectName, 'task', task]);
+        this.router.navigateByUrl(links.task(this.projectName, task));
       },
       error: (error: unknown) => {
         this.starting.set(false);

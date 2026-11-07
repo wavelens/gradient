@@ -81,12 +81,12 @@ describe('ConnectRepositoryComponent', () => {
   it('warns about a missing cache before the first build and starts the evaluation', () => {
     const startEvaluation = vi.fn(() => of('eval'));
     const fixture = render({ task: 'app', step: 'build' }, { startEvaluation });
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('[data-testid="cache-missing"]')).not.toBeNull();
     fixture.componentInstance.startEvaluation();
     expect(startEvaluation).toHaveBeenCalledWith('acme', 'app');
-    expect(navigate).toHaveBeenCalledWith(['/project', 'acme', 'task', 'app']);
+    expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/project/acme/task/app');
   });
 });

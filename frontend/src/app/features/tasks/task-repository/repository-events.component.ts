@@ -7,6 +7,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { links } from '@shared/routing';
 import {
   ButtonComponent,
   CheckboxComponent,
@@ -92,6 +93,7 @@ function integrationLabel(i: RepositoryIntegration): string {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RepositoryEventsComponent {
+  protected readonly links = links;
   private tasks = inject(TasksService);
   private integrationsService = inject(IntegrationsService);
   private notify = inject(NotifyService);
@@ -122,7 +124,7 @@ export class RepositoryEventsComponent {
   outboundOptions = computed(() => this.optionsOf('outbound'));
   selectedInbound = computed(() => this.state().integrations.find((i) => i.id === this.form().inbound) ?? null);
   hasServingInbound = computed(() => this.state().integrations.some((i) => i.kind === 'inbound' && i.serves_repository));
-  links = computed(() => gitHostSettingsLinks(this.state().repository, this.selectedInbound()?.git_host_type ?? null));
+  hostLinks = computed(() => gitHostSettingsLinks(this.state().repository, this.selectedInbound()?.git_host_type ?? null));
   events = computed(() => webhookEvents(this.selectedInbound()?.git_host_type ?? 'forgejo'));
   lastEvent = computed(() => {
     const event = this.state().last_event;

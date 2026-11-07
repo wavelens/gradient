@@ -266,7 +266,7 @@ describe('WebhooksComponent', () => {
       { project: 'p' },
     );
     expect(service.list).not.toHaveBeenCalled();
-    expect(root.textContent).toContain('No access to Webhooks');
+    expect(root.textContent).toContain('No access to event notifications');
     expect(root.textContent).toContain('manage webhooks permission for this project');
     expect(root.textContent).not.toContain('New Webhook');
     expect(root.textContent).not.toContain('Try Again');

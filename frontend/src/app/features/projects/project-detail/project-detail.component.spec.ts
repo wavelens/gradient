@@ -58,19 +58,19 @@ describe('ProjectDetailComponent header', () => {
     expect(render(false).root.querySelector('gr-star-button')).toBeNull();
   });
 
-  it('offers a viewer Settings but no Create Task', () => {
+  it('offers a viewer Settings but no Connect repository', () => {
     const { root } = render(true, undefined, { role: 'View', permissions: ['viewProject'] });
     const labels = Array.from(root.querySelectorAll('[slot="actions"] [grButton]')).map((el) => el.querySelector('.gr-button__label')?.textContent?.trim());
     expect(labels).toContain('Settings');
-    expect(labels).not.toContain('Create Task');
-    expect(root.textContent).toContain('No tasks have been created yet');
+    expect(labels).not.toContain('Connect repository');
+    expect(root.textContent).toContain('Ask a project administrator to connect a repository.');
   });
 
-  it('offers neither Settings nor Create Task to a visitor without a role', () => {
+  it('offers neither Settings nor Connect repository to a visitor without a role', () => {
     const { root } = render(true, undefined, { role: null, permissions: [] });
     const labels = Array.from(root.querySelectorAll('[slot="actions"] [grButton]')).map((el) => el.querySelector('.gr-button__label')?.textContent?.trim());
     expect(labels).not.toContain('Settings');
-    expect(labels).not.toContain('Create Task');
+    expect(labels).not.toContain('Connect repository');
   });
 });
 

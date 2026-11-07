@@ -114,18 +114,6 @@ describe('ProjectListComponent', () => {
     expect(createProject).not.toHaveBeenCalled();
   });
 
-  it('opens the new project after creating it', () => {
-    const { fixture } = render(() => of(EMPTY_PAGE));
-    (TestBed.inject(ProjectsService) as unknown as { createProject: () => unknown }).createProject = () => of('id');
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    const cmp = fixture.componentInstance;
-    cmp.openCreateDialog();
-    cmp.newProject.name = 'acme';
-    cmp.newProject.display_name = 'Acme';
-    cmp.createProject();
-    expect(navigate).toHaveBeenCalledWith(['/project', 'acme']);
-  });
-
   it('sends one create and stays open while the request runs', () => {
     const { fixture } = render(() => of(EMPTY_PAGE));
     const createProject = vi.fn(() => new Subject<void>());

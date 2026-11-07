@@ -31,8 +31,8 @@
     </div>
   </div>
 
-  <app-repository-fetch-banner class="pad" [status]="proj.repository_fetch" [canEdit]="proj.can_edit"
-    [fixLink]="['/project', projectName, 'task', taskName, 'repository']" />
+  <app-repository-fetch-banner class="pad" [status]="proj.repository_fetch" [canEdit]="proj.permissions.includes('editTask')"
+    [fixLink]="links.taskPage(projectName, taskName, 'repository')" />
 
   <div class="pad task-info">
     <p class="desc">{{ proj.description || 'No description' }}</p>

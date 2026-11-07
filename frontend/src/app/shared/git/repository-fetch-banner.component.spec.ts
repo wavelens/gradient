@@ -8,13 +8,14 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RepositoryFetchStatus } from '@core/models';
 import { RepositoryFetchBannerComponent } from './repository-fetch-banner.component';
+import { links } from '@shared/routing';
 
 function render(status: RepositoryFetchStatus | null, canEdit: boolean): HTMLElement {
   TestBed.configureTestingModule({ imports: [RepositoryFetchBannerComponent], providers: [provideRouter([])] });
   const fixture = TestBed.createComponent(RepositoryFetchBannerComponent);
   fixture.componentRef.setInput('status', status);
   fixture.componentRef.setInput('canEdit', canEdit);
-  fixture.componentRef.setInput('fixLink', ['/project', 'p', 'task', 't', 'settings']);
+  fixture.componentRef.setInput('fixLink', links.taskPage('p', 't', 'settings'));
   fixture.detectChanges();
   return fixture.nativeElement as HTMLElement;
 }
