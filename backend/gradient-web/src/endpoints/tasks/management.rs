@@ -374,6 +374,10 @@ pub async fn patch_task(
         ("exec_enabled", body.exec_enabled.is_some()),
         ("only_evaluate", body.only_evaluate.is_some()),
     ]);
+    let repository_changed = body
+        .repository
+        .as_deref()
+        .is_some_and(|url| url.trim() != task.repository);
     let mut atask: ATask = task.into();
     let mut patcher = TaskPatcher::new(&state, &mut atask);
 
@@ -418,9 +422,16 @@ pub async fn patch_task(
     }
 
     atask.force_evaluation = Set(true);
-    gradient_db::tasks::update(&state.web_db, atask)
+    let updated = gradient_db::tasks::update(&state.web_db, atask)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
+
+    if repository_changed {
+        let integrations = gradient_db::integrations::of_project(&state.web_db, project.id).await?;
+        if let Err(e) = auto_attach::apply(&state.web_db, &updated, &integrations).await {
+            tracing::warn!(task = %updated.id, error = %e, "Could not connect the integration to the new repository");
+        }
+    }
 
     audit.write(Action::TaskUpdate, owner, fields).await;
 

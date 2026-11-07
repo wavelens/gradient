@@ -18029,6 +18029,7 @@ components:
       - created_by
       - created_at
       - managed
+      - connected_tasks
       properties:
         id:
           $ref: '#/components/schemas/IntegrationId'
@@ -18078,6 +18079,10 @@ components:
           type:
           - string
           - 'null'
+        connected_tasks:
+          type: array
+          items:
+            type: string
     IntegrationSummaryResponse:
       type: object
       required:

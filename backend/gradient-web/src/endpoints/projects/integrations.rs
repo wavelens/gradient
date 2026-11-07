@@ -52,6 +52,7 @@ pub struct IntegrationResponse {
     pub managed: bool,
     pub generated_secret: Option<String>,
     pub webhook_url: Option<String>,
+    pub connected_tasks: Vec<String>,
 }
 
 impl IntegrationResponse {
@@ -78,6 +79,7 @@ impl IntegrationResponse {
             managed: integration.managed,
             generated_secret: None,
             webhook_url,
+            connected_tasks: Vec::new(),
         }
     }
 }
@@ -352,9 +354,9 @@ pub async fn put_integration(
             })?;
         txn.commit().await?;
 
-        return Ok(ok_json(
-            integration_response(&state.web_db, &base, created).await?,
-        ));
+        let mut response = integration_response(&state.web_db, &base, created).await?;
+        response.connected_tasks = connect_tasks(&state.web_db, project.id).await;
+        return Ok(ok_json(response));
     }
 
     let kind = parse_kind(&body.kind)?;
@@ -427,7 +429,28 @@ pub async fn put_integration(
 
     let mut response = integration_response(&state.web_db, &base, integration).await?;
     response.generated_secret = generated_secret;
+    response.connected_tasks = connect_tasks(&state.web_db, project.id).await;
     Ok(ok_json(response))
+}
+
+async fn connect_tasks(db: &gradient_db::WebDb, project: ProjectId) -> Vec<String> {
+    let (Ok(tasks), Ok(integrations)) = (
+        gradient_db::tasks::of_project(project).all(db).await,
+        gradient_db::integrations::of_project(db, project).await,
+    ) else {
+        return Vec::new();
+    };
+    let mut connected = Vec::new();
+    for task in tasks.iter().filter(|t| !t.managed) {
+        match crate::endpoints::tasks::auto_attach::apply(db, task, &integrations).await {
+            Ok(attached) if attached.any() => connected.push(task.name.clone()),
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(task = %task.id, error = %e, "Could not connect the task to the new integration");
+            }
+        }
+    }
+    connected
 }
 
 fn new_webhook_secret() -> String {

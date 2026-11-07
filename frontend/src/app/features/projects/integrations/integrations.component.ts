@@ -271,10 +271,10 @@ export class IntegrationsComponent implements OnInit {
         ...(this.formData.display_name.trim() ? { display_name: this.formData.display_name.trim() } : {}),
       };
       this.integrationsService.createProjectIntegration(this.projectName, body).subscribe({
-        next: () => {
+        next: (created) => {
           this.saving.set(false);
           this.showCreateDialog.set(false);
-          this.notify.success('Integration created');
+          this.notifyCreated(created);
           this.loadIntegrations();
         },
         error: (error: unknown) => {
@@ -305,7 +305,7 @@ export class IntegrationsComponent implements OnInit {
       next: (created) => {
         this.saving.set(false);
         this.showCreateDialog.set(false);
-        this.notify.success('Integration created');
+        this.notifyCreated(created);
         if (created.generated_secret) {
           this.createdInbound.set({ integration: created, secret: created.generated_secret });
           this.showSecretDialog.set(true);
@@ -317,6 +317,11 @@ export class IntegrationsComponent implements OnInit {
         this.saving.set(false);
       },
     });
+  }
+
+  private notifyCreated(created: IntegrationResponse): void {
+    const tasks = created.connected_tasks ?? [];
+    this.notify.success(tasks.length > 0 ? `Created integration. Connected to ${tasks.join(', ')}.` : 'Integration created');
   }
 
   openEditDialog(integration: IntegrationResponse): void {

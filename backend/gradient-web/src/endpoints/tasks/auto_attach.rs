@@ -5,7 +5,7 @@
  */
 
 use gradient_ci::IntegrationKind;
-use gradient_types::actions::ActionConfig;
+use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::{
     GitHostType, MIntegration, MTask, MTaskAction, MTaskTrigger, TaskActionId, TaskTriggerId,
@@ -13,7 +13,7 @@ use gradient_types::{
 use sea_orm::ConnectionTrait;
 
 #[derive(Debug, Default, PartialEq)]
-pub(super) struct AutoAttach {
+pub(crate) struct AutoAttach {
     pub inbound: Option<MIntegration>,
     pub outbound: Option<MIntegration>,
 }
@@ -74,7 +74,7 @@ fn pick_one(
     matched.next().is_none().then(|| first.clone())
 }
 
-pub(super) fn match_integrations_for_repo(repo: &str, integrations: &[MIntegration]) -> AutoAttach {
+pub(crate) fn match_integrations_for_repo(repo: &str, integrations: &[MIntegration]) -> AutoAttach {
     let Some(host) = url_host(repo) else {
         return AutoAttach::default();
     };
@@ -86,36 +86,81 @@ pub(super) fn match_integrations_for_repo(repo: &str, integrations: &[MIntegrati
     }
 }
 
-pub(super) async fn apply<C: ConnectionTrait>(
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct Attached {
+    pub push: bool,
+    pub pull_request: bool,
+    pub status: bool,
+}
+
+impl Attached {
+    pub(crate) fn any(&self) -> bool {
+        self.push || self.pull_request || self.status
+    }
+}
+
+/// The function can add only the missing parts to the task. A rerun can happen after repository
+/// URL changes or new integrations appear.
+pub(crate) async fn apply<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
     integrations: &[MIntegration],
-) -> Result<(), sea_orm::DbErr> {
+) -> Result<Attached, sea_orm::DbErr> {
     let attach = match_integrations_for_repo(&task.repository, integrations);
     let now = gradient_types::now();
+    let mut attached = Attached::default();
 
+    let existing: Vec<TriggerType> = gradient_db::triggers::of_task(db, task.id)
+        .await?
+        .into_iter()
+        .map(|t| t.trigger_type)
+        .collect();
     if let Some(inbound) = attach.inbound {
-        let cfg = TriggerConfig::ReporterPush {
-            integration_id: inbound.id,
-            branches: vec![],
-            tags: vec![],
-            releases_only: false,
-            include_flake_inputs: false,
-        };
-        let trigger = MTaskTrigger {
-            id: TaskTriggerId::now_v7(),
-            task: task.id,
-            trigger_type: TriggerType::ReporterPush,
-            config: cfg.to_db_json(),
-            active: true,
-            created_at: now,
-            updated_at: now,
-            ..Default::default()
-        };
-        gradient_db::triggers::insert(db, trigger).await?;
+        let wanted = [
+            TriggerConfig::ReporterPush {
+                integration_id: inbound.id,
+                branches: vec![],
+                tags: vec![],
+                releases_only: false,
+                include_flake_inputs: false,
+            },
+            TriggerConfig::ReporterPullRequest {
+                integration_id: inbound.id,
+                branches: vec![],
+                actions: ["opened", "synchronize", "reopened"]
+                    .map(String::from)
+                    .to_vec(),
+                require_approval: true,
+            },
+        ];
+        for cfg in wanted {
+            if existing.contains(&cfg.trigger_type()) {
+                continue;
+            }
+            match cfg.trigger_type() {
+                TriggerType::ReporterPush => attached.push = true,
+                _ => attached.pull_request = true,
+            }
+            let trigger = MTaskTrigger {
+                id: TaskTriggerId::now_v7(),
+                task: task.id,
+                trigger_type: cfg.trigger_type(),
+                config: cfg.to_db_json(),
+                active: true,
+                created_at: now,
+                updated_at: now,
+                ..Default::default()
+            };
+            gradient_db::triggers::insert(db, trigger).await?;
+        }
     }
 
-    if let Some(outbound) = attach.outbound {
+    let has_status_action = gradient_db::actions::of_task(db, task.id)
+        .await?
+        .iter()
+        .any(|a| a.action_type == ActionType::GitHostStatusReport);
+    if let Some(outbound) = attach.outbound.filter(|_| !has_status_action) {
+        attached.status = true;
         let cfg = ActionConfig::GitHostStatusReport {
             integration_id: outbound.id,
         };
@@ -135,7 +180,7 @@ pub(super) async fn apply<C: ConnectionTrait>(
         gradient_db::actions::insert(db, action).await?;
     }
 
-    Ok(())
+    Ok(attached)
 }
 
 #[cfg(test)]

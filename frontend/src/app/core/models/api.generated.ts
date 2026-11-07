@@ -1419,6 +1419,7 @@ export interface IntegrationResponse {
   managed: boolean;
   generated_secret?: string | null;
   webhook_url?: string | null;
+  connected_tasks: string[];
 }
 
 export interface IntegrationSummaryResponse {
