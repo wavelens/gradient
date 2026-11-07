@@ -240,9 +240,6 @@ width="420px"
 >
 <div>
   <p>Transfer <strong>{{ task()?.display_name }}</strong> to another project. This action cannot be undone.</p>
-  @if (transferSuccess()) {
-    <gr-message-banner type="success">Ownership transferred successfully.</gr-message-banner>
-  }
   <gr-form-field label="Target Project">
     <gr-autocomplete
       [(ngModel)]="transferProjectName"

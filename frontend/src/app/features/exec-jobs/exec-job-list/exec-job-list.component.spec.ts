@@ -112,7 +112,8 @@ describe('ExecJobListComponent', () => {
     try {
       const refused = vi.fn(() => throwError(() => new ApiError('Evaluation not found', 404)));
       const unreachable = vi.fn(() => throwError(() => new ApiError('Bad Gateway', 502)));
-      for (const forEvaluation of [refused, unreachable]) {
+      const offline = vi.fn(() => throwError(() => new ApiError('Connection to the server failed.', 0)));
+      for (const forEvaluation of [refused, unreachable, offline]) {
         TestBed.resetTestingModule();
         TestBed.configureTestingModule({
           imports: [ExecJobListComponent],
@@ -129,6 +130,7 @@ describe('ExecJobListComponent', () => {
 
       expect(refused).toHaveBeenCalledTimes(1);
       expect(unreachable).toHaveBeenCalledTimes(4);
+      expect(offline).toHaveBeenCalledTimes(4);
     } finally {
       vi.useRealTimers();
     }

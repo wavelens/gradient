@@ -1025,12 +1025,12 @@ describe('TaskDetailComponent diagnostic report', () => {
   /// The bundled default hands over a report that names which package broke
   /// but not whose repository it is. Build logs carry whatever a build printed,
   /// so they are opted into rather than out of.
-  it('defaults to hidden identities, real package names, no build logs and no exec jobs', () => {
+  it('defaults to hidden identities, real package names, no build logs, no instance context and no exec jobs', () => {
     const o = component().reportOptions();
     expect(o.include_identities).toBe(false);
     expect(o.include_packages).toBe(true);
     expect(o.include_logs).toBe(false);
-    expect(o.include_instance).toBe(true);
+    expect(o.include_instance).toBe(false);
     expect(o.include_exec).toBe(false);
   });
 

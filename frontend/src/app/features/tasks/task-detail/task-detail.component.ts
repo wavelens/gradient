@@ -707,13 +707,9 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     include_identities: false,
     include_packages: true,
     include_logs: false,
-    include_instance: true,
+    include_instance: false,
     include_exec: false,
   });
-
-  // The instance section needs ManageWorkers, which the task access payload
-  // does not carry, so the box stays enabled and the server's 403 explains
-  // itself. Disabling it up front needs `can_manage_workers` on AccessState.
 
   setReportOption(key: keyof ReportOptions, value: boolean): void {
     this.reportOptions.update(o => ({ ...o, [key]: value }));

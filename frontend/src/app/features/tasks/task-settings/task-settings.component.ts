@@ -110,7 +110,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   saveSuccess = signal(false);
   transferProjectName = '';
   transferError = signal<string | null>(null);
-  transferSuccess = signal(false);
   transferProjectSuggestions = signal<string[]>([]);
   sshKey = signal('');
 
@@ -311,24 +310,19 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   onTransferDialogHide(): void {
     this.transferProjectName = '';
     this.transferError.set(null);
-    this.transferSuccess.set(false);
   }
 
   transferOwnership(): void {
     if (!this.transferProjectName.trim()) return;
+    const targetProject = this.transferProjectName.trim();
     this.transferring.set(true);
     this.transferError.set(null);
-    this.transferSuccess.set(false);
-    this.tasksService.transferOwnership(this.projectName, this.taskName, this.transferProjectName.trim()).subscribe({
+    this.tasksService.transferOwnership(this.projectName, this.taskName, targetProject).subscribe({
       next: () => {
         this.transferring.set(false);
-        this.transferSuccess.set(true);
-        const targetProject = this.transferProjectName.trim();
-        this.transferProjectName = '';
-        setTimeout(() => {
-          this.showTransferDialog.set(false);
-          this.router.navigate(['/project', targetProject]);
-        }, 1500);
+        this.showTransferDialog.set(false);
+        this.notify.success(`Task transferred to ${targetProject}`);
+        this.router.navigate(['/project', targetProject, 'task', this.taskName]);
       },
       error: (error) => {
         this.transferError.set(apiErrorMessage(error, 'Failed to transfer ownership.'));

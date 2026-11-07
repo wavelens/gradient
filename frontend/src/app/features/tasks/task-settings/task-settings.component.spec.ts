@@ -438,6 +438,28 @@ describe('TaskSettingsComponent - write failures', () => {
     expect(updateTask).toHaveBeenCalledOnce();
   });
 
+  it('opens the moved task at once, so no delayed redirect can overtake a later click', () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = setup(admin);
+      tasks()['transferOwnership'] = () => of('ok');
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+      const component = fixture.componentInstance;
+      component.showTransferDialog.set(true);
+      component.transferProjectName = 'other';
+      component.transferOwnership();
+
+      expect(component.showTransferDialog()).toBe(false);
+      expect(success).toHaveBeenCalledWith('Task transferred to other');
+      expect(navigate).toHaveBeenCalledExactlyOnceWith(['/project', 'other', 'task', 'demo']);
+      vi.advanceTimersByTime(5000);
+      expect(navigate).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows a refused transfer inside the open dialog, not on the page', () => {
     const fixture = setup(admin);
     tasks()['transferOwnership'] = () => throwError(() => new ApiError('Project not found', 404));
