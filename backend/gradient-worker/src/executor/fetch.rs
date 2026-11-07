@@ -85,7 +85,7 @@ pub async fn fetch_repository(
             let source_path = super::source::add_git_tree(store, &checkout_path, &commit).await?;
             (source_path, flake_root, Some(checkout))
         }
-        FlakeSource::Cached { store_path } => {
+        FlakeSource::Cached { store_path, .. } => {
             debug!(%store_path, has_ssh_key = ssh_key.is_some(), "using the cached build source");
             let flake_root = flake_root(Path::new(store_path), job.flake_dir.as_deref())?;
             (store_path.clone(), flake_root, None)
@@ -748,6 +748,7 @@ mod tests {
             steps: vec![FlakeStep::FetchFlake],
             source: FlakeSource::Cached {
                 store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source".into(),
+                commit: None,
             },
             wildcards: vec![],
             timeout_secs: None,
@@ -897,6 +898,7 @@ mod tests {
         let job = FlakeJob {
             source: FlakeSource::Cached {
                 store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source".into(),
+                commit: None,
             },
             flake_dir: Some("../x".into()),
             ..make_flake_job()

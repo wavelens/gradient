@@ -55,6 +55,7 @@ impl PendingEvalJob {
         follow.job.steps = vec![FlakeStep::EvaluateFlake, FlakeStep::EvaluateDerivations];
         follow.job.source = FlakeSource::Cached {
             store_path: store_path.clone(),
+            commit: self.job.source.commit().map(str::to_owned),
         };
         follow.required_paths = vec![RequiredPath {
             path: store_path,
@@ -2701,6 +2702,7 @@ mod tests {
             steps,
             source: FlakeSource::Cached {
                 store_path: "/nix/store/abc-source".into(),
+                commit: None,
             },
             wildcards: vec!["*".into()],
             timeout_secs: None,
@@ -3729,7 +3731,9 @@ mod tests {
             vec![FlakeStep::EvaluateFlake, FlakeStep::EvaluateDerivations]
         );
         match &follow.job.source {
-            FlakeSource::Cached { store_path } => assert_eq!(store_path, "/nix/store/abc-source"),
+            FlakeSource::Cached { store_path, .. } => {
+                assert_eq!(store_path, "/nix/store/abc-source")
+            }
             other => panic!("expected Cached, got {other:?}"),
         }
         assert_eq!(follow.evaluation_id, original.evaluation_id);

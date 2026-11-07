@@ -1160,6 +1160,7 @@ async fn r17_a_completed_fetch_job_enqueues_the_cached_follow_up_for_an_eval_wor
         "after 2: result.job.source is Repository, got {:?}",
         job.source
     );
+    let fetched_commit = job.source.commit().map(str::to_owned);
     case.check("step 2").await;
 
     case.report_status(W1, &k, EvaluationStatus::Fetching).await;
@@ -1197,7 +1198,8 @@ async fn r17_a_completed_fetch_job_enqueues_the_cached_follow_up_for_an_eval_wor
     assert_eq!(
         follow_up.job.source,
         FlakeSource::Cached {
-            store_path: SOURCE.to_owned()
+            store_path: SOURCE.to_owned(),
+            commit: fetched_commit,
         },
         "after 4: source of the follow-up"
     );

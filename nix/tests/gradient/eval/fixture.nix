@@ -22,6 +22,12 @@
       };
     in
     {
+      checks.x86_64-linux.revision = derivation {
+        name = "revision-${self.shortRev or "missing"}";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+      };
+
       apps.x86_64-linux = {
         curl = {
           type = "app";

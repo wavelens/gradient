@@ -458,6 +458,7 @@ pub(crate) fn flake_job_for_eval_source(
             steps,
             source: FlakeSource::Cached {
                 store_path: repository.to_owned(),
+                commit: (!commit_sha.bytes().all(|b| b == b'0')).then_some(commit_sha),
             },
             wildcards,
             timeout_secs: None,
@@ -560,6 +561,24 @@ mod eval_source_tests {
         assert!(matches!(job.source, FlakeSource::Cached { .. }));
         assert_eq!(job.steps, vec![FlakeStep::FetchFlake]);
         assert_eq!(required.len(), 1);
+    }
+
+    #[test]
+    fn a_cached_source_carries_its_commit_unless_it_was_uploaded() {
+        let commit = |sha: String| {
+            let (job, _) = flake_job_for_eval_source(
+                "/nix/store/qgzxagd5bql1iqx0w8qzljwdlb06sn6n-source",
+                sha,
+                vec![],
+                false,
+                vec![],
+                None,
+            );
+            job.source.commit().map(str::to_owned)
+        };
+        let sha = "04169d1865f26d83cfb94497616ad3ca04d83b13".to_owned();
+        assert_eq!(commit(sha.clone()), Some(sha));
+        assert_eq!(commit("0".repeat(40)), None);
     }
 
     #[test]

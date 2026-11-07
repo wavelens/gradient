@@ -284,6 +284,7 @@ async fn q06_a_store_path_repository_yields_a_cached_source_that_still_fetches()
             all_steps(),
             FlakeSource::Cached {
                 store_path: "/nix/store/abc-source".into(),
+                commit: None,
             },
         ),
         "after 1: the candidate's job"
