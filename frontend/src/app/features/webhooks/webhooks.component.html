@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" [title]="title" subtitle="Signed POSTs of durable events to your endpoints">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" [title]="title" subtitle="Signed POSTs of durable events to your endpoints">
   @if (!loading() && !loadError() && !denied()) {
     <button slot="actions" grButton label="New event notification" icon="add" (click)="startCreate()"></button>
   }

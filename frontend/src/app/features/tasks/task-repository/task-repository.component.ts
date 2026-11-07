@@ -20,7 +20,7 @@ import { repositoryHost } from '@shared/git';
   standalone: true,
   imports: [LoadStateComponent, PageLayoutComponent, RepositoryAccessComponent, RepositoryEventsComponent],
   template: `
-    <gr-page-layout [breadcrumb]="breadcrumb()" title="Repository"
+    <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Repository"
       subtitle="Connect this task to the Git host for access, push-triggered builds and commit status.">
       @if (state(); as repo) {
         <app-repository-access [project]="projectName" [task]="taskName" [state]="repo"

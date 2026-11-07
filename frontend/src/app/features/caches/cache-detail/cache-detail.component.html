@@ -25,7 +25,7 @@
       }
     </div>
 
-  <gr-settings-section class="used-by" title="Projects using this cache" description="Projects that push builds to this cache or read from this cache." maxWidth="none">
+  <gr-settings-section class="used-by" title="Projects using this cache" description="Projects that push builds to this cache or read from this cache.">
     @if (authService.isAuthenticated()) {
       <button slot="actions" grButton label="Use with project" icon="add_link" severity="secondary" size="small" (click)="useDialogOpen.set(true)"></button>
     }
@@ -124,7 +124,7 @@
   <gr-settings-section
     title="How to Use This Cache"
     description="Add the following to your /etc/nix/nix.conf or NixOS configuration."
-    maxWidth="none"
+   
   >
     <gr-form-field label="Substituter URL" for="cache-url">
       <gr-label-help slot="label" doc="concepts/caches/#using-a-cache" title="Using a cache" />

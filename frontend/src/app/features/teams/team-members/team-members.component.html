@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-settings-section title="Members" [description]="countLabel()" [card]="false" maxWidth="none">
+<gr-settings-section title="Members" [description]="countLabel()" [card]="false">
   @if (canEdit()) {
     <button slot="actions" grButton severity="secondary" label="Add Member" icon="person_add" (click)="openAdd()"></button>
   }
@@ -43,7 +43,7 @@
 </gr-settings-section>
 
 @if (invitations().length > 0) {
-  <gr-settings-section title="Pending Invitations" [card]="false" maxWidth="none">
+  <gr-settings-section title="Pending Invitations" [card]="false">
     <gr-row-list>
       @for (invitation of invitations(); track invitation.user) {
         <gr-row icon="mail">

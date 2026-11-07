@@ -17,11 +17,7 @@ SPDX-License-Identifier: AGPL-3.0-only
       </div>
     </header>
   }
-  <div
-    class="settings-section__body"
-    [class.settings-section__body--card]="card()"
-    [style.max-width]="maxWidth()"
-  >
+  <div class="settings-section__body" [class.settings-section__body--card]="card()">
     <ng-content></ng-content>
   </div>
 </section>

@@ -7,7 +7,7 @@
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!task()" loadingMessage="Loading task settings..."
                errorTitle="Failed to load task settings" (retry)="loadTask()">
 @if (task(); as proj) {
-  <gr-page-layout [breadcrumb]="breadcrumb()" title="Task Settings">
+  <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Task Settings">
   <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
   <!-- General Settings -->
   <gr-settings-section title="General">

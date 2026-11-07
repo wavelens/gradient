@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
   @if (canCreateCache()) {
     <app-create-cache-button slot="actions"
         *appWritable="access()"

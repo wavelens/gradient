@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="page-layout" [style.max-width]="maxWidth()">
+<div class="page-layout" [class]="'page-layout page-layout--' + width()">
   <header class="page-layout__header">
   @if (breadcrumb().length) {
     <gr-breadcrumb [trail]="breadcrumb()" />

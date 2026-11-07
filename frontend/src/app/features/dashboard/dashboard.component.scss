@@ -7,7 +7,7 @@
 @use '@gradient/ui/styles/variables' as *;
 
 .page {
-  max-width: 1240px;
+  max-width: $content-width-detail;
   margin: 0 auto;
   padding: $spacing-md;
 }

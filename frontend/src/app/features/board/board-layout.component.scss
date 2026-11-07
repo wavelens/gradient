@@ -7,8 +7,8 @@
 @use '@gradient/ui/styles/variables' as *;
 
 .board {
-  padding: 1.5rem;
-  max-width: 1200px;
+  padding: $spacing-md;
+  max-width: $content-width-detail;
   margin: 0 auto;
 }
 h1 {

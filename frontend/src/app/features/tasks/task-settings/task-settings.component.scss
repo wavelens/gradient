@@ -4,28 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '@gradient/ui/styles/variables' as *;.settings-card {
-  background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-md;
-  padding: $spacing-lg;
-  max-width: 640px;
-}
-
-
-.danger-divider {
-  border-top: 1px solid color-mix(in srgb, var(--gr-status-danger) 20%, transparent);
-  margin: $spacing-lg 0;
-}
-.repo-row {
-  display: flex;
-  gap: $spacing-sm;
-
-  input { flex: 1; min-width: 0; }
-}
-
-.repo-reachable { color: var(--gr-status-success); }
-
 .save-hint {
   align-self: center;
 }

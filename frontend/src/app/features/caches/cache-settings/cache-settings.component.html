@@ -7,7 +7,7 @@
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!cache()" loadingMessage="Loading cache settings..."
                errorTitle="Failed to load cache settings" (retry)="loadCache()">
 @if (cache(); as c) {
-  <gr-page-layout
+  <gr-page-layout width="settings"
     [breadcrumb]="breadcrumb()"
     title="Cache Settings"
   >

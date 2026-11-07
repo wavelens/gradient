@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" title="Settings">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Settings">
   @if (error(); as message) {
     <gr-message-banner type="error">{{ message }}</gr-message-banner>
   }

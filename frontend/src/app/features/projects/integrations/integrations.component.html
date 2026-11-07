@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" title="Integrations" subtitle="Git host webhooks and status reporters for this project">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Integrations" subtitle="Git host webhooks and status reporters for this project">
   <button slot="actions"
       *appWritable="access()"
       grButton
@@ -35,7 +35,7 @@
     }
 
     @if (githubAppInstalled()) {
-      <gr-settings-section title="GitHub App" maxWidth="none">
+      <gr-settings-section title="GitHub App">
         <div class="github-row">
           <div>
             <h3>GitHub App installations</h3>
@@ -49,7 +49,7 @@
       </gr-settings-section>
     }
 
-    <gr-settings-section title="Configured Integrations" [card]="false" maxWidth="none">
+    <gr-settings-section title="Configured Integrations" [card]="false">
       @if (integrations().length === 0) {
         <gr-empty-state icon="hub" title="No integrations" message="Create an inbound integration to receive Git host webhooks, or an outbound integration to report build statuses.">
           <button slot="action"

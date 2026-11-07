@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-settings-section title="Teams" [card]="false" maxWidth="none">
+<gr-settings-section title="Teams" [card]="false">
   @if (canEdit()) {
     <button slot="actions" grButton severity="secondary" label="Grant Team" (click)="openGrant()"></button>
   }

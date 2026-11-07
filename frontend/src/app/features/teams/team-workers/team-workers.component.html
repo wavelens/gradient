@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-settings-section title="Workers" [card]="false" maxWidth="none">
+<gr-settings-section title="Workers" [card]="false">
   <div slot="actions">
     @if (offlineCount() > 0) {
       <button grButton [label]="showOffline() ? 'Hide Offline' : 'Show Offline (' + offlineCount() + ')'" icon="visibility"

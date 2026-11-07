@@ -5,20 +5,21 @@
 -->
 
 <gr-settings-section title="Builds from events on the Git host" description="Gradient can check the repository for new commits on a schedule when no events exist.">
-  @if (!hasServingInbound()) {
-    @if (isGitHub()) {
-      <p class="text-secondary" data-testid="github-hint">Connect GitHub repositories through a GitHub App.</p>
-    } @else if (state().can_manage_integrations) {
-      <button grButton [label]="'Connect ' + (host() ?? 'Git host')" icon="hub" (click)="openConnect()" data-testid="connect-git-host"></button>
-    } @else {
-      <p class="text-secondary" data-testid="ask-admin">No connection to {{ host() ?? 'this Git host' }} yet. Ask a project admin to connect the Git host.</p>
-    }
-  }
-
   <gr-form-field label="Events from" for="repo-inbound">
     <gr-select inputId="repo-inbound" [options]="inboundOptions()" optionLabel="label" optionValue="value"
       [ngModel]="form().inbound" (ngModelChange)="patch({ inbound: $event })" [disabled]="!state().can_edit" />
   </gr-form-field>
+  @if (!hasServingInbound()) {
+    <p class="gr-form-aside">
+      @if (isGitHub()) {
+        <span data-testid="github-hint">Connect GitHub repositories through a GitHub App.</span>
+      } @else if (state().can_manage_integrations) {
+        <button grButton severity="secondary" size="small" [label]="'Connect ' + (host() ?? 'Git host')" icon="hub" (click)="openConnect()" data-testid="connect-git-host"></button>
+      } @else {
+        <span data-testid="ask-admin">No connection to {{ host() ?? 'this Git host' }} yet. Ask a project admin to connect the Git host.</span>
+      }
+    </p>
+  }
 
   @if (selectedInbound(); as inbound) {
     @if (inbound.webhook_url; as url) {

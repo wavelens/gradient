@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" title="Connect repository"
+<gr-page-layout width="form" [breadcrumb]="breadcrumb()" title="Connect repository"
   subtitle="Gradient can build each new commit in a repository and report the result to the Git host.">
   <ol class="connect-steps" aria-label="Steps">
     @for (s of steps; track s.id; let i = $index) {

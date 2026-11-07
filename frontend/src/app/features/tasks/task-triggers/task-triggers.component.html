@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that start an evaluation. Start Evaluation uses the default trigger.">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that start an evaluation. Start Evaluation uses the default trigger.">
   <a slot="actions" grButton label="Open the Repository page" icon="hub" severity="secondary"
      [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
   <gr-message-banner slot="banner" type="info">Set up build triggers for push and pull requests on the Repository page.</gr-message-banner>

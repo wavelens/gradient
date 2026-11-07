@@ -16,7 +16,7 @@
     <gr-loading-spinner message="Loading team..." />
   } @else if (team(); as team) {
     @if (isAdmin() && requests().length > 0) {
-      <gr-settings-section title="Requests" [card]="false" maxWidth="none">
+      <gr-settings-section title="Requests" [card]="false">
         <gr-row-list>
           @for (request of requests(); track request.id) {
             <gr-row icon="mark_email_unread">
@@ -38,7 +38,7 @@
     <app-team-workers [team]="team" />
 
     @if (grants().projects.length + grants().caches.length > 0) {
-      <gr-settings-section title="Projects and Caches" [card]="false" maxWidth="none">
+      <gr-settings-section title="Projects and Caches" [card]="false">
         <gr-row-list>
           @for (grant of grants().projects; track grant.project) {
             <gr-row icon="corporate_fare" [link]="links.project(grant.project)" linkLabel="Open project">
@@ -55,7 +55,7 @@
         </gr-row-list>
       </gr-settings-section>
     } @else {
-      <gr-settings-section title="Projects and Caches" [card]="false" maxWidth="none">
+      <gr-settings-section title="Projects and Caches" [card]="false">
         <gr-empty-state flat icon="corporate_fare" title="No projects or caches"
           message='This team can&apos;t access projects or caches yet. Admins of a project or cache grant access in "Settings, Members and roles".' />
       </gr-settings-section>

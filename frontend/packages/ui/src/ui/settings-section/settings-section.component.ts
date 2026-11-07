@@ -23,6 +23,4 @@ export class SettingsSectionComponent {
   card = input(true, { transform: booleanAttribute });
   /// A destructive group: the heading and the card edge read as danger.
   danger = input(false, { transform: booleanAttribute });
-  /// One measure for a settings page, card or not, so its sections line up.
-  maxWidth = input('640px');
 }

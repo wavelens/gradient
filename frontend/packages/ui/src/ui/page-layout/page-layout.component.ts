@@ -7,6 +7,7 @@
 import { Component, input, ChangeDetectionStrategy } from '@angular/core';
 import { BreadcrumbComponent, type Crumb } from '../breadcrumb/breadcrumb.component';
 
+export type PageWidth = 'form' | 'settings' | 'detail' | 'full';
 
 @Component({
   selector: 'gr-page-layout',
@@ -20,5 +21,6 @@ export class PageLayoutComponent {
   breadcrumb = input<Crumb[]>([]);
   title = input.required<string>();
   subtitle = input<string>();
-  maxWidth = input<string>('1200px');
+  /// Content widths of page types are `form` for creation flows, `settings` for all settings pages, `detail` for overviews and lists, and `full` for graphs and logs.
+  width = input<PageWidth>('detail');
 }

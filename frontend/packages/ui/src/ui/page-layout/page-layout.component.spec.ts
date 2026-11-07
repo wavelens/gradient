@@ -69,6 +69,18 @@ describe('gr-page-layout', () => {
     expect(root.querySelector('.page-layout__body .body')).not.toBeNull();
   });
 
+  it('takes the detail width unless the page type asks for another', async () => {
+    const fixture = TestBed.createComponent(PageLayoutComponent);
+    fixture.componentRef.setInput('title', 'Settings');
+    fixture.detectChanges();
+    const layout = (fixture.nativeElement as HTMLElement).querySelector('.page-layout')!;
+    expect(layout.classList).toContain('page-layout--detail');
+    fixture.componentRef.setInput('width', 'settings');
+    fixture.detectChanges();
+    expect(layout.classList).toContain('page-layout--settings');
+    expect(layout.classList).not.toContain('page-layout--detail');
+  });
+
   it('omits the subtitle when not given', async () => {
     const fixture = TestBed.createComponent(PageLayoutComponent);
     fixture.componentRef.setInput('title', 'Bare');
