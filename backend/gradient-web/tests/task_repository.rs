@@ -212,3 +212,52 @@ async fn turning_on_push_builds_creates_the_push_trigger() {
     assert!(statements.contains("INSERT INTO"), "{statements}");
     assert!(statements.contains("task_trigger"), "{statements}");
 }
+
+fn outbound_without_token() -> integration::Model {
+    integration::Model {
+        id: IntegrationId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000020").unwrap()),
+        kind: IntegrationKind::Outbound,
+        secret: None,
+        ..inbound()
+    }
+}
+
+#[tokio::test]
+async fn installing_a_deploy_key_needs_a_git_host_token() {
+    let session_id = SessionId::now_v7();
+    let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_ADMIN_ID)
+        .append_query_results([vec![admin_role()]])
+        .append_query_results([vec![inbound(), outbound_without_token()]]);
+
+    let res = make_test_server(db.into_connection())
+        .post(&format!("{URL}/install-deploy-key"))
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&json!({ "outbound_integration": outbound_without_token().id }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn view_members_cannot_install_webhooks() {
+    let session_id = SessionId::now_v7();
+    let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_VIEW_ID)
+        .append_query_results([vec![view_role()]]);
+
+    let res = make_test_server(db.into_connection())
+        .post(&format!("{URL}/install-webhook"))
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&json!({
+            "inbound_integration": inbound().id,
+            "outbound_integration": outbound_without_token().id,
+        }))
+        .await;
+
+    res.assert_status_forbidden();
+}

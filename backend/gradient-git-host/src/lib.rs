@@ -10,6 +10,7 @@ pub mod github_app;
 pub mod pr;
 pub mod provider;
 pub mod providers;
+pub mod provision;
 pub mod registry;
 pub mod reporter;
 pub mod webhook;

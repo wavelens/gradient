@@ -21,6 +21,7 @@ import { RepositoryFetchBannerComponent, gitHostSettingsLinks, repositoryHost } 
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { relativeTime } from '@shared/text';
 import { fieldChecks, firstFieldError } from '@shared/forms';
+import { provisioningIntegration } from './provisioning';
 
 @Component({
   selector: 'app-repository-access',
@@ -52,6 +53,7 @@ export class RepositoryAccessComponent {
   saving = signal(false);
   testing = signal(false);
   testError = signal<string | null>(null);
+  installingKey = signal(false);
 
   urlError = computed(() => {
     const url = this.draftUrl().trim();
@@ -60,6 +62,7 @@ export class RepositoryAccessComponent {
   });
   links = computed(() => gitHostSettingsLinks(this.state().repository, this.gitHost()));
   isGitHub = computed(() => repositoryHost(this.state().repository) === 'github.com');
+  provisioner = computed(() => (this.state().deploy_key ? provisioningIntegration(this.state()) : null));
   fetchOk = computed(() => {
     const fetch = this.state().fetch;
     return fetch && !fetch.failed ? fetch : null;
@@ -99,6 +102,23 @@ export class RepositoryAccessComponent {
         this.testing.set(false);
         this.testError.set(apiErrorMessage(error, 'Failed to test access'));
         this.changed.emit();
+      },
+    });
+  }
+
+  installDeployKey(): void {
+    const outbound = this.provisioner()?.id;
+    if (!outbound || this.installingKey()) return;
+    this.installingKey.set(true);
+    this.tasks.installDeployKey(this.project(), this.task(), { outbound_integration: outbound }).subscribe({
+      next: () => {
+        this.installingKey.set(false);
+        this.notify.success('Deploy key installed');
+        this.testAccess();
+      },
+      error: (error: unknown) => {
+        this.installingKey.set(false);
+        this.notify.failure("Couldn't install deploy key", error);
       },
     });
   }

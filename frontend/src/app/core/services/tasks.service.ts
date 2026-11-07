@@ -10,6 +10,8 @@ import { HttpResponse } from '@angular/common/http';
 import { ApiService } from './api.service';
 import {
   CheckRepositoryRequest,
+  InstallDeployKeyRequest,
+  InstallWebhookRequest,
   Paginated,
   TaskResponse,
   TaskDetailsResponse,
@@ -109,6 +111,14 @@ export class TasksService {
 
   updateRepository(project: string, task: string, body: UpdateTaskRepositoryRequest): Observable<TaskRepositoryResponse> {
     return this.api.put<TaskRepositoryResponse>(`tasks/${project}/${task}/repository`, body);
+  }
+
+  installWebhook(project: string, task: string, body: InstallWebhookRequest): Observable<string> {
+    return this.api.post<string>(`tasks/${project}/${task}/repository/install-webhook`, body);
+  }
+
+  installDeployKey(project: string, task: string, body: InstallDeployKeyRequest): Observable<string> {
+    return this.api.post<string>(`tasks/${project}/${task}/repository/install-deploy-key`, body);
   }
 
   deactivateTask(project: string, task: string): Observable<string> {

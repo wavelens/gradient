@@ -7,7 +7,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
-import { TaskRepositoryResponse } from '@core/models';
+import { RepositoryIntegration, TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { RepositoryAccessComponent } from './repository-access.component';
@@ -78,5 +78,31 @@ describe('RepositoryAccessComponent', () => {
     const el = render({ can_edit: false }, {}).nativeElement as HTMLElement;
     expect(el.textContent).not.toContain('Test access');
     expect(el.textContent).not.toContain('Edit URL');
+  });
+
+  it('installs the deploy key through the Git host and tests access afterwards', () => {
+    const outbound: RepositoryIntegration = {
+      id: 'out1',
+      name: 'forgejo',
+      display_name: 'forgejo.example.com',
+      kind: 'outbound',
+      git_host_type: 'forgejo',
+      serves_repository: true,
+      webhook_url: null,
+      has_secret: false,
+      has_access_token: true,
+    };
+    const installDeployKey = vi.fn(() => of('acme/app'));
+    const checkRepository = vi.fn(() => of('1a2b'));
+    const fixture = render({ integrations: [outbound] }, { installDeployKey, checkRepository });
+    const el = fixture.nativeElement as HTMLElement;
+    (el.querySelector('[data-testid="install-deploy-key"]') as HTMLButtonElement).click();
+    expect(installDeployKey).toHaveBeenCalledWith('acme', 'app', { outbound_integration: 'out1' });
+    expect(checkRepository).toHaveBeenCalled();
+  });
+
+  it('hides the deploy key install without a Git host token', () => {
+    const el = render({}, {}).nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="install-deploy-key"]')).toBeNull();
   });
 });

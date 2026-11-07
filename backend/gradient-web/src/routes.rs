@@ -167,6 +167,8 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     tasks::repository::get_task_repository,
                     tasks::repository::put_task_repository
                 ))
+                .routes(routes!(tasks::provision::post_install_webhook))
+                .routes(routes!(tasks::provision::post_install_deploy_key))
                 .routes(routes!(
                     projects::integrations::get_integration,
                     projects::integrations::patch_integration,

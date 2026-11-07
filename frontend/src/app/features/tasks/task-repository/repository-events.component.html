@@ -29,6 +29,10 @@
     @if (links(); as link) {
       <a grButton label="Open settings for webhooks" icon="open_in_new" severity="secondary" size="small" [href]="link.webhooks" target="_blank" rel="noopener noreferrer"></a>
     }
+    @if (provisioner() && inbound.serves_repository) {
+      <button grButton label="Install webhook" icon="add_link" size="small" (click)="installWebhook()"
+        [loading]="installingWebhook()" [disabled]="installingWebhook()" data-testid="install-webhook"></button>
+    }
     <p class="text-secondary" role="status" data-testid="last-event">
       <strong>Last event</strong>
       {{ lastEvent() ?? 'No events yet. Send a test delivery from the webhook settings on the Git host.' }}
@@ -109,7 +113,7 @@
   <gr-form-field label="Base URL" for="connect-url" required [invalid]="!!endpointError" [error]="endpointError ?? ''">
     <input grInput id="connect-url" [(ngModel)]="connectForm.endpoint_url" (keyup.enter)="connect()" />
   </gr-form-field>
-  <gr-form-field label="Access token" for="connect-token" hint="Token for a bot account with write access to commit status. Leave empty to skip status reports.">
+  <gr-form-field label="Access token" for="connect-token" hint="Token for a bot account. Gradient can report commit statuses when the token has write access. Gradient can also install webhooks and deploy keys when the token has admin access to the repository. Leave this field empty to skip status reports.">
     <input grInput id="connect-token" type="password" [(ngModel)]="connectForm.access_token" (keyup.enter)="connect()" />
   </gr-form-field>
   <div grDialogFooter>

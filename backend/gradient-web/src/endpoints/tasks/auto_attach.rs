@@ -18,7 +18,7 @@ pub(crate) struct AutoAttach {
     pub outbound: Option<MIntegration>,
 }
 
-fn url_host(url: &str) -> Option<String> {
+pub(crate) fn url_host(url: &str) -> Option<String> {
     let s = url.trim();
     let s = s.strip_prefix("git+").unwrap_or(s);
 

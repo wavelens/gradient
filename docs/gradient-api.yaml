@@ -10660,6 +10660,101 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/tasks/{project}/{task}/repository/install-deploy-key:
+    post:
+      tags:
+      - tasks
+      summary: Install deploy key on the Git host
+      description: 'Add the project SSH key to the repository on the Git host as a read-only deploy key. Gradient clones that repository over SSH. Gradient can call the Git host API with the access token of the selected status reporter. Give that token admin permission on the repository. Supported Git hosts: Gitea, Forgejo, GitLab. Callers need permission to manage integrations. Return the repository path on the Git host. Return `502` and the reason for a rejection from the Git host.'
+      operationId: installTaskRepositoryDeployKey
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallDeployKeyRequest'
+        required: true
+      responses:
+        '200':
+          description: Deploy key installed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/tasks/{project}/{task}/repository/install-webhook:
+    post:
+      tags:
+      - tasks
+      summary: Install webhook on the Git host
+      description: |-
+        Create a webhook on the Git host. Send push, tag, pull request, comment, and release events to the selected webhook receiver. Sign them with the secret of that receiver.
+
+        Gradient can call the API of the Git host with the access token of the selected status reporter. Give that token admin rights on the repository.
+
+        Gitea, Forgejo, and GitLab work with this endpoint. GitHub repositories get events from a GitHub App instead.
+
+        Callers need permission to manage integrations.
+
+        Return the repository path on the Git host. Return `502` with the reason after the Git host rejected the request.
+      operationId: installTaskRepositoryWebhook
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallWebhookRequest'
+        required: true
+      responses:
+        '200':
+          description: Webhook installed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/tasks/{project}/{task}/transfer:
     post:
       tags:
@@ -18160,6 +18255,23 @@ components:
           type: string
         url:
           type: string
+    InstallDeployKeyRequest:
+      type: object
+      required:
+      - outbound_integration
+      properties:
+        outbound_integration:
+          $ref: '#/components/schemas/IntegrationId'
+    InstallWebhookRequest:
+      type: object
+      required:
+      - inbound_integration
+      - outbound_integration
+      properties:
+        inbound_integration:
+          $ref: '#/components/schemas/IntegrationId'
+        outbound_integration:
+          $ref: '#/components/schemas/IntegrationId'
     IntegrationId:
       type: string
       format: uuid

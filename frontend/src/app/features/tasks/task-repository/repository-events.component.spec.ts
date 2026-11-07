@@ -6,9 +6,10 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { RepositoryIntegration, TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
+import { ApiError } from '@core/services/api.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { RepositoryEventsComponent } from './repository-events.component';
 
@@ -100,14 +101,15 @@ describe('RepositoryEventsComponent', () => {
     }));
   });
 
-  it('connects a Git host, shows the secret once and wires push, pull requests and status', () => {
+  it('connects a Git host, shows the secret when the webhook install fails and wires push, pull requests and status', () => {
     const connectGitHost = vi.fn(() => of({
       inbound: { ...inbound, generated_secret: 's3cret' },
       outbound: { ...outbound },
     }));
     const updateRepository = vi.fn(() => of(repo()));
+    const installWebhook = vi.fn(() => throwError(() => new ApiError('403 token lacks admin rights', 502)));
     const fixture = render(repo(), {
-      tasks: { updateRepository },
+      tasks: { updateRepository, installWebhook },
       integrations: { connectGitHost, listIntegrationDeliveries: () => of([]) },
     });
     const comp = fixture.componentInstance;
@@ -120,12 +122,37 @@ describe('RepositoryEventsComponent', () => {
       git_host_type: 'forgejo',
       access_token: 'token',
     }));
+    expect(installWebhook).toHaveBeenCalledWith('acme', 'app', { inbound_integration: 'in1', outbound_integration: 'out1' });
     expect(comp.createdSecret()?.secret).toBe('s3cret');
+    expect(comp.showSecret()).toBe(true);
     expect(updateRepository).toHaveBeenCalledWith('acme', 'app', expect.objectContaining({
       inbound_integration: 'in1',
       build_on_push: true,
       outbound_integration: 'out1',
       report_status: true,
     }));
+  });
+
+  it('installs the webhook through the Git host and skips the manual secret', () => {
+    const connectGitHost = vi.fn(() => of({ inbound: { ...inbound, generated_secret: 's3cret' }, outbound: { ...outbound } }));
+    const installWebhook = vi.fn(() => of('acme/app'));
+    const fixture = render(repo(), {
+      tasks: { updateRepository: () => of(repo()), installWebhook },
+      integrations: { connectGitHost, listIntegrationDeliveries: () => of([]) },
+    });
+    const comp = fixture.componentInstance;
+    comp.openConnect();
+    comp.connectForm.access_token = 'token';
+    comp.connect();
+    expect(installWebhook).toHaveBeenCalled();
+    expect(comp.showSecret()).toBe(false);
+  });
+
+  it('offers to install the webhook only with a token on a connection that serves the repository', () => {
+    const withToken = render(repo({ integrations: [inbound, outbound] })).nativeElement as HTMLElement;
+    expect(withToken.querySelector('[data-testid="install-webhook"]')).not.toBeNull();
+    TestBed.resetTestingModule();
+    const withoutToken = render(repo({ integrations: [inbound, { ...outbound, has_access_token: false }] })).nativeElement as HTMLElement;
+    expect(withoutToken.querySelector('[data-testid="install-webhook"]')).toBeNull();
   });
 });

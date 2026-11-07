@@ -25,6 +25,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { IncomingDeliveriesComponent, deliverySummary, gitHostSettingsLinks, guessGitHost, repositoryHost, webhookEvents } from '@shared/git';
 import { relativeTime, slugify } from '@shared/text';
 import { fieldChecks, splitList, unsavedChanges } from '@shared/forms';
+import { provisioningIntegration } from './provisioning';
 
 interface EventsForm {
   inbound: string | null;
@@ -140,6 +141,9 @@ export class RepositoryEventsComponent {
     return null;
   });
 
+  provisioner = computed(() => provisioningIntegration(this.state()));
+  installingWebhook = signal(false);
+
   showConnect = signal(false);
   connecting = signal(false);
   connectError = signal<string | null>(null);
@@ -210,10 +214,9 @@ export class RepositoryEventsComponent {
           this.connecting.set(false);
           this.showConnect.set(false);
           this.notify.success('Git host connected');
-          if (connected.inbound.generated_secret) {
-            this.createdSecret.set({ url: connected.inbound.webhook_url ?? '', secret: connected.inbound.generated_secret });
-            this.showSecret.set(true);
-          }
+          const secret = connected.inbound.generated_secret;
+          this.createdSecret.set(secret ? { url: connected.inbound.webhook_url ?? '', secret } : null);
+          const revealSecret = () => this.showSecret.set(!!secret);
           const base = this.form();
           this.persist({
             ...base,
@@ -223,10 +226,35 @@ export class RepositoryEventsComponent {
             outbound: connected.outbound?.id ?? base.outbound,
             reportStatus: !!connected.outbound || base.reportStatus,
           });
+          if (connected.outbound && token) this.install(connected.inbound.id, connected.outbound.id, revealSecret);
+          else revealSecret();
         },
         error: (error: unknown) => {
           this.connecting.set(false);
           this.connectError.set(apiErrorMessage(error, 'Failed to connect to the Git host'));
+        },
+      });
+  }
+
+  installWebhook(): void {
+    const inbound = this.form().inbound;
+    const outbound = this.provisioner()?.id;
+    if (inbound && outbound && !this.installingWebhook()) this.install(inbound, outbound);
+  }
+
+  private install(inbound: string, outbound: string, onFailure = () => {}): void {
+    this.installingWebhook.set(true);
+    this.tasks
+      .installWebhook(this.project(), this.task(), { inbound_integration: inbound, outbound_integration: outbound })
+      .subscribe({
+        next: () => {
+          this.installingWebhook.set(false);
+          this.notify.success('Webhook installed');
+        },
+        error: (error: unknown) => {
+          this.installingWebhook.set(false);
+          this.notify.failure("Couldn't install webhook", error);
+          onFailure();
         },
       });
   }

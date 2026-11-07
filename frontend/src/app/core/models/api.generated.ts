@@ -1412,6 +1412,15 @@ export interface InputOverrideBody {
   url: string;
 }
 
+export interface InstallDeployKeyRequest {
+  outbound_integration: IntegrationId;
+}
+
+export interface InstallWebhookRequest {
+  inbound_integration: IntegrationId;
+  outbound_integration: IntegrationId;
+}
+
 export type IntegrationId = string;
 
 export interface IntegrationResponse {

@@ -88,6 +88,14 @@ pub(crate) enum TaskRefusal {
     RepositoryInboundRequired,
     #[error("commit status reports need an integration to send reports to the Git host")]
     RepositoryOutboundRequired,
+    #[error("no access token on the status reporter, add one first with admin rights on the repository")]
+    ProvisionTokenMissing,
+    #[error("the integration for the webhook receiver has no secret - set the secret before webhook installation")]
+    ProvisionSecretMissing,
+    #[error("{0}")]
+    ProvisionUnsupported(String),
+    #[error("git host did not accept the request: {reason}")]
+    ProvisionRefused { reason: String },
 }
 
 impl Refusal for TaskRefusal {
@@ -128,7 +136,11 @@ impl Refusal for TaskRefusal {
             | Self::OutboundIntegrationNotFound
             | Self::ActionTypeChange
             | Self::CustomEventsNotAllowed
-            | Self::TokenRegenerationNotSupported => RefusalStatus::UnprocessableEntity,
+            | Self::TokenRegenerationNotSupported
+            | Self::ProvisionTokenMissing
+            | Self::ProvisionSecretMissing
+            | Self::ProvisionUnsupported(_) => RefusalStatus::UnprocessableEntity,
+            Self::ProvisionRefused { .. } => RefusalStatus::BadGateway,
         }
     }
 
