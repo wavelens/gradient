@@ -22,16 +22,40 @@ pub struct OnlineWorkerLoad {
     pub busy_pct: u8,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WorkerLoad {
+    pub assigned_jobs: usize,
+    pub max_concurrent_builds: usize,
+    pub cpu_usage_pct: Option<f32>,
+}
+
+impl WorkerLoad {
+    fn busy_fraction(self) -> f64 {
+        let busy = match self.cpu_usage_pct {
+            Some(cpu) => f64::from(cpu) / 100.0,
+            None if self.max_concurrent_builds > 0 => {
+                self.assigned_jobs as f64 / self.max_concurrent_builds as f64
+            }
+            None => f64::from(u8::from(self.assigned_jobs > 0)),
+        };
+        busy.clamp(0.0, 1.0)
+    }
+}
+
 impl OnlineWorkerLoad {
-    pub fn from_slots(slots: &[(i64, i64)]) -> Self {
-        let (assigned, capacity) = slots.iter().fold((0, 0), |(a, c), (x, y)| (a + x, c + y));
-        let busy_pct = if capacity > 0 {
-            (assigned * 100 / capacity).clamp(0, 100) as u8
-        } else {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "average of fractions clamped to 0..=1 can't exceed 100"
+    )]
+    pub fn from_workers(workers: &[WorkerLoad]) -> Self {
+        let busy_pct = if workers.is_empty() {
             0
+        } else {
+            let busy: f64 = workers.iter().map(|w| w.busy_fraction()).sum();
+            (busy * 100.0 / workers.len() as f64).round() as u8
         };
         OnlineWorkerLoad {
-            online: slots.len(),
+            online: workers.len(),
             busy_pct,
         }
     }
@@ -47,17 +71,16 @@ pub struct DashboardStats {
     pub queue_wait_p50_ms: i64,
 }
 
-async fn visible_slots(scheduler: &Scheduler, scope: &MetricsScope) -> Vec<(i64, i64)> {
+async fn visible_loads(scheduler: &Scheduler, scope: &MetricsScope) -> Vec<WorkerLoad> {
     scheduler
         .board_workers()
         .await
         .into_iter()
         .filter(|w| scope.worker_projects(w.authorized_peers.as_ref()).is_some())
-        .map(|w| {
-            (
-                w.assigned_build_count as i64,
-                w.max_concurrent_builds as i64,
-            )
+        .map(|w| WorkerLoad {
+            assigned_jobs: w.assigned_job_count,
+            max_concurrent_builds: w.max_concurrent_builds as usize,
+            cpu_usage_pct: w.cpu_usage_pct,
         })
         .collect()
 }
@@ -68,7 +91,7 @@ async fn visible_slots(scheduler: &Scheduler, scope: &MetricsScope) -> Vec<(i64,
     operation_id = "getDashboardStats",
     tag = "dashboard",
     summary = "Stat tiles of the current user",
-    description = "Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).\n`builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median wait for a worker over the last 24 hours.\n`cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); each size is recounted every metrics rollup pass, and a path held by two caches counts in both.\n`workers` covers connected workers of visible projects only: `busy_pct` is assigned jobs over summed capacity, capped at 100.",
+    description = "Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).\n`builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median wait for a worker over the last 24 hours.\n`cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); each size is recounted every metrics rollup pass, and a path held by two caches counts in both.\nOnly connected workers of visible projects appear in ``workers``. ``busy_pct`` is the average load across those workers. A worker's load is the CPU usage when metrics are on, or the number of assigned jobs relative to ``max_concurrent_builds`` when metrics are off. Both values use 100 as the maximum.",
     responses((status = OK, description = "Dashboard stat tiles", body = DashboardStats), WebError)
 )]
 pub async fn get_stats(
@@ -83,7 +106,7 @@ pub async fn get_stats(
         cpu_time_ms_7d: totals.cpu_time_ms_7d,
         builds_completed: totals.builds_completed,
         cache_size_bytes: cache_size(&state.web_db, user.id, user.superuser).await?,
-        workers: OnlineWorkerLoad::from_slots(&visible_slots(&scheduler, &scope).await),
+        workers: OnlineWorkerLoad::from_workers(&visible_loads(&scheduler, &scope).await),
         queue_wait_p50_ms: totals.queue_wait_p50_ms,
     }))
 }
@@ -92,10 +115,29 @@ pub async fn get_stats(
 mod tests {
     use super::*;
 
+    fn jobs(assigned_jobs: usize, max_concurrent_builds: usize) -> WorkerLoad {
+        WorkerLoad {
+            assigned_jobs,
+            max_concurrent_builds,
+            cpu_usage_pct: None,
+        }
+    }
+
+    fn cpu(pct: f32) -> WorkerLoad {
+        WorkerLoad {
+            cpu_usage_pct: Some(pct),
+            ..jobs(0, 4)
+        }
+    }
+
+    fn busy(workers: &[WorkerLoad]) -> u8 {
+        OnlineWorkerLoad::from_workers(workers).busy_pct
+    }
+
     #[test]
-    fn busy_is_assigned_over_capacity() {
+    fn busy_is_the_mean_of_each_worker_load() {
         assert_eq!(
-            OnlineWorkerLoad::from_slots(&[(3, 4), (1, 4)]),
+            OnlineWorkerLoad::from_workers(&[jobs(3, 4), jobs(1, 4)]),
             OnlineWorkerLoad {
                 online: 2,
                 busy_pct: 50
@@ -104,25 +146,32 @@ mod tests {
     }
 
     #[test]
+    fn cpu_usage_wins_over_job_slots_when_reported() {
+        assert_eq!(busy(&[cpu(100.0), jobs(0, 4), jobs(0, 4)]), 33);
+        assert_eq!(busy(&[cpu(90.0)]), 90);
+    }
+
+    #[test]
+    fn one_job_on_a_wide_worker_does_not_round_to_zero() {
+        assert_eq!(busy(&[jobs(1, 64)]), 2);
+        assert_eq!(busy(&[jobs(1, 0)]), 100);
+    }
+
+    #[test]
     fn no_workers_is_idle_not_a_division_by_zero() {
         assert_eq!(
-            OnlineWorkerLoad::from_slots(&[]),
+            OnlineWorkerLoad::from_workers(&[]),
             OnlineWorkerLoad {
                 online: 0,
                 busy_pct: 0
             }
         );
-        assert_eq!(
-            OnlineWorkerLoad::from_slots(&[(0, 0)]),
-            OnlineWorkerLoad {
-                online: 1,
-                busy_pct: 0
-            }
-        );
+        assert_eq!(busy(&[jobs(0, 0)]), 0);
     }
 
     #[test]
     fn overbooked_caps_at_full() {
-        assert_eq!(OnlineWorkerLoad::from_slots(&[(9, 4)]).busy_pct, 100);
+        assert_eq!(busy(&[jobs(9, 4)]), 100);
+        assert_eq!(busy(&[cpu(140.0)]), 100);
     }
 }
