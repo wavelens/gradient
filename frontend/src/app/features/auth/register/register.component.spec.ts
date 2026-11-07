@@ -79,6 +79,19 @@ describe('RegisterComponent - username check', () => {
   });
 });
 
+describe('RegisterComponent - password rule', () => {
+  it('accepts the special characters the server accepts and nothing else', () => {
+    const { fixture } = setup(() => of('Username is available'));
+    const password = fixture.componentInstance.password!;
+    for (const accepted of ['Zebra7kq_', 'Zebra7kq-', 'Zebra7kq+', 'Zebra7kq=', 'Zebra7kq[', 'Zebra7kq;']) {
+      password.setValue(accepted);
+      expect(password.errors, accepted).toBeNull();
+    }
+    password.setValue('Zebra7kq"');
+    expect(password.errors?.['passwordStrength']?.hasSpecialChar).toBe(false);
+  });
+});
+
 describe('RegisterComponent - submit', () => {
   it('shows every missing field instead of a silently disabled button', () => {
     const { fixture, root, register } = setup(() => of('Username is available'));

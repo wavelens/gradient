@@ -31,6 +31,8 @@ import {
   PasswordInputComponent,
 } from '@gradient/ui/ui';
 
+const PASSWORD_SPECIAL_CHARACTERS = '!@#$%^&*()_+-=[]{}|;:,.<>?';
+
 @Component({
   selector: 'app-register',
   standalone: true,
@@ -44,6 +46,7 @@ export class RegisterComponent {
   private authService = inject(AuthService);
   private router = inject(Router);
   private config = inject(ConfigService);
+  protected readonly specialCharacters = PASSWORD_SPECIAL_CHARACTERS;
 
   registerForm: FormGroup;
   errorMessage = signal<string | null>(null);
@@ -81,10 +84,10 @@ export class RegisterComponent {
     const value = control.value;
     if (!value) return null;
 
-    const hasUpperCase = /[A-Z]/.test(value);
-    const hasLowerCase = /[a-z]/.test(value);
+    const hasUpperCase = /\p{Lu}/u.test(value);
+    const hasLowerCase = /\p{Ll}/u.test(value);
     const hasNumeric = /[0-9]/.test(value);
-    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(value);
+    const hasSpecialChar = [...value].some((c) => PASSWORD_SPECIAL_CHARACTERS.includes(c));
 
     const valid = hasUpperCase && hasLowerCase && hasNumeric && hasSpecialChar;
 
