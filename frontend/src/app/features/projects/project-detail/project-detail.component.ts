@@ -17,6 +17,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import {
   ButtonComponent,
   CardGridComponent,
+  LoadMoreComponent,
   DialogComponent,
   FormFieldComponent,
   InputDirective,
@@ -31,6 +32,7 @@ import { NameFieldsComponent, fieldChecks, firstFieldError, nameAvailability } f
 import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { links } from '@shared/routing';
+import { pagedList } from '@shared/paging';
 
 const RESERVED_TASK_NAMES = ['build-request'];
 
@@ -48,6 +50,7 @@ const RESERVED_TASK_NAMES = ['build-request'];
     LabelHelpComponent,
     EvalStatusBadgeComponent,
     CardGridComponent,
+    LoadMoreComponent,
     NavCardComponent,
     PageLayoutComponent,
     FormFieldComponent,
@@ -72,13 +75,9 @@ export class ProjectDetailComponent implements OnInit {
     RESERVED_TASK_NAMES,
   );
 
-  loading = signal(true);
-  loadError = signal<unknown>(null);
   project = signal<ProjectResponse>((this.route.snapshot.data['projectAccess'] as ProjectAccessData).project);
   canCreateTask = computed(() => this.project().permissions.includes('createTask'));
-  tasks = signal<TaskResponse[]>([]);
-  tasksTotal = signal(0);
-  tasksPage = signal(1);
+  tasks = pagedList<TaskResponse>('tasks', (page) => this.tasksService.getTasks(this.projectName, page));
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
@@ -102,24 +101,7 @@ export class ProjectDetailComponent implements OnInit {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.starTarget = { kind: 'project', project: this.projectName };
     this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
-    this.loadTasks();
-  }
-
-  loadTasks(): void {
-    this.loading.set(true);
-    this.loadError.set(null);
-    this.tasksService.getTasks(this.projectName, this.tasksPage()).subscribe({
-      next: (tasks) => {
-        this.tasks.set(tasks.items);
-        this.tasksTotal.set(tasks.total);
-        this.tasksPage.set(tasks.page);
-        this.loading.set(false);
-      },
-      error: (error: unknown) => {
-        this.loadError.set(error);
-        this.loading.set(false);
-      },
-    });
+    this.tasks.reload();
   }
 
   openCreateDialog(): void {

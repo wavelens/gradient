@@ -12,21 +12,21 @@
   }
   @if (authService.isAuthenticated()) {
     <gr-load-state
-      [loading]="loading()"
-      [error]="loadError()"
-      [empty]="projects().length === 0"
+      [loading]="projects.loading()"
+      [error]="projects.error()"
+      [empty]="projects.items().length === 0"
       loadingMessage="Loading projects..."
       errorTitle="Failed to load projects"
       emptyIcon="corporate_fare"
       emptyTitle="No projects yet"
       [emptyMessage]="canCreateProject ? 'Create your first project to get started with Gradient' : 'Ask a project administrator to add this account to a project.'"
-      (retry)="loadProjects()"
+      (retry)="projects.reload()"
     >
       @if (canCreateProject) {
         <button slot="empty-action" grButton label="Create Project" (click)="openCreateDialog()"></button>
       }
       <gr-card-grid>
-        @for (project of projects(); track project.id) {
+        @for (project of projects.items(); track project.id) {
           <gr-nav-card
             icon="corporate_fare"
             [title]="project.display_name || project.name"
@@ -49,16 +49,17 @@
           </gr-nav-card>
         }
       </gr-card-grid>
+      <gr-load-more [shown]="projects.items().length" [total]="projects.total()" [loading]="projects.loadingMore()" (more)="projects.loadMore()" />
     </gr-load-state>
   }
 
   <gr-load-state
-    [loading]="publicLoading() && !loading()"
-    [error]="publicError()"
+    [loading]="publicProjects.loading() && !projects.loading()"
+    [error]="publicProjects.error()"
     [empty]="filteredPublicProjects.length === 0"
     loadingMessage="Loading public projects..."
     errorTitle="Failed to load public projects"
-    (retry)="loadPublicProjects()"
+    (retry)="publicProjects.reload()"
   >
     <div slot="empty">
       @if (!authService.isAuthenticated()) {
@@ -80,6 +81,7 @@
         </gr-nav-card>
       }
     </gr-card-grid>
+    <gr-load-more [shown]="publicProjects.items().length" [total]="publicProjects.total()" [loading]="publicProjects.loadingMore()" (more)="publicProjects.loadMore()" />
   </gr-load-state>
 </gr-page-layout>
 

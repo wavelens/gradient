@@ -10,12 +10,12 @@
   }
   @if (authService.isAuthenticated()) {
     <gr-load-state
-      [loading]="loading()"
-      [error]="loadError()"
-      [empty]="caches().length === 0"
+      [loading]="caches.loading()"
+      [error]="caches.error()"
+      [empty]="caches.items().length === 0"
       loadingMessage="Loading caches..."
       errorTitle="Failed to load caches"
-      (retry)="loadCaches()"
+      (retry)="caches.reload()"
     >
       <div slot="empty">
         @if (!publicLoading() && filteredPublicCaches.length === 0) {
@@ -76,12 +76,13 @@
           </gr-card-grid>
         </div>
       }
+      <gr-load-more [shown]="caches.items().length" [total]="caches.total()" [loading]="caches.loadingMore()" (more)="caches.loadMore()" />
     </gr-load-state>
   }
 
   @if (showPublic) {
     <gr-load-state
-      [loading]="publicLoading() && !loading()"
+      [loading]="publicLoading() && !caches.loading()"
       [error]="publicError()"
       [empty]="filteredPublicCaches.length === 0"
       loadingMessage="Loading public caches..."

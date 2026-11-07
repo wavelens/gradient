@@ -16,6 +16,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import {
   BadgeComponent,
   EmptyStateComponent,
+  LoadMoreComponent,
   ButtonComponent,
   CardGridComponent,
   DialogComponent,
@@ -29,6 +30,7 @@ import {
 import { NameFieldsComponent, nameAvailability } from '@shared/forms';
 import { ProjectSummary, PublicProjectSummary } from '@core/models';
 import { links } from '@shared/routing';
+import { pagedList } from '@shared/paging';
 
 @Component({
   selector: 'app-project-list',
@@ -47,6 +49,7 @@ import { links } from '@shared/routing';
     CardGridComponent,
     BadgeComponent,
     EmptyStateComponent,
+    LoadMoreComponent,
     SelectComponent,
     NameFieldsComponent,
   ],
@@ -73,11 +76,7 @@ export class ProjectListComponent implements OnInit {
     return this.config.canCreate(this.config.createProject, this.authService.user()?.superuser === true);
   }
 
-  loading = signal(true);
-  loadError = signal<unknown>(null);
-  projects = signal<ProjectSummary[]>([]);
-  projectsTotal = signal(0);
-  projectsPage = signal(1);
+  projects = pagedList<ProjectSummary>('projects', (page) => this.projectsService.getProjects(page));
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
@@ -90,55 +89,11 @@ export class ProjectListComponent implements OnInit {
     public: false,
   };
 
-  publicProjects = signal<PublicProjectSummary[]>([]);
-  publicTotal = signal(0);
-  publicPage = signal(1);
-  publicLoading = signal(false);
-  publicError = signal<unknown>(null);
+  publicProjects = pagedList<PublicProjectSummary>('public projects', (page) => this.projectsService.getPublicProjects(page));
 
   ngOnInit(): void {
-    if (this.authService.isAuthenticated()) {
-      this.loadProjects();
-    } else {
-      this.loading.set(false);
-    }
-    if (this.config.publicListing) {
-      this.loadPublicProjects();
-    }
-  }
-
-  loadProjects(page = this.projectsPage()): void {
-    this.loading.set(true);
-    this.loadError.set(null);
-    this.projectsService.getProjects(page).subscribe({
-      next: (result) => {
-        this.projects.set(result.items);
-        this.projectsTotal.set(result.total);
-        this.projectsPage.set(result.page);
-        this.loading.set(false);
-      },
-      error: (error: unknown) => {
-        this.loadError.set(error);
-        this.loading.set(false);
-      },
-    });
-  }
-
-  loadPublicProjects(page = this.publicPage()): void {
-    this.publicLoading.set(true);
-    this.publicError.set(null);
-    this.projectsService.getPublicProjects(page).subscribe({
-      next: (result) => {
-        this.publicProjects.set(result.items);
-        this.publicTotal.set(result.total);
-        this.publicPage.set(result.page);
-        this.publicLoading.set(false);
-      },
-      error: (error: unknown) => {
-        this.publicError.set(error);
-        this.publicLoading.set(false);
-      },
-    });
+    if (this.authService.isAuthenticated()) this.projects.reload();
+    if (this.config.publicListing) this.publicProjects.reload();
   }
 
   openCreateDialog(): void {
@@ -150,8 +105,8 @@ export class ProjectListComponent implements OnInit {
   }
 
   get filteredPublicProjects(): PublicProjectSummary[] {
-    const ownedIds = new Set(this.projects().map((o) => o.id));
-    return this.publicProjects().filter((o) => !ownedIds.has(o.id));
+    const ownedIds = new Set(this.projects.items().map((o) => o.id));
+    return this.publicProjects.items().filter((o) => !ownedIds.has(o.id));
   }
 
   get missingNamesError(): string | null {

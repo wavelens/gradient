@@ -18,15 +18,15 @@
     }
   </div>
   <gr-load-state
-    [loading]="loading()"
-    [error]="loadError()"
-    [empty]="tasks().length === 0"
+    [loading]="tasks.loading()"
+    [error]="tasks.error()"
+    [empty]="tasks.items().length === 0"
     loadingMessage="Loading project..."
     errorTitle="Failed to load tasks"
     emptyIcon="folder"
     emptyTitle="No tasks yet"
     [emptyMessage]="canCreateTask() ? 'Create your first task to start evaluating Nix builds' : 'No tasks have been created yet'"
-    (retry)="loadTasks()"
+    (retry)="tasks.reload()"
   >
     @if (canCreateTask()) {
       <button slot="empty-action" grButton label="Create Task" (click)="openCreateDialog()"></button>
@@ -34,7 +34,7 @@
     <div class="section">
       <h2>Tasks</h2>
       <gr-card-grid>
-        @for (task of tasks(); track task.id) {
+        @for (task of tasks.items(); track task.id) {
           <gr-nav-card
             icon="folder"
             [title]="task.display_name || task.name"
@@ -49,6 +49,7 @@
           </gr-nav-card>
         }
       </gr-card-grid>
+      <gr-load-more [shown]="tasks.items().length" [total]="tasks.total()" [loading]="tasks.loadingMore()" (more)="tasks.loadMore()" />
     </div>
   </gr-load-state>
 </gr-page-layout>

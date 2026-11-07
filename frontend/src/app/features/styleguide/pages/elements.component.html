@@ -90,6 +90,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 <p>Lists that load their own data go inside <code>gr-load-state</code>. A failed load can show the reason and a "Try Again" button in place of the empty state.</p>
 <gr-load-state errorTitle="Couldn't load integrations" error="Database connection failed." />
 
+<p>Server-paginated lists end with <code>gr-load-more</code>. The component can show how many items sit on screen. A click can add the next page.</p>
+<gr-load-more [shown]="50" [total]="75" />
+
 <p>Without an icon, in the grid the cache pages use.</p>
 <gr-card-grid min="220px">
   <gr-stat-card label="Packages stored" [value]="128" />

@@ -15,6 +15,7 @@ import {
   CopyFieldComponent,
   DividerComponent,
   EmptyStateComponent,
+  LoadMoreComponent,
   FieldRowComponent,
   IconComponent,
   IconSize,
@@ -56,7 +57,7 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
   standalone: true,
   imports: [
     BadgeComponent, CopyFieldComponent, FieldRowComponent, IconComponent,
-    MessageBannerComponent, EmptyStateComponent, LoadingSpinnerComponent, LoadStateComponent,
+    MessageBannerComponent, EmptyStateComponent, LoadingSpinnerComponent, LoadMoreComponent, LoadStateComponent,
     StatCardComponent, TableComponent, DividerComponent, EvalStatusBadgeComponent, StatusBadgeComponent,
     MetricChartComponent, ToastComponent, ButtonComponent,
     CardGridComponent, RowComponent, RowListComponent, SkeletonComponent,

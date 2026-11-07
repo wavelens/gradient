@@ -26,6 +26,7 @@ export * from './in-view/in-view.directive';
 export * from './link-tabs/link-tabs.component';
 export * from './on-screen/on-screen';
 export * from './input/input.directive';
+export * from './load-more/load-more.component';
 export * from './load-state/load-state.component';
 export * from './loading-spinner/loading-spinner.component';
 export * from './logo/logo.component';

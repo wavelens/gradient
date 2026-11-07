@@ -83,7 +83,7 @@ import { MetricChartComponent } from '@shared/ui';
 | Actions | `button[grButton]`, `a[grButton]`, `gr-star-button`, `gr-menu` |
 | Forms | `gr-form-field`, `input[grInput]`, `textarea[grInput]`, `select[grInput]`, `gr-password-input`, `gr-name-field`, `gr-select`, `gr-select-button`, `gr-checkbox`, `gr-autocomplete`, `gr-label-help` |
 | Display | `gr-badge`, `gr-eval-status-badge`, `gr-status-icon`, `gr-icon`, `gr-logo`, `gr-copy-field`, `gr-field-row`, `gr-stat-card`, `gr-metric-chart`, `gr-table`, `gr-divider` |
-| Feedback | `gr-message-banner`, `gr-toast` (with `MessageService`), `gr-loading-spinner`, `gr-empty-state`, `gr-load-state` |
+| Feedback | `gr-message-banner`, `gr-toast` (with `MessageService`), `gr-loading-spinner`, `gr-empty-state`, `gr-load-state`, `gr-load-more` |
 | Overlays | `gr-dialog`, `gr-popover`, `[grTooltip]` |
 | Layout | `gr-page-layout`, `gr-breadcrumb`, `gr-link-tabs`, `gr-settings-section`, `gr-row-list` / `gr-row`, `gr-card-grid`, `gr-nav-card`, `gr-tab-switch`, `[grInView]`, `[grScrollRegion]`, `[grDrawer]` |
 
@@ -91,6 +91,7 @@ import { MetricChartComponent } from '@shared/ui';
 - `gr-settings-section`: a titled section with an optional description. A card contains it by default. Set `[card]="false"` to drop the card.
 - `gr-load-state`: a wrapper for any content that can load its own data. The inputs `loading`, `error` and `empty` pick one of four states (a spinner, an error with a Try Again button, an empty state, or content). Errors always take precedence over the empty state. A failed request can never show the "nothing here yet" text. Use a "No permission" message in place of the server code on a 403 response. Keep the data visible on reload. Skip the spinner with data on screen. Put write errors (save, delete) outside `error`. Those errors belong next to the failed action.
 - Pickers that need another item (cache, team, integration) and have an empty list show the next step in a ``.gr-form-aside`` line below the field. Users who can create that item get the create dialog in place. Reopen the original dialog with the new item selected after creation. Links to the page for that item cover the other case. Don't show the create option to users who can't create. ``injectCanCreateCache()`` and ``injectCanCreateTeam()`` hold that check inside ``@shared/forms``.
+- Server-paginated lists (projects, tasks, caches) use `pagedList()` from `@shared/paging` and end with `gr-load-more`. Lists keep items on screen and add the next page. Show a toast on a failed page load. Keep the list.
 
 ## Grid Utilities
 

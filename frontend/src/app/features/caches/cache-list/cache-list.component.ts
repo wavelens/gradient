@@ -13,6 +13,7 @@ import { ConfigService } from '@core/services/config.service';
 import {
   BadgeComponent,
   CardGridComponent,
+  LoadMoreComponent,
   EmptyStateComponent,
   IconComponent,
   LoadStateComponent,
@@ -22,6 +23,7 @@ import {
 import { CreateCacheButtonComponent, CreateCacheDialogComponent } from '@shared/forms';
 import { Cache } from '@core/models';
 import { links } from '@shared/routing';
+import { pagedList } from '@shared/paging';
 
 @Component({
   selector: 'app-cache-list',
@@ -35,6 +37,7 @@ import { links } from '@shared/routing';
     PageLayoutComponent,
     NavCardComponent,
     CardGridComponent,
+    LoadMoreComponent,
     BadgeComponent,
     CreateCacheButtonComponent,
     CreateCacheDialogComponent,
@@ -55,9 +58,7 @@ export class CacheListComponent implements OnInit {
     return this.config.canCreate(this.config.createCache, this.authService.user()?.superuser === true);
   }
 
-  loading = signal(true);
-  loadError = signal<unknown>(null);
-  caches = signal<Cache[]>([]);
+  caches = pagedList<Cache>('caches', (page) => this.cachesService.getCaches(page, 100));
   showCreateDialog = signal(false);
 
   publicCaches = signal<Cache[]>([]);
@@ -69,29 +70,10 @@ export class CacheListComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    if (this.authService.isAuthenticated()) {
-      this.loadCaches();
-    } else {
-      this.loading.set(false);
-    }
+    if (this.authService.isAuthenticated()) this.caches.reload();
     if (this.config.publicListing) {
       this.loadPublicCaches();
     }
-  }
-
-  loadCaches(): void {
-    this.loading.set(true);
-    this.loadError.set(null);
-    this.cachesService.getCaches(1, 100).subscribe({
-      next: (caches) => {
-        this.caches.set(caches.items);
-        this.loading.set(false);
-      },
-      error: (error: unknown) => {
-        this.loadError.set(error);
-        this.loading.set(false);
-      },
-    });
   }
 
   loadPublicCaches(): void {
@@ -118,15 +100,15 @@ export class CacheListComponent implements OnInit {
   }
 
   get activeCaches() {
-    return this.caches().filter((c) => c.active);
+    return this.caches.items().filter((c) => c.active);
   }
 
   get inactiveCaches() {
-    return this.caches().filter((c) => !c.active);
+    return this.caches.items().filter((c) => !c.active);
   }
 
   get filteredPublicCaches(): Cache[] {
-    const ownedIds = new Set(this.caches().map((c) => c.id));
+    const ownedIds = new Set(this.caches.items().map((c) => c.id));
     return this.publicCaches().filter((c) => !ownedIds.has(c.id));
   }
 }
