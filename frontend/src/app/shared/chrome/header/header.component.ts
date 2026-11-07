@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { BadgeComponent, IconComponent, MenuComponent, MenuItem } from '@gradient/ui/ui';
+import { BadgeComponent, IconComponent } from '@gradient/ui/ui';
 import { Brand, HeaderComponent, NavLink } from '@gradient/ui/chrome';
 import { AuthService } from '@core/services/auth.service';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
 import { ConfigService } from '@core/services/config.service';
-import { WhatsNewService } from '@core/whats-new/whats-new.service';
+import { UserMenuComponent } from './user-menu.component';
 import { links } from '@shared/routing';
 
 const BRAND: Brand = { label: 'Gradient', href: String(links.dashboard()) };
@@ -27,7 +27,7 @@ const NAV: (NavLink & { signedIn?: true; publicList?: true })[] = [
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [HeaderComponent, BadgeComponent, IconComponent, MenuComponent, RouterLink],
+  imports: [HeaderComponent, BadgeComponent, IconComponent, UserMenuComponent, RouterLink],
   templateUrl: './header.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './header.component.scss',
@@ -38,7 +38,6 @@ export class AppHeaderComponent {
   protected palette = inject(CommandPaletteService);
   protected router = inject(Router);
   private config = inject(ConfigService);
-  private whatsNew = inject(WhatsNewService);
   protected invites = inject(PendingInvitesService);
 
   protected readonly brand = BRAND;
@@ -48,17 +47,26 @@ export class AppHeaderComponent {
     return NAV.filter((link) => signedIn || (!link.signedIn && (listed || !link.publicList)));
   });
 
-  protected userMenuItems = computed<MenuItem[]>(() => [
-    { label: 'Settings', icon: 'settings', routerLink: links.settings('profile') },
-    { label: this.invites.count() ? `My Invites (${this.invites.count()})` : 'My Invites', icon: 'mail', routerLink: links.settings('invites') },
-    ...(this.whatsNew.hasNotes ? [{ label: "What's New", icon: 'new_releases', command: () => this.whatsNew.showAll() }] : []),
-    { separator: true },
-    { label: 'Log out', icon: 'logout', command: () => this.logout() },
-  ]);
+  protected userMenu = viewChild<UserMenuComponent>('userMenu');
+  private pendingMenuOrigin = signal<HTMLElement | null>(null);
 
   get registrationDisabled() { return this.config.registrationDisabled; }
 
-  logout(): void {
-    this.authService.logout().subscribe();
+  constructor() {
+    effect(() => {
+      const menu = this.userMenu();
+      const origin = this.pendingMenuOrigin();
+      if (!menu || !origin) return;
+      untracked(() => {
+        this.pendingMenuOrigin.set(null);
+        menu.toggle(origin);
+      });
+    });
+  }
+
+  protected toggleUserMenu(trigger: HTMLElement): void {
+    const menu = this.userMenu();
+    if (menu) menu.toggle(trigger);
+    else this.pendingMenuOrigin.set(trigger);
   }
 }

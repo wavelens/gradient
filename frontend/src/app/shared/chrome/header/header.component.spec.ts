@@ -65,16 +65,24 @@ describe('AppHeaderComponent - registration visibility', () => {
 });
 
 describe('AppHeaderComponent - user menu', () => {
-  function openMenu(): { root: HTMLElement; items: HTMLElement[] } {
+  async function openMenu(): Promise<{ root: HTMLElement; items: HTMLElement[] }> {
     const fixture = setup(false, true);
     const root = fixture.nativeElement as HTMLElement;
     (root.querySelector('.user-menu-trigger') as HTMLElement).click();
+    await fixture.whenStable();
     fixture.detectChanges();
     return { root, items: Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item')) };
   }
 
-  it('folds the user name, settings, invites and logout into one dropdown', () => {
-    const { root, items } = openMenu();
+  afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((el) => el.remove()));
+
+  it('opens the menu on the first click, before the menu code has loaded', async () => {
+    const { root } = await openMenu();
+    expect(root.querySelector('.user-menu-trigger')?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('folds the user name, settings, invites and logout into one dropdown', async () => {
+    const { root, items } = await openMenu();
     expect(root.querySelector('.header-user')?.textContent).toContain('Alice');
     expect(root.querySelector('.header-user a, .header-user .logout-btn')).toBeNull();
     expect(items.map((item) => item.textContent?.trim())).toEqual([
@@ -84,8 +92,8 @@ describe('AppHeaderComponent - user menu', () => {
     ]);
   });
 
-  it('logs out from the dropdown', () => {
-    const { items } = openMenu();
+  it('logs out from the dropdown', async () => {
+    const { items } = await openMenu();
     items.find((item) => item.textContent?.includes('Log out'))!.click();
     expect(logout).toHaveBeenCalled();
   });

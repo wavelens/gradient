@@ -8,14 +8,18 @@
 <app-header />
 
 @if (authService.isAuthenticated()) {
-  <app-command-palette />
-  <app-whats-new-dialog />
+  @defer (on idle) {
+    <app-command-palette />
+    <app-whats-new-dialog />
+  }
 }
 
 <main #main id="main-content" class="app-main" tabindex="-1">
   <router-outlet />
 </main>
-<app-confirm-dialog />
+@defer (on idle) {
+  <app-confirm-dialog />
+}
 <gr-toast />
 
 @if (showFooter()) {

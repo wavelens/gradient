@@ -53,6 +53,7 @@ flowchart LR
 - Link sibling pages of one area, such as the user settings, with gr-link-tabs in the page banner slot, so every page reaches its siblings in one click.
 - Show repository fetch failures in `app-repository-fetch-banner` of `@shared/git`. Members who can edit the task see the git error and how to fix the failure. Everyone else sees who to ask.
 - Show the webhooks that a Git host sent to an integration with the `app-incoming-deliveries` of `@shared/git`. Rows contain the event, result, and rejection reason.
+- Keep the initial bundle below the 500 kB budget. Load shell parts not needed for first render (dialogs, command palette, menus built on `@angular/cdk/overlay`) inside a `@defer (on idle)` block. Import lazy components from their own file, not from a barrel such as `@shared/confirm`. Imports from a barrel keep the component in the initial bundle. Triggers inside the shell store clicks that happen before the lazy code has loaded (see the user menu in the header). Those triggers replay the clicks after the block has rendered.
 - Put the Git settings for a task on that task's repository page. Repository setup flows reuse `app-repository-access` and `app-repository-events` instead of a separate form. UI labels show "receives events" and "reports status" instead of inbound and outbound.
 
 ## Shared UI Package

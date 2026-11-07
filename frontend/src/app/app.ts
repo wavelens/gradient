@@ -17,7 +17,7 @@ import { ConfigService } from '@core/services/config.service';
 import { ThemeService } from '@core/services/theme.service';
 import { followOverscroll } from '@core/overscroll/overscroll';
 import { WhatsNewDialogComponent } from '@core/whats-new/whats-new-dialog.component';
-import { ConfirmDialogComponent } from '@shared/confirm';
+import { ConfirmDialogComponent } from '@shared/confirm/confirm-dialog.component';
 
 const FOOTER_LINKS: FooterLink[] = [
   {

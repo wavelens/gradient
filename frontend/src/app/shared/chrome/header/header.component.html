@@ -15,14 +15,16 @@
 
   <div slot="actions" class="header-user">
     @if (authService.user(); as user) {
-      <button type="button" class="user-menu-trigger" aria-haspopup="menu" [attr.aria-expanded]="userMenu.isOpen()" (click)="userMenu.toggle($event)"
+      <button #userTrigger type="button" class="user-menu-trigger" aria-haspopup="menu" [attr.aria-expanded]="userMenu()?.isOpen() ?? false" (click)="toggleUserMenu(userTrigger)"
               [attr.aria-label]="invites.count() ? user.name + ', ' + invites.count() + ' pending invitations' : null">
         <gr-icon name="account_circle" />
         <span class="user-name" [title]="user.name">{{ user.name }}</span>
         @if (invites.count(); as count) { <gr-badge severity="info">{{ count }}</gr-badge> }
         <gr-icon name="expand_more" size="sm" />
       </button>
-      <gr-menu #userMenu [model]="userMenuItems()" />
+      @defer (on idle; on interaction(userTrigger)) {
+        <app-user-menu #userMenu />
+      }
     } @else {
       <a [routerLink]="links.login(router.url.startsWith('/account/') ? null : router.url)" class="user-link">Login</a>
       @if (!registrationDisabled) {
