@@ -15,7 +15,8 @@ SPDX-License-Identifier: AGPL-3.0-only
       grInput
       class="copy-field__input"
       [class.copy-field__input--mono]="mono()"
-      [id]="inputId() ?? null"
+      [attr.id]="inputId() || null"
+      [attr.aria-label]="name() ?? null"
       [value]="value()"
       [rows]="rows()"
       readonly
@@ -25,7 +26,8 @@ SPDX-License-Identifier: AGPL-3.0-only
       grInput
       class="copy-field__input"
       [class.copy-field__input--mono]="mono()"
-      [id]="inputId() ?? null"
+      [attr.id]="inputId() || null"
+      [attr.aria-label]="name() ?? null"
       [value]="value()"
       readonly
     />

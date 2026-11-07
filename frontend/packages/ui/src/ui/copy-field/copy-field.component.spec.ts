@@ -7,6 +7,7 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { CopyFieldComponent } from './copy-field.component';
+import { FormFieldComponent } from '../form-field/form-field.component';
 
 async function render(inputs: Record<string, unknown>) {
   const fixture = TestBed.createComponent(CopyFieldComponent);
@@ -76,6 +77,19 @@ describe('CopyFieldComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelectorAll('#token')).toHaveLength(1);
     expect(root.querySelector('label')?.control).toBe(root.querySelector('input'));
+  });
+
+  it('get name from label of surrounding form field', async () => {
+    @Component({
+      imports: [CopyFieldComponent, FormFieldComponent],
+      template: `<gr-form-field label="Store address"><gr-copy-field value="ssh://host" /></gr-form-field>`,
+    })
+    class InField {}
+    const fixture = TestBed.createComponent(InField);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const input = (fixture.nativeElement as HTMLElement).querySelector('input');
+    expect(input?.getAttribute('aria-label')).toBe('Store address');
   });
 
   it('copies the value and flags copied state', async () => {

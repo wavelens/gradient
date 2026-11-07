@@ -20,9 +20,9 @@
 
   <div class="header-content">
     <div id="header-menu" class="header-menu">
-      <nav class="header-nav">
+      <nav class="header-nav" aria-label="Main">
         @for (link of nav(); track link.href) {
-          <a [routerLink]="link.href" routerLinkActive="active" [routerLinkActiveOptions]="activeLinkMatch(link.exact ?? false)">
+          <a [routerLink]="link.href" routerLinkActive="active" ariaCurrentWhenActive="page" [routerLinkActiveOptions]="activeLinkMatch(link.exact ?? false)">
             {{ link.label }}
           </a>
         }

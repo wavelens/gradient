@@ -10,7 +10,7 @@ SPDX-License-Identifier: AGPL-3.0-only
   aria-autocomplete="list"
   cdkOverlayOrigin
   #trigger="cdkOverlayOrigin"
-  [id]="inputId()"
+  [attr.id]="inputId() || null"
   [value]="value()"
   [placeholder]="placeholder()"
   [disabled]="isDisabled()"

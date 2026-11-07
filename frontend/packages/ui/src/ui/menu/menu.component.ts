@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ESCAPE } from '@angular/cdk/keycodes';
 import {
   ConnectedPosition,
   FlexibleConnectedPositionStrategyOrigin,
@@ -18,8 +17,11 @@ import {
   OnDestroy,
   TemplateRef,
   ViewContainerRef,
+  Injector,
+  afterNextRender,
   inject,
   input,
+  signal,
   viewChild,
   ChangeDetectionStrategy
 } from '@angular/core';
@@ -97,7 +99,11 @@ export class MenuComponent implements OnDestroy {
   private panel = viewChild.required<TemplateRef<unknown>>('panel');
   private overlay = inject(Overlay);
   private vcr = inject(ViewContainerRef);
+  private injector = inject(Injector);
   private ref?: OverlayRef;
+  private returnFocus?: HTMLElement;
+  private readonly openState = signal(false);
+  readonly isOpen = this.openState.asReadonly();
 
   ngOnDestroy(): void {
     this.ref?.dispose();
@@ -129,6 +135,7 @@ export class MenuComponent implements OnDestroy {
     positions: ConnectedPosition[],
   ): void {
     this.hide();
+    this.returnFocus = origin instanceof HTMLElement ? origin : undefined;
     this.ref = this.overlay.create({
       hasBackdrop: true,
       backdropClass: 'cdk-overlay-transparent-backdrop',
@@ -137,18 +144,51 @@ export class MenuComponent implements OnDestroy {
       positionStrategy: this.overlay.position().flexibleConnectedTo(origin).withPositions(positions),
     });
     this.ref.backdropClick().subscribe(() => this.hide());
-    this.ref.keydownEvents().subscribe((e) => e.keyCode === ESCAPE && this.hide());
+    this.ref.keydownEvents().subscribe((e) => this.onKeydown(e));
     this.ref.attach(new TemplatePortal(this.panel(), this.vcr));
+    this.openState.set(true);
+    const panel = this.ref.overlayElement;
+    afterNextRender(() => this.items(panel)[0]?.focus(), { injector: this.injector });
   }
 
   hide(): void {
     const ref = this.ref;
     this.ref = undefined;
+    this.openState.set(false);
     disposeAnimated(ref);
   }
 
-  protected run(item: MenuItem): void {
+  private close(): void {
+    const target = this.returnFocus;
     this.hide();
+    target?.focus();
+  }
+
+  private items(panel: HTMLElement): HTMLElement[] {
+    return Array.from(panel.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])'));
+  }
+
+  private onKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape' || event.key === 'Tab') {
+      if (event.key === 'Escape') event.preventDefault();
+      return this.close();
+    }
+    if (!this.ref) return;
+    const items = this.items(this.ref.overlayElement);
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    const next: Record<string, number> = {
+      ArrowDown: (current + 1) % items.length,
+      ArrowUp: current <= 0 ? items.length - 1 : current - 1,
+      Home: 0,
+      End: items.length - 1,
+    };
+    if (!(event.key in next) || !items.length) return;
+    event.preventDefault();
+    items[next[event.key]].focus();
+  }
+
+  protected run(item: MenuItem): void {
+    this.close();
     item.command?.();
   }
 }

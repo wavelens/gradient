@@ -31,6 +31,7 @@ import {
   LoadStateComponent,
   MenuComponent,
   MenuItem,
+  ScrollRegionDirective,
   SkeletonComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
@@ -62,7 +63,7 @@ import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, build
     SkeletonComponent, EmptyStateComponent, LoadStateComponent, WritableDirective,
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, StarButtonComponent,
-    ExecJobListComponent,
+    ExecJobListComponent, ScrollRegionDirective,
   ],
   templateUrl: './task-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

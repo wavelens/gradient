@@ -65,7 +65,7 @@
                 <button grButton label="Activate" icon="play_arrow" severity="success" size="small"
                   [loading]="busy() === worker.worker_id" (click)="setActive(worker, true)"></button>
               }
-              <button grButton icon="delete" severity="danger" size="small" [disabled]="worker.managed || busy() === worker.worker_id"
+              <button grButton icon="delete" severity="danger" size="small" [attr.aria-label]="'Delete worker ' + worker.display_name" [disabled]="worker.managed || busy() === worker.worker_id"
                 (click)="remove(worker)"></button>
             }
           </div>

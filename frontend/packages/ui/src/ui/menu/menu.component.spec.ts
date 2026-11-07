@@ -97,6 +97,37 @@ describe('MenuComponent', () => {
     expect(items()).toHaveLength(0);
   });
 
+  const press = (key: string) => document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+
+  it('can move focus into panel and use arrow keys to move between items', async () => {
+    const { fixture, anchor } = render();
+    anchor().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.menu().isOpen()).toBe(true);
+    expect(document.activeElement).toBe(items()[0]);
+    press('ArrowDown');
+    expect(document.activeElement).toBe(items()[2]);
+    press('ArrowDown');
+    expect(document.activeElement).toBe(items()[0]);
+    press('ArrowUp');
+    expect(document.activeElement).toBe(items()[2]);
+    press('Home');
+    expect(document.activeElement).toBe(items()[0]);
+  });
+
+  it('can close on Escape and return focus to the button that opened it', () => {
+    const { fixture, anchor } = render();
+    anchor().focus();
+    anchor().click();
+    fixture.detectChanges();
+    press('Escape');
+    fixture.detectChanges();
+    expect(items()).toHaveLength(0);
+    expect(fixture.componentInstance.menu().isOpen()).toBe(false);
+    expect(document.activeElement).toBe(anchor());
+  });
+
   describe('openAt', () => {
     function rightClick(target: HTMLElement, x: number, y: number): MouseEvent {
       const event = new MouseEvent('contextmenu', { clientX: x, clientY: y, bubbles: true, cancelable: true });

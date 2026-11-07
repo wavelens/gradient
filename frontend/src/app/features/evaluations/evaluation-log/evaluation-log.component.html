@@ -49,8 +49,8 @@
         (click)="selectEvaluationSection()"
         (keydown.enter)="selectEvaluationSection()"
         tabindex="0"
-        role="option"
-        [attr.aria-selected]="selectedSection() === 'messages'"
+        role="button"
+        [attr.aria-pressed]="selectedSection() === 'messages'"
       >
         <span class="sidebar-item-label">Evaluation</span>
         @if (errorMessages().length > 0) {
@@ -107,8 +107,8 @@
                   (contextmenu)="openBuildMenu($event, build, buildMenu)"
                   [title]="build.name"
                   tabindex="0"
-                  role="option"
-                  [attr.aria-selected]="selectedBuildId() === build.id"
+                  role="button"
+                  [attr.aria-pressed]="selectedBuildId() === build.id"
                 >
                   <span class="build-dot status-{{ statusClass(build.status) }}"></span>
                   <span class="build-name">{{ buildDisplayName(build.name) }}</span>
@@ -116,10 +116,10 @@
                   @if (getBuildElapsed(build)) {
                     <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
                   }
-                  <button type="button" class="sidebar-kebab" aria-label="Build actions" tabindex="-1"
-                          (click)="toggleBuildMenu($event, build, buildMenu)">
+                  <span class="sidebar-kebab" aria-hidden="true"
+                        (click)="toggleBuildMenu($event, build, buildMenu)">
                     <gr-icon name="more_vert" size="sm" />
-                  </button>
+                  </span>
                 </div>
               }
             </div>
@@ -132,14 +132,15 @@
     </aside>
 
     <!-- ── Main ─────────────────────────────────────────────────── -->
-    <main class="log-main" (mouseenter)="setPointerOver('log')" (mouseleave)="setPointerOver(null)">
+    <div class="log-main" (mouseenter)="setPointerOver('log')" (mouseleave)="setPointerOver(null)">
+      <h1 class="sr-only">Evaluation log</h1>
 
       <!-- Info bar -->
       <div class="info-bar">
         <button grButton class="sidebar-toggle" icon="view_list" severity="secondary" size="small"
           aria-label="Builds" aria-controls="builds-drawer" [attr.aria-expanded]="buildsOpen()"
           (click)="buildsOpen.set(!buildsOpen())"></button>
-        <div class="info-bar-left">
+        <div class="info-bar-left" grScrollRegion>
           <div class="info-metric">
             <gr-eval-status-badge [status]="ev.status" [prioritized]="ev.prioritized" />
           </div>
@@ -301,6 +302,6 @@
         }
       </div>
 
-    </main>
+    </div>
   </div>
 }

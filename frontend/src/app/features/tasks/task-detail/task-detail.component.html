@@ -68,7 +68,7 @@
   </div>
 
   @if (evaluations().length > 0) {
-    <div class="strip-wrap pad">
+    <div class="strip-wrap pad" grScrollRegion>
       <div class="eval-strip">
         @for (e of evaluations(); track e.id) {
           <div class="eval-card" [attr.data-phase]="evaluationPhase(e.status)" [class.selected]="selected()?.id === e.id" (click)="select(e)"

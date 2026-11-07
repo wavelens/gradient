@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, signal, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
+import { Component, computed, inject, input, signal, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonComponent } from '../button/button.component';
 import { InputDirective } from '../input/input.directive';
+import { FormFieldComponent } from '../form-field/form-field.component';
 
 @Component({
   selector: 'gr-copy-field',
@@ -20,6 +21,7 @@ import { InputDirective } from '../input/input.directive';
 export class CopyFieldComponent {
   value = input.required<string | number>();
   inputId = input<string>();
+  label = input<string>();
   mono = input(true, { transform: booleanAttribute });
   inline = input(false, { transform: booleanAttribute });
   multiline = input(false, { transform: booleanAttribute });
@@ -28,6 +30,9 @@ export class CopyFieldComponent {
   copiedLabel = input('Copied');
 
   copied = signal(false);
+
+  private field = inject(FormFieldComponent, { optional: true });
+  protected name = computed(() => this.label() ?? (this.inputId() ? undefined : this.field?.label()));
 
   async copy(): Promise<void> {
     try {

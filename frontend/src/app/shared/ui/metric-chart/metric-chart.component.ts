@@ -63,12 +63,12 @@ echarts.use([
       @if (title() && !bare()) {
         <header class="metric-chart__header">
           <div>
-            <h3>
+            <h2>
               {{ title() }}
               @if (doc(); as link) {
                 <gr-label-help [doc]="link" [title]="'About ' + title()" />
               }
-            </h3>
+            </h2>
             @if (subtitle()) {
               <p class="metric-chart__subtitle">{{ subtitle() }}</p>
             }

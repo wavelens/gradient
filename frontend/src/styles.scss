@@ -17,10 +17,21 @@ body {
   overflow-x: hidden;
 }
 
-// Make page components fill remaining vertical space so the footer stays at the bottom.
-// Angular's router-outlet inserts activated components as siblings of the outlet element.
-app-root > *:not(app-header):not(gr-footer):not(app-command-palette):not(app-whats-new-dialog):not(router-outlet) {
+// The main element and its routed page fill the height between the header and footer. The footer can stay at the bottom. The router can insert the page as a sibling of the `router-outlet` element.
+.app-main {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+
+  &:focus {
+    outline: none;
+  }
+
+  > :not(router-outlet) {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 // index.html paints this in place of the header until Angular replaces the app-root content.

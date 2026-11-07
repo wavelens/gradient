@@ -10,9 +10,10 @@ SPDX-License-Identifier: AGPL-3.0-only
   aria-haspopup="listbox"
   cdkOverlayOrigin
   #trigger="cdkOverlayOrigin"
-  [id]="inputId()"
+  [attr.id]="inputId() || null"
   [disabled]="isDisabled()"
   [attr.aria-expanded]="open()"
+  [attr.aria-label]="name() ?? null"
   (click)="toggle()"
   (keydown)="onKeydown($event)"
   (blur)="onTouched()"

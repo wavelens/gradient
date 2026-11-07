@@ -30,9 +30,9 @@ const TABS = [
   template: `
     <div class="board">
       <h1>Job Board</h1>
-      <nav class="board-nav">
+      <nav class="board-nav" aria-label="Pages of Job Board">
         @for (tab of tabs(); track tab.path) {
-          <a #link [routerLink]="tab.path" routerLinkActive="active" (isActiveChange)="$event && activeLink.set(link)">{{ tab.label }}</a>
+          <a #link [routerLink]="tab.path" routerLinkActive="active" ariaCurrentWhenActive="page" (isActiveChange)="$event && activeLink.set(link)">{{ tab.label }}</a>
         }
       </nav>
       <router-outlet></router-outlet>

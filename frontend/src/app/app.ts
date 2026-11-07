@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, DestroyRef, inject, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, DestroyRef, ElementRef, inject, computed, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { Router, RouterOutlet, NavigationEnd } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map } from 'rxjs/operators';
@@ -43,6 +43,7 @@ export class App {
   private config = inject(ConfigService);
 
   protected readonly footerLinks = FOOTER_LINKS;
+  private readonly main = viewChild.required<ElementRef<HTMLElement>>('main');
   protected get version(): string | null {
     const { backendVersion, backendCommit } = this.config;
     if (!backendVersion) return null;
@@ -51,6 +52,11 @@ export class App {
 
   constructor() {
     inject(DestroyRef).onDestroy(followOverscroll(window));
+  }
+
+  protected skipToMain(event: Event): void {
+    event.preventDefault();
+    this.main().nativeElement.focus();
   }
 
   private routeData = toSignal(

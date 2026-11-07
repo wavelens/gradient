@@ -11,6 +11,7 @@ import { FormsModule } from '@angular/forms';
 import {
   ButtonComponent,
   MessageBannerComponent,
+  ScrollRegionDirective,
   SkeletonComponent,
   TabSwitchComponent,
   TooltipDirective,
@@ -25,7 +26,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 @Component({
   selector: 'app-dashboard-activity',
   standalone: true,
-  imports: [FormsModule, ButtonComponent, MessageBannerComponent, SkeletonComponent, TabSwitchComponent, TooltipDirective],
+  imports: [FormsModule, ButtonComponent, MessageBannerComponent, SkeletonComponent, TabSwitchComponent, TooltipDirective, ScrollRegionDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @if (!hidden()) {
@@ -43,7 +44,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
             <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
           </gr-message-banner>
         } @else if (days()) {
-          <div class="heat-scroll">
+          <div class="heat-scroll" grScrollRegion>
             <svg
               role="img"
               [attr.aria-label]="summary()"

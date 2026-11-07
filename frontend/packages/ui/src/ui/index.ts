@@ -37,6 +37,7 @@ export * from './password-input/password-input.component';
 export * from './popover/popover.component';
 export * from './row-list/row-list.component';
 export * from './row-list/row.component';
+export * from './scroll-region/scroll-region.directive';
 export * from './select-button/select-button.component';
 export * from './select/select.component';
 export * from './settings-section/settings-section.component';

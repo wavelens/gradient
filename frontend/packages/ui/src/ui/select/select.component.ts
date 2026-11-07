@@ -6,6 +6,7 @@
 
 import { CdkConnectedOverlay, CdkOverlayOrigin } from '@angular/cdk/overlay';
 import { IconComponent } from '../icon/icon.component';
+import { FormFieldComponent } from '../form-field/form-field.component';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import {
   Component,
@@ -38,6 +39,7 @@ export class SelectComponent implements ControlValueAccessor {
   optionDisabled = input('');
   placeholder = input('');
   inputId = input('');
+  ariaLabel = input<string>();
 
   protected open = signal(false);
   protected value = signal<unknown>(null);
@@ -45,6 +47,8 @@ export class SelectComponent implements ControlValueAccessor {
   protected activeIndex = signal(-1);
 
   private host = inject(ElementRef<HTMLElement>);
+  private field = inject(FormFieldComponent, { optional: true });
+  protected name = computed(() => this.ariaLabel() ?? (this.inputId() ? undefined : this.field?.label()));
   private onChange: (value: unknown) => void = () => {};
   protected onTouched: () => void = () => {};
 

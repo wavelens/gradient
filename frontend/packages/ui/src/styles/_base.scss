@@ -198,6 +198,24 @@ a {
   @include sr-only;
 }
 
+// A skip link can stay off-screen until keyboard focus.
+.gr-skip-link {
+  position: absolute;
+  top: $spacing-sm;
+  left: $spacing-sm;
+  z-index: $z-modal;
+  padding: $spacing-sm $spacing-md;
+  border-radius: $border-radius-sm;
+  background-color: var(--gr-surface-raised);
+  color: var(--gr-text-primary);
+  box-shadow: var(--gr-shadow-overlay);
+  text-decoration: underline;
+
+  &:not(:focus) {
+    @include sr-only;
+  }
+}
+
 // Buttons in these groups keep only their icon on phones, the label stays for assistive tech.
 @media (max-width: $breakpoint-sm) {
   .phone-icon-buttons .gr-button:has(.gr-button__icon) {

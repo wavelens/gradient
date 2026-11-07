@@ -4,6 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
+<a class="gr-skip-link" href="#main-content" (click)="skipToMain($event)">Skip to main content</a>
 <app-header />
 
 @if (authService.isAuthenticated()) {
@@ -11,7 +12,9 @@
   <app-whats-new-dialog />
 }
 
-<router-outlet />
+<main #main id="main-content" class="app-main" tabindex="-1">
+  <router-outlet />
+</main>
 <app-confirm-dialog />
 <gr-toast />
 

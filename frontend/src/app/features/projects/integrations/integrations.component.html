@@ -214,7 +214,7 @@
     <gr-form-field label="Webhook Secret" for="int-secret" hint="Copy this into the webhook secret field of the Git host. Store it now - it will not be shown again.">
       <div class="field-actions">
         <input grInput id="int-secret" [(ngModel)]="formData.secret" placeholder="Leave blank to omit verification" />
-        <button grButton type="button" icon="refresh" severity="secondary" (click)="generateSecret()"></button>
+        <button grButton type="button" icon="refresh" severity="secondary" aria-label="Generate secret" (click)="generateSecret()"></button>
       </div>
     </gr-form-field>
     <gr-form-field label="Allowed source IPs / CIDRs" for="int-allowed-ips" hint="One CIDR per line. Leave blank to accept webhooks from any source."
@@ -269,7 +269,7 @@
       <gr-form-field label="Webhook Secret" for="edit-secret">
         <div class="field-actions">
           <input grInput id="edit-secret" [(ngModel)]="formData.secret" placeholder="Leave blank to keep existing" />
-          <button grButton type="button" icon="refresh" severity="secondary" (click)="generateSecret()"></button>
+          <button grButton type="button" icon="refresh" severity="secondary" aria-label="Generate secret" (click)="generateSecret()"></button>
         </div>
         <small class="text-secondary">Currently {{ target.has_secret ? 'configured' : 'not set' }}. Entering a new value replaces it.</small>
         @if (target.has_secret) {

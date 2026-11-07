@@ -87,15 +87,15 @@ SPDX-License-Identifier: AGPL-3.0-only
       <gr-row icon="person">
         <span class="mono">alice</span>
         <div slot="actions">
-          <gr-select [options]="roleOptions" optionLabel="label" optionValue="value" [(ngModel)]="role" />
-          <button grButton icon="close" severity="danger"></button>
+          <gr-select [options]="roleOptions" optionLabel="label" optionValue="value" [(ngModel)]="role" ariaLabel="Role: alice" />
+          <button grButton icon="close" severity="danger" aria-label="Remove alice"></button>
         </div>
       </gr-row>
       <gr-row icon="person">
         <span class="mono">bob</span>
         <div slot="actions">
-          <gr-select [options]="roleOptions" optionLabel="label" optionValue="value" [(ngModel)]="role" />
-          <button grButton icon="close" severity="danger"></button>
+          <gr-select [options]="roleOptions" optionLabel="label" optionValue="value" [(ngModel)]="role" ariaLabel="Role: bob" />
+          <button grButton icon="close" severity="danger" aria-label="Remove bob"></button>
         </div>
       </gr-row>
     </gr-row-list>

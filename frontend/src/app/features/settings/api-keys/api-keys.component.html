@@ -189,7 +189,7 @@
   width="500px"
 >
   <p>Your new API key has been created. Copy it now - it will not be shown again.</p>
-  <gr-copy-field [value]="createdKeyValue()" />
+  <gr-copy-field label="New API key" [value]="createdKeyValue()" />
   <div grDialogFooter>
     <button grButton label="Done" (click)="showKeyDialog.set(false)"></button>
   </div>

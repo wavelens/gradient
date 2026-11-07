@@ -37,10 +37,10 @@
             <gr-icon [name]="option.icon" size="sm" />
             <span class="sidebar-item-label">{{ option.label }}</span>
             @if (option.value === 'log') {
-              <button type="button" class="sidebar-kebab" aria-label="Exec job actions" tabindex="-1"
-                      (click)="$event.stopPropagation(); jobActions.toggle($event)">
+              <span class="sidebar-kebab" aria-hidden="true"
+                    (click)="$event.stopPropagation(); jobActions.toggle($event)">
                 <gr-icon name="more_vert" size="sm" />
-              </button>
+              </span>
             }
           </div>
         }
@@ -107,12 +107,13 @@
       </div>
     </aside>
 
-    <main class="log-main">
+    <div class="log-main">
+      <h1 class="sr-only">Log of exec job</h1>
       <div class="info-bar">
         <button grButton class="sidebar-toggle" icon="view_list" severity="secondary" size="small"
                 aria-label="Job details" aria-controls="job-drawer" [attr.aria-expanded]="sidebarOpen()"
                 (click)="sidebarOpen.set(!sidebarOpen())"></button>
-        <div class="info-bar-left">
+        <div class="info-bar-left" grScrollRegion>
           <div class="info-metric">
             <gr-status-badge [phase]="phase(job.status)" [label]="job.status" />
           </div>
@@ -230,7 +231,7 @@
           </gr-log-viewer>
         }
       </div>
-    </main>
+    </div>
   </div>
 } @else if (errorMessage(); as message) {
   <div class="error-state">

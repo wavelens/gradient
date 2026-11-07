@@ -116,10 +116,10 @@
           Page {{ page() }} of {{ totalPages() }} &middot; {{ total() }} total
         </span>
         <div class="pagination-actions">
-          <button grButton icon="keyboard_double_arrow_left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(1)"></button>
-          <button grButton icon="chevron_left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(page() - 1)"></button>
-          <button grButton icon="chevron_right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)"></button>
-          <button grButton icon="keyboard_double_arrow_right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(totalPages())"></button>
+          <button grButton icon="keyboard_double_arrow_left" severity="secondary" aria-label="First" [disabled]="page() <= 1" (click)="goToPage(1)"></button>
+          <button grButton icon="chevron_left" severity="secondary" aria-label="Previous" [disabled]="page() <= 1" (click)="goToPage(page() - 1)"></button>
+          <button grButton icon="chevron_right" severity="secondary" aria-label="Next" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)"></button>
+          <button grButton icon="keyboard_double_arrow_right" severity="secondary" aria-label="Last" [disabled]="page() >= totalPages()" (click)="goToPage(totalPages())"></button>
         </div>
       </div>
     }

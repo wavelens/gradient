@@ -44,14 +44,14 @@ describe('MetricChartComponent', () => {
 
   it('shows the title as a heading by default', async () => {
     const fixture = await render();
-    expect(fixture.nativeElement.querySelector('h3')?.textContent).toContain('Build duration');
+    expect(fixture.nativeElement.querySelector('h2')?.textContent).toContain('Build duration');
   });
 
   it('drops the heading and card chrome when bare', async () => {
     const fixture = await render();
     fixture.componentInstance.bare.set(true);
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('h3')).toBeNull();
+    expect(fixture.nativeElement.querySelector('h2')).toBeNull();
     expect(fixture.nativeElement.querySelector('.metric-chart--bare')).toBeTruthy();
   });
 
@@ -83,7 +83,7 @@ describe('MetricChartComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('h3')?.textContent).toContain('Total Build Time');
+    expect(root.querySelector('h2')?.textContent).toContain('Total Build Time');
     expect(root.querySelector('.metric-chart__subtitle')?.textContent).toContain('Sum of all');
   });
 
@@ -94,7 +94,7 @@ describe('MetricChartComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('h3')?.textContent).toContain('Traffic over time');
+    expect(root.querySelector('h2')?.textContent).toContain('Traffic over time');
     expect(root.querySelector('.metric-chart')?.getAttribute('aria-busy')).toBe('true');
     expect(root.querySelector('gr-skeleton')).not.toBeNull();
 
@@ -111,7 +111,7 @@ describe('MetricChartComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('h3')).toBeNull();
+    expect(root.querySelector('h2')).toBeNull();
     expect(root.querySelector('.metric-chart__subtitle')).toBeNull();
   });
   it('projects a control into the chart header', async () => {

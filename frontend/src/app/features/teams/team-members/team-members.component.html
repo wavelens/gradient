@@ -29,8 +29,8 @@
             }
             @if (canEdit() && member.source !== 'state') {
               <gr-select [ngModel]="member.role" [options]="roles" optionLabel="label" optionValue="value"
-                (ngModelChange)="updateRole(member.user, $event)" />
-              <button grButton icon="close" severity="danger" size="small" [disabled]="busy() === member.user"
+                [ariaLabel]="'Role: ' + member.user" (ngModelChange)="updateRole(member.user, $event)" />
+              <button grButton icon="close" severity="danger" size="small" [attr.aria-label]="'Remove ' + member.user" [disabled]="busy() === member.user"
                 (click)="removeMember(member.user)"></button>
             } @else {
               <gr-badge severity="neutral">{{ member.role }}</gr-badge>

@@ -21,6 +21,7 @@ import {
   MenuComponent,
   type MenuItem,
   MessageBannerComponent,
+  ScrollRegionDirective,
   SelectButtonComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, StatusBadgeComponent, StatusIconComponent } from '@shared/ui';
@@ -69,7 +70,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
     RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MenuComponent, MessageBannerComponent,
     SelectButtonComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
-    LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent,
+    LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, ScrollRegionDirective,
   ],
   templateUrl: './exec-job-page.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

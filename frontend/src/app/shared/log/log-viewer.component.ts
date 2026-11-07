@@ -21,7 +21,7 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import type { LogSearchHit } from '@core/models';
-import { IconComponent, InputDirective } from '@gradient/ui/ui';
+import { IconComponent, InputDirective, ScrollRegionDirective } from '@gradient/ui/ui';
 import { ansiToHtml } from './ansi';
 import { searchLines, windowAround } from './log-window';
 
@@ -53,7 +53,7 @@ function extendsLog(shown: readonly string[], next: readonly string[]): boolean 
 @Component({
   selector: 'gr-log-viewer',
   standalone: true,
-  imports: [IconComponent, InputDirective],
+  imports: [IconComponent, InputDirective, ScrollRegionDirective],
   templateUrl: './log-viewer.component.html',
   styleUrl: './log-viewer.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,

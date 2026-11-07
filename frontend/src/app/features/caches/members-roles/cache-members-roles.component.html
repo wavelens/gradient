@@ -41,6 +41,7 @@
                   optionValue="name"
                   [disabled]="updatingRole() === member.id || rolesLoading()"
                   [appManagedDisable]="access()"
+                  [ariaLabel]="'Role: ' + member.id"
                   (ngModelChange)="updateMemberRole(member.id, $event)"
                 />
                 <button
@@ -48,6 +49,7 @@
                   grButton
                   icon="close"
                   severity="danger"
+                  [attr.aria-label]="'Remove ' + member.id"
                   [disabled]="updatingRole() !== null"
                   [appManagedDisable]="access()"
                   (click)="removeMember(member.id)"
@@ -128,7 +130,7 @@
                     grButton
                     icon="edit"
                     severity="secondary"
-                   
+                    [attr.aria-label]="'Edit role ' + role.name"
                     [disabled]="savingRole()"
                     [appManagedDisable]="roleAccess()"
                     (click)="openEditRoleDialog(role)"
@@ -138,7 +140,7 @@
                     grButton
                     icon="delete"
                     severity="danger"
-                   
+                    [attr.aria-label]="'Delete role ' + role.name"
                     [appManagedDisable]="roleAccess()"
                     (click)="deleteRole(role)"
                   ></button>

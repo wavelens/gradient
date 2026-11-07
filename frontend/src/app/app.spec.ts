@@ -50,6 +50,21 @@ describe('App', () => {
     expect(footer()).toBeNull();
   });
 
+  it('render pages into the single main landmark for skip link focus', async () => {
+    const fixture = TestBed.createComponent(App);
+    await TestBed.inject(Router).navigateByUrl('/');
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const mains = root.querySelectorAll('main');
+    expect(mains).toHaveLength(1);
+    expect(mains[0].textContent).toContain('page');
+    const skip = root.querySelector<HTMLAnchorElement>('.gr-skip-link')!;
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    skip.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(mains[0]);
+  });
+
   it('names the deployed commit next to the version in the footer', async () => {
     Object.assign(TestBed.inject(ConfigService), { backendVersion: '2.0.1', backendCommit: '455a55591f5f49fe6251d936cdc94d44a7c87df5' });
     const fixture = TestBed.createComponent(App);

@@ -5,12 +5,14 @@
  */
 
 import { Component, ChangeDetectionStrategy } from '@angular/core';
+import { ScrollRegionDirective } from '../scroll-region/scroll-region.directive';
 
 @Component({
   selector: 'gr-table',
   standalone: true,
+  imports: [ScrollRegionDirective],
   template: `
-    <div class="gr-table__scroll">
+    <div class="gr-table__scroll" grScrollRegion>
       <table><ng-content></ng-content></table>
     </div>
   `,

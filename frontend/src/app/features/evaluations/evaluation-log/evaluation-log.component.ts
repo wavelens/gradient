@@ -59,6 +59,7 @@ import {
   MenuItem,
   MessageBannerComponent,
   MessageService,
+  ScrollRegionDirective,
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent } from '@shared/ui';
@@ -70,7 +71,7 @@ import { saveResponse } from '@shared/download';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WritableDirective, ScrollRegionDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [

@@ -35,7 +35,7 @@
     </button>
   </div>
 }
-<div class="log-container" #logContainer (scroll)="onLogScroll($event)"
+<div class="log-container" #logContainer grScrollRegion (scroll)="onLogScroll($event)"
      (wheel)="onLogWheel($event)" (pointerdown)="stopFollowScroll()" (keydown)="stopFollowScroll()">
   @if (lineCount() > 0) {
     <div class="log-spacer" [style.height.px]="topSpacerPx()"></div>
