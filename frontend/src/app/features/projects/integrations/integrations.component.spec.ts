@@ -209,7 +209,7 @@ describe('IntegrationsComponent - required webhook events', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [baseIntegration]);
     await settled(fixture);
     const comp = fixture.componentInstance;
-    const events = comp.requiredWebhookEvents(baseIntegration.id);
+    const events = comp.requiredWebhookEvents(baseIntegration);
     expect(events).toContain('Issue Comment');
     expect(events).toContain('Pull Request Review');
   });
@@ -218,10 +218,19 @@ describe('IntegrationsComponent - required webhook events', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [baseIntegration]);
     await settled(fixture);
     const comp = fixture.componentInstance;
-    comp.setInboundGitHost(baseIntegration.id, 'gitlab');
-    const events = comp.requiredWebhookEvents(baseIntegration.id);
+    const events = comp.requiredWebhookEvents({ ...baseIntegration, git_host_type: 'gitlab' });
     expect(events).toContain('Merge request');
     expect(events).toContain('Comments (note)');
+  });
+});
+
+describe('IntegrationsComponent - webhook URL', () => {
+  it('shows the webhook URL from the server, not from the browser address', async () => {
+    const url = 'https://ci.example.com/api/v1/hooks/gitea/acme/gitea-prod';
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [{ ...baseIntegration, webhook_url: url }]);
+    await settled(fixture);
+    const inputs = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLInputElement>('gr-copy-field input'));
+    expect(inputs.map((input) => input.value)).toContain(url);
   });
 });
 

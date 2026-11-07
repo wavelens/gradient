@@ -112,18 +112,8 @@
                 </div>
               } @else if (integration.kind === 'inbound') {
                 <div class="integration-body">
-                  <gr-form-field label="Git Host" hint="This integration can serve webhooks from any supported Git host. Pick the one being configured.">
-                    <gr-tab-switch
-                      ariaLabel="Git host"
-                      [options]="inboundGitHostOptions"
-                      optionLabel="label"
-                      optionValue="value"
-                      [ngModel]="inboundGitHost(integration.id)"
-                      (ngModelChange)="setInboundGitHost(integration.id, $event)"
-                    />
-                  </gr-form-field>
-                  <gr-form-field label="Webhook URL">
-                    <gr-copy-field [value]="inboundUrl(integration)" />
+                  <gr-form-field label="Webhook URL" hint="Gradient generated this address from its own public URL. Enter it as the Webhook URL in the Git host.">
+                    <gr-copy-field [value]="integration.webhook_url ?? ''" />
                   </gr-form-field>
                   <gr-form-field label="Secret">
                     @if (integration.has_secret) {
@@ -133,7 +123,7 @@
                     }
                   </gr-form-field>
                   <gr-form-field label="Events to enable">
-                    <small class="text-secondary">Enable {{ requiredWebhookEvents(integration.id) }} on the Git host webhook. A push-only webhook never delivers PR CI or the <code>/gradient</code> comment commands.</small>
+                    <small class="text-secondary">Enable {{ requiredWebhookEvents(integration) }} on the Git host webhook. A push-only webhook never delivers PR CI or the <code>/gradient</code> comment commands.</small>
                   </gr-form-field>
                   <app-incoming-deliveries [project]="projectName" [integrationId]="integration.id" />
                 </div>
@@ -307,7 +297,7 @@
   @if (createdInbound(); as created) {
     <p>Copy the webhook URL and secret to the webhook settings in the Git host now. The secret is visible only one time.</p>
     <gr-form-field label="Webhook URL">
-      <gr-copy-field [value]="inboundUrl(created.integration)" />
+      <gr-copy-field [value]="created.integration.webhook_url ?? ''" />
     </gr-form-field>
     <gr-form-field label="Secret">
       <gr-copy-field [value]="created.secret" />

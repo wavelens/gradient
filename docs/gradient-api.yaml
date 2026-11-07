@@ -7159,10 +7159,7 @@ paths:
 
         Creating an inbound integration without `secret` makes the server generate one. The create response returns it once in `generated_secret`. Later responses only show `has_secret`.
 
-        One **inbound** integration can serve Gitea/Forgejo/GitLab
-        simultaneously - the caller picks the Git host path segment in the webhook
-        URL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).
-        The stored `git_host_type` is display metadata only for inbound.
+        ``webhook_url`` is the address to enter on the Git host. The public server URL and the stored ``git_host_type`` form its base. The same integration can also use ``/hooks/gitea/...``, ``/hooks/forgejo/...`` and ``/hooks/gitlab/...`` as path segments for other self-hosted hosts.
 
         `git_host_type: "github"` integrations are creatable by supplying
         `installation_id`. The server App must be configured (else `400`);
@@ -18074,6 +18071,10 @@ components:
         managed:
           type: boolean
         generated_secret:
+          type:
+          - string
+          - 'null'
+        webhook_url:
           type:
           - string
           - 'null'

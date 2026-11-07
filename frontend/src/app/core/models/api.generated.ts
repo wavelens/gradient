@@ -1418,6 +1418,7 @@ export interface IntegrationResponse {
   created_at: string;
   managed: boolean;
   generated_secret?: string | null;
+  webhook_url?: string | null;
 }
 
 export interface IntegrationSummaryResponse {

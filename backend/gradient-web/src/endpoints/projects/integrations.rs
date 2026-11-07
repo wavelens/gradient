@@ -51,12 +51,14 @@ pub struct IntegrationResponse {
     pub created_at: chrono::NaiveDateTime,
     pub managed: bool,
     pub generated_secret: Option<String>,
+    pub webhook_url: Option<String>,
 }
 
 impl IntegrationResponse {
     fn new(
         integration: MIntegration,
         installation: Option<gradient_entity::github_installation::Model>,
+        webhook_url: Option<String>,
     ) -> Self {
         Self {
             id: integration.id,
@@ -75,19 +77,43 @@ impl IntegrationResponse {
             created_at: integration.created_at,
             managed: integration.managed,
             generated_secret: None,
+            webhook_url,
         }
+    }
+}
+
+pub(crate) struct WebhookBase<'a> {
+    pub serve_url: &'a str,
+    pub project: &'a str,
+}
+
+impl WebhookBase<'_> {
+    pub(crate) fn url_for(&self, integration: &MIntegration) -> Option<String> {
+        let per_integration = integration.kind == IntegrationKind::Inbound
+            && integration.git_host_type != GitHostType::GitHub;
+        per_integration.then(|| {
+            format!(
+                "{}/api/v1/hooks/{}/{}/{}",
+                self.serve_url.trim_end_matches('/'),
+                integration.git_host_type.as_path_segment(),
+                self.project,
+                integration.name
+            )
+        })
     }
 }
 
 async fn integration_response(
     db: &impl sea_orm::ConnectionTrait,
+    base: &WebhookBase<'_>,
     m: MIntegration,
 ) -> Result<IntegrationResponse, WebError> {
     let install = match m.github_installation {
         Some(fk) => by_id::<gradient_entity::github_installation::Entity, _>(db, fk).await?,
         None => None,
     };
-    Ok(IntegrationResponse::new(m, install))
+    let webhook_url = base.url_for(&m);
+    Ok(IntegrationResponse::new(m, install, webhook_url))
 }
 
 fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>, WebError> {
@@ -226,10 +252,14 @@ pub async fn get_integrations(
     ProjectScope { project, db, .. }: ProjectScope<Requires<can::ManageIntegrations>>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationResponse>>>> {
     let rows = gradient_db::integrations::of_project(&db.web_db, project.id).await?;
+    let base = WebhookBase {
+        serve_url: &db.config.server.serve_url,
+        project: &project.name,
+    };
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        out.push(integration_response(&db.web_db, row).await?);
+        out.push(integration_response(&db.web_db, &base, row).await?);
     }
 
     Ok(ok_json(out))
@@ -263,7 +293,7 @@ pub async fn get_integration_summaries(
     operation_id = "createProjectIntegration",
     tag = "integrations",
     summary = "Create integration",
-    description = "Creates a named inbound or outbound integration. `secret` and\n`access_token` are stored encrypted and never returned in responses.\nName is unique within `(project, kind)`.\n\nCreating an inbound integration without `secret` makes the server generate one. The create response returns it once in `generated_secret`. Later responses only show `has_secret`.\n\nOne **inbound** integration can serve Gitea/Forgejo/GitLab\nsimultaneously - the caller picks the Git host path segment in the webhook\nURL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).\nThe stored `git_host_type` is display metadata only for inbound.\n\n`git_host_type: \"github\"` integrations are creatable by supplying\n`installation_id`. The server App must be configured (else `400`);\nthe installation id is validated against the App (invalid id returns\n`400`). An inbound and outbound integration pair is created\nautomatically, named `github-<account>`. Multiple installations per project\nare supported (one per GitHub account).",
+    description = "Creates a named inbound or outbound integration. `secret` and\n`access_token` are stored encrypted and never returned in responses.\nName is unique within `(project, kind)`.\n\nCreating an inbound integration without `secret` makes the server generate one. The create response returns it once in `generated_secret`. Later responses only show `has_secret`.\n\n``webhook_url`` is the address to enter on the Git host. The public server URL and the stored ``git_host_type`` form its base. The same integration can also use ``/hooks/gitea/...``, ``/hooks/forgejo/...`` and ``/hooks/gitlab/...`` as path segments for other self-hosted hosts.\n\n`git_host_type: \"github\"` integrations are creatable by supplying\n`installation_id`. The server App must be configured (else `400`);\nthe installation id is validated against the App (invalid id returns\n`400`). An inbound and outbound integration pair is created\nautomatically, named `github-<account>`. Multiple installations per project\nare supported (one per GitHub account).",
     params(ProjectPath),
     request_body = CreateIntegrationRequest,
     responses((status = OK, description = "Integration created", body = IntegrationResponse), WebError)
@@ -274,6 +304,10 @@ pub async fn put_integration(
     JsonBody(body): JsonBody<CreateIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let git_host = parse_git_host(&body.git_host_type)?;
+    let base = WebhookBase {
+        serve_url: &state.config.server.serve_url,
+        project: &project.name,
+    };
 
     if matches!(git_host, GitHostType::GitHub) {
         let installation_id = body
@@ -318,7 +352,9 @@ pub async fn put_integration(
             })?;
         txn.commit().await?;
 
-        return Ok(ok_json(integration_response(&state.web_db, created).await?));
+        return Ok(ok_json(
+            integration_response(&state.web_db, &base, created).await?,
+        ));
     }
 
     let kind = parse_kind(&body.kind)?;
@@ -389,7 +425,7 @@ pub async fn put_integration(
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?;
 
-    let mut response = integration_response(&state.web_db, integration).await?;
+    let mut response = integration_response(&state.web_db, &base, integration).await?;
     response.generated_secret = generated_secret;
     Ok(ok_json(response))
 }
@@ -422,8 +458,12 @@ pub async fn get_integration(
     let integration_id: IntegrationId = params.param("id")?;
 
     let integration = load_integration_in_project(&db.web_db, project.id, integration_id).await?;
+    let base = WebhookBase {
+        serve_url: &db.config.server.serve_url,
+        project: &project.name,
+    };
     Ok(ok_json(
-        integration_response(&db.web_db, integration).await?,
+        integration_response(&db.web_db, &base, integration).await?,
     ))
 }
 
@@ -560,7 +600,13 @@ pub async fn patch_integration(
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?;
 
-    Ok(ok_json(integration_response(&state.web_db, updated).await?))
+    let base = WebhookBase {
+        serve_url: &state.config.server.serve_url,
+        project: &project.name,
+    };
+    Ok(ok_json(
+        integration_response(&state.web_db, &base, updated).await?,
+    ))
 }
 
 #[utoipa::path(

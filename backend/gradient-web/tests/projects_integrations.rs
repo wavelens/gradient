@@ -369,6 +369,12 @@ async fn inbound_create_without_secret_returns_generated_secret_once() {
     let body: Value = res.json();
     let secret = body["message"]["generated_secret"].as_str().unwrap();
     assert_eq!(secret.len(), 64);
+    let webhook_url = body["message"]["webhook_url"].as_str().unwrap();
+    assert!(
+        webhook_url.ends_with("/api/v1/hooks/gitea/test-project/my-gitea-hook"),
+        "{webhook_url}"
+    );
+    assert!(webhook_url.starts_with("http"), "{webhook_url}");
     assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
 }
 

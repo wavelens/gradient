@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { IntegrationsService } from '@core/services/integrations.service';
+import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { injectProject } from '@core/resolvers/project-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
@@ -17,7 +18,6 @@ import { apiErrorMessage } from '@core/services/api.service';
 import {
   accessTo,
   GitHostType,
-  InboundGitHost,
   IntegrationKind,
   IntegrationResponse,
   CreateIntegrationRequest,
@@ -38,12 +38,12 @@ import {
   PageLayoutComponent,
   SelectComponent,
   SettingsSectionComponent,
-  TabSwitchComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, missingPermissionText } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { IncomingDeliveriesComponent } from '@shared/git';
+import { IncomingDeliveriesComponent, firstRepositoryHost, guessGitHost, webhookEvents } from '@shared/git';
+import { slugify } from '@shared/text';
 import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
 
 interface Option<T> {
@@ -74,7 +74,6 @@ interface Option<T> {
     SettingsSectionComponent,
     BadgeComponent,
     CopyFieldComponent,
-    TabSwitchComponent,
     FieldRowComponent,
     IncomingDeliveriesComponent,
   ],
@@ -86,6 +85,7 @@ export class IntegrationsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private integrationsService = inject(IntegrationsService);
   private resolvedProject = injectProject();
+  private tasksService = inject(TasksService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
@@ -147,18 +147,10 @@ export class IntegrationsComponent implements OnInit {
   editingIntegration = signal<IntegrationResponse | null>(null);
   errorMessage = signal<string | null>(null);
 
-  selectedGitHostByIntegration = signal<Record<string, InboundGitHost>>({});
-  copiedUrlId = signal<string | null>(null);
 
   kindOptions: Option<IntegrationKind>[] = [
     { label: 'Inbound (webhook)', value: 'inbound' },
     { label: 'Outbound (status reporter)', value: 'outbound' },
-  ];
-
-  inboundGitHostOptions: Option<InboundGitHost>[] = [
-    { label: 'Gitea', value: 'gitea' },
-    { label: 'Forgejo', value: 'forgejo' },
-    { label: 'GitLab', value: 'gitlab' },
   ];
 
   formData: {
@@ -204,9 +196,15 @@ export class IntegrationsComponent implements OnInit {
       : this.selfHostedGitHostOptions,
   );
 
+  repositoryHost = signal<string | null>(null);
+
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.loadIntegrations();
+    this.tasksService.getTasks(this.projectName).subscribe({
+      next: (page) => this.repositoryHost.set(firstRepositoryHost(page.items.map((t) => t.repository))),
+      error: () => {},
+    });
   }
 
   loadIntegrations(): void {
@@ -219,16 +217,6 @@ export class IntegrationsComponent implements OnInit {
     this.integrationsService.listProjectIntegrations(this.projectName).subscribe({
       next: (list) => {
         this.integrations.set(list);
-        const map: Record<string, InboundGitHost> = {};
-        for (const i of list) {
-          if (i.kind === 'inbound') {
-            map[i.id] =
-              i.git_host_type === 'gitea' || i.git_host_type === 'forgejo' || i.git_host_type === 'gitlab'
-                ? i.git_host_type
-                : 'gitea';
-          }
-        }
-        this.selectedGitHostByIntegration.set(map);
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -239,12 +227,13 @@ export class IntegrationsComponent implements OnInit {
   }
 
   openCreateDialog(): void {
+    const host = this.repositoryHost();
     this.formData = {
-      name: '',
+      name: host ? slugify(host) : '',
       display_name: '',
       kind: 'inbound',
-      git_host_type: 'gitea',
-      endpoint_url: '',
+      git_host_type: host ? guessGitHost(host, this.githubAppAvailable()) : 'forgejo',
+      endpoint_url: host ? `https://${host}` : '',
       secret: '',
       access_token: '',
       allowed_ips: '',
@@ -439,33 +428,8 @@ export class IntegrationsComponent implements OnInit {
       });
   }
 
-  inboundGitHost(id: string): InboundGitHost {
-    return this.selectedGitHostByIntegration()[id] ?? 'gitea';
-  }
-
-  setInboundGitHost(id: string, gitHost: InboundGitHost): void {
-    this.selectedGitHostByIntegration.update((m) => ({ ...m, [id]: gitHost }));
-  }
-
-  inboundUrl(integration: IntegrationResponse): string {
-    const gitHost = this.inboundGitHost(integration.id);
-    return `${window.location.origin}/api/v1/hooks/${gitHost}/${this.projectName}/${integration.name}`;
-  }
-
-  requiredWebhookEvents(id: string): string {
-    return this.inboundGitHost(id) === 'gitlab'
-      ? 'Push, Tag push, Merge request, Comments (note), and Releases events'
-      : 'Push, Pull Request, Issue Comment, Pull Request Comment, Pull Request Review, and Release';
-  }
-
-  copyInboundUrl(integration: IntegrationResponse): void {
-    const url = this.inboundUrl(integration);
-    navigator.clipboard.writeText(url).then(() => {
-      this.copiedUrlId.set(integration.id);
-      setTimeout(() => {
-        if (this.copiedUrlId() === integration.id) this.copiedUrlId.set(null);
-      }, 2000);
-    });
+  requiredWebhookEvents(integration: IntegrationResponse): string {
+    return webhookEvents(integration.git_host_type);
   }
 
   gitHostLabel(gitHost: string): string {

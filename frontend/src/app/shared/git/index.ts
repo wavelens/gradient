@@ -5,5 +5,6 @@
  */
 
 export * from './fetch-failure-hint';
+export * from './git-host';
 export * from './incoming-deliveries.component';
 export * from './repository-fetch-banner.component';
