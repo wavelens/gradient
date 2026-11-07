@@ -221,11 +221,12 @@ export class MembersRolesComponent implements OnInit {
     this.projectsService
       .addMember(this.projectName, this.newMember.user, this.newMember.role)
       .subscribe({
-        next: () => {
+        next: (outcome) => {
           this.addingMember.set(false);
           this.showAddMemberDialog.set(false);
-          this.notify.success('Member added');
+          this.notify.success(outcome || 'Member added');
           this.loadMembers();
+          this.loadInvitations();
         },
         error: (error: unknown) => {
           this.memberError.set(apiErrorMessage(error, 'Failed to add member.'));

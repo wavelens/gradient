@@ -199,6 +199,17 @@ describe('MembersRolesComponent - writes', () => {
     expect(fixture.componentInstance.showAddMemberDialog()).toBe(true);
     expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
+
+  it('reports an invitation with the server message and lists it at once', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    addMember.mockReturnValue(of('Invitation sent'));
+    await settled(fixture);
+    const loadInvitations = vi.spyOn(fixture.componentInstance, 'loadInvitations');
+    fixture.componentInstance.newMember = { user: 'dave', role: 'Admin' };
+    fixture.componentInstance.addMember();
+    expect(notify.success).toHaveBeenCalledWith('Invitation sent');
+    expect(loadInvitations).toHaveBeenCalled();
+  });
 });
 
 describe('MembersRolesComponent - role form', () => {
