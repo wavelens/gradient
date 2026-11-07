@@ -10,4 +10,5 @@ export * from './permission-label';
 export * from './relative-time';
 export * from './repository-url';
 export * from './slug';
+export * from './subscription-mode';
 export * from './units';

@@ -80,10 +80,11 @@
 </gr-page-layout>
 
 <app-create-cache-dialog
-  header="Create and Subscribe to Cache"
-  submitLabel="Create and Subscribe"
+  [header]="createForSubscribe() ? 'Create Cache' : 'Create and Subscribe to Cache'"
+  [submitLabel]="createForSubscribe() ? 'Create' : 'Create and Subscribe'"
   [(visible)]="showCreateDialog"
-  (created)="subscribeCreated($event)"
+  (visibleChange)="createDialogClosed($event)"
+  (created)="cacheCreated($event)"
 />
 
 <!-- Subscribe Dialog -->
@@ -106,6 +107,12 @@
       (enter)="subscribeCache()"
     />
   </gr-form-field>
+  @if (canCreateCache()) {
+    <p class="create-instead">
+      Can't find a cache?
+      <button grButton label="Create new cache" icon="add" severity="secondary" size="small" (click)="createInsteadOfPick()"></button>
+    </p>
+  }
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showSubscribeDialog.set(false)" [disabled]="subscribing()"></button>
     <button

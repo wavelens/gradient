@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, provideRouter } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
@@ -21,6 +21,10 @@ import { AccessState } from '@core/models/access.model';
 import { By } from '@angular/platform-browser';
 import { CreateCacheDialogComponent } from '@shared/forms';
 
+function routeStub(access: AccessState, query: Record<string, string>): Partial<ActivatedRoute> {
+  const route = projectRouteStub('acme', access);
+  return { ...route, snapshot: { ...route.snapshot, queryParamMap: convertToParamMap(query) } as never };
+}
 
 function findByText(root: HTMLElement, text: string): HTMLElement | null {
   const target = text.toLowerCase();
@@ -34,7 +38,7 @@ const unsubscribeCache = vi.fn((): Observable<unknown> => of(undefined));
 const notify = { success: vi.fn(), failure: vi.fn() };
 const confirm = vi.fn();
 
-function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponent> {
+function setup(access: AccessState, query: Record<string, string> = {}): ComponentFixture<CacheSubscriptionsComponent> {
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   subscribeCache.mockReset().mockReturnValue(of(undefined));
   unsubscribeCache.mockReset().mockReturnValue(of(undefined));
@@ -46,7 +50,7 @@ function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponen
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useFactory: () => projectRouteStub('acme', access) },
+      { provide: ActivatedRoute, useFactory: () => routeStub(access, query) },
       {
         provide: ProjectsService,
         useValue: {
@@ -62,7 +66,7 @@ function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponen
       },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
-      { provide: CachesService, useValue: {} },
+      { provide: CachesService, useValue: { getCaches: () => of({ items: [] }), getPublicCaches: () => of([]) } },
       { provide: ConfigService, useValue: { createCache: 'all', canCreate: () => true } },
     ],
   });
@@ -114,6 +118,31 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     expect(dialog.visible()).toBe(true);
     dialog.created.emit('fresh');
     expect(subscribeCache).toHaveBeenCalledWith('acme', 'fresh');
+  });
+
+  it('opens Subscribe with the cache picked on the cache page', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, { subscribe: 'nixpkgs' });
+    await settled(fixture);
+    expect(fixture.componentInstance.showSubscribeDialog()).toBe(true);
+    expect(fixture.componentInstance.newCacheName).toBe('nixpkgs');
+  });
+
+  it('returns to Subscribe with a cache created from it selected', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const cmp = fixture.componentInstance;
+    cmp.openSubscribeDialog();
+    await settled(fixture);
+    findByText(document.body, 'create new cache')!.click();
+    await settled(fixture);
+    expect(cmp.showSubscribeDialog()).toBe(false);
+    const dialog = fixture.debugElement.query(By.directive(CreateCacheDialogComponent)).componentInstance as CreateCacheDialogComponent;
+    dialog.created.emit('fresh');
+    dialog.visible.set(false);
+    await settled(fixture);
+    expect(subscribeCache).not.toHaveBeenCalled();
+    expect(cmp.showSubscribeDialog()).toBe(true);
+    expect(cmp.newCacheName).toBe('fresh');
   });
 
   it('hides Create Cache under read-only access', async () => {

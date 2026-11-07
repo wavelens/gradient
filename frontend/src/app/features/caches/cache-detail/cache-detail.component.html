@@ -25,6 +25,32 @@
       }
     </div>
 
+  <gr-settings-section class="used-by" title="Projects using this cache" description="Projects that push builds to this cache or read from this cache." maxWidth="none">
+    @if (authService.isAuthenticated()) {
+      <button slot="actions" grButton label="Use with project" icon="add_link" severity="secondary" size="small" (click)="useDialogOpen.set(true)"></button>
+    }
+    <gr-load-state [loading]="!subscribers() && !subscribersError()" [error]="subscribersError()" flat
+                   errorTitle="Failed to load the projects using this cache" (retry)="loadSubscribers()">
+      @if (subscribers(); as used) {
+        @if (used.projects.length) {
+          <gr-row-list>
+            @for (project of used.projects; track project.project) {
+              <gr-row icon="folder" [link]="links.project(project.project)" [linkLabel]="project.project_display_name">
+                {{ project.project_display_name }}
+                <gr-badge severity="neutral">{{ modeLabel(project.mode) }}</gr-badge>
+              </gr-row>
+            }
+          </gr-row-list>
+        } @else if (!used.hidden) {
+          <p class="used-by-empty">No projects use this cache yet.</p>
+        }
+        @if (used.hidden) {
+          <p class="used-by-empty">{{ used.projects.length ? 'and ' : '' }}{{ used.hidden }} private {{ used.hidden === 1 ? 'project' : 'projects' }} that can't be shown</p>
+        }
+      }
+    </gr-load-state>
+  </gr-settings-section>
+
   <gr-load-state [error]="statsError()" errorTitle="Failed to load cache stats" (retry)="loadStats()">
   <div class="section">
     <h2>Storage</h2>
@@ -130,4 +156,5 @@
   </gr-settings-section>
 
   </gr-page-layout>
+  <app-use-cache-dialog [cache]="cacheName" [(visible)]="useDialogOpen" />
 }

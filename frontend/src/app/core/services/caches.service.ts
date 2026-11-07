@@ -23,6 +23,7 @@ import {
   NarStats,
   PendingInvitationItem,
   SubscriptionRequestItem,
+  CacheSubscribersResponse,
   MakeCacheRequest,
   PatchCacheRequest,
   CacheResponse,
@@ -150,6 +151,10 @@ export class CachesService {
 
   revokeInvitation(cache: string, user: string): Observable<string> {
     return this.api.delete<string>(`caches/${cache}/invitations`, { user });
+  }
+
+  getSubscribers(cache: string): Observable<CacheSubscribersResponse> {
+    return this.api.get<CacheSubscribersResponse>(`caches/${cache}/subscribers`);
   }
 
   getSubscriptionRequests(cache: string): Observable<SubscriptionRequestItem[]> {

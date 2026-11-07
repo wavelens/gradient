@@ -23,6 +23,7 @@ describe('CacheDetailComponent cache usage instructions', () => {
     const caches = {
       getCache: vi.fn().mockReturnValue(of({ name: 'main', public_key: OWN_KEY, public: true })),
       getCacheStats: vi.fn().mockReturnValue(of(null)),
+      getSubscribers: () => NEVER,
     };
     TestBed.configureTestingModule({
       imports: [CacheDetailComponent],
@@ -74,7 +75,7 @@ describe('CacheDetailComponent loading', () => {
         provideRouter([]),
         provideHttpClient(),
         provideHttpClientTesting(),
-        { provide: CachesService, useValue: { getCache: () => NEVER, getCacheStats: () => NEVER } },
+        { provide: CachesService, useValue: { getCache: () => NEVER, getCacheStats: () => NEVER, getSubscribers: () => NEVER } },
         {
           provide: ActivatedRoute,
           useValue: {
@@ -103,7 +104,7 @@ describe('CacheDetailComponent loading', () => {
         provideRouter([]),
         provideHttpClient(),
         provideHttpClientTesting(),
-        { provide: CachesService, useValue: { getCache: () => NEVER, getCacheStats } },
+        { provide: CachesService, useValue: { getCache: () => NEVER, getCacheStats, getSubscribers: () => NEVER } },
         {
           provide: ActivatedRoute,
           useValue: {
@@ -141,10 +142,11 @@ describe('CacheDetailComponent header', () => {
           useValue: {
             getCache: () => of({ name: 'main', display_name: 'Main', public_key: OWN_KEY, public: true, active: true }),
             getCacheStats: () => NEVER,
+            getSubscribers: () => of({ projects: [{ project: 'acme', project_display_name: 'Acme', mode: 'ReadWrite' }], hidden: 2 }),
           },
         },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) } } },
-        { provide: AuthService, useValue: { isAuthenticated: () => authenticated } },
+        { provide: AuthService, useValue: { isAuthenticated: () => authenticated, user: () => null } },
         { provide: StarsService, useValue: { starred, set: () => of(true) } },
       ],
     });
@@ -161,5 +163,14 @@ describe('CacheDetailComponent header', () => {
 
   it('shows no star to a guest', () => {
     expect(render(false).root.querySelector('gr-star-button')).toBeNull();
+  });
+
+  it('names the projects using the cache with a link and counts the private ones', () => {
+    const { root } = render(false);
+    const section = root.querySelector('.used-by')!;
+    expect(section.querySelector('.row-link')?.getAttribute('href')).toBe('/project/acme');
+    expect(section.textContent).toContain('Read & Write');
+    expect(section.textContent).toContain('and 2 private projects');
+    expect(section.textContent).not.toContain('Use with project');
   });
 });

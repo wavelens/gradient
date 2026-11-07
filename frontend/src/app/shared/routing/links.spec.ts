@@ -34,6 +34,7 @@ const every: UrlTree[] = [
   ...(['settings', 'members', 'workers', 'integrations', 'secrets', 'webhooks', 'caches'] as const)
     .map((page) => links.projectPage('p', page)),
   links.workerMetrics('p', 'w'),
+  links.subscribeToCache('p', 'c'),
   links.task('p', 't', 'e'),
   ...(['settings', 'triggers', 'actions', 'flake-inputs', 'metrics'] as const).map((page) => links.taskPage('p', 't', page)),
   links.entryPointMetrics('p', 't', 'packages.x86_64-linux.hello'),

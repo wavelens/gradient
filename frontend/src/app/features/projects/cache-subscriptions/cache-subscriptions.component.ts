@@ -79,6 +79,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   access = computed(() => accessTo(this.resolvedProject(), 'manageSubscriptions'));
   canCreateCache = computed(() => this.config.canCreate(this.config.createCache, this.auth.user()?.superuser === true));
   showCreateDialog = signal(false);
+  createForSubscribe = signal(false);
 
   loading = signal(true);
   loadError = signal<unknown>(null);
@@ -96,6 +97,8 @@ export class CacheSubscriptionsComponent implements OnInit {
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.loadCaches();
+    const preselected = this.route.snapshot.queryParamMap.get('subscribe');
+    if (preselected) this.openSubscribeDialog(preselected);
   }
 
   loadCaches(): void {
@@ -113,8 +116,8 @@ export class CacheSubscriptionsComponent implements OnInit {
     });
   }
 
-  openSubscribeDialog(): void {
-    this.newCacheName = '';
+  openSubscribeDialog(cache = ''): void {
+    this.newCacheName = cache;
     this.errorMessage.set(null);
     this.cacheSuggestions.set([]);
     this.showSubscribeDialog.set(true);
@@ -151,9 +154,26 @@ export class CacheSubscriptionsComponent implements OnInit {
     );
   }
 
-  subscribeCreated(name: string): void {
+  createInsteadOfPick(): void {
+    this.showSubscribeDialog.set(false);
+    this.createForSubscribe.set(true);
+    this.showCreateDialog.set(true);
+  }
+
+  cacheCreated(name: string): void {
+    if (this.createForSubscribe()) {
+      this.createForSubscribe.set(false);
+      this.openSubscribeDialog(name);
+      return;
+    }
     this.newCacheName = name;
     this.subscribeCache();
+  }
+
+  createDialogClosed(visible: boolean): void {
+    if (visible || !this.createForSubscribe()) return;
+    this.createForSubscribe.set(false);
+    this.showSubscribeDialog.set(true);
   }
 
   subscribeCache(): void {

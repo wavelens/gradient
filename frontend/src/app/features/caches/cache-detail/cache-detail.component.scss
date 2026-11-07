@@ -10,3 +10,13 @@
   gap: $spacing-md;
   margin-bottom: $spacing-lg;
 }
+.used-by {
+  display: block;
+  margin-bottom: $spacing-lg;
+}
+
+.used-by-empty {
+  margin: $spacing-sm 0 0;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+}

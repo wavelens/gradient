@@ -44,8 +44,11 @@
             @if (!u.active) {
               <gr-badge severity="danger">Inactive</gr-badge>
             }
-            <span slot="meta">{{ u.url ?? u.upstream_cache_id }}</span>
+            <span slot="meta">{{ u.url ?? u.upstream_cache_name ?? u.remote_cache ?? '' }}</span>
             <div slot="actions">
+              @if (u.upstream_cache_name; as upstream) {
+                <a grButton icon="arrow_forward" severity="secondary" label="Open cache" [routerLink]="links.cache(upstream)"></a>
+              }
               @if (u.kind === 'http') {
                 <button
                   *appWritable="access()"

@@ -98,8 +98,8 @@ export class CreateCacheDialogComponent {
     this.caches.createCache(this.cache).subscribe({
       next: () => {
         this.creating.set(false);
-        this.visible.set(false);
         this.created.emit(this.cache.name);
+        this.visible.set(false);
       },
       error: (error: Error) => {
         this.error.set(error?.message || 'Failed to create cache.');

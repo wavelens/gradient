@@ -46,6 +46,7 @@ export const links = {
   projects: () => url(['projects']),
   project: (project: string) => url(['project', project]),
   projectPage: (project: string, page: ProjectPage) => url(['project', project, page]),
+  subscribeToCache: (project: string, cache: string) => url(['project', project, 'caches'], { subscribe: cache }),
   workerMetrics: (project: string, worker: string) => url(['project', project, 'workers', worker, 'metrics']),
 
   task: (project: string, task: string, evaluation?: string | null) =>

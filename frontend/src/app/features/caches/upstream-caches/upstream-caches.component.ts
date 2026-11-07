@@ -35,6 +35,8 @@ import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
 import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, ProtocolProbe } from '@core/models';
 import { fieldChecks } from '@shared/forms';
+import { links } from '@shared/routing';
+import { SUBSCRIPTION_MODES, subscriptionModeLabel } from '@shared/text';
 
 type UpstreamErrors = Partial<Record<'cache_name' | 'display_name' | 'url' | 'remote_cache' | 'public_key', string | null>>;
 
@@ -139,11 +141,7 @@ export class UpstreamCachesComponent implements OnInit {
     http1_only: false,
   };
 
-  readonly modes: { value: CacheSubscriptionMode; label: string }[] = [
-    { value: 'ReadWrite', label: 'Read & Write' },
-    { value: 'ReadOnly', label: 'Read Only' },
-    { value: 'WriteOnly', label: 'Write Only' },
-  ];
+  readonly modes = SUBSCRIPTION_MODES;
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
@@ -379,9 +377,8 @@ export class UpstreamCachesComponent implements OnInit {
     }
   }
 
-  modeLabel(mode: CacheSubscriptionMode): string {
-    return this.modes.find((m) => m.value === mode)?.label ?? mode;
-  }
+  protected readonly modeLabel = subscriptionModeLabel;
+  protected readonly links = links;
 }
 
 export function probeSummary(probe: ProtocolProbe): string {

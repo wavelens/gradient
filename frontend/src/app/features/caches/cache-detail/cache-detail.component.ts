@@ -21,6 +21,8 @@ import {
   FormFieldComponent,
   LoadStateComponent,
   PageLayoutComponent,
+  RowComponent,
+  RowListComponent,
   TabSwitchComponent,
   SettingsSectionComponent,
   StatCardComponent,
@@ -37,10 +39,12 @@ import {
   CacheMetricPoint,
   StorageMetricPoint,
   CacheResponse,
+  CacheSubscribersResponse,
   TrafficKind,
 } from '@core/models';
 import { docsUrl } from '@core/docs';
-import { formatBytes, formatCount } from '@shared/text';
+import { formatBytes, formatCount, subscriptionModeLabel } from '@shared/text';
+import { UseCacheDialogComponent } from './use-cache-dialog.component';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { FormsModule } from '@angular/forms';
 import { links } from '@shared/routing';
@@ -75,6 +79,9 @@ const CHART_COLORS = {
     TabSwitchComponent,
     StarButtonComponent,
     FormsModule,
+    RowListComponent,
+    RowComponent,
+    UseCacheDialogComponent,
   ],
   templateUrl: './cache-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -107,6 +114,10 @@ export class CacheDetailComponent implements OnInit {
   activeWindow = queryParamSignal<Window>('window', 'hours', oneOf(this.windows.map((w) => w.key)));
   traffic = queryParamSignal<TrafficKind>('traffic', 'total', oneOf(this.trafficOptions.map((o) => o.key)));
   starred = signal(false);
+  subscribers = signal<CacheSubscribersResponse | null>(null);
+  subscribersError = signal<unknown>(null);
+  useDialogOpen = signal(false);
+  protected readonly modeLabel = subscriptionModeLabel;
 
   setWindow(value: unknown): void {
     this.activeWindow.set(value as Window);
@@ -185,6 +196,15 @@ export class CacheDetailComponent implements OnInit {
     this.cacheUrl = `${this.serverUrl}/cache/${this.cacheName}`;
     this.loadCache();
     this.loadStats();
+    this.loadSubscribers();
+  }
+
+  loadSubscribers(): void {
+    this.subscribersError.set(null);
+    this.cachesService.getSubscribers(this.cacheName).subscribe({
+      next: (used) => this.subscribers.set(used),
+      error: (error: unknown) => this.subscribersError.set(error),
+    });
   }
 
   loadCache(): void {

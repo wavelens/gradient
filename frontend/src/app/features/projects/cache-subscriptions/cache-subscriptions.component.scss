@@ -16,3 +16,12 @@
   gap: $spacing-md;
 
   gr-icon { color: var(--gr-text-secondary); }}
+
+.create-instead {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin: $spacing-sm 0 0;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+}
