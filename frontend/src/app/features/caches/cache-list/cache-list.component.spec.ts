@@ -5,7 +5,9 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
+import { By } from '@angular/platform-browser';
+import { CreateCacheDialogComponent } from '@shared/forms';
 import { Observable, of, throwError } from 'rxjs';
 import { CacheListComponent } from './cache-list.component';
 import { CachesService } from '@core/services/caches.service';
@@ -74,5 +76,12 @@ describe('CacheListComponent', () => {
   it('offers to create a cache when the user has none and nothing public exists', () => {
     const { element } = setup({ authenticated: true, getCaches: () => of({ items: [] }), getPublicCaches: () => of([]) });
     expect(element.textContent).toContain('No caches yet');
+  });
+
+  it('opens the created cache', () => {
+    const { fixture } = setup({ authenticated: true });
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    fixture.debugElement.query(By.directive(CreateCacheDialogComponent)).componentInstance.created.emit('team-cache');
+    expect(String(navigate.mock.calls[0][0])).toBe('/caches/team-cache');
   });
 });

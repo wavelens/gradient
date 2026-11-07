@@ -6,7 +6,7 @@
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '@core/services/auth.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -66,6 +66,7 @@ export class ProjectDetailComponent implements OnInit {
   private stars = inject(StarsService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private router = inject(Router);
   protected names = nameAvailability(
     (name) => this.tasksService.checkTaskNameAvailable(this.projectName, name),
     RESERVED_TASK_NAMES,
@@ -155,6 +156,7 @@ export class ProjectDetailComponent implements OnInit {
 
     this.creating.set(true);
     this.createError.set(null);
+    const created = this.newTask.name;
     this.tasksService
       .createTask(this.projectName, this.newTask)
       .subscribe({
@@ -162,7 +164,7 @@ export class ProjectDetailComponent implements OnInit {
           this.creating.set(false);
           this.showCreateDialog.set(false);
           this.notify.success('Task created');
-          this.loadTasks();
+          this.router.navigateByUrl(links.task(this.projectName, created));
         },
         error: (error: unknown) => {
           this.createError.set(apiErrorMessage(error, 'Failed to create task.'));

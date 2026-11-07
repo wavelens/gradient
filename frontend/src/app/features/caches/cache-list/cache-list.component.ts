@@ -6,7 +6,7 @@
 
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -48,6 +48,7 @@ export class CacheListComponent implements OnInit {
   private cachesService = inject(CachesService);
   protected authService = inject(AuthService);
   private config = inject(ConfigService);
+  private router = inject(Router);
 
   get canCreateCache(): boolean {
     if (!this.authService.isAuthenticated()) return false;
@@ -110,6 +111,10 @@ export class CacheListComponent implements OnInit {
 
   openCreateDialog(): void {
     this.showCreateDialog.set(true);
+  }
+
+  openCreatedCache(name: string): void {
+    this.router.navigateByUrl(links.cache(name));
   }
 
   get activeCaches() {

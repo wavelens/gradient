@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { Observable, Subject, of, throwError } from 'rxjs';
 import { ProjectListComponent } from './project-list.component';
 import { AuthService } from '@core/services/auth.service';
@@ -72,6 +72,18 @@ describe('ProjectListComponent', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Project name acme is taken');
     expect(cmp.showCreateDialog()).toBe(true);
+  });
+
+  it('opens the created project', () => {
+    const { fixture } = render(() => of(EMPTY_PAGE));
+    (TestBed.inject(ProjectsService) as unknown as { createProject: () => unknown }).createProject = () => of('Project created');
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const cmp = fixture.componentInstance;
+    cmp.openCreateDialog();
+    cmp.newProject.name = 'acme';
+    cmp.newProject.display_name = 'Acme';
+    cmp.createProject();
+    expect(String(navigate.mock.calls[0][0])).toBe('/project/acme');
   });
 
   it('ignores Enter while the project name is still being checked', () => {

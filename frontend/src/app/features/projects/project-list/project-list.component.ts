@@ -6,7 +6,7 @@
 
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
@@ -63,6 +63,7 @@ export class ProjectListComponent implements OnInit {
   protected authService = inject(AuthService);
   private config = inject(ConfigService);
   private notify = inject(NotifyService);
+  private router = inject(Router);
   protected names = nameAvailability((name) => this.projectsService.checkProjectNameAvailable(name));
 
   get canCreateProject(): boolean {
@@ -163,12 +164,13 @@ export class ProjectListComponent implements OnInit {
 
     this.creating.set(true);
     this.createError.set(null);
+    const created = this.newProject.name;
     this.projectsService.createProject(this.newProject).subscribe({
       next: () => {
         this.creating.set(false);
         this.showCreateDialog.set(false);
         this.notify.success('Project created');
-        this.loadProjects();
+        this.router.navigateByUrl(links.project(created));
       },
       error: (error: unknown) => {
         this.createError.set(apiErrorMessage(error, 'Failed to create project.'));

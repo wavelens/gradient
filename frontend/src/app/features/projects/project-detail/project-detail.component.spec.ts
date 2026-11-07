@@ -7,7 +7,7 @@
 import { EVERY_PERMISSION } from '@core/resolvers/access-route.testing';
 import type { ProjectResponse } from '@core/models';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { Observable, Subject, of, throwError } from 'rxjs';
 import { ProjectDetailComponent } from './project-detail.component';
 import { AuthService } from '@core/services/auth.service';
@@ -115,6 +115,17 @@ describe('ProjectDetailComponent create task', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Repository is not reachable');
     expect(cmp.showCreateDialog()).toBe(true);
+  });
+
+  it('opens the created task', () => {
+    const { fixture } = render(true);
+    (TestBed.inject(TasksService) as unknown as { createTask: () => unknown }).createTask = () => of('Task created');
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const cmp = fixture.componentInstance;
+    cmp.showCreateDialog.set(true);
+    cmp.newTask = { name: 'web', display_name: 'Web', description: '', repository: 'https://github.com/acme/web', wildcard: 'packages.x86_64-linux.**' };
+    cmp.createTask();
+    expect(String(navigate.mock.calls[0][0])).toBe('/project/acme/task/web');
   });
 
   it('sends one create and stays open while the request runs', () => {
