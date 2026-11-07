@@ -74,6 +74,7 @@
               <button
                 *appWritable="access()"
                 grButton
+                label="Edit"
                 icon="edit"
                 severity="secondary"
                 [attr.aria-label]="'Edit upstream cache ' + u.display_name"
@@ -83,6 +84,7 @@
               <button
                 *appWritable="access()"
                 grButton
+                label="Delete"
                 icon="delete"
                 severity="danger"
                 [attr.aria-label]="'Delete upstream cache ' + u.display_name"

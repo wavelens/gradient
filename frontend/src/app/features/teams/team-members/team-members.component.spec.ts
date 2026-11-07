@@ -208,7 +208,7 @@ describe('TeamMembersComponent', () => {
     const invitations = [{ user: 'carol', name: 'Carol', role: 'member', created_at: '2026-10-01T10:00:00', expires_at: '2026-10-08T10:00:00' }];
     const { fixture, confirm, revokeInvitation } = setup(undefined, false, undefined, invitations);
     const revoke = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button')).find(
-      (b) => b.textContent?.trim() === 'Revoke',
+      (b) => b.querySelector('.gr-button__label')?.textContent?.trim() === 'Revoke',
     )!;
     revoke.click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Revoke invitation', target: 'carol' }));

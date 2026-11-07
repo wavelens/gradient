@@ -47,6 +47,7 @@
                 <button
                   *appWritable="access()"
                   grButton
+                  label="Remove"
                   icon="close"
                   severity="danger"
                   [attr.aria-label]="'Remove ' + member.id"
@@ -128,6 +129,7 @@
                   <button
                     *appWritable="roleAccess()"
                     grButton
+                    label="Edit"
                     icon="edit"
                     severity="secondary"
                     [attr.aria-label]="'Edit role ' + role.name"
@@ -138,6 +140,7 @@
                   <button
                     *appWritable="roleAccess()"
                     grButton
+                    label="Delete"
                     icon="delete"
                     severity="danger"
                     [attr.aria-label]="'Delete role ' + role.name"
