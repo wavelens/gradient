@@ -190,17 +190,14 @@ export class ApiKeysComponent implements OnInit {
     this.editingKey.set(key);
     this.formName = key.name;
     this.formExpiresInDays = null;
+    this.formScope = key.cache ? 'cache' : key.project ? 'project' : 'none';
+    this.formProject = key.project ?? null;
+    this.formCache = key.cache ?? null;
+    if (key.cache && !this.cacheOptions().some((option) => option.value === key.cache)) {
+      this.cacheOptions.update((options) => [{ label: key.cache!, value: key.cache! }, ...options]);
+    }
     this.formPermissions = this.permissionTemplate(false);
     for (const p of key.permissions) this.formPermissions[p] = true;
-    if (key.project) {
-      this.formScope = 'project';
-      this.formProject = key.project;
-      this.formCache = null;
-    } else {
-      this.formScope = 'none';
-      this.formProject = null;
-      this.formCache = null;
-    }
     this.formAllowedIps = (key.allowed_ips ?? []).join('\n');
     this.errorMessage.set(null);
     this.attempted.set(false);
@@ -226,9 +223,17 @@ export class ApiKeysComponent implements OnInit {
     return this.formScope === 'cache' ? this.availableCachePermissions() : this.availablePermissions();
   }
 
+  /// An edit request cannot move a key between a cache pin and a project pin.
+  scopeChoices(): { label: string; value: ScopeType }[] {
+    const editing = this.editingKey();
+    if (!editing) return this.scopeOptions;
+    if (editing.cache) return this.scopeOptions.filter((option) => option.value === 'cache');
+    return this.scopeOptions.filter((option) => option.value !== 'cache');
+  }
+
   private permissionTemplate(value: boolean): Record<string, boolean> {
     const out: Record<string, boolean> = {};
-    for (const p of this.availablePermissions()) out[p.id] = value;
+    for (const p of this.activePermissions()) out[p.id] = value;
     return out;
   }
 
@@ -347,6 +352,7 @@ export class ApiKeysComponent implements OnInit {
   }
 
   scopeBadge(key: ApiKeyInfo): string {
+    if (key.cache) return `Cache ${key.cache}`;
     if (key.project) return key.project;
     return 'Any project';
   }

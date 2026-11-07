@@ -12283,11 +12283,7 @@ paths:
       tags:
       - user
       summary: Update an API key's configurable options
-      description: |-
-        Edit the key's name, permission set, or project pin in place.
-        Permissions replace the existing set wholesale. State-managed keys
-        cannot be edited. Cannot be called from an API-key-authenticated
-        request - sessions only.
+      description: Edit the key name, permission set, and pin to a project in place. The new permissions replace the existing set in full. Cache-pinned keys hold only cache permissions. Those keys hold only a subset of the caller's permissions on that cache. A key pinned to a cache can't also have a pin to a project. State-managed keys don't allow edits. A call with API-key authentication can't reach this endpoint. Use a session instead.
       operationId: patchUserKey
       parameters:
       - name: api_id
@@ -14115,6 +14111,10 @@ components:
           items:
             type: string
         project:
+          type:
+          - string
+          - 'null'
+        cache:
           type:
           - string
           - 'null'

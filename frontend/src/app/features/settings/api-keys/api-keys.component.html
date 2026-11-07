@@ -111,7 +111,7 @@
 
   <gr-form-field label="Scope">
     <gr-select-button
-      [options]="scopeOptions"
+      [options]="scopeChoices()"
       [(ngModel)]="formScope"
       optionLabel="label"
       optionValue="value"
@@ -140,6 +140,7 @@
         optionLabel="label"
         optionValue="value"
         [(ngModel)]="formCache"
+        [disabled]="!!editingKey()"
         placeholder="Select a cache"
       />
     </gr-form-field>

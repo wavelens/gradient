@@ -211,6 +211,26 @@ describe('ApiKeysComponent - edits', () => {
     expect(updateApiKey).toHaveBeenCalledWith('k1', { name: 'CI key 2' });
   });
 
+  it('shows the cache and cache permissions of a cache-scoped key and keeps them on save', () => {
+    const cacheKey: ApiKeyInfo = { ...unmanagedKey, cache: 'nix-cache', permissions: ['viewCache', 'readStore'] };
+    const updateApiKey = vi.fn(() => of(cacheKey));
+    const fixture = setup([cacheKey], { updateApiKey });
+    const component = fixture.componentInstance;
+    component.availableCachePermissions.set([
+      { id: 'viewCache', mutating: false },
+      { id: 'readStore', mutating: false },
+      { id: 'writeStore', mutating: true },
+    ]);
+    component.openEditDialog(cacheKey);
+    expect(component.formScope).toBe('cache');
+    expect(component.formCache).toBe('nix-cache');
+    expect(component.scopeChoices().map((option) => option.value)).toEqual(['cache']);
+    expect(component.formPermissions).toEqual({ viewCache: true, readStore: true, writeStore: false });
+    component.formPermissions = { ...component.formPermissions, writeStore: true };
+    component.saveKey();
+    expect(updateApiKey).toHaveBeenCalledWith('k1', { permissions: ['viewCache', 'readStore', 'writeStore'] });
+  });
+
   it('closes without a request when nothing changed', () => {
     const updateApiKey = vi.fn(() => of(unmanagedKey));
     const fixture = setup([unmanagedKey], { updateApiKey });
