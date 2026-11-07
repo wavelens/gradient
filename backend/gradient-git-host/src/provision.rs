@@ -180,7 +180,9 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/api/v4/projects/group%2Fapp/deploy_keys"))
             .and(header("PRIVATE-TOKEN", "tok"))
-            .and(body_partial_json(json!({ "key": "ssh-ed25519 AAAA", "can_push": false })))
+            .and(body_partial_json(
+                json!({ "key": "ssh-ed25519 AAAA", "can_push": false }),
+            ))
             .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": 1 })))
             .expect(1)
             .mount(&server)
@@ -215,6 +217,9 @@ mod tests {
             .await
             .expect_err("a 403 must fail");
         assert!(err.to_string().contains("403"), "{err}");
-        assert!(err.to_string().contains("token lacks admin rights"), "{err}");
+        assert!(
+            err.to_string().contains("token lacks admin rights"),
+            "{err}"
+        );
     }
 }

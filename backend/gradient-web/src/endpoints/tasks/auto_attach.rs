@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::endpoints::git_host_hooks::installation::github_full_name;
 use gradient_ci::IntegrationKind;
+use gradient_core::ServerState;
 use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::{
     GitHostType, MIntegration, MTask, MTaskAction, MTaskTrigger, TaskActionId, TaskTriggerId,
 };
-use crate::endpoints::git_host_hooks::installation::github_full_name;
-use gradient_core::ServerState;
 use sea_orm::{ConnectionTrait, TransactionTrait};
 
 #[derive(Debug, Default, PartialEq)]
@@ -204,13 +204,14 @@ async fn bind_github_app(state: &ServerState, task: &MTask) -> anyhow::Result<()
         return Ok(());
     };
     let pem = tokio::fs::read_to_string(&app.private_key_file).await?;
-    let Some((installation_id, account)) = gradient_git_host::github_app::get_repository_installation(
-        &state.http,
-        app.app_id,
-        &pem,
-        &full_name,
-    )
-    .await?
+    let Some((installation_id, account)) =
+        gradient_git_host::github_app::get_repository_installation(
+            &state.http,
+            app.app_id,
+            &pem,
+            &full_name,
+        )
+        .await?
     else {
         return Ok(());
     };

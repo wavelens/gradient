@@ -53,9 +53,8 @@ struct Target {
 
 impl Target {
     async fn load(scope: &TaskScope<Requires<can::ManageIntegrations>>) -> WebResult<Self> {
-        let repository = provision::repository_path(&scope.task.repository).ok_or_else(|| {
-            TaskRefusal::InvalidRepositoryUrl(scope.task.repository.clone())
-        })?;
+        let repository = provision::repository_path(&scope.task.repository)
+            .ok_or_else(|| TaskRefusal::InvalidRepositoryUrl(scope.task.repository.clone()))?;
         let host = url_host(&scope.task.repository)
             .ok_or_else(|| TaskRefusal::InvalidRepositoryUrl(scope.task.repository.clone()))?;
         let integrations =
@@ -85,8 +84,10 @@ impl Target {
 }
 
 fn decrypt(state: &ServerState, encrypted: &str) -> WebResult<SecretString> {
-    Ok(decrypt_secret_with_file(&state.config.secrets.crypt_file, encrypted)
-        .context("decrypt integration credential")?)
+    Ok(
+        decrypt_secret_with_file(&state.config.secrets.crypt_file, encrypted)
+            .context("decrypt integration credential")?,
+    )
 }
 
 fn forge_endpoint(outbound: &MIntegration, host: &str) -> String {

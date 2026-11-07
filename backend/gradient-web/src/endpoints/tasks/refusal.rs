@@ -88,9 +88,13 @@ pub(crate) enum TaskRefusal {
     RepositoryInboundRequired,
     #[error("commit status reports need an integration to send reports to the Git host")]
     RepositoryOutboundRequired,
-    #[error("no access token on the status reporter, add one first with admin rights on the repository")]
+    #[error(
+        "no access token on the status reporter, add one first with admin rights on the repository"
+    )]
     ProvisionTokenMissing,
-    #[error("the integration for the webhook receiver has no secret - set the secret before webhook installation")]
+    #[error(
+        "the integration for the webhook receiver has no secret - set the secret before webhook installation"
+    )]
     ProvisionSecretMissing,
     #[error("{0}")]
     ProvisionUnsupported(String),
