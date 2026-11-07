@@ -9,13 +9,13 @@ import { Router, RouterModule } from '@angular/router';
 import { TeamsService } from '@core/services/teams.service';
 import { ConfigService } from '@core/services/config.service';
 import { AuthService } from '@core/services/auth.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import { TeamSummary } from '@core/models';
 import {
   BadgeComponent,
   ButtonComponent,
   DialogComponent,
   LoadStateComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -31,7 +31,6 @@ import { NameFieldsComponent, nameAvailability } from '@shared/forms';
     ButtonComponent,
     DialogComponent,
     LoadStateComponent,
-    MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -96,8 +95,8 @@ export class TeamsListComponent implements OnInit {
     this.error.set(null);
     this.teams.create(this.form.name, this.form.displayName).subscribe({
       next: () => this.router.navigate(['/team', this.form.name]),
-      error: (err: Error) => {
-        this.error.set(err.message || 'Failed to create the team.');
+      error: (err: unknown) => {
+        this.error.set(apiErrorMessage(err, 'Failed to create the team.'));
         this.creating.set(false);
       },
     });

@@ -16,13 +16,13 @@ import {
   CheckboxComponent,
   DialogComponent,
   FormFieldComponent,
-  IconComponent,
   InputDirective,
   LoadStateComponent,
   MessageService,
   PageLayoutComponent,
-  ToastComponent,
 } from '@gradient/ui/ui';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -52,16 +52,13 @@ const DEFAULT_FORM: FlakeInputFormState = {
     ButtonComponent,
     InputDirective,
     CheckboxComponent,
-    ToastComponent,
     LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
-    IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
     BadgeComponent,
   ],
-  providers: [MessageService],
   templateUrl: './task-flake-inputs.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './task-flake-inputs.component.scss',
@@ -72,6 +69,7 @@ export class TaskFlakeInputsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private messageService = inject(MessageService);
   private accessSvc = inject(AccessService);
+  private notify = inject(NotifyService);
 
   access = injectTaskAccess();
 
@@ -162,7 +160,7 @@ export class TaskFlakeInputsComponent implements OnInit {
         this.loadOverrides();
       },
       error: (err) => {
-        this.error.set(err?.message || 'Failed to create override.');
+        this.error.set(apiErrorMessage(err, 'Failed to create override.'));
         this.saving.set(false);
       },
     });
@@ -190,7 +188,7 @@ export class TaskFlakeInputsComponent implements OnInit {
         this.loadOverrides();
       },
       error: (err) => {
-        this.error.set(err?.message || 'Failed to update override.');
+        this.error.set(apiErrorMessage(err, 'Failed to update override.'));
         this.saving.set(false);
       },
     });
@@ -202,9 +200,13 @@ export class TaskFlakeInputsComponent implements OnInit {
     this.overridesService.delete(this.projectName, this.taskName, id).subscribe({
       next: () => {
         this.deletingId.set(null);
+        this.notify.success('Deleted the override for the flake input');
         this.loadOverrides();
       },
-      error: () => this.deletingId.set(null),
+      error: (error: unknown) => {
+        this.deletingId.set(null);
+        this.notify.failure('Failed to delete the override for the flake input', error);
+      },
     });
   }
 

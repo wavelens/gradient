@@ -15,6 +15,7 @@ import { TeamWorkersComponent } from './team-workers.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import { NotifyService } from '@core/services/notify.service';
 import { TeamResponse, TeamWorkerEntry } from '@core/models';
 
 const team = { id: 't1', name: 'platform', display_name: 'Platform', managed: false, role: 'admin' } as TeamResponse;
@@ -42,6 +43,9 @@ function setup(
   list: () => Observable<TeamWorkerEntry[]> = () => of(workers),
 ) {
   const updateWorker = vi.fn().mockReturnValue(of('updated'));
+  const registerWorker = vi.fn().mockReturnValue(of({ token: 'secret' }));
+  const removeWorker = vi.fn().mockReturnValue(of('removed'));
+  const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [TeamWorkersComponent],
     providers: [
@@ -50,13 +54,14 @@ function setup(
       provideHttpClientTesting(),
       { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
       { provide: ConfigService, useValue: { gradientCiEnabled: true, gradientCiUrl: 'https://servers.gradient.ci' } },
-      { provide: TeamsService, useValue: { workers: list, updateWorker } },
+      { provide: TeamsService, useValue: { workers: list, updateWorker, registerWorker, removeWorker } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(TeamWorkersComponent);
   fixture.componentRef.setInput('team', { ...team, role });
   fixture.detectChanges();
-  return { fixture, updateWorker, root: fixture.nativeElement as HTMLElement };
+  return { fixture, updateWorker, registerWorker, removeWorker, notify, root: fixture.nativeElement as HTMLElement };
 }
 
 function button(root: Element, label: string): HTMLButtonElement | undefined {
@@ -84,6 +89,47 @@ describe('TeamWorkersComponent', () => {
     button(dialog, 'Save')!.click();
 
     expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { enable_secrets: true });
+  });
+
+  it('keeps a refused registration inside the Register dialog', () => {
+    const { fixture, root, registerWorker } = setup();
+    registerWorker.mockReturnValue(throwError(() => new ApiError('worker_id must be a valid UUID', 422)));
+    button(root, 'Register Worker')!.click();
+    fixture.componentInstance.form = { worker_id: 'nope', display_name: 'Builder' };
+    fixture.componentInstance.register();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.showRegister()).toBe(true);
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('worker_id must be a valid UUID');
+    expect(root.textContent).not.toContain('worker_id must be a valid UUID');
+  });
+
+  it('keeps a failed edit inside the Edit dialog', () => {
+    const { fixture, root, updateWorker } = setup();
+    updateWorker.mockReturnValue(throwError(() => new ApiError('Worker is managed', 409)));
+    button(root, 'Edit')!.click();
+    fixture.detectChanges();
+    button(document.querySelector('.gr-dialog')!, 'Save')!.click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.editing()).not.toBeNull();
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Worker is managed');
+    expect(root.textContent).not.toContain('Worker is managed');
+  });
+
+  it('reports a failed deactivation as a toast', () => {
+    const { fixture, root, updateWorker, notify } = setup();
+    const failure = new ApiError('database is down', 500);
+    updateWorker.mockReturnValue(throwError(() => failure));
+    button(root, 'Deactivate')!.click();
+    fixture.detectChanges();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to deactivate worker', failure);
+    expect(fixture.componentInstance.busy()).toBeNull();
+  });
+
+  it('confirms a deleted worker', () => {
+    const { fixture, removeWorker, notify } = setup();
+    fixture.componentInstance.remove(connection);
+    expect(removeWorker).toHaveBeenCalledWith('platform', 'g1');
+    expect(notify.success).toHaveBeenCalledWith('Worker deleted');
   });
 
   it('hides offline workers until asked to show them', () => {

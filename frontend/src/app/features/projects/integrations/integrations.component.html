@@ -161,14 +161,9 @@
 <gr-dialog
   header="New Integration"
   [(visible)]="showCreateDialog"
+  [error]="errorMessage()"
   width="520px"
 >
-  @if (errorMessage()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ errorMessage() }}
-    </div>
-  }
   <gr-form-field
     label="Name"
     for="int-name"
@@ -243,15 +238,10 @@
 <gr-dialog
   header="Edit Integration"
   [(visible)]="showEditDialog"
+  [error]="errorMessage()"
   width="520px"
 >
   @if (editingIntegration(); as target) {
-    @if (errorMessage()) {
-      <div class="dialog-error">
-        <gr-icon name="error" />
-        {{ errorMessage() }}
-      </div>
-    }
     <gr-form-field label="Name" for="edit-name">
       <input grInput id="edit-name" [(ngModel)]="formData.name" />
     </gr-form-field>

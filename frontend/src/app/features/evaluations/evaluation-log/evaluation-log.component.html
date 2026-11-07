@@ -4,8 +4,6 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-toast />
-
 @if (loading() || !evaluation()) {
   <div class="full-loading">
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading evaluation..."
@@ -311,6 +309,7 @@
   header="Abort evaluation"
   [visible]="abortConfirmOpen()"
   (visibleChange)="!$event && !aborting() && abortConfirmOpen.set(false)"
+  [error]="abortError()"
   width="400px"
 >
   <p>Do you really want to abort the eval?</p>

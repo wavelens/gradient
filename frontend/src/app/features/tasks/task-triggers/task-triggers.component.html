@@ -118,6 +118,7 @@
 <gr-dialog
   header="New Trigger"
   [(visible)]="showCreateDialog"
+  [error]="error()"
   width="560px"
   (hide)="cancelEdit()"
 >
@@ -132,6 +133,7 @@
 <gr-dialog
   header="Edit Trigger"
   [(visible)]="showEditDialog"
+  [error]="error()"
   width="560px"
   (hide)="cancelEdit()"
 >
@@ -144,13 +146,6 @@
 
 <!-- Shared form template -->
 <ng-template #triggerForm let-isEdit="isEdit">
-  @if (error()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ error() }}
-    </div>
-  }
-
   <gr-form-field label="Type" for="trig-type">
     <gr-label-help slot="label" doc="concepts/triggers/" title="Trigger types" />
     <gr-select

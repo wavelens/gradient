@@ -11,6 +11,7 @@ import { ProjectDetailComponent } from './project-detail.component';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
 import { TasksService } from '@core/services/tasks.service';
+import { ApiError } from '@core/services/api.service';
 
 const NO_TASKS = { items: [], total: 0, page: 1 };
 
@@ -72,5 +73,26 @@ describe('ProjectDetailComponent tasks', () => {
     fixture.detectChanges();
     expect(tasks).toHaveBeenCalledTimes(2);
     expect(root.textContent).toContain('No tasks yet');
+  });
+});
+
+describe('ProjectDetailComponent create task', () => {
+  it('keeps a failed create inside the open Create Task dialog', () => {
+    const { fixture } = render(true);
+    const service = TestBed.inject(TasksService) as unknown as { createTask: () => unknown };
+    service.createTask = () => throwError(() => new ApiError('Repository is not reachable', 400));
+    const cmp = fixture.componentInstance;
+    cmp.showCreateDialog.set(true);
+    cmp.newTask = {
+      name: 'web',
+      display_name: 'Web',
+      description: '',
+      repository: 'https://github.com/acme/web',
+      wildcard: 'packages.x86_64-linux.**',
+    };
+    cmp.createTask();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Repository is not reachable');
+    expect(cmp.showCreateDialog()).toBe(true);
   });
 });

@@ -11,6 +11,8 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of, throwError } from 'rxjs';
 import { TeamMembersComponent } from './team-members.component';
 import { TeamsService } from '@core/services/teams.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 import { TeamResponse, TeamMemberItem } from '@core/models';
 
 const team: TeamResponse = {
@@ -34,6 +36,8 @@ const members: TeamMemberItem[] = [
 
 function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), managed = false, listMembers = vi.fn().mockReturnValue(of(members))) {
   const addMember = vi.fn().mockReturnValue(of('Invitation sent'));
+  const updateMember = vi.fn().mockReturnValue(of('ok'));
+  const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [TeamMembersComponent],
     providers: [
@@ -46,17 +50,18 @@ function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), manag
           members: listMembers,
           invitations: () => of([]),
           addMember,
-          updateMember: vi.fn().mockReturnValue(of('ok')),
+          updateMember,
           removeMember,
           revokeInvitation: vi.fn().mockReturnValue(of('ok')),
         },
       },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(TeamMembersComponent);
   fixture.componentRef.setInput('team', { ...team, managed });
   fixture.detectChanges();
-  return { fixture, addMember, removeMember };
+  return { fixture, addMember, updateMember, removeMember, notify };
 }
 
 describe('TeamMembersComponent', () => {
@@ -101,7 +106,7 @@ describe('TeamMembersComponent', () => {
 
   it('shows a failed addition inside the add dialog', () => {
     const { fixture, addMember } = setup();
-    addMember.mockReturnValue(throwError(() => new Error('User not found')));
+    addMember.mockReturnValue(throwError(() => new ApiError('User not found', 404)));
     const component = fixture.componentInstance;
     component.openAdd();
     fixture.detectChanges();
@@ -112,13 +117,25 @@ describe('TeamMembersComponent', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('User not found');
   });
 
-  it('shows why the last admin cannot be removed', () => {
-    const conflict = vi.fn().mockReturnValue(
-      throwError(() => new Error('Cannot remove the last Admin from the team.')),
-    );
-    const { fixture } = setup(conflict);
+  it('reports why the last admin cannot be removed', () => {
+    const failure = new ApiError('Cannot remove the last Admin from the team.', 409);
+    const { fixture, notify } = setup(vi.fn().mockReturnValue(throwError(() => failure)));
     fixture.componentInstance.removeMember('alice');
-    fixture.detectChanges();
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('last Admin');
+    expect(notify.failure).toHaveBeenCalledWith('Member removal failed', failure);
+    expect(fixture.componentInstance.busy()).toBeNull();
+  });
+
+  it('reports a refused role change', () => {
+    const { fixture, updateMember, notify } = setup();
+    const failure = new ApiError('Forbidden', 403);
+    updateMember.mockReturnValue(throwError(() => failure));
+    fixture.componentInstance.updateRole('bob', 'admin');
+    expect(notify.failure).toHaveBeenCalledWith('Role change failed', failure);
+  });
+
+  it('confirms a removed member', () => {
+    const { fixture, notify } = setup();
+    fixture.componentInstance.removeMember('bob');
+    expect(notify.success).toHaveBeenCalledWith('Member removed');
   });
 });

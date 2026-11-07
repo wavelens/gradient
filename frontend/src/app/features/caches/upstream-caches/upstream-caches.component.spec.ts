@@ -13,6 +13,7 @@ import { ApiError } from '@core/services/api.service';
 import { UpstreamCachesComponent, probeSummary } from './upstream-caches.component';
 import { CachesService } from '@core/services/caches.service';
 import { AccessState } from '@core/models/access.model';
+import { MessageService } from '@gradient/ui/ui';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
@@ -234,5 +235,30 @@ describe('UpstreamCachesComponent - activation', () => {
     expect(fixture.nativeElement.textContent).toContain('Inactive');
     expect(findByText(fixture.nativeElement, 'deactivate')).toBeNull();
     expect(findByText(fixture.nativeElement, 'activate')).not.toBeNull();
+  });
+});
+
+describe('UpstreamCachesComponent - write failures', () => {
+  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  it('shows a failed deactivate as an error toast with the server reason', () => {
+    const fixture = setup(admin, oneUpstream, () => throwError(() => new ApiError('Upstream is locked', 409)));
+    (findByText(fixture.nativeElement, 'deactivate') as HTMLButtonElement).click();
+    expect(TestBed.inject(MessageService).messages()).toContainEqual(
+      expect.objectContaining({ severity: 'error', summary: 'Upstream cache deactivation failed', detail: 'Upstream is locked' }),
+    );
+    expect(fixture.componentInstance.togglingUpstreamId()).toBeNull();
+  });
+
+  it('keeps a failed save inside the open Edit dialog', () => {
+    const fixture = setup(admin, [httpUpstream], () => throwError(() => new ApiError('Public key is malformed', 400)));
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstream);
+    fixture.detectChanges();
+    component.saveUpstream();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Public key is malformed');
+    expect(component.showEditDialog()).toBe(true);
+    expect(component.savingUpstream()).toBe(false);
   });
 });

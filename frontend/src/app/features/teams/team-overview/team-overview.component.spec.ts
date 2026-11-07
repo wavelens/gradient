@@ -9,12 +9,14 @@ import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { TeamOverviewComponent } from './team-overview.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
-import { TeamResponse } from '@core/models';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
+import { TeamRequestItem, TeamResponse } from '@core/models';
 
 const team: TeamResponse = {
   id: 't1',
@@ -29,7 +31,19 @@ const team: TeamResponse = {
   new_project_role: null,
 };
 
-function render(): HTMLElement {
+const request: TeamRequestItem = {
+  id: 'r1',
+  kind: 'project',
+  target: 'acme',
+  display_name: 'Acme',
+  users: true,
+  workers: false,
+  role: 'View',
+  created_at: '2026-10-01T10:00:00',
+};
+
+function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().mockReturnValue(of('ok'))) {
+  const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [TeamOverviewComponent],
     providers: [
@@ -41,19 +55,26 @@ function render(): HTMLElement {
       {
         provide: TeamsService,
         useValue: {
-          get: () => of(team),
+          get: () => of({ ...team, role }),
           members: () => of([]),
           invitations: () => of([]),
           workers: () => of([]),
           grants: () => of({ projects: [], caches: [] }),
+          requests: () => of([request]),
+          approveRequest,
         },
       },
       { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(TeamOverviewComponent);
   fixture.detectChanges();
-  return fixture.nativeElement as HTMLElement;
+  return { fixture, notify, root: fixture.nativeElement as HTMLElement };
+}
+
+function render(): HTMLElement {
+  return setup().root;
 }
 
 function headings(element: HTMLElement): string[] {
@@ -67,5 +88,21 @@ describe('TeamOverviewComponent', () => {
 
   it('hides the projects and caches section when the team has no grants', () => {
     expect(headings(render())).not.toContain('Projects and Caches');
+  });
+
+  it('reports a failed approval as a toast and keeps the page usable', () => {
+    const failure = new ApiError('Project no longer exists', 404);
+    const { fixture, notify, root } = setup('admin', vi.fn().mockReturnValue(throwError(() => failure)));
+    fixture.componentInstance.approve('r1');
+    fixture.detectChanges();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to approve request', failure);
+    expect(fixture.componentInstance.busy()).toBeNull();
+    expect(root.textContent).not.toContain('Project no longer exists');
+  });
+
+  it('confirms an approved request', () => {
+    const { fixture, notify } = setup('admin');
+    fixture.componentInstance.approve('r1');
+    expect(notify.success).toHaveBeenCalledWith('Request approved');
   });
 });

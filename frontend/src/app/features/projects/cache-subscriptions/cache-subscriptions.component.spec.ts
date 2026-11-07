@@ -8,7 +8,9 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { CacheSubscriptionsComponent } from './cache-subscriptions.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
@@ -29,10 +31,15 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-const subscribeCache = vi.fn(() => of(undefined));
+const subscribeCache = vi.fn((): Observable<unknown> => of(undefined));
+const unsubscribeCache = vi.fn((): Observable<unknown> => of(undefined));
+const notify = { success: vi.fn(), failure: vi.fn() };
 
 function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponent> {
-  subscribeCache.mockClear();
+  subscribeCache.mockReset().mockReturnValue(of(undefined));
+  unsubscribeCache.mockReset().mockReturnValue(of(undefined));
+  notify.success.mockClear();
+  notify.failure.mockClear();
   TestBed.configureTestingModule({
     imports: [CacheSubscriptionsComponent],
     providers: [
@@ -50,8 +57,10 @@ function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponen
               { id: 'c2', name: 'staging', mode: 'ReadWrite', status: 'pending' },
             ]),
           subscribeCache,
+          unsubscribeCache,
         },
       },
+      { provide: NotifyService, useValue: notify },
       { provide: CachesService, useValue: {} },
       { provide: ConfigService, useValue: { createCache: 'all', canCreate: () => true } },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
@@ -146,5 +155,30 @@ describe('CacheSubscriptionsComponent - load errors', () => {
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     await settled(fixture);
     expect(root.textContent).not.toContain('Failed to load caches');
+  });
+});
+
+describe('CacheSubscriptionsComponent - write failures', () => {
+  it('reports a failed unsubscribe', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
+    unsubscribeCache.mockReturnValue(throwError(() => failure));
+    await settled(fixture);
+    (findByText(fixture.nativeElement, 'unsubscribe') as HTMLButtonElement).click();
+    expect(unsubscribeCache).toHaveBeenCalledWith('acme', 'shared');
+    expect(notify.failure).toHaveBeenCalledWith('Failed to remove subscription', failure);
+    expect(fixture.componentInstance.unsubscribingId()).toBeNull();
+  });
+
+  it('keeps a failed subscribe inside the open dialog', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    subscribeCache.mockReturnValue(throwError(() => new ApiError('Cache nightly is private', 403)));
+    await settled(fixture);
+    const cmp = fixture.componentInstance;
+    cmp.showSubscribeDialog.set(true);
+    cmp.newCacheName = 'nightly';
+    cmp.subscribeCache();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Cache nightly is private');
   });
 });

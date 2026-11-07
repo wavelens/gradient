@@ -11,6 +11,8 @@ import { ActivatedRoute } from '@angular/router';
 import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId } from '@core/models';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { WebhooksService } from '@core/services/webhooks.service';
+import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -20,7 +22,6 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   TableComponent,
 } from '@gradient/ui/ui';
@@ -43,7 +44,6 @@ import { ActionEventsComponent } from '../tasks/task-actions/action-events.compo
     FormFieldComponent,
     InputDirective,
     LoadStateComponent,
-    MessageBannerComponent,
     PageLayoutComponent,
     TableComponent,
   ],
@@ -55,6 +55,7 @@ export class WebhooksComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private service = inject(WebhooksService);
   private crumbs = inject(BreadcrumbsService);
+  private notify = inject(NotifyService);
 
   scope!: WebhookScopeRef;
   title = '';
@@ -63,7 +64,8 @@ export class WebhooksComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   saving = signal(false);
-  error = signal<string | null>(null);
+  formError = signal<string | null>(null);
+  deleteError = signal<string | null>(null);
   webhooks = signal<WebhookResponse[]>([]);
 
   editing = signal<WebhookResponse | null>(null);
@@ -144,7 +146,7 @@ export class WebhooksComponent implements OnInit {
   }
 
   private fill(hook: WebhookResponse | null): void {
-    this.error.set(null);
+    this.formError.set(null);
     this.editing.set(hook);
     this.name.set(hook?.name ?? '');
     this.url.set(hook?.url ?? '');
@@ -167,18 +169,24 @@ export class WebhooksComponent implements OnInit {
     const body = { name: this.name(), url: this.url(), events: this.patterns(), active: this.active() };
     const target = this.editing();
     this.saving.set(true);
-    this.error.set(null);
+    this.formError.set(null);
     const done = () => {
       this.saving.set(false);
       this.formOpen.set(false);
       this.load();
     };
-    const failed = (err: { message?: string }) => {
-      this.error.set(err?.message || 'Failed to save webhook.');
+    const failed = (err: unknown) => {
+      this.formError.set(apiErrorMessage(err, 'Failed to save webhook.'));
       this.saving.set(false);
     };
     if (target) {
-      this.service.update(this.scope, target.id, body).subscribe({ next: done, error: failed });
+      this.service.update(this.scope, target.id, body).subscribe({
+        next: () => {
+          done();
+          this.notify.success('Webhook saved');
+        },
+        error: failed,
+      });
     } else {
       this.service.create(this.scope, body).subscribe({
         next: (res) => {
@@ -191,20 +199,30 @@ export class WebhooksComponent implements OnInit {
   }
 
   toggleActive(hook: WebhookResponse): void {
-    this.service.update(this.scope, hook.id, { active: !hook.active }).subscribe(() => this.load());
+    const active = !hook.active;
+    this.service.update(this.scope, hook.id, { active }).subscribe({
+      next: () => {
+        this.notify.success(active ? 'Webhook enabled' : 'Webhook disabled');
+        this.load();
+      },
+      error: (err: unknown) => this.notify.failure(active ? "Can't enable webhook" : "Can't disable webhook", err),
+    });
   }
 
   rotate(hook: WebhookResponse): void {
-    this.service.rotateSecret(this.scope, hook.id).subscribe((res) => this.revealedSecret.set(res.secret));
+    this.service.rotateSecret(this.scope, hook.id).subscribe({
+      next: (res) => this.revealedSecret.set(res.secret),
+      error: (err: unknown) => this.notify.failure("Can't rotate webhook secret", err),
+    });
   }
 
   test(hook: WebhookResponse): void {
     this.testResult.set({ id: hook.id, delivery: null });
     this.service.test(this.scope, hook.id).subscribe({
       next: (delivery) => this.testResult.set({ id: hook.id, delivery }),
-      error: (err) => {
+      error: (err: unknown) => {
         this.testResult.set(null);
-        this.error.set(err?.message || 'Test delivery failed.');
+        this.notify.failure("Can't send test delivery", err);
       },
     });
   }
@@ -234,12 +252,22 @@ export class WebhooksComponent implements OnInit {
     });
   }
 
+  startDelete(hook: WebhookResponse): void {
+    this.deleteError.set(null);
+    this.confirmDeleteId.set(hook.id);
+  }
+
   confirmDelete(): void {
     const id = this.confirmDeleteId();
     if (!id) return;
-    this.service.delete(this.scope, id).subscribe(() => {
-      this.confirmDeleteId.set(null);
-      this.load();
+    this.deleteError.set(null);
+    this.service.delete(this.scope, id).subscribe({
+      next: () => {
+        this.confirmDeleteId.set(null);
+        this.notify.success('Webhook deleted');
+        this.load();
+      },
+      error: (err: unknown) => this.deleteError.set(apiErrorMessage(err, "Can't delete webhook.")),
     });
   }
 }

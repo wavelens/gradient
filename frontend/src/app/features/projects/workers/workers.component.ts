@@ -52,8 +52,9 @@ import {
   PopoverComponent,
   RowComponent,
   RowListComponent,
-  ToastComponent,
 } from '@gradient/ui/ui';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, canOpenTeam } from '@shared/access';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
@@ -70,7 +71,6 @@ import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.com
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    ToastComponent,
     LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
@@ -88,7 +88,6 @@ import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.com
     GradientCiConnectComponent,
     TeamGrantsComponent,
   ],
-  providers: [MessageService],
   templateUrl: './workers.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./workers.component.scss', './workers.dialog.scss'],
@@ -100,6 +99,7 @@ export class WorkersComponent implements OnInit {
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
   private messageService = inject(MessageService);
+  private notify = inject(NotifyService);
   private teamsService = inject(TeamsService);
   private authService = inject(AuthService);
   config = inject(ConfigService);
@@ -136,6 +136,7 @@ export class WorkersComponent implements OnInit {
   pendingToggleWorker = signal<ProjectWorkerEntry | null>(null);
   renamingWorker = signal<ProjectWorkerEntry | null>(null);
   errorMessage = signal<string | null>(null);
+  renameError = signal<string | null>(null);
   hasNoCacheSubscribed = signal(false);
 
   projectName = '';
@@ -272,11 +273,13 @@ export class WorkersComponent implements OnInit {
           this.lastRegistration.set(reg);
           this.tokenCopied.set(false);
           this.showTokenDialog.set(true);
+        } else {
+          this.notify.success('Worker registered');
         }
         this.loadWorkers();
       },
-      error: (err) => {
-        this.errorMessage.set(err.message || 'Failed to register worker.');
+      error: (error: unknown) => {
+        this.errorMessage.set(apiErrorMessage(error, 'Failed to register worker.'));
         this.registering.set(false);
       },
     });
@@ -287,10 +290,11 @@ export class WorkersComponent implements OnInit {
     this.workersService.deleteWorker(this.projectName, worker.worker_id).subscribe({
       next: () => {
         this.deletingId.set(null);
+        this.notify.success('Worker deleted');
         this.loadWorkers();
       },
-      error: (err) => {
-        console.error('Failed to delete worker:', err);
+      error: (error: unknown) => {
+        this.notify.failure('Worker delete failed', error);
         this.deletingId.set(null);
       },
     });
@@ -315,10 +319,11 @@ export class WorkersComponent implements OnInit {
       next: () => {
         this.togglingId.set(null);
         this.pendingToggleWorker.set(null);
+        this.notify.success(worker.active ? 'Worker deactivated' : 'Worker activated');
         this.loadWorkers();
       },
-      error: (err) => {
-        console.error('Failed to toggle worker active state:', err);
+      error: (error: unknown) => {
+        this.notify.failure(worker.active ? 'Worker deactivation failed' : 'Worker activation failed', error);
         this.togglingId.set(null);
         this.pendingToggleWorker.set(null);
       },
@@ -334,6 +339,7 @@ export class WorkersComponent implements OnInit {
     this.renamingWorker.set(worker);
     this.newName = worker.display_name;
     this.editAllowed = worker;
+    this.renameError.set(null);
     this.showRenameDialog.set(true);
   }
 
@@ -341,6 +347,7 @@ export class WorkersComponent implements OnInit {
     const worker = this.renamingWorker();
     if (!worker || !this.newName.trim()) return;
     this.renaming.set(true);
+    this.renameError.set(null);
     const body: PatchWorkerRequest = changedCapabilities(worker, this.editAllowed);
     if (this.newName.trim() !== worker.display_name) body.display_name = this.newName.trim();
     this.workersService.patchWorker(this.projectName, worker.worker_id, body).subscribe({
@@ -348,10 +355,11 @@ export class WorkersComponent implements OnInit {
         this.renaming.set(false);
         this.showRenameDialog.set(false);
         this.renamingWorker.set(null);
+        this.notify.success('Worker updated');
         this.loadWorkers();
       },
-      error: (err) => {
-        console.error('Failed to update worker:', err);
+      error: (error: unknown) => {
+        this.renameError.set(apiErrorMessage(error, 'Worker update failed.'));
         this.renaming.set(false);
       },
     });
@@ -373,13 +381,9 @@ export class WorkersComponent implements OnInit {
           detail: r.message,
         });
       },
-      error: (err) => {
+      error: (error: unknown) => {
         this.testingId.set(null);
-        this.messageService.add({
-          severity: 'error',
-          summary: 'Worker test failed',
-          detail: err?.message || 'Failed to reach worker.',
-        });
+        this.notify.failure('Worker test failed', error);
       },
     });
   }

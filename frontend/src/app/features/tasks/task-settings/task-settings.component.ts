@@ -12,6 +12,8 @@ import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ConfigService } from '@core/services/config.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   AutoCompleteComponent,
   ButtonComponent,
@@ -72,6 +74,7 @@ export class TaskSettingsComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private crumbs = inject(BreadcrumbsService);
   protected config = inject(ConfigService);
+  private notify = inject(NotifyService);
 
   access = injectTaskAccess();
 
@@ -206,7 +209,7 @@ export class TaskSettingsComponent implements OnInit {
       },
       error: (error) => {
         this.checkingRepo.set(false);
-        this.repoCheck.set({ url, ok: false, message: error.message || 'Repository unreachable.' });
+        this.repoCheck.set({ url, ok: false, message: apiErrorMessage(error, 'Repository unreachable.') });
       },
     });
   }
@@ -222,7 +225,7 @@ export class TaskSettingsComponent implements OnInit {
         this.loadTask();
       },
       error: (error) => {
-        this.errorMessage.set(error.message || 'Failed to save settings.');
+        this.errorMessage.set(apiErrorMessage(error, 'Failed to save settings.'));
         this.saving.set(false);
       },
     });
@@ -233,18 +236,20 @@ export class TaskSettingsComponent implements OnInit {
     if (!proj) return;
 
     this.toggling.set(true);
-    const action = proj.active
-      ? this.tasksService.deactivateTask(this.projectName, this.taskName)
-      : this.tasksService.activateTask(this.projectName, this.taskName);
+    const activate = !proj.active;
+    const action = activate
+      ? this.tasksService.activateTask(this.projectName, this.taskName)
+      : this.tasksService.deactivateTask(this.projectName, this.taskName);
 
     action.subscribe({
       next: () => {
         this.toggling.set(false);
+        this.notify.success(activate ? 'Task activated' : 'Task deactivated');
         this.loadTask();
       },
-      error: (error) => {
-        console.error('Failed to toggle task status:', error);
+      error: (error: unknown) => {
         this.toggling.set(false);
+        this.notify.failure(activate ? 'Failed to activate task' : 'Failed to deactivate task', error);
       },
     });
   }
@@ -285,7 +290,7 @@ export class TaskSettingsComponent implements OnInit {
         }, 1500);
       },
       error: (error) => {
-        this.transferError.set(error.message || 'Failed to transfer ownership.');
+        this.transferError.set(apiErrorMessage(error, 'Failed to transfer ownership.'));
         this.transferring.set(false);
       },
     });
@@ -295,12 +300,13 @@ export class TaskSettingsComponent implements OnInit {
     this.deleting.set(true);
     this.tasksService.deleteTask(this.projectName, this.taskName).subscribe({
       next: () => {
+        this.notify.success('Task deleted');
         this.router.navigate(['/project', this.projectName]);
       },
-      error: (error) => {
-        console.error('Failed to delete task:', error);
+      error: (error: unknown) => {
         this.deleting.set(false);
         this.showDeleteDialog.set(false);
+        this.notify.failure('Failed to delete task', error);
       },
     });
   }

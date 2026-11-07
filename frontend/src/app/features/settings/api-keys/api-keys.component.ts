@@ -11,6 +11,8 @@ import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
+import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -20,7 +22,6 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -64,7 +65,6 @@ interface SelectOption {
     CopyFieldComponent,
     RowListComponent,
     RowComponent,
-    MessageBannerComponent,
   ],
   templateUrl: './api-keys.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -74,6 +74,7 @@ export class ApiKeysComponent implements OnInit {
   private userService = inject(UserService);
   private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);
+  private notify = inject(NotifyService);
 
   loading = signal(true);
   loadError = signal<unknown>(null);
@@ -231,6 +232,7 @@ export class ApiKeysComponent implements OnInit {
     if (this.invalidIps().length > 0) return;
     const allowedIps = splitLines(this.formAllowedIps);
     const editing = this.editingKey();
+    this.errorMessage.set(null);
     if (editing) {
       this.saving.set(true);
       this.userService
@@ -244,10 +246,11 @@ export class ApiKeysComponent implements OnInit {
           next: () => {
             this.saving.set(false);
             this.showDialog.set(false);
+            this.notify.success('API key saved');
             this.loadKeys();
           },
-          error: (err) => {
-            this.errorMessage.set(err?.message || 'Failed to save key.');
+          error: (err: unknown) => {
+            this.errorMessage.set(apiErrorMessage(err, 'Failed to save key.'));
             this.saving.set(false);
           },
         });
@@ -263,8 +266,8 @@ export class ApiKeysComponent implements OnInit {
             this.showKeyDialog.set(true);
             this.loadKeys();
           },
-          error: (err) => {
-            this.errorMessage.set(err?.message || 'Failed to create key.');
+          error: (err: unknown) => {
+            this.errorMessage.set(apiErrorMessage(err, 'Failed to create key.'));
             this.creating.set(false);
           },
         });
@@ -276,9 +279,13 @@ export class ApiKeysComponent implements OnInit {
     this.userService.revokeApiKey(key.id).subscribe({
       next: () => {
         this.revokingId.set(null);
+        this.notify.success('API key revoked');
         this.loadKeys();
       },
-      error: () => this.revokingId.set(null),
+      error: (err: unknown) => {
+        this.revokingId.set(null);
+        this.notify.failure('Failed to revoke API key', err);
+      },
     });
   }
 
@@ -287,12 +294,15 @@ export class ApiKeysComponent implements OnInit {
     this.userService.deleteApiKey(key.name).subscribe({
       next: () => {
         this.deletingId.set(null);
+        this.notify.success('API key deleted');
         this.loadKeys();
       },
-      error: () => this.deletingId.set(null),
+      error: (err: unknown) => {
+        this.deletingId.set(null);
+        this.notify.failure('Failed to delete API key', err);
+      },
     });
   }
-
 
   permissionTooltip(key: ApiKeyInfo): string {
     if (key.permissions.length === 0) return 'No permissions';

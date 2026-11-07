@@ -9,7 +9,10 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of, throwError } from 'rxjs';
+import { vi } from 'vitest';
 import { TaskActionsComponent } from './task-actions.component';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -159,5 +162,54 @@ describe('TaskActionsComponent - load errors', () => {
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     fixture.detectChanges();
     expect(root.textContent).toContain('No actions configured');
+  });
+});
+
+describe('TaskActionsComponent - write failures', () => {
+  const writer = { managed: false, canEdit: true, canTrigger: true };
+  const refused = new ApiError('You need write access to change actions', 403);
+
+  it('reports a failed delete with the server reason and a successful one', () => {
+    const fixture = setup(writer);
+    const service = TestBed.inject(ActionsService) as unknown as Record<string, unknown>;
+    const notify = TestBed.inject(NotifyService);
+    const failure = vi.spyOn(notify, 'failure');
+    const success = vi.spyOn(notify, 'success');
+    const component = fixture.componentInstance;
+
+    service['delete'] = () => throwError(() => refused);
+    component.requestDelete('a-1');
+    component.confirmDelete();
+    expect(failure).toHaveBeenCalledWith('Action deletion failed', refused);
+    expect(component.deletingId()).toBeNull();
+
+    service['delete'] = () => of({ deleted: true });
+    component.requestDelete('a-1');
+    component.confirmDelete();
+    expect(success).toHaveBeenCalledWith('Action deleted');
+  });
+
+  it('reports a failed test with the server reason', () => {
+    const fixture = setup(writer);
+    (TestBed.inject(ActionsService) as unknown as Record<string, unknown>)['test'] = () => throwError(() => refused);
+    const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+    fixture.componentInstance.testAction('a-1');
+    expect(failure).toHaveBeenCalledWith('Action test failed', refused);
+  });
+
+  it('shows a rejected create inside the open dialog and nowhere on the page', () => {
+    const fixture = setup(writer);
+    (TestBed.inject(ActionsService) as unknown as Record<string, unknown>)['create'] =
+      () => throwError(() => new ApiError('An action named X already exists', 409));
+    const component = fixture.componentInstance;
+    component.startCreate();
+    fixture.detectChanges();
+    component.onCreateSaved({ name: 'X', config: { type: 'send_web_request', url: 'u' } } as any);
+    fixture.detectChanges();
+
+    expect(component.showCreateDialog()).toBe(true);
+    const banner = document.body.querySelector('.gr-dialog gr-message-banner');
+    expect(banner?.textContent).toContain('An action named X already exists');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('An action named X already exists');
   });
 });

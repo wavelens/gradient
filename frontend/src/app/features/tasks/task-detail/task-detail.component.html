@@ -4,8 +4,6 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-toast />
-
 @if (task(); as proj) {
   <div class="pp-head pad">
     <div>
@@ -44,16 +42,6 @@
       }
     </div>
   </div>
-
-  @if (errorMessage(); as msg) {
-    <div class="pad"><div class="evaluation-error" role="alert">
-      <gr-icon name="error" size="sm" />
-      <span class="evaluation-error__text">{{ msg }}</span>
-      <button type="button" class="evaluation-error__dismiss" aria-label="Dismiss error" (click)="dismissError()">
-        <gr-icon name="close" size="sm" />
-      </button>
-    </div></div>
-  }
 
   <div class="pad task-info">
     <p class="desc">{{ proj.description || 'No description' }}</p>
@@ -298,6 +286,7 @@
     header="Diagnostic report"
     [visible]="reportDialogOpen()"
     (visibleChange)="!$event && reportDialogOpen.set(false)"
+    [error]="reportError()"
     width="480px"
   >
     <p>

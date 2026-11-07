@@ -83,11 +83,8 @@
   [(visible)]="showDialog"
   width="520px"
   [header]="editingKey() ? 'Edit API Key' : 'Create API Key'"
+  [error]="errorMessage()"
 >
-  @if (errorMessage()) {
-    <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
-  }
-
   <gr-form-field label="Name" for="key-name">
     <input
       grInput

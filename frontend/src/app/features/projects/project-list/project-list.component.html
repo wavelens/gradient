@@ -78,14 +78,9 @@
 <gr-dialog
   header="Create Project"
   [(visible)]="showCreateDialog"
+  [error]="createError()"
   width="500px"
 >
-  @if (createError()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ createError() }}
-    </div>
-  }
   <div>
     <app-name-fields
       noun="project"

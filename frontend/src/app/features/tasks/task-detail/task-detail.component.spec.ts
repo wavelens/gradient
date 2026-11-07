@@ -18,6 +18,8 @@ import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 import { AccessState } from '@core/models/access.model';
 import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models';
 
@@ -121,6 +123,7 @@ type SetupOverrides = Partial<{
   getProject: () => ReturnType<ProjectsService['getProject']>;
   startEvaluation: () => ReturnType<TasksService['startEvaluation']>;
   abortEvaluation: (project: string, proj: string, id: string) => ReturnType<TasksService['abortEvaluation']>;
+  downloadReport: () => ReturnType<TasksService['downloadReport']>;
   getEntryPoints: () => ReturnType<TasksService['getEntryPoints']>;
   getEvaluations: TasksService['getEvaluations'];
   extraEvals: EvaluationSummary[];
@@ -140,6 +143,7 @@ function makeTasksService(access: AccessState, overrides: SetupOverrides = {}): 
     getEvaluations: overrides.getEvaluations ?? (() => of([])),
     startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
     abortEvaluation: overrides.abortEvaluation ?? (() => of('ok')),
+    downloadReport: overrides.downloadReport ?? (() => NEVER),
   } as unknown as TasksService;
 }
 
@@ -153,9 +157,11 @@ function setup(
   evaluationsService: EvaluationsService;
   query: BehaviorSubject<ParamMap>;
   frames: Subject<LiveEvent>;
+  notify: { success: ReturnType<typeof vi.fn>; failure: ReturnType<typeof vi.fn> };
 } {
   const query = new BehaviorSubject(convertToParamMap({}));
   const frames = new Subject<LiveEvent>();
+  const notify = { success: vi.fn(), failure: vi.fn() };
   const tasksService = makeTasksService(access, serviceOverrides);
   const evaluationsService = {
     prioritizeEvaluation: () => of('Success'),
@@ -180,11 +186,12 @@ function setup(
       } },
       { provide: StarsService, useValue: { starred: vi.fn(() => of(true)), set: () => of(true) } },
       { provide: LiveService, useValue: { connect: () => frames } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(TaskDetailComponent);
   fixture.detectChanges();
-  return { fixture, tasksService, evaluationsService, query, frames };
+  return { fixture, tasksService, evaluationsService, query, frames, notify };
 }
 
 const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
@@ -377,10 +384,11 @@ describe('TaskDetailComponent evaluation menu', () => {
   });
 
   it('reports a failed retry', () => {
-    const { fixture, evaluationsService } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
-    vi.spyOn(evaluationsService, 'retryEvaluation').mockReturnValue(throwError(() => ({})));
+    const { fixture, evaluationsService, notify } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
+    const error = new ApiError('Evaluation is still running', 409);
+    vi.spyOn(evaluationsService, 'retryEvaluation').mockReturnValue(throwError(() => error));
     retryItem(fixture)!.command!();
-    expect(fixture.componentInstance.errorMessage()).toBe('Failed to retry evaluation.');
+    expect(notify.failure).toHaveBeenCalledWith('Failed to retry evaluation', error);
   });
 
   it('starts a full rewalk from the menu', () => {
@@ -591,33 +599,15 @@ describe('TaskDetailComponent - evaluation progress', () => {
 });
 
 describe('TaskDetailComponent - error surfacing (issue #280)', () => {
-  it('shows an inline error banner when startEvaluation fails', () => {
-    const msg = 'Failed to fetch repository state: connection refused';
-    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
-      startEvaluation: () => throwError(() => new Error(msg)),
+  it('reports a failed start with the server reason and enables the button again', () => {
+    const error = new ApiError('Failed to fetch repository state: connection refused', 502);
+    const { fixture, notify } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      startEvaluation: () => throwError(() => error),
     });
     fixture.componentInstance.startEvaluation();
-    fixture.detectChanges();
 
-    const banner = fixture.nativeElement.querySelector('.evaluation-error') as HTMLElement | null;
-    expect(banner).not.toBeNull();
-    expect(banner!.textContent).toContain('Failed to fetch repository state');
-  });
-
-  it('clears the error banner when the user retries', () => {
-    const msg = 'Failed to fetch repository state: connection refused';
-    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
-      startEvaluation: () => throwError(() => new Error(msg)),
-    });
-    const component = fixture.componentInstance;
-    component.startEvaluation();
-    fixture.detectChanges();
-    expect(component.errorMessage()).not.toBeNull();
-
-    component.dismissError();
-    fixture.detectChanges();
-    expect(component.errorMessage()).toBeNull();
-    expect(fixture.nativeElement.querySelector('.evaluation-error')).toBeNull();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to start evaluation', error);
+    expect(fixture.componentInstance.starting()).toBe(false);
   });
 });
 
@@ -980,15 +970,14 @@ describe('TaskDetailComponent - abort modal', () => {
   });
 
   it('reports a failed abort instead of swallowing it', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
-    vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(
-      throwError(() => new Error('Evaluation already finished')),
-    );
+    const { fixture, tasksService, notify } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const error = new ApiError('Evaluation already finished', 409);
+    vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(throwError(() => error));
     const component = fixture.componentInstance;
     component.abortTarget.set('e1');
     component.confirmAbort();
     expect(component.aborting()).toBe(false);
-    expect(component.errorMessage()).toBe('Evaluation already finished');
+    expect(notify.failure).toHaveBeenCalledWith('Failed to abort evaluation', error);
   });
 
   it('ignores a second confirm while one abort is still running', () => {
@@ -1064,6 +1053,36 @@ describe('TaskDetailComponent diagnostic report', () => {
     expect(c.reportOptions().include_identities).toBe(true);
     expect(c.reportOptions().include_packages).toBe(true);
   });
+
+  it('keeps the dialog open with the server reason when the report is refused', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      downloadReport: () => throwError(() => new ApiError('Instance context needs the Manage Workers permission', 403)),
+    });
+    const c = fixture.componentInstance;
+    c.panelMenuModel().find(i => i.label === 'Diagnostic report')!.command!();
+    c.generateReport();
+    fixture.detectChanges();
+
+    expect(c.reportDialogOpen()).toBe(true);
+    expect(c.reportBusy()).toBe(false);
+    const dialog = Array.from(document.body.querySelectorAll('.gr-dialog'))
+      .find((el) => el.querySelector('.gr-dialog__title')?.textContent?.includes('Diagnostic report'));
+    expect(dialog?.querySelector('gr-message-banner')?.textContent).toContain('Instance context needs the Manage Workers permission');
+  });
+
+  it('clears the previous report error when the dialog opens again', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      downloadReport: () => throwError(() => new Error('Http failure response for /report: 403 Forbidden')),
+    });
+    const c = fixture.componentInstance;
+    c.openReportDialog();
+    c.generateReport();
+    expect(c.reportError()).toBe('Failed to generate the diagnostic report.');
+
+    c.reportDialogOpen.set(false);
+    c.openReportDialog();
+    expect(c.reportError()).toBeNull();
+  });
 });
 
 describe('TaskDetailComponent package sbom', () => {
@@ -1113,13 +1132,13 @@ describe('TaskDetailComponent package sbom', () => {
   });
 
   it('shows the error when the download fails', () => {
-    const { fixture, evaluationsService } = setup(access);
-    (evaluationsService as unknown as Record<string, unknown>)['downloadBuildSbom'] =
-      () => throwError(() => new Error('Build not found'));
+    const { fixture, evaluationsService, notify } = setup(access);
+    const error = new ApiError('Build not found', 404);
+    (evaluationsService as unknown as Record<string, unknown>)['downloadBuildSbom'] = () => throwError(() => error);
 
     sbomItem(fixture, epSummary('hello'))!.command!();
 
-    expect(fixture.componentInstance.errorMessage()).toBe('Build not found');
+    expect(notify.failure).toHaveBeenCalledWith('Failed to download SBOM', error);
   });
 });
 
@@ -1289,10 +1308,11 @@ describe('TaskDetailComponent prioritize', () => {
   });
 
   it('reports a failed prioritize', () => {
-    const { fixture, evaluationsService } = setup(trigger, { primaryStatus: 'Building' }, 'superuser');
-    vi.spyOn(evaluationsService, 'prioritizeEvaluation').mockReturnValue(throwError(() => new Error('Evaluation already finished')));
+    const { fixture, evaluationsService, notify } = setup(trigger, { primaryStatus: 'Building' }, 'superuser');
+    const error = new ApiError('Evaluation already finished', 409);
+    vi.spyOn(evaluationsService, 'prioritizeEvaluation').mockReturnValue(throwError(() => error));
     fixture.componentInstance.panelMenuModel().find(i => i.label === 'Prioritize')!.command!();
-    expect(fixture.componentInstance.errorMessage()).toBe('Evaluation already finished');
+    expect(notify.failure).toHaveBeenCalledWith('Failed to prioritize evaluation', error);
   });
 
   it('prioritizes a pending entry point by its build id', () => {

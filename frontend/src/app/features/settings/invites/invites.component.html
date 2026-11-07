@@ -5,14 +5,6 @@
 -->
 
 <gr-page-layout title="My Invites" subtitle="Projects, caches and teams waiting for your answer">
-  @if (errorMessage()) {
-    <gr-message-banner slot="banner" type="error">{{ errorMessage() }}</gr-message-banner>
-  }
-
-  @if (successMessage()) {
-    <gr-message-banner slot="banner" type="success">{{ successMessage() }}</gr-message-banner>
-  }
-
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

@@ -9,6 +9,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { ConfigService } from '@core/services/config.service';
+import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { SshKeyInfo } from '@core/models';
 import {
   ButtonComponent,
@@ -17,7 +19,6 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -39,7 +40,6 @@ function sshKeyComment(publicKey: string): string {
     FormFieldComponent,
     InputDirective,
     LoadStateComponent,
-    MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -50,6 +50,7 @@ function sshKeyComment(publicKey: string): string {
 export class SshKeysComponent implements OnInit {
   private userService = inject(UserService);
   private config = inject(ConfigService);
+  private notify = inject(NotifyService);
 
   loading = signal(true);
   loadError = signal<unknown>(null);
@@ -110,11 +111,12 @@ export class SshKeysComponent implements OnInit {
       next: () => {
         this.saving.set(false);
         this.showDialog.set(false);
+        this.notify.success('Added SSH key');
         this.loadKeys();
       },
-      error: (e) => {
+      error: (err: unknown) => {
         this.saving.set(false);
-        this.errorMessage.set(e?.message || 'Could not add the key.');
+        this.errorMessage.set(apiErrorMessage(err, 'Could not add the key.'));
       },
     });
   }
@@ -124,9 +126,13 @@ export class SshKeysComponent implements OnInit {
     this.userService.deleteSshKey(key.id).subscribe({
       next: () => {
         this.deletingId.set(null);
+        this.notify.success('Deleted SSH key');
         this.loadKeys();
       },
-      error: () => this.deletingId.set(null),
+      error: (err: unknown) => {
+        this.deletingId.set(null);
+        this.notify.failure('Failed to delete SSH key', err);
+      },
     });
   }
 }

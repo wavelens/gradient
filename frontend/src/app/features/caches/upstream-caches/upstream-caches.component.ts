@@ -25,8 +25,9 @@ import {
   RowComponent,
   RowListComponent,
   SelectComponent,
-  ToastComponent,
 } from '@gradient/ui/ui';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
@@ -55,9 +56,7 @@ import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, Protoco
     BadgeComponent,
     RowListComponent,
     RowComponent,
-    ToastComponent,
   ],
-  providers: [MessageService],
   templateUrl: './upstream-caches.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './upstream-caches.component.scss',
@@ -68,6 +67,7 @@ export class UpstreamCachesComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
   private messageService = inject(MessageService);
+  private notify = inject(NotifyService);
 
   access = injectCacheAccess();
 
@@ -220,9 +220,13 @@ export class UpstreamCachesComponent implements OnInit {
       next: () => {
         this.savingUpstream.set(false);
         this.showEditDialog.set(false);
+        this.notify.success('Upstream cache saved');
         this.loadUpstreamCaches();
       },
-      error: () => this.savingUpstream.set(false),
+      error: (error: unknown) => {
+        this.editError.set(apiErrorMessage(error, 'Upstream cache save failed.'));
+        this.savingUpstream.set(false);
+      },
     });
   }
 
@@ -263,10 +267,11 @@ export class UpstreamCachesComponent implements OnInit {
       next: () => {
         this.addingUpstream.set(false);
         this.showAddDialog.set(false);
+        this.notify.success('Upstream cache added');
         this.loadUpstreamCaches();
       },
-      error: (err) => {
-        this.addError.set(err?.message || 'Failed to add upstream cache.');
+      error: (error: unknown) => {
+        this.addError.set(apiErrorMessage(error, 'Failed to add upstream cache.'));
         this.addingUpstream.set(false);
       },
     });
@@ -298,13 +303,9 @@ export class UpstreamCachesComponent implements OnInit {
           detail: `HTTP/1.1: ${probeSummary(r.http1)}; HTTP/2: ${probeSummary(r.http2)}`,
         });
       },
-      error: (err) => {
+      error: (error: unknown) => {
         this.testingUpstreamId.set(null);
-        this.messageService.add({
-          severity: 'error',
-          summary: 'Upstream test failed',
-          detail: err?.message || 'Failed to test upstream.',
-        });
+        this.notify.failure('Upstream test failed', error);
       },
     });
   }
@@ -314,9 +315,16 @@ export class UpstreamCachesComponent implements OnInit {
     this.cachesService.updateUpstream(this.cacheName, upstream.id, { active: !upstream.active }).subscribe({
       next: () => {
         this.togglingUpstreamId.set(null);
+        this.notify.success(upstream.active ? 'Upstream cache deactivated' : 'Upstream cache activated');
         this.loadUpstreamCaches();
       },
-      error: () => this.togglingUpstreamId.set(null),
+      error: (error: unknown) => {
+        this.togglingUpstreamId.set(null);
+        this.notify.failure(
+          upstream.active ? 'Upstream cache deactivation failed' : 'Upstream cache activation failed',
+          error,
+        );
+      },
     });
   }
 
@@ -325,9 +333,13 @@ export class UpstreamCachesComponent implements OnInit {
     this.cachesService.removeUpstream(this.cacheName, id).subscribe({
       next: () => {
         this.removingUpstreamId.set(null);
+        this.notify.success('Upstream cache removed');
         this.loadUpstreamCaches();
       },
-      error: () => this.removingUpstreamId.set(null),
+      error: (error: unknown) => {
+        this.removingUpstreamId.set(null);
+        this.notify.failure('Upstream cache removal failed', error);
+      },
     });
   }
 

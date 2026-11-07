@@ -9,6 +9,8 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TeamsService } from '@core/services/teams.service';
 import { UserService } from '@core/services/user.service';
+import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import {
   TeamRole,
   TeamResponse,
@@ -23,7 +25,6 @@ import {
   DialogComponent,
   FormFieldComponent,
   LoadStateComponent,
-  MessageBannerComponent,
   RowComponent,
   RowListComponent,
   SelectComponent,
@@ -42,7 +43,6 @@ import {
     DialogComponent,
     FormFieldComponent,
     LoadStateComponent,
-    MessageBannerComponent,
     RowComponent,
     RowListComponent,
     SelectComponent,
@@ -54,6 +54,7 @@ import {
 export class TeamMembersComponent implements OnInit {
   private teams = inject(TeamsService);
   private users = inject(UserService);
+  private notify = inject(NotifyService);
 
   readonly roles: { label: string; value: TeamRole }[] = [
     { label: 'Admin', value: 'admin' },
@@ -66,7 +67,6 @@ export class TeamMembersComponent implements OnInit {
   members = signal<TeamMemberItem[]>([]);
   invitations = signal<PendingInvitationItem[]>([]);
   suggestions = signal<string[]>([]);
-  error = signal<string | null>(null);
   addError = signal<string | null>(null);
   busy = signal<string | null>(null);
   showAdd = signal(false);
@@ -128,11 +128,12 @@ export class TeamMembersComponent implements OnInit {
       next: () => {
         this.busy.set(null);
         this.showAdd.set(false);
+        this.notify.success('Member added');
         this.load();
       },
-      error: (err: Error) => {
+      error: (err: unknown) => {
         this.busy.set(null);
-        this.addError.set(err.message || 'Failed to add the member.');
+        this.addError.set(apiErrorMessage(err, 'Failed to add the member.'));
       },
     });
   }
@@ -144,8 +145,9 @@ export class TeamMembersComponent implements OnInit {
         this.busy.set(null);
         this.load();
       },
-      error: (err: Error) => {
-        this.fail(err, 'Failed to change the role.');
+      error: (err: unknown) => {
+        this.busy.set(null);
+        this.notify.failure('Role change failed', err);
         this.load();
       },
     });
@@ -156,9 +158,13 @@ export class TeamMembersComponent implements OnInit {
     this.teams.removeMember(this.teamName, user).subscribe({
       next: () => {
         this.busy.set(null);
+        this.notify.success('Member removed');
         this.load();
       },
-      error: (err: Error) => this.fail(err, 'Failed to remove the member.'),
+      error: (err: unknown) => {
+        this.busy.set(null);
+        this.notify.failure('Member removal failed', err);
+      },
     });
   }
 
@@ -167,14 +173,13 @@ export class TeamMembersComponent implements OnInit {
     this.teams.revokeInvitation(this.teamName, user).subscribe({
       next: () => {
         this.busy.set(null);
+        this.notify.success('Invitation revoked');
         this.load();
       },
-      error: (err: Error) => this.fail(err, 'Failed to revoke the invitation.'),
+      error: (err: unknown) => {
+        this.busy.set(null);
+        this.notify.failure('Invitation revoke failed', err);
+      },
     });
-  }
-
-  private fail(err: Error, fallback: string): void {
-    this.busy.set(null);
-    this.error.set(err.message || fallback);
   }
 }

@@ -7,13 +7,13 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { UserService } from '@core/services/user.service';
+import { NotifyService } from '@core/services/notify.service';
 import { SessionInfo } from '@core/models';
 import { deviceName } from '@shared/text';
 import {
   BadgeComponent,
   ButtonComponent,
   LoadStateComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -27,7 +27,6 @@ import {
     BadgeComponent,
     ButtonComponent,
     LoadStateComponent,
-    MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -37,12 +36,12 @@ import {
 })
 export class SessionsComponent implements OnInit {
   private userService = inject(UserService);
+  private notify = inject(NotifyService);
   protected readonly deviceName = deviceName;
 
   loading = signal(true);
   revokingId = signal<string | null>(null);
   sessions = signal<SessionInfo[]>([]);
-  errorMessage = signal<string | null>(null);
   loadError = signal<unknown>(null);
 
   ngOnInit(): void {
@@ -69,15 +68,15 @@ export class SessionsComponent implements OnInit {
       return;
     }
     this.revokingId.set(s.id);
-    this.errorMessage.set(null);
     this.userService.revokeSession(s.id).subscribe({
       next: () => {
         this.revokingId.set(null);
+        this.notify.success('Session revoked');
         this.load();
       },
-      error: () => {
+      error: (err: unknown) => {
         this.revokingId.set(null);
-        this.errorMessage.set('Failed to revoke session.');
+        this.notify.failure('Failed to revoke session', err);
       },
     });
   }

@@ -13,7 +13,11 @@ import { vi } from 'vitest';
 import { SshKeysComponent } from './ssh-keys.component';
 import { UserService } from '@core/services/user.service';
 import { ConfigService } from '@core/services/config.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 import { SshKeyInfo } from '@core/models';
+
+let notify = { success: vi.fn(), failure: vi.fn() };
 
 const key: SshKeyInfo = {
   id: 'k1',
@@ -27,6 +31,7 @@ function setup(
   keys: SshKeyInfo[],
   overrides: Partial<Record<keyof UserService, unknown>> = {},
 ): ComponentFixture<SshKeysComponent> {
+  notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [SshKeysComponent],
     providers: [
@@ -35,6 +40,7 @@ function setup(
       provideHttpClientTesting(),
       { provide: UserService, useValue: { getSshKeys: () => of(keys), ...overrides } },
       { provide: ConfigService, useValue: { sshEnabled: true, sshPort: 2222 } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(SshKeysComponent);
@@ -85,6 +91,29 @@ describe('SshKeysComponent', () => {
     const fixture = setup([key], { deleteSshKey });
     buttonsByText(fixture.nativeElement, 'delete')[0].click();
     expect(deleteSshKey).toHaveBeenCalledWith('k1');
+    expect(notify.success).toHaveBeenCalledWith('Deleted SSH key');
+  });
+
+  it('reports a failed delete and enables Delete again', () => {
+    const failure = new ApiError('database is down', 500);
+    const fixture = setup([key], { deleteSshKey: () => throwError(() => failure) });
+    buttonsByText(fixture.nativeElement, 'delete')[0].click();
+    fixture.detectChanges();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to delete SSH key', failure);
+    expect(buttonsByText(fixture.nativeElement, 'delete')[0].disabled).toBe(false);
+  });
+
+  it('keeps a refused key inside the add dialog', () => {
+    const fixture = setup([], { addSshKey: () => throwError(() => new ApiError('Key already registered', 409)) });
+    const component = fixture.componentInstance;
+    component.openDialog();
+    component.formName = 'laptop';
+    component.formPublicKey = 'ssh-ed25519 AAAA';
+    component.addKey();
+    fixture.detectChanges();
+    expect(component.showDialog()).toBe(true);
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Key already registered');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Key already registered');
   });
 
   describe('Add SSH Key dialog', () => {

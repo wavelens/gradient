@@ -64,19 +64,6 @@
   word-break: break-all;
 }
 
-.dialog-error {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
-  border-radius: $border-radius-md;
-  padding: $spacing-md;
-  color: var(--gr-status-danger);
-  margin-bottom: $spacing-md;
-
-}
-
 .dialog-info {
   display: flex;
   align-items: center;

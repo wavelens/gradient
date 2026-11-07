@@ -8,9 +8,6 @@
   @if (canEdit()) {
     <button slot="actions" grButton label="Grant Team" (click)="openGrant()"></button>
   }
-  @if (error(); as message) {
-    <gr-message-banner type="error">{{ message }}</gr-message-banner>
-  }
   @if (shownGrants().length > 0) {
     <gr-row-list>
       @for (grant of shownGrants(); track grant.team) {
@@ -38,10 +35,7 @@
   }
 </gr-settings-section>
 
-<gr-dialog header="Grant Team" [(visible)]="showGrant" width="420px">
-  @if (grantError(); as message) {
-    <gr-message-banner type="error">{{ message }}</gr-message-banner>
-  }
+<gr-dialog header="Grant Team" [(visible)]="showGrant" width="420px" [error]="grantError()">
   <gr-form-field label="Team" hint="A team you are not Admin of receives a request to approve.">
     <gr-autocomplete [(ngModel)]="form.team" [suggestions]="suggestions()" (completeMethod)="search($event)"
       [forceSelection]="false" />

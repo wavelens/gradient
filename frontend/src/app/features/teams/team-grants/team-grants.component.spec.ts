@@ -11,6 +11,8 @@ import { of, throwError } from 'rxjs';
 import { GrantedPart, TeamGrantsComponent } from './team-grants.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 import { TeamGrantEntry, TeamSummary } from '@core/models';
 
 const grants: TeamGrantEntry[] = [
@@ -37,12 +39,14 @@ function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false)
     updateProjectGrant: vi.fn().mockReturnValue(of('ok')),
     updateCacheGrant: vi.fn().mockReturnValue(of('ok')),
   };
+  const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [TeamGrantsComponent],
     providers: [
       provideRouter([]),
       { provide: TeamsService, useValue: service },
       { provide: AuthService, useValue: { user: signal({ superuser }) } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(TeamGrantsComponent);
@@ -55,7 +59,7 @@ function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false)
   const changed = vi.fn();
   fixture.componentInstance.changed.subscribe(changed);
   const text = () => (fixture.nativeElement as HTMLElement).textContent || '';
-  return { fixture, component: fixture.componentInstance, service, text, changed };
+  return { fixture, component: fixture.componentInstance, service, text, changed, notify };
 }
 
 function grantOf(team: string): TeamGrantEntry {
@@ -171,7 +175,7 @@ describe('TeamGrantsComponent', () => {
 
   it('shows a failed grant inside the grant dialog', () => {
     const { fixture, component, service, text } = setup('project', 'users');
-    service.grantProject.mockReturnValue(throwError(() => new Error('Team not found')));
+    service.grantProject.mockReturnValue(throwError(() => new ApiError('Team not found', 404)));
     component.openGrant();
     fixture.detectChanges();
     component.form = { team: 'unknown', role: 'View' };
@@ -179,6 +183,16 @@ describe('TeamGrantsComponent', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('Team not found');
     expect(text()).not.toContain('Team not found');
+  });
+
+  it('reports a failed removal as a toast', () => {
+    const { component, service, notify, changed } = setup('cache');
+    const failure = new ApiError('Forbidden', 403);
+    service.removeCacheGrant.mockReturnValue(throwError(() => failure));
+    component.remove(grantOf('platform'));
+    expect(notify.failure).toHaveBeenCalledWith('Failed to remove team', failure);
+    expect(component.busy()).toBeNull();
+    expect(changed).not.toHaveBeenCalled();
   });
 
   it('grants a cache only users with a role', () => {

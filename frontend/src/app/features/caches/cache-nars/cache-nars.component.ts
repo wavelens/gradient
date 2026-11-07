@@ -10,6 +10,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   ButtonComponent,
   CardGridComponent,
@@ -61,6 +63,7 @@ export class CacheNarsComponent implements OnInit {
   private router = inject(Router);
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
+  private notify = inject(NotifyService);
 
   access = injectCacheAccess();
 
@@ -216,10 +219,11 @@ export class CacheNarsComponent implements OnInit {
         this.total.set(Math.max(0, this.total() - 1));
         this.deletingHash.set(null);
         this.pendingDelete.set(null);
+        this.notify.success('NAR removed');
         this.loadStats();
       },
-      error: (err) => {
-        this.deleteError.set(err?.message ?? 'Failed to delete NAR.');
+      error: (error: unknown) => {
+        this.deleteError.set(apiErrorMessage(error, 'Failed to delete NAR.'));
         this.deletingHash.set(null);
       },
     });

@@ -9,11 +9,11 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
+import { NotifyService } from '@core/services/notify.service';
 import { SubscriptionRequestItem } from '@core/models';
 import {
   ButtonComponent,
   LoadStateComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -26,7 +26,6 @@ import {
     CommonModule,
     ButtonComponent,
     LoadStateComponent,
-    MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -39,13 +38,13 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
+  private notify = inject(NotifyService);
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Subscriptions' }));
   loading = signal(true);
   deciding = signal<string | null>(null);
   requests = signal<SubscriptionRequestItem[]>([]);
-  errorMessage = signal<string | null>(null);
   loadError = signal<unknown>(null);
 
   ngOnInit(): void {
@@ -70,30 +69,30 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
 
   approve(project: string): void {
     this.deciding.set(project);
-    this.errorMessage.set(null);
     this.cachesService.approveSubscriptionRequest(this.cacheName, project).subscribe({
       next: () => {
         this.deciding.set(null);
+        this.notify.success('Approved subscription request');
         this.load();
       },
-      error: (e: Error) => {
+      error: (error: unknown) => {
         this.deciding.set(null);
-        this.errorMessage.set(e.message || 'Failed to approve the request.');
+        this.notify.failure('Failed to approve subscription request', error);
       },
     });
   }
 
   deny(project: string): void {
     this.deciding.set(project);
-    this.errorMessage.set(null);
     this.cachesService.denySubscriptionRequest(this.cacheName, project).subscribe({
       next: () => {
         this.deciding.set(null);
+        this.notify.success('Denied subscription request');
         this.load();
       },
-      error: (e: Error) => {
+      error: (error: unknown) => {
         this.deciding.set(null);
-        this.errorMessage.set(e.message || 'Failed to deny the request.');
+        this.notify.failure('Failed to deny subscription request', error);
       },
     });
   }

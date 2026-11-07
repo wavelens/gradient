@@ -9,10 +9,6 @@
   title="Subscriptions"
   subtitle="Projects asking to use this cache"
 >
-  @if (errorMessage()) {
-    <gr-message-banner slot="banner" type="error">{{ errorMessage() }}</gr-message-banner>
-  }
-
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

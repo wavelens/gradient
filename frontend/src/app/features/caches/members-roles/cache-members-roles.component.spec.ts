@@ -13,6 +13,8 @@ import { ApiError } from '@core/services/api.service';
 import { CacheMembersRolesComponent } from './cache-members-roles.component';
 import { CachesService } from '@core/services/caches.service';
 import { UserService } from '@core/services/user.service';
+import { NotifyService } from '@core/services/notify.service';
+import { RoleResponse_CacheRoleOwner } from '@core/models';
 
 function activatedRouteStub(canEdit = false) {
   const data = canEdit
@@ -33,10 +35,17 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 
 const revokeInvitation = vi.fn().mockReturnValue(of('Invitation revoked'));
 const getMembers = vi.fn();
+const removeMember = vi.fn();
+const deleteRole = vi.fn();
+const notify = { success: vi.fn(), failure: vi.fn() };
 
 function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
-  revokeInvitation.mockClear();
+  revokeInvitation.mockReset().mockReturnValue(of('Invitation revoked'));
   getMembers.mockReset().mockReturnValue(of([{ id: 'alice', name: 'Admin' }]));
+  removeMember.mockReset().mockReturnValue(of('ok'));
+  deleteRole.mockReset().mockReturnValue(of(true));
+  notify.success.mockClear();
+  notify.failure.mockClear();
   TestBed.configureTestingModule({
     imports: [CacheMembersRolesComponent],
     providers: [
@@ -56,10 +65,10 @@ function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
             }),
           addMember: () => of('ok'),
           updateMember: () => of('ok'),
-          removeMember: () => of('ok'),
+          removeMember,
           createRole: () => of({}),
           updateRole: () => of({}),
-          deleteRole: () => of(true),
+          deleteRole,
           getInvitations: () =>
             of([
               {
@@ -74,6 +83,7 @@ function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
         },
       },
       { provide: UserService, useValue: { searchUsers: () => of([]) } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   return TestBed.createComponent(CacheMembersRolesComponent);
@@ -131,5 +141,37 @@ describe('CacheMembersRolesComponent - pending invitations', () => {
     fixture.detectChanges();
     (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
     expect(revokeInvitation).toHaveBeenCalledWith('my-cache', 'bob');
+  });
+
+  it('reports a failed revoke as a toast, not inside the closed Add Member dialog', async () => {
+    const fixture = setup(true);
+    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
+    revokeInvitation.mockReturnValue(throwError(() => failure));
+    await settled(fixture);
+    (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to revoke invitation', failure);
+    expect(fixture.componentInstance.memberError()).toBeNull();
+  });
+});
+
+describe('CacheMembersRolesComponent - write failures', () => {
+  it('reports a failed member removal', async () => {
+    const fixture = setup(true);
+    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
+    removeMember.mockReturnValue(throwError(() => failure));
+    await settled(fixture);
+    fixture.componentInstance.removeMember('alice');
+    expect(notify.failure).toHaveBeenCalledWith('Failed to remove member', failure);
+    expect(fixture.componentInstance.removingMember()).toBeNull();
+  });
+
+  it('reports a failed role delete', async () => {
+    const fixture = setup(true);
+    const failure = new ApiError('Role is still assigned', 409);
+    deleteRole.mockReturnValue(throwError(() => failure));
+    await settled(fixture);
+    fixture.componentInstance.deleteRole({ id: 'r2', name: 'releaser', builtin: false } as RoleResponse_CacheRoleOwner);
+    expect(notify.failure).toHaveBeenCalledWith('Failed to delete role', failure);
+    expect(fixture.componentInstance.deletingRole()).toBeNull();
   });
 });

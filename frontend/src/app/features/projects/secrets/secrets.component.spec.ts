@@ -16,6 +16,7 @@ import { ProjectAccessService } from '@core/services/project-access.service';
 import { AccessState } from '@core/models/access.model';
 import { ProjectSecretSummary, SopsRecipientResponse } from '@core/models';
 import { docsUrl } from '@core/docs';
+import { ApiError } from '@core/services/api.service';
 
 const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
 
@@ -141,6 +142,39 @@ describe('SecretsComponent', () => {
     buttonIn(document.body.querySelector('.cdk-overlay-container')!, 'Delete')!.click();
     await settled(fixture);
     expect(service.remove).toHaveBeenCalledWith('acme', 'wandb-token');
+  });
+
+  it('keeps a failed delete open with the server reason inside the dialog', async () => {
+    const { fixture, service } = setup();
+    service.remove.mockReturnValue(throwError(() => new ApiError('Secret is in use', 409)));
+    await settled(fixture);
+    buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.click();
+    await settled(fixture);
+    buttonIn(document.body.querySelector('.cdk-overlay-container')!, 'Delete')!.click();
+    await settled(fixture);
+    const dialog = document.body.querySelector('.gr-dialog')!;
+    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Secret is in use');
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')).toBeNull();
+
+    buttonIn(dialog, 'Cancel')!.click();
+    await settled(fixture);
+    buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.click();
+    await settled(fixture);
+    expect(document.body.querySelector('.gr-dialog gr-message-banner')).toBeNull();
+  });
+
+  it('keeps a failed save inside the Set secret dialog', async () => {
+    const { fixture, service } = setup();
+    service.put.mockReturnValue(throwError(() => new ApiError('Value is too long', 400)));
+    await settled(fixture);
+    buttonIn(fixture.nativeElement, 'Set secret')!.click();
+    await settled(fixture);
+    typeInto('secret-name', 'wandb-token');
+    typeInto('secret-value', 'v');
+    await settled(fixture);
+    buttonIn(document.body, 'Save')!.click();
+    await settled(fixture);
+    expect(document.body.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Value is too long');
   });
 
   it('hides Set secret without settings access', async () => {

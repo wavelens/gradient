@@ -12,6 +12,8 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   ButtonComponent,
   CheckboxComponent,
@@ -70,6 +72,7 @@ export class ProjectSettingsComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
+  private notify = inject(NotifyService);
   protected config = inject(ConfigService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
@@ -86,6 +89,7 @@ export class ProjectSettingsComponent implements OnInit {
   sshKey = signal<string>('');
 
   showDeleteDialog = signal(false);
+  deleteError = signal<string | null>(null);
   showRegenerateKeyDialog = signal(false);
   saveError = signal<string | null>(null);
   saveSuccess = signal(false);
@@ -167,30 +171,36 @@ export class ProjectSettingsComponent implements OnInit {
             this.saveSuccess.set(true);
             this.loadProject();
           },
-          error: (error) => {
-            this.saveError.set(error?.message || 'Failed to update visibility.');
+          error: (error: unknown) => {
+            this.saveError.set(apiErrorMessage(error, 'Failed to update visibility.'));
             this.saving.set(false);
             this.loadProject();
           },
         });
       },
-      error: (error) => {
-        this.saveError.set(error?.message || 'Failed to save settings.');
+      error: (error: unknown) => {
+        this.saveError.set(apiErrorMessage(error, 'Failed to save settings.'));
         this.saving.set(false);
       },
     });
   }
 
+  openDeleteDialog(): void {
+    this.deleteError.set(null);
+    this.showDeleteDialog.set(true);
+  }
+
   deleteProject(): void {
     this.deleting.set(true);
+    this.deleteError.set(null);
     this.projectsService.deleteProject(this.projectName).subscribe({
       next: () => {
+        this.notify.success('Project deleted');
         this.router.navigate(['/projects']);
       },
-      error: (error) => {
-        console.error('Failed to delete project:', error);
+      error: (error: unknown) => {
+        this.deleteError.set(apiErrorMessage(error, 'Project deletion failed.'));
         this.deleting.set(false);
-        this.showDeleteDialog.set(false);
       },
     });
   }
@@ -206,9 +216,10 @@ export class ProjectSettingsComponent implements OnInit {
       next: (key) => {
         this.sshKey.set(key);
         this.generatingSSH.set(false);
+        this.notify.success('SSH key generated');
       },
-      error: (error) => {
-        console.error('Failed to generate SSH key:', error);
+      error: (error: unknown) => {
+        this.notify.failure('SSH key generation failed', error);
         this.generatingSSH.set(false);
       },
     });

@@ -21,6 +21,10 @@ import { AuthService } from '@core/services/auth.service';
 import { signal } from '@angular/core';
 import { MenuItem } from '@gradient/ui/ui';
 import { ProjectWorkerEntry } from '@core/models';
+import { ApiError } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
+
+const notify = { success: vi.fn(), failure: vi.fn() };
 
 type MockedProjects = {
   getProject: ReturnType<typeof vi.fn>;
@@ -73,7 +77,10 @@ function setup(opts: {
     testWorker: opts.testWorker ?? vi.fn(() => of({ ok: true, connected: true, authorized_for_project: true, message: 'ok' })),
     patchWorker: vi.fn(() => of('updated')),
     setWorkerActive: vi.fn(() => of('updated')),
+    deleteWorker: vi.fn(() => of('deleted')),
   };
+  notify.success.mockClear();
+  notify.failure.mockClear();
   const projects: MockedProjects = {
     getProject: vi.fn(() => of({ id: 'project-uuid', display_name: 'Project' } as never)),
     getSubscribedCaches: vi.fn(() => of(opts.caches)),
@@ -96,6 +103,7 @@ function setup(opts: {
       { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(opts.access) } },
       { provide: ActivatedRoute, useValue: activatedRouteStub() },
+      { provide: NotifyService, useValue: notify },
       {
         provide: ConfigService,
         useValue: { gradientCiEnabled: opts.gradientCi ?? true, gradientCiUrl: 'https://servers.gradient.ci' },
@@ -456,5 +464,53 @@ describe('WorkersComponent - load errors', () => {
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     await settled(fixture);
     expect(root.textContent).not.toContain('Failed to load workers');
+  });
+});
+
+describe('WorkersComponent - write failures', () => {
+  const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  it('reports a failed delete and a failed deactivate instead of logging them', async () => {
+    const fixture = setup({ access: writable, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
+    const workers = TestBed.inject(WorkersService) as unknown as {
+      deleteWorker: ReturnType<typeof vi.fn>;
+      setWorkerActive: ReturnType<typeof vi.fn>;
+    };
+    workers.deleteWorker.mockReturnValue(throwError(() => failure));
+    workers.setWorkerActive.mockReturnValue(throwError(() => failure));
+    const cmp = fixture.componentInstance;
+
+    cmp.deleteWorker(workerUnmanaged);
+    expect(notify.failure).toHaveBeenCalledWith('Worker delete failed', failure);
+    expect(cmp.deletingId()).toBeNull();
+
+    cmp.requestToggleWorker(workerUnmanaged);
+    expect(notify.failure).toHaveBeenCalledWith('Worker deactivation failed', failure);
+    expect(cmp.togglingId()).toBeNull();
+  });
+
+  it('keeps a failed edit inside the open Edit Worker dialog', async () => {
+    const fixture = setup({ access: writable, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    const workers = TestBed.inject(WorkersService) as unknown as { patchWorker: ReturnType<typeof vi.fn> };
+    workers.patchWorker.mockReturnValue(throwError(() => new ApiError('Name is already used by another worker', 409)));
+    const cmp = fixture.componentInstance;
+
+    cmp.openRenameDialog(workerUnmanaged);
+    fixture.detectChanges();
+    cmp.newName = 'Renamed';
+    cmp.confirmRename();
+    fixture.detectChanges();
+
+    const dialog = document.querySelector('.gr-dialog')!;
+    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Name is already used by another worker');
+    expect(cmp.showRenameDialog()).toBe(true);
+
+    cmp.cancelRename();
+    cmp.openRenameDialog(workerUnmanaged);
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog gr-message-banner')).toBeNull();
   });
 });

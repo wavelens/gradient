@@ -12,6 +12,8 @@ import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { ThemeService, ThemePreference } from '@core/services/theme.service';
+import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { environment } from '@environments/environment';
 import {
   ButtonComponent,
@@ -71,6 +73,7 @@ export class ProfileComponent implements OnInit {
   protected config = inject(ConfigService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  private notify = inject(NotifyService);
   theme = inject(ThemeService);
 
   loading = signal(true);
@@ -144,12 +147,12 @@ export class ProfileComponent implements OnInit {
     this.userService.disconnectLoginProvider(id).subscribe({
       next: () => {
         this.disconnecting.set(null);
-        this.successMessage.set('Account disconnected.');
+        this.notify.success('Account disconnected');
         this.loadSettings();
       },
-      error: (error) => {
+      error: (error: unknown) => {
         this.disconnecting.set(null);
-        this.errorMessage.set(error.message || 'Failed to disconnect the account.');
+        this.notify.failure('Failed to disconnect account', error);
       },
     });
   }
@@ -191,12 +194,12 @@ export class ProfileComponent implements OnInit {
       next: () => {
         this.savedProfile = { ...this.savedProfile, ...changes };
         this.saving.set(false);
-        this.successMessage.set('Profile updated successfully.');
+        this.notify.success('Profile saved');
         this.authService.reloadUser();
       },
-      error: (error) => {
-        this.errorMessage.set(error.message || 'Failed to save settings.');
+      error: (error: unknown) => {
         this.saving.set(false);
+        this.notify.failure('Failed to save profile', error);
       },
     });
   }
@@ -227,9 +230,9 @@ export class ProfileComponent implements OnInit {
       next: () => {
         this.authService.logout().subscribe();
       },
-      error: (error) => {
+      error: (error: unknown) => {
         this.deleting.set(false);
-        this.deleteError.set(error?.message || 'Failed to delete account.');
+        this.deleteError.set(apiErrorMessage(error, 'Failed to delete account.'));
       },
     });
   }

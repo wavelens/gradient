@@ -6,6 +6,7 @@
 
 import { CdkTrapFocus } from '@angular/cdk/a11y';
 import { IconComponent } from '../icon/icon.component';
+import { MessageBannerComponent } from '../message-banner/message-banner.component';
 import { ESCAPE } from '@angular/cdk/keycodes';
 import { Overlay, OverlayRef } from '@angular/cdk/overlay';
 import { TemplatePortal } from '@angular/cdk/portal';
@@ -33,7 +34,7 @@ let dialogSeq = 0;
 @Component({
   selector: 'gr-dialog',
   standalone: true,
-  imports: [IconComponent, CdkTrapFocus],
+  imports: [IconComponent, CdkTrapFocus, MessageBannerComponent],
   providers: [FormErrors],
   template: `
     <ng-template #panel>
@@ -54,7 +55,12 @@ let dialogSeq = 0;
             </button>
           }
         </div>
-        <div class="gr-dialog__content"><ng-content /></div>
+        <div class="gr-dialog__content">
+          @if (error(); as message) {
+            <gr-message-banner type="error">{{ message }}</gr-message-banner>
+          }
+          <ng-content />
+        </div>
         <div class="gr-dialog__footer"><ng-content select="[grDialogFooter]" /></div>
       </div>
     </ng-template>
@@ -67,6 +73,7 @@ export class DialogComponent implements OnDestroy {
   header = input('');
   width = input('420px');
   closable = input(true, { transform: booleanAttribute });
+  error = input<string | null>(null);
   hide = output<void>();
 
   private panel = viewChild.required<TemplateRef<unknown>>('panel');

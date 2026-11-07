@@ -9,7 +9,10 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of, throwError } from 'rxjs';
+import { vi } from 'vitest';
 import { TaskFlakeInputsComponent } from './task-flake-inputs.component';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
@@ -185,5 +188,40 @@ describe('TaskFlakeInputsComponent - load errors', () => {
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     fixture.detectChanges();
     expect(root.textContent).toContain('No overrides configured');
+  });
+});
+
+describe('TaskFlakeInputsComponent - write failures', () => {
+  const writer = { managed: false, canEdit: true, canTrigger: true };
+
+  it('reports a failed delete with the server reason and a successful one', () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const refused = new ApiError('You need write access to change overrides', 403);
+    const fixture = setup(writer, [override], { delete: () => throwError(() => refused) });
+    const notify = TestBed.inject(NotifyService);
+    const failure = vi.spyOn(notify, 'failure');
+    const success = vi.spyOn(notify, 'success');
+    fixture.componentInstance.deleteOverride('o1');
+    expect(failure).toHaveBeenCalledWith('Failed to delete the override for the flake input', refused);
+    expect(fixture.componentInstance.deletingId()).toBeNull();
+
+    (TestBed.inject(FlakeInputOverridesService) as unknown as Record<string, unknown>)['delete'] = () => of({ deleted: true });
+    fixture.componentInstance.deleteOverride('o1');
+    expect(success).toHaveBeenCalledWith('Deleted the override for the flake input');
+  });
+
+  it('shows a rejected edit inside the open dialog instead of raw transport text', () => {
+    const fixture = setup(writer, [override], {
+      update: () => throwError(() => new Error('Http failure response for /overrides/o1: 500 Internal Server Error')),
+    });
+    const component = fixture.componentInstance;
+    component.startEdit(override);
+    component.saveEdit();
+    fixture.detectChanges();
+
+    expect(component.showEditDialog()).toBe(true);
+    const banner = document.body.querySelector('.gr-dialog gr-message-banner');
+    expect(banner?.textContent).toContain('Failed to update override.');
+    expect(document.body.textContent).not.toContain('Http failure response');
   });
 });

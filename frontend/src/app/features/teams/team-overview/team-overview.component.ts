@@ -9,6 +9,8 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
+import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { TeamResponse, TeamGrants, TeamRequestItem } from '@core/models';
 import {
   ButtonComponent,
@@ -45,6 +47,7 @@ export class TeamOverviewComponent implements OnInit {
   private teams = inject(TeamsService);
   private crumbs = inject(BreadcrumbsService);
   private authService = inject(AuthService);
+  private notify = inject(NotifyService);
 
   teamName = '';
   breadcrumb = computed(() => this.crumbs.team(this.teamName));
@@ -65,8 +68,8 @@ export class TeamOverviewComponent implements OnInit {
         this.loading.set(false);
         if (this.isAdmin()) this.loadRequests();
       },
-      error: (err: Error) => {
-        this.error.set(err.message || 'Failed to load the team.');
+      error: (err: unknown) => {
+        this.error.set(apiErrorMessage(err, 'Failed to load the team.'));
         this.loading.set(false);
       },
     });
@@ -85,25 +88,25 @@ export class TeamOverviewComponent implements OnInit {
   }
 
   approve(id: string): void {
-    this.decide(id, this.teams.approveRequest(this.teamName, id));
+    this.decide(id, this.teams.approveRequest(this.teamName, id), 'Request approved', 'Failed to approve request');
   }
 
   deny(id: string): void {
-    this.decide(id, this.teams.denyRequest(this.teamName, id));
+    this.decide(id, this.teams.denyRequest(this.teamName, id), 'Request denied', 'Failed to deny request');
   }
 
-  private decide(id: string, call: ReturnType<TeamsService['approveRequest']>): void {
+  private decide(id: string, call: ReturnType<TeamsService['approveRequest']>, done: string, failed: string): void {
     this.busy.set(id);
-    this.error.set(null);
     call.subscribe({
       next: () => {
         this.busy.set(null);
+        this.notify.success(done);
         this.loadRequests();
         this.loadGrants();
       },
-      error: (err: Error) => {
+      error: (err: unknown) => {
         this.busy.set(null);
-        this.error.set(err.message || 'Failed to answer the request.');
+        this.notify.failure(failed, err);
       },
     });
   }

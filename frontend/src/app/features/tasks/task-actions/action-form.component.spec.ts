@@ -118,7 +118,7 @@ describe('ActionFormComponent', () => {
     fixture.componentRef.setInput('open', true);
     fixture.componentRef.setInput('error', 'Integration not found');
     fixture.detectChanges();
-    expect(document.body.textContent).toContain('Integration not found');
+    expect(document.body.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Integration not found');
   });
 
   it('emits a CreateActionRequest with the correct discriminated union on submit', () => {

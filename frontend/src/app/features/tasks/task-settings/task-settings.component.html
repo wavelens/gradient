@@ -231,14 +231,12 @@
 <gr-dialog
 header="Transfer Ownership"
 [(visible)]="showTransferDialog"
+[error]="transferError()"
 width="420px"
 (hide)="onTransferDialogHide()"
 >
 <div>
   <p>Transfer <strong>{{ task()?.display_name }}</strong> to another project. This action cannot be undone.</p>
-  @if (transferError()) {
-    <gr-message-banner type="error">{{ transferError() }}</gr-message-banner>
-  }
   @if (transferSuccess()) {
     <gr-message-banner type="success">Ownership transferred successfully.</gr-message-banner>
   }

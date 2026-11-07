@@ -13,6 +13,7 @@ import { CacheNarsComponent } from './cache-nars.component';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { NarSummary, NarStats, Paginated } from '@core/models';
+import { ApiError } from '@core/services/api.service';
 
 const NAR = {
   hash: 'abc123',
@@ -100,5 +101,25 @@ describe('CacheNarsComponent loading', () => {
   it('drops the stat cards when the stats fail', () => {
     const { root } = render(() => of(PAGE), () => throwError(() => ({ status: 500 })));
     expect(root.querySelector('gr-stat-card')).toBeNull();
+  });
+});
+
+describe('CacheNarsComponent delete', () => {
+  it('keeps a failed delete inside the open dialog and clears it on the next attempt', () => {
+    const { fixture } = render(() => of(PAGE));
+    const service = TestBed.inject(CachesService) as unknown as { deleteCacheNar: () => unknown };
+    service.deleteCacheNar = () => throwError(() => new ApiError('NAR is pinned by a running build', 409));
+    const cmp = fixture.componentInstance;
+    cmp.askDelete(NAR);
+    fixture.detectChanges();
+    cmp.confirmDelete();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('NAR is pinned by a running build');
+    expect(cmp.pendingDelete()).toEqual(NAR);
+
+    cmp.cancelDelete();
+    cmp.askDelete(NAR);
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog gr-message-banner')).toBeNull();
   });
 });

@@ -4,7 +4,6 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-toast />
 <gr-page-layout [breadcrumb]="breadcrumb()" title="Upstream Caches" subtitle="External and internal caches this cache pulls through from">
   <button slot="actions"
       *appWritable="access()"
@@ -99,14 +98,9 @@
 <gr-dialog
   header="Edit Upstream Cache"
   [(visible)]="showEditDialog"
+  [error]="editError()"
   width="480px"
 >
-  @if (editError()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ editError() }}
-    </div>
-  }
   @if (editingUpstream(); as u) {
     <div class="upstream-form">
       <gr-form-field label="Display Name" for="edit-display-name">
@@ -147,14 +141,9 @@
 <gr-dialog
   header="Add Upstream Cache"
   [(visible)]="showAddDialog"
+  [error]="addError()"
   width="480px"
 >
-  @if (addError()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ addError() }}
-    </div>
-  }
   <div class="upstream-form">
     <gr-form-field label="Type">
       <gr-label-help slot="label" doc="concepts/caches/#upstream-types" title="Upstream types" />

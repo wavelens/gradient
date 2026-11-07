@@ -15,9 +15,11 @@ import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { ThemeService } from '@core/services/theme.service';
+import { NotifyService } from '@core/services/notify.service';
 
 let profileWrites: unknown[] = [];
 let disconnects: string[] = [];
+let notify = { success: vi.fn(), failure: vi.fn() };
 
 interface SetupOptions {
   managed: boolean;
@@ -27,6 +29,7 @@ interface SetupOptions {
   provider?: { connected: boolean; canDisconnect: boolean };
   query?: Record<string, string>;
   loadFailure?: ApiError;
+  writeFailure?: ApiError;
 }
 
 function settings(opts: SetupOptions) {
@@ -46,6 +49,7 @@ function settings(opts: SetupOptions) {
 function setup(opts: SetupOptions): ComponentFixture<ProfileComponent> {
   profileWrites = [];
   disconnects = [];
+  notify = { success: vi.fn(), failure: vi.fn() };
   localStorage.clear();
   document.documentElement.removeAttribute('data-theme');
   TestBed.configureTestingModule({
@@ -60,14 +64,16 @@ function setup(opts: SetupOptions): ComponentFixture<ProfileComponent> {
           getUserSettings: () => (opts.loadFailure ? throwError(() => opts.loadFailure) : of(settings(opts))),
           updateUserSettings: (body: unknown) => {
             profileWrites.push(body);
-            return of({});
+            return opts.writeFailure ? throwError(() => opts.writeFailure) : of({});
           },
           disconnectLoginProvider: (id: string) => {
             disconnects.push(id);
-            return of('Account disconnected');
+            return opts.writeFailure ? throwError(() => opts.writeFailure) : of('Account disconnected');
           },
+          deleteUser: () => throwError(() => opts.writeFailure),
         },
       },
+      { provide: NotifyService, useValue: notify },
       {
         provide: ActivatedRoute,
         useValue: { snapshot: { queryParamMap: convertToParamMap(opts.query ?? {}) } },
@@ -243,6 +249,16 @@ describe('ProfileComponent - connected accounts', () => {
     (findByText(fixture.nativeElement, 'disconnect') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(disconnects).toEqual(['example']);
+    expect(notify.success).toHaveBeenCalledWith('Account disconnected');
+  });
+
+  it('reports a failed save as a toast with the server reason', () => {
+    const writeFailure = new ApiError('Email already in use', 409);
+    const fixture = setup({ managed: false, oidc: false, writeFailure });
+    (findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to save profile', writeFailure);
+    expect(fixture.componentInstance.saving()).toBe(false);
   });
 
   it('shows a success banner after connecting', () => {
@@ -283,6 +299,18 @@ describe('ProfileComponent - delete confirmation', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     expect(document.body.querySelector('#confirm-username')).not.toBeNull();
+  });
+
+  it('keeps a failed deletion inside the open dialog', () => {
+    const fixture = setup({ managed: false, oidc: false, writeFailure: new ApiError('Wrong password', 403) });
+    const component = fixture.componentInstance;
+    component.openDeleteDialog();
+    component.deletePassword = 'nope';
+    component.deleteAccount();
+    fixture.detectChanges();
+    expect(component.showDeleteDialog()).toBe(true);
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Wrong password');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Wrong password');
   });
 
   it('never offers an empty profile form to save after a failed load', () => {

@@ -12,6 +12,8 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Subject, of, throwError } from 'rxjs';
 import { GithubAppComponent } from './github-app.component';
 import { AdminService } from '@core/services/admin.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 
 type MockedAdmin = {
   requestGithubAppManifest: ReturnType<typeof vi.fn>;
@@ -20,12 +22,14 @@ type MockedAdmin = {
 
 describe('GithubAppComponent', () => {
   let admin: MockedAdmin;
+  let notify: { success: ReturnType<typeof vi.fn>; failure: ReturnType<typeof vi.fn> };
 
   function setup(queryParams: Record<string, string> = {}) {
     admin = {
       requestGithubAppManifest: vi.fn(),
       fetchGithubAppCredentials: vi.fn(),
     };
+    notify = { success: vi.fn(), failure: vi.fn() };
     TestBed.configureTestingModule({
       imports: [GithubAppComponent],
       providers: [
@@ -33,6 +37,7 @@ describe('GithubAppComponent', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: AdminService, useValue: admin },
+        { provide: NotifyService, useValue: notify },
         {
           provide: ActivatedRoute,
           useValue: {
@@ -63,6 +68,17 @@ describe('GithubAppComponent', () => {
     fixture.componentInstance.host.set('ghe.example.com');
     fixture.componentInstance.create();
     expect(admin.requestGithubAppManifest).toHaveBeenCalledWith('ghe.example.com');
+  });
+
+  it('reports a refused manifest request as a toast and enables the button again', () => {
+    setup({});
+    const failure = new ApiError('GitHub App is already configured', 409);
+    admin.requestGithubAppManifest.mockReturnValue(throwError(() => failure));
+    const fixture = TestBed.createComponent(GithubAppComponent);
+    fixture.componentInstance.create();
+    fixture.detectChanges();
+    expect(notify.failure).toHaveBeenCalledWith('Setup for GitHub App did not start', failure);
+    expect(fixture.nativeElement.querySelector('[data-testid="github-app-create-button"]').disabled).toBe(false);
   });
 
   it('renders credentials when ready=1 and the API returns them', async () => {

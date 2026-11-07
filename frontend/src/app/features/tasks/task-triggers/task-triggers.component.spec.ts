@@ -15,6 +15,8 @@ import { TriggersService } from '@core/services/triggers.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 import { AccessState } from '@core/models/access.model';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
@@ -202,5 +204,65 @@ describe('TaskTriggersComponent - load errors', () => {
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     fixture.detectChanges();
     expect(root.textContent).toContain('No triggers configured');
+  });
+});
+
+describe('TaskTriggersComponent - write failures', () => {
+  const writer = { managed: false, canEdit: true, canTrigger: true };
+  const refused = new ApiError('You need write access to change triggers', 403);
+
+  function failingService(fixture: ComponentFixture<TaskTriggersComponent>): Record<string, unknown> {
+    fixture.detectChanges();
+    return TestBed.inject(TriggersService) as unknown as Record<string, unknown>;
+  }
+
+  it('reports a failed fire with the server reason and frees the row', () => {
+    const fixture = setup(writer);
+    failingService(fixture)['fireNow'] = () => throwError(() => refused);
+    const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+    fixture.componentInstance.fireNow('t1');
+    expect(failure).toHaveBeenCalledWith('Failed to fire trigger', refused);
+    expect(fixture.componentInstance.firingId()).toBeNull();
+  });
+
+  it('reports a failed make default', () => {
+    const fixture = setup(writer);
+    failingService(fixture)['setDefault'] = () => throwError(() => refused);
+    const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+    fixture.componentInstance.makeDefault('t1');
+    expect(failure).toHaveBeenCalledWith("Couldn't make trigger the default", refused);
+    expect(fixture.componentInstance.makingDefaultId()).toBeNull();
+  });
+
+  it('reports a failed delete and a successful one', () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const fixture = setup(writer);
+    const service = failingService(fixture);
+    const notify = TestBed.inject(NotifyService);
+    const failure = vi.spyOn(notify, 'failure');
+    const success = vi.spyOn(notify, 'success');
+    service['delete'] = () => throwError(() => refused);
+    fixture.componentInstance.deleteTrigger('t1');
+    expect(failure).toHaveBeenCalledWith('Failed to delete trigger', refused);
+
+    service['delete'] = () => of(undefined);
+    fixture.componentInstance.deleteTrigger('t1');
+    expect(success).toHaveBeenCalledWith('Trigger deleted');
+  });
+
+  it('shows a rejected save inside the open dialog, not raw transport text', () => {
+    const fixture = setup(writer, [trigger], () => throwError(() => new Error('Http failure response for /triggers/t1: 500')));
+    const component = fixture.componentInstance;
+    component.startEdit(trigger as any);
+    component.saveEdit();
+    fixture.detectChanges();
+    expect(component.showEditDialog()).toBe(true);
+    expect(component.error()).toBe('Failed to update trigger.');
+    const banner = document.body.querySelector('.gr-dialog gr-message-banner');
+    expect(banner?.textContent).toContain('Failed to update trigger.');
+
+    component.cancelEdit();
+    component.startEdit(trigger as any);
+    expect(component.error()).toBeNull();
   });
 });

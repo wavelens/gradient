@@ -8,12 +8,12 @@ import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@ang
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { UserService } from '@core/services/user.service';
+import { NotifyService } from '@core/services/notify.service';
 import { InviteItem } from '@core/models';
 import {
   BadgeComponent,
   ButtonComponent,
   LoadStateComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -27,7 +27,6 @@ import {
     BadgeComponent,
     ButtonComponent,
     LoadStateComponent,
-    MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -39,12 +38,11 @@ import {
 export class InvitesComponent implements OnInit {
   private userService = inject(UserService);
   private route = inject(ActivatedRoute);
+  private notify = inject(NotifyService);
 
   loading = signal(true);
   pendingToken = signal<string | null>(null);
   invites = signal<InviteItem[]>([]);
-  errorMessage = signal<string | null>(null);
-  successMessage = signal<string | null>(null);
   loadError = signal<unknown>(null);
 
   ngOnInit(): void {
@@ -73,38 +71,31 @@ export class InvitesComponent implements OnInit {
 
   accept(token: string): void {
     this.pendingToken.set(token);
-    this.clearMessages();
     this.userService.acceptInvite(token).subscribe({
       next: () => {
         this.pendingToken.set(null);
-        this.successMessage.set('Invitation accepted.');
+        this.notify.success('Invitation accepted');
         this.load();
       },
-      error: (e: Error) => {
+      error: (err: unknown) => {
         this.pendingToken.set(null);
-        this.errorMessage.set(e.message || 'Failed to accept the invitation.');
+        this.notify.failure('Invitation accept failed', err);
       },
     });
   }
 
   decline(token: string): void {
     this.pendingToken.set(token);
-    this.clearMessages();
     this.userService.declineInvite(token).subscribe({
       next: () => {
         this.pendingToken.set(null);
-        this.successMessage.set('Invitation declined.');
+        this.notify.success('Invitation declined');
         this.load();
       },
-      error: (e: Error) => {
+      error: (err: unknown) => {
         this.pendingToken.set(null);
-        this.errorMessage.set(e.message || 'Failed to decline the invitation.');
+        this.notify.failure('Invitation decline failed', err);
       },
     });
-  }
-
-  private clearMessages(): void {
-    this.errorMessage.set(null);
-    this.successMessage.set(null);
   }
 }

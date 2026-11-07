@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AdminService } from '@core/services/admin.service';
+import { NotifyService } from '@core/services/notify.service';
 import {
   ButtonComponent,
   CopyFieldComponent,
@@ -32,10 +33,10 @@ import { ManifestResult } from '@core/models';
 export class GithubAppComponent implements OnInit {
   private admin = inject(AdminService);
   private route = inject(ActivatedRoute);
+  private notify = inject(NotifyService);
 
   host = signal<string>('');
   loading = signal(false);
-  errorMessage = signal<string | null>(null);
 
   showResult = signal(false);
   credentials = signal<ManifestResult | null>(null);
@@ -58,16 +59,15 @@ export class GithubAppComponent implements OnInit {
 
   create(): void {
     this.loading.set(true);
-    this.errorMessage.set(null);
     const host = this.host().trim() || undefined;
     this.admin.requestGithubAppManifest(host).subscribe({
       next: (resp) => {
         this.loading.set(false);
         this.submitManifestForm(resp.post_url, resp.manifest);
       },
-      error: (err) => {
+      error: (err: unknown) => {
         this.loading.set(false);
-        this.errorMessage.set(err?.message || 'Failed to start manifest flow');
+        this.notify.failure('Setup for GitHub App did not start', err);
       },
     });
   }

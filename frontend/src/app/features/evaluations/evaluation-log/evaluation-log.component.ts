@@ -29,7 +29,8 @@ import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
-import { ApiError } from '@core/services/api.service';
+import { ApiError, apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { AccessService, WritableDirective } from '@shared/access';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
@@ -59,7 +60,6 @@ import {
   MessageBannerComponent,
   MessageService,
   SkeletonComponent,
-  ToastComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent } from '@shared/ui';
 import { buildDuration, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, formatWaitingReason, waitingTitle } from '@shared/evaluation';
@@ -70,8 +70,7 @@ import { saveResponse } from '@shared/download';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, ToastComponent, WritableDirective],
-  providers: [MessageService],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WritableDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -92,6 +91,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private tasksService = inject(TasksService);
   private accessService = inject(AccessService);
   private messageService = inject(MessageService);
+  private notify = inject(NotifyService);
   protected authService = inject(AuthService);
   private sanitizer = inject(DomSanitizer);
   private destroyRef = inject(DestroyRef);
@@ -122,6 +122,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   logLoading = signal(true);
   aborting = signal(false);
   abortConfirmOpen = signal(false);
+  abortError = signal<string | null>(null);
   // The log page is reachable without the task route's access resolver, so the
   // owning task is asked directly: a viewer must not be offered an abort.
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
@@ -1095,11 +1096,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   downloadSbom(build: BuildItem): void {
     this.evalService.downloadBuildSbom(build.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: response => saveResponse(response, `${this.buildFileName(build.name)}-sbom.cdx.json`),
-      error: (error: Error) => this.messageService.add({
-        severity: 'error',
-        summary: 'SBOM download failed',
-        detail: error?.message,
-      }),
+      error: (error: unknown) => this.notify.failure('Failed to download SBOM', error),
     });
   }
 
@@ -1119,47 +1116,53 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   prioritizeBuild(build: BuildItem): void {
-    this.runBuildAction(this.evalService.prioritizeBuild(build.id), build, 'Build prioritized', 'Prioritize failed', 'Failed to prioritize build.');
+    this.runBuildAction(this.evalService.prioritizeBuild(build.id), build, 'Build prioritized', 'Failed to prioritize build');
   }
 
   abortBuild(build: BuildItem): void {
-    this.runBuildAction(this.evalService.abortBuild(build.id), build, 'Build aborted', 'Abort failed', 'Failed to abort build.');
+    this.runBuildAction(this.evalService.abortBuild(build.id), build, 'Build aborted', 'Failed to abort build');
   }
 
   retryBuild(build: BuildItem): void {
-    this.runBuildAction(this.evalService.retryBuild(build.id), build, 'Build retried', 'Retry failed', 'Failed to retry build.');
+    this.runBuildAction(this.evalService.retryBuild(build.id), build, 'Build retried', 'Failed to retry build');
   }
 
-  private runBuildAction(request: Observable<string>, build: BuildItem, successSummary: string, failureSummary: string, failureDetail: string): void {
+  private runBuildAction(request: Observable<string>, build: BuildItem, successSummary: string, failureSummary: string): void {
     request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.messageService.add({ severity: 'success', summary: successSummary, detail: this.buildDisplayName(build.name) });
         this.refreshEvaluation();
       },
-      error: (error: Error) => this.messageService.add({
-        severity: 'error',
-        summary: failureSummary,
-        detail: error?.message || failureDetail,
-      }),
+      error: (error: unknown) => this.notify.failure(failureSummary, error),
     });
   }
 
   // ── Abort ───────────────────────────────────────────────────────────────────
 
   requestAbort(event: MouseEvent): void {
-    if (event.ctrlKey || event.metaKey) this.abortEvaluation();
-    else this.abortConfirmOpen.set(true);
+    if (event.ctrlKey || event.metaKey) {
+      this.abortEvaluation();
+      return;
+    }
+    this.abortError.set(null);
+    this.abortConfirmOpen.set(true);
   }
 
   abortEvaluation(): void {
     this.aborting.set(true);
+    this.abortError.set(null);
     this.evalService.abortEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.aborting.set(false);
         this.abortConfirmOpen.set(false);
+        this.notify.success('Evaluation aborted');
         this.loadEvaluation();
       },
-      error: () => this.aborting.set(false),
+      error: (error: unknown) => {
+        this.aborting.set(false);
+        if (this.abortConfirmOpen()) this.abortError.set(apiErrorMessage(error, 'Failed to abort the evaluation.'));
+        else this.notify.failure('Failed to abort evaluation', error);
+      },
     });
   }
 

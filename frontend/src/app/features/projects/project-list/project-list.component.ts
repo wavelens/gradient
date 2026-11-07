@@ -11,13 +11,14 @@ import { FormsModule } from '@angular/forms';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   BadgeComponent,
   ButtonComponent,
   CardGridComponent,
   DialogComponent,
   FormFieldComponent,
-  IconComponent,
   InputDirective,
   LoadStateComponent,
   NavCardComponent,
@@ -38,7 +39,6 @@ import { ProjectSummary, PublicProjectSummary } from '@core/models';
     ButtonComponent,
     InputDirective,
     LoadStateComponent,
-    IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
     NavCardComponent,
@@ -60,6 +60,7 @@ export class ProjectListComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   protected authService = inject(AuthService);
   private config = inject(ConfigService);
+  private notify = inject(NotifyService);
   protected names = nameAvailability((name) => this.projectsService.checkProjectNameAvailable(name));
 
   get canCreateProject(): boolean {
@@ -157,10 +158,11 @@ export class ProjectListComponent implements OnInit {
       next: () => {
         this.creating.set(false);
         this.showCreateDialog.set(false);
+        this.notify.success('Project created');
         this.loadProjects();
       },
-      error: (error) => {
-        this.createError.set(error?.message || 'Failed to create project.');
+      error: (error: unknown) => {
+        this.createError.set(apiErrorMessage(error, 'Failed to create project.'));
         this.creating.set(false);
       },
     });

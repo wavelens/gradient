@@ -15,6 +15,8 @@ import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { AccessState } from '@core/models/access.model';
 import { ConfigService } from '@core/services/config.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 
 type AccessCase = { managed: boolean; canEdit: boolean; canTrigger?: boolean };
 
@@ -141,7 +143,7 @@ describe('TaskSettingsComponent - repository connection test', () => {
   });
 
   it('shows why the repository could not be reached', () => {
-    const fixture = setup(editor, () => throwError(() => new Error('Permission denied (publickey)')));
+    const fixture = setup(editor, () => throwError(() => new ApiError('Permission denied (publickey)', 400)));
     (findByText(fixture.nativeElement, 'test connection') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(status(fixture)).toContain('Permission denied (publickey)');
@@ -166,7 +168,7 @@ describe('TaskSettingsComponent - repository connection test', () => {
   });
 
   it('drops a failed check once the URL is edited', async () => {
-    const fixture = setup(editor, () => throwError(() => new Error('Permission denied (publickey)')));
+    const fixture = setup(editor, () => throwError(() => new ApiError('Permission denied (publickey)', 400)));
     (findByText(fixture.nativeElement, 'test connection') as HTMLButtonElement).click();
     fixture.detectChanges();
     await typeRepository(fixture, 'git@example.org:other.git');
@@ -267,7 +269,7 @@ describe('TaskSettingsComponent - repository URL errors', () => {
 
   it('blocks saving while the last connection test failed', async () => {
     const updateTask = vi.fn(() => of('ok'));
-    const fixture = setup(editor, () => throwError(() => new Error('Permission denied (publickey)')), updateTask);
+    const fixture = setup(editor, () => throwError(() => new ApiError('Permission denied (publickey)', 400)), updateTask);
     const root = fixture.nativeElement as HTMLElement;
     (findByText(root, 'test connection') as HTMLButtonElement).click();
     fixture.detectChanges();
@@ -280,5 +282,55 @@ describe('TaskSettingsComponent - repository URL errors', () => {
     const fixture = setup(editor);
     const key = (fixture.nativeElement as HTMLElement).querySelector('#proj-ssh-key') as HTMLInputElement;
     expect(key.value).toBe('ssh-ed25519 AAAA acme@gradient');
+  });
+});
+
+describe('TaskSettingsComponent - write failures', () => {
+  const admin = { managed: false, canEdit: true, canTrigger: true };
+  const refused = new ApiError('You need admin rights on this project', 403);
+
+  function tasks(): Record<string, unknown> {
+    return TestBed.inject(TasksService) as unknown as Record<string, unknown>;
+  }
+
+  it('reports a failed deactivate with the server reason and frees the button', () => {
+    const fixture = setup(admin);
+    tasks()['deactivateTask'] = () => throwError(() => refused);
+    const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+    fixture.componentInstance.toggleActive();
+    expect(failure).toHaveBeenCalledWith('Failed to deactivate task', refused);
+    expect(fixture.componentInstance.toggling()).toBe(false);
+  });
+
+  it('reports a successful deactivate', () => {
+    const fixture = setup(admin);
+    tasks()['deactivateTask'] = () => of('ok');
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+    fixture.componentInstance.toggleActive();
+    expect(success).toHaveBeenCalledWith('Task deactivated');
+  });
+
+  it('reports a failed delete with the server reason', () => {
+    const fixture = setup(admin);
+    tasks()['deleteTask'] = () => throwError(() => refused);
+    const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+    fixture.componentInstance.deleteTask();
+    expect(failure).toHaveBeenCalledWith('Failed to delete task', refused);
+    expect(fixture.componentInstance.deleting()).toBe(false);
+  });
+
+  it('shows a refused transfer inside the open dialog, not on the page', () => {
+    const fixture = setup(admin);
+    tasks()['transferOwnership'] = () => throwError(() => new ApiError('Project not found', 404));
+    const component = fixture.componentInstance;
+    component.showTransferDialog.set(true);
+    component.transferProjectName = 'nowhere';
+    fixture.detectChanges();
+    component.transferOwnership();
+    fixture.detectChanges();
+
+    expect(component.showTransferDialog()).toBe(true);
+    expect(document.body.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Project not found');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Project not found');
   });
 });

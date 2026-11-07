@@ -12,12 +12,13 @@ import { AuthService } from '@core/services/auth.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
 import { StarsService } from '@core/services/stars.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   ButtonComponent,
   CardGridComponent,
   DialogComponent,
   FormFieldComponent,
-  IconComponent,
   InputDirective,
   LoadStateComponent,
   NavCardComponent,
@@ -45,7 +46,6 @@ const RESERVED_TASK_NAMES = ['build-request'];
     LoadStateComponent,
     LabelHelpComponent,
     EvalStatusBadgeComponent,
-    IconComponent,
     CardGridComponent,
     NavCardComponent,
     PageLayoutComponent,
@@ -56,7 +56,6 @@ const RESERVED_TASK_NAMES = ['build-request'];
   ],
   templateUrl: './project-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './project-detail.component.scss',
 })
 export class ProjectDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
@@ -64,6 +63,7 @@ export class ProjectDetailComponent implements OnInit {
   private tasksService = inject(TasksService);
   private stars = inject(StarsService);
   private crumbs = inject(BreadcrumbsService);
+  private notify = inject(NotifyService);
   protected names = nameAvailability(
     (name) => this.tasksService.checkTaskNameAvailable(this.projectName, name),
     RESERVED_TASK_NAMES,
@@ -148,10 +148,11 @@ export class ProjectDetailComponent implements OnInit {
         next: () => {
           this.creating.set(false);
           this.showCreateDialog.set(false);
+          this.notify.success('Task created');
           this.loadTasks();
         },
-        error: (error) => {
-          this.createError.set(error?.message || 'Failed to create task.');
+        error: (error: unknown) => {
+          this.createError.set(apiErrorMessage(error, 'Failed to create task.'));
           this.creating.set(false);
         },
       });

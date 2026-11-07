@@ -15,6 +15,7 @@ import { LiveEvent, LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { UserInfoResponse, BuildItem, EvaluationResponse, EvaluationStatus } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import type { LogViewerComponent } from '@shared/log';
@@ -992,6 +993,53 @@ describe('EvaluationLogComponent', () => {
       cmp.requestAbort(new MouseEvent('click', { ctrlKey: true }));
       expect(abort).toHaveBeenCalledOnce();
       expect(cmp.abortConfirmOpen()).toBe(false);
+    });
+
+    it('keeps the confirmation open with the server reason when the abort is refused', () => {
+      const { cmp } = setup();
+      vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation')
+        .mockReturnValue(throwError(() => new ApiError('Evaluation already finished', 409)));
+      const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+      cmp.requestAbort(new MouseEvent('click'));
+      cmp.abortEvaluation();
+      expect(cmp.abortConfirmOpen()).toBe(true);
+      expect(cmp.aborting()).toBe(false);
+      expect(cmp.abortError()).toBe('Evaluation already finished');
+      expect(failure).not.toHaveBeenCalled();
+
+      cmp.abortConfirmOpen.set(false);
+      cmp.requestAbort(new MouseEvent('click'));
+      expect(cmp.abortError()).toBeNull();
+    });
+
+    it('reports a refused Ctrl-click abort as a toast, since no dialog is open', () => {
+      const { cmp } = setup();
+      const refused = new ApiError('Evaluation already finished', 409);
+      vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(throwError(() => refused));
+      const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+      cmp.requestAbort(new MouseEvent('click', { ctrlKey: true }));
+      expect(failure).toHaveBeenCalledWith('Failed to abort evaluation', refused);
+      expect(cmp.abortError()).toBeNull();
+    });
+  });
+
+  describe('build write failures', () => {
+    it('reports a failed sbom download with the server reason', () => {
+      const { cmp } = setup();
+      const missing = new ApiError('Build has no SBOM', 404);
+      vi.spyOn(TestBed.inject(EvaluationsService), 'downloadBuildSbom').mockReturnValue(throwError(() => missing));
+      const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+      cmp.downloadSbom(build('b1', 'hello'));
+      expect(failure).toHaveBeenCalledWith('Failed to download SBOM', missing);
+    });
+
+    it('reports a failed retry with the server reason', () => {
+      const { cmp } = setup();
+      const refused = new ApiError('Build is still running', 409);
+      vi.spyOn(TestBed.inject(EvaluationsService), 'retryBuild').mockReturnValue(throwError(() => refused));
+      const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+      cmp.retryBuild(build('b1', 'hello', 'Failed'));
+      expect(failure).toHaveBeenCalledWith('Failed to retry build', refused);
     });
   });
 

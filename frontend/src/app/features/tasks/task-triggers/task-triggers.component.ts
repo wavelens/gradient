@@ -11,6 +11,8 @@ import { FormsModule } from '@angular/forms';
 import { TriggersService } from '@core/services/triggers.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   BadgeComponent,
   BadgeSeverity,
@@ -106,6 +108,7 @@ export class TaskTriggersComponent implements OnInit {
   private integrationsService = inject(IntegrationsService);
   private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
+  private notify = inject(NotifyService);
 
   access = injectTaskAccess();
 
@@ -274,7 +277,7 @@ export class TaskTriggersComponent implements OnInit {
         this.loadTriggers();
       },
       error: (err) => {
-        this.error.set(err?.message || 'Failed to create trigger.');
+        this.error.set(apiErrorMessage(err, 'Failed to create trigger.'));
         this.saving.set(false);
       },
     });
@@ -297,7 +300,7 @@ export class TaskTriggersComponent implements OnInit {
         this.loadTriggers();
       },
       error: (err) => {
-        this.error.set(err?.message || 'Failed to update trigger.');
+        this.error.set(apiErrorMessage(err, 'Failed to update trigger.'));
         this.saving.set(false);
       },
     });
@@ -309,9 +312,13 @@ export class TaskTriggersComponent implements OnInit {
     this.triggersService.delete(this.projectName, this.taskName, id).subscribe({
       next: () => {
         this.deletingId.set(null);
+        this.notify.success('Trigger deleted');
         this.loadTriggers();
       },
-      error: () => this.deletingId.set(null),
+      error: (error: unknown) => {
+        this.deletingId.set(null);
+        this.notify.failure('Failed to delete trigger', error);
+      },
     });
   }
 
@@ -322,7 +329,10 @@ export class TaskTriggersComponent implements OnInit {
         this.makingDefaultId.set(null);
         this.loadTriggers();
       },
-      error: () => this.makingDefaultId.set(null),
+      error: (error: unknown) => {
+        this.makingDefaultId.set(null);
+        this.notify.failure("Couldn't make trigger the default", error);
+      },
     });
   }
 
@@ -337,7 +347,10 @@ export class TaskTriggersComponent implements OnInit {
           if (this.fireSuccessId() === id) this.fireSuccessId.set(null);
         }, 3000);
       },
-      error: () => this.firingId.set(null),
+      error: (error: unknown) => {
+        this.firingId.set(null);
+        this.notify.failure('Failed to fire trigger', error);
+      },
     });
   }
 

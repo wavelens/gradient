@@ -12,6 +12,8 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { UserService } from '@core/services/user.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -20,7 +22,6 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -68,7 +69,6 @@ interface RoleFormState {
     RowComponent,
     BadgeComponent,
     SelectComponent,
-    MessageBannerComponent,
   ],
   templateUrl: './members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -79,6 +79,7 @@ export class MembersRolesComponent implements OnInit {
   private userService = inject(UserService);
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
+  private notify = inject(NotifyService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
@@ -157,11 +158,12 @@ export class MembersRolesComponent implements OnInit {
     this.projectsService.revokeInvitation(this.projectName, username).subscribe({
       next: () => {
         this.revokingUser.set(null);
+        this.notify.success('Invitation revoked');
         this.loadInvitations();
       },
-      error: () => {
+      error: (error: unknown) => {
         this.revokingUser.set(null);
-        this.memberError.set('Failed to revoke the invitation.');
+        this.notify.failure('Failed to revoke invitation', error);
       },
     });
   }
@@ -217,12 +219,11 @@ export class MembersRolesComponent implements OnInit {
         next: () => {
           this.addingMember.set(false);
           this.showAddMemberDialog.set(false);
+          this.notify.success('Member added');
           this.loadMembers();
         },
-        error: (err) => {
-          this.memberError.set(
-            err?.message || 'Failed to add member.'
-          );
+        error: (error: unknown) => {
+          this.memberError.set(apiErrorMessage(error, 'Failed to add member.'));
           this.addingMember.set(false);
         },
       });
@@ -237,8 +238,9 @@ export class MembersRolesComponent implements OnInit {
           this.updatingRole.set(null);
           this.loadMembers();
         },
-        error: () => {
+        error: (error: unknown) => {
           this.updatingRole.set(null);
+          this.notify.failure('Failed to change member role', error);
           this.loadMembers();
         },
       });
@@ -249,9 +251,13 @@ export class MembersRolesComponent implements OnInit {
     this.projectsService.removeMember(this.projectName, username).subscribe({
       next: () => {
         this.removingMember.set(null);
+        this.notify.success('Member removed');
         this.loadMembers();
       },
-      error: () => this.removingMember.set(null),
+      error: (error: unknown) => {
+        this.removingMember.set(null);
+        this.notify.failure('Failed to remove member', error);
+      },
     });
   }
 
@@ -308,12 +314,11 @@ export class MembersRolesComponent implements OnInit {
       next: () => {
         this.savingRole.set(false);
         this.showRoleDialog.set(false);
+        this.notify.success('Role saved');
         this.loadRoles();
       },
-      error: (err) => {
-        this.roleError.set(
-          err?.message || 'Failed to save role.'
-        );
+      error: (error: unknown) => {
+        this.roleError.set(apiErrorMessage(error, 'Failed to save role.'));
         this.savingRole.set(false);
       },
     });
@@ -325,9 +330,13 @@ export class MembersRolesComponent implements OnInit {
     this.projectsService.deleteRole(this.projectName, role.id).subscribe({
       next: () => {
         this.deletingRole.set(null);
+        this.notify.success('Role deleted');
         this.loadRoles();
       },
-      error: () => this.deletingRole.set(null),
+      error: (error: unknown) => {
+        this.deletingRole.set(null);
+        this.notify.failure('Failed to delete role', error);
+      },
     });
   }
 

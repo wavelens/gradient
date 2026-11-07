@@ -6,11 +6,12 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
-import { vi } from 'vitest';
+import { Observable, of, throwError } from 'rxjs';
+import { type Mock, vi } from 'vitest';
 import type { UserInfoResponse } from '@core/models';
-import { ApiService } from '@core/services/api.service';
+import { ApiError, ApiService } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
+import { NotifyService } from '@core/services/notify.service';
 import { environment } from '@environments/environment';
 import { releaseLine } from './version';
 import { RELEASE_NOTES_SOURCE, WhatsNewService } from './whats-new.service';
@@ -23,20 +24,21 @@ const NOTES = [
   { version: LINE, pages: [{ title: 'Current', html: '<p>current</p>' }] },
 ];
 
-function setup(lastSeen: string | null) {
-  const put = vi.fn(() => of('Version stored'));
+function setup(lastSeen: string | null, put: Mock<() => Observable<string>> = vi.fn(() => of('Version stored'))) {
   const user = signal<UserInfoResponse | null>(null);
+  const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     providers: [
       { provide: ApiService, useValue: { put } },
       { provide: AuthService, useValue: { user } },
+      { provide: NotifyService, useValue: notify },
       { provide: RELEASE_NOTES_SOURCE, useValue: NOTES },
     ],
   });
   const service = TestBed.inject(WhatsNewService);
   user.set({ id: 'u1', username: 'alice', name: 'Alice', email: 'a@x', superuser: false, last_seen_version: lastSeen, can_create_cache: true });
   TestBed.tick();
-  return { service, put };
+  return { service, put, notify };
 }
 
 describe('WhatsNewService', () => {
@@ -64,6 +66,13 @@ describe('WhatsNewService', () => {
     service.close();
     expect(service.open()).toBe(false);
     expect(put).toHaveBeenCalledWith('user/whats-new', { version: CURRENT });
+  });
+
+  it('reports a failed attempt to remember the running version', () => {
+    const failure = new ApiError('database is down', 500);
+    const { service, notify } = setup('1.9.4', vi.fn(() => throwError(() => failure)));
+    service.close();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to save release notes as read', failure);
   });
 
   it('stays closed when the user saw the running version and reopens on demand', () => {

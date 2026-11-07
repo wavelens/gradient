@@ -35,6 +35,7 @@ flowchart LR
 - Build content layouts from `gr-row-list` or `gr-card-grid`. Avoid entity-specific names.
 - Keep every element readable in both themes. Never hard-code black or white in a component.
 - Keep text sizes within one step of body size: 16px for interactive text, 14px for secondary text, 12px for badges only.
+- Report the result of every write through `NotifyService` (`success`, `failure`), which shows a `gr-toast`. A failed write submitted from an open `gr-dialog` keeps the dialog open and shows the reason through its `[error]` input. Take the reason from `apiErrorMessage(error, fallback)`, never from the `message` of an arbitrary error.
 
 ## Shared UI Package
 

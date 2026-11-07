@@ -15,6 +15,7 @@ import { CachesService } from '@core/services/caches.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TeamsService } from '@core/services/teams.service';
 import { EventsService } from '@core/services/events.service';
+import { NotifyService } from '@core/services/notify.service';
 import type { WebhookResponse } from '@core/models';
 import { webhooksBase } from '@core/models/webhook.model';
 
@@ -45,6 +46,7 @@ function setup(
     rotateSecret: vi.fn(() => of({ secret: 'whs_new' })),
     deliveries: vi.fn(() => of([])),
   };
+  const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [WebhooksComponent],
     providers: [
@@ -55,11 +57,12 @@ function setup(
       { provide: TeamsService, useValue: { get: () => of({ display_name: 'Platform' }) } },
       { provide: EventsService, useValue: { catalog$: of([]) } },
       { provide: ActivatedRoute, useValue: { snapshot: { data, paramMap: convertToParamMap(params) } } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(WebhooksComponent);
   fixture.detectChanges();
-  return { component: fixture.componentInstance, service, root: fixture.nativeElement as HTMLElement };
+  return { fixture, component: fixture.componentInstance, service, notify, root: fixture.nativeElement as HTMLElement };
 }
 
 describe('WebhooksComponent', () => {
@@ -108,6 +111,51 @@ describe('WebhooksComponent', () => {
       { kind: 'instance' },
       expect.objectContaining({ events: ['task.star', 'gc.*', 'build.*'] }),
     );
+  });
+
+  it('keeps a refused save inside the open webhook dialog', () => {
+    const { fixture, component, service, root } = setup({ webhookScope: 'project' }, { project: 'p' });
+    service.create.mockReturnValue(throwError(() => new ApiError('Enter a full URL', 422)));
+    component.startCreate();
+    component.save();
+    fixture.detectChanges();
+    expect(component.formOpen()).toBe(true);
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Enter a full URL');
+    expect(root.textContent).not.toContain('Enter a full URL');
+
+    component.startCreate();
+    expect(component.formError()).toBeNull();
+  });
+
+  it.each([
+    { action: 'toggle', summary: "Can't disable webhook", run: (c: WebhooksComponent) => c.toggleActive(hook) },
+    { action: 'rotate', summary: "Can't rotate webhook secret", run: (c: WebhooksComponent) => c.rotate(hook) },
+    { action: 'test', summary: "Can't send test delivery", run: (c: WebhooksComponent) => c.test(hook) },
+  ])('reports a failed $action as a toast', ({ summary, run }) => {
+    const { component, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' });
+    const failure = new ApiError('database is down', 500);
+    service.update.mockReturnValue(throwError(() => failure));
+    service.rotateSecret.mockReturnValue(throwError(() => failure));
+    service.test.mockReturnValue(throwError(() => failure));
+    run(component);
+    expect(notify.failure).toHaveBeenCalledWith(summary, failure);
+    expect(component.revealedSecret()).toBeNull();
+  });
+
+  it('keeps a failed delete inside the delete dialog and confirms a later success', () => {
+    const { fixture, component, service, notify, root } = setup({ webhookScope: 'project' }, { project: 'p' });
+    service.delete.mockReturnValueOnce(throwError(() => new ApiError('Webhook is managed', 409)));
+    component.startDelete(hook);
+    component.confirmDelete();
+    fixture.detectChanges();
+    expect(component.confirmDeleteId()).toBe('w1');
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Webhook is managed');
+    expect(root.textContent).not.toContain('Webhook is managed');
+
+    component.confirmDelete();
+    expect(component.confirmDeleteId()).toBeNull();
+    expect(component.deleteError()).toBeNull();
+    expect(notify.success).toHaveBeenCalledWith('Webhook deleted');
   });
 
   it('explains a refused list instead of offering to create webhooks', () => {

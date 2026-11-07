@@ -11,6 +11,7 @@ import { ProjectListComponent } from './project-list.component';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { ApiError } from '@core/services/api.service';
 
 const EMPTY_PAGE = { items: [], total: 0, page: 1 };
 
@@ -57,5 +58,19 @@ describe('ProjectListComponent', () => {
   it('reports a failed public list next to the own projects', () => {
     const { root } = render(() => of(EMPTY_PAGE), () => throwError(() => new Error('down')));
     expect(root.textContent).toContain('Failed to load public projects');
+  });
+
+  it('keeps a failed create inside the open Create Project dialog', () => {
+    const { fixture } = render(() => of(EMPTY_PAGE));
+    const service = TestBed.inject(ProjectsService) as unknown as { createProject: () => unknown };
+    service.createProject = () => throwError(() => new ApiError('Project name acme is taken', 409));
+    const cmp = fixture.componentInstance;
+    cmp.openCreateDialog();
+    cmp.newProject.name = 'acme';
+    cmp.newProject.display_name = 'Acme';
+    cmp.createProject();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Project name acme is taken');
+    expect(cmp.showCreateDialog()).toBe(true);
   });
 });

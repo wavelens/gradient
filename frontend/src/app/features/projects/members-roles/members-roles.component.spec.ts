@@ -15,6 +15,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { UserService } from '@core/services/user.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { AccessState } from '@core/models/access.model';
+import { NotifyService } from '@core/services/notify.service';
 
 function activatedRouteStub() {
   return { snapshot: { paramMap: convertToParamMap({ project: 'acme' }) } } as Partial<ActivatedRoute>;
@@ -29,10 +30,17 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 
 const revokeInvitation = vi.fn().mockReturnValue(of('Invitation revoked'));
 const getMembers = vi.fn();
+const removeMember = vi.fn();
+const addMember = vi.fn();
+const notify = { success: vi.fn(), failure: vi.fn() };
 
 function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
-  revokeInvitation.mockClear();
+  revokeInvitation.mockReset().mockReturnValue(of('Invitation revoked'));
   getMembers.mockReset().mockReturnValue(of([{ id: 'alice', name: 'Admin' }]));
+  removeMember.mockReset().mockReturnValue(of('ok'));
+  addMember.mockReset().mockReturnValue(of('ok'));
+  notify.success.mockClear();
+  notify.failure.mockClear();
   TestBed.configureTestingModule({
     imports: [MembersRolesComponent],
     providers: [
@@ -61,10 +69,13 @@ function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
               },
             ]),
           revokeInvitation,
+          removeMember,
+          addMember,
         },
       },
       { provide: UserService, useValue: { listUsers: () => of([]) } },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   return TestBed.createComponent(MembersRolesComponent);
@@ -110,6 +121,43 @@ describe('MembersRolesComponent - pending invitations', () => {
     await settled(fixture);
     (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
     expect(revokeInvitation).toHaveBeenCalledWith('acme', 'bob');
+  });
+
+  it('reports a failed revoke as a toast, not inside the closed Add Member dialog', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
+    revokeInvitation.mockReturnValue(throwError(() => failure));
+    await settled(fixture);
+    (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to revoke invitation', failure);
+    expect(fixture.componentInstance.memberError()).toBeNull();
+    expect(fixture.componentInstance.revokingUser()).toBeNull();
+  });
+});
+
+describe('MembersRolesComponent - write failures', () => {
+  it('reports a failed member removal', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
+    removeMember.mockReturnValue(throwError(() => failure));
+    await settled(fixture);
+    fixture.componentInstance.removeMember('alice');
+    expect(notify.failure).toHaveBeenCalledWith('Failed to remove member', failure);
+    expect(fixture.componentInstance.removingMember()).toBeNull();
+  });
+
+  it('keeps a failed add inside the open Add Member dialog', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    addMember.mockReturnValue(throwError(() => new ApiError('User carol does not exist', 404)));
+    await settled(fixture);
+    (findByText(fixture.nativeElement, 'add member') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    fixture.componentInstance.newMember.user = 'carol';
+    fixture.componentInstance.addMember();
+    fixture.detectChanges();
+    const dialog = document.body.querySelector('.gr-dialog')!;
+    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('User carol does not exist');
+    expect(fixture.componentInstance.showAddMemberDialog()).toBe(true);
   });
 });
 

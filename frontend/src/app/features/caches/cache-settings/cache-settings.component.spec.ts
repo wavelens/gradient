@@ -8,10 +8,14 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { CacheSettingsComponent } from './cache-settings.component';
 import { CachesService } from '@core/services/caches.service';
 import { AccessState } from '@core/models/access.model';
+import { ApiError } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
+
+const notify = { success: vi.fn(), failure: vi.fn() };
 
 function cacheFor(access: AccessState) {
   return {
@@ -45,6 +49,8 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 }
 
 function setup(access: AccessState): ComponentFixture<CacheSettingsComponent> {
+  notify.success.mockClear();
+  notify.failure.mockClear();
   TestBed.configureTestingModule({
     imports: [CacheSettingsComponent],
     providers: [
@@ -53,6 +59,7 @@ function setup(access: AccessState): ComponentFixture<CacheSettingsComponent> {
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
       { provide: CachesService, useValue: { getCache: () => of(cacheFor(access)) } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(CacheSettingsComponent);
@@ -92,5 +99,31 @@ describe('CacheSettingsComponent - access gating', () => {
     );
     expect(hrefs).toContain('/caches/demo/upstream-caches');
     expect(hrefs).toContain('/caches/demo/members-roles');
+  });
+});
+
+describe('CacheSettingsComponent - write failures', () => {
+  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  it('reports a failed deactivate instead of logging it', () => {
+    const fixture = setup(admin);
+    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
+    const service = TestBed.inject(CachesService) as unknown as { deactivateCache: () => unknown };
+    service.deactivateCache = () => throwError(() => failure);
+    findByText(fixture.nativeElement, 'deactivate')!.click();
+    expect(notify.failure).toHaveBeenCalledWith('Cache deactivation failed', failure);
+    expect(fixture.componentInstance.toggling()).toBe(false);
+  });
+
+  it('keeps the delete dialog open with the server reason when the delete fails', () => {
+    const fixture = setup(admin);
+    const service = TestBed.inject(CachesService) as unknown as { deleteCache: () => unknown };
+    service.deleteCache = () => throwError(() => new ApiError('Cache is still used by 2 projects', 409));
+    findByText(fixture.nativeElement, 'delete cache')!.click();
+    fixture.detectChanges();
+    findByText(document.querySelector('.gr-dialog') as HTMLElement, 'delete')!.click();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Cache is still used by 2 projects');
+    expect(fixture.componentInstance.showDeleteDialog()).toBe(true);
   });
 });

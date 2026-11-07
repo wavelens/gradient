@@ -7,10 +7,12 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { TeamSettingsComponent } from './team-settings.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 import { TeamResponse } from '@core/models';
 
 const team: TeamResponse = {
@@ -29,18 +31,21 @@ const team: TeamResponse = {
 function setup(superuser: boolean, managed = false) {
   const update = vi.fn().mockReturnValue(of('Team updated'));
   const get = vi.fn(() => of<TeamResponse>({ ...team, managed, oidc_group: managed ? 'ci-admins' : null }));
+  const remove = vi.fn().mockReturnValue(of('Team deleted'));
+  const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [TeamSettingsComponent],
     providers: [
       provideRouter([]),
       { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ team: 'platform' }) } } },
-      { provide: TeamsService, useValue: { get, update, remove: vi.fn() } },
+      { provide: TeamsService, useValue: { get, update, remove } },
       { provide: AuthService, useValue: { user: signal({ superuser }) } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(TeamSettingsComponent);
   fixture.detectChanges();
-  return { fixture, update, get };
+  return { fixture, update, get, remove, notify };
 }
 
 function input(fixture: { nativeElement: HTMLElement }, id: string): HTMLInputElement {
@@ -93,5 +98,30 @@ describe('TeamSettingsComponent', () => {
     component.form = { ...component.form, new_project_workers: true };
     component.save();
     expect(update).toHaveBeenCalledWith('platform', { new_project_workers: true });
+  });
+
+  it('reports a failed save as a toast', () => {
+    const { fixture, update, notify } = setup(true);
+    const failure = new ApiError('Display name taken', 409);
+    update.mockReturnValue(throwError(() => failure));
+    const component = fixture.componentInstance;
+    component.form = { ...component.form, display_name: 'Ops' };
+    component.save();
+    fixture.detectChanges();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to save team', failure);
+    expect(component.saving()).toBe(false);
+    expect(component.saved()).toBe(false);
+  });
+
+  it('keeps a failed deletion inside the open dialog', () => {
+    const { fixture, remove } = setup(true);
+    remove.mockReturnValue(throwError(() => new ApiError('Team still owns projects', 409)));
+    const component = fixture.componentInstance;
+    component.openDelete();
+    component.remove();
+    fixture.detectChanges();
+    expect(component.showDelete()).toBe(true);
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Team still owns projects');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Team still owns projects');
   });
 });

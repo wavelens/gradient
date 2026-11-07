@@ -15,13 +15,6 @@
       (click)="startCreate()"
       [appManagedDisable]="access()"
     ></button>
-  @if (error()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ error() }}
-    </div>
-  }
-
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

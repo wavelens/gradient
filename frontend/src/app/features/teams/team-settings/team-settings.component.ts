@@ -10,6 +10,8 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
+import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { AccessState, TeamResponse, PatchTeamRequest } from '@core/models';
 import { ManagedDisableDirective, WritableDirective } from '@shared/access';
 import {
@@ -66,6 +68,7 @@ export class TeamSettingsComponent implements OnInit {
   private teams = inject(TeamsService);
   private crumbs = inject(BreadcrumbsService);
   private authService = inject(AuthService);
+  private notify = inject(NotifyService);
 
   readonly roleOptions = [
     { label: 'None', value: '' },
@@ -82,6 +85,7 @@ export class TeamSettingsComponent implements OnInit {
   deleting = signal(false);
   saved = signal(false);
   error = signal<string | null>(null);
+  deleteError = signal<string | null>(null);
   showDelete = signal(false);
   form: SettingsForm = this.formOf(null);
 
@@ -102,8 +106,8 @@ export class TeamSettingsComponent implements OnInit {
         this.form = this.formOf(team);
         this.loading.set(false);
       },
-      error: (err: Error) => {
-        this.error.set(err.message || 'Failed to load the team.');
+      error: (err: unknown) => {
+        this.error.set(apiErrorMessage(err, 'Failed to load the team.'));
         this.loading.set(false);
       },
     });
@@ -116,28 +120,35 @@ export class TeamSettingsComponent implements OnInit {
     if (Object.keys(patch).length === 0) return;
     this.saving.set(true);
     this.saved.set(false);
-    this.error.set(null);
     this.teams.update(this.teamName, patch).subscribe({
       next: () => {
         this.saving.set(false);
         this.saved.set(true);
         this.load();
       },
-      error: (err: Error) => {
+      error: (err: unknown) => {
         this.saving.set(false);
-        this.error.set(err.message || 'Failed to save the team.');
+        this.notify.failure('Failed to save team', err);
       },
     });
   }
 
+  openDelete(): void {
+    this.deleteError.set(null);
+    this.showDelete.set(true);
+  }
+
   remove(): void {
     this.deleting.set(true);
+    this.deleteError.set(null);
     this.teams.remove(this.teamName).subscribe({
-      next: () => this.router.navigate(['/teams']),
-      error: (err: Error) => {
+      next: () => {
+        this.notify.success('Team deleted');
+        this.router.navigate(['/teams']);
+      },
+      error: (err: unknown) => {
         this.deleting.set(false);
-        this.showDelete.set(false);
-        this.error.set(err.message || 'Failed to delete the team.');
+        this.deleteError.set(apiErrorMessage(err, 'Failed to delete the team.'));
       },
     });
   }

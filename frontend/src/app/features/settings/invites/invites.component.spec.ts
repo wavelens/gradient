@@ -11,6 +11,8 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Observable, of, throwError } from 'rxjs';
 import { InvitesComponent } from './invites.component';
 import { UserService } from '@core/services/user.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ApiError } from '@core/services/api.service';
 import { InviteItem } from '@core/models';
 
 const projectInvite: InviteItem = {
@@ -36,6 +38,7 @@ const teamInvite: InviteItem = {
 function setup(invites: InviteItem[], queryToken: string | null = null, getInvites: () => Observable<InviteItem[]> = () => of(invites)) {
   const accept = vi.fn().mockReturnValue(of('Invitation accepted'));
   const decline = vi.fn().mockReturnValue(of('Invitation declined'));
+  const notify = { success: vi.fn(), failure: vi.fn() };
 
   TestBed.configureTestingModule({
     imports: [InvitesComponent],
@@ -59,12 +62,13 @@ function setup(invites: InviteItem[], queryToken: string | null = null, getInvit
           declineInvite: decline,
         },
       },
+      { provide: NotifyService, useValue: notify },
     ],
   });
 
   const fixture: ComponentFixture<InvitesComponent> = TestBed.createComponent(InvitesComponent);
   fixture.detectChanges();
-  return { fixture, accept, decline };
+  return { fixture, accept, decline, notify };
 }
 
 function buttonByText(root: HTMLElement, text: string): HTMLButtonElement | undefined {
@@ -118,6 +122,23 @@ describe('InvitesComponent', () => {
     const { fixture, decline } = setup([projectInvite]);
     buttonByText(fixture.nativeElement, 'Decline')?.click();
     expect(decline).toHaveBeenCalledWith('tok-project');
+  });
+
+  it('reports a failed decline as a toast without a page banner', () => {
+    const { fixture, decline, notify } = setup([projectInvite]);
+    const failure = new ApiError('Invitation expired', 410);
+    decline.mockReturnValue(throwError(() => failure));
+    buttonByText(fixture.nativeElement, 'Decline')?.click();
+    fixture.detectChanges();
+    expect(notify.failure).toHaveBeenCalledWith('Invitation decline failed', failure);
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')).toBeNull();
+    expect(fixture.componentInstance.pendingToken()).toBeNull();
+  });
+
+  it('reports an accepted invitation', () => {
+    const { fixture, notify } = setup([projectInvite]);
+    buttonByText(fixture.nativeElement, 'Accept')?.click();
+    expect(notify.success).toHaveBeenCalledWith('Invitation accepted');
   });
 
   it('accepts the token carried in the query string on load', () => {

@@ -4,8 +4,6 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-toast />
-
 <gr-page-layout [breadcrumb]="breadcrumb()" title="Workers" subtitle="Registered build workers for this project">
   <button slot="actions"
       *appWritable="access()"
@@ -206,18 +204,13 @@
 <gr-dialog
   header="Register Worker"
   [(visible)]="showRegisterDialog"
+  [error]="errorMessage()"
   width="480px"
 >
   @if (projectId()) {
     <gr-form-field label="Peer ID (this project)">
       <gr-copy-field [value]="projectId()!" />
     </gr-form-field>
-  }
-  @if (errorMessage()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ errorMessage() }}
-    </div>
   }
   <gr-form-field label="Name" for="worker-name">
     <input
@@ -336,6 +329,7 @@
 <gr-dialog
   header="Edit Worker"
   [(visible)]="showRenameDialog"
+  [error]="renameError()"
   width="480px"
 >
   @if (renamingWorker(); as worker) {

@@ -10,19 +10,25 @@ import { of, throwError } from 'rxjs';
 import { SessionsComponent } from './sessions.component';
 import { UserService } from '@core/services/user.service';
 import { ApiError } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { SessionInfo } from '@core/models';
 
 const CURRENT = { id: 's1', current: true, user_agent: 'Firefox', ip: '10.0.0.1', last_used_at: '2026-10-01T10:00:00', expires_at: '2026-11-01T10:00:00' } as SessionInfo;
 const OTHER = { ...CURRENT, id: 's2', current: false };
 
 function setup(getSessions: ReturnType<typeof vi.fn>, revokeSession = vi.fn().mockReturnValue(of('ok'))) {
+  const notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [SessionsComponent],
-    providers: [provideRouter([]), { provide: UserService, useValue: { getSessions, revokeSession } }],
+    providers: [
+      provideRouter([]),
+      { provide: UserService, useValue: { getSessions, revokeSession } },
+      { provide: NotifyService, useValue: notify },
+    ],
   });
   const fixture = TestBed.createComponent(SessionsComponent);
   fixture.detectChanges();
-  return { fixture, root: fixture.nativeElement as HTMLElement };
+  return { fixture, notify, root: fixture.nativeElement as HTMLElement };
 }
 
 describe('SessionsComponent', () => {
@@ -39,15 +45,18 @@ describe('SessionsComponent', () => {
     expect(root.textContent).toContain('This device');
   });
 
-  it('clears an old revoke error once the next revoke succeeds', () => {
+  it('reports a failed revoke as a toast and a later success separately', () => {
     const revokeSession = vi.fn()
       .mockReturnValueOnce(throwError(() => new ApiError('boom', 500)))
       .mockReturnValue(of('ok'));
-    const { fixture } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])), revokeSession);
+    const { fixture, notify, root } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])), revokeSession);
     const component = fixture.componentInstance;
     component.revoke(OTHER);
-    expect(component.errorMessage()).not.toBeNull();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to revoke session', expect.any(ApiError));
+    expect(component.revokingId()).toBeNull();
     component.revoke(OTHER);
-    expect(component.errorMessage()).toBeNull();
+    fixture.detectChanges();
+    expect(notify.success).toHaveBeenCalledWith('Session revoked');
+    expect(root.querySelector('gr-message-banner')).toBeNull();
   });
 });

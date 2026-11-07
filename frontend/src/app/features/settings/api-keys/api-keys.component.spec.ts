@@ -13,6 +13,7 @@ import { ApiKeysComponent } from './api-keys.component';
 import { UserService } from '@core/services/user.service';
 import { ApiError } from '@core/services/api.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { NotifyService } from '@core/services/notify.service';
 import { ApiKeyInfo } from '@core/models';
 
 const unmanagedKey: ApiKeyInfo = {
@@ -41,7 +42,10 @@ const managedKey: ApiKeyInfo = {
   allowed_ips: [],
 };
 
+let notify = { success: vi.fn(), failure: vi.fn() };
+
 function setup(keys: ApiKeyInfo[], user: object = {}): ComponentFixture<ApiKeysComponent> {
+  notify = { success: vi.fn(), failure: vi.fn() };
   TestBed.configureTestingModule({
     imports: [ApiKeysComponent],
     providers: [
@@ -60,6 +64,7 @@ function setup(keys: ApiKeyInfo[], user: object = {}): ComponentFixture<ApiKeysC
         provide: ProjectsService,
         useValue: { getProjects: () => of({ items: [], total: 0, page: 1, per_page: 100 }) },
       },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(ApiKeysComponent);
@@ -145,9 +150,40 @@ describe('ApiKeysComponent - create errors', () => {
     const reason = 'Permission manageProject exceeds your own permissions';
     const fixture = setup([], { createApiKey: () => throwError(() => new ApiError(reason, 403)) });
     const component = fixture.componentInstance;
+    component.openCreateDialog();
     component.formName = 'deploy';
     component.formPermissions = { viewProject: true };
     component.saveKey();
+    fixture.detectChanges();
     expect(component.errorMessage()).toBe(reason);
+    expect(component.showDialog()).toBe(true);
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain(reason);
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain(reason);
+  });
+});
+
+describe('ApiKeysComponent - row actions', () => {
+  it('reports a failed revoke and clears the busy state', () => {
+    const failure = new ApiError('database is down', 500);
+    const fixture = setup([unmanagedKey], { revokeApiKey: () => throwError(() => failure) });
+    buttonsByText(fixture.nativeElement, 'revoke')[0].click();
+    fixture.detectChanges();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to revoke API key', failure);
+    expect(fixture.componentInstance.revokingId()).toBeNull();
+  });
+
+  it('reports a failed delete and clears the busy state', () => {
+    const failure = new ApiError('database is down', 500);
+    const fixture = setup([unmanagedKey], { deleteApiKey: () => throwError(() => failure) });
+    buttonsByText(fixture.nativeElement, 'delete')[0].click();
+    fixture.detectChanges();
+    expect(notify.failure).toHaveBeenCalledWith('Failed to delete API key', failure);
+    expect(fixture.componentInstance.deletingId()).toBeNull();
+  });
+
+  it('confirms a deleted key', () => {
+    const fixture = setup([unmanagedKey], { deleteApiKey: () => of('ok') });
+    buttonsByText(fixture.nativeElement, 'delete')[0].click();
+    expect(notify.success).toHaveBeenCalledWith('API key deleted');
   });
 });

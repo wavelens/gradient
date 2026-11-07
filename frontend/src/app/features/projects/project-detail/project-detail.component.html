@@ -56,14 +56,9 @@
 <gr-dialog
 header="Create Task"
 [(visible)]="showCreateDialog"
+[error]="createError()"
 width="550px"
 >
-@if (createError()) {
-  <div class="dialog-error">
-    <gr-icon name="error" />
-    {{ createError() }}
-  </div>
-}
 <div>
   <app-name-fields
     noun="task"

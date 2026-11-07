@@ -10,6 +10,8 @@ import { TeamsService } from '@core/services/teams.service';
 import { inBackground } from '@core/interceptors/request-context';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import {
   ALL_ALLOWED,
   AllowedCapabilities,
@@ -31,7 +33,6 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
-  MessageBannerComponent,
   RowComponent,
   RowListComponent,
   SettingsSectionComponent,
@@ -51,7 +52,6 @@ import {
     FormFieldComponent,
     InputDirective,
     LoadStateComponent,
-    MessageBannerComponent,
     RowComponent,
     RowListComponent,
     SettingsSectionComponent,
@@ -62,6 +62,7 @@ import {
 export class TeamWorkersComponent implements OnInit {
   private teams = inject(TeamsService);
   private authService = inject(AuthService);
+  private notify = inject(NotifyService);
   config = inject(ConfigService);
 
   team = input.required<TeamResponse>();
@@ -70,7 +71,8 @@ export class TeamWorkersComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   busy = signal<string | null>(null);
-  error = signal<string | null>(null);
+  registerError = signal<string | null>(null);
+  editError = signal<string | null>(null);
   showRegister = signal(false);
   showGradientCiConnect = signal(false);
   issuedToken = signal<string | null>(null);
@@ -120,10 +122,15 @@ export class TeamWorkersComponent implements OnInit {
     });
   }
 
+  openRegister(): void {
+    this.registerError.set(null);
+    this.showRegister.set(true);
+  }
+
   register(): void {
     if (!this.form.worker_id || !this.form.display_name) return;
     this.busy.set('register');
-    this.error.set(null);
+    this.registerError.set(null);
     const worker: RegisterWorkerRequest = { ...this.form, url: this.form.url?.trim() || undefined };
     this.teams.registerWorker(this.teamName, worker).subscribe({
       next: (res) => {
@@ -133,7 +140,10 @@ export class TeamWorkersComponent implements OnInit {
         this.form = { worker_id: '', display_name: '' };
         this.load();
       },
-      error: (err: Error) => this.fail(err, 'Failed to register the worker.'),
+      error: (err: unknown) => {
+        this.busy.set(null);
+        this.registerError.set(apiErrorMessage(err, 'Failed to register the worker.'));
+      },
     });
   }
 
@@ -142,15 +152,20 @@ export class TeamWorkersComponent implements OnInit {
     this.teams.updateWorker(this.teamName, worker.worker_id, { active }).subscribe({
       next: () => {
         this.busy.set(null);
+        this.notify.success(active ? 'Worker activated' : 'Worker deactivated');
         this.load();
       },
-      error: (err: Error) => this.fail(err, 'Failed to change the worker.'),
+      error: (err: unknown) => {
+        this.busy.set(null);
+        this.notify.failure(active ? 'Failed to activate worker' : 'Failed to deactivate worker', err);
+      },
     });
   }
 
   openEdit(worker: TeamWorkerEntry): void {
     this.editName = worker.display_name;
     this.editAllowed = worker;
+    this.editError.set(null);
     this.editing.set(worker);
   }
 
@@ -160,13 +175,18 @@ export class TeamWorkersComponent implements OnInit {
     const patch: PatchWorkerRequest = changedCapabilities(worker, this.editAllowed);
     if (this.editName.trim() !== worker.display_name) patch.display_name = this.editName.trim();
     this.busy.set('edit');
+    this.editError.set(null);
     this.teams.updateWorker(this.teamName, worker.worker_id, patch).subscribe({
       next: () => {
         this.busy.set(null);
         this.editing.set(null);
+        this.notify.success('Worker saved');
         this.load();
       },
-      error: (err: Error) => this.fail(err, 'Failed to change the worker.'),
+      error: (err: unknown) => {
+        this.busy.set(null);
+        this.editError.set(apiErrorMessage(err, 'Failed to change the worker.'));
+      },
     });
   }
 
@@ -175,14 +195,13 @@ export class TeamWorkersComponent implements OnInit {
     this.teams.removeWorker(this.teamName, worker.worker_id).subscribe({
       next: () => {
         this.busy.set(null);
+        this.notify.success('Worker deleted');
         this.load();
       },
-      error: (err: Error) => this.fail(err, 'Failed to delete the worker.'),
+      error: (err: unknown) => {
+        this.busy.set(null);
+        this.notify.failure('Failed to delete worker', err);
+      },
     });
-  }
-
-  private fail(err: Error, fallback: string): void {
-    this.busy.set(null);
-    this.error.set(err.message || fallback);
   }
 }

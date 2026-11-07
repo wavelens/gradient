@@ -6,8 +6,8 @@
 
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpContext, HttpErrorResponse, HttpHeaders, HttpResponse } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
-import { map, catchError } from 'rxjs/operators';
+import { Observable, from, throwError } from 'rxjs';
+import { map, catchError, switchMap } from 'rxjs/operators';
 import { environment } from '@environments/environment';
 import { ApiResponse } from '@core/models';
 
@@ -28,6 +28,40 @@ export class ApiError extends Error {
   get unreachable(): boolean {
     return [0, 429, 502, 503, 504].includes(this.status);
   }
+}
+
+const STATUS_MESSAGES: Record<number, string> = {
+  0: 'Connection to the server failed. Check the connection and try again.',
+  403: 'No permission for this action.',
+  404: 'This item is already gone.',
+  409: 'Other changes conflict with this one. Reload the page and try again.',
+  429: 'The server is busy. Try again later.',
+};
+
+function statusMessage(status: number): string {
+  if (STATUS_MESSAGES[status]) return STATUS_MESSAGES[status];
+  return status >= 500 ? 'The server failed to process the request. Try again later.' : 'The server rejected the request.';
+}
+
+function serverMessage(body: unknown): string | undefined {
+  const message = (body as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && message ? message : undefined;
+}
+
+function toApiError(error: HttpErrorResponse, body: unknown = error.error): ApiError {
+  return new ApiError(serverMessage(body) ?? statusMessage(error.status), error.status);
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? error.message : fallback;
 }
 
 export interface RequestOptions {
@@ -62,14 +96,13 @@ export class ApiService {
             return undefined as T;
           }
           if (response.error) {
-            throw new Error(response.message as string);
+            throw new ApiError(serverMessage(response) ?? statusMessage(200), 200);
           }
           return response.message as T;
         }),
         catchError((error: unknown) => {
           if (error instanceof HttpErrorResponse) {
-            const message = error.error?.message || error.message || 'An unknown error occurred';
-            return throwError(() => new ApiError(message, error.status));
+            return throwError(() => toApiError(error));
           }
           return throwError(() =>
             error instanceof Error ? error : new Error('An unknown error occurred')
@@ -90,10 +123,17 @@ export class ApiService {
    * keeps the full response so callers can read `Content-Disposition`.
    */
   getBlob(endpoint: string): Observable<HttpResponse<Blob>> {
-    return this.http.get(`${this.baseUrl}/${endpoint}`, {
-      observe: 'response',
-      responseType: 'blob',
-    });
+    return this.http
+      .get(`${this.baseUrl}/${endpoint}`, { observe: 'response', responseType: 'blob' })
+      .pipe(
+        catchError((error: unknown) => {
+          if (!(error instanceof HttpErrorResponse)) return throwError(() => error);
+          if (!(error.error instanceof Blob)) return throwError(() => toApiError(error));
+          return from(error.error.text()).pipe(
+            switchMap((text) => throwError(() => toApiError(error, parseJson(text)))),
+          );
+        }),
+      );
   }
 
   /**

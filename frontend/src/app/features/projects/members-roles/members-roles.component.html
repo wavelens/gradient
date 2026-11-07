@@ -160,12 +160,10 @@
 <gr-dialog
   header="Add Member"
   [(visible)]="showAddMemberDialog"
+  [error]="memberError()"
   width="420px"
 >
   <div>
-    @if (memberError()) {
-      <gr-message-banner type="error">{{ memberError() }}</gr-message-banner>
-    }
     <gr-form-field label="Username" for="member-name">
       <gr-autocomplete
         inputId="member-name"
@@ -209,12 +207,10 @@
 <gr-dialog
   [header]="editingRole() ? 'Edit Role' : 'New Role'"
   [(visible)]="showRoleDialog"
+  [error]="roleError()"
   width="520px"
 >
   <div>
-    @if (roleError()) {
-      <gr-message-banner type="error">{{ roleError() }}</gr-message-banner>
-    }
     <gr-form-field label="Name" for="role-name" hint="Lowercase letters, digits, and hyphens.">
       <input
         grInput

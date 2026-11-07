@@ -92,14 +92,9 @@
 <gr-dialog
   header="Subscribe to Cache"
   [(visible)]="showSubscribeDialog"
+  [error]="errorMessage()"
   width="440px"
 >
-  @if (errorMessage()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ errorMessage() }}
-    </div>
-  }
   <gr-form-field label="Cache Name" for="cache-name" hint="The name of the binary cache you own.">
     <gr-label-help slot="label" doc="guides/share-a-cache/#2-share-with-another-project" title="Share a cache" />
     <gr-autocomplete

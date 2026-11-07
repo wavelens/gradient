@@ -8,7 +8,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   OnInit,
-  WritableSignal,
   computed,
   inject,
   input,
@@ -20,6 +19,8 @@ import { RouterModule } from '@angular/router';
 import { Observable } from 'rxjs';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
+import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { TeamGrantEntry, TeamSummary } from '@core/models';
 import { canOpenTeam } from '@shared/access';
 import {
@@ -29,7 +30,6 @@ import {
   DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
-  MessageBannerComponent,
   RowComponent,
   RowListComponent,
   SelectComponent,
@@ -55,7 +55,6 @@ interface GrantForm {
     DialogComponent,
     EmptyStateComponent,
     FormFieldComponent,
-    MessageBannerComponent,
     RowComponent,
     RowListComponent,
     SelectComponent,
@@ -67,6 +66,7 @@ interface GrantForm {
 export class TeamGrantsComponent implements OnInit {
   private teams = inject(TeamsService);
   private authService = inject(AuthService);
+  private notify = inject(NotifyService);
 
   kind = input.required<'project' | 'cache'>();
   name = input.required<string>();
@@ -81,7 +81,6 @@ export class TeamGrantsComponent implements OnInit {
   shownGrants = computed(() => this.allGrants().filter((grant) => grant[this.part()]));
   myTeams = signal<TeamSummary[]>([]);
   suggestions = signal<string[]>([]);
-  error = signal<string | null>(null);
   grantError = signal<string | null>(null);
   busy = signal<string | null>(null);
   showGrant = signal(false);
@@ -124,12 +123,22 @@ export class TeamGrantsComponent implements OnInit {
     const form = { ...this.form, team: this.teamNamed(this.form.team) };
     const request =
       this.kind() === 'project' ? this.grantProject(form) : this.teams.grantCache(this.name(), form.team, form.role);
-    this.run('grant', request, this.grantError, () => this.showGrant.set(false));
+    this.grantError.set(null);
+    this.run('grant', request, {
+      done: () => {
+        this.showGrant.set(false);
+        this.notify.success('Granted to team');
+      },
+      failed: (err) => this.grantError.set(apiErrorMessage(err, 'Failed to grant to team.')),
+    });
   }
 
   remove(grant: TeamGrantEntry): void {
     const request = this.kind() === 'project' ? this.removeFromProject(grant) : this.teams.removeCacheGrant(this.name(), grant.team);
-    this.run(grant.team, request, this.error);
+    this.run(grant.team, request, {
+      done: () => this.notify.success('Removed team'),
+      failed: (err) => this.notify.failure('Failed to remove team', err),
+    });
   }
 
   private teamNamed(typed: string): string {
@@ -161,19 +170,18 @@ export class TeamGrantsComponent implements OnInit {
     return this.teams.removeProjectGrant(this.name(), grant.team);
   }
 
-  private run(key: string, request: Observable<string>, error: WritableSignal<string | null>, done?: () => void): void {
+  private run(key: string, request: Observable<string>, outcome: { done: () => void; failed: (err: unknown) => void }): void {
     this.busy.set(key);
-    error.set(null);
     request.subscribe({
       next: () => {
         this.busy.set(null);
-        done?.();
+        outcome.done();
         this.load();
         this.changed.emit();
       },
-      error: (err: Error) => {
+      error: (err: unknown) => {
         this.busy.set(null);
-        error.set(err.message || 'The team change failed.');
+        outcome.failed(err);
       },
     });
   }

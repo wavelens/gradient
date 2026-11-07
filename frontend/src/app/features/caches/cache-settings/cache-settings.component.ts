@@ -10,6 +10,8 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   ButtonComponent,
   CheckboxComponent,
@@ -62,6 +64,7 @@ export class CacheSettingsComponent implements OnInit {
   private router = inject(Router);
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
+  private notify = inject(NotifyService);
 
   access = injectCacheAccess();
 
@@ -73,6 +76,7 @@ export class CacheSettingsComponent implements OnInit {
 
   cache = signal<CacheResponse | null>(null);
   showDeleteDialog = signal(false);
+  deleteError = signal<string | null>(null);
   saveError = signal<string | null>(null);
   saveSuccess = signal(false);
 
@@ -159,15 +163,15 @@ export class CacheSettingsComponent implements OnInit {
             this.saveSuccess.set(true);
             this.loadCache();
           },
-          error: (error) => {
-            this.saveError.set(error?.message || 'Failed to update visibility.');
+          error: (error: unknown) => {
+            this.saveError.set(apiErrorMessage(error, 'Failed to update visibility.'));
             this.saving.set(false);
             this.loadCache();
           },
         });
       },
-      error: (error) => {
-        this.saveError.set(error?.message || 'Failed to save settings.');
+      error: (error: unknown) => {
+        this.saveError.set(apiErrorMessage(error, 'Failed to save settings.'));
         this.saving.set(false);
       },
     });
@@ -185,25 +189,32 @@ export class CacheSettingsComponent implements OnInit {
     action.subscribe({
       next: () => {
         this.toggling.set(false);
+        this.notify.success(currentCache.active ? 'Cache deactivated' : 'Cache activated');
         this.loadCache();
       },
-      error: (error) => {
-        console.error('Failed to toggle cache status:', error);
+      error: (error: unknown) => {
+        this.notify.failure(currentCache.active ? 'Cache deactivation failed' : 'Cache activation failed', error);
         this.toggling.set(false);
       },
     });
   }
 
+  openDeleteDialog(): void {
+    this.deleteError.set(null);
+    this.showDeleteDialog.set(true);
+  }
+
   deleteCache(): void {
     this.deleting.set(true);
+    this.deleteError.set(null);
     this.cachesService.deleteCache(this.cacheName).subscribe({
       next: () => {
+        this.notify.success('Cache deleted');
         this.router.navigate(['/caches']);
       },
-      error: (error) => {
-        console.error('Failed to delete cache:', error);
+      error: (error: unknown) => {
+        this.deleteError.set(apiErrorMessage(error, 'Cache deletion failed.'));
         this.deleting.set(false);
-        this.showDeleteDialog.set(false);
       },
     });
   }

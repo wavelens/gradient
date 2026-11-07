@@ -8,6 +8,7 @@ import { Injectable, InjectionToken, effect, inject, signal, untracked } from '@
 import { environment } from '@environments/environment';
 import { ApiService } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
+import { NotifyService } from '@core/services/notify.service';
 import type { UserInfoResponse } from '@core/models';
 import { RELEASE_NOTES, type ReleaseNotes } from './release-notes.generated';
 import { compareVersions, releaseLine } from './version';
@@ -26,6 +27,7 @@ function releasedNotes(current: string, notes: readonly ReleaseNotes[]): Release
 export class WhatsNewService {
   private api = inject(ApiService);
   private auth = inject(AuthService);
+  private notify = inject(NotifyService);
   private checkedUser: string | null = null;
   private seenVersion: string | null = null;
 
@@ -68,6 +70,8 @@ export class WhatsNewService {
 
   private markSeen(): void {
     this.seenVersion = this.current;
-    this.api.put<string>('user/whats-new', { version: this.current }).subscribe({ error: () => undefined });
+    this.api.put<string>('user/whats-new', { version: this.current }).subscribe({
+      error: (err: unknown) => this.notify.failure('Failed to save release notes as read', err),
+    });
   }
 }

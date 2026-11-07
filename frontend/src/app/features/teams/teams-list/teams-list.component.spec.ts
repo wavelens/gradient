@@ -56,6 +56,19 @@ describe('TeamsListComponent', () => {
     expect(element.textContent).toContain('Platform');
   });
 
+  it('keeps a refused team creation inside the New Team dialog', () => {
+    const { fixture, create } = setup(true);
+    create.mockReturnValue(throwError(() => new ApiError('Team name already taken', 409)));
+    const component = fixture.componentInstance;
+    component.openCreate();
+    component.form = { name: 'platform', displayName: 'Platform' };
+    component.create();
+    fixture.detectChanges();
+    expect(component.showCreate()).toBe(true);
+    expect(component.creating()).toBe(false);
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Team name already taken');
+  });
+
   it('hides New Team when the server does not allow creating teams', () => {
     const { fixture } = setup(false);
     const text = (fixture.nativeElement as HTMLElement).textContent || '';

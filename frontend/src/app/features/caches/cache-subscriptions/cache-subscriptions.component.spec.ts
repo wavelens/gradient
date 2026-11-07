@@ -13,6 +13,7 @@ import { ApiError } from '@core/services/api.service';
 import { CacheSubscriptionRequestsComponent } from './cache-subscriptions.component';
 import { CachesService } from '@core/services/caches.service';
 import { SubscriptionRequestItem } from '@core/models';
+import { MessageService } from '@gradient/ui/ui';
 
 const request: SubscriptionRequestItem = {
   project: 'wavelens',
@@ -97,5 +98,21 @@ describe('CacheSubscriptionRequestsComponent', () => {
     const { fixture, deny } = setup([request]);
     buttonByText(fixture.nativeElement, 'Deny')?.click();
     expect(deny).toHaveBeenCalledWith('prod', 'wavelens');
+  });
+
+  it('shows a failed approve as an error toast with the server reason, not as raw text', () => {
+    const { fixture, approve } = setup([request]);
+    approve.mockReturnValue(throwError(() => new ApiError('Project wavelens was deleted', 404)));
+    buttonByText(fixture.nativeElement, 'Approve')?.click();
+    fixture.detectChanges();
+    expect(TestBed.inject(MessageService).messages()).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        summary: 'Failed to approve subscription request',
+        detail: 'Project wavelens was deleted',
+      }),
+    );
+    expect(fixture.componentInstance.deciding()).toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')).toBeNull();
   });
 });

@@ -14,6 +14,10 @@ import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { AccessState } from '@core/models/access.model';
 import { ProjectResponse } from '@core/models';
+import { ApiError } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
+
+const notify = { success: vi.fn(), failure: vi.fn() };
 
 function projectFor(access: AccessState): ProjectResponse {
   return {
@@ -40,6 +44,8 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 }
 
 function setup(access: AccessState):ComponentFixture<ProjectSettingsComponent> {
+  notify.success.mockClear();
+  notify.failure.mockClear();
   TestBed.configureTestingModule({
     imports: [ProjectSettingsComponent],
     providers: [
@@ -58,6 +64,7 @@ function setup(access: AccessState):ComponentFixture<ProjectSettingsComponent> {
         },
       },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
+      { provide: NotifyService, useValue: notify },
     ],
   });
   const fixture = TestBed.createComponent(ProjectSettingsComponent);
@@ -120,5 +127,32 @@ describe('ProjectSettingsComponent - project load errors', () => {
     const root = fixture.nativeElement as HTMLElement;
     expect(root.textContent).toContain('Failed to load project settings');
     expect(root.textContent).toContain('database is down');
+  });
+});
+
+describe('ProjectSettingsComponent - write failures', () => {
+  it('reports a refused SSH key generation instead of failing silently', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
+    await settled(fixture);
+    const denied = new ApiError('No permission for this action.', 403);
+    const service = TestBed.inject(ProjectsService) as unknown as { generateSSHKey: () => unknown };
+    service.generateSSHKey = () => throwError(() => denied);
+    fixture.componentInstance.generateSSHKey();
+    expect(notify.failure).toHaveBeenCalledWith('SSH key generation failed', denied);
+    expect(fixture.componentInstance.generatingSSH()).toBe(false);
+  });
+
+  it('keeps the delete dialog open with the server reason when the delete fails', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const service = TestBed.inject(ProjectsService) as unknown as { deleteProject: () => unknown };
+    service.deleteProject = () => throwError(() => new ApiError('Project still has running evaluations', 409));
+    findByText(fixture.nativeElement, 'delete project')!.click();
+    fixture.detectChanges();
+    findByText(document.body.querySelector('.gr-dialog')!, 'delete')!.click();
+    fixture.detectChanges();
+    const dialog = document.body.querySelector('.gr-dialog')!;
+    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Project still has running evaluations');
+    expect(fixture.componentInstance.showDeleteDialog()).toBe(true);
   });
 });

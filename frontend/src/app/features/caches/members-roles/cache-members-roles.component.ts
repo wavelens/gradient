@@ -11,6 +11,8 @@ import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { UserService } from '@core/services/user.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -19,7 +21,6 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -67,7 +68,6 @@ interface RoleFormState {
     RowComponent,
     BadgeComponent,
     SelectComponent,
-    MessageBannerComponent,
   ],
   templateUrl: './cache-members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -77,6 +77,7 @@ export class CacheMembersRolesComponent implements OnInit {
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
   private userService = inject(UserService);
+  private notify = inject(NotifyService);
 
   access = injectCacheAccess();
 
@@ -154,11 +155,12 @@ export class CacheMembersRolesComponent implements OnInit {
     this.cachesService.revokeInvitation(this.cacheName, username).subscribe({
       next: () => {
         this.revokingUser.set(null);
+        this.notify.success('Invitation revoked');
         this.loadInvitations();
       },
-      error: () => {
+      error: (error: unknown) => {
         this.revokingUser.set(null);
-        this.memberError.set('Failed to revoke the invitation.');
+        this.notify.failure('Failed to revoke invitation', error);
       },
     });
   }
@@ -212,12 +214,11 @@ export class CacheMembersRolesComponent implements OnInit {
         next: () => {
           this.addingMember.set(false);
           this.showAddMemberDialog.set(false);
+          this.notify.success('Member added');
           this.loadMembers();
         },
-        error: (err) => {
-          this.memberError.set(
-            err?.message || 'Failed to add member.'
-          );
+        error: (error: unknown) => {
+          this.memberError.set(apiErrorMessage(error, 'Failed to add member.'));
           this.addingMember.set(false);
         },
       });
@@ -230,8 +231,9 @@ export class CacheMembersRolesComponent implements OnInit {
         this.updatingRole.set(null);
         this.loadMembers();
       },
-      error: () => {
+      error: (error: unknown) => {
         this.updatingRole.set(null);
+        this.notify.failure('Failed to change member role', error);
         this.loadMembers();
       },
     });
@@ -242,9 +244,13 @@ export class CacheMembersRolesComponent implements OnInit {
     this.cachesService.removeMember(this.cacheName, username).subscribe({
       next: () => {
         this.removingMember.set(null);
+        this.notify.success('Member removed');
         this.loadMembers();
       },
-      error: () => this.removingMember.set(null),
+      error: (error: unknown) => {
+        this.removingMember.set(null);
+        this.notify.failure('Failed to remove member', error);
+      },
     });
   }
 
@@ -299,12 +305,11 @@ export class CacheMembersRolesComponent implements OnInit {
       next: () => {
         this.savingRole.set(false);
         this.showRoleDialog.set(false);
+        this.notify.success('Role saved');
         this.loadRoles();
       },
-      error: (err) => {
-        this.roleError.set(
-          err?.message || 'Failed to save role.'
-        );
+      error: (error: unknown) => {
+        this.roleError.set(apiErrorMessage(error, 'Failed to save role.'));
         this.savingRole.set(false);
       },
     });
@@ -316,9 +321,13 @@ export class CacheMembersRolesComponent implements OnInit {
     this.cachesService.deleteRole(this.cacheName, role.id).subscribe({
       next: () => {
         this.deletingRole.set(null);
+        this.notify.success('Role deleted');
         this.loadRoles();
       },
-      error: () => this.deletingRole.set(null),
+      error: (error: unknown) => {
+        this.deletingRole.set(null);
+        this.notify.failure('Failed to delete role', error);
+      },
     });
   }
 

@@ -30,10 +30,7 @@
   </gr-load-state>
 </gr-page-layout>
 
-<gr-dialog header="New Team" [(visible)]="showCreate" width="420px">
-  @if (error(); as message) {
-    <gr-message-banner type="error">{{ message }}</gr-message-banner>
-  }
+<gr-dialog header="New Team" [(visible)]="showCreate" width="420px" [error]="error()">
   <app-name-fields
     noun="team"
     [names]="names"

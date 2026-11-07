@@ -9,10 +9,6 @@
     <button slot="actions" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
   }
 
-  @if (error()) {
-    <gr-message-banner type="error">{{ error() }}</gr-message-banner>
-  }
-
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"
@@ -56,7 +52,7 @@
             <button grButton [label]="hook.active ? 'Disable' : 'Enable'" icon="power_settings_new" severity="secondary" size="small" (click)="toggleActive(hook)"></button>
             <button grButton label="Rotate secret" icon="key" severity="secondary" size="small" (click)="rotate(hook)"></button>
             <button grButton label="Edit" icon="edit" severity="secondary" size="small" (click)="startEdit(hook)"></button>
-            <button grButton label="Delete" icon="delete" severity="danger" size="small" (click)="confirmDeleteId.set(hook.id)"></button>
+            <button grButton label="Delete" icon="delete" severity="danger" size="small" (click)="startDelete(hook)"></button>
           </div>
         </div>
       }
@@ -64,7 +60,7 @@
   </gr-load-state>
 </gr-page-layout>
 
-<gr-dialog [header]="editing() ? 'Edit Webhook' : 'New Webhook'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px">
+<gr-dialog [header]="editing() ? 'Edit Webhook' : 'New Webhook'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px" [error]="formError()">
   <gr-form-field label="Name" for="webhook-name">
     <input grInput id="webhook-name" [ngModel]="name()" (ngModelChange)="name.set($event)" />
   </gr-form-field>
@@ -93,7 +89,7 @@
   </div>
 </gr-dialog>
 
-<gr-dialog header="Delete Webhook" [visible]="confirmDeleteId() !== null" (visibleChange)="$event || confirmDeleteId.set(null)" width="400px">
+<gr-dialog header="Delete Webhook" [visible]="confirmDeleteId() !== null" (visibleChange)="$event || confirmDeleteId.set(null)" width="400px" [error]="deleteError()">
   <p>Delete this webhook and its delivery history? This cannot be undone.</p>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="confirmDeleteId.set(null)"></button>

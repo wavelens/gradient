@@ -12,6 +12,8 @@ import { IntegrationsService } from '@core/services/integrations.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   AccessState,
   GitHostType,
@@ -82,6 +84,7 @@ export class IntegrationsComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
+  private notify = inject(NotifyService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
@@ -262,10 +265,11 @@ export class IntegrationsComponent implements OnInit {
         next: () => {
           this.saving.set(false);
           this.showCreateDialog.set(false);
+          this.notify.success('Integration created');
           this.loadIntegrations();
         },
-        error: (err) => {
-          this.errorMessage.set(err?.message || 'Failed to create integration.');
+        error: (error: unknown) => {
+          this.errorMessage.set(apiErrorMessage(error, 'Failed to create integration.'));
           this.saving.set(false);
         },
       });
@@ -293,10 +297,11 @@ export class IntegrationsComponent implements OnInit {
       next: () => {
         this.saving.set(false);
         this.showCreateDialog.set(false);
+        this.notify.success('Integration created');
         this.loadIntegrations();
       },
-      error: (err) => {
-        this.errorMessage.set(err?.message || 'Failed to create integration.');
+      error: (error: unknown) => {
+        this.errorMessage.set(apiErrorMessage(error, 'Failed to create integration.'));
         this.saving.set(false);
       },
     });
@@ -356,10 +361,11 @@ export class IntegrationsComponent implements OnInit {
         this.saving.set(false);
         this.showEditDialog.set(false);
         this.editingIntegration.set(null);
+        this.notify.success('Integration updated');
         this.loadIntegrations();
       },
-      error: (err) => {
-        this.errorMessage.set(err?.message || 'Failed to update integration.');
+      error: (error: unknown) => {
+        this.errorMessage.set(apiErrorMessage(error, 'Failed to update integration.'));
         this.saving.set(false);
       },
     });
@@ -378,9 +384,10 @@ export class IntegrationsComponent implements OnInit {
           this.loadIntegrations();
           this.showEditDialog.set(false);
           this.editingIntegration.set(null);
+          this.notify.success('Webhook secret cleared');
         },
-        error: (err) => {
-          this.errorMessage.set(err?.message || 'Failed to clear secret.');
+        error: (error: unknown) => {
+          this.errorMessage.set(apiErrorMessage(error, 'Failed to clear secret.'));
           this.saving.set(false);
         },
       });
@@ -399,9 +406,10 @@ export class IntegrationsComponent implements OnInit {
           this.loadIntegrations();
           this.showEditDialog.set(false);
           this.editingIntegration.set(null);
+          this.notify.success('Access token cleared');
         },
-        error: (err) => {
-          this.errorMessage.set(err?.message || 'Failed to clear token.');
+        error: (error: unknown) => {
+          this.errorMessage.set(apiErrorMessage(error, 'Failed to clear token.'));
           this.saving.set(false);
         },
       });
@@ -412,9 +420,13 @@ export class IntegrationsComponent implements OnInit {
     this.integrationsService.deleteProjectIntegration(this.projectName, integration.id).subscribe({
       next: () => {
         this.deletingId.set(null);
+        this.notify.success('Integration deleted');
         this.loadIntegrations();
       },
-      error: () => this.deletingId.set(null),
+      error: (error: unknown) => {
+        this.deletingId.set(null);
+        this.notify.failure('Integration delete failed', error);
+      },
     });
   }
 

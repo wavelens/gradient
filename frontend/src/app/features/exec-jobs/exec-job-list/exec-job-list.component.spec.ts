@@ -11,6 +11,7 @@ import { vi } from 'vitest';
 import type { ExecJobSummary } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
+import { NotifyService } from '@core/services/notify.service';
 import { ExecJobListComponent } from './exec-job-list.component';
 
 function queuedJob(): ExecJobSummary {
@@ -206,8 +207,19 @@ describe('ExecJobListComponent', () => {
 
     it('aborts the job from the menu', () => {
       const { fixture, abort } = renderJob('running', true);
+      const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
       openMenu(fixture, 'kebab').find((item) => item.textContent?.includes('Abort'))!.click();
       expect(abort).toHaveBeenCalledWith('j1');
+      expect(success).toHaveBeenCalledWith('Exec job aborted');
+    });
+
+    it('reports a refused abort with the server reason', () => {
+      const { fixture, abort } = renderJob('running', true);
+      const refused = new ApiError('Exec job already finished', 409);
+      abort.mockReturnValue(throwError(() => refused));
+      const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+      openMenu(fixture, 'kebab').find((item) => item.textContent?.includes('Abort'))!.click();
+      expect(failure).toHaveBeenCalledWith('Failed to abort exec job', refused);
     });
   });
 });

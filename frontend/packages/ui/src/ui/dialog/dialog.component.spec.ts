@@ -16,6 +16,7 @@ import { DialogComponent } from './dialog.component';
       [(visible)]="open"
       [header]="header()"
       [closable]="closable()"
+      [error]="error()"
       width="500px"
       (hide)="hidden.set(hidden() + 1)"
     >
@@ -31,6 +32,7 @@ class HostComponent {
   open = signal(false);
   header = signal('Delete project');
   closable = signal(true);
+  error = signal<string | null>(null);
   hidden = signal(0);
   confirmDisabled = signal(false);
   clicks: string[] = [];
@@ -129,5 +131,16 @@ describe('DialogComponent', () => {
     expect((panel() as HTMLElement).style.width).toBe('500px');
     expect(panel()!.getAttribute('role')).toBe('dialog');
     expect(panel()!.getAttribute('aria-modal')).toBe('true');
+  });
+
+  it('shows a failed action inside the open dialog, not behind it', () => {
+    const fixture = render();
+    fixture.componentInstance.open.set(true);
+    fixture.componentInstance.error.set('Name already taken');
+    fixture.detectChanges();
+    expect(panel()!.querySelector('gr-message-banner')?.textContent).toContain('Name already taken');
+    fixture.componentInstance.error.set(null);
+    fixture.detectChanges();
+    expect(panel()!.querySelector('gr-message-banner')).toBeNull();
   });
 });

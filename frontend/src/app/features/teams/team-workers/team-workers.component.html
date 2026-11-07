@@ -14,12 +14,9 @@
       <button grButton label="Connect Gradient.CI Servers" icon="link" severity="secondary" (click)="showGradientCiConnect.set(true)"></button>
     }
     @if (isAdmin()) {
-      <button grButton label="Register Worker" icon="add" (click)="showRegister.set(true)"></button>
+      <button grButton label="Register Worker" icon="add" (click)="openRegister()"></button>
     }
   </div>
-  @if (error(); as message) {
-    <gr-message-banner type="error">{{ message }}</gr-message-banner>
-  }
 
   <gr-load-state
     [loading]="loading()"
@@ -78,7 +75,7 @@
   </gr-load-state>
 </gr-settings-section>
 
-<gr-dialog header="Register Worker" [(visible)]="showRegister" width="480px">
+<gr-dialog header="Register Worker" [(visible)]="showRegister" width="480px" [error]="registerError()">
   <gr-form-field label="Worker ID" for="team-worker-id" hint="The worker's UUID from services.gradient.worker.id.">
     <input grInput id="team-worker-id" [(ngModel)]="form.worker_id" />
   </gr-form-field>
@@ -106,7 +103,7 @@
   </div>
 </gr-dialog>
 
-<gr-dialog header="Edit Worker" [visible]="editing() !== null" (hide)="editing.set(null)" width="480px">
+<gr-dialog header="Edit Worker" [visible]="editing() !== null" (hide)="editing.set(null)" width="480px" [error]="editError()">
   @if (editing(); as worker) {
     @if (!worker.gradient_ci) {
       <gr-form-field label="Display Name" for="team-worker-edit-name">

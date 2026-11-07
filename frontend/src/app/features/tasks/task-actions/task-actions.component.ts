@@ -13,6 +13,8 @@ import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -72,6 +74,7 @@ export class TaskActionsComponent implements OnInit {
   private accessSvc = inject(AccessService);
   private teamsService = inject(TeamsService);
   private tasksService = inject(TasksService);
+  private notify = inject(NotifyService);
 
   access = injectTaskAccess();
 
@@ -188,7 +191,7 @@ export class TaskActionsComponent implements OnInit {
         this.loadActions();
       },
       error: (err) => {
-        this.error.set(err?.message || 'Failed to create action.');
+        this.error.set(apiErrorMessage(err, 'Failed to create action.'));
         this.saving.set(false);
       },
     });
@@ -207,7 +210,7 @@ export class TaskActionsComponent implements OnInit {
         this.loadActions();
       },
       error: (err) => {
-        this.error.set(err?.message || 'Failed to update action.');
+        this.error.set(apiErrorMessage(err, 'Failed to update action.'));
         this.saving.set(false);
       },
     });
@@ -225,11 +228,13 @@ export class TaskActionsComponent implements OnInit {
       next: () => {
         this.deletingId.set(null);
         this.confirmDeleteId.set(null);
+        this.notify.success('Action deleted');
         this.loadActions();
       },
-      error: () => {
+      error: (error: unknown) => {
         this.deletingId.set(null);
         this.confirmDeleteId.set(null);
+        this.notify.failure('Action deletion failed', error);
       },
     });
   }
@@ -250,8 +255,9 @@ export class TaskActionsComponent implements OnInit {
           if (this.testSuccessId() === id) this.testSuccessId.set(null);
         }, 3000);
       },
-      error: () => {
+      error: (error: unknown) => {
         this.testingId.set(null);
+        this.notify.failure('Action test failed', error);
         this.testFailureId.set(id);
         setTimeout(() => {
           if (this.testFailureId() === id) this.testFailureId.set(null);

@@ -10,6 +10,8 @@ import { ActivatedRoute } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { ProjectSecretsService } from '@core/services/project-secrets.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import { AccessState, ProjectSecretSummary, SopsRecipientResponse } from '@core/models';
 import { docsUrl } from '@core/docs';
 import {
@@ -20,7 +22,6 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -45,7 +46,6 @@ const SECRET_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
     InputDirective,
     LabelHelpComponent,
     LoadStateComponent,
-    MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -61,6 +61,7 @@ export class SecretsComponent implements OnInit {
   private secretsService = inject(ProjectSecretsService);
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
+  private notify = inject(NotifyService);
 
   protected readonly relativeTime = relativeTime;
   protected readonly docsUrl = docsUrl('exec/secrets/');
@@ -69,7 +70,6 @@ export class SecretsComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   secrets = signal<ProjectSecretSummary[]>([]);
-  pageError = signal<string | null>(null);
   sopsRecipient = signal<SopsRecipientResponse | null>(null);
 
   formOpen = signal(false);
@@ -81,6 +81,7 @@ export class SecretsComponent implements OnInit {
 
   deleteName = signal<string | null>(null);
   deleting = signal(false);
+  deleteError = signal<string | null>(null);
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Secrets' }));
@@ -132,10 +133,11 @@ export class SecretsComponent implements OnInit {
       next: () => {
         this.saving.set(false);
         this.closeForm();
+        this.notify.success('Secret saved');
         this.loadSecrets();
       },
-      error: (error) => {
-        this.formError.set(error?.message || 'Failed to save the secret.');
+      error: (error: unknown) => {
+        this.formError.set(apiErrorMessage(error, 'Failed to save the secret.'));
         this.saving.set(false);
       },
     });
@@ -146,21 +148,26 @@ export class SecretsComponent implements OnInit {
     this.value.set('');
   }
 
+  startDelete(name: string): void {
+    this.deleteError.set(null);
+    this.deleteName.set(name);
+  }
+
   confirmDelete(): void {
     const name = this.deleteName();
     if (!name) return;
     this.deleting.set(true);
-    this.pageError.set(null);
+    this.deleteError.set(null);
     this.secretsService.remove(this.projectName, name).subscribe({
       next: () => {
         this.deleting.set(false);
         this.deleteName.set(null);
+        this.notify.success('Secret deleted');
         this.loadSecrets();
       },
-      error: (error) => {
-        this.pageError.set(error?.message || 'Failed to delete the secret.');
+      error: (error: unknown) => {
+        this.deleteError.set(apiErrorMessage(error, 'Failed to delete the secret.'));
         this.deleting.set(false);
-        this.deleteName.set(null);
       },
     });
   }

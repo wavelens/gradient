@@ -14,6 +14,8 @@ import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { AccessState, IntegrationResponse } from '@core/models';
+import { ApiError } from '@core/services/api.service';
+import { MessageService } from '@gradient/ui/ui';
 
 const baseIntegration: IntegrationResponse = {
   id: 'i1',
@@ -338,5 +340,35 @@ describe('IntegrationsComponent - load errors', () => {
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     await settled(fixture);
     expect(root.textContent).not.toContain('Failed to load integrations');
+  });
+});
+
+describe('IntegrationsComponent - write failures', () => {
+  const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  it('shows a failed delete as an error toast with the server reason', async () => {
+    const fixture = setup(writable, [baseIntegration]);
+    const service = TestBed.inject(IntegrationsService) as unknown as { deleteProjectIntegration: () => unknown };
+    service.deleteProjectIntegration = () => throwError(() => new ApiError('Integration is used by a task', 409));
+    await settled(fixture);
+    fixture.componentInstance.deleteIntegration(baseIntegration);
+    expect(TestBed.inject(MessageService).messages()).toContainEqual(
+      expect.objectContaining({ severity: 'error', summary: 'Integration delete failed', detail: 'Integration is used by a task' }),
+    );
+    expect(fixture.componentInstance.deletingId()).toBeNull();
+  });
+
+  it('keeps a failed create inside the open New Integration dialog', async () => {
+    const fixture = setup(writable, []);
+    const service = TestBed.inject(IntegrationsService) as unknown as { createProjectIntegration: () => unknown };
+    service.createProjectIntegration = () => throwError(() => new ApiError('Name gitea-prod is already taken', 409));
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    comp.openCreateDialog();
+    comp.formData.name = 'gitea-prod';
+    comp.createIntegration();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Name gitea-prod is already taken');
+    expect(comp.showCreateDialog()).toBe(true);
   });
 });

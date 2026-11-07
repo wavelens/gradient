@@ -17,6 +17,8 @@ import { StarsService } from '@core/services/stars.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService, ReportOptions } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -28,9 +30,7 @@ import {
   LoadStateComponent,
   MenuComponent,
   MenuItem,
-  MessageService,
   SkeletonComponent,
-  ToastComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
 import { EvalStatusBadgeComponent, inputFetchRows, SegmentedBarComponent, StarButtonComponent, StatusIconComponent, ThunkProgressComponent } from '@shared/ui';
@@ -60,10 +60,9 @@ import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commit
     CommonModule, FormsModule, RouterModule, BadgeComponent, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     SkeletonComponent, EmptyStateComponent, LoadStateComponent, WritableDirective,
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
-    IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent,
+    IconComponent, InViewDirective, StatusIconComponent, StarButtonComponent,
     ExecJobListComponent,
   ],
-  providers: [MessageService],
   templateUrl: './task-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -81,7 +80,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private crumbs = inject(BreadcrumbsService);
   private tasksService = inject(TasksService);
   private evaluationsService = inject(EvaluationsService);
-  private messageService = inject(MessageService);
+  private notify = inject(NotifyService);
   private accessService = inject(AccessService);
   private live = inject(LiveService);
   private document = inject(DOCUMENT);
@@ -110,7 +109,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   starting = signal(false);
   private evaluationsBeforeStart: Set<string> | null = null;
   starred = signal(false);
-  errorMessage = signal<string | null>(null);
   abortTarget = signal<string | null>(null);
   aborting = signal(false);
   tick = signal(Date.now());
@@ -382,13 +380,12 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   startEvaluation(walk: WalkMode = 'pruned'): void {
     this.starting.set(true);
-    this.errorMessage.set(null);
     this.selectNextNewEvaluation();
     this.tasksService.startEvaluation(this.projectName, this.taskName, walk).subscribe({
       next: () => this.loadTaskData(),
-      error: (error) => {
+      error: (error: unknown) => {
         this.cancelNewEvaluationSelect();
-        this.errorMessage.set(error?.message || 'Failed to start evaluation.');
+        this.notify.failure('Failed to start evaluation', error);
         this.starting.set(false);
       },
     });
@@ -423,17 +420,16 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       next: () => {
         this.aborting.set(false);
         this.abortTarget.set(null);
+        this.notify.success('Evaluation aborted');
         this.loadTaskData();
       },
-      error: (error: Error) => {
+      error: (error: unknown) => {
         this.aborting.set(false);
         this.abortTarget.set(null);
-        this.errorMessage.set(error?.message || 'Failed to abort evaluation.');
+        this.notify.failure('Failed to abort evaluation', error);
       },
     });
   }
-
-  dismissError(): void { this.errorMessage.set(null); }
 
   private startLiveUpdates(): void {
     const frames = this.live
@@ -591,7 +587,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       label: 'Retry', icon: 'replay',
       disabled: this.starting() || this.evaluationInProgress(),
       command: () => this.runAction(this.evaluationsService.retryEvaluation(selected.id),
-        'Evaluation retried', 'Failed to retry evaluation.'),
+        'Evaluation retried', 'Failed to retry evaluation'),
     };
   });
 
@@ -635,7 +631,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       ...(selected && this.canPrioritizeEvaluation(selected)
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up',
              command: () => this.runAction(this.evaluationsService.prioritizeEvaluation(selected.id),
-               'Evaluation prioritized', 'Failed to prioritize evaluation.') }]
+               'Evaluation prioritized', 'Failed to prioritize evaluation') }]
         : []),
       ...(this.canTrigger()
         ? [{ label: 'Full rewalk', icon: 'account_tree',
@@ -644,7 +640,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         : []),
       ...(this.authService.isAuthenticated()
         ? [{ label: 'Diagnostic report', icon: 'bug_report', disabled: !selected,
-             command: () => this.reportDialogOpen.set(true) }]
+             command: () => this.openReportDialog() }]
         : []),
     ];
   });
@@ -683,15 +679,16 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private runAction(request: Observable<string>, success: string, failure: string): void {
     request.subscribe({
       next: () => {
-        this.messageService.add({ severity: 'success', summary: success });
+        this.notify.success(success);
         this.loadTaskData();
       },
-      error: (error: Error) => this.errorMessage.set(error?.message || failure),
+      error: (error: unknown) => this.notify.failure(failure, error),
     });
   }
 
   reportDialogOpen = signal(false);
   reportBusy = signal(false);
+  reportError = signal<string | null>(null);
   reportOptions = signal<ReportOptions>({
     include_identities: false,
     include_packages: true,
@@ -708,20 +705,26 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.reportOptions.update(o => ({ ...o, [key]: value }));
   }
 
+  openReportDialog(): void {
+    this.reportError.set(null);
+    this.reportDialogOpen.set(true);
+  }
+
   generateReport(): void {
     const evaluation = this.selected();
     if (!evaluation || this.reportBusy()) return;
 
     this.reportBusy.set(true);
+    this.reportError.set(null);
     this.tasksService.downloadReport(evaluation.id, this.reportOptions()).subscribe({
       next: response => {
         this.reportBusy.set(false);
         this.reportDialogOpen.set(false);
         saveResponse(response, `gradient-report-${evaluation.id.split('-')[0]}.db`);
       },
-      error: (e: Error) => {
+      error: (error: unknown) => {
         this.reportBusy.set(false);
-        this.errorMessage.set(e.message);
+        this.reportError.set(apiErrorMessage(error, 'Failed to generate the diagnostic report.'));
       },
     });
   }
@@ -729,7 +732,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private downloadSbom(ep: EntryPointSummary): void {
     this.evaluationsService.downloadBuildSbom(ep.build_id).subscribe({
       next: response => saveResponse(response, `${ep.derivation_path.replace(/\.drv$/, '')}-sbom.cdx.json`),
-      error: (e: Error) => this.errorMessage.set(e.message),
+      error: (error: unknown) => this.notify.failure('Failed to download SBOM', error),
     });
   }
 
@@ -761,17 +764,17 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       ...(this.canPrioritizeEntryPoint(ep)
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up',
              command: () => this.runAction(this.evaluationsService.prioritizeBuild(ep.build_id),
-               'Build prioritized', 'Failed to prioritize build.') }]
+               'Build prioritized', 'Failed to prioritize build') }]
         : []),
       ...(evaluation && this.canAbortEntryPoint(ep, evaluation)
         ? [{ label: 'Abort', icon: 'stop_circle',
              command: () => this.runAction(this.evaluationsService.abortBuild(ep.build_id),
-               'Build aborted', 'Failed to abort build.') }]
+               'Build aborted', 'Failed to abort build') }]
         : []),
       ...(evaluation && this.canRetryEntryPoint(ep, evaluation)
         ? [{ label: 'Retry', icon: 'replay',
              command: () => this.runAction(this.evaluationsService.retryBuild(ep.build_id),
-               'Build retried', 'Failed to retry build.') }]
+               'Build retried', 'Failed to retry build') }]
         : []),
     ];
   }

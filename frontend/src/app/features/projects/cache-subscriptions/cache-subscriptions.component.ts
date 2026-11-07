@@ -14,6 +14,8 @@ import { CachesService } from '@core/services/caches.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -21,7 +23,6 @@ import {
   DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
-  IconComponent,
   LoadStateComponent,
   PageLayoutComponent,
   RowComponent,
@@ -48,7 +49,6 @@ import { AccessState, CacheSubscriptionItem } from '@core/models';
     LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
-    IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
     EmptyStateComponent,
@@ -70,6 +70,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private auth = inject(AuthService);
   private config = inject(ConfigService);
+  private notify = inject(NotifyService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
   canCreateCache = computed(() => this.config.canCreate(this.config.createCache, this.auth.user()?.superuser === true));
@@ -162,10 +163,11 @@ export class CacheSubscriptionsComponent implements OnInit {
       next: () => {
         this.subscribing.set(false);
         this.showSubscribeDialog.set(false);
+        this.notify.success('Subscribed to cache');
         this.loadCaches();
       },
-      error: (err) => {
-        this.errorMessage.set(err?.message || 'Cache not found or already subscribed.');
+      error: (error: unknown) => {
+        this.errorMessage.set(apiErrorMessage(error, 'Cache not found or already subscribed.'));
         this.subscribing.set(false);
         this.showSubscribeDialog.set(true);
       },
@@ -177,9 +179,13 @@ export class CacheSubscriptionsComponent implements OnInit {
     this.projectsService.unsubscribeCache(this.projectName, cache.name).subscribe({
       next: () => {
         this.unsubscribingId.set(null);
+        this.notify.success('Removed cache subscription');
         this.loadCaches();
       },
-      error: () => this.unsubscribingId.set(null),
+      error: (error: unknown) => {
+        this.unsubscribingId.set(null);
+        this.notify.failure('Failed to remove subscription', error);
+      },
     });
   }
 }

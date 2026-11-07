@@ -140,13 +140,8 @@
   (visibleChange)="$event || cancelDelete()"
   width="480px"
   [closable]="!deletingHash()"
+  [error]="deleteError()"
 >
-  @if (deleteError()) {
-    <div class="inline-error">
-      <gr-icon name="error" />
-      {{ deleteError() }}
-    </div>
-  }
   @if (pendingDelete(); as row) {
     <p>
       Remove <code class="mono">{{ row.hash }}</code> from this cache?

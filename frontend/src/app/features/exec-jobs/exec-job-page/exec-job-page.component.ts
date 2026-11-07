@@ -34,6 +34,7 @@ import { evaluationPhase, formatEvaluationDuration, parseUtcTimestamp } from '@s
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
+import { NotifyService } from '@core/services/notify.service';
 import type { ExecJobPullRequestView, ExecJobResponse } from '@core/models';
 import { deviceLabel, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
@@ -85,6 +86,7 @@ export class ExecJobPageComponent implements OnInit {
   private execJobs = inject(ExecJobsService);
   private breadcrumbs = inject(BreadcrumbsService);
   private accessService = inject(AccessService);
+  private notify = inject(NotifyService);
   private viewer = viewChild(LogViewerComponent);
 
   access = injectTaskAccess();
@@ -254,12 +256,13 @@ export class ExecJobPageComponent implements OnInit {
       next: () => {
         this.aborting.set(false);
         this.abortOpen.set(false);
+        this.notify.success('Exec job aborted');
         this.watch();
       },
-      error: (error: Error) => {
+      error: (error: unknown) => {
         this.aborting.set(false);
         this.abortOpen.set(false);
-        this.errorMessage.set(error.message);
+        this.notify.failure('Failed to abort exec job', error);
       },
     });
   }
@@ -278,12 +281,11 @@ export class ExecJobPageComponent implements OnInit {
     request.subscribe({
       next: () => {
         this.switchingKeep.set(false);
-        this.errorMessage.set(null);
         this.watch();
       },
-      error: (error: Error) => {
+      error: (error: unknown) => {
         this.switchingKeep.set(false);
-        this.errorMessage.set(error.message);
+        this.notify.failure(keep ? 'Failed to keep VM running' : 'Failed to let VM stop', error);
       },
     });
   }
@@ -293,12 +295,12 @@ export class ExecJobPageComponent implements OnInit {
     this.execJobs.run(this.jobId).subscribe({
       next: () => {
         this.starting.set(false);
-        this.errorMessage.set(null);
+        this.notify.success('Exec job started');
         this.watch();
       },
-      error: (error: Error) => {
+      error: (error: unknown) => {
         this.starting.set(false);
-        this.errorMessage.set(error.message);
+        this.notify.failure('Failed to start exec job', error);
       },
     });
   }

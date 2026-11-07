@@ -17,6 +17,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CachesService } from '@core/services/caches.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -76,8 +77,8 @@ export class CacheNarsDetailDrawerComponent implements OnChanges {
         this.detail.set(d);
         this.loading.set(false);
       },
-      error: (err) => {
-        this.error.set(err?.message ?? 'Failed to load NAR details.');
+      error: (error: unknown) => {
+        this.error.set(apiErrorMessage(error, 'Failed to load NAR details.'));
         this.loading.set(false);
       },
     });

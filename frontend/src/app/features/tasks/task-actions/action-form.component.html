@@ -9,14 +9,8 @@
   [visible]="visible()"
   (visibleChange)="onVisibleChange($event)"
   width="560px"
+  [error]="error()"
 >
-  @if (error()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ error() }}
-    </div>
-  }
-
   <gr-form-field label="Name" for="action-name">
     <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" />
   </gr-form-field>

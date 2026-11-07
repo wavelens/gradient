@@ -10,6 +10,8 @@ import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import type { ExecJobResponse, ExecJobStatus } from '@core/models';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
+import { ApiError } from '@core/services/api.service';
+import { MessageService } from '@gradient/ui/ui';
 import { ExecJobPageComponent } from './exec-job-page.component';
 
 vi.mock('@xterm/xterm', () => ({
@@ -152,6 +154,10 @@ function setup(
   return { fixture, abort, run, log, keepVmRunning, letVmStop, navigate };
 }
 
+function toasts() {
+  return TestBed.inject(MessageService).messages();
+}
+
 function keepButton(root: HTMLElement): HTMLButtonElement | undefined {
   return Array.from(root.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Keep VM running'));
 }
@@ -206,13 +212,17 @@ describe('ExecJobPageComponent', () => {
       expect(letVmStop).toHaveBeenCalledWith('j1');
     });
 
-    it('shows a refused switch', () => {
+    it('shows a refused switch as a toast that polling does not clear', () => {
       const { fixture, keepVmRunning } = setup('running');
-      keepVmRunning.mockReturnValue(throwError(() => new Error('the exec job has already finished')));
+      keepVmRunning.mockReturnValue(throwError(() => new ApiError('the exec job has already finished', 409)));
       keepButton(fixture.nativeElement)?.click();
       fixture.detectChanges();
-      expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')?.textContent)
-        .toContain('the exec job has already finished');
+      expect(toasts()).toContainEqual(expect.objectContaining({
+        severity: 'error',
+        summary: 'Failed to keep VM running',
+        detail: 'the exec job has already finished',
+      }));
+      expect(fixture.componentInstance.errorMessage()).toBeNull();
     });
   });
 
@@ -242,14 +252,17 @@ describe('ExecJobPageComponent', () => {
 
   it('runs a finished job again and shows a refusal', () => {
     const { fixture, run } = setup('failed');
-    run.mockReturnValue(throwError(() => new Error('exec jobs are disabled for this task')));
+    run.mockReturnValue(throwError(() => new ApiError('exec jobs are disabled for this task', 403)));
     const root = fixture.nativeElement as HTMLElement;
     Array.from(root.querySelectorAll('.info-bar-right button'))
       .find((b) => (b.textContent ?? '').includes('Run again'))
       ?.dispatchEvent(new MouseEvent('click'));
     fixture.detectChanges();
     expect(run).toHaveBeenCalledWith('j1');
-    expect(root.querySelector('gr-message-banner')?.textContent).toContain('exec jobs are disabled for this task');
+    expect(toasts()).toContainEqual(expect.objectContaining({
+      summary: 'Failed to start exec job',
+      detail: 'exec jobs are disabled for this task',
+    }));
   });
 
   it('names the worker and keeps its id on hover', () => {
@@ -337,6 +350,22 @@ describe('ExecJobPageComponent', () => {
       .find((b) => (b.textContent ?? '').includes('Abort')) as HTMLButtonElement | undefined;
     confirm?.click();
     expect(abort).toHaveBeenCalledWith('j1');
+    expect(toasts()).toContainEqual(expect.objectContaining({ severity: 'success', summary: 'Exec job aborted' }));
+  });
+
+  it('reports a refused abort as a toast and keeps the page banner for load errors only', () => {
+    const { fixture, abort } = setup('running');
+    abort.mockReturnValue(throwError(() => new ApiError('Exec job already finished', 409)));
+    fixture.componentInstance.abortOpen.set(true);
+    fixture.componentInstance.confirmAbort();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.aborting()).toBe(false);
+    expect(toasts()).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      summary: 'Failed to abort exec job',
+      detail: 'Exec job already finished',
+    }));
+    expect(fixture.componentInstance.errorMessage()).toBeNull();
   });
 
   it('keeps updating after one failed poll', () => {
