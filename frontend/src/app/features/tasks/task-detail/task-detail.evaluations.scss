@@ -235,6 +235,7 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 
   b { color: var(--gr-text-primary); }
   .tally-overall { color: var(--gr-text-muted); }
+  .eval-only { display: inline-flex; align-items: center; gap: $spacing-xs; color: var(--gr-text-secondary); }
   .dur { display: inline-flex; align-items: center; gap: $spacing-xs; gr-icon { color: var(--gr-text-muted); } }
 }
 

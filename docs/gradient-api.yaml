@@ -17027,6 +17027,7 @@ components:
       - errors
       - warnings
       - prioritized
+      - only_evaluate
       - created_at
       - updated_at
       properties:
@@ -17076,6 +17077,8 @@ components:
           - $ref: '#/components/schemas/ClusterJobId'
           - type: 'null'
         prioritized:
+          type: boolean
+        only_evaluate:
           type: boolean
         created_at:
           type: string

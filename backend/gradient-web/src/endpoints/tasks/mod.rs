@@ -210,6 +210,7 @@ pub struct EvaluationSummary {
     pub dispatched_job: Option<DispatchedJobId>,
     pub cluster_job: Option<ClusterJobId>,
     pub prioritized: bool,
+    pub only_evaluate: bool,
     pub created_at: chrono::NaiveDateTime,
     pub started_at: Option<chrono::NaiveDateTime>,
     pub finished_at: Option<chrono::NaiveDateTime>,
@@ -402,6 +403,7 @@ mod summary_tests {
             dispatched_job: None,
             cluster_job: None,
             prioritized: false,
+            only_evaluate: false,
             created_at: chrono::NaiveDateTime::default(),
             started_at: None,
             finished_at: None,
@@ -424,6 +426,11 @@ mod summary_tests {
         let idle = summary(None);
         assert!(idle.get("progress").is_none());
         assert!(idle.get("expected_thunks").is_none());
+    }
+
+    #[test]
+    fn the_summary_always_says_whether_the_evaluation_only_evaluates() {
+        assert_eq!(summary(None)["only_evaluate"], false);
     }
 
     #[test]

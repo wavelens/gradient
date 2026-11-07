@@ -1023,6 +1023,7 @@ export interface EvaluationSummary {
   dispatched_job?: DispatchedJobId | null;
   cluster_job?: ClusterJobId | null;
   prioritized: boolean;
+  only_evaluate: boolean;
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;

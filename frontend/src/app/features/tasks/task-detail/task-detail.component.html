@@ -100,12 +100,16 @@
               </div>
             </div>
             <div class="bar-line">
-              <gr-segmented-bar class="eval-bar" [counts]="sel.builds" />
-              @let tally = buildTally(sel.builds);
-              <span>
-                <b>{{ tally.done }} / {{ tally.total }}</b> builds
-                @if (tally.overall > tally.total) { <span class="tally-overall">of {{ tally.overall }} total</span> }
-              </span>
+              @if (sel.only_evaluate) {
+                <span class="eval-only"><gr-icon name="info" size="sm" /> Evaluation only - other tasks do the build</span>
+              } @else {
+                <gr-segmented-bar class="eval-bar" [counts]="sel.builds" />
+                @let tally = buildTally(sel.builds);
+                <span>
+                  <b>{{ tally.done }} / {{ tally.total }}</b> builds
+                  @if (tally.overall > tally.total) { <span class="tally-overall">of {{ tally.overall }} total</span> }
+                </span>
+              }
               <span class="dur"><gr-icon name="timer" size="sm" /> <b>{{ evalDuration(sel) }}</b></span>
               @if (sel.errors > 0) {
                 <a class="msg-chip error" [routerLink]="links.evaluationLog(projectName, sel.id, { messages: true })">
@@ -155,20 +159,23 @@
                 @if (row.kind === 'build') {
                   @let ep = row.entry;
                   @let counts = barCounts(ep);
-                  <div class="entry-row pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="($index % staggeredRows) * 18"
+                  @let phase = packagePhase(sel, ep);
+                  <div class="entry-row pkg" [attr.data-phase]="phase" [style.animation-delay.ms]="($index % staggeredRows) * 18"
                        (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
                     <a class="entry-link" [routerLink]="links.evaluationLog(projectName, sel.id, { build: ep.build_id })"
                        [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="row.label"></a>
-                    <gr-status-icon class="phase-swatch" [phase]="entryPointPhase(ep)" [prioritized]="ep.prioritized" size="sm" />
+                    <gr-status-icon class="phase-swatch" [phase]="phase" [prioritized]="ep.prioritized" size="sm" />
                     <span class="pkg-name entry-name">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>
                     <span class="chip-arch mono">{{ ep.architecture }}</span>
-                    <gr-segmented-bar class="pkg-bar" [counts]="counts" />
-                    @let depTally = buildTally(counts);
-                    <span class="pkg-deps" [title]="depTally.overall + ' deps in total'">{{ depTally.done }} / {{ depTally.total }} deps</span>
-                    <span class="pkg-time">
-                      {{ pkgDuration(ep) }}
-                      @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }
-                    </span>
+                    @if (!sel.only_evaluate) {
+                      <gr-segmented-bar class="pkg-bar" [counts]="counts" />
+                      @let depTally = buildTally(counts);
+                      <span class="pkg-deps" [title]="depTally.overall + ' deps in total'">{{ depTally.done }} / {{ depTally.total }} deps</span>
+                      <span class="pkg-time">
+                        {{ pkgDuration(ep) }}
+                        @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }
+                      </span>
+                    }
                     <button type="button" class="entry-kebab"
                             (click)="openPkgMenu($event, ep, sel.id, pkgMenu)"
                             aria-label="Package actions"><gr-icon name="more_vert" /></button>

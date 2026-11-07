@@ -55,7 +55,7 @@ import {
   WalkMode,
   EvaluationStatus,
 } from '@core/models';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -587,8 +587,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   ));
 
   protected readonly evaluationPhase = evaluationPhase;
-  protected readonly entryPointPhase = entryPointPhase;
   protected readonly inputFetchPhase = inputFetchPhase;
+
+  protected packagePhase(evaluation: EvaluationSummary, entry: EntryPointSummary): StatusPhase {
+    return evaluation.only_evaluate ? 'success' : entryPointPhase(entry);
+  }
 
   pkgMenuModel = signal<MenuItem[]>([]);
 

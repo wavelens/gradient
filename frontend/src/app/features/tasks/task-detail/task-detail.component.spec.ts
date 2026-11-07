@@ -67,6 +67,7 @@ function evalSummary(
     warnings: 0,
     dispatched_job: null,
     prioritized: false,
+    only_evaluate: false,
     created_at: '2026-01-01T00:00:00',
     started_at: null,
     finished_at: null,
@@ -696,6 +697,27 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const text = (sel: string) => Array.from(root.querySelectorAll(sel)).map((e) => e.textContent?.trim());
     expect(text('.pkg-label h3')).toEqual(['Packages', 'Checks']);
     expect(text('.pkg-name')).toEqual(['hello', 'fmt']);
+  });
+
+  it('shows packages of an evaluate-only evaluation as evaluated, not as the build another task runs', () => {
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      {
+        primaryStatus: 'Completed',
+        primary: { only_evaluate: true, builds: { ...zeroCounts(), building: 1 } },
+        getEntryPoints: () => of({
+          entry_points: [{ ...epSummary('a'), build_status: 'Building' }],
+          total: 1,
+          failed_attributes: [],
+        }),
+      },
+    );
+    const root = fixture.nativeElement as HTMLElement;
+
+    expect(root.querySelector('.entry-row.pkg')?.getAttribute('data-phase')).toBe('success');
+    expect(root.querySelector('.pkg-bar')).toBeNull();
+    expect(root.querySelector('.eval-bar')).toBeNull();
+    expect(root.querySelector('.eval-only')?.textContent).toContain('Evaluation only');
   });
 
   it('tags the row of a derivation an evaluation imported', () => {

@@ -170,6 +170,7 @@ pub(super) async fn evaluations_to_summaries(
                 .and_then(|job| clusters.get(job))
                 .copied(),
             prioritized: with_qos.contains(&evaluation.id),
+            only_evaluate: evaluation.only_evaluate,
             created_at: evaluation.created_at,
             started_at: evaluation.fetch_started_at,
             finished_at: evaluation.finished_at,
