@@ -183,12 +183,7 @@
       <!-- Log area -->
       <div class="log-area">
         @if (ev.status === 'Waiting' && selectedSection() !== 'messages' && selectedBuildId()) {
-          <gr-message-banner type="warning" icon="pause_circle">
-            <strong>{{ waitingTitle(ev.waiting_reason) }}</strong>
-            @if (ev.waiting_reason) {
-              {{ formatWaitingReason(ev.waiting_reason) }}
-            }
-          </gr-message-banner>
+          <gr-waiting-notice banner [reason]="ev.waiting_reason" [project]="projectName" [access]="waitingAccess()" />
         }
         @if (selectedSection() === 'messages') {
           <div class="messages-panel">
@@ -234,29 +229,7 @@
             </div>
           } @else if (ev.status === 'Waiting') {
             <div class="queued-hint">
-              <gr-icon name="pause_circle" class="queued-icon" size="xl" />
-              <span class="queued-title">{{ waitingTitle(ev.waiting_reason) }}</span>
-              @if (ev.waiting_reason && ev.waiting_reason.kind === 'workers' && ev.waiting_reason.unmet.length > 0) {
-                <span class="queued-sub">{{ formatWaitingReason(ev.waiting_reason) }}</span>
-                <ul class="waiting-unmet">
-                  @for (req of ev.waiting_reason.unmet; track req.architecture + ':' + req.required_features.join(',')) {
-                    <li>
-                      <code>{{ req.architecture }}</code>
-                      @if (req.required_features.length > 0) {
-                        with feature{{ req.required_features.length === 1 ? '' : 's' }}
-                        @for (f of req.required_features; track f; let last = $last) {
-                          <code>{{ f }}</code>{{ last ? '' : ', ' }}
-                        }
-                      }
-                      - {{ req.build_count }} {{ req.build_count === 1 ? 'build' : 'builds' }}
-                    </li>
-                  }
-                </ul>
-              } @else if (ev.waiting_reason) {
-                <span class="queued-sub">{{ formatWaitingReason(ev.waiting_reason) }}</span>
-              } @else {
-                <span class="queued-sub">No build workers are currently available. Evaluation will resume when a worker connects&hellip;</span>
-              }
+              <gr-waiting-notice [reason]="ev.waiting_reason" [project]="projectName" [access]="waitingAccess()" />
             </div>
           } @else if (ev.status === 'Queued') {
             <div class="queued-hint">

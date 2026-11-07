@@ -25,21 +25,22 @@ import {
   ScrollRegionDirective,
   SelectButtonComponent,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent, StatusBadgeComponent, StatusIconComponent } from '@shared/ui';
+import { LabelHelpComponent, StatusBadgeComponent, StatusIconComponent, WaitingNoticeComponent } from '@shared/ui';
+import { AuthService } from '@core/services/auth.service';
 import { JobTimelineComponent } from '@features/board/job-detail/job-timeline.component';
 import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
 import { LogViewerComponent, parseLineFragment, splitLogLines } from '@shared/log';
 import { WritableDirective, AccessService } from '@shared/access';
 import { clockTime, monthDay } from '@shared/text';
-import { evaluationPhase, formatEvaluationDuration, parseUtcTimestamp } from '@shared/evaluation';
-import { injectTaskAccess } from '@core/resolvers/inject-access';
+import { evaluationPhase, formatEvaluationDuration, parseUtcTimestamp, waitingAccessFrom } from '@shared/evaluation';
+import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import type { ExecJobPullRequestView, ExecJobResponse } from '@core/models';
-import { abortExecJobConfirm, deviceLabel, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
+import { abortExecJobConfirm, deviceLabel, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 import { ExecJobInfoComponent } from '../exec-job-info/exec-job-info.component';
@@ -72,7 +73,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
     RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MenuComponent, MessageBannerComponent,
     SelectButtonComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
-    LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, ScrollRegionDirective, DrawerDirective,
+    LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, WaitingNoticeComponent, ScrollRegionDirective, DrawerDirective,
   ],
   templateUrl: './exec-job-page.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -88,6 +89,7 @@ export class ExecJobPageComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private execJobs = inject(ExecJobsService);
   private breadcrumbs = inject(BreadcrumbsService);
+  private auth = inject(AuthService);
   private accessService = inject(AccessService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
@@ -146,8 +148,10 @@ export class ExecJobPageComponent implements OnInit {
     const job = this.job();
     return this.open() && job?.keep_vm_running ? job.program_exit_code ?? null : null;
   });
-  waiting = computed(() => waitingReasonText(this.job()?.waiting_reason));
-  waitsForManualStart = computed(() => this.job()?.waiting_reason?.kind === 'manual_start');
+  private taskData = injectTaskAccessData();
+  waitingAccess = computed(() =>
+    waitingAccessFrom(this.taskData()?.task.permissions ?? [], this.triggerAccess().canEdit, this.auth.user()?.superuser === true),
+  );
   jobMenu = computed<MenuItem[]>(() => {
     const job = this.job();
     if (!job) return [];

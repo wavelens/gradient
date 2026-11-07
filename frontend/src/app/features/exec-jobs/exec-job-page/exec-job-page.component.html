@@ -152,10 +152,6 @@
                     [severity]="keepVmRunning() ? 'primary' : 'secondary'" [attr.aria-pressed]="keepVmRunning()"
                     [loading]="switchingKeep()" [disabled]="switchingKeep()" (click)="toggleKeepVmRunning()"></button>
           }
-          @if (waitsForManualStart()) {
-            <button *appWritable="triggerAccess()" grButton label="Run" icon="play_arrow" size="small"
-                    [loading]="starting()" [disabled]="starting()" (click)="run()"></button>
-          }
           @if (open()) {
             <button *appWritable="triggerAccess()" grButton label="Abort" icon="close" severity="danger" size="small"
                     (click)="abort()"></button>
@@ -170,8 +166,9 @@
         @if (errorMessage(); as message) {
           <gr-message-banner type="error">{{ message }}</gr-message-banner>
         }
-        @if (waiting(); as reason) {
-          <gr-message-banner type="warning" icon="pause_circle">{{ reason }}</gr-message-banner>
+        @if (job.waiting_reason; as reason) {
+          <gr-waiting-notice banner [reason]="reason" [project]="job.project" [access]="waitingAccess()"
+                             [busy]="starting()" (start)="run()" />
         }
         @if (keptExitCode() !== null) {
           <gr-message-banner class="kept-vm">

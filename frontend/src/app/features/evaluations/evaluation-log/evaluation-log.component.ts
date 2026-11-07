@@ -45,8 +45,8 @@ import {
   LogChunkIndex,
   EvaluationStatus,
   BuildWithOutputs,
-  WaitingReason,
   TriggerType,
+  Permission,
 } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import {
@@ -65,8 +65,8 @@ import {
   ScrollRegionDirective,
   SkeletonComponent,
 } from '@gradient/ui/ui';
-import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent } from '@shared/ui';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, formatWaitingReason, waitingTitle, buildPhase, PHASE_SEVERITY } from '@shared/evaluation';
+import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, buildPhase, PHASE_SEVERITY } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -74,7 +74,7 @@ import { saveResponse } from '@shared/download';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WritableDirective, ScrollRegionDirective, DrawerDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, ScrollRegionDirective, DrawerDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -130,6 +130,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   // owning task is asked directly: a viewer must not be offered an abort.
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
   triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
+  private taskPermissions = signal<readonly Permission[]>([]);
+  waitingAccess = computed(() =>
+    waitingAccessFrom(this.taskPermissions(), this.access().canTrigger, this.authService.user()?.superuser === true),
+  );
   duration = signal('0s');
   totalBuildsCount = signal(0);
   activeBuildsCount = signal(0);
@@ -328,7 +332,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       .getTask(this.projectName, taskName)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (task) => this.access.set(accessFromEntity(task)),
+        next: (task) => {
+          this.access.set(accessFromEntity(task));
+          this.taskPermissions.set(task.permissions);
+        },
         error: () => {},
       });
   }
@@ -1221,13 +1228,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return s === 'Queued' || s === 'Fetching' || s === 'EvaluatingFlake' || s === 'EvaluatingDerivation' || s === 'Building' || s === 'Waiting';
   }
 
-  readonly formatWaitingReason = formatWaitingReason;
-  readonly waitingTitle = waitingTitle;
   protected readonly links = links;
-
-  isWorkersWaiting(reason: WaitingReason | undefined): boolean {
-    return reason?.kind === 'workers';
-  }
 
   readonly commitLabel = commitLabel;
 

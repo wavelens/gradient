@@ -49,6 +49,7 @@ flowchart LR
 - Gate every write control by the permission that its endpoint can check, not by role name. Project, task and cache responses list the caller's own `permissions`. Build the gate with `accessTo(resource, ...permissions)` (or `injectTaskAccessTo` / `injectCacheAccessTo`) and pass it to `*appWritable` and `[appManagedDisable]`. Bind the busy flag to the same element as `[disabled]`. `appManagedDisable` can combine both. Show `missingPermissionText()` inside `gr-load-state` with `[retryable]="false"` on a page where callers lack a permission for the list endpoint. Send no request.
 - Validate input on the client with ``fieldChecks`` in ``@shared/forms``. Use ``gr-form-field`` to show messages below the field before the request can leave the client. Track changes on the settings page with ``unsavedChanges()`` from ``@shared/forms``. Keep Save disabled when there are no changes. Register ``unsavedChangesGuard`` on the route and ask for confirmation before leaving with edits.
 - Build every in-app link with links from @shared/routing. Never write a path as an array or a string. A builder returns a UrlTree with its query, so bind it to routerLink alone, without queryParams, and navigate with router.navigateByUrl. Pages that open from a task or an evaluation keep it in the link, so the way back returns to the same evaluation and build. Every page shows a gr-breadcrumb trail (through gr-page-layout or on its own) back to its parent.
+- Show a waiting or stuck state through gr-waiting-notice, never as bare text. Its mapping, explainWaiting in @shared/evaluation, gives each reason a title, a detail and either an action (a link or Run) or a hint whom to ask, chosen by the viewer's permission. Add a new reason there, not on a page.
 
 ## Shared UI Package
 
@@ -69,7 +70,7 @@ The package `@gradient/ui` lives in the pnpm workspace at `frontend/packages/ui`
 
 ## `gr-ui`
 
-The generic building blocks live in `frontend/packages/ui/src/ui/` and build on `@angular/cdk`. Gradient-specific components (`gr-eval-status-badge`, `gr-status-icon`, `gr-metric-chart`, `gr-star-button`, `gr-label-help`) live in `frontend/src/app/shared/ui/`. Imports go through the barrel of each layer.
+The generic building blocks live in `frontend/packages/ui/src/ui/` and build on `@angular/cdk`. Gradient-specific components (`gr-eval-status-badge`, `gr-status-icon`, `gr-waiting-notice`, `gr-metric-chart`, `gr-star-button`, `gr-label-help`) live in `frontend/src/app/shared/ui/`. Imports go through the barrel of each layer.
 
 ```ts
 import { FormFieldComponent, PageLayoutComponent, SettingsSectionComponent } from '@gradient/ui/ui';

@@ -33,14 +33,6 @@
   margin-top: $space-pair;
 }
 
-.waiting-unmet {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: $font-size-sm;
-  color: var(--gr-text-secondary);
-}
-
 .pkg {
   // Each row is its own grid, so no track may size by content or the columns drift between rows.
   grid-template-columns: 24px minmax(0, 4fr) 8rem minmax(0, 4fr) 9rem minmax(0, 1fr) 2.5rem;

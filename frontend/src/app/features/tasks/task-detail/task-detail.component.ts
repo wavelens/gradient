@@ -36,7 +36,7 @@ import {
   SkeletonComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, inputFetchRows, SegmentedBarComponent, StarButtonComponent, StatusIconComponent, ThunkProgressComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, inputFetchRows, SegmentedBarComponent, StarButtonComponent, StatusIconComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
 import { saveResponse } from '@shared/download';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
@@ -54,7 +54,7 @@ import {
   WalkMode,
   EvaluationStatus,
 } from '@core/models';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, unmetRequirementLabel, waitingTitle, formatWaitingReason } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -64,7 +64,7 @@ import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, build
     SkeletonComponent, EmptyStateComponent, LoadStateComponent, WritableDirective,
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, StarButtonComponent,
-    ExecJobListComponent, ScrollRegionDirective,
+    ExecJobListComponent, WaitingNoticeComponent, ScrollRegionDirective,
   ],
   templateUrl: './task-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -92,6 +92,9 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   access = injectTaskAccess();
   triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
+  waitingAccess = computed(() =>
+    waitingAccessFrom(this.resolved()?.task.permissions ?? [], this.canTrigger(), this.isSuperuser()),
+  );
 
   private resolved = injectTaskAccessData();
   canOpenSettings = computed(() =>
@@ -521,9 +524,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   isRunning(status: EvaluationStatus): boolean { return isRunningEvaluationStatus(status); }
-  readonly waitingTitle = waitingTitle;
-  readonly formatWaitingReason = formatWaitingReason;
-  readonly unmetRequirementLabel = unmetRequirementLabel;
   protected readonly links = links;
 
   private runningActivity(all: Record<string, EvaluationProgress>): Record<string, EvaluationProgress> {

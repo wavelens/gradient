@@ -737,7 +737,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(failed?.querySelector('.entry-link')?.getAttribute('href')).toMatch(/\/log\/[^?]+\?eval=1$/);
   });
 
-  it('shows why a waiting evaluation has no packages yet', () => {
+  it('shows why a waiting evaluation has no packages yet and how to fix it', () => {
     const { fixture } = setup(
       { managed: false, canEdit: true, canTrigger: true },
       {
@@ -753,9 +753,10 @@ describe('TaskDetailComponent - evaluation selection', () => {
       },
     );
     const text = (fixture.nativeElement as HTMLElement).querySelector('.pkg-wait')?.textContent ?? '';
-    expect(text).toContain('Waiting for Workers');
-    expect(text).toContain('No workers are connected');
+    expect(text).toContain('Waiting for a worker');
+    expect(text).toContain('No worker is connected.');
     expect(text).toContain('aarch64-linux with feature kvm - 3 builds');
+    expect(fixture.nativeElement.querySelector('.pkg-wait a[grButton]')?.getAttribute('href')).toBe('/project/acme/workers');
   });
 
   it('holds a failed attribute back until the rows before it are loaded', () => {

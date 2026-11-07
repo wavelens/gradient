@@ -241,11 +241,9 @@ describe('ExecJobPageComponent', () => {
     };
     const { fixture, run } = setup('created', SSH, {}, waiting);
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('.log-area')?.textContent).toContain('waits for a manual start');
+    expect(root.querySelector('.log-area')?.textContent).toContain('Waiting for manual start');
     expect(abortButton(root)).toBeTruthy();
-    Array.from(root.querySelectorAll<HTMLButtonElement>('.info-bar-right button'))
-      .find((b) => (b.textContent ?? '').includes('Run'))
-      ?.click();
+    root.querySelector<HTMLButtonElement>('.log-area gr-waiting-notice button')?.click();
     expect(run).toHaveBeenCalledWith('j1');
   });
 
