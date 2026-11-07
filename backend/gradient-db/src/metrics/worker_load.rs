@@ -58,7 +58,7 @@ fn capacity_hours_sql(window_hours: i64, project_filter: Option<&str>) -> String
                   bool_or(coalesce((capabilities->>'eval')::boolean, false)) AS eval, \
                   bool_or(coalesce((capabilities->>'network')::boolean, false)) AS network, \
                   bool_or(coalesce((capabilities->>'build')::boolean, false)) AS build, \
-                  (array_agg(architectures ORDER BY at DESC))[1] AS architectures \
+                  (array_agg(to_jsonb(architectures) ORDER BY at DESC))[1] AS architectures \
            FROM worker_sample \
            WHERE at >= {since}{scope} \
            GROUP BY worker_id, floor(extract(epoch FROM at - {since}) / 3600) \
@@ -67,7 +67,7 @@ fn capacity_hours_sql(window_hours: i64, project_filter: Option<&str>) -> String
            SELECT 'capability', 'eval' WHERE h.eval \
            UNION ALL SELECT 'capability', 'network' WHERE h.network \
            UNION ALL SELECT 'capability', 'build' WHERE h.build \
-           UNION ALL SELECT 'architecture', unnest(h.architectures) \
+           UNION ALL SELECT 'architecture', jsonb_array_elements_text(h.architectures) \
          ) v(dimension, key) \
          GROUP BY v.dimension, v.key",
         since = since(window_hours),
@@ -127,6 +127,51 @@ pub async fn capacity_hours<C: ConnectionTrait>(
 
 #[cfg(test)]
 mod tests {
+    use gradient_entity::ids::WorkerSampleId;
+    use gradient_entity::worker_sample;
+    use gradient_fixtures::database::TestDatabase;
+    use sea_orm::{EntityTrait, IntoActiveModel};
+
+    fn sample(worker: &str, minutes_ago: i64, architectures: &[&str]) -> worker_sample::Model {
+        worker_sample::Model {
+            id: WorkerSampleId::now_v7(),
+            worker_id: worker.into(),
+            at: chrono::Utc::now().naive_utc() - chrono::Duration::minutes(minutes_ago),
+            max_concurrent_builds: 2,
+            capabilities: serde_json::json!({ "build": true }),
+            architectures: architectures.iter().map(|a| a.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn capacity_reads_empty_and_changing_architecture_lists() {
+        let db = TestDatabase::create().await;
+        worker_sample::Entity::insert_many(
+            [
+                sample("bare", 1, &[]),
+                sample("moved", 2, &["x86_64-linux", "aarch64-linux"]),
+                sample("moved", 1, &["x86_64-linux"]),
+            ]
+            .map(IntoActiveModel::into_active_model),
+        )
+        .exec_without_returning(&db.connection())
+        .await
+        .expect("the samples are written");
+
+        let rows = super::capacity_hours(&db.connection(), 24, None)
+            .await
+            .expect("the capacity query runs");
+        let architectures: Vec<&str> = rows
+            .iter()
+            .filter(|row| row.dimension == "architecture")
+            .map(|row| row.key.as_str())
+            .collect();
+
+        assert_eq!(architectures, ["x86_64-linux"]);
+        db.finish().await;
+    }
+
     #[test]
     fn load_hours_are_scoped_to_the_projects() {
         let busy = super::busy_hours_sql(24, Some("'p'"));
