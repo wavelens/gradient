@@ -1159,16 +1159,12 @@ describe('TaskDetailComponent package sbom', () => {
 });
 
 describe('TaskDetailComponent - vertical fill', () => {
-  it('grows into the task shell and lets the panel absorb the leftover height', () => {
+  it('grows into the task shell', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true });
     const host = getComputedStyle(fixture.nativeElement as HTMLElement);
     expect(host.display).toBe('flex');
     expect(host.flexDirection).toBe('column');
     expect(host.flexGrow).toBe('1');
-
-    const panel = (fixture.nativeElement as HTMLElement).querySelector('.panel');
-    expect(panel).not.toBeNull();
-    expect(getComputedStyle(panel!).flexGrow).toBe('1');
   });
 });
 
@@ -1270,10 +1266,9 @@ describe('TaskDetailComponent - #636 eval page', () => {
 describe('TaskDetailComponent - status phases', () => {
   const access = { managed: false, canEdit: true, canTrigger: true };
 
-  it('marks the evaluation card and its icon with the evaluation phase', () => {
+  it('marks the evaluation card icon with the evaluation phase', () => {
     const { fixture } = setup(access, { primaryStatus: 'Building' });
     const card: HTMLElement = fixture.nativeElement.querySelector('.eval-card');
-    expect(card.dataset['phase']).toBe('running');
     expect(card.querySelector('gr-status-icon.phase-swatch')?.getAttribute('data-phase')).toBe('running');
   });
 

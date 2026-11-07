@@ -6,21 +6,19 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-// Status hues are named locally so the tab rail, the status chip and the
-// package rows can all read one value per state.
+$page-inset: max(#{$spacing-md}, calc((100% - #{$content-width-detail}) / 2 + #{$spacing-md}));
+
 :host {
-  --ok: var(--gr-indicator-success);
   --err: var(--gr-indicator-danger);
   --warn: var(--gr-status-warning);
   --run: var(--gr-indicator-info);
-  --idle: var(--gr-border-subtle);
   display: flex;
   flex-direction: column;
   flex: 1;
   background: var(--gr-surface-base);
 }
 
-.pad { padding-left: $space-section; padding-right: $space-section; }
+.pad { padding-inline: $page-inset; }
 
 .pp-head {
   display: flex;
@@ -89,9 +87,6 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 .eval-card {
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
-  // Status rail as a thick left border: it tapers cleanly around the corner
-  // radius and ends flush at the panel surface.
-  border-left: 4px solid var(--rail-c, var(--idle));
   padding: $spacing-sm $spacing-md;
   min-width: 200px;
   position: relative;
@@ -158,20 +153,19 @@ h1 { font-size: $font-size-xxl; margin: 0; }
     &::before,
     &::after { opacity: 1; }
   }
+
+  &:first-child::before { display: none; }
 }
 
 .panel {
-  // The raised surface is the page floor: it takes the height left under the
-  // tab strip so it meets the footer instead of ending at its content.
-  flex-grow: 1;
+  margin: -3px $page-inset $space-section;
+  padding: $spacing-lg;
   background: var(--gr-surface-raised);
-  border-top: 1px solid var(--gr-border-subtle);
-  margin-top: -3px;
-  padding-top: $spacing-lg;
-  padding-bottom: $spacing-xl;
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: 0 $border-radius-md $border-radius-md;
+  box-shadow: var(--gr-shadow-raised);
   position: relative;
   z-index: 1;
-  min-height: 560px;
 }
 
 .panel-body { animation: panel-in $transition-base ease; }
@@ -259,8 +253,8 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 .report-options { display: flex; flex-direction: column; gap: $spacing-sm; margin-top: $spacing-md; }
 
 @media (max-width: $breakpoint-sm) {
-  .pad {
-    padding-inline: $spacing-md;
+  .panel {
+    padding: $spacing-md;
   }
 
   .pp-head {

@@ -111,15 +111,6 @@
   from { opacity: 0; transform: translateY(6px); }
 }
 
-.eval-card {
-  &[data-phase='success'] { --rail-c: var(--ok); }
-  &[data-phase='failure'] { --rail-c: var(--err); }
-  &[data-phase='queued'],
-  &[data-phase='running'] { --rail-c: var(--run); }
-  &[data-phase='waiting'] { --rail-c: var(--warn); }
-  &[data-phase='aborted'] { --rail-c: var(--idle); }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .eval-card,
   .eval-card::before,
