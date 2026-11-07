@@ -158,6 +158,14 @@ export class TaskTriggersComponent implements OnInit {
   form: TriggerFormState = { ...DEFAULT_FORM };
   submitAttempted = signal(false);
   private loadedForm = '';
+  private editRequestHandled = false;
+
+  integrationSetupLink = computed(() => {
+    const trigger = this.editingTrigger();
+    return trigger
+      ? links.integrationForTrigger(this.projectName, this.taskName, trigger.id)
+      : links.projectPage(this.projectName, 'integrations');
+  });
 
   typeOptions: Option<TriggerType>[] = [
     { label: 'Polling', value: 'polling' },
@@ -189,12 +197,23 @@ export class TaskTriggersComponent implements OnInit {
       next: (list) => {
         this.triggers.set(list);
         this.loading.set(false);
+        this.openRequestedEdit(list);
       },
       error: (error: unknown) => {
         this.loadError.set(error);
         this.loading.set(false);
       },
     });
+  }
+
+  private openRequestedEdit(list: TriggerOut[]): void {
+    const query = this.route.snapshot.queryParamMap;
+    const trigger = list.find((t) => t.id === query.get('edit'));
+    if (!trigger || this.editRequestHandled || this.rowDisabled()) return;
+    this.editRequestHandled = true;
+    this.startEdit(trigger);
+    const integration = query.get('integration');
+    if (integration) this.form.integration_id = integration;
   }
 
   private loadIntegrations(): void {

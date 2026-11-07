@@ -202,7 +202,7 @@
     @if (!inboundIntegrations().length && integrationAccess().canEdit) {
       <p class="gr-form-aside">
         No inbound integration yet.
-        <a [routerLink]="links.projectPage(projectName, 'integrations')">Set up an integration</a>
+        <a [routerLink]="integrationSetupLink()">Set up an integration</a>
       </p>
     }
     <gr-form-field label="Branches" for="trig-branches" hint="Comma-separated list. Leave blank to match any branch.">

@@ -6,7 +6,7 @@
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, RouterModule, UrlTree } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { TasksService } from '@core/services/tasks.service';
@@ -43,6 +43,7 @@ import { WritableDirective, ManagedDisableDirective, missingPermissionText } fro
 import { ConfirmService } from '@shared/confirm';
 import { IncomingDeliveriesComponent, firstRepositoryHost, guessGitHost, webhookEvents } from '@shared/git';
 import { slugify } from '@shared/text';
+import { links } from '@shared/routing';
 import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
 
 interface Option<T> {
@@ -137,6 +138,9 @@ export class IntegrationsComponent implements OnInit {
   showEditDialog = signal(false);
   showSecretDialog = signal(false);
   createdInbound = signal<{ integration: IntegrationResponse; secret: string } | null>(null);
+  private readonly triggerToReturnTo = this.readTriggerToReturnTo();
+  private createdForTrigger = signal<UrlTree | null>(null);
+  backToTrigger = computed(() => (this.showSecretDialog() ? null : this.createdForTrigger()));
   editingIntegration = signal<IntegrationResponse | null>(null);
   errorMessage = signal<string | null>(null);
 
@@ -186,9 +190,24 @@ export class IntegrationsComponent implements OnInit {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.loadIntegrations();
     this.tasksService.getTasks(this.projectName).subscribe({
-      next: (page) => this.repositoryHost.set(firstRepositoryHost(page.items.map((t) => t.repository))),
-      error: () => {},
+      next: (page) => {
+        this.repositoryHost.set(firstRepositoryHost(page.items.map((t) => t.repository)));
+        this.openCreateDialogForTrigger();
+      },
+      error: () => this.openCreateDialogForTrigger(),
     });
+  }
+
+  private readTriggerToReturnTo(): { task: string; trigger: string } | null {
+    const query = this.route.snapshot.queryParamMap;
+    const task = query.get('task');
+    const trigger = query.get('trigger');
+    return task && trigger ? { task, trigger } : null;
+  }
+
+  private openCreateDialogForTrigger(): void {
+    const access = this.access();
+    if (this.triggerToReturnTo && access.canEdit && !access.managed) this.openCreateDialog();
   }
 
   loadIntegrations(): void {
@@ -262,6 +281,10 @@ export class IntegrationsComponent implements OnInit {
         this.saving.set(false);
         this.showCreateDialog.set(false);
         this.notifyCreated(created);
+        const returnTo = this.triggerToReturnTo;
+        if (returnTo && created.kind === 'inbound') {
+          this.createdForTrigger.set(links.editTrigger(this.projectName, returnTo.task, returnTo.trigger, created.id));
+        }
         if (created.generated_secret) {
           this.createdInbound.set({ integration: created, secret: created.generated_secret });
           this.showSecretDialog.set(true);

@@ -21,9 +21,9 @@ import { ApiError } from '@core/services/api.service';
 import { AccessState } from '@core/models/access.model';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 
-function activatedRouteStub(access: AccessState): ActivatedRoute {
+function activatedRouteStub(access: AccessState, query: Record<string, string> = {}): ActivatedRoute {
   return {
-    snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }) },
+    snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }), queryParamMap: convertToParamMap(query) },
     data: of({}),
     parent: { data: of(taskAccessData(access)) },
   } as unknown as ActivatedRoute;
@@ -49,6 +49,8 @@ function setup(
   access: AccessState,
   triggers: any[] = [trigger],
   update: (...args: any[]) => unknown = () => of({}),
+  query: Record<string, string> = {},
+  integrations: unknown[] = [],
 ): ComponentFixture<TaskTriggersComponent> {
   TestBed.configureTestingModule({
     imports: [TaskTriggersComponent],
@@ -56,9 +58,9 @@ function setup(
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
+      { provide: ActivatedRoute, useValue: activatedRouteStub(access, query) },
       { provide: TriggersService, useValue: { list: () => of(triggers), update } },
-      { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries: () => of([]) } },
+      { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries: () => of(integrations) } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
     ],
@@ -357,5 +359,42 @@ describe('TaskTriggersComponent - validation', () => {
     component.saveEdit();
     expect(update).not.toHaveBeenCalled();
     expect(component.showEditDialog()).toBe(false);
+  });
+});
+
+describe('TaskTriggersComponent - setting up an integration from a trigger', () => {
+  const writer = { managed: false, canEdit: true, canTrigger: true };
+  const orphan = {
+    id: 't3',
+    type: 'reporter_push' as const,
+    active: true,
+    config: { type: 'reporter_push', integration_id: 'gone', branches: [] },
+    last_fired_at: null,
+    integration: null,
+  };
+  const inbound = { id: 'new-id', name: 'forgejo', display_name: 'Forgejo', kind: 'inbound', git_host_type: 'forgejo' };
+
+  it('links from the edit dialog to Integrations with the way back to this trigger', () => {
+    const fixture = setup(writer, [orphan]);
+    fixture.componentInstance.startEdit(orphan as any);
+    fixture.detectChanges();
+    const link = Array.from(document.querySelectorAll<HTMLAnchorElement>('.gr-dialog a')).find((a) => a.textContent?.includes('Set up an integration'));
+    expect(link?.getAttribute('href')).toBe('/project/acme/integrations?task=demo&trigger=t3');
+  });
+
+  it('reopens the trigger with the new integration selected on the way back', () => {
+    const fixture = setup(writer, [orphan], undefined, { edit: 't3', integration: 'new-id' }, [inbound]);
+    const component = fixture.componentInstance;
+    expect(component.showEditDialog()).toBe(true);
+    expect(component.editingTrigger()?.id).toBe('t3');
+    expect(component.form.integration_id).toBe('new-id');
+  });
+
+  it.each([
+    ['read-only', { managed: false, canEdit: false, canTrigger: false }],
+    ['state-managed', { managed: true, canEdit: true, canTrigger: true }],
+  ])('opens no edit dialog on the way back under %s access', (_label, access) => {
+    const fixture = setup(access, [orphan], undefined, { edit: 't3', integration: 'new-id' }, [inbound]);
+    expect(fixture.componentInstance.showEditDialog()).toBe(false);
   });
 });

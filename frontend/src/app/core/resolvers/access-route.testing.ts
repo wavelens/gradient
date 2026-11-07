@@ -44,11 +44,12 @@ export function projectRouteStub(
   project: string,
   access: AccessState,
   fields: Partial<ProjectResponse> = {},
+  query: Record<string, string> = {},
 ): Partial<ActivatedRoute> {
   const permissions: Permission[] = access.canEdit ? EVERY_PERMISSION : ['viewProject'];
   const resolved = { id: 'project-uuid', name: project, managed: access.managed, permissions, ...fields } as ProjectResponse;
   const data = { projectAccess: { project: resolved } };
-  return { snapshot: { paramMap: convertToParamMap({ project }), data } as never, data: of(data) };
+  return { snapshot: { paramMap: convertToParamMap({ project }), queryParamMap: convertToParamMap(query), data } as never, data: of(data) };
 }
 
 export function taskAccessData(access: AccessState, task: Partial<TaskDetailsResponse> = {}) {

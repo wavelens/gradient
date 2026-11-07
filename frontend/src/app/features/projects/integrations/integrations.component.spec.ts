@@ -12,6 +12,7 @@ import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { IntegrationsComponent } from './integrations.component';
 import { IntegrationsService } from '@core/services/integrations.service';
+import { TasksService } from '@core/services/tasks.service';
 import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { AccessState, IntegrationResponse } from '@core/models';
 import { ApiError } from '@core/services/api.service';
@@ -67,6 +68,7 @@ function setup(
   integrations: IntegrationResponse[],
   githubAppAvailable = false,
   githubAppInstallUrl: string | null = null,
+  query: Record<string, string> = {},
 ): ComponentFixture<IntegrationsComponent> {
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   TestBed.configureTestingModule({
@@ -78,10 +80,12 @@ function setup(
       {
         provide: ActivatedRoute,
         useFactory: () =>
-          projectRouteStub('acme', access, {
-            github_app_available: githubAppAvailable,
-            github_app_install_url: githubAppInstallUrl,
-          }),
+          projectRouteStub(
+            'acme',
+            access,
+            { github_app_available: githubAppAvailable, github_app_install_url: githubAppInstallUrl },
+            query,
+          ),
       },
       {
         provide: IntegrationsService,
@@ -91,6 +95,7 @@ function setup(
         },
       },
       { provide: ConfirmService, useValue: { confirm } },
+      { provide: TasksService, useValue: { getTasks: () => of({ items: [] }) } },
     ],
   });
   return TestBed.createComponent(IntegrationsComponent);
@@ -366,6 +371,42 @@ describe('IntegrationsComponent - write failures', () => {
     expect(create.mock.calls[0]).not.toHaveProperty('1.secret');
     expect(comp.showSecretDialog()).toBe(true);
     expect(comp.createdInbound()?.secret).toBe('f00d');
+  });
+
+  it('opens New Integration for a trigger and offers the way back once the secret dialog closes', async () => {
+    const fixture = setup(writable, [], false, null, { task: 'demo', trigger: 't9' });
+    const create = vi.fn(() => of({ ...baseIntegration, id: 'new-id', generated_secret: 'f00d' }));
+    (TestBed.inject(IntegrationsService) as unknown as { createProjectIntegration: typeof create }).createProjectIntegration = create;
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    expect(comp.showCreateDialog()).toBe(true);
+    comp.formData.name = 'gitea-prod';
+    comp.createIntegration();
+    fixture.detectChanges();
+    const banner = () => (fixture.nativeElement as HTMLElement).querySelector('[data-testid="back-to-trigger-banner"] a');
+    expect(banner()).toBeNull();
+
+    comp.showSecretDialog.set(false);
+    fixture.detectChanges();
+    expect(banner()?.getAttribute('href')).toBe('/project/acme/task/demo/triggers?edit=t9&integration=new-id');
+  });
+
+  it('offers no way back to a trigger after creating an outbound integration', async () => {
+    const fixture = setup(writable, [], false, null, { task: 'demo', trigger: 't9' });
+    const create = vi.fn(() => of({ ...githubOutbound, id: 'new-id' }));
+    (TestBed.inject(IntegrationsService) as unknown as { createProjectIntegration: typeof create }).createProjectIntegration = create;
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    comp.formData = { ...comp.formData, name: 'reporter', kind: 'outbound', endpoint_url: 'https://git.example.com' };
+    comp.createIntegration();
+    fixture.detectChanges();
+    expect(comp.backToTrigger()).toBeNull();
+  });
+
+  it('opens no create dialog for a trigger under read-only access', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [], false, null, { task: 'demo', trigger: 't9' });
+    await settled(fixture);
+    expect(fixture.componentInstance.showCreateDialog()).toBe(false);
   });
 
   it('keeps a failed create inside the open New Integration dialog', async () => {

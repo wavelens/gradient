@@ -47,11 +47,15 @@ export const links = {
   project: (project: string) => url(['project', project]),
   projectPage: (project: string, page: ProjectPage) => url(['project', project, page]),
   subscribeToCache: (project: string, cache: string) => url(['project', project, 'caches'], { subscribe: cache }),
+  integrationForTrigger: (project: string, task: string, trigger: string) =>
+    url(['project', project, 'integrations'], { task, trigger }),
   workerMetrics: (project: string, worker: string) => url(['project', project, 'workers', worker, 'metrics']),
 
   task: (project: string, task: string, evaluation?: string | null) =>
     url(['project', project, 'task', task], { eval: evaluation }),
   taskPage: (project: string, task: string, page: TaskPage) => url(['project', project, 'task', task, page]),
+  editTrigger: (project: string, task: string, trigger: string, integration?: string | null) =>
+    url(['project', project, 'task', task, 'triggers'], { edit: trigger, integration }),
   entryPointMetrics: (project: string, task: string, entryPoint: string) =>
     url(['project', project, 'task', task, 'entry-point-metrics'], { eval: entryPoint }),
   execJob: (project: string, task: string, job: string, options: { node?: number; terminal?: boolean } = {}) =>
