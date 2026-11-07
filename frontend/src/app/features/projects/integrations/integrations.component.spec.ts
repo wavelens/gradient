@@ -387,6 +387,21 @@ describe('IntegrationsComponent - write failures', () => {
     expect(component.editingIntegration()).toBeNull();
   });
 
+  it('offers GitHub only when the server has a GitHub App', async () => {
+    const fixture = setup(writable, [], false);
+    await settled(fixture);
+    expect(fixture.componentInstance.gitHostOptions().map((o) => o.value)).not.toContain('github');
+    fixture.componentInstance.openCreateDialog();
+    fixture.detectChanges();
+    expect(document.querySelector('[data-testid="github-unavailable"]')?.textContent).toContain('instance admin');
+  });
+
+  it('offers GitHub when the server has a GitHub App', async () => {
+    const fixture = setup(writable, [], true);
+    await settled(fixture);
+    expect(fixture.componentInstance.gitHostOptions().map((o) => o.value)).toContain('github');
+  });
+
   it('shows the generated webhook secret once after creating an inbound integration', async () => {
     const fixture = setup(writable, []);
     const create = vi.fn(() => of({ ...baseIntegration, generated_secret: 'f00d' }));

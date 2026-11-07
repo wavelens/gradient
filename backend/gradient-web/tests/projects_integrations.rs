@@ -245,8 +245,8 @@ async fn github_create_without_app_config_is_rejected() {
     let body: Value = res.json();
     assert_eq!(body["error"], true);
     assert!(
-        body["message"].as_str().unwrap().contains("not configured"),
-        "expected 'not configured' in error: {}",
+        body["message"].as_str().unwrap().contains("No GitHub App"),
+        "expected 'No GitHub App' in error: {}",
         body["message"]
     );
 }

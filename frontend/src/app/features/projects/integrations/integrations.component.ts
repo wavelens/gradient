@@ -12,6 +12,7 @@ import { IntegrationsService } from '@core/services/integrations.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { injectProject } from '@core/resolvers/project-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
+import { AuthService } from '@core/services/auth.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
   accessTo,
@@ -86,6 +87,7 @@ export class IntegrationsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private auth = inject(AuthService);
 
   access = computed(() => accessTo(this.resolvedProject(), 'manageIntegrations'));
 
@@ -186,19 +188,19 @@ export class IntegrationsComponent implements OnInit {
   githubAppInstalled = computed(() => this.githubInstallations().length > 0);
   githubAppInstallUrl = computed(() => this.resolvedProject()?.github_app_install_url ?? null);
 
-  outboundGitHostOptions = computed<Option<GitHostType>[]>(() => [
-    { label: 'Gitea', value: 'gitea' },
-    { label: 'Forgejo', value: 'forgejo' },
-    { label: 'GitLab', value: 'gitlab' },
-    { label: 'GitHub', value: 'github' },
-  ]);
+  isSuperuser = computed(() => this.auth.user()?.superuser === true);
 
-  allGitHostOptions = computed<Option<GitHostType>[]>(() => [
+  readonly selfHostedGitHostOptions: Option<GitHostType>[] = [
     { label: 'Gitea', value: 'gitea' },
     { label: 'Forgejo', value: 'forgejo' },
     { label: 'GitLab', value: 'gitlab' },
-    { label: 'GitHub', value: 'github' },
-  ]);
+  ];
+
+  gitHostOptions = computed<Option<GitHostType>[]>(() =>
+    this.githubAppAvailable()
+      ? [...this.selfHostedGitHostOptions, { label: 'GitHub', value: 'github' }]
+      : this.selfHostedGitHostOptions,
+  );
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';

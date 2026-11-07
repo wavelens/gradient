@@ -193,10 +193,20 @@
     <gr-select
       inputId="int-git-host"
       [(ngModel)]="formData.git_host_type"
-      [options]="formData.kind === 'outbound' ? outboundGitHostOptions() : allGitHostOptions()"
+      [options]="gitHostOptions()"
       optionLabel="label"
       optionValue="value"
     />
+    @if (!githubAppAvailable()) {
+      <small slot="hint" class="text-secondary" data-testid="github-unavailable">
+        @if (isSuperuser()) {
+          This server must have a GitHub App for GitHub integration.
+          <a routerLink="/admin/github-app">Set up GitHub App</a>
+        } @else {
+          GitHub isn't available before GitHub App setup by an instance admin.
+        }
+      </small>
+    }
   </gr-form-field>
 
   @if (formData.git_host_type === 'github') {
@@ -251,7 +261,7 @@
       <gr-select
         inputId="edit-git-host"
         [(ngModel)]="formData.git_host_type"
-        [options]="target.kind === 'outbound' ? outboundGitHostOptions() : allGitHostOptions()"
+        [options]="selfHostedGitHostOptions"
         optionLabel="label"
         optionValue="value"
       />

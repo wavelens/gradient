@@ -16,7 +16,9 @@ pub(crate) enum ProjectRefusal {
     InvalidGitHostType { host_type: String },
     #[error("git_host_type 'github' requires an installation_id")]
     InstallationIdRequired,
-    #[error("GitHub App is not configured on this server; set GRADIENT_GITHUB_APP_* first")]
+    #[error(
+        "No GitHub App on this server. GitHub integration isn't available. Ask an instance admin to set up the GitHub App."
+    )]
     GitHubAppNotConfigured,
     #[error("invalid installation_id: {reason}")]
     InvalidInstallationId { reason: String },
