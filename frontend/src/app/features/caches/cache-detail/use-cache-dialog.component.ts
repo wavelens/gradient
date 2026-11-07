@@ -11,7 +11,7 @@ import { ButtonComponent, DialogComponent, FormFieldComponent, LoadStateComponen
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
-import type { ProjectSummary } from '@core/models';
+import { accessTo, type ProjectSummary } from '@core/models';
 import { links } from '@shared/routing';
 
 @Component({
@@ -24,7 +24,7 @@ import { links } from '@shared/routing';
       <p>Select a project to open its cache subscription with this cache selected.</p>
       <gr-load-state [loading]="loading()" [error]="error()" [empty]="projects().length === 0" flat
                      errorTitle="Failed to load projects" (retry)="load()"
-                     emptyIcon="folder" emptyTitle="No projects yet.">
+                     emptyIcon="folder" emptyTitle="No projects where a cache subscription can be managed.">
         @if (canCreateProject()) {
           <a slot="empty-action" grButton label="Create project" icon="add" [routerLink]="links.projects()"></a>
         }
@@ -67,7 +67,7 @@ export class UseCacheDialogComponent {
     this.error.set(null);
     this.projectsService.getProjects(1, 100).subscribe({
       next: (page) => {
-        const writable = page.items.filter((p) => !!p.role && p.role !== 'View' && !p.managed);
+        const writable = page.items.filter((p) => !p.managed && accessTo(p, 'manageSubscriptions').canEdit);
         this.projects.set(writable);
         this.project = writable.length === 1 ? writable[0].name : '';
         this.loading.set(false);

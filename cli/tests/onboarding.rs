@@ -39,7 +39,8 @@ async fn projects_mock(names: &[&str]) -> MockServer {
                 "public": false,
                 "public_key": null,
                 "role": null,
-                "running_evaluations": 0
+                "running_evaluations": 0,
+                "permissions": []
             })
         })
         .collect();

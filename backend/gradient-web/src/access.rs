@@ -380,20 +380,26 @@ pub async fn load_membership_with_permissions(
     project_id: ProjectId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<Option<PermissionMask>> {
-    if let Some(ctx) = api_key
-        && let Some(pinned) = ctx.project
-        && pinned != project_id
-    {
+    if api_key.is_some_and(|ctx| ctx.project.is_some_and(|pinned| pinned != project_id)) {
         return Ok(None);
     }
-    let Some(mask) = gradient_db::access::project_permission_mask(db, project_id, user_id).await?
-    else {
-        return Ok(None);
-    };
-    Ok(Some(match api_key {
+    Ok(
+        gradient_db::access::project_permission_mask(db, project_id, user_id)
+            .await?
+            .map(|mask| key_limited_project_mask(mask, project_id, api_key)),
+    )
+}
+
+pub fn key_limited_project_mask(
+    mask: PermissionMask,
+    project_id: ProjectId,
+    api_key: Option<&ApiKeyContext>,
+) -> PermissionMask {
+    match api_key {
+        Some(ctx) if ctx.project.is_some_and(|pinned| pinned != project_id) => 0,
         Some(ctx) => mask & ctx.mask,
         None => mask,
-    }))
+    }
 }
 
 pub async fn caller_project_mask(

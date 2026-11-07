@@ -12,7 +12,7 @@ import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { UseCacheDialogComponent } from './use-cache-dialog.component';
 
-function render(items: { name: string; display_name: string; role: string | null; managed?: boolean }[], canCreate = true) {
+function render(items: { name: string; display_name: string; managed: boolean; permissions: string[] }[], canCreate = true) {
   TestBed.configureTestingModule({
     imports: [UseCacheDialogComponent],
     providers: [
@@ -30,10 +30,11 @@ function render(items: { name: string; display_name: string; role: string | null
 }
 
 describe('UseCacheDialogComponent', () => {
-  it('offers only projects the user may change and opens their subscriptions with the cache selected', () => {
+  it('offers only unmanaged projects whose subscriptions the user may manage and opens their subscriptions with the cache selected', () => {
     const fixture = render([
-      { name: 'web', display_name: 'Web', role: 'Admin' },
-      { name: 'docs', display_name: 'Docs', role: 'View' },
+      { name: 'web', display_name: 'Web', managed: false, permissions: ['viewProject', 'manageSubscriptions'] },
+      { name: 'docs', display_name: 'Docs', managed: false, permissions: ['viewProject', 'manageProjectSettings'] },
+      { name: 'infra', display_name: 'Infra', managed: true, permissions: ['viewProject', 'manageSubscriptions'] },
     ]);
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     const continueButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.gr-dialog button'))

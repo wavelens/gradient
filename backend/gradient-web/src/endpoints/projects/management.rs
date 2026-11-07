@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, caller_project_mask};
+use crate::access::{Caller, caller_project_mask, key_limited_project_mask};
 use crate::api_spec::ProjectPath;
 use crate::audit::{Audit, changed_fields};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate};
 use crate::json_body::JsonBody;
@@ -65,10 +66,16 @@ pub struct ProjectSummary {
     pub created_at: chrono::NaiveDateTime,
     pub running_evaluations: i64,
     pub role: Option<String>,
+    pub permissions: Vec<Permission>,
 }
 
 impl ProjectSummary {
-    fn new(project: MProject, running_evaluations: i64, role: Option<String>) -> Self {
+    fn new(
+        project: MProject,
+        running_evaluations: i64,
+        role: Option<String>,
+        permissions: PermissionMask,
+    ) -> Self {
         Self {
             id: project.id,
             name: project.name,
@@ -83,6 +90,7 @@ impl ProjectSummary {
             created_at: project.created_at,
             running_evaluations,
             role,
+            permissions: mask_to_vec(permissions),
         }
     }
 }
@@ -187,13 +195,14 @@ type PaginatedProjectSummary = Paginated<ProjectSummary>;
     operation_id = "listProjects",
     tag = "projects",
     summary = "List projects",
-    description = "Returns all projects the current user is a member of.",
+    description = "Return all projects where the current user is a member, along with the caller's role and `permissions`.",
     params(PaginationParams),
     responses((status = OK, description = "Project list", body = PaginatedProjectSummary), WebError)
 )]
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<ProjectSummary>>>> {
     let listing = paginate(
@@ -207,13 +216,19 @@ pub async fn get(
     let running_per_project =
         gradient_db::projects::running_evaluations_per_project(&state.web_db, &project_ids).await?;
 
-    let project_role_map =
-        gradient_db::access::project_role_names(&state.web_db, user.id, project_ids).await?;
+    let mut grants =
+        gradient_db::access::project_grants(&state.web_db, user.id, project_ids).await?;
 
     let listing = listing.map(|project| {
         let running_evaluations = *running_per_project.get(&project.id).unwrap_or(&0);
-        let role = project_role_map.get(&project.id).cloned();
-        ProjectSummary::new(project, running_evaluations, role)
+        let (role, permissions) = match grants.remove(&project.id) {
+            Some(grant) => (
+                Some(grant.role),
+                key_limited_project_mask(grant.permissions, project.id, api_key.as_ref()),
+            ),
+            None => (None, 0),
+        };
+        ProjectSummary::new(project, running_evaluations, role, permissions)
     });
 
     Ok(ok_json(listing))

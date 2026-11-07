@@ -63,11 +63,17 @@ pub async fn reaches_project<C: ConnectionTrait>(
     Ok(!project_roles(db, project, user).await?.is_empty())
 }
 
-pub async fn project_role_names<C: ConnectionTrait>(
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectGrant {
+    pub role: String,
+    pub permissions: PermissionMask,
+}
+
+pub async fn project_grants<C: ConnectionTrait>(
     db: &C,
     user: UserId,
     projects: Vec<ProjectId>,
-) -> Result<HashMap<ProjectId, String>, DbErr> {
+) -> Result<HashMap<ProjectId, ProjectGrant>, DbErr> {
     let access = EProjectAccess::find()
         .filter(CProjectAccess::User.eq(user))
         .filter(CProjectAccess::Project.is_in(projects))
@@ -76,16 +82,20 @@ pub async fn project_role_names<C: ConnectionTrait>(
     if access.is_empty() {
         return Ok(HashMap::new());
     }
-    let names: HashMap<RoleId, String> = ERole::find()
+    let roles: HashMap<RoleId, MRole> = ERole::find()
         .filter(CRole::Id.is_in(access.iter().map(|a| a.role)))
         .all(db)
         .await?
         .into_iter()
-        .map(|role| (role.id, role.name))
+        .map(|role| (role.id, role))
         .collect();
 
     let mut strongest: HashMap<ProjectId, RoleId> = HashMap::new();
+    let mut masks: HashMap<ProjectId, PermissionMask> = HashMap::new();
     for row in access {
+        if let Some(role) = roles.get(&row.role) {
+            *masks.entry(row.project).or_default() |= role.permission;
+        }
         strongest
             .entry(row.project)
             .and_modify(|role| {
@@ -97,7 +107,25 @@ pub async fn project_role_names<C: ConnectionTrait>(
     }
     Ok(strongest
         .into_iter()
-        .filter_map(|(project, role)| names.get(&role).map(|name| (project, name.clone())))
+        .filter_map(|(project, role)| {
+            let grant = ProjectGrant {
+                role: roles.get(&role)?.name.clone(),
+                permissions: masks.get(&project).copied().unwrap_or_default(),
+            };
+            Some((project, grant))
+        })
+        .collect())
+}
+
+pub async fn project_role_names<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+    projects: Vec<ProjectId>,
+) -> Result<HashMap<ProjectId, String>, DbErr> {
+    Ok(project_grants(db, user, projects)
+        .await?
+        .into_iter()
+        .map(|(project, grant)| (project, grant.role))
         .collect())
 }
 

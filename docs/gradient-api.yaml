@@ -6870,7 +6870,7 @@ paths:
       tags:
       - projects
       summary: List projects
-      description: Returns all projects the current user is a member of.
+      description: Return all projects where the current user is a member, along with the caller's role and `permissions`.
       operationId: listProjects
       parameters:
       - name: page
@@ -20121,6 +20121,7 @@ components:
       - created_by
       - created_at
       - running_evaluations
+      - permissions
       properties:
         id:
           $ref: '#/components/schemas/ProjectId'
@@ -20154,6 +20155,10 @@ components:
           type:
           - string
           - 'null'
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
     ProjectWorkerEntry:
       allOf:
       - $ref: '#/components/schemas/WorkerConnection'

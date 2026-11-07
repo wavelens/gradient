@@ -2068,6 +2068,7 @@ export interface ProjectSummary {
   created_at: string;
   running_evaluations: number;
   role?: string | null;
+  permissions: Permission[];
 }
 
 export type ProjectWorkerEntry = WorkerConnection & {
