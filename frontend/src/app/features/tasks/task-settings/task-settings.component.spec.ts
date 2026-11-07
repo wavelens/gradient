@@ -194,6 +194,22 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
     expect(updateTask).toHaveBeenCalledWith('acme', 'demo', { display_name: 'Renamed' });
   });
 
+  it('shows a failed save beside Save Changes and scrolls it into view', async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    const updateTask = vi.fn(() => throwError(() => new ApiError('branch does not exist', 400)));
+    const fixture = setup(editor, undefined, updateTask);
+    await typeInto(fixture, '#proj-display', 'Renamed');
+    fixture.componentInstance.saveSettings();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const banner = (fixture.nativeElement as HTMLElement).querySelector('gr-message-banner');
+
+    expect(banner?.textContent).toContain('branch does not exist');
+    expect(banner?.parentElement?.querySelector('.form-actions button')?.textContent).toContain('Save Changes');
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+  });
+
   it('hides the saved banner as soon as the form changes again', async () => {
     const fixture = setup(editor);
     await typeInto(fixture, '#proj-display', 'Renamed');

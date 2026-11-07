@@ -9,13 +9,6 @@
 @if (task(); as proj) {
   <gr-page-layout [breadcrumb]="breadcrumb()" title="Task Settings">
   <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
-  @if (errorMessage()) {
-    <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
-  }
-  @if (saveSuccess() && !unsaved.changed()) {
-    <gr-message-banner type="success">Changes saved.</gr-message-banner>
-  }
-
   <!-- General Settings -->
   <gr-settings-section title="General">
     <gr-form-field label="Name" for="proj-name">
@@ -119,18 +112,26 @@
       </gr-form-field>
     }
 
-    <div class="form-actions" *appWritable="access()">
-      <button
-        grButton
-        label="Save Changes"
-        icon="check"
-        (grSubmit)="saveSettings()"
-        [loading]="saving()"
-        [disabled]="!!saveBlockedReason"
-      ></button>
-      @if (saveBlockedReason; as reason) {
-        <small class="text-secondary save-hint" role="status">{{ reason }}</small>
+    <div #saveArea>
+      @if (errorMessage()) {
+        <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
       }
+      @if (saveSuccess() && !unsaved.changed()) {
+        <gr-message-banner type="success">Changes saved.</gr-message-banner>
+      }
+      <div class="form-actions" *appWritable="access()">
+        <button
+          grButton
+          label="Save Changes"
+          icon="check"
+          (grSubmit)="saveSettings()"
+          [loading]="saving()"
+          [disabled]="!!saveBlockedReason"
+        ></button>
+        @if (saveBlockedReason; as reason) {
+          <small class="text-secondary save-hint" role="status">{{ reason }}</small>
+        }
+      </div>
     </div>
 
   </gr-settings-section>

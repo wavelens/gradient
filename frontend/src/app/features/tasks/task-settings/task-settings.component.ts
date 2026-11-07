@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, Injector, OnInit, afterNextRender, computed, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -95,6 +95,8 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   protected config = inject(ConfigService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private injector = inject(Injector);
+  private saveArea = viewChild<ElementRef<HTMLElement>>('saveArea');
 
   access = injectTaskAccess();
 
@@ -216,13 +218,19 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
       next: () => {
         this.saving.set(false);
         this.saveSuccess.set(true);
+        this.revealSaveResult();
         this.loadTask();
       },
       error: (error) => {
         this.errorMessage.set(apiErrorMessage(error, 'Failed to save settings.'));
         this.saving.set(false);
+        this.revealSaveResult();
       },
     });
+  }
+
+  private revealSaveResult(): void {
+    afterNextRender(() => this.saveArea()?.nativeElement.scrollIntoView({ block: 'nearest' }), { injector: this.injector });
   }
 
   toggleActive(): void {
