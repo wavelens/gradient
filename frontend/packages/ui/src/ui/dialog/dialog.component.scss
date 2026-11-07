@@ -53,6 +53,11 @@
   overflow-y: auto;
 }
 
+.gr-dialog__error {
+  flex-shrink: 0;
+  padding: 0 $spacing-md;
+}
+
 .gr-dialog__footer {
   display: flex;
   justify-content: flex-end;

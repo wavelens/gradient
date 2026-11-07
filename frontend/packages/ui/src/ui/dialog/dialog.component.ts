@@ -55,12 +55,10 @@ let dialogSeq = 0;
             </button>
           }
         </div>
-        <div class="gr-dialog__content">
-          @if (error(); as message) {
-            <gr-message-banner type="error">{{ message }}</gr-message-banner>
-          }
-          <ng-content />
-        </div>
+        <div class="gr-dialog__content"><ng-content /></div>
+        @if (error(); as message) {
+          <div class="gr-dialog__error"><gr-message-banner type="error">{{ message }}</gr-message-banner></div>
+        }
         <div class="gr-dialog__footer"><ng-content select="[grDialogFooter]" /></div>
       </div>
     </ng-template>

@@ -83,92 +83,95 @@
   [error]="errorMessage()"
   [busy]="creating() || saving()"
 >
-  <gr-form-field label="Name" for="key-name" [invalid]="!!nameError()" [error]="nameError() ?? ''">
-    <input
-      grInput
-      id="key-name"
-      [(ngModel)]="formName"
-      placeholder="e.g. CI/CD Pipeline"
-      (keyup.enter)="saveKey()"
-    />
-  </gr-form-field>
-
-  @if (!editingKey()) {
-    <gr-form-field label="Expires in (days)" for="key-expires" [invalid]="!!expiryError()" [error]="expiryError() ?? ''">
+  <div #keyForm>
+    <gr-form-field label="Name" for="key-name" [invalid]="!!nameError()" [error]="nameError() ?? ''">
       <input
         grInput
-        id="key-expires"
-        type="number"
-        min="1"
-        step="1"
-        [(ngModel)]="formExpiresInDays"
-        placeholder="Leave blank for no expiry"
+        id="key-name"
+        [(ngModel)]="formName"
+        placeholder="e.g. CI/CD Pipeline"
         (keyup.enter)="saveKey()"
       />
     </gr-form-field>
-  }
 
-  <gr-divider />
-
-  <gr-form-field label="Scope">
-    <gr-select-button
-      [options]="scopeChoices()"
-      [(ngModel)]="formScope"
-      optionLabel="label"
-      optionValue="value"
-      (ngModelChange)="onScopeChange()"
-    />
-  </gr-form-field>
-
-  @if (formScope === 'project') {
-    <gr-form-field label="Project" for="key-project">
-      <gr-select
-        inputId="key-project"
-        [options]="projectOptions()"
-        optionLabel="label"
-        optionValue="value"
-        [(ngModel)]="formProject"
-        placeholder="Any project"
-      />
-    </gr-form-field>
-  }
-
-  @if (formScope === 'cache') {
-    <gr-form-field label="Cache" for="key-cache" [invalid]="!!cacheError()" [error]="cacheError() ?? ''">
-      <gr-select
-        inputId="key-cache"
-        [options]="cacheOptions()"
-        optionLabel="label"
-        optionValue="value"
-        [(ngModel)]="formCache"
-        [disabled]="!!editingKey()"
-        placeholder="Select a cache"
-      />
-    </gr-form-field>
-    @if (canCreateCache()) {
-      <p class="gr-form-aside">
-        Can't find a cache?
-        <button grButton label="Create new cache" icon="add" severity="secondary" size="small" (click)="createCacheInsteadOfPick()"></button>
-      </p>
+    @if (!editingKey()) {
+      <gr-form-field label="Expires in (days)" for="key-expires" [invalid]="!!expiryError()" [error]="expiryError() ?? ''">
+        <input
+          grInput
+          id="key-expires"
+          type="number"
+          min="1"
+          step="1"
+          [(ngModel)]="formExpiresInDays"
+          placeholder="Leave blank for no expiry"
+          (keyup.enter)="saveKey()"
+        />
+      </gr-form-field>
     }
-  }
 
-  <gr-form-field label="Allowed source IPs / CIDRs" for="key-allowed-ips" hint="One per line. Blank allows any source."
-                 [invalid]="invalidIps().length > 0" [error]="'Not an IP address or CIDR: ' + invalidIps().join(', ')">
-    <textarea
-      id="key-allowed-ips"
-      grInput
-      rows="3"
-      [(ngModel)]="formAllowedIps"
-      placeholder="10.0.0.0/8&#10;203.0.113.5"
-    ></textarea>
-  </gr-form-field>
+    <gr-divider />
 
-  <gr-divider />
+    <gr-form-field label="Scope">
+      <gr-select-button
+        [options]="scopeChoices()"
+        [(ngModel)]="formScope"
+        optionLabel="label"
+        optionValue="value"
+        (ngModelChange)="onScopeChange()"
+      />
+    </gr-form-field>
 
-  <gr-form-field label="Permissions" [invalid]="!!permissionsError()" [error]="permissionsError() ?? ''">
-    <app-permission-picker [permissions]="activePermissions()" [(selection)]="formPermissions" />
-  </gr-form-field>
+    @if (formScope === 'project') {
+      <gr-form-field label="Project" for="key-project">
+        <gr-select
+          inputId="key-project"
+          [options]="projectOptions()"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="formProject"
+          placeholder="Any project"
+        />
+      </gr-form-field>
+    }
+
+    @if (formScope === 'cache') {
+      <gr-form-field label="Cache" for="key-cache" [invalid]="!!cacheError()" [error]="cacheError() ?? ''">
+        <gr-select
+          inputId="key-cache"
+          [options]="cacheOptions()"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="formCache"
+          [disabled]="!!editingKey()"
+          placeholder="Select a cache"
+        />
+      </gr-form-field>
+      @if (canCreateCache()) {
+        <p class="gr-form-aside">
+          Can't find a cache?
+          <button grButton label="Create new cache" icon="add" severity="secondary" size="small" (click)="createCacheInsteadOfPick()"></button>
+        </p>
+      }
+    }
+
+    <gr-form-field label="Allowed source IPs / CIDRs" for="key-allowed-ips" hint="One per line. Blank allows any source."
+                   [invalid]="!!allowedIpsError()" [error]="allowedIpsError() ?? ''">
+      <textarea
+        id="key-allowed-ips"
+        grInput
+        rows="3"
+        [(ngModel)]="formAllowedIps"
+        (blur)="allowedIpsTouched.set(true)"
+        placeholder="10.0.0.0/8&#10;203.0.113.5"
+      ></textarea>
+    </gr-form-field>
+
+    <gr-divider />
+
+    <gr-form-field label="Permissions" [invalid]="!!permissionsError()" [error]="permissionsError() ?? ''">
+      <app-permission-picker [permissions]="activePermissions()" [(selection)]="formPermissions" />
+    </gr-form-field>
+  </div>
 
   <div grDialogFooter>
     <button

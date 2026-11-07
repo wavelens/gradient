@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, OnInit, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -34,7 +34,7 @@ import { ConfirmService } from '@shared/confirm';
 import { AccessState, ApiKeyInfo, PatchApiKeyRequest, PermissionEntry } from '@core/models';
 import { permissionLabel } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
-import { CreateCacheDialogComponent, fieldChecks, injectCanCreateCache, isIpNetwork, splitLines } from '@shared/forms';
+import { CreateCacheDialogComponent, fieldChecks, injectCanCreateCache, injectRevealFirstInvalid, isIpNetwork, splitLines } from '@shared/forms';
 import { links } from '@shared/routing';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
@@ -128,6 +128,9 @@ export class ApiKeysComponent implements OnInit {
   createdKeyValue = signal('');
   errorMessage = signal<string | null>(null);
   attempted = signal(false);
+  allowedIpsTouched = signal(false);
+  private keyForm = viewChild<ElementRef<HTMLElement>>('keyForm');
+  private revealFirstInvalid = injectRevealFirstInvalid();
 
   formName = '';
   formExpiresInDays: number | null = null;
@@ -150,7 +153,7 @@ export class ApiKeysComponent implements OnInit {
       next: (paginated) => {
         const options: SelectOption[] = [
           { label: 'Any project', value: null },
-          ...paginated.items.map((o) => ({ label: o.name, value: o.name })),
+          ...paginated.items.map((o) => ({ label: o.display_name || o.name, value: o.name })),
         ];
         this.projectOptions.set(options);
       },
@@ -214,6 +217,7 @@ export class ApiKeysComponent implements OnInit {
     this.formAllowedIps = '';
     this.errorMessage.set(null);
     this.attempted.set(false);
+    this.allowedIpsTouched.set(false);
     this.showDialog.set(true);
   }
 
@@ -232,11 +236,17 @@ export class ApiKeysComponent implements OnInit {
     this.formAllowedIps = (key.allowed_ips ?? []).join('\n');
     this.errorMessage.set(null);
     this.attempted.set(false);
+    this.allowedIpsTouched.set(false);
     this.showDialog.set(true);
   }
 
   invalidIps(): string[] {
     return splitLines(this.formAllowedIps).filter((entry) => !isIpNetwork(entry));
+  }
+
+  allowedIpsError(): string | null {
+    const invalid = this.allowedIpsTouched() || this.attempted() ? this.invalidIps() : [];
+    return invalid.length > 0 ? 'Not an IP address or CIDR: ' + invalid.join(', ') : null;
   }
 
   onScopeChange(): void {
@@ -293,7 +303,8 @@ export class ApiKeysComponent implements OnInit {
   saveKey(): void {
     if (this.creating() || this.saving()) return;
     this.attempted.set(true);
-    if (this.nameError() || this.expiryError() || this.cacheError() || this.permissionsError() || this.invalidIps().length > 0) {
+    if (this.nameError() || this.expiryError() || this.cacheError() || this.permissionsError() || this.allowedIpsError()) {
+      this.revealFirstInvalid(() => this.keyForm()?.nativeElement);
       return;
     }
     const name = this.formName.trim();
@@ -383,8 +394,9 @@ export class ApiKeysComponent implements OnInit {
   }
 
   scopeBadge(key: ApiKeyInfo): string {
-    if (key.cache) return `Cache ${key.cache}`;
-    if (key.project) return key.project;
+    const label = (options: SelectOption[], name: string) => options.find((option) => option.value === name)?.label ?? name;
+    if (key.cache) return `Cache ${label(this.cacheOptions(), key.cache)}`;
+    if (key.project) return label(this.projectOptions(), key.project);
     return 'Any project';
   }
 

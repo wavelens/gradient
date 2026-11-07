@@ -48,7 +48,7 @@ const managedKey: ApiKeyInfo = {
 let notify = { success: vi.fn(), failure: vi.fn() };
 const confirm = vi.fn();
 
-function setup(keys: ApiKeyInfo[], user: object = {}): ComponentFixture<ApiKeysComponent> {
+function setup(keys: ApiKeyInfo[], user: object = {}, projects: object[] = []): ComponentFixture<ApiKeysComponent> {
   notify = { success: vi.fn(), failure: vi.fn() };
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   TestBed.configureTestingModule({
@@ -67,7 +67,7 @@ function setup(keys: ApiKeyInfo[], user: object = {}): ComponentFixture<ApiKeysC
       },
       {
         provide: ProjectsService,
-        useValue: { getProjects: () => of({ items: [], total: 0, page: 1, per_page: 100 }) },
+        useValue: { getProjects: () => of({ items: projects, total: projects.length, page: 1, per_page: 100 }) },
       },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
@@ -164,6 +164,35 @@ describe('ApiKeysComponent - field checks', () => {
     const field = (id: string) => document.querySelector(`#${id}`)!.closest('gr-form-field')!.textContent ?? '';
     return { fixture, component, createApiKey, field };
   }
+
+  it('checks the allowed sources once the field loses focus, not while typing', () => {
+    const { fixture, component, field } = openCreate();
+    const ips = document.querySelector('#key-allowed-ips') as HTMLTextAreaElement;
+    component.formAllowedIps = '10.0.0.0/33';
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    expect(field('key-allowed-ips')).not.toContain('Not an IP address or CIDR');
+    ips.dispatchEvent(new Event('blur'));
+    fixture.detectChanges();
+    expect(field('key-allowed-ips')).toContain('Not an IP address or CIDR: 10.0.0.0/33');
+  });
+
+  it('moves focus to the first invalid field when Create is refused', () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const { fixture, component } = openCreate();
+    component.formName = ' ';
+    buttonsByText(document.querySelector('.gr-dialog__footer')!, 'create')[0].click();
+    fixture.detectChanges();
+    expect(document.activeElement?.id).toBe('key-name');
+  });
+
+  it('labels projects by display name in the picker and the key badge', () => {
+    const pinned = { ...unmanagedKey, project: 'web' };
+    const fixture = setup([pinned], {}, [{ name: 'web', display_name: 'Web Shop' }]);
+    const component = fixture.componentInstance;
+    expect(component.projectOptions().map((option) => option.label)).toEqual(['Any project', 'Web Shop']);
+    expect(component.scopeBadge(pinned)).toBe('Web Shop');
+  });
 
   it('shows an empty name under its field and sends nothing', () => {
     const { fixture, component, createApiKey, field } = openCreate();

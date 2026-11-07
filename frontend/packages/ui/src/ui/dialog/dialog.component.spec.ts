@@ -138,12 +138,15 @@ describe('DialogComponent', () => {
     expect(panel()!.getAttribute('aria-modal')).toBe('true');
   });
 
-  it('shows a failed action inside the open dialog, not behind it', () => {
+  it('shows a failed action inside the open dialog, beside the actions and outside the scrolling content', () => {
     const fixture = render();
     fixture.componentInstance.open.set(true);
     fixture.componentInstance.error.set('Name already taken');
     fixture.detectChanges();
-    expect(panel()!.querySelector('gr-message-banner')?.textContent).toContain('Name already taken');
+    const banner = panel()!.querySelector('gr-message-banner');
+    expect(banner?.textContent).toContain('Name already taken');
+    expect(banner?.closest('.gr-dialog__content')).toBeNull();
+    expect(banner?.parentElement?.nextElementSibling?.classList).toContain('gr-dialog__footer');
     fixture.componentInstance.error.set(null);
     fixture.detectChanges();
     expect(panel()!.querySelector('gr-message-banner')).toBeNull();

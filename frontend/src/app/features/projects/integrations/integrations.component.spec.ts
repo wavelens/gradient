@@ -419,7 +419,7 @@ describe('IntegrationsComponent - write failures', () => {
     comp.formData.name = 'gitea-prod';
     comp.createIntegration();
     fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Name gitea-prod is already taken');
+    expect(document.querySelector('.gr-dialog__error gr-message-banner')?.textContent).toContain('Name gitea-prod is already taken');
     expect(comp.showCreateDialog()).toBe(true);
   });
 
