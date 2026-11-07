@@ -383,6 +383,15 @@ pub(super) async fn forward_store_build_log(updater: &mut JobUpdater, drv_path: 
     }
 }
 
+const LOG_PAUSED: &[u8] =
+    b"\x1b[0m[gradient: log paused, the build can write output faster than the rate limit for the log]\n";
+
+fn log_resumed(skipped_lines: u64) -> String {
+    format!(
+        "\x1b[0m[gradient: log resumed, the rate limit for the log dropped {skipped_lines} lines]\n"
+    )
+}
+
 #[derive(Default)]
 struct LogStreamStats {
     total_msgs: u64,
@@ -406,11 +415,10 @@ async fn drain_build_logs_with_timeout<S>(
 where
     S: futures::Stream<Item = LogMessage>,
 {
-    use crate::executor::log_limit::LogRateLimiter;
+    use crate::executor::log_limit::{Admission, LogRateLimiter};
     let mut stats = LogStreamStats::default();
     let mut limiter = LogRateLimiter::from(log_limits);
     let started = std::time::Instant::now();
-    let mut limit_hit = false;
     let mut watchdog = Watchdog::new(tokio::time::Instant::now(), None, silent);
     loop {
         watchdog.saw_output();
@@ -428,20 +436,20 @@ where
         };
         stats.total_msgs += 1;
         if let Some(line) = log_message_to_text(&msg) {
-            if limit_hit {
-                continue;
-            }
             let len = line.len();
-            if !limiter.admit(len as u64, started.elapsed().as_secs_f64()) {
-                limit_hit = true;
-                let _ = updater
-                    .send_log_chunk(
-                        b"\x1b[0m[gradient: log truncated \xe2\x80\x94 rate limit exceeded]\n"
-                            .to_vec(),
-                    )
-                    .await;
-                warn!("build log rate limit exceeded; truncating remaining output");
-                continue;
+            match limiter.admit(len as u64, started.elapsed().as_secs_f64()) {
+                Admission::Forward => {}
+                Admission::Skipped => continue,
+                Admission::Paused => {
+                    let _ = updater.send_log_chunk(LOG_PAUSED.to_vec()).await;
+                    warn!("build log rate limit exceeded; pausing the log");
+                    continue;
+                }
+                Admission::Resumed { skipped_lines } => {
+                    let _ = updater
+                        .send_log_chunk(log_resumed(skipped_lines).into_bytes())
+                        .await;
+                }
             }
             match updater.send_log_chunk(line.into_bytes()).await {
                 Ok(()) => {

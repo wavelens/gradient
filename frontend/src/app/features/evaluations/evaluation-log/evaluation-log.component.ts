@@ -20,6 +20,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, parseLineFragment, splitLogLines } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
 import { buildLog } from './build-log';
+import { lastRateLimitNote, rateLimitMarker } from './log-rate-limit';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -60,6 +61,7 @@ import {
   LoadingSpinnerComponent,
   MenuComponent,
   MenuItem,
+  MessageBannerComponent,
   MessageService,
   DrawerDirective,
   ScrollRegionDirective,
@@ -74,7 +76,7 @@ import { saveResponse } from '@shared/download';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, ScrollRegionDirective, DrawerDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, ScrollRegionDirective, DrawerDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -256,6 +258,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private loadingMore = false;
 
   logLines = signal<readonly string[]>([]);
+  logPaused = signal(false);
+  protected readonly rateLimitMarker = rateLimitMarker;
   serverLog = signal<ServerLog | null>(null);
   deepLinkLine = signal<number | null>(null);
   sidebarSearchOpen = signal(false);
@@ -786,6 +790,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           const lines = splitLogLines(data.message);
           this.logLines.set(lines);
           this.logLineCount.set(lines.length);
+          this.trackRateLimit(lines);
         }
       }
     } catch {
@@ -885,6 +890,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.logLines.set([]);
     this.serverLog.set(null);
     this.logLineCount.set(0);
+    this.logPaused.set(false);
   }
 
   private async fetchChunkedLog(buildId: string): Promise<boolean> {
@@ -1006,6 +1012,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private appendStreamedLines(lines: string[]): void {
     this.logLines.update(shown => shown.concat(lines));
     this.logLineCount.set(this.logLines().length);
+    this.trackRateLimit(lines);
+  }
+
+  private trackRateLimit(lines: readonly string[]): void {
+    const note = lastRateLimitNote(lines);
+    if (note) this.logPaused.set(note === 'paused');
   }
 
   // ── Log parsing ─────────────────────────────────────────────────────────────

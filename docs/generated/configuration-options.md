@@ -414,7 +414,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.log.burstBytesPerMin` | unsigned int | `8388608` | `GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN` | Build log bytes forwarded per build within any minute. The worker stops forwarding a build's log past this limit. The build itself continues. |
+| `worker.log.burstBytesPerMin` | unsigned int | `8388608` | `GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN` | The limit on bytes of build log that the worker can forward for each build in any one minute. The worker can pause the log for a build over this limit and resume it when the rate is lower. A note can give the number of skipped lines. The build itself can continue. |
 | `worker.log.fetchFromStore` | bool | `true` | `GRADIENT_WORKER_LOG_FETCH_FROM_STORE` | Whether to forward the stored build log of a derivation already built locally and therefore producing no new log. |
 | `worker.log.level.build` | null or one of `trace` `debug` `info` `warn` `error` | `null` | `GRADIENT_WORKER_LOG_LEVEL_BUILD` | Log level of the builder. `null` uses `worker.log.level.default`. |
 | `worker.log.level.default` | one of `trace` `debug` `info` `warn` `error` | `"info"` | `GRADIENT_WORKER_LOG_LEVEL_DEFAULT` | Default log level. |

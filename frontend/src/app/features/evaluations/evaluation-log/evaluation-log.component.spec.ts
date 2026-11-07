@@ -63,6 +63,17 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.logLines()).toEqual(['a', 'b', 'c']);
       expect(cmp.logLineCount()).toBe(3);
     });
+
+    it('stay paused after a rate limit note until the worker resumes the log', () => {
+      const { cmp } = setup();
+      const c = cmp as unknown as Internals;
+      c.appendStreamedLines(['a', '\x1b[0m[gradient: log paused, the build can write output faster than the rate limit for the log]']);
+      expect(cmp.logPaused()).toBe(true);
+      c.appendStreamedLines(['still building']);
+      expect(cmp.logPaused()).toBe(true);
+      c.appendStreamedLines(['\x1b[0m[gradient: log resumed, the rate limit for the log dropped 12 lines]', 'b']);
+      expect(cmp.logPaused()).toBe(false);
+    });
   });
 
   // #341: sidebar search filters the build list by name without disturbing the

@@ -322,8 +322,9 @@ pub struct LogArgs {
 
     pub level_proto: Option<String>,
 
-    /// Build log bytes forwarded per build within any minute. The worker stops forwarding
-    /// a build's log past this limit. The build itself continues.
+    /// The limit on bytes of build log that the worker can forward for each build in any one minute.
+    /// The worker can pause the log for a build over this limit and resume it when the rate is lower.
+    /// A note can give the number of skipped lines. The build itself can continue.
     #[arg(default_value_t = 8 * 1024 * 1024)]
     pub burst_bytes_per_min: u64,
 

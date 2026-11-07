@@ -28,23 +28,26 @@ impl Bucket {
         }
     }
 
-    fn try_take(&mut self, n: f64, now: f64) -> bool {
+    fn refill(&mut self, now: f64) {
         let dt = (now - self.last_t).max(0.0);
         self.tokens = (self.tokens + dt * self.refill_per_sec).min(self.capacity);
         self.last_t = now;
-        if self.tokens >= n {
-            self.tokens -= n;
-            true
-        } else {
-            false
-        }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Admission {
+    Forward,
+    Paused,
+    Skipped,
+    Resumed { skipped_lines: u64 },
 }
 
 pub struct LogRateLimiter {
     minute: Bucket,
     hour: Bucket,
-    tripped: bool,
+    resume_at: f64,
+    skipped_lines: Option<u64>,
 }
 
 impl From<LogRateLimits> for LogRateLimiter {
@@ -58,58 +61,85 @@ impl LogRateLimiter {
         Self {
             minute: Bucket::new(bytes_per_min, 60.0),
             hour: Bucket::new(bytes_per_hour, 3600.0),
-            tripped: false,
+            resume_at: bytes_per_min as f64 / 4.0,
+            skipped_lines: None,
         }
     }
 
-    /// The limiter is tripping permanently on the first denial.
-    /// The admitting bucket may already be debited when the two buckets disagree.
-    /// This is harmless because forwarding is stopping entirely after the trip.
-    pub fn admit(&mut self, n: u64, now: f64) -> bool {
-        if self.tripped {
-            return false;
-        }
+    /// Paused logs resume when both buckets hold a quarter of the per-minute budget again. Logs continue in bursts instead of a sparse sample of lines.
+    pub fn admit(&mut self, n: u64, now: f64) -> Admission {
         let n = n as f64;
-        let m = self.minute.try_take(n, now);
-        let h = self.hour.try_take(n, now);
-        if m && h {
-            true
-        } else {
-            self.tripped = true;
-            false
+        self.minute.refill(now);
+        self.hour.refill(now);
+        let needed = match self.skipped_lines {
+            Some(_) => n.max(self.resume_at),
+            None => n,
+        };
+        if self.minute.tokens < needed || self.hour.tokens < needed {
+            let pausing = self.skipped_lines.is_none();
+            *self.skipped_lines.get_or_insert(0) += 1;
+            return if pausing {
+                Admission::Paused
+            } else {
+                Admission::Skipped
+            };
+        }
+        self.minute.tokens -= n;
+        self.hour.tokens -= n;
+        match self.skipped_lines.take() {
+            Some(skipped_lines) => Admission::Resumed { skipped_lines },
+            None => Admission::Forward,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::LogRateLimiter;
+    use super::{Admission, LogRateLimiter};
 
     #[test]
     fn allows_under_limit() {
         let mut l = LogRateLimiter::new(1000, 5000);
-        assert!(l.admit(500, 0.0));
-        assert!(l.admit(400, 0.0));
+        assert_eq!(l.admit(500, 0.0), Admission::Forward);
+        assert_eq!(l.admit(400, 0.0), Admission::Forward);
     }
 
     #[test]
-    fn trips_on_burst() {
+    fn pauses_on_burst_and_skips_until_refilled() {
         let mut l = LogRateLimiter::new(1000, 5000);
-        assert!(l.admit(1000, 0.0));
-        assert!(!l.admit(1, 0.0));
+        assert_eq!(l.admit(1000, 0.0), Admission::Forward);
+        assert_eq!(l.admit(1, 0.0), Admission::Paused);
+        assert_eq!(l.admit(1, 1.0), Admission::Skipped);
     }
 
     #[test]
-    fn refills_when_not_yet_tripped() {
+    fn refills_while_under_limit() {
         let mut l = LogRateLimiter::new(1000, 100_000);
-        assert!(l.admit(1000, 0.0));
-        assert!(l.admit(400, 30.0));
+        assert_eq!(l.admit(1000, 0.0), Admission::Forward);
+        assert_eq!(l.admit(400, 30.0), Admission::Forward);
     }
 
     #[test]
-    fn trips_on_sustained_even_when_burst_ok() {
+    fn pauses_on_sustained_even_when_burst_ok() {
         let mut l = LogRateLimiter::new(10_000, 5000);
-        assert!(l.admit(5000, 0.0));
-        assert!(!l.admit(1, 0.0));
+        assert_eq!(l.admit(5000, 0.0), Admission::Forward);
+        assert_eq!(l.admit(1, 0.0), Admission::Paused);
+    }
+
+    #[test]
+    fn resumes_with_the_skipped_count_once_a_quarter_minute_refilled() {
+        let mut l = LogRateLimiter::new(1200, 100_000);
+        assert_eq!(l.admit(1200, 0.0), Admission::Forward);
+        assert_eq!(l.admit(10, 0.0), Admission::Paused);
+        assert_eq!(l.admit(10, 10.0), Admission::Skipped);
+        assert_eq!(l.admit(10, 15.0), Admission::Resumed { skipped_lines: 2 });
+        assert_eq!(l.admit(10, 15.0), Admission::Forward);
+    }
+
+    #[test]
+    fn a_denied_line_debits_no_bucket() {
+        let mut l = LogRateLimiter::new(10_000, 5000);
+        assert_eq!(l.admit(6000, 0.0), Admission::Paused);
+        assert_eq!(l.admit(5000, 0.0), Admission::Resumed { skipped_lines: 1 });
     }
 }
