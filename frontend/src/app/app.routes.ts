@@ -303,7 +303,7 @@ export const routes: Routes = [
       },
       {
         path: 'webhooks',
-        title: 'Cache Webhooks',
+        title: 'Cache event notifications',
         canActivate: [authGuard],
         data: { webhookScope: 'cache' },
         loadComponent: () =>
@@ -522,7 +522,7 @@ export const routes: Routes = [
       },
       {
         path: 'team/:team/webhooks',
-        title: 'Team Webhooks',
+        title: 'Team event notifications',
         canActivate: [visibleTeamGuard],
         data: { webhookScope: 'team' },
         loadComponent: () =>
@@ -548,10 +548,10 @@ export const routes: Routes = [
           import('./features/projects/secrets/secrets.component').then((m) => m.SecretsComponent),
       },
 
-      // Webhooks
+      // Event notifications
       {
         path: 'project/:project/webhooks',
-        title: 'Webhooks',
+        title: 'Event notifications',
         data: { webhookScope: 'project' },
         resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
@@ -617,7 +617,7 @@ export const routes: Routes = [
 
   {
     path: 'admin/webhooks',
-    title: 'Webhooks (admin)',
+    title: 'Event notifications (admin)',
     canActivate: [authGuard, adminGuard],
     data: { webhookScope: 'instance' },
     loadComponent: () =>

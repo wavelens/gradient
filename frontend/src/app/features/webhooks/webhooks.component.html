@@ -6,7 +6,7 @@
 
 <gr-page-layout [breadcrumb]="breadcrumb()" [title]="title" subtitle="Signed POSTs of durable events to your endpoints">
   @if (!loading() && !loadError() && !denied()) {
-    <button slot="actions" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
+    <button slot="actions" grButton label="New event notification" icon="add" (click)="startCreate()"></button>
   }
 
   <gr-load-state
@@ -14,14 +14,14 @@
     [error]="denied() ?? loadError()"
     [retryable]="!denied()"
     [empty]="webhooks().length === 0"
-    loadingMessage="Loading webhooks..."
-    [errorTitle]="denied() ? 'No access to Webhooks' : 'Failed to load webhooks'"
+    loadingMessage="Loading event notifications..."
+    [errorTitle]="denied() ? 'No access to event notifications' : 'Failed to load event notifications'"
     emptyIcon="webhook"
-    emptyTitle="No webhooks"
-    emptyMessage="Create a webhook to receive events as signed HTTP requests."
+    emptyTitle="No event notifications"
+    emptyMessage="Create an event notification to receive events as signed HTTP requests."
     (retry)="load()"
   >
-    <button slot="empty-action" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
+    <button slot="empty-action" grButton label="New event notification" icon="add" (click)="startCreate()"></button>
     <div class="webhook-list">
       @for (hook of webhooks(); track hook.id) {
         <div class="webhook-row">
@@ -61,7 +61,7 @@
   </gr-load-state>
 </gr-page-layout>
 
-<gr-dialog [header]="editing() ? 'Edit Webhook' : 'New Webhook'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px" [error]="formError()" [busy]="saving()">
+<gr-dialog [header]="editing() ? 'Edit event notification' : 'New event notification'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px" [error]="formError()" [busy]="saving()">
   <gr-form-field label="Name" for="webhook-name" [invalid]="!!nameError()" [error]="nameError() ?? ''">
     <input grInput id="webhook-name" [ngModel]="name()" (ngModelChange)="name.set($event)" (keyup.enter)="save()" />
   </gr-form-field>

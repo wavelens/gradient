@@ -10,7 +10,7 @@ export type ActionType = ActionConfig['type'];
 
 export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
   send_mail: 'Mail',
-  send_web_request: 'Webhook',
+  send_web_request: 'HTTP request',
   send_matrix_message: 'Matrix',
   send_slack_message: 'Slack',
   git_host_status_report: 'Git Status',

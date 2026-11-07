@@ -83,10 +83,10 @@ function rowButton(root: HTMLElement, label: string): HTMLButtonElement {
 
 describe('WebhooksComponent', () => {
   it.each([
-    { scope: 'project', trail: ['Projects', 'Acme', 'Settings', 'Webhooks'] },
-    { scope: 'cache', trail: ['Caches', 'Main', 'Settings', 'Webhooks'] },
-    { scope: 'team', trail: ['Teams', 'Platform', 'Settings', 'Webhooks'] },
-    { scope: 'instance', trail: ['Job Board', 'Webhooks'] },
+    { scope: 'project', trail: ['Projects', 'Acme', 'Settings', 'Event notifications'] },
+    { scope: 'cache', trail: ['Caches', 'Main', 'Settings', 'Event notifications'] },
+    { scope: 'team', trail: ['Teams', 'Platform', 'Settings', 'Event notifications'] },
+    { scope: 'instance', trail: ['Job Board', 'Event notifications'] },
   ])('leads the $scope scope back to the page its webhooks are reached from', ({ scope, trail }) => {
     const { root } = setup({ webhookScope: scope }, { [scope]: 'main' });
     const crumbs = Array.from(root.querySelectorAll('.breadcrumb-link, .breadcrumb-current'));
@@ -172,7 +172,7 @@ describe('WebhooksComponent', () => {
   });
 
   it.each([
-    { action: 'toggle', summary: "Can't disable webhook", run: (c: WebhooksComponent) => c.toggleActive(hook) },
+    { action: 'toggle', summary: "Couldn't disable event notification", run: (c: WebhooksComponent) => c.toggleActive(hook) },
     { action: 'test', summary: "Can't send test delivery", run: (c: WebhooksComponent) => c.test(hook) },
   ])('reports a failed $action as a toast', ({ summary, run }) => {
     const { component, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' });
@@ -184,8 +184,8 @@ describe('WebhooksComponent', () => {
   });
 
   it.each([
-    { action: 'delete', label: 'Delete', title: 'Delete webhook', method: 'delete' as const },
-    { action: 'rotate', label: 'Rotate secret', title: 'Rotate webhook secret', method: 'rotateSecret' as const },
+    { action: 'delete', label: 'Delete', title: 'Delete event notification', method: 'delete' as const },
+    { action: 'rotate', label: 'Rotate secret', title: 'Rotate event notification secret', method: 'rotateSecret' as const },
   ])('asks before the $action, naming the webhook', ({ label, title, method }) => {
     const { root, service, confirm } = setup({ webhookScope: 'project' }, { project: 'p' });
     rowButton(root, label).click();
@@ -207,7 +207,7 @@ describe('WebhooksComponent', () => {
   it('confirms a deletion with a toast and a reload', () => {
     const { root, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' });
     rowButton(root, 'Delete').click();
-    expect(notify.success).toHaveBeenCalledWith('Webhook deleted');
+    expect(notify.success).toHaveBeenCalledWith('Event notification deleted');
     expect(service.list).toHaveBeenCalledTimes(2);
   });
 
@@ -254,10 +254,10 @@ describe('WebhooksComponent', () => {
 
   it('explains a refused list instead of offering to create webhooks', () => {
     const { root } = setup({ webhookScope: 'cache' }, { cache: 'main' }, () => throwError(() => new ApiError('Forbidden', 403)));
-    expect(root.textContent).toContain('Failed to load webhooks');
+    expect(root.textContent).toContain('Failed to load event notifications');
     expect(root.textContent).toContain('No permission');
-    expect(root.textContent).not.toContain('No webhooks');
-    expect(root.textContent).not.toContain('New Webhook');
+    expect(root.textContent).not.toContain('No event notifications');
+    expect(root.textContent).not.toContain('New event notification');
   });
 
   it('explains the missing permission to a project viewer without asking the server', () => {

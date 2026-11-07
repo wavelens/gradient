@@ -325,6 +325,20 @@ describe('IntegrationsComponent - write failures', () => {
     expect(fixture.componentInstance.selfHostedGitHostOptions.map((o) => o.value)).not.toContain('github');
   });
 
+  it('warns that renaming a webhook receiver changes its webhook URL', async () => {
+    const fixture = setup(writable, [baseIntegration]);
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    comp.openEditDialog(baseIntegration);
+    fixture.detectChanges();
+    expect(document.querySelector('[data-testid="rename-breaks-webhook"]')).toBeNull();
+    const name = document.querySelector<HTMLInputElement>('#edit-name')!;
+    name.value = 'gitea-main';
+    name.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(document.querySelector('[data-testid="rename-breaks-webhook"]')?.textContent).toContain('Webhook URL');
+  });
+
   it('names the tasks a new integration connected to', async () => {
     const fixture = setup(writable, []);
     const create = vi.fn(() => of({ ...baseIntegration, connected_tasks: ['app', 'lib'] }));

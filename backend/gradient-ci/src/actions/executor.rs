@@ -163,17 +163,15 @@ pub async fn execute_action(
         warn!(error = %e, %action_id, "Failed to record action delivery");
     }
 
-    if success {
-        // A burst of firings is writing equivalent timestamps to this one row. Skipping a locked
-        // row is avoiding a convoy of pool connections behind it.
-        let stamp = gradient_types::now();
-        let update = TOUCH_ACTION_LAST_FIRED.bind([
-            stamp.into(),
-            sea_orm::Value::Uuid(Some(action_id.into_inner())),
-        ]);
-        if let Err(e) = ctx.db.worker_db.execute_raw(update).await {
-            warn!(error = %e, %action_id, "Failed to update action last_fired_at");
-        }
+    // A burst of firings is writing equivalent timestamps to this one row. Skipping a locked
+    // row is avoiding a convoy of pool connections behind it.
+    let stamp = gradient_types::now();
+    let update = TOUCH_ACTION_LAST_FIRED.bind([
+        stamp.into(),
+        sea_orm::Value::Uuid(Some(action_id.into_inner())),
+    ]);
+    if let Err(e) = ctx.db.worker_db.execute_raw(update).await {
+        warn!(error = %e, %action_id, "Failed to update action last_fired_at");
     }
 
     result.map(|_| ())

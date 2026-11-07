@@ -105,26 +105,26 @@ export class WebhooksComponent implements OnInit {
     switch (data['webhookScope']) {
       case 'project':
         this.scope = { kind: 'project', name: paramMap.get('project') ?? '' };
-        this.title = 'Project Webhooks';
+        this.title = 'Project event notifications';
         break;
       case 'cache':
         this.scope = { kind: 'cache', name: paramMap.get('cache') ?? '' };
-        this.title = 'Cache Webhooks';
+        this.title = 'Cache event notifications';
         break;
       case 'team':
         this.scope = { kind: 'team', name: paramMap.get('team') ?? '' };
-        this.title = 'Team Webhooks';
+        this.title = 'Team event notifications';
         break;
       default:
         this.scope = { kind: 'instance' };
-        this.title = 'Instance Webhooks';
+        this.title = 'Instance event notifications';
     }
     this.denied.set(this.missingPermission());
     this.load();
   }
 
   private trail(): Crumb[] {
-    const page = { label: 'Webhooks' };
+    const page = { label: 'Event notifications' };
     switch (this.scope.kind) {
       case 'project':
         return this.crumbs.projectSettings(this.scope.name, page);
@@ -218,7 +218,7 @@ export class WebhooksComponent implements OnInit {
       this.service.update(this.scope, target.id, body).subscribe({
         next: () => {
           done();
-          this.notify.success('Webhook saved');
+          this.notify.success('Event notification saved');
         },
         error: failed,
       });
@@ -241,21 +241,21 @@ export class WebhooksComponent implements OnInit {
       .pipe(finalize(() => this.togglingId.set(null)))
       .subscribe({
         next: () => {
-          this.notify.success(active ? 'Webhook enabled' : 'Webhook disabled');
+          this.notify.success(active ? 'Event notification enabled' : 'Event notification disabled');
           this.load();
         },
-        error: (err: unknown) => this.notify.failure(active ? "Can't enable webhook" : "Can't disable webhook", err),
+        error: (err: unknown) => this.notify.failure(active ? "Couldn't enable event notification" : "Couldn't disable event notification", err),
       });
   }
 
   rotate(hook: WebhookResponse): void {
     this.confirm
       .confirm({
-        title: 'Rotate webhook secret',
+        title: 'Rotate event notification secret',
         target: hook.name,
         consequence: 'The current secret can no longer verify deliveries. Pass the new secret to the receiving service.',
         confirmLabel: 'Rotate',
-        failure: "Can't rotate webhook secret.",
+        failure: "Couldn't rotate event notification secret",
         action: () => this.service.rotateSecret(this.scope, hook.id),
       })
       .subscribe((res) => this.revealedSecret.set(res.secret));
@@ -305,15 +305,15 @@ export class WebhooksComponent implements OnInit {
   startDelete(hook: WebhookResponse): void {
     this.confirm
       .confirm({
-        title: 'Delete webhook',
+        title: 'Delete event notification',
         target: hook.name,
-        consequence: 'Deletes the webhook and its delivery history. The deletion is permanent.',
+        consequence: 'Deletes the event notification and its delivery history. The deletion is permanent.',
         confirmLabel: 'Delete',
         failure: "Can't delete webhook.",
         action: () => this.service.delete(this.scope, hook.id),
       })
       .subscribe(() => {
-        this.notify.success('Webhook deleted');
+        this.notify.success('Event notification deleted');
         this.load();
       });
   }
