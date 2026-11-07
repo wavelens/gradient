@@ -198,7 +198,7 @@ pub async fn evaluate_flake(_job: &FlakeJob, updater: &mut JobUpdater) -> Result
 
 pub fn required_local_source(source: &FlakeSource) -> Option<&str> {
     match source {
-        FlakeSource::Cached { store_path } => Some(store_path.as_str()),
+        FlakeSource::Cached { store_path, .. } => Some(store_path.as_str()),
         FlakeSource::Repository { .. } => None,
     }
 }
@@ -313,14 +313,18 @@ pub(super) fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) ->
 }
 
 fn source_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
-    if let Some(path) = local_flake_path {
-        return format!("path:{}", path);
-    }
-    match &job.source {
-        FlakeSource::Repository { url, commit } => gradient_types::NixFlakeUrl::new(url, commit)
-            .map(|u| u.to_string())
-            .unwrap_or_else(|_| url.clone()),
-        FlakeSource::Cached { store_path } => format!("path:{}", store_path),
+    let store_path = match (local_flake_path, &job.source) {
+        (Some(path), _) => path,
+        (None, FlakeSource::Cached { store_path, .. }) => store_path,
+        (None, FlakeSource::Repository { url, commit }) => {
+            return gradient_types::NixFlakeUrl::new(url, commit)
+                .map(|u| u.to_string())
+                .unwrap_or_else(|_| url.clone());
+        }
+    };
+    match job.source.commit() {
+        Some(commit) => format!("path:{store_path}?rev={commit}"),
+        None => format!("path:{store_path}"),
     }
 }
 
@@ -1394,9 +1398,39 @@ mod tests {
     }
 
     #[test]
+    fn a_fetched_source_keeps_the_commit_it_was_fetched_at() {
+        let mut job = make_flake_job("https://h/o/r");
+        assert_eq!(
+            build_flake_url(&job, Some("/nix/store/x-source")),
+            "path:/nix/store/x-source?rev=abc123"
+        );
+
+        job.flake_dir = Some("nix".into());
+        job.source = FlakeSource::Cached {
+            store_path: "/nix/store/x-source".into(),
+            commit: Some("abc123".into()),
+        };
+        assert_eq!(
+            build_flake_url(&job, None),
+            "path:/nix/store/x-source?rev=abc123&dir=nix"
+        );
+    }
+
+    #[test]
+    fn an_uploaded_source_has_no_commit() {
+        let mut job = make_flake_job("https://h/o/r");
+        job.source = FlakeSource::Cached {
+            store_path: "/nix/store/x-source".into(),
+            commit: None,
+        };
+        assert_eq!(build_flake_url(&job, None), "path:/nix/store/x-source");
+    }
+
+    #[test]
     fn cached_source_requires_store_path_present() {
         let cached = FlakeSource::Cached {
             store_path: "/nix/store/abc-source".into(),
+            commit: None,
         };
         assert_eq!(
             required_local_source(&cached),

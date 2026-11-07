@@ -215,7 +215,7 @@ fn outbound_fields(
                 outbound_realisations(&mut spec.input_realisations, paths)?;
             }
             Job::Flake(flake) => {
-                if let FlakeSource::Cached { store_path } = &mut flake.source {
+                if let FlakeSource::Cached { store_path, .. } = &mut flake.source {
                     paths.path(store_path)?;
                 }
             }

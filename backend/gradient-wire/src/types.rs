@@ -47,8 +47,24 @@ pub enum Job {
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum FlakeSource {
-    Repository { url: String, commit: String },
-    Cached { store_path: String },
+    Repository {
+        url: String,
+        commit: String,
+    },
+    Cached {
+        store_path: String,
+        #[proto(59, default)]
+        commit: Option<String>,
+    },
+}
+
+impl FlakeSource {
+    pub fn commit(&self) -> Option<&str> {
+        match self {
+            Self::Repository { commit, .. } => Some(commit),
+            Self::Cached { commit, .. } => commit.as_deref(),
+        }
+    }
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

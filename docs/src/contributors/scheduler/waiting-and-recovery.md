@@ -28,7 +28,7 @@ flowchart LR
 - **Source:** a repository evaluation must carry `FlakeSource::Repository` as source. A `/nix/store/...` source (`gradient build` upload) must carry `FlakeSource::Cached` as source. That source will still run `FetchFlake` to resolve inputs with the project SSH key (`flake_job_for_eval_source`).
 - **Routing:** `WorkerCaps::can_eval` (`gradient-pool/src/worker_caps.rs`) will require `network` for a `FetchFlake` step and `eval` for an evaluation step. Repositories behind an SSH URL also need `secrets` (`WorkerCaps::can_fetch`).
 - **Follow-up:** `handle_job_completed` (`job_handlers/build_status.rs`) will react to `JobCompleted` of a fetch-only job (`is_fetch_only`). The handler must read `evaluation.flake_source` and enqueue `PendingEvalJob::cached_followup` under the same `eval:{id}` key. The follow-up will carry `FlakeSource::Cached` plus the source as a required path. A missing `flake_source` will fail the evaluation permanently.
-- **Worker side:** the evaluating worker will substitute the source from the cache and evaluate `path:<store path>` (`gradient-worker/src/executor/eval.rs`).
+- **Worker side:** Evaluation workers fetch the source from the cache instead and evaluate `path:<store path>?rev=<commit>`. `self.rev` can keep the commit (`gradient-worker/src/executor/eval.rs`) from the source fetch.
 - **Steering:** `ReserveFetchWorkersRule` (`gradient-pool/src/score/rules/builtin.rs`) will score a worker with `network` at `-300 * (1 - idle / total)` for a job without `FetchFlake`. The penalty will fade as workers go idle. The rule will never refuse the job. See [Scoring](scoring.md).
 
 ## Waiting Reasons

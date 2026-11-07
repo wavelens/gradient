@@ -74,7 +74,7 @@
           "${worker} --eval-driver"
       )
 
-      def drive(tag):
+      def drive(tag, requests=requests):
           payload = "".join(json.dumps(r) + "\n" for r in requests)
           b64 = base64.b64encode(payload.encode()).decode()
           machine.succeed(f"echo {b64} | base64 -d > /root/reqs-{tag}.jsonl")
@@ -90,7 +90,8 @@
 
           out = machine.succeed(f"cat /root/out-{tag}.jsonl").splitlines()
           responses = [json.loads(l) for l in out if l.strip()]
-          assert len(responses) == 5, f"expected 5 responses, got {len(responses)}: {responses}"
+          expected = len(requests) - 1
+          assert len(responses) == expected, f"expected {expected} responses, got {len(responses)}: {responses}"
           return responses, int(machine.succeed(f"cat /root/ms-{tag}").strip())
 
       responses, cold_ms = drive("cold")
@@ -157,6 +158,20 @@
 
       print(f"cold={cold_ms}ms warm={warm_ms}ms")
       assert warm_ms * 2 < cold_ms, f"second eval was not warm: cold={cold_ms}ms warm={warm_ms}ms"
+
+      banner("Assert a fetched source keeps its commit")
+      source = json.loads(machine.succeed(f"${nix} flake metadata --json {REPO}"))["path"]
+      commit = machine.succeed("${git} -C /root/fixture rev-parse HEAD").strip()
+      at = lambda rev: f"path:{source}?rev={rev}"
+      revision, _ = drive("revision", [
+          {"op": "list", "repository": at(commit), "wildcards": ["checks.x86_64-linux.revision"]},
+          {"op": "fingerprint", "repository": at(commit)},
+          {"op": "fingerprint", "repository": at("1" * 40)},
+          {"op": "shutdown"},
+      ])
+      probe = revision[0]["items"][0]["drv_path"]
+      assert probe.endswith(f"-revision-{commit[:7]}.drv"), f"self.shortRev is lost: {probe}"
+      assert revision[1]["fingerprint"] != revision[2]["fingerprint"], f"two commits share one eval cache: {revision}"
 
       banner("Eval test PASSED")
       '';

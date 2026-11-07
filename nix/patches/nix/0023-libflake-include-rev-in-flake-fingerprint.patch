@@ -1,0 +1,23 @@
+From 9b96d76d930e3730a1caa867f9f30dbf323b116e Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sat, 7 Nov 2026 21:25:02 +0100
+Subject: [PATCH] libflake: include rev in flake fingerprint
+
+A path flake can carry the source git commit via `rev`, and `self.rev` and `self.shortRev` come from that value. `revCount` and `lastModified` already appear in the fingerprint because the NAR hash does not include them, but `rev` does not appear in the fingerprint. Two commits with the same tree, or a tree that an evaluation ran on once without `rev`, can share one evaluation cache and return a result from the wrong revision.
+---
+ src/libflake/flake.cc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/libflake/flake.cc b/src/libflake/flake.cc
+index bd3ea4a..7d93676 100644
+--- a/src/libflake/flake.cc
++++ b/src/libflake/flake.cc
+@@ -1009,6 +1009,8 @@ std::optional<Fingerprint> LockedFlake::getFingerprint(Store & store, const fetc
+     }
+     if (auto lastModified = flake.lockedRef.input.getLastModified())
+         *fingerprint += fmt(";lastModified=%d", *lastModified);
++    if (auto rev = flake.lockedRef.input.getRev())
++        *fingerprint += fmt(";rev=%s", rev->gitRev());
+ 
+     // FIXME: as an optimization, if the flake contains a lock file
+     // and we haven't changed it, then it's sufficient to use
