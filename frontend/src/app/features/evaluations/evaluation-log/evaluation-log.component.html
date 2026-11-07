@@ -251,6 +251,21 @@
             <span class="queued-title">Build Queued</span>
             <span class="queued-sub">This build is waiting to start. Logs will appear once it begins.</span>
           </div>
+        } @else if (selectedBuild()?.status === 'DependencyFailed' && !logLineCount()) {
+          <div class="queued-hint dependency-failed-hint">
+            <gr-icon name="link_off" size="xl" />
+            <span class="queued-title">Dependency failed</span>
+            <span class="queued-sub">This build did not run because a dependency failed. Open the failed dependency to see why.</span>
+            <div class="dependency-failed-actions">
+              @for (dep of failedDependencies(); track dep.id) {
+                @if (buildOf(dep); as failed) {
+                  <button grButton severity="secondary" size="small" icon="article" [label]="dep.name" (click)="selectBuild(failed, true)"></button>
+                }
+              }
+              <a grButton severity="secondary" size="small" icon="account_tree" label="Dependency graph"
+                [routerLink]="links.dependencyGraph(projectName, selectedBuild()!.id, { evaluation: evaluationId })"></a>
+            </div>
+          </div>
         } @else if (downloadProgress(); as p) {
           <gr-build-progress class="download-panel" [progress]="p" />
         } @else {

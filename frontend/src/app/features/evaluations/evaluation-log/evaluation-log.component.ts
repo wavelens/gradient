@@ -44,7 +44,9 @@ import {
   EvaluationMessageResponse,
   LogChunkIndex,
   EvaluationStatus,
+  BuildStatus,
   BuildWithOutputs,
+  DependencyGraphNode,
   TriggerType,
   Permission,
 } from '@core/models';
@@ -59,14 +61,13 @@ import {
   LoadingSpinnerComponent,
   MenuComponent,
   MenuItem,
-  MessageBannerComponent,
   MessageService,
   DrawerDirective,
   ScrollRegionDirective,
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, buildPhase, PHASE_SEVERITY } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_SEVERITY } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -74,7 +75,7 @@ import { saveResponse } from '@shared/download';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, ScrollRegionDirective, DrawerDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, ScrollRegionDirective, DrawerDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -169,6 +170,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   );
 
   visibleBuilds = signal<BuildItem[]>([]);
+  failedDependencies = signal<DependencyGraphNode[]>([]);
+
+  buildOf(node: DependencyGraphNode): BuildItem | null {
+    return this.builds().find((b) => b.id === node.build) ?? null;
+  }
 
   // The build the sidebar's menu is acting on, opened by right-click or the
   // row's three dots.
@@ -744,6 +750,20 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
     this.logLoading.set(true);
     this.fetchInitialLogs(build.id);
+    this.loadFailedDependencies(build);
+  }
+
+  private loadFailedDependencies(build: BuildItem): void {
+    this.failedDependencies.set([]);
+    if (build.status !== 'DependencyFailed') return;
+    this.evalService.getBuildGraph(build.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (graph) => {
+        if (this.selectedBuildId() !== build.id) return;
+        this.failedDependencies.set(graph.nodes.filter((node) =>
+          node.id !== graph.root && !!node.status && buildPhase(node.status as BuildStatus) === 'failure'));
+      },
+      error: () => {},
+    });
   }
 
   private async fetchInitialLogs(buildId: string): Promise<void> {

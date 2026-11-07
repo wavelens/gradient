@@ -597,6 +597,31 @@ describe('EvaluationLogComponent', () => {
     });
   });
 
+  describe('dependency failed', () => {
+    it('points to the failed dependency and opens its log', () => {
+      const { cmp } = setup();
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+      const service = TestBed.inject(EvaluationsService);
+      vi.spyOn(service, 'getBuildGraph').mockReturnValue(of({
+        root: 'd-app',
+        nodes: [
+          { id: 'd-app', build: 'b-app', name: 'app', path: '', status: 'DependencyFailed', created_at: '', updated_at: '' },
+          { id: 'd-lib', build: 'b-lib', name: 'lib', path: '', status: 'FailedPermanent', created_at: '', updated_at: '' },
+          { id: 'd-ok', build: 'b-ok', name: 'ok', path: '', status: 'Completed', created_at: '', updated_at: '' },
+        ],
+        edges: [],
+      }));
+      const app = build('b-app', 'app', 'DependencyFailed');
+      const lib = build('b-lib', 'lib', 'FailedPermanent');
+      cmp.builds.set([app, lib]);
+      cmp.selectBuild(app, true);
+      expect(cmp.failedDependencies().map((node) => node.name)).toEqual(['lib']);
+      expect(cmp.buildOf(cmp.failedDependencies()[0])).toBe(lib);
+      cmp.selectBuild(lib, true);
+      expect(cmp.failedDependencies()).toEqual([]);
+    });
+  });
+
   // #636: with `?build=` the reader came for that log, so it loads before the list.
   describe('deep-linked build', () => {
     it('fetches the linked build before the build list', () => {
