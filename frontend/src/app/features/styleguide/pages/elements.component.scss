@@ -11,6 +11,11 @@
   grid-template-columns: minmax(6rem, 360px) minmax(0, 1fr);
   align-items: center;
   gap: $spacing-md $spacing-lg;
+
+  @media (max-width: $breakpoint-sm) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: $spacing-xs;
+  }
 }
 
 .sg-segbar { --segbar-h: 7px; }

@@ -89,7 +89,7 @@ interface DecisionRow {
         @if (!showDecisions()) {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>Assigned</th><th></th></tr>
+              <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>Assigned</th><th><span class="sr-only">Details</span></th></tr>
             </thead>
             <tbody>
               @for (row of assignedRows(); track row.job.id) {
@@ -111,7 +111,7 @@ interface DecisionRow {
         } @else {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>When</th><th></th></tr>
+              <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>When</th><th><span class="sr-only">Details</span></th></tr>
             </thead>
             <tbody>
               @for (r of decisionRows(); track r.id) {
