@@ -5,6 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { ActionFormComponent } from './action-form.component';
 import { ConfigService } from '@core/services/config.service';
 import { ActionResponse, CreateActionRequest } from '@core/models';
@@ -12,7 +13,7 @@ import { ActionResponse, CreateActionRequest } from '@core/models';
 function createFixture(smtpEnabled: boolean): ComponentFixture<ActionFormComponent> {
   TestBed.configureTestingModule({
     imports: [ActionFormComponent],
-    providers: [{ provide: ConfigService, useValue: { smtpEnabled } }],
+    providers: [provideRouter([]), { provide: ConfigService, useValue: { smtpEnabled } }],
   });
   const fixture = TestBed.createComponent(ActionFormComponent);
   fixture.componentRef.setInput('open', true);
@@ -111,6 +112,18 @@ describe('ActionFormComponent', () => {
     c.saved.subscribe((r) => (emitted = r));
     c.onSubmit();
     expect(emitted.events).toEqual([]);
+  });
+
+  it('says a flake lock pull request needs tracked flake inputs and links to them', () => {
+    const fixture = createFixture(true);
+    fixture.componentRef.setInput('project', 'acme');
+    fixture.componentRef.setInput('task', 'web');
+    fixture.detectChanges();
+    fixture.componentInstance.onTypeChange('open_pr');
+    fixture.detectChanges();
+    const hint = document.body.querySelector('[data-testid="flake-override-hint"]');
+    expect(hint?.textContent).toContain('Force update using the URL declared in flake.nix');
+    expect(hint?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/task/web/flake-inputs');
   });
 
   it('starts empty on the next open after a create', () => {

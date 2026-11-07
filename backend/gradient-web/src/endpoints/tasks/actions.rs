@@ -511,7 +511,7 @@ pub async fn delete_action(
     operation_id = "testTaskAction",
     tag = "actions",
     summary = "Fire action now (synthetic test)",
-    description = "Fires the action immediately with a synthetic test event, bypassing event matching. Git host integration actions (`git_host_status_report`, `open_pr`) instead perform a non-mutating connectivity check against the task's repository, since a synthetic status/PR posted against a placeholder commit is always rejected by the Git host.",
+    description = "Fires the action immediately with a synthetic test event, bypassing event matching. Git host integration actions (`git_host_status_report`, `open_pr`) instead perform a non-mutating connectivity check against the task's repository, since a synthetic status/PR posted against a placeholder commit is always rejected by the Git host. All tests enter the action's delivery history. Connectivity checks enter that history as event `test.connectivity`.",
     params(TaskPath, ("id" = TaskActionId, Path)),
     responses((status = OK, description = "Action fired", body = serde_json::Value), WebError)
 )]
@@ -538,7 +538,7 @@ pub async fn test_action(
         action_type,
         ActionType::GitHostStatusReport | ActionType::OpenPr
     ) {
-        gradient_ci::actions::verify_git_host_action(&ci, &action, &proj.repository)
+        gradient_ci::actions::test_git_host_action(&ci, &action, &proj.repository)
             .await
             .context("run the test fire")?;
 

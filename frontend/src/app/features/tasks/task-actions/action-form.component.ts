@@ -128,6 +128,7 @@ export class ActionFormComponent implements OnChanges {
   recipientsRaw = signal('');
   teams = input<string[]>([]);
   project = input<string>('');
+  task = input<string>('');
   canGrantTeams = input(false);
   teamOptions = computed(() => this.teams().map((team) => ({ label: team, value: team })));
 

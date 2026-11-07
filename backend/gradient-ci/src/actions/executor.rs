@@ -7,13 +7,14 @@
 use super::send::{
     execute_exec_tree_pr, execute_git_host_status_report, execute_open_pr, execute_send_mail,
     execute_send_matrix_message, execute_send_slack_message, execute_send_web_request,
-    execute_start_evaluation,
+    execute_start_evaluation, verify_git_host_action,
 };
 use super::{MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
 use anyhow::{Context, Result};
 use gradient_types::{
     ActionConfig, MTaskAction, MTaskActionDelivery, PatchGeneratorKind, TaskActionDeliveryId,
+    TaskActionId,
 };
 use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 use serde_json::Value as JsonValue;
@@ -132,36 +133,29 @@ pub async fn execute_action(
         }
     };
 
-    let duration_ms = i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX);
-    let success = match &result {
-        Ok(ok) => ok
-            .status_code
-            .map(|c| (200..300).contains(&c))
-            .unwrap_or(true),
-        Err(_) => false,
+    let (response_status, response_body, error_message, success) = match &result {
+        Ok(ok) => (
+            ok.status_code,
+            ok.response_body.clone(),
+            None,
+            ok.status_code.is_none_or(|c| (200..300).contains(&c)),
+        ),
+        Err(e) => (None, None, Some(format!("{:#}", e)), false),
     };
-    let (response_status, response_body, error_message) = match &result {
-        Ok(ok) => (ok.status_code, ok.response_body.clone(), None),
-        Err(e) => (None, None, Some(format!("{:#}", e))),
-    };
-
-    let delivery = MTaskActionDelivery {
-        id: TaskActionDeliveryId::now_v7(),
-        action_id,
-        event: event.to_string(),
-        request_body,
-        response_status,
-        response_body: response_body.map(|s| truncate(s, MAX_BODY_BYTES)),
-        error_message,
-        success,
-        duration_ms,
-        delivered_at: gradient_types::now(),
-    }
-    .into_active_model();
-
-    if let Err(e) = delivery.insert(&ctx.db.worker_db).await {
-        warn!(error = %e, %action_id, "Failed to record action delivery");
-    }
+    record_delivery(
+        ctx,
+        Attempt {
+            action_id,
+            event: event.to_string(),
+            request_body,
+            response_status,
+            response_body,
+            error_message,
+            success,
+            started,
+        },
+    )
+    .await;
 
     // A burst of firings is writing equivalent timestamps to this one row. Skipping a locked
     // row is avoiding a convoy of pool connections behind it.
@@ -175,4 +169,62 @@ pub async fn execute_action(
     }
 
     result.map(|_| ())
+}
+
+const CONNECTIVITY_TEST_EVENT: &str = "test.connectivity";
+
+pub async fn test_git_host_action(
+    ctx: &CiContext,
+    action: &MTaskAction,
+    repository: &str,
+) -> Result<()> {
+    let started = Instant::now();
+    let result = verify_git_host_action(ctx, action, repository).await;
+    record_delivery(
+        ctx,
+        Attempt {
+            action_id: action.id,
+            event: CONNECTIVITY_TEST_EVENT.to_owned(),
+            request_body: String::new(),
+            response_status: None,
+            response_body: None,
+            error_message: result.as_ref().err().map(|e| format!("{e:#}")),
+            success: result.is_ok(),
+            started,
+        },
+    )
+    .await;
+    result
+}
+
+struct Attempt {
+    action_id: TaskActionId,
+    event: String,
+    request_body: String,
+    response_status: Option<i32>,
+    response_body: Option<String>,
+    error_message: Option<String>,
+    success: bool,
+    started: Instant,
+}
+
+async fn record_delivery(ctx: &CiContext, attempt: Attempt) {
+    let action_id = attempt.action_id;
+    let delivery = MTaskActionDelivery {
+        id: TaskActionDeliveryId::now_v7(),
+        action_id,
+        event: attempt.event,
+        request_body: attempt.request_body,
+        response_status: attempt.response_status,
+        response_body: attempt.response_body.map(|s| truncate(s, MAX_BODY_BYTES)),
+        error_message: attempt.error_message,
+        success: attempt.success,
+        duration_ms: i32::try_from(attempt.started.elapsed().as_millis()).unwrap_or(i32::MAX),
+        delivered_at: gradient_types::now(),
+    }
+    .into_active_model();
+
+    if let Err(e) = delivery.insert(&ctx.db.worker_db).await {
+        warn!(error = %e, %action_id, "Failed to record action delivery");
+    }
 }

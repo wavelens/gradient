@@ -24,10 +24,10 @@ pub use crypto::{
     decrypt_action_secret, decrypt_secret_with_file, encrypt_action_secret,
     encrypt_secret_with_file,
 };
-pub use executor::execute_action;
+pub use executor::{execute_action, test_git_host_action};
 pub use matchers::{GIT_HOST_STATUS_EVENTS, git_host_status_for_event, matches_event};
 pub use payload::git_host_status_payload;
-pub use send::{reporter_for_task, verify_git_host_action};
+pub use send::reporter_for_task;
 
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 

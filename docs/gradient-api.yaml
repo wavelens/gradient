@@ -9690,7 +9690,7 @@ paths:
       tags:
       - actions
       summary: Fire action now (synthetic test)
-      description: Fires the action immediately with a synthetic test event, bypassing event matching. Git host integration actions (`git_host_status_report`, `open_pr`) instead perform a non-mutating connectivity check against the task's repository, since a synthetic status/PR posted against a placeholder commit is always rejected by the Git host.
+      description: Fires the action immediately with a synthetic test event, bypassing event matching. Git host integration actions (`git_host_status_report`, `open_pr`) instead perform a non-mutating connectivity check against the task's repository, since a synthetic status/PR posted against a placeholder commit is always rejected by the Git host. All tests enter the action's delivery history. Connectivity checks enter that history as event `test.connectivity`.
       operationId: testTaskAction
       parameters:
       - name: project

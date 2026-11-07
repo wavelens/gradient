@@ -192,6 +192,11 @@
       />
     </gr-form-field>
     @if (prGenerator() === 'flake_lock') {
+      <p class="gr-form-aside" data-testid="flake-override-hint">
+        A pull request can update only the inputs that have an override under
+        <a [routerLink]="links.taskPage(project(), task(), 'flake-inputs')">Flake inputs</a>
+        with "Force update using the URL declared in flake.nix" on. This action can update no inputs without an override.
+      </p>
       <gr-form-field label="Granularity" for="pr-granularity">
         <gr-select
           inputId="pr-granularity"

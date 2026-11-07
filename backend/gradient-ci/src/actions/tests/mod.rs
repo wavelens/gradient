@@ -550,3 +550,27 @@ fn exec_events_report_one_status_per_entry_point() {
         assert_eq!(report.status, CiStatus::Success);
     });
 }
+
+#[test]
+fn a_failed_connectivity_test_lands_in_the_delivery_history() {
+    use gradient_fixtures::mock::raw_statements;
+
+    run(async {
+        let db =
+            mock_db().append_query_results([vec![gradient_types::MTaskActionDelivery::default()]]);
+        let ctx = make_ctx_with(db);
+        let action = action_with(ActionType::OpenPr, vec![]);
+
+        let result = super::test_git_host_action(&ctx, &action, "https://example.com/a/b").await;
+
+        assert!(result.is_err());
+        let log = raw_statements(ctx.db.worker_db.into_transaction_log());
+        let insert = log
+            .iter()
+            .find(|s| s.sql.starts_with(r#"INSERT INTO "task_action_delivery""#))
+            .expect("the attempt is recorded");
+        let values = &insert.values.as_ref().unwrap().0;
+        assert!(values.contains(&sea_orm::Value::String(Some("test.connectivity".into()))));
+        assert!(values.contains(&sea_orm::Value::Bool(Some(false))));
+    });
+}
