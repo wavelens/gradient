@@ -15,13 +15,13 @@ import { ApiError } from '@core/services/api.service';
 
 const EMPTY_PAGE = { items: [], total: 0, page: 1 };
 
-function render(getProjects: () => Observable<unknown>, getPublicProjects: () => Observable<unknown> = () => of(EMPTY_PAGE)) {
+function render(getProjects: () => Observable<unknown>, getPublicProjects: () => Observable<unknown> = () => of(EMPTY_PAGE), signedIn = true) {
   const projects = vi.fn(getProjects);
   TestBed.configureTestingModule({
     imports: [ProjectListComponent],
     providers: [
       provideRouter([]),
-      { provide: AuthService, useValue: { isAuthenticated: () => true, user: () => ({ superuser: false }) } },
+      { provide: AuthService, useValue: { isAuthenticated: () => signedIn, user: () => (signedIn ? { superuser: false } : null) } },
       { provide: ConfigService, useValue: { publicListing: true, createProject: 'everyone', canCreate: () => true } },
       {
         provide: ProjectsService,
@@ -58,6 +58,21 @@ describe('ProjectListComponent', () => {
   it('reports a failed public list next to the own projects', () => {
     const { root } = render(() => of(EMPTY_PAGE), () => throwError(() => new Error('down')));
     expect(root.textContent).toContain('Failed to load public projects');
+  });
+
+  it('shows anonymous visitors the public projects without an own empty list', () => {
+    const publicPage = { items: [{ id: 'p1', name: 'nixpkgs', display_name: 'Nixpkgs', description: null }], total: 1, page: 1 };
+    const { root, projects } = render(() => of(EMPTY_PAGE), () => of(publicPage), false);
+    expect(projects).not.toHaveBeenCalled();
+    expect(root.textContent).not.toContain('No projects yet');
+    expect(root.textContent).toContain('Nixpkgs');
+    expect(root.textContent).toContain('Sign in');
+  });
+
+  it('tells anonymous visitors when nothing is public', () => {
+    const { root } = render(() => of(EMPTY_PAGE), () => of(EMPTY_PAGE), false);
+    expect(root.textContent).toContain('No public projects');
+    expect(root.textContent).not.toContain('No projects yet');
   });
 
   it('keeps a failed create inside the open Create Project dialog', () => {

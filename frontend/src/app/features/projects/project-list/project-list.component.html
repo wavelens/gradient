@@ -4,24 +4,27 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Projects" subtitle="Manage your projects">
+<gr-page-layout title="Projects" [subtitle]="authService.isAuthenticated() ? 'Manage your projects' : 'Public projects on this server. Sign in to see your own.'">
   @if (canCreateProject) {
     <button slot="actions" grButton label="Create Project" icon="add" (click)="openCreateDialog()"></button>
+  } @else if (!authService.isAuthenticated()) {
+    <a slot="actions" grButton label="Sign in" icon="login" [routerLink]="links.login(links.projects().toString())"></a>
   }
-  <gr-load-state
-    [loading]="loading()"
-    [error]="loadError()"
-    [empty]="projects().length === 0"
-    loadingMessage="Loading projects..."
-    errorTitle="Failed to load projects"
-    emptyIcon="corporate_fare"
-    emptyTitle="No projects yet"
-    [emptyMessage]="canCreateProject ? 'Create your first project to get started with Gradient' : 'No projects have been created yet'"
-    (retry)="loadProjects()"
-  >
-    @if (canCreateProject) {
-      <button slot="empty-action" grButton label="Create Project" (click)="openCreateDialog()"></button>
-    }
+  @if (authService.isAuthenticated()) {
+    <gr-load-state
+      [loading]="loading()"
+      [error]="loadError()"
+      [empty]="projects().length === 0"
+      loadingMessage="Loading projects..."
+      errorTitle="Failed to load projects"
+      emptyIcon="corporate_fare"
+      emptyTitle="No projects yet"
+      [emptyMessage]="canCreateProject ? 'Create your first project to get started with Gradient' : 'Ask a project administrator to add this account to a project.'"
+      (retry)="loadProjects()"
+    >
+      @if (canCreateProject) {
+        <button slot="empty-action" grButton label="Create Project" (click)="openCreateDialog()"></button>
+      }
       <gr-card-grid>
         @for (project of projects(); track project.id) {
           <gr-nav-card
@@ -46,7 +49,8 @@
           </gr-nav-card>
         }
       </gr-card-grid>
-  </gr-load-state>
+    </gr-load-state>
+  }
 
   <gr-load-state
     [loading]="publicLoading() && !loading()"
@@ -56,6 +60,11 @@
     errorTitle="Failed to load public projects"
     (retry)="loadPublicProjects()"
   >
+    <div slot="empty">
+      @if (!authService.isAuthenticated()) {
+        <gr-empty-state icon="public" title="No public projects" message="Nobody has published a project on this server yet." />
+      }
+    </div>
     <div class="discover-header">
       <h2>Discover Public Projects</h2>
     </div>

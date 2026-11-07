@@ -15,6 +15,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
   BadgeComponent,
+  EmptyStateComponent,
   ButtonComponent,
   CardGridComponent,
   DialogComponent,
@@ -45,6 +46,7 @@ import { links } from '@shared/routing';
     NavCardComponent,
     CardGridComponent,
     BadgeComponent,
+    EmptyStateComponent,
     SelectComponent,
     NameFieldsComponent,
   ],
