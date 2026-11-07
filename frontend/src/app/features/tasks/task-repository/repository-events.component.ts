@@ -226,8 +226,12 @@ export class RepositoryEventsComponent {
             outbound: connected.outbound?.id ?? base.outbound,
             reportStatus: !!connected.outbound || base.reportStatus,
           });
-          if (connected.outbound && token) this.install(connected.inbound.id, connected.outbound.id, revealSecret);
-          else revealSecret();
+          if (connected.outbound && token) {
+            this.install(connected.inbound.id, connected.outbound.id, revealSecret);
+            if (this.state().deploy_key) this.installDeployKey(connected.outbound.id);
+          } else {
+            revealSecret();
+          }
         },
         error: (error: unknown) => {
           this.connecting.set(false);
@@ -257,6 +261,13 @@ export class RepositoryEventsComponent {
           onFailure();
         },
       });
+  }
+
+  private installDeployKey(outbound: string): void {
+    this.tasks.installDeployKey(this.project(), this.task(), { outbound_integration: outbound }).subscribe({
+      next: () => this.notify.success('Deploy key installed'),
+      error: (error: unknown) => this.notify.failure("Couldn't install deploy key", error),
+    });
   }
 
   save(): void {

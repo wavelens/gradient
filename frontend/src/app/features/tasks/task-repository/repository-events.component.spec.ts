@@ -109,7 +109,7 @@ describe('RepositoryEventsComponent', () => {
     const updateRepository = vi.fn(() => of(repo()));
     const installWebhook = vi.fn(() => throwError(() => new ApiError('403 token lacks admin rights', 502)));
     const fixture = render(repo(), {
-      tasks: { updateRepository, installWebhook },
+      tasks: { updateRepository, installWebhook, installDeployKey: () => of('acme/app') },
       integrations: { connectGitHost, listIntegrationDeliveries: () => of([]) },
     });
     const comp = fixture.componentInstance;
@@ -133,11 +133,12 @@ describe('RepositoryEventsComponent', () => {
     }));
   });
 
-  it('installs the webhook through the Git host and skips the manual secret', () => {
+  it('installs the webhook and deploy key through the Git host and skips the manual secret', () => {
     const connectGitHost = vi.fn(() => of({ inbound: { ...inbound, generated_secret: 's3cret' }, outbound: { ...outbound } }));
     const installWebhook = vi.fn(() => of('acme/app'));
+    const installDeployKey = vi.fn(() => of('acme/app'));
     const fixture = render(repo(), {
-      tasks: { updateRepository: () => of(repo()), installWebhook },
+      tasks: { updateRepository: () => of(repo()), installWebhook, installDeployKey },
       integrations: { connectGitHost, listIntegrationDeliveries: () => of([]) },
     });
     const comp = fixture.componentInstance;
@@ -145,6 +146,7 @@ describe('RepositoryEventsComponent', () => {
     comp.connectForm.access_token = 'token';
     comp.connect();
     expect(installWebhook).toHaveBeenCalled();
+    expect(installDeployKey).toHaveBeenCalledWith('acme', 'app', { outbound_integration: 'out1' });
     expect(comp.showSecret()).toBe(false);
   });
 
