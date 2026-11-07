@@ -21,11 +21,11 @@ import {
   TableComponent,
 } from '@gradient/ui/ui';
 import { formatBytes, formatDuration, formatMegabytes, serverTime } from '@shared/text';
-import { LabelHelpComponent } from '@shared/ui';
+import { LabelHelpComponent, WaitingNoticeComponent } from '@shared/ui';
 import { JobTimelineComponent } from './job-timeline.component';
 import { BUILD_KIND, EXEC_KIND, jobKindName, jobSubjectLabel } from '../job-kind';
 import { abortExecJobConfirm } from '@features/exec-jobs/exec-job-status';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, waitingAccessFrom } from '@shared/evaluation';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import {
   PendingJobSummary,
@@ -46,7 +46,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent],
+  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent, WaitingNoticeComponent],
   template: `
     <div class="top-row phone-icon-buttons">
       <a [routerLink]="links.board('live')" class="back" (click)="goBack($event)">
@@ -336,8 +336,24 @@ interface RuleRow {
           <h1>Pending job</h1>
         </div>
       </header>
-      <p class="muted">Still queued - limited details are available until the job is assigned.</p>
+      @if (p.waiting_reason && p.project_name) {
+        <gr-waiting-notice banner [reason]="p.waiting_reason" [project]="p.project_name" [access]="pendingAccess()" />
+      } @else {
+        <p class="muted">The job can stay in the queue until a matching worker is free. The worker and score appear after assignment.</p>
+      }
       <section class="ids">
+        @if (p.project_name; as project) {
+          <div>
+            <span class="label">Project</span>
+            <a class="project-link" [routerLink]="links.project(project)">{{ project }}</a>
+          </div>
+          @if (p.task; as task) {
+            <div>
+              <span class="label">Task</span>
+              <a [routerLink]="links.task(project, task, p.evaluation_id)">{{ task }}</a>
+            </div>
+          }
+        }
         @if (p.exec_job; as ex) {
           <div>
             <span class="label">Exec job</span>
@@ -346,7 +362,14 @@ interface RuleRow {
         } @else if (p.subject) {
           <div><span class="label">{{ p.kind === 1 ? 'Derivation' : 'Repository' }}</span><span class="mono">{{ p.subject }}</span></div>
         }
-        <div><span class="label">Evaluation</span><span class="mono">{{ p.evaluation_id }}</span></div>
+        <div>
+          <span class="label">Evaluation</span>
+          @if (p.project_name; as project) {
+            <a class="mono" [routerLink]="links.evaluationLog(project, p.evaluation_id)">{{ p.evaluation_id }}</a>
+          } @else {
+            <span class="mono">{{ p.evaluation_id }}</span>
+          }
+        </div>
         @if (p.build_id) {
           <div><span class="label">Build</span><span class="mono">{{ p.build_id }}</span></div>
         }
@@ -426,6 +449,9 @@ export class BoardJobDetailComponent implements OnInit {
     event.preventDefault();
     this.location.back();
   }
+
+  pendingAccess = computed(() =>
+    waitingAccessFrom(this.pending()?.permissions ?? [], false, this.auth.user()?.superuser === true));
 
   canAbort = computed(() => {
     const j = this.job();

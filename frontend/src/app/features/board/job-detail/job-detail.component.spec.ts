@@ -140,6 +140,7 @@ const PENDING: PendingJobSummary = {
   queued_at: '2026-06-08T00:00:00Z',
   dependency_count: 3,
   subject: 'hello-2.12.1',
+  permissions: [],
 };
 
 function setup(board: Partial<BoardService> = {}, id = 'job-1'): ComponentFixture<BoardJobDetailComponent> {
@@ -306,6 +307,31 @@ describe('BoardJobDetailComponent - pending fallback', () => {
     ).nativeElement as HTMLElement;
     expect(el.textContent).toContain('Pending job');
     expect(el.textContent).not.toContain('Score breakdown');
+  });
+
+  it('explains why a pending evaluation waits and links its project, task and evaluation', () => {
+    const pending: PendingJobSummary = {
+      ...PENDING,
+      kind: 0,
+      build_id: null,
+      project_name: 'sandbox',
+      task: 'oktask',
+      waiting_reason: { kind: 'no_cache' },
+      permissions: ['manageSubscriptions'],
+    };
+    const el = setup(
+      { getJob: () => throwError(() => new Error('not found')), getPendingJobs: () => of({ jobs: [pending], other_pending: 0 }) },
+      'e1',
+    ).nativeElement as HTMLElement;
+
+    expect(el.querySelector('gr-waiting-notice')?.textContent).toContain('Cache not configured');
+    const hrefs = Array.from(el.querySelectorAll('section.ids a, gr-waiting-notice a')).map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual(expect.arrayContaining([
+      '/project/sandbox',
+      '/project/sandbox/task/oktask?eval=e1',
+      '/project/sandbox/log/e1',
+      '/project/sandbox/caches',
+    ]));
   });
 
   it('shows "Job not found" when neither assigned nor pending', () => {
