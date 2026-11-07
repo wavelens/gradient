@@ -32,7 +32,7 @@ use super::refusal::ProjectRefusal;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
-use crate::scope::{Member, ProjectScope};
+use crate::scope::{Member, ProjectScope, Requires, can};
 
 fn default_true() -> bool {
     true
@@ -249,7 +249,7 @@ pub(crate) async fn reauth_project_workers(db: &WebDb, scheduler: &Scheduler, pr
     responses((status = OK, description = "Worker registered", body = RegisterWorkerResponse), WebError)
 )]
 pub async fn post_project_worker(
-    ProjectScope { project, user, .. }: ProjectScope<Member>,
+    ProjectScope { project, user, .. }: ProjectScope<Requires<can::ManageWorkers>>,
     state: State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
@@ -559,7 +559,7 @@ fn worker_test_result(connected: bool, authorized_for_project: bool) -> (bool, S
 pub async fn post_project_worker_test(
     ProjectScope {
         project, params, ..
-    }: ProjectScope<Member>,
+    }: ProjectScope<Requires<can::ManageWorkers>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<WorkerTestResponse>>> {
     let worker_id: String = params.param("worker_id")?;
@@ -595,7 +595,7 @@ pub async fn patch_project_worker(
         db,
         params,
         ..
-    }: ProjectScope<Member>,
+    }: ProjectScope<Requires<can::ManageWorkers>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -681,7 +681,7 @@ pub async fn delete_project_worker(
         db,
         params,
         ..
-    }: ProjectScope<Member>,
+    }: ProjectScope<Requires<can::ManageWorkers>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let worker_id: String = params.param("worker_id")?;

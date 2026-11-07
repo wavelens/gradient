@@ -10,7 +10,7 @@ use gradient_entity::team_user::TeamRole;
 use gradient_entity::{project_user, team, team_project, team_worker, worker_registration};
 use gradient_fixtures::ids::{project_id, team_id, user_id};
 use gradient_fixtures::mock::exec_ok;
-use gradient_fixtures::rows::{project, team, team_member};
+use gradient_fixtures::rows::{admin_role, project, team, team_member};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, signed_in};
 use serde_json::{Value, json};
@@ -76,6 +76,7 @@ async fn a_project_cannot_change_a_team_worker() {
             user: user_id(),
             role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
         }]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![team_worker_row()]]);
     let server = make_test_server(db.into_connection());
 
