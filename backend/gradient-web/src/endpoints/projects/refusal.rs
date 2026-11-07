@@ -56,6 +56,10 @@ pub(crate) enum ProjectRefusal {
         "Inbound integrations need a webhook secret. Enter a new secret instead of clearing the current secret."
     )]
     WebhookSecretRequired,
+    #[error("GitHub repositories connect through a GitHub App, not a token")]
+    GitHubNeedsApp,
+    #[error("endpoint_url must be an http or https URL")]
+    InvalidEndpointUrl,
 }
 
 impl Refusal for ProjectRefusal {
@@ -72,7 +76,9 @@ impl Refusal for ProjectRefusal {
             | Self::InvalidSecretName { .. }
             | Self::EmptySecretValue
             | Self::SecretValueTooLarge
-            | Self::WebhookSecretRequired => RefusalStatus::BadRequest,
+            | Self::WebhookSecretRequired
+            | Self::GitHubNeedsApp
+            | Self::InvalidEndpointUrl => RefusalStatus::BadRequest,
             Self::IntegrationNameTaken { .. }
             | Self::WorkerIdBelongsToTeamWorker
             | Self::WorkerIdRegistered

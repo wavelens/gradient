@@ -73,7 +73,7 @@ describe('ActionFormComponent', () => {
     const opts = fixture.componentInstance.typeOptions().map((o) => o.value);
     expect(opts).not.toContain('send_mail');
     expect(opts).toContain('send_web_request');
-    expect(opts).toContain('git_host_status_report');
+    expect(opts).not.toContain('git_host_status_report');
   });
 
   it('generateToken populates a gat_-prefixed string of reasonable length', () => {

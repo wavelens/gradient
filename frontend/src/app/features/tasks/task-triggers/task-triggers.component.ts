@@ -27,6 +27,7 @@ import {
   PageLayoutComponent,
   SelectComponent,
   TooltipDirective,
+  MessageBannerComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
@@ -41,6 +42,7 @@ import {
 } from '@core/models';
 import { relativeTime } from '@shared/text';
 import { links } from '@shared/routing';
+import { splitList } from '@shared/forms';
 
 interface Option<T> {
   label: string;
@@ -82,6 +84,7 @@ const DEFAULT_FORM: TriggerFormState = {
   selector: 'app-task-triggers',
   standalone: true,
   imports: [
+    MessageBannerComponent,
     LabelHelpComponent,
     CommonModule,
     RouterModule,
@@ -162,6 +165,7 @@ export class TaskTriggersComponent implements OnInit {
     { label: 'Pull Request (reporter)', value: 'reporter_pull_request' },
     { label: 'Time (cron)', value: 'time' },
   ];
+  readonly createTypeOptions = this.typeOptions.filter((o) => o.value === 'polling' || o.value === 'time');
 
   integrationOptions = computed<Option<string>[]>(() => {
     const opts: Option<string>[] = [{ label: '- select integration -', value: '' }];
@@ -287,8 +291,8 @@ export class TaskTriggersComponent implements OnInit {
       }
       case 'reporter_push': {
         const cfg: any = { type: 'reporter_push', integration_id: this.form.integration_id };
-        const branches = this.splitList(this.form.branches);
-        const tags = this.splitList(this.form.tags);
+        const branches = splitList(this.form.branches);
+        const tags = splitList(this.form.tags);
         if (branches.length) cfg.branches = branches;
         if (tags.length) cfg.tags = tags;
         if (this.form.releases_only) cfg.releases_only = true;
@@ -297,8 +301,8 @@ export class TaskTriggersComponent implements OnInit {
       }
       case 'reporter_pull_request': {
         const cfg: any = { type: 'reporter_pull_request', integration_id: this.form.integration_id };
-        const branches = this.splitList(this.form.branches);
-        const actions = this.splitList(this.form.actions);
+        const branches = splitList(this.form.branches);
+        const actions = splitList(this.form.actions);
         if (branches.length) cfg.branches = branches;
         cfg.actions = actions;
         cfg.require_approval = this.form.require_approval !== false;
@@ -469,10 +473,4 @@ export class TaskTriggersComponent implements OnInit {
     return `${Math.floor(m / 60)}h ${m % 60}min`;
   }
 
-  private splitList(raw: string): string[] {
-    return raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-  }
 }

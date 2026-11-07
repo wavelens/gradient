@@ -34,9 +34,8 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { repositoryUrlError } from '@shared/text';
 import { WritableDirective, ManagedDisableDirective, accessDisabledReason } from '@shared/access';
-import { fieldChecks, firstFieldError, unsavedChanges } from '@shared/forms';
+import { fieldChecks, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { TaskResponse, ConcurrencyPolicy, PatchTaskRequest } from '@core/models';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -45,7 +44,6 @@ import { links } from '@shared/routing';
 interface TaskForm {
   display_name: string;
   description: string;
-  repository: string;
   wildcard: string;
   keep_evaluations: number | null;
   concurrency: ConcurrencyPolicy;
@@ -113,7 +111,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   transferProjectName = '';
   transferError = signal<string | null>(null);
   transferProjectSuggestions = signal<string[]>([]);
-  sshKey = signal('');
 
   projectName = '';
   taskName = '';
@@ -122,7 +119,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   formData: TaskForm = {
     display_name: '',
     description: '',
-    repository: '',
     wildcard: '',
     keep_evaluations: 30,
     concurrency: 'auto',
@@ -150,7 +146,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     const access = this.access();
     if (access.managed || !access.canEdit) return accessDisabledReason(access);
     if (!this.unsaved.changed()) return 'There are no changes to save.';
-    if (this.displayNameError || this.repositoryError || this.keepEvaluationsError) return 'Fix the marked fields to save.';
+    if (this.displayNameError || this.keepEvaluationsError) return 'Fix the marked fields to save.';
     return null;
   }
 
@@ -170,10 +166,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     this.loadTask();
-    this.projectsService.getSSHKey(this.projectName).subscribe({
-      next: (key) => this.sshKey.set(key),
-      error: (error) => console.error('Failed to load SSH key:', error),
-    });
   }
 
   loadTask(): void {
@@ -190,7 +182,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
         this.formData = {
           display_name: task.display_name,
           description: task.description,
-          repository: task.repository,
           wildcard: task.wildcard,
           keep_evaluations: task.keep_evaluations,
           concurrency: task.concurrency,
@@ -208,45 +199,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
       error: (error: unknown) => {
         this.loadError.set(error);
         this.loading.set(false);
-      },
-    });
-  }
-
-  repoCheck = signal<{ url: string; ok: boolean; message: string } | null>(null);
-  checkingRepo = signal(false);
-
-  private currentRepoCheck(): { ok: boolean; message: string } | null {
-    const check = this.repoCheck();
-    return check?.url === this.formData.repository.trim() ? check : null;
-  }
-
-  get repositoryError(): string | null {
-    const url = this.formData.repository.trim();
-    if (!url) return 'Enter the repository URL.';
-    const check = this.currentRepoCheck();
-    return (
-      firstFieldError(url, fieldChecks.remoteRepository, (value) => repositoryUrlError(String(value))) ??
-      (check && !check.ok ? check.message : null)
-    );
-  }
-
-  get repositoryReachable(): string | null {
-    const check = this.currentRepoCheck();
-    return check?.ok ? check.message : null;
-  }
-
-  testConnection(): void {
-    const url = this.formData.repository.trim();
-    this.checkingRepo.set(true);
-    this.repoCheck.set(null);
-    this.tasksService.checkRepository(this.projectName, this.taskName, url).subscribe({
-      next: (head) => {
-        this.checkingRepo.set(false);
-        this.repoCheck.set({ url, ok: true, message: `Reachable, head at ${head.slice(0, 12)}` });
-      },
-      error: (error) => {
-        this.checkingRepo.set(false);
-        this.repoCheck.set({ url, ok: false, message: apiErrorMessage(error, 'Repository unreachable.') });
       },
     });
   }

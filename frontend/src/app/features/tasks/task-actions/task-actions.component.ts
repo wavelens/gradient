@@ -24,6 +24,7 @@ import {
   LoadStateComponent,
   PageLayoutComponent,
   BadgeSeverity,
+  MessageBannerComponent,
 } from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccessTo } from '@core/resolvers/inject-access';
@@ -50,6 +51,7 @@ interface IntegrationOption {
   selector: 'app-task-actions',
   standalone: true,
   imports: [
+    MessageBannerComponent,
     CommonModule,
     RouterModule,
     FormsModule,

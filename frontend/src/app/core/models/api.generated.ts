@@ -567,6 +567,19 @@ export interface ComparedEvaluation {
 
 export type ConcurrencyPolicy = "hard_abort" | "soft_abort" | "all" | "skip" | "auto";
 
+export interface ConnectGitHostRequest {
+  name: IndexName;
+  display_name?: string | null;
+  git_host_type: string;
+  endpoint_url: string;
+  access_token?: string | null;
+}
+
+export interface ConnectGitHostResponse {
+  inbound: IntegrationResponse;
+  outbound?: IntegrationResponse | null;
+}
+
 export interface ConnectedLoginProvider {
   id: string;
   label: string;
@@ -2080,10 +2093,28 @@ export interface PublicProjectSummary {
   created_at: string;
 }
 
+export interface PullRequestBuild {
+  trigger_id: TaskTriggerId;
+  integration_id: IntegrationId;
+  active: boolean;
+  branches: string[];
+  require_approval: boolean;
+  last_fired_at?: string | null;
+}
+
 export interface PullRequestResponse {
   url: string;
   number: number;
   branch: string;
+}
+
+export interface PushBuild {
+  trigger_id: TaskTriggerId;
+  integration_id: IntegrationId;
+  active: boolean;
+  branches: string[];
+  tags: string[];
+  last_fired_at?: string | null;
 }
 
 export interface PutProjectSecretRequest {
@@ -2170,6 +2201,18 @@ export interface RepositoryFetchStatus {
   ok_at?: string | null;
   failed: boolean;
   error?: string | null;
+}
+
+export interface RepositoryIntegration {
+  id: IntegrationId;
+  name: string;
+  display_name: string;
+  kind: string;
+  git_host_type: string;
+  serves_repository: boolean;
+  webhook_url?: string | null;
+  has_secret?: boolean | null;
+  has_access_token?: boolean | null;
 }
 
 export type RequestKind = "project" | "cache";
@@ -2371,6 +2414,20 @@ export interface StartedEvaluationView {
   created_at: string;
 }
 
+export interface StatusReport {
+  action_id: TaskActionId;
+  integration_id: IntegrationId;
+  active: boolean;
+  last_delivery?: StatusReportDelivery | null;
+}
+
+export interface StatusReportDelivery {
+  success: boolean;
+  response_status?: number | null;
+  error_message?: string | null;
+  delivered_at: string;
+}
+
 export interface StorageMetricPoint {
   time: string;
   packages: number;
@@ -2445,6 +2502,20 @@ export interface TaskMetricPoint {
 export interface TaskMetricsResponse {
   keep_evaluations: number;
   points: TaskMetricPoint[];
+}
+
+export interface TaskRepositoryResponse {
+  repository: string;
+  uses_ssh: boolean;
+  deploy_key?: string | null;
+  fetch?: RepositoryFetchStatus | null;
+  build_on_push?: PushBuild | null;
+  build_on_pull_request?: PullRequestBuild | null;
+  last_event?: IncomingWebhookDeliveryResponse | null;
+  report_status?: StatusReport | null;
+  integrations: RepositoryIntegration[];
+  can_edit: boolean;
+  can_manage_integrations: boolean;
 }
 
 export interface TaskResponse {
@@ -2673,6 +2744,18 @@ export interface UpdateActionRequest {
 export interface UpdateFlakeInputOverrideRequest {
   input_name?: string | null;
   url?: string | null;
+}
+
+export interface UpdateTaskRepositoryRequest {
+  inbound_integration?: IntegrationId | null;
+  build_on_push?: boolean;
+  push_branches?: string[];
+  push_tags?: string[];
+  build_on_pull_request?: boolean;
+  pull_request_branches?: string[];
+  require_approval?: boolean;
+  outbound_integration?: IntegrationId | null;
+  report_status?: boolean;
 }
 
 export interface UpdateTriggerRequest {

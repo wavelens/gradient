@@ -1,0 +1,53 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-settings-section title="Repository access">
+  @if (editing()) {
+    <gr-form-field label="Repository URL" for="repo-url" required [invalid]="!!urlError()" [error]="urlError() ?? ''">
+      <input grInput id="repo-url" [ngModel]="draftUrl()" (ngModelChange)="draftUrl.set($event)" (keyup.enter)="saveUrl()" />
+    </gr-form-field>
+    <div class="gr-form-actions">
+      <button grButton label="Cancel" severity="secondary" (click)="editing.set(false)" [disabled]="saving()"></button>
+      <button grButton label="Save" icon="check" (click)="saveUrl()" [loading]="saving()" [disabled]="saving() || !!urlError()"></button>
+    </div>
+  } @else {
+    <gr-form-field label="Repository URL">
+      <gr-copy-field [value]="state().repository" />
+    </gr-form-field>
+  }
+
+  <app-repository-fetch-banner [status]="state().fetch" [canEdit]="state().can_edit" />
+  @if (fetchOk(); as fetch) {
+    <p class="text-secondary" role="status" data-testid="fetch-ok">Gradient can fetch the repository. Verified {{ since(fetch.checked_at) }}</p>
+  } @else if (!state().fetch) {
+    <p class="text-secondary" role="status">No access test yet. Add the deploy key, then test access.</p>
+  }
+  @if (testError(); as error) {
+    <p class="text-secondary" role="alert">{{ error }}</p>
+  }
+
+  @if (state().deploy_key; as key) {
+    <gr-form-field label="Deploy key" hint="Gradient can clone the repository with the project SSH key. Add this key to the repository as a read-only deploy key.">
+      <gr-copy-field multiline [rows]="3" [value]="key" />
+    </gr-form-field>
+  } @else {
+    <p class="text-secondary">Public HTTPS repositories need no key.</p>
+  }
+
+  @if (state().can_edit) {
+    <div class="gr-form-actions">
+      @if (links(); as link) {
+        @if (state().deploy_key) {
+          <a grButton label="Open settings for the deploy key" icon="open_in_new" severity="secondary" [href]="link.deployKeys" target="_blank" rel="noopener noreferrer"></a>
+        }
+      }
+      @if (!editing()) {
+        <button grButton label="Edit URL" icon="edit" severity="secondary" (click)="startEdit()"></button>
+      }
+      <button grButton label="Test access" icon="lan" (click)="testAccess()" [loading]="testing()" [disabled]="testing()"></button>
+    </div>
+  }
+</gr-settings-section>

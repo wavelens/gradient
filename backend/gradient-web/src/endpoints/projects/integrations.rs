@@ -172,6 +172,23 @@ impl From<MIntegration> for IntegrationSummaryResponse {
     }
 }
 
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
+pub struct ConnectGitHostRequest {
+    pub name: IntegrationName,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    pub git_host_type: String,
+    pub endpoint_url: String,
+    #[serde(default)]
+    pub access_token: Option<String>,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct ConnectGitHostResponse {
+    pub inbound: IntegrationResponse,
+    pub outbound: Option<IntegrationResponse>,
+}
+
 #[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct IncomingWebhookDeliveryResponse {
     pub id: IncomingWebhookDeliveryId,
@@ -459,6 +476,113 @@ fn new_webhook_secret() -> String {
     let mut raw = [0u8; 32];
     rand::rng().fill(&mut raw);
     hex::encode(raw)
+}
+
+#[utoipa::path(
+    post,
+    path = "/projects/{project}/integrations/connect",
+    operation_id = "connectGitHost",
+    tag = "integrations",
+    summary = "Connect a Git host",
+    description = "Create a webhook receiver for a Gitea, Forgejo, or GitLab host and a status reporter with `access_token` present, in one call. Both integrations share `name`. Fields `inbound.generated_secret` and `inbound.webhook_url` in the response contain the generated webhook secret once and the address to enter into the Git host.",
+    params(ProjectPath),
+    request_body = ConnectGitHostRequest,
+    responses((status = OK, description = "Created Integration", body = ConnectGitHostResponse), WebError)
+)]
+pub async fn post_connect_git_host(
+    ProjectScope { project, user, .. }: ProjectScope<RequiresUnmanaged<can::ManageIntegrations>>,
+    state: State<Arc<ServerState>>,
+    JsonBody(body): JsonBody<ConnectGitHostRequest>,
+) -> WebResult<Json<BaseResponse<ConnectGitHostResponse>>> {
+    let git_host = parse_git_host(&body.git_host_type)?;
+    if git_host == GitHostType::GitHub {
+        return Err(ProjectRefusal::GitHubNeedsApp.into());
+    }
+    let endpoint_url = body.endpoint_url.trim().to_string();
+    url::Url::parse(&endpoint_url)
+        .ok()
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .ok_or(ProjectRefusal::InvalidEndpointUrl)?;
+    let name = body.name.into_inner();
+    let display_name = body
+        .display_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&name)
+        .to_string();
+    let token = body
+        .access_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+
+    for kind in [IntegrationKind::Inbound, IntegrationKind::Outbound] {
+        if gradient_db::integrations::by_name(&state.web_db, project.id, kind, &name)
+            .await?
+            .is_some()
+        {
+            return Err(WebError::already_exists(Resource::IntegrationName));
+        }
+    }
+
+    let crypt_file = &state.config.secrets.crypt_file;
+    let secret = new_webhook_secret();
+    let row = |kind, secret: Option<String>, access_token: Option<String>| MIntegration {
+        id: IntegrationId::now_v7(),
+        project: project.id,
+        name: name.clone(),
+        display_name: display_name.clone(),
+        kind,
+        git_host_type: git_host,
+        secret,
+        endpoint_url: Some(endpoint_url.clone()),
+        access_token,
+        allowed_ips: None,
+        github_installation: None,
+        created_by: user.id,
+        created_at: gradient_types::now(),
+        managed: false,
+    };
+    let inbound_row = row(
+        IntegrationKind::Inbound,
+        Some(encrypt_secret_with_file(crypt_file, &secret).context("encrypt secret")?),
+        None,
+    );
+    let outbound_row = match token {
+        Some(t) => Some(row(
+            IntegrationKind::Outbound,
+            None,
+            Some(encrypt_secret_with_file(crypt_file, t).context("encrypt token")?),
+        )),
+        None => None,
+    };
+
+    let txn = state.web_db.inner().begin().await?;
+    let inbound = gradient_db::rows::insert::<EIntegration, _>(&txn, inbound_row)
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?;
+    let outbound = match outbound_row {
+        Some(r) => Some(
+            gradient_db::rows::insert::<EIntegration, _>(&txn, r)
+                .await
+                .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?,
+        ),
+        None => None,
+    };
+    txn.commit().await?;
+
+    let base = WebhookBase {
+        serve_url: &state.config.server.serve_url,
+        project: &project.name,
+    };
+    let mut inbound = integration_response(&state.web_db, &base, inbound).await?;
+    inbound.generated_secret = Some(secret);
+    let outbound = match outbound {
+        Some(o) => Some(integration_response(&state.web_db, &base, o).await?),
+        None => None,
+    };
+    Ok(ok_json(ConnectGitHostResponse { inbound, outbound }))
 }
 
 #[utoipa::path(

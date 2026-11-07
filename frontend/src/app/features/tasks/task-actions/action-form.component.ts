@@ -184,6 +184,7 @@ export class ActionFormComponent implements OnChanges {
       ] as ActionType[]
     )
       .filter((value) => value !== 'send_mail' || this.smtpEnabled())
+      .filter((value) => value !== 'git_host_status_report' || this.existing()?.action_type === value)
       .map((value) => ({ label: ACTION_TYPE_LABEL[value], value })),
   );
 

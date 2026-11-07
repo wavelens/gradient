@@ -7,7 +7,7 @@
 import { PRIMARY_OUTLET, Params, UrlSegment, UrlSegmentGroup, UrlTree } from '@angular/router';
 
 export type ProjectPage = 'settings' | 'members' | 'workers' | 'integrations' | 'secrets' | 'webhooks' | 'caches';
-export type TaskPage = 'settings' | 'triggers' | 'actions' | 'flake-inputs' | 'metrics';
+export type TaskPage = 'settings' | 'repository' | 'triggers' | 'actions' | 'flake-inputs' | 'metrics';
 export type CachePage = 'settings' | 'upstream-caches' | 'nars' | 'members-roles' | 'subscriptions' | 'webhooks';
 export type TeamPage = 'settings' | 'webhooks';
 export type SettingsPage = 'profile' | 'keys' | 'ssh-keys' | 'sessions' | 'invites';

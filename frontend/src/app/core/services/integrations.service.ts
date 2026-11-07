@@ -8,6 +8,8 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
+  ConnectGitHostRequest,
+  ConnectGitHostResponse,
   IncomingWebhookDeliveryResponse,
   IntegrationResponse,
   IntegrationSummaryResponse,
@@ -32,6 +34,10 @@ export class IntegrationsService {
 
   createProjectIntegration(project: string, body: CreateIntegrationRequest): Observable<IntegrationResponse> {
     return this.api.put<IntegrationResponse>(`projects/${project}/integrations`, body);
+  }
+
+  connectGitHost(project: string, body: ConnectGitHostRequest): Observable<ConnectGitHostResponse> {
+    return this.api.post<ConnectGitHostResponse>(`projects/${project}/integrations/connect`, body);
   }
 
   getProjectIntegration(project: string, id: string): Observable<IntegrationResponse> {

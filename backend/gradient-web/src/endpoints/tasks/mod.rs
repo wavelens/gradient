@@ -12,6 +12,7 @@ pub mod management;
 pub mod metrics;
 pub mod pull_requests;
 mod refusal;
+pub mod repository;
 pub mod triggers;
 
 pub use self::evaluations::{

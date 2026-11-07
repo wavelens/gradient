@@ -100,10 +100,10 @@ describe('TaskActionsComponent', () => {
     expect(findByText(fixture.nativeElement, 'test')).toBeNull();
   });
 
-  it('links to the project integrations', () => {
+  it('links to the Repository page for status reports', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
-    const link = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Integrations'));
-    expect(link?.getAttribute('href')).toBe('/project/acme/integrations');
+    const link = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Repository'));
+    expect(link?.getAttribute('href')).toMatch(/\/project\/acme\/task\/[^/]+\/repository$/);
   });
 
   it('shows but disables write buttons under state-managed access', () => {

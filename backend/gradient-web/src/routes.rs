@@ -162,6 +162,11 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 ))
                 .routes(routes!(projects::integrations::get_integration_summaries))
                 .routes(routes!(projects::integrations::get_integration_deliveries))
+                .routes(routes!(projects::integrations::post_connect_git_host))
+                .routes(routes!(
+                    tasks::repository::get_task_repository,
+                    tasks::repository::put_task_repository
+                ))
                 .routes(routes!(
                     projects::integrations::get_integration,
                     projects::integrations::patch_integration,

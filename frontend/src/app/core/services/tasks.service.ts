@@ -20,6 +20,8 @@ import {
   EntryPointMetricsResponse,
   MakeTaskRequest,
   PatchTaskRequest,
+  TaskRepositoryResponse,
+  UpdateTaskRepositoryRequest,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -99,6 +101,14 @@ export class TasksService {
   checkRepository(project: string, task: string, repository: string): Observable<string> {
     const body: CheckRepositoryRequest = { repository };
     return this.api.post<string>(`tasks/${project}/${task}/check-repository`, body);
+  }
+
+  getRepository(project: string, task: string): Observable<TaskRepositoryResponse> {
+    return this.api.get<TaskRepositoryResponse>(`tasks/${project}/${task}/repository`);
+  }
+
+  updateRepository(project: string, task: string, body: UpdateTaskRepositoryRequest): Observable<TaskRepositoryResponse> {
+    return this.api.put<TaskRepositoryResponse>(`tasks/${project}/${task}/repository`, body);
   }
 
   deactivateTask(project: string, task: string): Observable<string> {

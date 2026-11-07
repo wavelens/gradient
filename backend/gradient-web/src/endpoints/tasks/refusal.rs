@@ -80,6 +80,14 @@ pub(crate) enum TaskRefusal {
     UnknownEvaluationStatus { name: String },
     #[error("the task to start belongs to another project")]
     StartTaskInOtherProject,
+    #[error("this integration not part of this project, or wrong direction")]
+    RepositoryIntegrationMismatch,
+    #[error(
+        "builds on push or pull request need an integration to receive webhooks from the Git host"
+    )]
+    RepositoryInboundRequired,
+    #[error("commit status reports need an integration to send reports to the Git host")]
+    RepositoryOutboundRequired,
 }
 
 impl Refusal for TaskRefusal {
@@ -102,7 +110,10 @@ impl Refusal for TaskRefusal {
             | Self::CommitLookupFailed { .. }
             | Self::EvaluationInProgress
             | Self::AttrNotConcrete
-            | Self::UnknownEvaluationStatus { .. } => RefusalStatus::BadRequest,
+            | Self::UnknownEvaluationStatus { .. }
+            | Self::RepositoryIntegrationMismatch
+            | Self::RepositoryInboundRequired
+            | Self::RepositoryOutboundRequired => RefusalStatus::BadRequest,
             Self::TransferNotPermitted => RefusalStatus::Forbidden,
             Self::ActionNameTaken | Self::DefaultTriggerDeletion => RefusalStatus::Conflict,
             Self::TeamWithoutProjectAccess { .. }

@@ -7199,6 +7199,44 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/projects/{project}/integrations/connect:
+    post:
+      tags:
+      - integrations
+      summary: Connect a Git host
+      description: Create a webhook receiver for a Gitea, Forgejo, or GitLab host and a status reporter with `access_token` present, in one call. Both integrations share `name`. Fields `inbound.generated_secret` and `inbound.webhook_url` in the response contain the generated webhook secret once and the address to enter into the Git host.
+      operationId: connectGitHost
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectGitHostRequest'
+        required: true
+      responses:
+        '200':
+          description: Created Integration
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/ConnectGitHostResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/projects/{project}/integrations/summary:
     get:
       tags:
@@ -10539,6 +10577,85 @@ paths:
                     type: boolean
                   message:
                     $ref: '#/components/schemas/PullRequestResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/tasks/{project}/{task}/repository:
+    get:
+      tags:
+      - tasks
+      summary: Get repository connection
+      description: Description Retrieval
+      operationId: getTaskRepository
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Repository connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/TaskRepositoryResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - tasks
+      summary: Update repository connection
+      description: Configure push and pull request builds and commit status reports for a task in one call. Gradient can sync one push trigger, one pull request trigger and one status report action per task with the request. Turn off a build or status report to disable the existing row and keep the settings. Callers need permission to manage triggers and actions. Reject tasks under state management.
+      operationId: updateTaskRepository
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRepositoryRequest'
+        required: true
+      responses:
+        '200':
+          description: Repository connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/TaskRepositoryResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -15549,6 +15666,38 @@ components:
       - all
       - skip
       - auto
+    ConnectGitHostRequest:
+      type: object
+      required:
+      - name
+      - git_host_type
+      - endpoint_url
+      properties:
+        name:
+          $ref: '#/components/schemas/IndexName'
+        display_name:
+          type:
+          - string
+          - 'null'
+        git_host_type:
+          type: string
+        endpoint_url:
+          type: string
+        access_token:
+          type:
+          - string
+          - 'null'
+    ConnectGitHostResponse:
+      type: object
+      required:
+      - inbound
+      properties:
+        inbound:
+          $ref: '#/components/schemas/IntegrationResponse'
+        outbound:
+          oneOf:
+          - $ref: '#/components/schemas/IntegrationResponse'
+          - type: 'null'
     ConnectedLoginProvider:
       type: object
       required:
@@ -19988,6 +20137,32 @@ components:
         created_at:
           type: string
           format: date-time
+    PullRequestBuild:
+      type: object
+      required:
+      - trigger_id
+      - integration_id
+      - active
+      - branches
+      - require_approval
+      properties:
+        trigger_id:
+          $ref: '#/components/schemas/TaskTriggerId'
+        integration_id:
+          $ref: '#/components/schemas/IntegrationId'
+        active:
+          type: boolean
+        branches:
+          type: array
+          items:
+            type: string
+        require_approval:
+          type: boolean
+        last_fired_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
     PullRequestResponse:
       type: object
       required:
@@ -20002,6 +20177,34 @@ components:
           format: int64
         branch:
           type: string
+    PushBuild:
+      type: object
+      required:
+      - trigger_id
+      - integration_id
+      - active
+      - branches
+      - tags
+      properties:
+        trigger_id:
+          $ref: '#/components/schemas/TaskTriggerId'
+        integration_id:
+          $ref: '#/components/schemas/IntegrationId'
+        active:
+          type: boolean
+        branches:
+          type: array
+          items:
+            type: string
+        tags:
+          type: array
+          items:
+            type: string
+        last_fired_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
     PutProjectSecretRequest:
       type: object
       required:
@@ -20210,6 +20413,40 @@ components:
         error:
           type:
           - string
+          - 'null'
+    RepositoryIntegration:
+      type: object
+      required:
+      - id
+      - name
+      - display_name
+      - kind
+      - git_host_type
+      - serves_repository
+      properties:
+        id:
+          $ref: '#/components/schemas/IntegrationId'
+        name:
+          type: string
+        display_name:
+          type: string
+        kind:
+          type: string
+        git_host_type:
+          type: string
+        serves_repository:
+          type: boolean
+        webhook_url:
+          type:
+          - string
+          - 'null'
+        has_secret:
+          type:
+          - boolean
+          - 'null'
+        has_access_token:
+          type:
+          - boolean
           - 'null'
     RequestKind:
       type: string
@@ -20738,6 +20975,43 @@ components:
         created_at:
           type: string
           format: date-time
+    StatusReport:
+      type: object
+      required:
+      - action_id
+      - integration_id
+      - active
+      properties:
+        action_id:
+          $ref: '#/components/schemas/TaskActionId'
+        integration_id:
+          $ref: '#/components/schemas/IntegrationId'
+        active:
+          type: boolean
+        last_delivery:
+          oneOf:
+          - $ref: '#/components/schemas/StatusReportDelivery'
+          - type: 'null'
+    StatusReportDelivery:
+      type: object
+      required:
+      - success
+      - delivered_at
+      properties:
+        success:
+          type: boolean
+        response_status:
+          type:
+          - integer
+          - 'null'
+          format: int32
+        error_message:
+          type:
+          - string
+          - 'null'
+        delivered_at:
+          type: string
+          format: date-time
     StorageMetricPoint:
       type: object
       required:
@@ -20950,6 +21224,51 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TaskMetricPoint'
+    TaskRepositoryResponse:
+      type: object
+      required:
+      - repository
+      - uses_ssh
+      - integrations
+      - can_edit
+      - can_manage_integrations
+      properties:
+        repository:
+          type: string
+        uses_ssh:
+          type: boolean
+        deploy_key:
+          type:
+          - string
+          - 'null'
+        fetch:
+          oneOf:
+          - $ref: '#/components/schemas/RepositoryFetchStatus'
+          - type: 'null'
+        build_on_push:
+          oneOf:
+          - $ref: '#/components/schemas/PushBuild'
+          - type: 'null'
+        build_on_pull_request:
+          oneOf:
+          - $ref: '#/components/schemas/PullRequestBuild'
+          - type: 'null'
+        last_event:
+          oneOf:
+          - $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
+          - type: 'null'
+        report_status:
+          oneOf:
+          - $ref: '#/components/schemas/StatusReport'
+          - type: 'null'
+        integrations:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepositoryIntegration'
+        can_edit:
+          type: boolean
+        can_manage_integrations:
+          type: boolean
     TaskResponse:
       type: object
       required:
@@ -21595,6 +21914,37 @@ components:
           type:
           - string
           - 'null'
+    UpdateTaskRepositoryRequest:
+      type: object
+      properties:
+        inbound_integration:
+          oneOf:
+          - $ref: '#/components/schemas/IntegrationId'
+          - type: 'null'
+        build_on_push:
+          type: boolean
+        push_branches:
+          type: array
+          items:
+            type: string
+        push_tags:
+          type: array
+          items:
+            type: string
+        build_on_pull_request:
+          type: boolean
+        pull_request_branches:
+          type: array
+          items:
+            type: string
+        require_approval:
+          type: boolean
+        outbound_integration:
+          oneOf:
+          - $ref: '#/components/schemas/IntegrationId'
+          - type: 'null'
+        report_status:
+          type: boolean
     UpdateTriggerRequest:
       type: object
       properties:

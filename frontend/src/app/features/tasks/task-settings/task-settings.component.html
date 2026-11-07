@@ -30,25 +30,9 @@
       <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
     </gr-form-field>
 
-    <gr-form-field label="Repository URL" for="proj-repo" required [invalid]="!!repositoryError" [error]="repositoryError ?? ''">
-      <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path" />
-      <div class="repo-row phone-icon-buttons">
-        <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
-        <button *appWritable="access()" grButton type="button" label="Test connection" icon="lan"
-                severity="secondary" [loading]="checkingRepo()"
-                [disabled]="checkingRepo() || !formData.repository.trim()"
-                (click)="testConnection()"></button>
-      </div>
-      @if (repositoryReachable; as reachable) {
-        <span slot="hint" class="repo-reachable" role="status">{{ reachable }}</span>
-      }
+    <gr-form-field label="Repository URL">
+      <gr-copy-field [value]="proj.repository" />
     </gr-form-field>
-
-    @if (sshKey()) {
-      <gr-form-field label="Project SSH Key" for="proj-ssh-key" hint="Add it as a deploy key on the Git host to clone over SSH.">
-        <gr-copy-field inputId="proj-ssh-key" [value]="sshKey()" />
-      </gr-form-field>
-    }
 
     <gr-form-field label="Evaluation Wildcard" for="proj-wildcard">
       <gr-label-help slot="label" doc="reference/wildcards/" title="Pattern for selecting which outputs to evaluate" />
@@ -153,13 +137,17 @@
 
   <gr-settings-section title="More Settings" [card]="false">
     <gr-row-list>
+      <gr-row icon="hub" linkLabel="Repository" [link]="links.taskPage(projectName, taskName, 'repository')">
+        Repository
+        <span slot="meta">Repository URL, deploy key, builds from events on the Git host, commit status</span>
+      </gr-row>
       <gr-row icon="schedule" linkLabel="Triggers" [link]="links.taskPage(projectName, taskName, 'triggers')">
         Triggers
         <span slot="meta">Polling intervals, Git host push and pull-request events, and cron schedules</span>
       </gr-row>
       <gr-row icon="bolt" linkLabel="Actions" [link]="links.taskPage(projectName, taskName, 'actions')">
         Actions
-        <span slot="meta">Send mail, post webhooks, or report status back to the Git host</span>
+        <span slot="meta">Send mail, post webhooks, or open pull requests</span>
       </gr-row>
       <gr-row icon="share" linkLabel="Flake inputs" [link]="links.taskPage(projectName, taskName, 'flake-inputs')">
         Flake Inputs

@@ -32,7 +32,7 @@
   </div>
 
   <app-repository-fetch-banner class="pad" [status]="proj.repository_fetch" [canEdit]="proj.can_edit"
-    [fixLink]="['/project', projectName, 'task', taskName, 'settings']" />
+    [fixLink]="['/project', projectName, 'task', taskName, 'repository']" />
 
   <div class="pad task-info">
     <p class="desc">{{ proj.description || 'No description' }}</p>

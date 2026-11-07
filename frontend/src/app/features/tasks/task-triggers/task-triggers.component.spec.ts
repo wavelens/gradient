@@ -77,10 +77,15 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'fire now')).toBeNull();
   });
 
-  it('links to the project integrations even under read-only', () => {
+  it('links to the Repository page for push and pull request builds, even under read-only', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
-    const link = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Integrations'));
-    expect(link?.getAttribute('href')).toBe('/project/acme/integrations');
+    const link = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Repository'));
+    expect(link?.getAttribute('href')).toMatch(/\/project\/acme\/task\/[^/]+\/repository$/);
+  });
+
+  it('offers only polling and cron when creating a trigger', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    expect(fixture.componentInstance.createTypeOptions.map((o) => o.value)).toEqual(['polling', 'time']);
   });
 
   it('renders reporter trigger using inlined integration display_name (not raw UUID)', () => {

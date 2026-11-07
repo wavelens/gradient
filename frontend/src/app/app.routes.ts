@@ -120,6 +120,16 @@ export const routes: Routes = [
               ),
           },
           {
+            path: 'repository',
+            title: 'Task Repository',
+            canActivate: [authGuard],
+            canDeactivate: [unsavedChangesGuard],
+            loadComponent: () =>
+              import('./features/tasks/task-repository/task-repository.component').then(
+                (m) => m.TaskRepositoryComponent,
+              ),
+          },
+          {
             path: 'triggers',
             title: 'Task Triggers',
             canActivate: [authGuard],

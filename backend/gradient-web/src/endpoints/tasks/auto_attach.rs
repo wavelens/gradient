@@ -52,6 +52,17 @@ fn infer_git_host(host: &str, integrations: &[MIntegration]) -> Option<GitHostTy
     })
 }
 
+pub(crate) fn integration_serves_repository(
+    repo: &str,
+    integration: &MIntegration,
+    integrations: &[MIntegration],
+) -> bool {
+    url_host(repo).is_some_and(|host| {
+        let inferred = infer_git_host(&host, integrations);
+        integration_matches(integration, &host, inferred)
+    })
+}
+
 fn integration_matches(i: &MIntegration, host: &str, inferred: Option<GitHostType>) -> bool {
     if let Some(endpoint) = &i.endpoint_url {
         return url_host(endpoint).as_deref() == Some(host);
