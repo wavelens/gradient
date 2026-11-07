@@ -437,7 +437,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const pad = 60;
     const gw = maxX - minX + pad * 2;
     const gh = maxY - minY + pad * 2;
-    const s = Math.min(rect.width / gw, rect.height / gh, 1.2);
+    const s = Math.min(rect.width / gw, rect.height / gh, 1.6);
     this.scale.set(s);
     this.tx.set(rect.width / 2 - ((minX + maxX) / 2) * s);
     this.ty.set(rect.height / 2 - ((minY + maxY) / 2) * s);

@@ -158,27 +158,28 @@
   left: $spacing-lg;
   display: flex;
   flex-wrap: wrap;
-  gap: $spacing-md;
+  gap: $spacing-sm $spacing-lg;
+  max-width: calc(100% - 2 * #{$spacing-lg});
   background: color-mix(in srgb, var(--gr-surface-raised) 92%, transparent);
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
-  padding: $spacing-xs $spacing-md;
+  box-shadow: var(--gr-shadow-raised);
+  padding: $spacing-sm $spacing-md;
   backdrop-filter: blur(4px);
 
   .legend-item {
     display: flex;
     align-items: center;
-    gap: $spacing-xs;
-    font-size: $font-size-xs;
+    gap: $spacing-sm;
+    font-size: $font-size-sm;
     color: var(--gr-text-secondary);
   }
 
   .dot {
-    width: 9px;
-    height: 9px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     flex-shrink: 0;
-
   }
 }
 

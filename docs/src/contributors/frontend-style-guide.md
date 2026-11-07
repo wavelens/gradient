@@ -63,6 +63,7 @@ flowchart LR
 - Set the content width of a page with the `width` input of `gr-page-layout`. Don't set a fixed width on sections. Use `form` (720px) for creation flows, `settings` (880px) for all settings pages and their sibling pages, `detail` (1200px) for overviews and lists, and `full` for graphs and logs. Pages without `gr-page-layout` use the same `$content-width-*` variables. Button labels don't wrap. Wrap the button row with `.gr-form-actions` instead.
 - Place the page on `--gr-surface-base`. Place each content group on `--gr-surface-raised` cards with `--gr-border-subtle` edges inside the page width. Don't draw a raised band across the full page width. Tabs show item status through `gr-status-icon`, not a colored border.
 - The header menu can fill the full height below the header on narrow screens and use the font size of body text. A one-line row meta, such as a commit and its elapsed time, can cut off with an ellipsis and not wrap to a second line.
+- Fit the graph canvas to the content on load. Small graphs fill the view rather than a small patch in blank space. Set legend text to 14px and color swatches to 12px.
 
 ## Shared UI Package
 
