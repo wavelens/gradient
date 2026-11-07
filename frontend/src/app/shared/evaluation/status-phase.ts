@@ -10,8 +10,28 @@ import type {
   InputFetchState,
   EntryPointSummary,
 } from '@core/models';
+import type { BadgeSeverity } from '@gradient/ui/ui';
 
 export type StatusPhase = 'queued' | 'waiting' | 'running' | 'success' | 'failure' | 'aborted';
+
+/// All pages render each status phase with one color and one badge severity. Failure, running and waiting jobs look the same everywhere as a result.
+export const PHASE_COLOR: Record<StatusPhase, string> = {
+  queued: 'var(--gr-indicator-info)',
+  running: 'var(--gr-indicator-info)',
+  waiting: 'var(--gr-status-warning)',
+  success: 'var(--gr-indicator-success)',
+  failure: 'var(--gr-indicator-danger)',
+  aborted: 'var(--gr-text-secondary)',
+};
+
+export const PHASE_SEVERITY: Record<StatusPhase, BadgeSeverity> = {
+  queued: 'info',
+  running: 'info',
+  waiting: 'warning',
+  success: 'success',
+  failure: 'danger',
+  aborted: 'neutral',
+};
 
 export function evaluationPhase(status: EvaluationStatus): StatusPhase {
   switch (status) {

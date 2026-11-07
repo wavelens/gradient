@@ -31,10 +31,12 @@ import {
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
 import { formatDuration } from '@shared/text';
+import { PHASE_COLOR, PHASE_SEVERITY, buildPhase, type StatusPhase } from '@shared/evaluation';
 import { longestPathDepths } from './dependency-depths';
-import { BuildGraph, DependencyEdge, DependencyGraphNode } from '@core/models';
+import { BuildGraph, BuildStatus, DependencyEdge, DependencyGraphNode } from '@core/models';
 
 const CARD_W = 200;
+const paint = (el: SVGElement, property: 'fill' | 'stroke', role: string) => el.style.setProperty(property, role.startsWith('var(') ? role : `var(${role})`);
 const CARD_H = 78;
 const H_GAP = 32;
 const V_GAP = 90;
@@ -266,15 +268,15 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const shadow = document.createElementNS(ns, 'rect');
     shadow.setAttribute('x', '2'); shadow.setAttribute('y', '3');
     shadow.setAttribute('width', String(CARD_W)); shadow.setAttribute('height', String(CARD_H));
-    shadow.setAttribute('rx', '8'); shadow.setAttribute('fill', '#0d1118'); shadow.setAttribute('opacity', '0.5');
+    shadow.setAttribute('rx', '8'); paint(shadow, 'fill', '--gr-border-subtle'); shadow.setAttribute('opacity', '0.5');
     g.appendChild(shadow);
 
     // Card background
     const bg = document.createElementNS(ns, 'rect');
     bg.setAttribute('width', String(CARD_W)); bg.setAttribute('height', String(CARD_H));
     bg.setAttribute('rx', '8');
-    bg.setAttribute('fill', isRoot ? '#1a2535' : '#1c2333');
-    bg.setAttribute('stroke', isRoot ? color : '#2d3748');
+    paint(bg, 'fill', isRoot ? '--gr-surface-active' : '--gr-surface-raised');
+    paint(bg, 'stroke', isRoot ? color : '--gr-border');
     bg.setAttribute('stroke-width', isRoot ? '1.5' : '1');
     g.appendChild(bg);
 
@@ -282,13 +284,13 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const stripe = document.createElementNS(ns, 'rect');
     stripe.setAttribute('width', '4'); stripe.setAttribute('height', String(CARD_H - 16));
     stripe.setAttribute('x', '0'); stripe.setAttribute('y', '8');
-    stripe.setAttribute('rx', '2'); stripe.setAttribute('fill', color);
+    stripe.setAttribute('rx', '2'); paint(stripe, 'fill', color);
     g.appendChild(stripe);
 
     // Package name  [text index 0]
     const nameText = document.createElementNS(ns, 'text');
     nameText.setAttribute('x', '14'); nameText.setAttribute('y', '22');
-    nameText.setAttribute('fill', '#e5e7eb');
+    paint(nameText, 'fill', '--gr-text-primary');
     nameText.setAttribute('font-size', '13');
     nameText.setAttribute('font-weight', '600');
     nameText.setAttribute('font-family', 'monospace, Arial, sans-serif');
@@ -302,7 +304,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const drvName = dashIdx >= 0 ? filename.slice(dashIdx + 1) : filename;
     const pathText = document.createElementNS(ns, 'text');
     pathText.setAttribute('x', '14'); pathText.setAttribute('y', '36');
-    pathText.setAttribute('fill', '#4b5563');
+    paint(pathText, 'fill', '--gr-text-muted');
     pathText.setAttribute('font-size', '10');
     pathText.setAttribute('font-family', 'monospace, Arial, sans-serif');
     pathText.setAttribute('pointer-events', 'none');
@@ -312,7 +314,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     // Status label  [text index 2]
     const statusText = document.createElementNS(ns, 'text');
     statusText.setAttribute('x', '14'); statusText.setAttribute('y', '52');
-    statusText.setAttribute('fill', color);
+    paint(statusText, 'fill', '--gr-text-secondary');
     statusText.setAttribute('font-size', '11');
     statusText.setAttribute('font-family', 'Arial, sans-serif');
     statusText.setAttribute('pointer-events', 'none');
@@ -322,7 +324,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     // Build duration  [text index 3]
     const durationText = document.createElementNS(ns, 'text') as SVGTextElement;
     durationText.setAttribute('x', '14'); durationText.setAttribute('y', '66');
-    durationText.setAttribute('fill', '#4b5563');
+    paint(durationText, 'fill', '--gr-text-muted');
     durationText.setAttribute('font-size', '10');
     durationText.setAttribute('font-family', 'Arial, sans-serif');
     durationText.setAttribute('pointer-events', 'none');
@@ -366,15 +368,12 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       el.setAttribute('transform', `translate(${node.x.toFixed(1)},${node.y.toFixed(1)})`);
 
       const color = this.nodeColor(node.status);
-      // rect[2] = stripe, text[2] = status label
       const stripe = el.querySelectorAll('rect')[2];
-      if (stripe) stripe.setAttribute('fill', color);
-      const statusTxt = el.querySelectorAll('text')[2];
-      if (statusTxt) statusTxt.setAttribute('fill', color);
+      if (stripe) paint(stripe, 'fill', color);
 
       if (node.id === this.rootId()) {
         const bg = el.querySelectorAll('rect')[1];
-        if (bg) bg.setAttribute('stroke', color);
+        if (bg) paint(bg, 'stroke', color);
       }
     }
 
@@ -388,7 +387,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       const cx = child.x + CARD_W / 2, cy = child.y;
       const midY = (py + cy) / 2;
       edge.el.setAttribute('d', `M ${px} ${py} C ${px} ${midY} ${cx} ${midY} ${cx} ${cy}`);
-      edge.el.setAttribute('stroke', '#374151');
+      paint(edge.el, 'stroke', '--gr-border');
     }
 
     // Re-apply hover highlight if a node is still hovered after a live update.
@@ -401,7 +400,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const near = this.neighbours.get(nodeId) ?? new Set<string>();
     this.edgeEls.forEach((e, i) => {
       const on = inc.has(i);
-      e.el.setAttribute('stroke', on ? '#9ca3af' : '#1f2733');
+      paint(e.el, 'stroke', on ? '--gr-text-secondary' : '--gr-border-subtle');
       e.el.setAttribute('stroke-width', on ? '2.5' : '1');
       e.el.setAttribute('opacity', on ? '1' : '0.25');
     });
@@ -413,7 +412,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   private resetHighlight(): void {
     this.hoveredId = null;
     for (const e of this.edgeEls) {
-      e.el.setAttribute('stroke', '#374151');
+      paint(e.el, 'stroke', '--gr-border');
       e.el.setAttribute('stroke-width', '1.5');
       e.el.setAttribute('opacity', '1');
     }
@@ -571,58 +570,30 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     return Number.isNaN(elapsed) || elapsed < 0 ? '' : formatDuration(elapsed);
   }
 
+  protected readonly phaseColor = PHASE_COLOR;
+
+  private phase(status?: string | null): StatusPhase {
+    return (status && buildPhase(status as BuildStatus)) || 'aborted';
+  }
+
   nodeColor(status?: string | null): string {
-    switch (status) {
-      case 'Completed':         return '#22c55e';
-      case 'Substituted':       return '#22c55e';
-      case 'FailedPermanent':
-      case 'FailedTransient':
-      case 'FailedTimeout':          return '#ef4444';
-      case 'Building':          return '#3b82f6';
-      case 'Queued':            return '#eab308';
-      case 'Aborted':           return '#6b7280';
-      case 'DependencyFailed':  return '#6b7280';
-      case 'Created':           return '#6b7280';
-      case 'Skipped':           return '#abb0b4';
-      default:                  return '#abb0b4';
-    }
+    return PHASE_COLOR[this.phase(status)];
   }
 
   /// The legend restates the node colours, so it reads them from the same tokens.
-  readonly legend = [
-    { label: 'Created', tone: 'idle' },
-    { label: 'Queued', tone: 'queued' },
-    { label: 'Building', tone: 'running' },
-    { label: 'Completed', tone: 'success' },
-    { label: 'Failed', tone: 'danger' },
-    { label: 'Aborted', tone: 'idle' },
-    { label: 'Dependency Failed', tone: 'idle' },
-    { label: 'Skipped', tone: 'idle' },
+  readonly legend: { label: string; phase: StatusPhase }[] = [
+    { label: 'Created', phase: 'queued' },
+    { label: 'Queued', phase: 'queued' },
+    { label: 'Building', phase: 'running' },
+    { label: 'Completed', phase: 'success' },
+    { label: 'Failed', phase: 'failure' },
+    { label: 'Aborted', phase: 'aborted' },
+    { label: 'Dependency Failed', phase: 'aborted' },
+    { label: 'Skipped', phase: 'aborted' },
   ];
 
   statusSeverity(status?: string | null): BadgeSeverity {
-    switch (this.statusClass(status)) {
-      case 'status-success': return 'success';
-      case 'status-danger': return 'danger';
-      case 'status-running': return 'info';
-      default: return 'neutral';
-    }
-  }
-
-  statusClass(status?: string | null): string {
-    switch (status) {
-      case 'Completed':
-      case 'Substituted':       return 'status-success';
-      case 'FailedPermanent':
-      case 'FailedTransient':
-      case 'FailedTimeout':     return 'status-danger';
-      case 'Aborted':
-      case 'DependencyFailed':
-      case 'Skipped':           return 'status-neutral';
-      case 'Building':
-      case 'Queued':            return 'status-running';
-      default:                  return '';
-    }
+    return PHASE_SEVERITY[this.phase(status)];
   }
 
   goBack(): void {

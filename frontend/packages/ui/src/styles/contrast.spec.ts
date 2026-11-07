@@ -38,6 +38,14 @@ const PAIRS: Array<[string, string, number]> = [
     '--gr-text-primary', '--gr-text-secondary', '--gr-text-muted', '--gr-status-danger', '--gr-status-success',
     '--gr-status-warning', '--gr-status-info', '--gr-log-magenta', '--gr-log-cyan',
   ].map((role): [string, string, number] => [role, '--gr-surface-sunken', 4.5]),
+  // Lines and areas on a chart are graphics. They need 3:1 contrast against the card and page.
+  ...[
+    '--gr-chart-cyan', '--gr-chart-green', '--gr-chart-orange', '--gr-chart-purple', '--gr-chart-pink', '--gr-chart-teal',
+    '--gr-graph-success', '--gr-graph-danger', '--gr-graph-warning', '--gr-graph-running',
+  ].flatMap((role): Array<[string, string, number]> => [
+    [role, '--gr-surface-raised', 3],
+    [role, '--gr-surface-base', 3],
+  ]),
   // Components use status colours and accent for text. Hover rows do the same. Each one must meet the contrast ratio for text on every surface.
   ...['--gr-status-success', '--gr-status-danger', '--gr-status-warning', '--gr-status-info', '--gr-accent'].flatMap(
     (role): Array<[string, string, number]> => [

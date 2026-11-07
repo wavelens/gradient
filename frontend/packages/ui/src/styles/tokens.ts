@@ -8,12 +8,14 @@ export const DARK_SHADOWS = {
   '--gr-shadow-raised': 'inset 0 1px 0 rgb(255 255 255 / 0.05)',
   '--gr-shadow-overlay': '0 8px 24px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.07)',
   '--gr-shadow-modal': '0 20px 48px rgb(0 0 0 / 0.65), 0 0 0 1px rgb(255 255 255 / 0.09)',
+  '--gr-backdrop': 'rgb(0 0 0 / 0.55)',
 } as const;
 
 export const LIGHT_SHADOWS = {
   '--gr-shadow-raised': '0 1px 2px rgb(31 35 40 / 0.08)',
   '--gr-shadow-overlay': '0 8px 24px rgb(31 35 40 / 0.16)',
   '--gr-shadow-modal': '0 20px 48px rgb(31 35 40 / 0.24)',
+  '--gr-backdrop': 'rgb(31 35 40 / 0.45)',
 } as const;
 
 export const LINE_HEIGHTS = { tight: 1.25, base: 1.5, relaxed: 1.7 } as const;
@@ -61,6 +63,7 @@ export const PALETTE: Record<string, string> = {
   '--gr-emerald-500': '#10b981',
   '--gr-emerald-700': '#047857',
   '--gr-emerald-800': '#065f46',
+  '--gr-green-500': '#28a745',
   '--gr-green-400': '#22c55e',
   '--gr-green-300': '#4ade80',
   '--gr-sage-800': '#2f5a39',
@@ -80,7 +83,13 @@ export const PALETTE: Record<string, string> = {
   '--gr-amber-900': '#6b4700',
   '--gr-amber-550': '#e6ac06',
   '--gr-amber-500': '#ffc107',
+  '--gr-orange-700': '#c2410c',
   '--gr-orange-500': '#f97316',
+  '--gr-orange-400': '#fd7e14',
+  '--gr-pink-700': '#c2255c',
+  '--gr-pink-400': '#f06595',
+  '--gr-teal-700': '#0f766e',
+  '--gr-teal-400': '#20c997',
   '--gr-cyan-300': '#67d4e6',
   '--gr-cyan-400': '#22b8cf',
   '--gr-cyan-500': '#17a2b8',
@@ -89,6 +98,8 @@ export const PALETTE: Record<string, string> = {
   '--gr-blue-900': '#064a9c',
   '--gr-blue-500': '#3b82f6',
   '--gr-purple-600': '#7c3aed',
+  '--gr-purple-500': '#6f42c1',
+  '--gr-purple-400': '#a78bfa',
   '--gr-purple-300': '#c084fc',
   '--gr-cyan-800': '#0b7285',
 };
@@ -135,6 +146,12 @@ export const DARK_ROLES: Record<string, string> = {
   '--gr-graph-running': '--gr-blue-500',
   '--gr-log-magenta': '--gr-purple-300',
   '--gr-log-cyan': '--gr-cyan-300',
+  '--gr-chart-cyan': '--gr-cyan-500',
+  '--gr-chart-green': '--gr-green-500',
+  '--gr-chart-orange': '--gr-orange-400',
+  '--gr-chart-purple': '--gr-purple-400',
+  '--gr-chart-pink': '--gr-pink-400',
+  '--gr-chart-teal': '--gr-teal-400',
 };
 
 export const LIGHT_ROLES: Record<string, string> = {
@@ -174,10 +191,16 @@ export const LIGHT_ROLES: Record<string, string> = {
   '--gr-indicator-info': '--gr-blue-600',
   '--gr-graph-success': '--gr-green-600',
   '--gr-graph-danger': '--gr-red-600',
-  '--gr-graph-warning': '--gr-orange-500',
+  '--gr-graph-warning': '--gr-orange-700',
   '--gr-graph-running': '--gr-blue-600',
   '--gr-log-magenta': '--gr-purple-600',
   '--gr-log-cyan': '--gr-cyan-800',
+  '--gr-chart-cyan': '--gr-cyan-800',
+  '--gr-chart-green': '--gr-green-600',
+  '--gr-chart-orange': '--gr-orange-700',
+  '--gr-chart-purple': '--gr-purple-500',
+  '--gr-chart-pink': '--gr-pink-700',
+  '--gr-chart-teal': '--gr-teal-700',
 };
 
 export const SEMANTIC_ROLES: readonly RoleDoc[] = [
@@ -221,6 +244,12 @@ export const SEMANTIC_ROLES: readonly RoleDoc[] = [
   { name: '--gr-graph-running', usage: 'Chart series: running builds' },
   { name: '--gr-log-magenta', usage: 'Log text: ANSI magenta' },
   { name: '--gr-log-cyan', usage: 'Log text: ANSI cyan' },
+  { name: '--gr-chart-cyan', usage: 'Chart, no status: cyan' },
+  { name: '--gr-chart-green', usage: 'Chart, no status: green' },
+  { name: '--gr-chart-orange', usage: 'Chart, no status: orange' },
+  { name: '--gr-chart-purple', usage: 'Chart, no status: purple' },
+  { name: '--gr-chart-pink', usage: 'Chart, no status: pink' },
+  { name: '--gr-chart-teal', usage: 'Chart, no status: teal' },
 ] as const;
 
 export function resolveRole(role: string, theme: 'dark' | 'light'): string {

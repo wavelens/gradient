@@ -13,7 +13,7 @@
   font-family: $font-family-mono;
   font-size: $font-size-sm;
   color: var(--gr-text-secondary);
-  background: color-mix(in srgb, var(--gr-white) 6%, transparent);
+  background: var(--gr-surface-hover);
   padding: 1px 6px;
   border-radius: $border-radius-sm;
 }

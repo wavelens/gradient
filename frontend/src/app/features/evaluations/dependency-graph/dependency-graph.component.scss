@@ -179,11 +179,6 @@
     border-radius: 50%;
     flex-shrink: 0;
 
-    &.is-idle { background: var(--gr-text-muted); }
-    &.is-queued { background: var(--gr-graph-warning); }
-    &.is-running { background: var(--gr-graph-running); }
-    &.is-success { background: var(--gr-graph-success); }
-    &.is-danger { background: var(--gr-graph-danger); }
   }
 }
 
@@ -198,7 +193,7 @@
   pointer-events: none;
   z-index: $z-tooltip;
   max-width: 320px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--gr-shadow-overlay);
 
   .tt-name {
     font-weight: 600;
@@ -212,11 +207,6 @@
     font-size: $font-size-xs;
     font-weight: 500;
     margin-bottom: 4px;
-
-    &.status-success { color: var(--gr-graph-success); }
-    &.status-danger  { color: var(--gr-graph-danger); }
-    &.status-warning { color: var(--gr-graph-warning); }
-    &.status-running { color: var(--gr-graph-running); }
   }
 
   .tt-path {

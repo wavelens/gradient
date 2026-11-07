@@ -40,7 +40,7 @@ const FIRST_FRAME_MS = 10_000;
         type="area"
         [series]="trafficSeries()"
         [categories]="trafficCats()"
-        [colors]="['#17a2b8']"
+        [colors]="['--gr-chart-cyan']"
         [valueFormatter]="bytes"
       >
         <gr-tab-switch slot="actions" ariaLabel="Traffic" [options]="trafficOptions" optionValue="value"
@@ -56,7 +56,7 @@ const FIRST_FRAME_MS = 10_000;
           [horizontal]="true"
           [series]="busiestSeries()"
           [categories]="busiestCats()"
-          [colors]="['#17a2b8']"
+          [colors]="['--gr-chart-cyan']"
           [valueFormatter]="bytes"
         ></gr-metric-chart>
       }
@@ -67,7 +67,7 @@ const FIRST_FRAME_MS = 10_000;
         type="line"
         [series]="requestSeries()"
         [categories]="trafficCats()"
-        [colors]="['#6f42c1']"
+        [colors]="['--gr-chart-purple']"
         [valueFormatter]="count"
       ></gr-metric-chart>
 
@@ -77,7 +77,7 @@ const FIRST_FRAME_MS = 10_000;
         type="area"
         [series]="storageSeries()"
         [categories]="storageCats()"
-        [colors]="['#28a745']"
+        [colors]="['--gr-chart-green']"
         [valueFormatter]="bytes"
       ></gr-metric-chart>
 
@@ -88,7 +88,7 @@ const FIRST_FRAME_MS = 10_000;
           type="line"
           [series]="u.series"
           [categories]="u.categories"
-          [colors]="['#fd7e14']"
+          [colors]="['--gr-chart-orange']"
           [valueFormatter]="duration"
         ></gr-metric-chart>
       }

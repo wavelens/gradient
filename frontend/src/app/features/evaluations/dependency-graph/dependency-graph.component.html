@@ -63,7 +63,7 @@
     >
       <defs>
         <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-          <polygon points="0 0, 8 3, 0 6" fill="#4b5563" />
+          <polygon points="0 0, 8 3, 0 6" style="fill: var(--gr-border)" />
         </marker>
       </defs>
       <g #graphEl [attr.transform]="transform()"></g>
@@ -73,7 +73,7 @@
     <div class="legend">
       @for (entry of legend; track entry.label) {
         <div class="legend-item">
-          <span class="dot" [class]="'is-' + entry.tone"></span>{{ entry.label }}
+          <span class="dot" [style.background]="phaseColor[entry.phase]"></span>{{ entry.label }}
         </div>
       }
     </div>
@@ -84,7 +84,7 @@
         [style.left.px]="tooltipX()"
         [style.top.px]="tooltipY()">
         <div class="tt-name">{{ hoveredNode()!.name }}</div>
-        <div class="tt-status" [ngClass]="statusClass(hoveredNode()!.status)">
+        <div class="tt-status" [style.color]="nodeColor(hoveredNode()!.status)">
           {{ statusLabel(hoveredNode()!.status) }}
         </div>
         <div class="tt-path">{{ hoveredNode()!.path }}</div>

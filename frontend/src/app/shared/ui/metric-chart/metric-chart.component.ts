@@ -100,6 +100,7 @@ export class MetricChartComponent implements OnDestroy {
   horizontal = input(false, { transform: booleanAttribute });
   series = input<MetricSeries[]>([]);
   categories = input<string[]>([]);
+  /// Callers pass color roles such as `--gr-chart-cyan`. The component can resolve each role with the theme, so series colors change with the theme.
   colors = input<string[]>([]);
   bare = input(false, { transform: booleanAttribute });
   loading = input(false, { transform: booleanAttribute });
@@ -148,11 +149,12 @@ export class MetricChartComponent implements OnDestroy {
 
   private option() {
     this.theme.resolved();
+    const style = getComputedStyle(document.documentElement);
     return buildMetricChartOption({
       type: this.type(),
       series: this.series(),
       categories: this.categories(),
-      colors: this.colors(),
+      colors: this.colors().map((role) => style.getPropertyValue(role).trim()),
       horizontal: this.horizontal(),
       yAxisTitle: this.yAxisTitle(),
       yAxisMax: this.yAxisMax(),

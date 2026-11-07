@@ -5,7 +5,7 @@
  */
 
 import type { BuildStatus, EvaluationStatus } from '@core/models';
-import { buildPhase, entryPointPhase, evaluationPhase, isPendingBuildStatus, type StatusPhase } from './status-phase';
+import { buildPhase, entryPointPhase, evaluationPhase, isPendingBuildStatus, PHASE_COLOR, PHASE_SEVERITY, type StatusPhase } from './status-phase';
 
 describe('evaluationPhase', () => {
   it.each<[EvaluationStatus, StatusPhase]>([
@@ -72,5 +72,19 @@ describe('entryPointPhase', () => {
     ['DependencyFailed', 1, 'aborted'],
   ])('maps %s with %i building deps to %s', (build_status, building, phase) => {
     expect(entryPointPhase({ build_status, deps: deps(building) })).toBe(phase);
+  });
+});
+
+describe('phase colours', () => {
+  it.each<[StatusPhase, string, string]>([
+    ['queued', 'info', '--gr-indicator-info'],
+    ['running', 'info', '--gr-indicator-info'],
+    ['waiting', 'warning', '--gr-status-warning'],
+    ['success', 'success', '--gr-indicator-success'],
+    ['failure', 'danger', '--gr-indicator-danger'],
+    ['aborted', 'neutral', '--gr-text-secondary'],
+  ])('display %s in the color of the %s badge', (phase, severity, role) => {
+    expect(PHASE_SEVERITY[phase]).toBe(severity);
+    expect(PHASE_COLOR[phase]).toBe(`var(${role})`);
   });
 });

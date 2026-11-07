@@ -10,8 +10,6 @@
   position: fixed;
   inset: 0;
   z-index: $z-modal;
-  background: rgb(0 0 0 / 0.55);
-  animation: gr-overlay-fade $transition-base both;
 }
 
 .palette {
@@ -98,7 +96,7 @@
   white-space: nowrap;
 }
 
-.palette__star { color: var(--gr-amber-550); }
+.palette__star { color: var(--gr-status-warning); }
 
 .palette__note {
   margin: 0;

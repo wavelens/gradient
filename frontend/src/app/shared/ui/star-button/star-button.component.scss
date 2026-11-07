@@ -17,7 +17,7 @@
   cursor: pointer;
 
   &:hover {
-    color: var(--gr-amber-550);
+    color: var(--gr-status-warning);
   }
 
   .star {
@@ -35,7 +35,7 @@
   stroke-linejoin: round;
 
   &--on {
-    fill: var(--gr-amber-550);
-    stroke: var(--gr-amber-550);
+    fill: var(--gr-status-warning);
+    stroke: var(--gr-status-warning);
   }
 }

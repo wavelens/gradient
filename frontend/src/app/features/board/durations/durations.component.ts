@@ -26,7 +26,7 @@ import { MetricPoint, DurationsHeatmap } from '@core/models';
         type="heatmap"
         [height]="300"
         [series]="heatmapSeries()"
-        [colors]="['#17a2b8']"
+        [colors]="['--gr-chart-cyan']"
       ></gr-metric-chart>
 
       <gr-metric-chart
@@ -35,7 +35,7 @@ import { MetricPoint, DurationsHeatmap } from '@core/models';
         type="area"
         [series]="buildSeries()"
         [categories]="buildCategories()"
-        [colors]="['#17a2b8', '#dc3545']"
+        [colors]="['--gr-chart-cyan', '--gr-graph-danger']"
         [valueFormatter]="duration"
       ></gr-metric-chart>
 
@@ -45,7 +45,7 @@ import { MetricPoint, DurationsHeatmap } from '@core/models';
         type="area"
         [series]="waitSeries()"
         [categories]="waitCategories()"
-        [colors]="['#6f42c1', '#fd7e14']"
+        [colors]="['--gr-chart-purple', '--gr-chart-orange']"
         [valueFormatter]="duration"
       ></gr-metric-chart>
     </gr-load-state>

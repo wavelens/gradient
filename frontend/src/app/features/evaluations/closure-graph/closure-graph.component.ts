@@ -24,8 +24,8 @@ import { ClosureGraph } from '@core/models';
 
 const TOP_N = 500;
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const ACCENT = '#fd7e14';
-const OTHERS_FILL = '#4b5563';
+const ACCENT = 'var(--gr-chart-orange)';
+const OTHERS_FILL = 'var(--gr-text-muted)';
 const MIN_SCALE = 0.02;
 const MAX_SCALE = 4;
 const NODE_PADDING = 28;
@@ -183,7 +183,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     for (const l of links) {
       const path = document.createElementNS(SVG_NS, 'path');
       path.setAttribute('d', linkPath(l));
-      path.setAttribute('stroke', this.fill(l.source));
+      path.style.setProperty('stroke', this.fill(l.source));
       path.setAttribute('stroke-width', `${Math.max(1, l.width ?? 1)}`);
       path.setAttribute('stroke-opacity', LINK_OPACITY);
       path.appendChild(this.titleEl(`${l.source.name} -> ${l.target.name}\n${formatBytes(l.value)}`));
@@ -199,7 +199,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       rect.setAttribute('y', `${n.y0}`);
       rect.setAttribute('width', `${n.x1 - n.x0}`);
       rect.setAttribute('height', `${Math.max(1, n.y1 - n.y0)}`);
-      rect.setAttribute('fill', this.fill(n));
+      rect.style.setProperty('fill', this.fill(n));
       rect.setAttribute('rx', '1');
       rect.appendChild(this.titleEl(this.nodeTooltip(n)));
       rect.addEventListener('mouseenter', () => this.highlight(n));
@@ -214,7 +214,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       text.setAttribute('y', `${(n.y0 + n.y1) / 2}`);
       text.setAttribute('dy', '0.35em');
       text.setAttribute('text-anchor', leftHalf ? 'start' : 'end');
-      text.setAttribute('fill', '#e5e7eb');
+      text.style.setProperty('fill', 'var(--gr-text-primary)');
       text.setAttribute('font-size', '11');
       text.textContent = `${this.shortName(n.name)} · ${formatBytes(n.value)}`;
       nodeLayer.appendChild(text);

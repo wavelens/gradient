@@ -28,7 +28,7 @@ import { BoardWorker, MetricPoint } from '@core/models';
         type="line"
         [series]="buildSeries()"
         [categories]="buildCategories()"
-        [colors]="['#17a2b8', '#28a745', '#dc3545']"
+        [colors]="['--gr-chart-cyan', '--gr-graph-success', '--gr-graph-danger']"
       ></gr-metric-chart>
 
       <gr-metric-chart
@@ -37,7 +37,7 @@ import { BoardWorker, MetricPoint } from '@core/models';
         type="line"
         [series]="evalSeries()"
         [categories]="evalCategories()"
-        [colors]="['#28a745', '#dc3545']"
+        [colors]="['--gr-graph-success', '--gr-graph-danger']"
       ></gr-metric-chart>
 
       <gr-metric-chart
@@ -46,7 +46,7 @@ import { BoardWorker, MetricPoint } from '@core/models';
         type="bar"
         [series]="workerSeries()"
         [categories]="workerCategories()"
-        [colors]="['#fd7e14']"
+        [colors]="['--gr-chart-orange']"
       ></gr-metric-chart>
     </gr-load-state>
   `,

@@ -30,7 +30,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
         type="area"
         [series]="egressSeries()"
         [categories]="egressCats()"
-        [colors]="['#17a2b8']"
+        [colors]="['--gr-chart-cyan']"
         [valueFormatter]="bytes"
       ></gr-metric-chart>
 
@@ -40,7 +40,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
         type="bar"
         [series]="transferSeries()"
         [categories]="workerCats()"
-        [colors]="['#6f42c1', '#20c997']"
+        [colors]="['--gr-chart-purple', '--gr-chart-teal']"
         [valueFormatter]="mbps"
       ></gr-metric-chart>
 
@@ -50,7 +50,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
         type="bar"
         [series]="diskSeries()"
         [categories]="workerCats()"
-        [colors]="['#fd7e14']"
+        [colors]="['--gr-chart-orange']"
         [valueFormatter]="mbps"
       ></gr-metric-chart>
 

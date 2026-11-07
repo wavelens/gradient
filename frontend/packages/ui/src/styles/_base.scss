@@ -353,7 +353,7 @@ textarea:disabled {
 
 .gr-dialog-panel { animation: gr-dialog-enter $transition-base both; }
 .gr-dialog-backdrop {
-  background: rgb(0 0 0 / 0.55);
+  background: var(--gr-backdrop);
   animation: gr-overlay-fade $transition-base both;
 }
 

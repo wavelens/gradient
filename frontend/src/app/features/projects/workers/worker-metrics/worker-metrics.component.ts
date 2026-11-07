@@ -49,11 +49,11 @@ import { WorkerSamplePoint, WorkerConnectionEntry } from '@core/models';
       </gr-card-grid>
 
       <gr-card-grid min="380px">
-        <gr-metric-chart title="CPU usage" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['#17a2b8']" [valueFormatter]="percent" [yAxisMax]="100"></gr-metric-chart>
-        <gr-metric-chart title="RAM free" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['#28a745']" [valueFormatter]="megabytes"></gr-metric-chart>
-        <gr-metric-chart title="Upload and download speed" type="line" [series]="transferSeries()" [categories]="times()" [colors]="['#6f42c1', '#20c997']" [valueFormatter]="mbps"></gr-metric-chart>
-        <gr-metric-chart title="Disk speed" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['#fd7e14']" [valueFormatter]="mbps"></gr-metric-chart>
-        <gr-metric-chart title="Assigned jobs" type="area" [series]="loadSeries()" [categories]="times()" [colors]="['#e83e8c']"></gr-metric-chart>
+        <gr-metric-chart title="CPU usage" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['--gr-chart-cyan']" [valueFormatter]="percent" [yAxisMax]="100"></gr-metric-chart>
+        <gr-metric-chart title="RAM free" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['--gr-chart-green']" [valueFormatter]="megabytes"></gr-metric-chart>
+        <gr-metric-chart title="Upload and download speed" type="line" [series]="transferSeries()" [categories]="times()" [colors]="['--gr-chart-purple', '--gr-chart-teal']" [valueFormatter]="mbps"></gr-metric-chart>
+        <gr-metric-chart title="Disk speed" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['--gr-chart-orange']" [valueFormatter]="mbps"></gr-metric-chart>
+        <gr-metric-chart title="Assigned jobs" type="area" [series]="loadSeries()" [categories]="times()" [colors]="['--gr-chart-pink']"></gr-metric-chart>
       </gr-card-grid>
 
       <h2>Connection history</h2>

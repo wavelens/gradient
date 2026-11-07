@@ -110,7 +110,7 @@
   align-items: center;
   justify-content: space-between;
   padding: $spacing-xs $spacing-md;
-  background: color-mix(in srgb, var(--gr-white) 3%, transparent);
+  background: color-mix(in srgb, var(--gr-text-primary) 3%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
   flex-shrink: 0;
   gap: $spacing-sm;

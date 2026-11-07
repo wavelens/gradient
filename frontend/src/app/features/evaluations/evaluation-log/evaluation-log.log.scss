@@ -99,7 +99,7 @@
   color: var(--gr-text-muted);
 
   .hint-icon {
-    color: color-mix(in srgb, var(--gr-white) 10%, transparent);
+    color: var(--gr-border);
   }
 
   .hint-text {

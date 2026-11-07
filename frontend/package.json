@@ -11,11 +11,12 @@
     "tokens:check": "pnpm --filter @gradient/ui tokens:check",
     "barrel:check": "node scripts/check-barrel.mts",
     "button-names:check": "node scripts/check-button-names.mts",
+    "colors:check": "node scripts/check-colors.mts",
     "whats-new": "node scripts/whats-new.mts",
     "whats-new:check": "node scripts/whats-new.mts --check",
     "lint:styles": "stylelint \"src/**/*.scss\" \"packages/ui/src/**/*.scss\"",
     "lint:ts": "eslint src packages/ui/src",
-    "verify": "pnpm tokens:check && pnpm barrel:check && pnpm button-names:check && pnpm whats-new:check && pnpm lint:styles && pnpm lint:ts"
+    "verify": "pnpm tokens:check && pnpm barrel:check && pnpm button-names:check && pnpm colors:check && pnpm whats-new:check && pnpm lint:styles && pnpm lint:ts"
   },
   "prettier": {
     "printWidth": 100,

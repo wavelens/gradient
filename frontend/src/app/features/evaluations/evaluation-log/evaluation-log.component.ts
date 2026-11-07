@@ -39,6 +39,7 @@ import {
   EvaluationResponse,
   EvaluationProgress,
   BuildItem,
+  BuildStatus,
   EvaluationMessageResponse,
   LogChunkIndex,
   EvaluationStatus,
@@ -63,7 +64,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent } from '@shared/ui';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, formatWaitingReason, waitingTitle } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, formatWaitingReason, waitingTitle, buildPhase, PHASE_SEVERITY } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -413,15 +414,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   /// reasons collapse onto `failed` so the red dot/badge renders for all of them.
   /// The badge severity a build status reads as.
   statusSeverity(status: string | null | undefined): BadgeSeverity {
-    switch (this.statusClass(status)) {
-      case 'completed':
-      case 'substituted': return 'success';
-      case 'building': return 'info';
-      case 'queued': return 'warning';
-      case 'failed':
-      case 'dependencyfailed': return 'danger';
-      default: return 'neutral';
-    }
+    return (status && PHASE_SEVERITY[buildPhase(status as BuildStatus)]) || 'neutral';
   }
 
   statusClass(status: string | null | undefined): string {

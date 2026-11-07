@@ -110,7 +110,7 @@
   min-height: 1.6em;
 
   &--hl {
-    background: rgba(234, 179, 8, 0.18);
+    background: color-mix(in srgb, var(--gr-status-warning) 18%, transparent);
   }
 }
 

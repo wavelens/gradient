@@ -19,11 +19,11 @@ import { formatBytes, formatCount, formatDuration } from '@shared/text';
 import { EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/models';
 
 const CHART_COLORS = {
-  buildTime: '#17a2b8',
-  outputSize: '#28a745',
-  closureSize: '#fd7e14',
-  runtimeClosure: '#20c997',
-  deps: '#e83e8c',
+  buildTime: '--gr-chart-cyan',
+  outputSize: '--gr-chart-green',
+  closureSize: '--gr-chart-orange',
+  runtimeClosure: '--gr-chart-teal',
+  deps: '--gr-chart-pink',
 };
 
 @Component({

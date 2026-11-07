@@ -15,12 +15,12 @@ import { formatBytes, formatCount, formatDuration } from '@shared/text';
 import { TaskMetricPoint, TaskMetricsResponse } from '@core/models';
 
 const CHART_COLORS = {
-  buildTime: '#17a2b8',
-  evalTime: '#6f42c1',
-  outputSize: '#28a745',
-  closureSize: '#fd7e14',
-  runtimeClosure: '#20c997',
-  deps: '#e83e8c',
+  buildTime: '--gr-chart-cyan',
+  evalTime: '--gr-chart-purple',
+  outputSize: '--gr-chart-green',
+  closureSize: '--gr-chart-orange',
+  runtimeClosure: '--gr-chart-teal',
+  deps: '--gr-chart-pink',
 };
 
 @Component({

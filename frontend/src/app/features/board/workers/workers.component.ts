@@ -39,7 +39,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         type="area"
         [series]="fleetSeries()"
         [categories]="fleetCats()"
-        [colors]="['#28a745', '#fd7e14']"
+        [colors]="['--gr-chart-green', '--gr-chart-orange']"
       ></gr-metric-chart>
 
       <gr-metric-chart
@@ -48,7 +48,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         type="line"
         [series]="capOverTime()"
         [categories]="fleetCats()"
-        [colors]="['#17a2b8', '#6f42c1', '#e83e8c']"
+        [colors]="['--gr-chart-cyan', '--gr-chart-purple', '--gr-chart-pink']"
       ></gr-metric-chart>
 
       <gr-load-state [error]="averageError()" errorTitle="Failed to load worker load" (retry)="loadAverage()" />
@@ -60,7 +60,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
           [height]="300"
           [series]="capLoad().series"
           [categories]="capLoad().cats"
-          [colors]="['#17a2b8']"
+          [colors]="['--gr-chart-cyan']"
           [valueFormatter]="percent"
         >
           <gr-tab-switch slot="actions" ariaLabel="Capability load range" [options]="loadRanges" optionValue="value"
@@ -73,7 +73,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
           [height]="300"
           [series]="archLoad().series"
           [categories]="archLoad().cats"
-          [colors]="['#28a745']"
+          [colors]="['--gr-chart-green']"
           [valueFormatter]="percent"
         >
           <gr-tab-switch slot="actions" ariaLabel="Architecture load range" [options]="loadRanges" optionValue="value"
@@ -88,7 +88,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         [height]="300"
         [series]="featLoad().series"
         [categories]="featLoad().cats"
-        [colors]="['#e83e8c']"
+        [colors]="['--gr-chart-pink']"
         [valueFormatter]="percent"
       ></gr-metric-chart>
 
@@ -99,7 +99,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         [height]="300"
         [series]="utilSeries()"
         [categories]="workerCats()"
-        [colors]="['#6f42c1']"
+        [colors]="['--gr-chart-purple']"
         [valueFormatter]="percent"
       ></gr-metric-chart>
 

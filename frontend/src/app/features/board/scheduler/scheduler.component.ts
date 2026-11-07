@@ -32,7 +32,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
         type="line"
         [series]="waitSeries()"
         [categories]="waitCategories()"
-        [colors]="['#17a2b8', '#fd7e14']"
+        [colors]="['--gr-chart-cyan', '--gr-chart-orange']"
         [valueFormatter]="duration"
       ></gr-metric-chart>
 
@@ -42,7 +42,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
         type="bar"
         [series]="histogramSeries()"
         [categories]="histogramCategories()"
-        [colors]="['#6f42c1']"
+        [colors]="['--gr-chart-purple']"
       ></gr-metric-chart>
 
       <h2>Per-rule mean contribution <gr-label-help doc="reference/scheduler-policies/" title="About the scoring rules" /></h2>

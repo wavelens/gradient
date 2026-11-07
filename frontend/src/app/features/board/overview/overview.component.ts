@@ -35,7 +35,7 @@ import { MetricPoint } from '@core/models';
         type="area"
         [series]="completedSeries()"
         [categories]="categories()"
-        [colors]="['#28a745']"
+        [colors]="['--gr-chart-green']"
       ></gr-metric-chart>
     </gr-load-state>
   `,

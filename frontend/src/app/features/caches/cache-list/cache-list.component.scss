@@ -28,7 +28,7 @@
   &:hover {
     border-color: var(--gr-text-secondary);
     transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--gr-shadow-overlay);
 
     .cache-arrow {
       transform: translateX(4px);

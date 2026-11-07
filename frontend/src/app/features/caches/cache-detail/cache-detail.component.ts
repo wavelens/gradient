@@ -47,10 +47,10 @@ import { FormsModule } from '@angular/forms';
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';
 
 const CHART_COLORS = {
-  bytes: '#17a2b8',
-  requests: '#28a745',
-  storageBytes: '#fd7e14',
-  storagePackages: '#6f42c1',
+  bytes: '--gr-chart-cyan',
+  requests: '--gr-chart-green',
+  storageBytes: '--gr-chart-orange',
+  storagePackages: '--gr-chart-purple',
 };
 
 @Component({
