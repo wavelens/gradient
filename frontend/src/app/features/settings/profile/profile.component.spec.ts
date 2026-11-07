@@ -118,6 +118,30 @@ describe('ProfileComponent - access gating', () => {
   });
 });
 
+describe('ProfileComponent - saving the profile', () => {
+  it('sends only the changed name, not the unchanged username and email', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    fixture.componentInstance.formData.name = 'Alice Liddell';
+    fixture.componentInstance.saveSettings();
+    expect(profileWrites).toEqual([{ name: 'Alice Liddell' }]);
+  });
+
+  it('sends nothing when no field changed', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    fixture.componentInstance.saveSettings();
+    expect(profileWrites).toEqual([]);
+  });
+
+  it('does not resend a field once it is saved', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    fixture.componentInstance.formData.username = 'alice2';
+    fixture.componentInstance.saveSettings();
+    fixture.componentInstance.formData.email = 'alice2@example.com';
+    fixture.componentInstance.saveSettings();
+    expect(profileWrites).toEqual([{ username: 'alice2' }, { email: 'alice2@example.com' }]);
+  });
+});
+
 describe('ProfileComponent - appearance', () => {
   /// ngModel writes the initial value in a microtask, so the checked segment
   /// only appears after the fixture settles.

@@ -29,6 +29,12 @@ import {
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState, ConnectedLoginProvider } from '@core/models';
 
+interface ProfileFields {
+  username: string;
+  name: string;
+  email: string;
+}
+
 const CONNECT_ERRORS: Record<string, string> = {
   taken: 'This account is already connected to another user.',
   already_connected: 'An account of this provider is already connected.',
@@ -93,11 +99,13 @@ export class ProfileComponent implements OnInit {
   deletePassword = '';
   deleteUsernameConfirm = '';
 
-  formData = {
+  formData: ProfileFields = {
     username: '',
     name: '',
     email: '',
   };
+
+  private savedProfile: ProfileFields = { ...this.formData };
 
   themeOptions: readonly { label: string; value: ThemePreference }[] = [
     { label: 'System', value: 'system' },
@@ -160,6 +168,7 @@ export class ProfileComponent implements OnInit {
           name: settings.name,
           email: settings.email,
         };
+        this.savedProfile = { ...this.formData };
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -170,11 +179,17 @@ export class ProfileComponent implements OnInit {
   }
 
   saveSettings(): void {
-    this.saving.set(true);
     this.errorMessage.set(null);
     this.successMessage.set(null);
-    this.userService.updateUserSettings(this.formData).subscribe({
+    const changes = this.changedProfileFields();
+    if (Object.keys(changes).length === 0) {
+      this.successMessage.set('Profile updated successfully.');
+      return;
+    }
+    this.saving.set(true);
+    this.userService.updateUserSettings(changes).subscribe({
       next: () => {
+        this.savedProfile = { ...this.savedProfile, ...changes };
         this.saving.set(false);
         this.successMessage.set('Profile updated successfully.');
         this.authService.reloadUser();
@@ -184,6 +199,15 @@ export class ProfileComponent implements OnInit {
         this.saving.set(false);
       },
     });
+  }
+
+  private changedProfileFields(): Partial<ProfileFields> {
+    const fields = Object.keys(this.formData) as (keyof ProfileFields)[];
+    return Object.fromEntries(
+      fields
+        .filter((field) => this.formData[field] !== this.savedProfile[field])
+        .map((field) => [field, this.formData[field]]),
+    );
   }
 
   openDeleteDialog(): void {
