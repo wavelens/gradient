@@ -17,7 +17,7 @@
     @if (authService.user(); as user) {
       <button type="button" class="user-menu-trigger" aria-haspopup="menu" [attr.aria-expanded]="userMenu.isOpen()" (click)="userMenu.toggle($event)">
         <gr-icon name="account_circle" />
-        <span class="user-name">{{ user.name }}</span>
+        <span class="user-name" [title]="user.name">{{ user.name }}</span>
         <gr-icon name="expand_more" size="sm" />
       </button>
       <gr-menu #userMenu [model]="userMenuItems" />

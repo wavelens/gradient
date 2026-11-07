@@ -19,6 +19,7 @@
 
 .trigger-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: $spacing-md;
@@ -26,6 +27,8 @@
 
 .trigger-info {
   display: flex;
+  flex: 1 1 14rem;
+  min-width: 0;
   align-items: flex-start;
   gap: $spacing-md;
 
@@ -46,8 +49,8 @@
 
 .trigger-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: $spacing-sm;
-  flex-shrink: 0;
 }
 
 .fire-success {

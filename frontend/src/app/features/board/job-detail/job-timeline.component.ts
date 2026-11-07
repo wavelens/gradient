@@ -10,7 +10,7 @@ import * as echarts from 'echarts/core';
 import { CustomChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
-import { EmptyStateComponent } from '@gradient/ui/ui';
+import { EmptyStateComponent, ScrollRegionDirective } from '@gradient/ui/ui';
 import { resolveChartTheme } from '@shared/ui';
 import { ThemeService } from '@core/services/theme.service';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
@@ -92,12 +92,13 @@ export function phaseLabel(phase: string): string {
 @Component({
   selector: 'gr-job-timeline',
   standalone: true,
-  imports: [CommonModule, EmptyStateComponent],
+  imports: [CommonModule, EmptyStateComponent, ScrollRegionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (rows().length) {
       <div class="chart" #chart [style.height.px]="chartHeight()"></div>
 
+      <div class="phases-scroll" grScrollRegion>
       <table class="phases">
         <thead>
           <tr><th>Phase</th><th class="num">Start</th><th class="num">Duration</th><th>Share</th><th class="num">Paths</th><th class="num">Size</th></tr>
@@ -115,6 +116,7 @@ export function phaseLabel(phase: string): string {
           }
         </tbody>
       </table>
+      </div>
     } @else {
       <gr-empty-state icon="schedule" title="No timeline" message="This job reported no phase spans." flat />
     }

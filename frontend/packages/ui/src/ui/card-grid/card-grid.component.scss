@@ -14,13 +14,7 @@
 
 @media (max-width: $breakpoint-sm) {
   :host(:has(> gr-stat-card)) {
-    container-type: inline-size;
-    grid-template-columns: none;
-    grid-auto-columns: max-content;
-    grid-auto-flow: column;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: $spacing-md;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
   }
 }

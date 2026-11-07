@@ -76,8 +76,7 @@
 
 @media (max-width: $breakpoint-sm) {
   :host {
-    min-width: 42cqi;
-    scroll-snap-align: start;
+    min-width: 0;
   }
 
   .stat-card {

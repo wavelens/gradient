@@ -13,6 +13,7 @@ export * from './card-grid/card-grid.component';
 export * from './checkbox/checkbox.component';
 export * from './copy-field/copy-field.component';
 export * from './dialog/dialog.component';
+export * from './drawer/drawer.directive';
 export * from './divider/divider.component';
 export * from './empty-state/empty-state.component';
 export * from './field-row/field-row.component';

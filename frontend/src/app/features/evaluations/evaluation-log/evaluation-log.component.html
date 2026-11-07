@@ -21,7 +21,8 @@
     }
     <aside id="builds-drawer" class="log-sidebar" [class.open]="buildsOpen()"
            (focusin)="setSidebarFocus(true)" (focusout)="setSidebarFocus(false)"
-           (mouseenter)="setPointerOver('builds')" (mouseleave)="setPointerOver(null)" (keydown.escape)="buildsOpen.set(false)">
+           (mouseenter)="setPointerOver('builds')" (mouseleave)="setPointerOver(null)"
+           [grDrawer]="buildsOpen()" (grDrawerClose)="buildsOpen.set(false)">
 
       <div class="sidebar-breadcrumb">
         @for (crumb of projectAndTaskCrumbs(); track $index) {

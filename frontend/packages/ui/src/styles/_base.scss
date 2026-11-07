@@ -85,6 +85,11 @@ a {
 
   .breadcrumb-separator { color: var(--gr-text-muted); }
   .breadcrumb-current { color: var(--gr-text-primary); }
+
+  > :not(.breadcrumb-separator) {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 }
 
 .breadcrumb-link,

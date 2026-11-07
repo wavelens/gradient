@@ -16,6 +16,7 @@
 }
 
 .gr-table__scroll {
+  position: relative;
   overflow-x: auto;
 
   @media (max-width: $breakpoint-sm) {

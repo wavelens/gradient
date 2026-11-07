@@ -13,8 +13,12 @@
 
 .sg-shell {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: calc(100vh - 4.5rem);
+
+  @media (max-width: $breakpoint-md) {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .sg-nav {
@@ -24,6 +28,12 @@
   padding: $spacing-lg;
   border-right: 1px solid var(--gr-border-subtle);
   background: var(--gr-surface-sunken);
+
+  @media (max-width: $breakpoint-md) {
+    flex-flow: row wrap;
+    border-right: none;
+    border-bottom: 1px solid var(--gr-border-subtle);
+  }
 
   h2 {
     margin: 0 0 $spacing-md;

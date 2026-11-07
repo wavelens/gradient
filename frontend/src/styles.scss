@@ -30,6 +30,7 @@ body {
 
   > :not(router-outlet) {
     flex: 1;
+    width: 100%;
     min-width: 0;
   }
 }

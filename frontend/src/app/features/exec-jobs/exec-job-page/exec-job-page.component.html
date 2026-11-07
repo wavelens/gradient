@@ -9,7 +9,7 @@
     @if (sidebarOpen()) {
       <div class="log-sidebar-backdrop gr-dialog-backdrop" aria-hidden="true" (click)="sidebarOpen.set(false)"></div>
     }
-    <aside id="job-drawer" class="log-sidebar" [class.open]="sidebarOpen()" (keydown.escape)="sidebarOpen.set(false)">
+    <aside id="job-drawer" class="log-sidebar" [class.open]="sidebarOpen()" [grDrawer]="sidebarOpen()" (grDrawerClose)="sidebarOpen.set(false)">
       <nav class="sidebar-breadcrumb" aria-label="Breadcrumb">
         @for (crumb of crumbs(); track $index; let last = $last) {
           @if (last) {

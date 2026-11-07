@@ -14,9 +14,12 @@
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   padding: $spacing-md;
+  min-width: 0;
 }
 
 .chart { width: 100%; }
+
+.phases-scroll { overflow-x: auto; }
 
 table.phases {
   width: 100%;

@@ -19,7 +19,7 @@
   </div>
 
   <div class="header-content">
-    <div id="header-menu" class="header-menu">
+    <div id="header-menu" class="header-menu" [grDrawer]="menuOpen()" (grDrawerClose)="closeMenu()">
       <nav class="header-nav" aria-label="Main">
         @for (link of nav(); track link.href) {
           <a [routerLink]="link.href" routerLinkActive="active" ariaCurrentWhenActive="page" [routerLinkActiveOptions]="activeLinkMatch(link.exact ?? false)">

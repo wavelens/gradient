@@ -51,6 +51,10 @@
   }
 
   .user-name {
+    max-width: 16ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--gr-text-primary);
     font-weight: 600;
   }

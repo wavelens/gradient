@@ -9,6 +9,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { filter } from 'rxjs';
 import { activeLinkMatch } from '../active-link-match';
+import { DrawerDirective } from '../../ui/drawer/drawer.directive';
 import { IconComponent } from '../../ui/icon/icon.component';
 import { LogoComponent } from '../../ui/logo/logo.component';
 import { Brand, NavLink } from '../types';
@@ -16,11 +17,10 @@ import { Brand, NavLink } from '../types';
 @Component({
   selector: 'gr-header',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive, IconComponent, LogoComponent],
+  imports: [RouterLink, RouterLinkActive, DrawerDirective, IconComponent, LogoComponent],
   templateUrl: './header.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './header.component.scss',
-  host: { '(document:keydown.escape)': 'closeMenu()' },
 })
 export class HeaderComponent {
   brand = input.required<Brand>();
