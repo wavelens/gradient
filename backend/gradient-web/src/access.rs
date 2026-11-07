@@ -396,6 +396,22 @@ pub async fn load_membership_with_permissions(
     }))
 }
 
+pub async fn caller_project_mask(
+    db: &WebDb,
+    caller: Caller<'_>,
+    project_id: ProjectId,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<PermissionMask> {
+    let Some(user_id) = caller.user_id() else {
+        return Ok(0);
+    };
+    Ok(
+        load_membership_with_permissions(db, user_id, project_id, api_key)
+            .await?
+            .unwrap_or(0),
+    )
+}
+
 pub(crate) async fn require_project_permission(
     db: &WebDb,
     user_id: UserId,
@@ -485,11 +501,28 @@ fn cache_mask_allows(
     api_key: Option<&ApiKeyContext>,
     permission: CachePermission,
 ) -> bool {
-    let key_mask = api_key
-        .and_then(|k| k.cache_permission_mask)
-        .unwrap_or(i64::MAX);
+    cache_mask_grants(key_limited_cache_mask(role_mask, api_key), permission)
+}
 
-    cache_mask_grants(role_mask & key_mask, permission)
+fn key_limited_cache_mask(role_mask: i64, api_key: Option<&ApiKeyContext>) -> i64 {
+    role_mask
+        & api_key
+            .and_then(|k| k.cache_permission_mask)
+            .unwrap_or(i64::MAX)
+}
+
+pub async fn caller_cache_mask(
+    db: &WebDb,
+    caller: Caller<'_>,
+    cache_id: CacheId,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<PermissionMask> {
+    let Some(user_id) = caller.user_id() else {
+        return Ok(0);
+    };
+    Ok(cache_role_mask(db, user_id, cache_id)
+        .await?
+        .map_or(0, |mask| key_limited_cache_mask(mask, api_key)))
 }
 
 pub async fn has_cache_permission(

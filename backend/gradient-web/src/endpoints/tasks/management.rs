@@ -7,7 +7,7 @@
 use super::TaskResponse;
 use super::auto_attach;
 use super::refusal::TaskRefusal;
-use crate::access::{Caller, ProjectAccess, has_permission, load_project};
+use crate::access::{Caller, ProjectAccess, caller_project_mask, has_permission, load_project};
 use crate::api_spec::{ProjectPath, TaskPath};
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::MaybeApiKey;
@@ -140,29 +140,13 @@ pub async fn get(
     }: ProjectScope<Readable>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<TaskResponse>>>> {
-    let api_key_ref = api_key.as_ref();
-
-    let (can_edit, can_trigger) = match &maybe_user {
-        Some(user) => (
-            has_permission(
-                &db.web_db,
-                user.id,
-                project.id,
-                Permission::EditTask,
-                api_key_ref,
-            )
-            .await?,
-            has_permission(
-                &db.web_db,
-                user.id,
-                project.id,
-                Permission::TriggerEvaluation,
-                api_key_ref,
-            )
-            .await?,
-        ),
-        None => (false, false),
-    };
+    let permissions = caller_project_mask(
+        &db.web_db,
+        Caller::from(&maybe_user),
+        project.id,
+        api_key.as_ref(),
+    )
+    .await?;
 
     let listing = paginate(
         gradient_db::tasks::of_project(project.id),
@@ -188,7 +172,7 @@ pub async fn get(
         let last_evaluation_status = p
             .last_evaluation
             .and_then(|id| eval_status_map.get(&id).cloned());
-        TaskResponse::new(p, last_evaluation_status, can_edit, can_trigger)
+        TaskResponse::new(p, last_evaluation_status, permissions)
     });
 
     Ok(ok_json(listing))
@@ -331,29 +315,13 @@ pub async fn get_task(
         ..
     }: TaskScope<Readable>,
 ) -> WebResult<Json<BaseResponse<TaskResponse>>> {
-    let api_key_ref = api_key.as_ref();
-
-    let (can_edit, can_trigger) = match &maybe_user {
-        Some(user) => (
-            has_permission(
-                &db.web_db,
-                user.id,
-                project.id,
-                Permission::EditTask,
-                api_key_ref,
-            )
-            .await?,
-            has_permission(
-                &db.web_db,
-                user.id,
-                project.id,
-                Permission::TriggerEvaluation,
-                api_key_ref,
-            )
-            .await?,
-        ),
-        None => (false, false),
-    };
+    let permissions = caller_project_mask(
+        &db.web_db,
+        Caller::from(&maybe_user),
+        project.id,
+        api_key.as_ref(),
+    )
+    .await?;
 
     let last_evaluation_status = if let Some(eval_id) = task.last_evaluation {
         by_id::<EEvaluation, _>(&db.web_db, eval_id)
@@ -366,8 +334,7 @@ pub async fn get_task(
     Ok(ok_json(TaskResponse::new(
         task,
         last_evaluation_status,
-        can_edit,
-        can_trigger,
+        permissions,
     )))
 }
 

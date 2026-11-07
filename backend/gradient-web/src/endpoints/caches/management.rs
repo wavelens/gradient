@@ -5,13 +5,14 @@
  */
 
 use super::refusal::CacheRefusal;
+use crate::access::{Caller, caller_cache_mask};
 use crate::api_spec::CachePath;
 use crate::audit::{Audit, changed_fields};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
 use crate::names::{CacheDisplayName, CacheName};
-use crate::permissions::CachePermission;
+use crate::permissions::{CachePermission, PermissionMask, cache_mask_grants, cache_mask_to_vec};
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
@@ -64,10 +65,11 @@ pub struct CacheResponse {
     pub created_at: NaiveDateTime,
     pub managed: bool,
     pub can_edit: bool,
+    pub permissions: Vec<CachePermission>,
 }
 
 impl CacheResponse {
-    fn new(cache: MCache, public_key: String, can_edit: bool) -> Self {
+    fn new(cache: MCache, public_key: String, permissions: PermissionMask) -> Self {
         Self {
             id: cache.id,
             name: cache.name,
@@ -83,7 +85,8 @@ impl CacheResponse {
             created_by: cache.created_by,
             created_at: cache.created_at,
             managed: cache.managed,
-            can_edit,
+            can_edit: cache_mask_grants(permissions, CachePermission::ManageCacheSettings),
+            permissions: cache_mask_to_vec(permissions),
         }
     }
 }
@@ -291,6 +294,7 @@ pub async fn get_cache(
     CacheScope {
         cache,
         user: maybe_user,
+        api_key,
         ..
     }: CacheScope<Readable>,
     state: State<Arc<ServerState>>,
@@ -302,18 +306,15 @@ pub async fn get_cache(
     )
     .context("derive public key")?;
 
-    let can_edit = match &maybe_user {
-        Some(u) => gradient_db::access::cache_permission_mask(&state.web_db, cache.id, u.id)
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|mask| {
-                crate::permissions::cache_mask_grants(mask, CachePermission::ManageCacheSettings)
-            }),
-        None => false,
-    };
+    let permissions = caller_cache_mask(
+        &state.web_db,
+        Caller::from(&maybe_user),
+        cache.id,
+        api_key.as_ref(),
+    )
+    .await?;
 
-    Ok(ok_json(CacheResponse::new(cache, public_key, can_edit)))
+    Ok(ok_json(CacheResponse::new(cache, public_key, permissions)))
 }
 
 #[utoipa::path(

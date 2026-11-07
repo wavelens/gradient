@@ -265,7 +265,7 @@ mod tests {
                     "items": [{
                         "id": "00000000-0000-0000-0000-000000000008", "name": "web", "display_name": "web",
                         "description": "", "active": true, "can_edit": true,
-                        "can_trigger": true, "concurrency": "skip",
+                        "can_trigger": true, "permissions": ["editTask", "triggerEvaluation"], "concurrency": "skip",
                         "created_at": "2026-05-21T08:53:21", "created_by": "00000000-0000-0000-0000-000000000009",
                         "force_evaluation": false, "keep_evaluations": 0, "managed": true,
                         "project": "00000000-0000-0000-0000-000000000010", "repository": "https://example.com/repo.git",

@@ -14945,6 +14945,20 @@ components:
         requests:
           type: integer
           format: int64
+    CachePermission:
+      type: string
+      enum:
+      - viewCache
+      - readStore
+      - writeStore
+      - manageCacheSettings
+      - manageCacheKeys
+      - manageUpstreamCaches
+      - manageCacheMembers
+      - manageCacheRoles
+      - manageCacheSubscriptions
+      - deleteCache
+      - manageCacheWebhooks
     CacheResponse:
       type: object
       required:
@@ -14962,6 +14976,7 @@ components:
       - created_at
       - managed
       - can_edit
+      - permissions
       properties:
         id:
           $ref: '#/components/schemas/CacheId'
@@ -14999,6 +15014,10 @@ components:
           type: boolean
         can_edit:
           type: boolean
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CachePermission'
     CacheRoleOwner:
       type: object
       properties:
@@ -19501,6 +19520,24 @@ components:
           type: integer
           format: int64
           minimum: 0
+    Permission:
+      type: string
+      enum:
+      - viewProject
+      - manageProjectSettings
+      - deleteProject
+      - manageMembers
+      - manageRoles
+      - manageIntegrations
+      - manageActions
+      - manageWorkers
+      - manageSubscriptions
+      - manageSshKey
+      - createTask
+      - editTask
+      - triggerEvaluation
+      - manageTriggers
+      - manageWebhooks
     PermissionEntry:
       type: object
       required:
@@ -19585,6 +19622,7 @@ components:
       - created_by
       - created_at
       - github_app_available
+      - permissions
       properties:
         id:
           $ref: '#/components/schemas/ProjectId'
@@ -19621,6 +19659,10 @@ components:
           type:
           - string
           - 'null'
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
     ProjectRoleOwner:
       type: object
       properties:
@@ -20628,6 +20670,7 @@ components:
       - last_evaluations
       - can_edit
       - can_trigger
+      - permissions
       - managed
       properties:
         id:
@@ -20665,6 +20708,10 @@ components:
           type: boolean
         can_trigger:
           type: boolean
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
         managed:
           type: boolean
     TaskId:
@@ -20746,6 +20793,7 @@ components:
       - only_evaluate
       - can_edit
       - can_trigger
+      - permissions
       properties:
         id:
           $ref: '#/components/schemas/TaskId'
@@ -20801,6 +20849,10 @@ components:
           type: boolean
         can_trigger:
           type: boolean
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
     TaskRow:
       type: object
       required:

@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::access::{Caller, caller_project_mask};
 use crate::api_spec::ProjectPath;
 use crate::audit::{Audit, changed_fields};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate};
 use crate::json_body::JsonBody;
 use crate::names::{ProjectDisplayName, ProjectName};
+use crate::permissions::{Permission, PermissionMask, mask_to_vec};
 use crate::resource::Resource;
 use crate::scope::{ProjectScope, Readable, RequiresUnmanaged, can};
 use anyhow::Context;
@@ -122,12 +124,14 @@ pub struct ProjectResponse {
     pub github_app_available: bool,
     pub github_app_install_url: Option<String>,
     pub role: Option<String>,
+    pub permissions: Vec<Permission>,
 }
 
 impl ProjectResponse {
     fn new(
         project: MProject,
         role: Option<String>,
+        permissions: PermissionMask,
         github_app_available: bool,
         github_app_install_url: Option<String>,
     ) -> Self {
@@ -146,6 +150,7 @@ impl ProjectResponse {
             github_app_available,
             github_app_install_url,
             role,
+            permissions: mask_to_vec(permissions),
         }
     }
 }
@@ -337,6 +342,7 @@ pub async fn get_project(
     ProjectScope {
         project,
         user: maybe_user,
+        api_key,
         ..
     }: ProjectScope<Readable>,
     state: State<Arc<ServerState>>,
@@ -349,6 +355,13 @@ pub async fn get_project(
         }
         None => None,
     };
+    let permissions = caller_project_mask(
+        &state.web_db,
+        Caller::from(&maybe_user),
+        project.id,
+        api_key.as_ref(),
+    )
+    .await?;
 
     let install_url = github_app_install_url(
         &state.config,
@@ -360,6 +373,7 @@ pub async fn get_project(
     Ok(ok_json(ProjectResponse::new(
         project,
         role,
+        permissions,
         state.config.github_app.is_some(),
         install_url,
     )))

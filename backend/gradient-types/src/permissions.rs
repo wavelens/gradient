@@ -6,8 +6,10 @@
 
 use crate::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use crate::ids::RoleId;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub enum Permission {
     ViewProject,
     ManageProjectSettings,
@@ -151,7 +153,8 @@ pub fn is_builtin_role(role_id: RoleId) -> bool {
 
 use crate::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub enum CachePermission {
     ViewCache,
     ReadStore,
@@ -287,6 +290,16 @@ mod tests {
             assert_eq!(CachePermission::from_wire_name(p.as_wire_name()), Some(p));
         }
         assert_eq!(CachePermission::from_wire_name("nope"), None);
+    }
+
+    #[test]
+    fn serialized_names_match_wire_names() {
+        for p in Permission::ALL.iter().copied() {
+            assert_eq!(serde_json::to_value(p).unwrap(), p.as_wire_name());
+        }
+        for p in CachePermission::ALL.iter().copied() {
+            assert_eq!(serde_json::to_value(p).unwrap(), p.as_wire_name());
+        }
     }
 
     #[test]

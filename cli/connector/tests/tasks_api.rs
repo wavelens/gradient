@@ -20,7 +20,7 @@ async fn list_tasks_returns_paginated() {
                     "id": "00000000-0000-0000-0000-000000000001", "name": "proj", "display_name": "Proj", "description": "",
                     "project": "00000000-0000-0000-0000-000000000002", "repository": "r", "wildcard": "*", "active": true,
                     "created_by": "00000000-0000-0000-0000-000000000003", "created_at": "2024-01-01T00:00:00", "managed": false,
-                    "can_edit": true, "can_trigger": true, "concurrency": "skip",
+                    "can_edit": true, "can_trigger": true, "permissions": ["editTask", "triggerEvaluation"], "concurrency": "skip",
                     "force_evaluation": false, "keep_evaluations": 30, "last_evaluation": null,
                     "last_evaluation_status": null, "retry_failed_builds": false, "multi_node_evaluation": false, "exec_enabled": false, "only_evaluate": false,
                     "sign_cache": true, "wait_for_workers": false

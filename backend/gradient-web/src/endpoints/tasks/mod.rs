@@ -26,6 +26,7 @@ pub use self::management::{
 };
 pub use self::metrics::{EntryPointMetricsQuery, get_entry_point_metrics, get_task_metrics};
 
+use crate::permissions::{Permission, PermissionMask, mask_grants, mask_to_vec};
 use gradient_types::ids::*;
 
 use gradient_db::evaluations::failed_attributes::FailedAttribute;
@@ -61,14 +62,14 @@ pub struct TaskResponse {
     pub only_evaluate: bool,
     pub can_edit: bool,
     pub can_trigger: bool,
+    pub permissions: Vec<Permission>,
 }
 
 impl TaskResponse {
     pub fn new(
         task: MTask,
         last_evaluation_status: Option<EvaluationStatus>,
-        can_edit: bool,
-        can_trigger: bool,
+        permissions: PermissionMask,
     ) -> Self {
         Self {
             id: task.id,
@@ -93,8 +94,9 @@ impl TaskResponse {
             multi_node_evaluation: task.multi_node_evaluation,
             exec_enabled: task.exec_enabled,
             only_evaluate: task.only_evaluate,
-            can_edit,
-            can_trigger,
+            can_edit: mask_grants(permissions, Permission::EditTask),
+            can_trigger: mask_grants(permissions, Permission::TriggerEvaluation),
+            permissions: mask_to_vec(permissions),
         }
     }
 }
@@ -210,6 +212,7 @@ pub struct TaskDetailsResponse {
     pub last_evaluations: Vec<EvaluationSummary>,
     pub can_edit: bool,
     pub can_trigger: bool,
+    pub permissions: Vec<Permission>,
     pub managed: bool,
 }
 
@@ -218,8 +221,7 @@ impl TaskDetailsResponse {
         task: MTask,
         queue: QueueSummary,
         last_evaluations: Vec<EvaluationSummary>,
-        can_edit: bool,
-        can_trigger: bool,
+        permissions: PermissionMask,
     ) -> Self {
         Self {
             id: task.id,
@@ -234,8 +236,9 @@ impl TaskDetailsResponse {
             last_check_at: checked_at(task.last_check_at),
             queue,
             last_evaluations,
-            can_edit,
-            can_trigger,
+            can_edit: mask_grants(permissions, Permission::EditTask),
+            can_trigger: mask_grants(permissions, Permission::TriggerEvaluation),
+            permissions: mask_to_vec(permissions),
             managed: task.managed,
         }
     }

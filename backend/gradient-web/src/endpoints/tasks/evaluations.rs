@@ -10,7 +10,7 @@ use super::{
     BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
     FailedAttributeSummary, PaginatedEntryPoints, QueueSummary, TaskDetailsResponse,
 };
-use crate::access::{has_permission, is_project_member};
+use crate::access::{Caller, caller_project_mask, is_project_member};
 use crate::api_spec::{Binary, TaskPath};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::{current_waiting_reason, live_progress, live_progress_status};
@@ -18,7 +18,6 @@ use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::lookup::require;
-use crate::permissions::Permission;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Readable, Requires, TaskScope, can};
@@ -403,8 +402,6 @@ pub async fn get_task_details(
     }: TaskScope<Readable>,
     state: State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<TaskDetailsResponse>>> {
-    let api_key_ref = api_key.as_ref();
-
     let evaluations = gradient_db::evaluations::latest_of_task(&state.web_db, task.id, 10).await?;
 
     let evaluation_summaries =
@@ -413,34 +410,19 @@ pub async fn get_task_details(
     let (building, queued) =
         gradient_db::task_board::task_queue_summary(&state.web_db, task.id).await?;
 
-    let (can_edit, can_trigger) = match &maybe_user {
-        Some(user) => (
-            has_permission(
-                &state.web_db,
-                user.id,
-                project.id,
-                Permission::EditTask,
-                api_key_ref,
-            )
-            .await?,
-            has_permission(
-                &state.web_db,
-                user.id,
-                project.id,
-                Permission::TriggerEvaluation,
-                api_key_ref,
-            )
-            .await?,
-        ),
-        None => (false, false),
-    };
+    let permissions = caller_project_mask(
+        &state.web_db,
+        Caller::from(&maybe_user),
+        project.id,
+        api_key.as_ref(),
+    )
+    .await?;
 
     let task_details = TaskDetailsResponse::new(
         task,
         QueueSummary { building, queued },
         evaluation_summaries,
-        can_edit,
-        can_trigger,
+        permissions,
     );
 
     let res = BaseResponse {

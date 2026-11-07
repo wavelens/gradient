@@ -46,6 +46,7 @@ async fn prod_cache(server: &MockServer) {
                 "max_storage_gb": 100,
                 "active": true,
                 "can_edit": true,
+                "permissions": ["manageCacheSettings"],
                 "managed": false,
                 "public": false,
                 "public_key": "prod:key",
