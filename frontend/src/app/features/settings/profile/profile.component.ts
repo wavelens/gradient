@@ -27,15 +27,37 @@ import {
   RowListComponent,
   SelectButtonComponent,
   SettingsSectionComponent,
+  SubmitDirective,
 } from '@gradient/ui/ui';
 import { ManagedDisableDirective } from '@shared/access';
-import { AccessState, ConnectedLoginProvider } from '@core/models';
+import { unsavedChanges } from '@shared/forms';
+import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
+import { AccessState, ConnectedLoginProvider, PatchUserSettingsRequest } from '@core/models';
 
-interface ProfileFields {
+interface ProfileForm {
   username: string;
   name: string;
   email: string;
 }
+
+const USERNAME = /^[A-Za-z0-9][A-Za-z0-9_-]{1,48}[A-Za-z0-9]$/;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const FIELD_CHECKS: Record<keyof ProfileForm, (value: string) => string | null> = {
+  username: (value) => {
+    if (!value) return 'Enter a username.';
+    return USERNAME.test(value)
+      ? null
+      : 'Use 3-50 characters. Allowed characters are letters, digits, hyphens and underscore characters. Start and end with a letter or digit.';
+  },
+  name: (value) => (value ? null : 'Enter a full name.'),
+  email: (value) => {
+    if (!value) return 'Enter an email address.';
+    return EMAIL.test(value) ? null : 'Enter an email address such as name@example.com.';
+  },
+};
+
+const FIELDS = Object.keys(FIELD_CHECKS) as (keyof ProfileForm)[];
 
 const CONNECT_ERRORS: Record<string, string> = {
   taken: 'This account is already connected to another user.',
@@ -63,11 +85,17 @@ const CONNECT_ERRORS: Record<string, string> = {
     RowComponent,
     RowListComponent,
     SelectButtonComponent,
+    SubmitDirective,
   ],
   templateUrl: './profile.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
+  styles: `
+    .save-hint {
+      align-self: center;
+    }
+  `,
 })
-export class ProfileComponent implements OnInit {
+export class ProfileComponent implements OnInit, CanComponentDeactivate {
   private userService = inject(UserService);
   private authService = inject(AuthService);
   protected config = inject(ConfigService);
@@ -103,13 +131,9 @@ export class ProfileComponent implements OnInit {
   deletePassword = '';
   deleteUsernameConfirm = '';
 
-  formData: ProfileFields = {
-    username: '',
-    name: '',
-    email: '',
-  };
-
-  private savedProfile: ProfileFields = { ...this.formData };
+  formData: ProfileForm = { username: '', name: '', email: '' };
+  private saved: ProfileForm = { ...this.formData };
+  readonly unsaved = unsavedChanges(() => this.formData, 'Profile settings');
 
   themeOptions: readonly { label: string; value: ThemePreference }[] = [
     { label: 'System', value: 'system' },
@@ -168,12 +192,9 @@ export class ProfileComponent implements OnInit {
         this.hasPassword.set(settings.has_password);
         this.loginProviders.set(settings.login_providers);
         this.savedUsername.set(settings.username);
-        this.formData = {
-          username: settings.username,
-          name: settings.name,
-          email: settings.email,
-        };
-        this.savedProfile = { ...this.formData };
+        this.saved = { username: settings.username, name: settings.name, email: settings.email };
+        this.formData = { ...this.saved };
+        this.unsaved.mark();
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -183,19 +204,44 @@ export class ProfileComponent implements OnInit {
     });
   }
 
+  canDeactivate() {
+    return this.unsaved.canLeave();
+  }
+
+  fieldError(field: keyof ProfileForm): string | null {
+    const value = this.formData[field].trim();
+    return value === this.saved[field] ? null : FIELD_CHECKS[field](value);
+  }
+
+  canSave(): boolean {
+    return !this.saving() && !this.access().managed && this.unsaved.changed() && FIELDS.every((field) => !this.fieldError(field));
+  }
+
   saveSettings(): void {
+    if (!this.canSave()) return;
+    const values: ProfileForm = {
+      username: this.formData.username.trim(),
+      name: this.formData.name.trim(),
+      email: this.formData.email.trim(),
+    };
+    const patch: PatchUserSettingsRequest = {};
+    for (const field of FIELDS) {
+      if (values[field] !== this.saved[field]) patch[field] = values[field];
+    }
+    const settle = () => {
+      this.saved = values;
+      this.formData = { ...values };
+      this.savedUsername.set(values.username);
+      this.unsaved.mark();
+    };
+    if (Object.keys(patch).length === 0) return settle();
+    this.saving.set(true);
     this.errorMessage.set(null);
     this.successMessage.set(null);
-    const changes = this.changedProfileFields();
-    if (Object.keys(changes).length === 0) {
-      this.successMessage.set('Profile updated successfully.');
-      return;
-    }
-    this.saving.set(true);
-    this.userService.updateUserSettings(changes).subscribe({
+    this.userService.updateUserSettings(patch).subscribe({
       next: () => {
-        this.savedProfile = { ...this.savedProfile, ...changes };
         this.saving.set(false);
+        settle();
         this.notify.success('Profile saved');
         this.authService.reloadUser();
       },
@@ -204,15 +250,6 @@ export class ProfileComponent implements OnInit {
         this.notify.failure('Failed to save profile', error);
       },
     });
-  }
-
-  private changedProfileFields(): Partial<ProfileFields> {
-    const fields = Object.keys(this.formData) as (keyof ProfileFields)[];
-    return Object.fromEntries(
-      fields
-        .filter((field) => this.formData[field] !== this.savedProfile[field])
-        .map((field) => [field, this.formData[field]]),
-    );
   }
 
   openDeleteDialog(): void {

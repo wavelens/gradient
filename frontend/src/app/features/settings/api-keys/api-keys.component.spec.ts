@@ -149,6 +149,79 @@ describe('ApiKeysComponent - allowed sources', () => {
   });
 });
 
+describe('ApiKeysComponent - field checks', () => {
+  function openCreate(createApiKey = vi.fn(() => of('key'))) {
+    const fixture = setup([], {
+      createApiKey,
+      getApiKeyPermissions: () => of({ available_permissions: [], availableCache: [{ id: 'readCache', mutating: false }] }),
+    });
+    const component = fixture.componentInstance;
+    component.openCreateDialog();
+    component.formName = 'deploy';
+    fixture.detectChanges();
+    const field = (id: string) => document.querySelector(`#${id}`)!.closest('gr-form-field')!.textContent ?? '';
+    return { fixture, component, createApiKey, field };
+  }
+
+  it('shows an empty name under its field and sends nothing', () => {
+    const { fixture, component, createApiKey, field } = openCreate();
+    component.formName = ' ';
+    buttonsByText(document.querySelector('.gr-dialog__footer')!, 'create')[0].click();
+    fixture.detectChanges();
+    expect(field('key-name')).toContain('Enter a name.');
+    expect(createApiKey).not.toHaveBeenCalled();
+  });
+
+  it.each([0, -5, 1.5])('refuses an expiry of %s days before asking the server', (days) => {
+    const { fixture, component, createApiKey, field } = openCreate();
+    component.formExpiresInDays = days;
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    expect(field('key-expires')).toContain('Enter an integer of 1 or higher.');
+    component.saveKey();
+    expect(createApiKey).not.toHaveBeenCalled();
+  });
+
+  it('asks for the cache of a cache-scoped key and sends nothing without it', () => {
+    const { fixture, component, createApiKey, field } = openCreate();
+    component.formScope = 'cache';
+    component.onScopeChange();
+    component.formPermissions = { readCache: true };
+    component.saveKey();
+    fixture.detectChanges();
+    expect(field('key-cache')).toContain('Select a cache.');
+    expect(createApiKey).not.toHaveBeenCalled();
+  });
+
+  it('creates the key on Enter in the name field', () => {
+    const { createApiKey } = openCreate();
+    document.querySelector('#key-name')!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    expect(createApiKey).toHaveBeenCalledWith('deploy', null, ['viewProject'], null, null, []);
+  });
+});
+
+describe('ApiKeysComponent - edits', () => {
+  it('sends only a changed name, so a rename keeps the scope and permissions the dialog cannot show', () => {
+    const updateApiKey = vi.fn(() => of(unmanagedKey));
+    const fixture = setup([unmanagedKey], { updateApiKey });
+    const component = fixture.componentInstance;
+    component.openEditDialog(unmanagedKey);
+    component.formName = 'CI key 2';
+    component.saveKey();
+    expect(updateApiKey).toHaveBeenCalledWith('k1', { name: 'CI key 2' });
+  });
+
+  it('closes without a request when nothing changed', () => {
+    const updateApiKey = vi.fn(() => of(unmanagedKey));
+    const fixture = setup([unmanagedKey], { updateApiKey });
+    const component = fixture.componentInstance;
+    component.openEditDialog(unmanagedKey);
+    component.saveKey();
+    expect(updateApiKey).not.toHaveBeenCalled();
+    expect(component.showDialog()).toBe(false);
+  });
+});
+
 describe('ApiKeysComponent - create errors', () => {
   it('shows the reason the server gave for refusing the key', () => {
     const reason = 'Permission manageProject exceeds your own permissions';

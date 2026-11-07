@@ -8,8 +8,9 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
+import { ConfirmService } from '@shared/confirm';
 import { ProfileComponent } from './profile.component';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
@@ -20,6 +21,7 @@ import { NotifyService } from '@core/services/notify.service';
 let profileWrites: unknown[] = [];
 let disconnects: string[] = [];
 let notify = { success: vi.fn(), failure: vi.fn() };
+let confirm = vi.fn(() => EMPTY);
 
 interface SetupOptions {
   managed: boolean;
@@ -50,6 +52,7 @@ function setup(opts: SetupOptions): ComponentFixture<ProfileComponent> {
   profileWrites = [];
   disconnects = [];
   notify = { success: vi.fn(), failure: vi.fn() };
+  confirm = vi.fn(() => EMPTY);
   localStorage.clear();
   document.documentElement.removeAttribute('data-theme');
   TestBed.configureTestingModule({
@@ -74,6 +77,7 @@ function setup(opts: SetupOptions): ComponentFixture<ProfileComponent> {
         },
       },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
       {
         provide: ActivatedRoute,
         useValue: { snapshot: { queryParamMap: convertToParamMap(opts.query ?? {}) } },
@@ -94,11 +98,76 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
+function edit(fixture: ComponentFixture<ProfileComponent>, change: Record<string, string>): void {
+  Object.assign(fixture.componentInstance.formData, change);
+  fixture.componentRef.changeDetectorRef.markForCheck();
+  fixture.detectChanges();
+}
+
+describe('ProfileComponent - edits', () => {
+  const saveButton = (fixture: ComponentFixture<ProfileComponent>) =>
+    findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement;
+
+  it('sends only the changed field, so an unchanged username is never checked again', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    edit(fixture, { name: 'Alice Liddell' });
+    saveButton(fixture).click();
+    expect(profileWrites).toEqual([{ name: 'Alice Liddell' }]);
+  });
+
+  it.each([
+    { field: 'username', value: '', message: 'Enter a username.' },
+    { field: 'username', value: 'a', message: 'Use 3-50 characters.' },
+    { field: 'name', value: ' ', message: 'Enter a full name.' },
+    { field: 'email', value: '', message: 'Enter an email address.' },
+    { field: 'email', value: 'alice', message: 'name@example.com' },
+  ])('shows why $field = "$value" is refused and sends nothing', ({ field, value, message }) => {
+    const fixture = setup({ managed: false, oidc: false });
+    edit(fixture, { [field]: value });
+    const input = (fixture.nativeElement as HTMLElement).querySelector(`#${field}`)!;
+    expect(input.closest('gr-form-field')!.textContent).toContain(message);
+    saveButton(fixture).click();
+    input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    expect(profileWrites).toEqual([]);
+  });
+
+  it('saves on Enter in a field', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    edit(fixture, { email: 'alice@example.org' });
+    (fixture.nativeElement as HTMLElement)
+      .querySelector('#email')!
+      .dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    expect(profileWrites).toEqual([{ email: 'alice@example.org' }]);
+  });
+
+  it('asks before leaving only with unsaved edits', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    expect(fixture.componentInstance.canDeactivate()).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+    edit(fixture, { name: 'Alice Liddell' });
+    expect(fixture.componentInstance.canDeactivate()).not.toBe(true);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Profile settings' }));
+  });
+
+  it('counts a saved edit as the new state, for leaving and for the delete confirmation', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    edit(fixture, { username: 'alice2' });
+    saveButton(fixture).click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.canDeactivate()).toBe(true);
+    expect(saveButton(fixture).disabled).toBe(true);
+    expect(fixture.componentInstance.savedUsername()).toBe('alice2');
+  });
+});
+
 describe('ProfileComponent - access gating', () => {
-  it('renders Save Changes enabled for an unmanaged, non-OIDC account', () => {
+  it('enables Save Changes on an unmanaged, non-OIDC account once a field changes', () => {
     const fixture = setup({ managed: false, oidc: false });
     const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
     expect(save).not.toBeNull();
+    expect(save!.disabled).toBe(true);
+    expect(fixture.nativeElement.textContent).toContain('No changes to save.');
+    edit(fixture, { name: 'Alice Liddell' });
     expect(save!.disabled).toBe(false);
   });
 
@@ -120,6 +189,7 @@ describe('ProfileComponent - access gating', () => {
     const fixture = setup({ managed: false, oidc: false });
     const updateUserSettings = vi.fn(() => new Subject<string>());
     TestBed.inject(UserService).updateUserSettings = updateUserSettings;
+    edit(fixture, { name: 'Alice Liddell' });
     const save = () => findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement;
     save().click();
     fixture.detectChanges();
@@ -266,6 +336,7 @@ describe('ProfileComponent - connected accounts', () => {
   it('reports a failed save as a toast with the server reason', () => {
     const writeFailure = new ApiError('Email already in use', 409);
     const fixture = setup({ managed: false, oidc: false, writeFailure });
+    edit(fixture, { email: 'alice@example.org' });
     (findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(notify.failure).toHaveBeenCalledWith('Failed to save profile', writeFailure);

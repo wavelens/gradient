@@ -12,8 +12,8 @@
   [error]="error()"
   [busy]="busy()"
 >
-  <gr-form-field label="Name" for="action-name">
-    <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" />
+  <gr-form-field label="Name" for="action-name" required [invalid]="showError('name')" [error]="errors().name ?? ''">
+    <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" (blur)="touch('name')" (keyup.enter)="onSubmit()" />
   </gr-form-field>
 
   <gr-form-field label="Type">
@@ -33,12 +33,15 @@
   </gr-form-field>
 
   @if (type() === 'send_mail') {
-    <gr-form-field label="Recipients" for="action-recipients" hint="Comma-separated email addresses or team:<name>.">
+    <gr-form-field label="Recipients" for="action-recipients" required hint="Comma-separated email addresses or team:<name>."
+      [invalid]="showError('recipients')" [error]="errors().recipients ?? ''">
       <input
         grInput
         id="action-recipients"
         [ngModel]="recipientsRaw()"
         (ngModelChange)="recipientsRaw.set($event)"
+        (blur)="touch('recipients')"
+        (keyup.enter)="onSubmit()"
         placeholder="alice@example.com, ops@example.com"
       />
     </gr-form-field>
@@ -60,12 +63,14 @@
   }
 
   @if (type() === 'send_web_request') {
-    <gr-form-field label="URL" for="action-url">
+    <gr-form-field label="URL" for="action-url" required [invalid]="showError('url')" [error]="errors().url ?? ''">
       <input
         grInput
         id="action-url"
         [ngModel]="url()"
         (ngModelChange)="url.set($event)"
+        (blur)="touch('url')"
+        (keyup.enter)="onSubmit()"
         placeholder="https://example.com/hook"
       />
     </gr-form-field>
@@ -89,25 +94,30 @@
   }
 
   @if (type() === 'send_matrix_message') {
-    <gr-form-field label="Homeserver" for="action-homeserver">
+    <gr-form-field label="Homeserver" for="action-homeserver" required [invalid]="showError('homeserver')" [error]="errors().homeserver ?? ''">
       <input
         grInput
         id="action-homeserver"
         [ngModel]="homeserver()"
         (ngModelChange)="homeserver.set($event)"
+        (blur)="touch('homeserver')"
+        (keyup.enter)="onSubmit()"
         placeholder="https://matrix.example.org"
       />
     </gr-form-field>
-    <gr-form-field label="Room ID" for="action-room">
+    <gr-form-field label="Room ID" for="action-room" required [invalid]="showError('roomId')" [error]="errors().roomId ?? ''">
       <input
         grInput
         id="action-room"
         [ngModel]="roomId()"
         (ngModelChange)="roomId.set($event)"
+        (blur)="touch('roomId')"
+        (keyup.enter)="onSubmit()"
         placeholder="!abc:example.org"
       />
     </gr-form-field>
-    <gr-form-field label="Access Token" for="action-matrix-token">
+    <gr-form-field label="Access Token" for="action-matrix-token" [required]="mode() === 'create'"
+      [invalid]="showError('matrixToken')" [error]="errors().matrixToken ?? ''">
       <input
         grInput
         id="action-matrix-token"
@@ -115,13 +125,16 @@
         autocomplete="off"
         [ngModel]="secretValue()"
         (ngModelChange)="secretValue.set($event)"
+        (blur)="touch('matrixToken')"
+        (keyup.enter)="onSubmit()"
         [placeholder]="mode() === 'edit' ? 'Leave blank to keep the stored token' : ''"
       />
     </gr-form-field>
   }
 
   @if (type() === 'send_slack_message') {
-    <gr-form-field label="Webhook URL" for="action-slack-url">
+    <gr-form-field label="Webhook URL" for="action-slack-url" [required]="mode() === 'create'"
+      [invalid]="showError('slackUrl')" [error]="errors().slackUrl ?? ''">
       <input
         grInput
         id="action-slack-url"
@@ -129,13 +142,16 @@
         autocomplete="off"
         [ngModel]="secretValue()"
         (ngModelChange)="secretValue.set($event)"
+        (blur)="touch('slackUrl')"
+        (keyup.enter)="onSubmit()"
         [placeholder]="mode() === 'edit' ? 'Leave blank to keep the stored URL' : 'https://hooks.slack.com/services/...'"
       />
     </gr-form-field>
   }
 
   @if (type() === 'git_host_status_report') {
-    <gr-form-field label="Outbound Integration" for="action-integration">
+    <gr-form-field label="Outbound Integration" for="action-integration" required
+      [invalid]="showError('integration')" [error]="errors().integration ?? ''">
       <gr-select
         inputId="action-integration"
         [ngModel]="integrationId()"
@@ -148,7 +164,8 @@
   }
 
   @if (type() === 'open_pr') {
-    <gr-form-field label="Outbound Integration" for="pr-integration">
+    <gr-form-field label="Outbound Integration" for="pr-integration" required
+      [invalid]="showError('integration')" [error]="errors().integration ?? ''">
       <gr-select
         inputId="pr-integration"
         [ngModel]="integrationId()"
@@ -191,12 +208,15 @@
         />
       </gr-form-field>
     }
-    <gr-form-field label="Branch Pattern" for="pr-branch-pattern">
+    <gr-form-field label="Branch Pattern" for="pr-branch-pattern" required
+      [invalid]="showError('branchPattern')" [error]="errors().branchPattern ?? ''">
       <input
         grInput
         id="pr-branch-pattern"
         [ngModel]="prBranchPattern()"
         (ngModelChange)="prBranchPattern.set($event)"
+        (blur)="touch('branchPattern')"
+        (keyup.enter)="onSubmit()"
         [placeholder]="defaultBranchPattern()"
       />
       @if (prGenerator() === 'flake_lock') {
@@ -232,7 +252,8 @@
   }
 
   @if (type() === 'start_evaluation') {
-    <gr-form-field label="Task to Evaluate" for="action-start-task" hint="A task of this project.">
+    <gr-form-field label="Task to Evaluate" for="action-start-task" required hint="A task of this project."
+      [invalid]="showError('startTask')" [error]="errors().startTask ?? ''">
       <gr-select
         inputId="action-start-task"
         [ngModel]="startTask()"

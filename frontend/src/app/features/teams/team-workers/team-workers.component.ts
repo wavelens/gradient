@@ -25,6 +25,7 @@ import {
 } from '@core/models';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
+import { fieldChecks } from '@shared/forms';
 import { Observable, map } from 'rxjs';
 import {
   BadgeComponent,
@@ -38,6 +39,8 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
+
+const DISPLAY_NAME_REQUIRED = 'Enter a display name.';
 
 @Component({
   selector: 'app-team-workers',
@@ -76,6 +79,7 @@ export class TeamWorkersComponent implements OnInit {
   registerError = signal<string | null>(null);
   editError = signal<string | null>(null);
   showRegister = signal(false);
+  registerAttempted = signal(false);
   showGradientCiConnect = signal(false);
   issuedToken = signal<string | null>(null);
   editing = signal<TeamWorkerEntry | null>(null);
@@ -126,14 +130,34 @@ export class TeamWorkersComponent implements OnInit {
 
   openRegister(): void {
     this.registerError.set(null);
+    this.registerAttempted.set(false);
     this.showRegister.set(true);
   }
 
+  workerIdError(): string | null {
+    if (!this.form.worker_id.trim()) return this.registerAttempted() ? 'Enter a worker ID.' : null;
+    return fieldChecks.uuid(this.form.worker_id);
+  }
+
+  displayNameError(): string | null {
+    return this.registerAttempted() && !this.form.display_name.trim() ? DISPLAY_NAME_REQUIRED : null;
+  }
+
+  editNameError(): string | null {
+    return this.editing()?.gradient_ci || this.editName.trim() ? null : DISPLAY_NAME_REQUIRED;
+  }
+
   register(): void {
-    if (!this.form.worker_id || !this.form.display_name) return;
+    if (this.busy() === 'register') return;
+    this.registerAttempted.set(true);
+    if (this.workerIdError() || this.displayNameError()) return;
     this.busy.set('register');
     this.registerError.set(null);
-    const worker: RegisterWorkerRequest = { ...this.form, url: this.form.url?.trim() || undefined };
+    const worker: RegisterWorkerRequest = {
+      worker_id: this.form.worker_id.trim(),
+      display_name: this.form.display_name.trim(),
+      url: this.form.url?.trim() || undefined,
+    };
     this.teams.registerWorker(this.teamName, worker).subscribe({
       next: (res) => {
         this.busy.set(null);
@@ -173,9 +197,13 @@ export class TeamWorkersComponent implements OnInit {
 
   saveEdit(): void {
     const worker = this.editing();
-    if (!worker || !this.editName.trim()) return;
+    if (!worker || this.busy() === 'edit' || this.editNameError()) return;
     const patch: PatchWorkerRequest = changedCapabilities(worker, this.editAllowed);
     if (this.editName.trim() !== worker.display_name) patch.display_name = this.editName.trim();
+    if (Object.keys(patch).length === 0) {
+      this.editing.set(null);
+      return;
+    }
     this.busy.set('edit');
     this.editError.set(null);
     this.teams.updateWorker(this.teamName, worker.worker_id, patch).subscribe({

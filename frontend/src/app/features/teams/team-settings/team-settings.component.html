@@ -17,8 +17,8 @@
     }
 
     <gr-settings-section title="General">
-      <gr-form-field label="Display Name" for="team-display-name">
-        <input grInput id="team-display-name" [(ngModel)]="form.display_name" [appManagedDisable]="access()" />
+      <gr-form-field label="Display Name" for="team-display-name" [invalid]="!!displayNameError" [error]="displayNameError ?? ''">
+        <input grInput id="team-display-name" [(ngModel)]="form.display_name" [appManagedDisable]="access()" (keyup.enter)="save()" />
       </gr-form-field>
       <gr-form-field hint="Applies to projects created from now on.">
         <gr-checkbox inputId="new-project-users" [(ngModel)]="form.new_project_users" [binary]="true"
@@ -33,18 +33,21 @@
           label="New projects grant the team's workers" [appManagedDisable]="superuserAccess()" />
       </gr-form-field>
       <gr-form-field label="OIDC group" for="team-oidc-group" hint="Members of this group join the team, taken from the groups claim at each sign-in.">
-        <input grInput id="team-oidc-group" [(ngModel)]="form.oidc_group" [appManagedDisable]="superuserAccess()" />
+        <input grInput id="team-oidc-group" [(ngModel)]="form.oidc_group" [appManagedDisable]="superuserAccess()" (keyup.enter)="save()" />
       </gr-form-field>
       <gr-form-field label="SCIM group" for="team-scim-group" hint="Members of this group join the team.">
-        <input grInput id="team-scim-group" [(ngModel)]="form.scim_group" [appManagedDisable]="superuserAccess()" />
+        <input grInput id="team-scim-group" [(ngModel)]="form.scim_group" [appManagedDisable]="superuserAccess()" (keyup.enter)="save()" />
       </gr-form-field>
 
-      @if (saved()) {
+      @if (saved() && !unsaved.changed()) {
         <gr-message-banner type="success">Changes saved.</gr-message-banner>
       }
-      <div class="form-actions">
-        <button *appWritable="access()" grButton label="Save Changes" icon="check" [loading]="saving()" (click)="save()"
-          [appManagedDisable]="access()"></button>
+      <div *appWritable="access()" class="form-actions">
+        <button grButton label="Save Changes" icon="check" [loading]="saving()" (grSubmit)="save()"
+          [disabled]="access().managed || !unsaved.changed()"></button>
+        @if (!access().managed && !unsaved.changed()) {
+          <small class="text-secondary save-hint">No changes to save.</small>
+        }
       </div>
     </gr-settings-section>
 

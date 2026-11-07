@@ -15,6 +15,8 @@ import { NotifyService } from '@core/services/notify.service';
 import { AccessState, TeamResponse, PatchTeamRequest } from '@core/models';
 import { ManagedDisableDirective, WritableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
+import { unsavedChanges } from '@shared/forms';
+import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import {
   ButtonComponent,
   CheckboxComponent,
@@ -27,6 +29,7 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
+  SubmitDirective,
 } from '@gradient/ui/ui';
 
 interface SettingsForm {
@@ -57,11 +60,17 @@ interface SettingsForm {
     RowListComponent,
     SelectComponent,
     SettingsSectionComponent,
+    SubmitDirective,
   ],
   templateUrl: './team-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
+  styles: `
+    .save-hint {
+      align-self: center;
+    }
+  `,
 })
-export class TeamSettingsComponent implements OnInit {
+export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private teams = inject(TeamsService);
@@ -85,6 +94,7 @@ export class TeamSettingsComponent implements OnInit {
   saved = signal(false);
   error = signal<string | null>(null);
   form: SettingsForm = this.formOf(null);
+  readonly unsaved = unsavedChanges(() => this.form, 'Team settings');
 
   isSuperuser = computed(() => this.authService.user()?.superuser === true);
   access = computed(() => this.accessFor(this.team()?.role === 'admin' || this.isSuperuser()));
@@ -101,6 +111,7 @@ export class TeamSettingsComponent implements OnInit {
         this.team.set(team);
         this.crumbs.rememberTeam(this.teamName, team.display_name);
         this.form = this.formOf(team);
+        this.unsaved.mark();
         this.loading.set(false);
       },
       error: (err: unknown) => {
@@ -110,16 +121,33 @@ export class TeamSettingsComponent implements OnInit {
     });
   }
 
+  canDeactivate() {
+    return this.unsaved.canLeave();
+  }
+
+  get displayNameError(): string | null {
+    return this.form.display_name.trim() ? null : 'Enter a display name.';
+  }
+
+  canSave(): boolean {
+    return !this.saving() && !this.access().managed && this.access().canEdit && this.unsaved.changed() && !this.displayNameError;
+  }
+
   save(): void {
     const team = this.team();
-    if (!team) return;
+    if (!team || !this.canSave()) return;
+    this.form.display_name = this.form.display_name.trim();
     const patch = this.changes(team);
-    if (Object.keys(patch).length === 0) return;
+    if (Object.keys(patch).length === 0) {
+      this.unsaved.mark();
+      return;
+    }
     this.saving.set(true);
     this.saved.set(false);
     this.teams.update(this.teamName, patch).subscribe({
       next: () => {
         this.team.set({ ...team, ...this.form });
+        this.unsaved.mark();
         this.saving.set(false);
         this.saved.set(true);
         this.load();

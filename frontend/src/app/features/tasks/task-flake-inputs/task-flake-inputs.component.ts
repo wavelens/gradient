@@ -35,6 +35,10 @@ interface FlakeInputFormState {
   keepUrl: boolean;
 }
 
+const INPUT_NAME_CHARS = /^[A-Za-z0-9_\-*?[\]]+$/;
+const INPUT_NAME_START = /^[A-Za-z_]/;
+const GLOB = /[*?[]/;
+
 const DEFAULT_FORM: FlakeInputFormState = {
   input_name: '',
   url: '',
@@ -92,6 +96,35 @@ export class TaskFlakeInputsComponent implements OnInit {
   error = signal<string | null>(null);
 
   form: FlakeInputFormState = { ...DEFAULT_FORM };
+  submitAttempted = signal(false);
+  private loadedForm = '';
+
+  get inputNameError(): string | null {
+    const name = this.form.input_name.trim();
+    if (!name) return 'Enter an input name.';
+    if (!INPUT_NAME_CHARS.test(name)) return 'Use letters, digits, _, - and the glob characters *, ?, [, ].';
+    if (!GLOB.test(name) && !INPUT_NAME_START.test(name)) return 'Start a name without glob characters with a letter or _.';
+    const taken = this.overrides().some((o) => o.id !== this.editingId() && o.input_name === name);
+    return taken ? 'This task already has an override for this input.' : null;
+  }
+
+  get urlError(): string | null {
+    return this.form.keepUrl || this.form.url.trim()
+      ? null
+      : 'Enter a flake URL, or turn on the option above to use the URL from flake.nix.';
+  }
+
+  submitForm(): void {
+    if (this.editingId()) this.saveEdit();
+    else this.saveCreate();
+  }
+
+  private requestBody(): CreateFlakeInputOverrideRequest | null {
+    if (this.saving()) return null;
+    this.submitAttempted.set(true);
+    if (this.inputNameError || this.urlError) return null;
+    return { input_name: this.form.input_name.trim(), url: this.form.keepUrl ? null : this.form.url.trim() };
+  }
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
@@ -116,7 +149,9 @@ export class TaskFlakeInputsComponent implements OnInit {
 
   startCreate(): void {
     this.form = { ...DEFAULT_FORM };
+    this.editingId.set(null);
     this.error.set(null);
+    this.submitAttempted.set(false);
     this.showCreateDialog.set(true);
   }
 
@@ -126,8 +161,10 @@ export class TaskFlakeInputsComponent implements OnInit {
       url: override.url ?? '',
       keepUrl: override.url === null,
     };
+    this.loadedForm = JSON.stringify(this.form);
     this.editingId.set(override.id);
     this.error.set(null);
+    this.submitAttempted.set(false);
     this.showEditDialog.set(true);
   }
 
@@ -139,12 +176,10 @@ export class TaskFlakeInputsComponent implements OnInit {
   }
 
   saveCreate(): void {
+    const body = this.requestBody();
+    if (!body) return;
     this.saving.set(true);
     this.error.set(null);
-    const body: CreateFlakeInputOverrideRequest = {
-      input_name: this.form.input_name,
-      url: this.form.keepUrl ? null : this.form.url,
-    };
     this.overridesService.create(this.projectName, this.taskName, body).subscribe({
       next: () => {
         this.saving.set(false);
@@ -166,12 +201,14 @@ export class TaskFlakeInputsComponent implements OnInit {
   saveEdit(): void {
     const id = this.editingId();
     if (!id) return;
+    const body = this.requestBody();
+    if (!body) return;
+    if (JSON.stringify(this.form) === this.loadedForm) {
+      this.cancelEdit();
+      return;
+    }
     this.saving.set(true);
     this.error.set(null);
-    const body: CreateFlakeInputOverrideRequest = {
-      input_name: this.form.input_name,
-      url: this.form.keepUrl ? null : this.form.url,
-    };
     this.overridesService.update(this.projectName, this.taskName, id, body).subscribe({
       next: () => {
         this.saving.set(false);
@@ -210,6 +247,6 @@ export class TaskFlakeInputsComponent implements OnInit {
   }
 
   isPattern(override: FlakeInputOverrideOut): boolean {
-    return /[*?[]/.test(override.input_name);
+    return GLOB.test(override.input_name);
   }
 }

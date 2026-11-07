@@ -56,7 +56,7 @@
 <gr-dialog
 header="Create Task"
 [(visible)]="showCreateDialog"
-[error]="createError()"
+[error]="createError() ?? missingNamesError"
 [busy]="creating()"
 width="550px"
 >
@@ -80,8 +80,9 @@ width="550px"
   </gr-form-field>
 
   <gr-form-field
-    label="Repository URL *"
+    label="Repository URL"
     for="proj-repo"
+    required
     hint="Git repository URL to evaluate"
     [invalid]="!!repositoryError"
     [error]="repositoryError ?? ''"
@@ -92,6 +93,7 @@ width="550px"
       id="proj-repo"
       [(ngModel)]="newTask.repository"
       placeholder="https://github.com/user/repo"
+      (blur)="repositoryTouched.set(true)"
       (keyup.enter)="createTask()"
     />
   </gr-form-field>
@@ -101,7 +103,7 @@ width="550px"
     for="proj-wildcard"
     [invalid]="wildcardInvalid"
     error="Each pattern must be non-empty, not start with a period, and contain no spaces."
-    hint="Pattern for selecting which outputs to evaluate (default: packages.x86_64-linux.*)"
+    hint="Pattern for the outputs to evaluate (default: packages.x86_64-linux.**)"
   >
     <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" />
     <input
@@ -126,7 +128,7 @@ width="550px"
     grButton
     label="Create"
     (grSubmit)="createTask()"
-    [disabled]="!newTask.name || !newTask.display_name || !newTask.repository || wildcardInvalid || names.blocksSubmit() || creating()"
+    [disabled]="names.blocksSubmit() || creating()"
     [loading]="creating()"
   ></button>
 </div>

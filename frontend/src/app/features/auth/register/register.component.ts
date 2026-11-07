@@ -18,8 +18,9 @@ import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { environment } from '@environments/environment';
-import { switchMap, map } from 'rxjs/operators';
-import { of, timer } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
+import { catchError, switchMap, map } from 'rxjs/operators';
+import { Observable, of, timer } from 'rxjs';
 import {
   ButtonComponent,
   FormFieldComponent,
@@ -113,46 +114,66 @@ export class RegisterComponent {
       : { passwordMismatch: true };
   }
 
-  // Async validator to check username availability
-  private usernameValidator(control: AbstractControl) {
+  private usernameValidator(control: AbstractControl): Observable<ValidationErrors | null> {
     if (!control.value) {
       return of(null);
     }
 
     return timer(500).pipe(
-      switchMap(() =>
-        this.authService.checkUsername(control.value).pipe(
-          map((available) => (available ? null : { usernameTaken: true }))
-        )
-      )
+      switchMap(() => this.authService.checkUsername(control.value)),
+      map(() => null),
+      catchError((error: unknown) =>
+        of(
+          error instanceof ApiError && !error.unreachable && error.status < 500
+            ? { usernameRefused: error.message }
+            : { usernameCheckFailed: true },
+        ),
+      ),
     );
   }
 
+  get usernameInvalid(): boolean {
+    const control = this.username;
+    if (!control) return false;
+    return (control.touched && control.invalid) || control.hasError('usernameRefused') || control.hasError('usernameCheckFailed');
+  }
+
+  get usernameRefusal(): string {
+    return this.username?.getError('usernameRefused') ?? '';
+  }
+
+  recheckUsername(): void {
+    this.username?.updateValueAndValidity();
+  }
+
   onSubmit(): void {
-    if (this.registerForm.valid) {
-      this.loading.set(true);
-      this.errorMessage.set(null);
-      this.successMessage.set(null);
-
-      const { username, name, email, password } = this.registerForm.value;
-
-      this.authService.register({ username, name, email, password }).subscribe({
-        next: () => {
-          this.loading.set(false);
-          if (this.config.emailVerificationEnabled) {
-            this.successMessage.set(
-              'Registration successful! Please check your email to verify your account before signing in.'
-            );
-          } else {
-            this.router.navigate(['/account/login']);
-          }
-        },
-        error: (error) => {
-          this.loading.set(false);
-          this.errorMessage.set(error.message || 'Registration failed. Please try again.');
-        },
-      });
+    if (this.loading() || this.registerForm.pending) return;
+    if (this.registerForm.invalid) {
+      this.registerForm.markAllAsTouched();
+      return;
     }
+    this.loading.set(true);
+    this.errorMessage.set(null);
+    this.successMessage.set(null);
+
+    const { username, name, email, password } = this.registerForm.value;
+
+    this.authService.register({ username, name, email, password }).subscribe({
+      next: () => {
+        this.loading.set(false);
+        if (this.config.emailVerificationEnabled) {
+          this.successMessage.set(
+            'Registration successful! Please check your email to verify your account before signing in.'
+          );
+        } else {
+          this.router.navigate(['/account/login']);
+        }
+      },
+      error: (error) => {
+        this.loading.set(false);
+        this.errorMessage.set(error.message || 'Registration failed. Please try again.');
+      },
+    });
   }
 
   get username() {

@@ -86,6 +86,7 @@ export class TeamGrantsComponent implements OnInit {
   grantError = signal<string | null>(null);
   granting = signal(false);
   showGrant = signal(false);
+  grantAttempted = signal(false);
   form: GrantForm = { team: '', role: '' };
 
   ngOnInit(): void {
@@ -117,11 +118,18 @@ export class TeamGrantsComponent implements OnInit {
   openGrant(): void {
     this.form = { team: '', role: this.roles()[0] ?? '' };
     this.grantError.set(null);
+    this.grantAttempted.set(false);
     this.showGrant.set(true);
   }
 
+  teamError(): string | null {
+    return this.grantAttempted() && !this.form.team.trim() ? 'Enter a team.' : null;
+  }
+
   grant(): void {
-    if (!this.form.team) return;
+    if (this.granting()) return;
+    this.grantAttempted.set(true);
+    if (this.teamError()) return;
     const form = { ...this.form, team: this.teamNamed(this.form.team) };
     const request =
       this.kind() === 'project' ? this.grantProject(form) : this.teams.grantCache(this.name(), form.team, form.role);

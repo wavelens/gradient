@@ -61,18 +61,18 @@
 </gr-page-layout>
 
 <gr-dialog [header]="editing() ? 'Edit Webhook' : 'New Webhook'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px" [error]="formError()" [busy]="saving()">
-  <gr-form-field label="Name" for="webhook-name">
-    <input grInput id="webhook-name" [ngModel]="name()" (ngModelChange)="name.set($event)" />
+  <gr-form-field label="Name" for="webhook-name" [invalid]="!!nameError()" [error]="nameError() ?? ''">
+    <input grInput id="webhook-name" [ngModel]="name()" (ngModelChange)="name.set($event)" (keyup.enter)="save()" />
   </gr-form-field>
-  <gr-form-field label="URL" for="webhook-url">
-    <input grInput id="webhook-url" [ngModel]="url()" (ngModelChange)="url.set($event)" placeholder="https://example.com/gradient" />
+  <gr-form-field label="URL" for="webhook-url" [invalid]="!!urlError()" [error]="urlError() ?? ''">
+    <input grInput id="webhook-url" [ngModel]="url()" (ngModelChange)="url.set($event)" placeholder="https://example.com/gradient" (keyup.enter)="save()" />
   </gr-form-field>
   <gr-form-field label="Events" hint="Nothing selected receives every event in this scope.">
     <gr-label-help slot="label" doc="reference/events/#webhooks" title="Webhook events" />
     <app-action-events [selected]="events()" (selectedChange)="events.set($event)" />
   </gr-form-field>
   <gr-form-field label="Event globs (optional)" for="webhook-globs" hint="Comma-separated, e.g. build.*, cache.nar.*">
-    <input grInput id="webhook-globs" [ngModel]="globs()" (ngModelChange)="globs.set($event)" />
+    <input grInput id="webhook-globs" [ngModel]="globs()" (ngModelChange)="globs.set($event)" (keyup.enter)="save()" />
   </gr-form-field>
   <gr-checkbox label="Active" [ngModel]="active()" (ngModelChange)="active.set($event)" />
   <div grDialogFooter>

@@ -110,6 +110,7 @@ export const routes: Routes = [
             path: 'settings',
             title: 'Task Settings',
             canActivate: [authGuard],
+            canDeactivate: [unsavedChangesGuard],
             loadComponent: () =>
               import('./features/tasks/task-settings/task-settings.component').then(
                 (m) => m.TaskSettingsComponent,
@@ -236,6 +237,7 @@ export const routes: Routes = [
         path: 'settings',
         title: 'Cache Settings',
         canActivate: [authGuard],
+        canDeactivate: [unsavedChangesGuard],
         loadComponent: () =>
           import('./features/caches/cache-settings/cache-settings.component').then(
             (m) => m.CacheSettingsComponent,
@@ -436,6 +438,7 @@ export const routes: Routes = [
         path: 'project/:project/settings',
         title: 'Project Settings',
         resolve: { projectAccess: projectAccessResolver },
+        canDeactivate: [unsavedChangesGuard],
         loadComponent: () =>
           import('./features/projects/project-settings/project-settings.component').then(
             (m) => m.ProjectSettingsComponent
@@ -490,6 +493,7 @@ export const routes: Routes = [
         path: 'team/:team/settings',
         title: 'Team Settings',
         canActivate: [visibleTeamGuard],
+        canDeactivate: [unsavedChangesGuard],
         loadComponent: () =>
           import('./features/teams/team-settings/team-settings.component').then((m) => m.TeamSettingsComponent),
       },
@@ -546,6 +550,7 @@ export const routes: Routes = [
       {
         path: 'settings/profile',
         title: 'Profile',
+        canDeactivate: [unsavedChangesGuard],
         loadComponent: () =>
           import('./features/settings/profile/profile.component').then(
             (m) => m.ProfileComponent

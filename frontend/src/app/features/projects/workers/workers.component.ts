@@ -58,6 +58,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, canOpenTeam } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
+import { fieldChecks } from '@shared/forms';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 
 @Component({
@@ -127,7 +128,9 @@ export class WorkersComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   registering = signal(false);
+  registerAttempted = signal(false);
   renaming = signal(false);
+  renameAttempted = signal(false);
   deletingId = signal<string | null>(null);
   togglingId = signal<string | null>(null);
   testingId = signal<string | null>(null);
@@ -259,11 +262,39 @@ export class WorkersComponent implements OnInit {
     this.newWorkerToken = '';
     this.newAllowed = ALL_ALLOWED;
     this.errorMessage.set(null);
+    this.registerAttempted.set(false);
     this.showRegisterDialog.set(true);
   }
 
+  get workerNameError(): string | null {
+    return this.newWorkerName.trim() ? null : 'Enter a worker name.';
+  }
+
+  get workerIdError(): string | null {
+    const id = this.newWorkerId.trim();
+    return id ? fieldChecks.uuid(id) : 'Enter a worker ID.';
+  }
+
+  get workerTokenError(): string | null {
+    return fieldChecks.base64(this.newWorkerToken);
+  }
+
+  get renameNameError(): string | null {
+    return this.renamingWorker()?.gradient_ci || this.newName.trim() ? null : 'Enter a worker name.';
+  }
+
+  generateWorkerId(): void {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    this.newWorkerId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
   registerWorker(): void {
-    if (this.registering() || !this.newWorkerId.trim() || !this.newWorkerName.trim()) return;
+    if (this.registering()) return;
+    this.registerAttempted.set(true);
+    if (this.workerNameError || this.workerIdError || this.workerTokenError) return;
     this.registering.set(true);
     this.errorMessage.set(null);
     const url = this.newWorkerUrl.trim() || undefined;
@@ -354,16 +385,23 @@ export class WorkersComponent implements OnInit {
     this.newName = worker.display_name;
     this.editAllowed = worker;
     this.renameError.set(null);
+    this.renameAttempted.set(false);
     this.showRenameDialog.set(true);
   }
 
   confirmRename(): void {
     const worker = this.renamingWorker();
-    if (!worker || this.renaming() || !this.newName.trim()) return;
-    this.renaming.set(true);
-    this.renameError.set(null);
+    if (!worker || this.renaming()) return;
+    this.renameAttempted.set(true);
+    if (this.renameNameError) return;
     const body: PatchWorkerRequest = changedCapabilities(worker, this.editAllowed);
     if (this.newName.trim() !== worker.display_name) body.display_name = this.newName.trim();
+    if (Object.keys(body).length === 0) {
+      this.cancelRename();
+      return;
+    }
+    this.renaming.set(true);
+    this.renameError.set(null);
     this.workersService.patchWorker(this.projectName, worker.worker_id, body).subscribe({
       next: () => {
         this.renaming.set(false);

@@ -208,12 +208,15 @@
   width="520px"
 >
   <div>
-    <gr-form-field label="Name" for="role-name" hint="Lowercase letters, digits, and hyphens.">
+    <gr-form-field label="Name" for="role-name" required hint="Lowercase letters, digits and hyphens."
+      [invalid]="(roleAttempted() || roleNameModel.dirty) && !!roleNameError" [error]="roleNameError ?? ''">
       <input
         grInput
         id="role-name"
         [(ngModel)]="roleForm.name"
+        #roleNameModel="ngModel"
         placeholder="e.g. releaser"
+        (keyup.enter)="saveRole()"
       />
     </gr-form-field>
     <gr-form-field label="Permissions">
@@ -233,7 +236,7 @@
       grButton
       [label]="editingRole() ? 'Save' : 'Create'"
       (click)="saveRole()"
-      [disabled]="!roleForm.name.trim() || savingRole()"
+      [disabled]="savingRole()"
       [loading]="savingRole()"
     ></button>
   </div>

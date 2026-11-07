@@ -31,6 +31,7 @@ import {
   SelectComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
+import { fieldChecks } from '@shared/forms';
 
 type FormMode = 'create' | 'edit';
 
@@ -48,6 +49,36 @@ const DEFAULT_BRANCH_PATTERN: Record<PatchGeneratorKind, string> = {
   flake_lock: 'gradient/flake-lock-update',
   exec_tree: 'gradient/{entry_point}',
 };
+
+const EMAIL = /^[^\s@]+@[^\s@]+$/;
+const TEAM_RECIPIENT = /^team:\S+$/;
+const MATRIX_ROOM_ID = /^![^\s:]+(?::\S+)?$/;
+
+type ActionField =
+  | 'name'
+  | 'recipients'
+  | 'url'
+  | 'homeserver'
+  | 'roomId'
+  | 'matrixToken'
+  | 'slackUrl'
+  | 'integration'
+  | 'branchPattern'
+  | 'startTask';
+
+const FIELDS_OF_TYPE: Record<ActionType, ActionField[]> = {
+  send_mail: ['name', 'recipients'],
+  send_web_request: ['name', 'url'],
+  send_matrix_message: ['name', 'homeserver', 'roomId', 'matrixToken'],
+  send_slack_message: ['name', 'slackUrl'],
+  git_host_status_report: ['name', 'integration'],
+  open_pr: ['name', 'integration', 'branchPattern'],
+  start_evaluation: ['name', 'startTask'],
+};
+
+const required = (value: string, message: string): string | null => (value.trim() ? null : message);
+const requiredUrl = (value: string, message: string): string | null =>
+  required(value, message) ?? fieldChecks.httpUrl(value);
 
 @Component({
   selector: 'app-action-form',
@@ -177,12 +208,68 @@ export class ActionFormComponent implements OnChanges {
 
   readonly typeRadioDisabled = computed(() => this.mode() === 'edit');
 
+  readonly submitAttempted = signal(false);
+  private readonly touched = signal<ReadonlySet<ActionField>>(new Set());
+
+  readonly errors = computed<Record<ActionField, string | null>>(() => {
+    const creating = this.mode() === 'create';
+    return {
+      name: required(this.name(), 'Enter a name for the action.'),
+      recipients: this.recipientsError(),
+      url: requiredUrl(this.url(), 'Enter a URL.'),
+      homeserver: requiredUrl(this.homeserver(), 'Enter the homeserver URL.'),
+      roomId:
+        required(this.roomId(), 'Enter the room ID.') ??
+        (MATRIX_ROOM_ID.test(this.roomId().trim())
+          ? null
+          : 'Start the room ID with ! and use no spaces (for example !abc:example.org).'),
+      matrixToken: creating ? required(this.secretValue(), 'Enter the access token.') : null,
+      slackUrl: creating
+        ? requiredUrl(this.secretValue(), 'Enter the webhook URL.')
+        : fieldChecks.httpUrl(this.secretValue()),
+      integration: this.integrationId() ? null : 'Select an outbound integration.',
+      branchPattern: this.branchPatternError(),
+      startTask: this.startTask() ? null : 'Select a task.',
+    };
+  });
+
+  readonly hasErrors = computed(() => FIELDS_OF_TYPE[this.type()].some((field) => this.errors()[field]));
+
+  showError(field: ActionField): boolean {
+    return (this.submitAttempted() || this.touched().has(field)) && !!this.errors()[field];
+  }
+
+  touch(field: ActionField): void {
+    this.touched.update((fields) => new Set(fields).add(field));
+  }
+
+  private recipientsError(): string | null {
+    const recipients = this.recipientsRaw()
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (recipients.length === 0) return 'Enter at least one recipient.';
+    const invalid = recipients.filter((r) => !EMAIL.test(r) && !TEAM_RECIPIENT.test(r));
+    return invalid.length > 0 ? 'Not an email address or team:<name> entry: ' + invalid.join(', ') : null;
+  }
+
+  private branchPatternError(): string | null {
+    const pattern = this.prBranchPattern().trim();
+    if (!pattern) return 'Enter a branch pattern.';
+    const perInput = this.prGenerator() === 'flake_lock' && this.prGranularity() === 'per_input';
+    return perInput && !pattern.includes('{input}')
+      ? 'Add a {input} placeholder to the branch pattern for Per Input granularity.'
+      : null;
+  }
+
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['open']) this.visible.set(this.open());
     if ((changes['open'] && this.open()) || changes['existing'] || changes['mode']) this.resetFromInputs();
   }
 
   private resetFromInputs(): void {
+    this.submitAttempted.set(false);
+    this.touched.set(new Set());
     const cur = this.existing();
     if (this.mode() === 'edit' && cur) {
       this.name.set(cur.name);
@@ -346,6 +433,9 @@ export class ActionFormComponent implements OnChanges {
   }
 
   onSubmit(): void {
+    if (this.busy()) return;
+    this.submitAttempted.set(true);
+    if (this.hasErrors()) return;
     const config = this.buildConfig();
     const events = this.eventsHardwired() ? [] : this.events();
     if (this.mode() === 'create') {

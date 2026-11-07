@@ -24,16 +24,16 @@
       } @else if (isOidc()) {
         <gr-message-banner type="info">Your profile is managed by your identity provider and cannot be edited here.</gr-message-banner>
       }
-      <gr-form-field label="Username" for="username">
-        <input grInput id="username" [(ngModel)]="formData.username" [appManagedDisable]="access()" />
+      <gr-form-field label="Username" for="username" [invalid]="!!fieldError('username')" [error]="fieldError('username') ?? ''">
+        <input grInput id="username" [(ngModel)]="formData.username" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
       </gr-form-field>
 
-      <gr-form-field label="Full Name" for="name">
-        <input grInput id="name" [(ngModel)]="formData.name" [appManagedDisable]="access()" />
+      <gr-form-field label="Full Name" for="name" [invalid]="!!fieldError('name')" [error]="fieldError('name') ?? ''">
+        <input grInput id="name" [(ngModel)]="formData.name" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
       </gr-form-field>
 
-      <gr-form-field label="Email" for="email">
-        <input grInput id="email" type="email" [(ngModel)]="formData.email" [appManagedDisable]="access()" />
+      <gr-form-field label="Email" for="email" [invalid]="!!fieldError('email')" [error]="fieldError('email') ?? ''">
+        <input grInput id="email" type="email" [(ngModel)]="formData.email" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
       </gr-form-field>
 
       <div class="form-actions">
@@ -41,12 +41,14 @@
           grButton
           label="Save Changes"
           icon="check"
-          (click)="saveSettings()"
+          (grSubmit)="saveSettings()"
           [loading]="saving()"
-          [appManagedDisable]="access()"
+          [disabled]="access().managed || !unsaved.changed()"
         ></button>
+        @if (!access().managed && !unsaved.changed()) {
+          <small class="text-secondary save-hint">No changes to save.</small>
+        }
       </div>
-    
     </gr-settings-section>
 
     <gr-settings-section title="Appearance" [card]="false">

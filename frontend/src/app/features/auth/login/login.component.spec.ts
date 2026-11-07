@@ -60,6 +60,29 @@ describe('LoginComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Sign-in failed');
   });
 
+  it('says the username is required once the field is left empty', () => {
+    const fixture = setup({ loginProviders: [], passwordLoginEnabled: true });
+    const root = fixture.nativeElement as HTMLElement;
+    root.querySelector('#username')!.dispatchEvent(new Event('blur'));
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Username or email is required');
+    expect(root.textContent).not.toContain('Password is required');
+  });
+
+  it('shows the missing fields on Sign In and sends nothing', () => {
+    const fixture = setup({ loginProviders: [], passwordLoginEnabled: true });
+    const root = fixture.nativeElement as HTMLElement;
+    const login = vi.fn();
+    (TestBed.inject(AuthService) as unknown as { login: typeof login }).login = login;
+    const submit = root.querySelector<HTMLButtonElement>('button[type=submit]')!;
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Username or email is required');
+    expect(root.textContent).toContain('Password is required');
+    expect(login).not.toHaveBeenCalled();
+  });
+
   it('hides the password form when password login is off', () => {
     const fixture = setup({ loginProviders: [EXAMPLE], passwordLoginEnabled: false });
     expect(fixture.nativeElement.querySelector('form')).toBeNull();

@@ -50,7 +50,7 @@ interface Option<T> {
 interface TriggerFormState {
   type: TriggerType;
   active: boolean;
-  interval_secs: number;
+  interval_secs: number | null;
   branch: string;
   integration_id: string;
   branches: string;
@@ -149,6 +149,8 @@ export class TaskTriggersComponent implements OnInit {
   inboundIntegrations = signal<IntegrationSummaryResponse[]>([]);
 
   form: TriggerFormState = { ...DEFAULT_FORM };
+  submitAttempted = signal(false);
+  private loadedForm = '';
 
   typeOptions: Option<TriggerType>[] = [
     { label: 'Polling', value: 'polling' },
@@ -194,9 +196,48 @@ export class TaskTriggersComponent implements OnInit {
     });
   }
 
+  get intervalError(): string | null {
+    const interval = this.form.interval_secs;
+    return interval !== null && /^\d+$/.test(String(interval)) && interval >= 10
+      ? null
+      : 'Enter an integer of at least 10 seconds.';
+  }
+
+  get integrationError(): string | null {
+    return this.form.integration_id ? null : 'Select an integration.';
+  }
+
+  get cronError(): string | null {
+    const cron = this.form.cron.trim();
+    if (!cron) return 'Enter a cron expression.';
+    const fields = cron.split(/\s+/).length;
+    return fields === 6 || fields === 7
+      ? null
+      : 'Enter 6 or 7 fields separated by spaces. The fields are sec, min, hour, dom, mon and dow, plus an optional year.';
+  }
+
+  private get formError(): string | null {
+    switch (this.form.type) {
+      case 'polling':
+        return this.intervalError;
+      case 'reporter_push':
+      case 'reporter_pull_request':
+        return this.integrationError;
+      case 'time':
+        return this.cronError;
+    }
+  }
+
+  submitForm(): void {
+    if (this.editingTrigger()) this.saveEdit();
+    else this.saveCreate();
+  }
+
   startCreate(): void {
     this.form = { ...DEFAULT_FORM };
     this.error.set(null);
+    this.submitAttempted.set(false);
+    this.editingTrigger.set(null);
     this.showCreateDialog.set(true);
   }
 
@@ -216,7 +257,9 @@ export class TaskTriggersComponent implements OnInit {
       require_approval: cfg.require_approval ?? true,
       cron: cfg.cron ?? '',
     };
+    this.loadedForm = JSON.stringify(this.form);
     this.error.set(null);
+    this.submitAttempted.set(false);
     this.editingTrigger.set(trigger);
     this.showEditDialog.set(true);
   }
@@ -234,7 +277,7 @@ export class TaskTriggersComponent implements OnInit {
         const trimmed = this.form.branch?.trim() ?? '';
         return {
           type: 'polling',
-          interval_secs: Math.max(10, this.form.interval_secs),
+          interval_secs: Number(this.form.interval_secs),
           branch: trimmed === '' ? null : trimmed,
         } as TriggerConfig;
       }
@@ -263,6 +306,9 @@ export class TaskTriggersComponent implements OnInit {
   }
 
   saveCreate(): void {
+    if (this.saving()) return;
+    this.submitAttempted.set(true);
+    if (this.formError) return;
     this.saving.set(true);
     this.error.set(null);
     const body: CreateTriggerRequest = {
@@ -284,7 +330,13 @@ export class TaskTriggersComponent implements OnInit {
 
   saveEdit(): void {
     const target = this.editingTrigger();
-    if (!target) return;
+    if (!target || this.saving()) return;
+    this.submitAttempted.set(true);
+    if (this.formError) return;
+    if (JSON.stringify(this.form) === this.loadedForm) {
+      this.cancelEdit();
+      return;
+    }
     this.saving.set(true);
     this.error.set(null);
     const body: UpdateTriggerRequest = {

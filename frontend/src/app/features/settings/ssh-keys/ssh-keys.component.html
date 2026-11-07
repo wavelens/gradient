@@ -55,11 +55,11 @@
 </gr-page-layout>
 
 <gr-dialog [(visible)]="showDialog" width="520px" header="Add SSH Key" [error]="errorMessage()" [busy]="saving()">
-  <gr-form-field label="Name" for="ssh-key-name">
-    <input grInput id="ssh-key-name" [(ngModel)]="formName" placeholder="e.g. Laptop" />
+  <gr-form-field label="Name" for="ssh-key-name" [invalid]="!!nameError()" [error]="nameError() ?? ''">
+    <input grInput id="ssh-key-name" [(ngModel)]="formName" placeholder="e.g. Laptop" (keyup.enter)="addKey()" />
   </gr-form-field>
 
-  <gr-form-field label="Public key" for="ssh-key-public">
+  <gr-form-field label="Public key" for="ssh-key-public" [invalid]="!!publicKeyError()" [error]="publicKeyError() ?? ''">
     <textarea
       grInput
       id="ssh-key-public"
@@ -78,7 +78,6 @@
       icon="add"
       (click)="addKey()"
       [loading]="saving()"
-      [disabled]="saving() || !formName.trim() || !formPublicKey.trim()"
     ></button>
   </div>
 </gr-dialog>

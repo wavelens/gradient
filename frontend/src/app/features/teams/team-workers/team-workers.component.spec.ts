@@ -36,6 +36,8 @@ const connection: TeamWorkerEntry = {
   connected: true,
 };
 
+const WORKER_ID = '3f2b8c1e-9a4d-4e6f-b7c2-1d5e8f9a0b3c';
+
 const offline = { ...connection, worker_id: 'w2', display_name: 'Sleeper', gradient_ci: false, connected: false };
 
 function setup(
@@ -96,21 +98,52 @@ describe('TeamWorkersComponent', () => {
 
   it('keeps a refused registration inside the Register dialog', () => {
     const { fixture, root, registerWorker } = setup();
-    registerWorker.mockReturnValue(throwError(() => new ApiError('worker_id must be a valid UUID', 422)));
+    registerWorker.mockReturnValue(throwError(() => new ApiError('Worker is already registered', 409)));
     button(root, 'Register Worker')!.click();
-    fixture.componentInstance.form = { worker_id: 'nope', display_name: 'Builder' };
+    fixture.componentInstance.form = { worker_id: WORKER_ID, display_name: 'Builder' };
     fixture.componentInstance.register();
     fixture.detectChanges();
     expect(fixture.componentInstance.showRegister()).toBe(true);
-    expect(document.querySelector('.gr-dialog')?.textContent).toContain('worker_id must be a valid UUID');
-    expect(root.textContent).not.toContain('worker_id must be a valid UUID');
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Worker is already registered');
+    expect(root.textContent).not.toContain('Worker is already registered');
+  });
+
+  it('names the missing fields under them and sends no registration', () => {
+    const { fixture, root, registerWorker } = setup();
+    button(root, 'Register Worker')!.click();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    button(dialog, 'Register')!.click();
+    fixture.detectChanges();
+    expect(dialog.textContent).toContain('Enter a worker ID.');
+    expect(dialog.textContent).toContain('Enter a display name.');
+    expect(registerWorker).not.toHaveBeenCalled();
+  });
+
+  it('refuses a worker ID that is no UUID before asking the server', () => {
+    const { fixture, root, registerWorker } = setup();
+    button(root, 'Register Worker')!.click();
+    fixture.componentInstance.form = { worker_id: 'builder-1', display_name: 'Builder' };
+    fixture.componentInstance.register();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Enter a UUID');
+    expect(registerWorker).not.toHaveBeenCalled();
+  });
+
+  it('closes the Edit dialog without a request when nothing changed', () => {
+    const { fixture, root, updateWorker } = setup();
+    button(root, 'Edit')!.click();
+    fixture.detectChanges();
+    button(document.querySelector('.gr-dialog')!, 'Save')!.click();
+    expect(updateWorker).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.editing()).toBeNull();
   });
 
   it('keeps the Register dialog open and sends one request while registration runs', () => {
     const { fixture, root, registerWorker } = setup();
     registerWorker.mockReturnValue(new Subject());
     button(root, 'Register Worker')!.click();
-    fixture.componentInstance.form = { worker_id: 'w9', display_name: 'Builder' };
+    fixture.componentInstance.form = { worker_id: WORKER_ID, display_name: 'Builder' };
     fixture.detectChanges();
     const dialog = document.querySelector('.gr-dialog')!;
     button(dialog, 'Register')!.click();
@@ -128,6 +161,7 @@ describe('TeamWorkersComponent', () => {
     const { fixture, root, updateWorker } = setup();
     updateWorker.mockReturnValue(throwError(() => new ApiError('Worker is managed', 409)));
     button(root, 'Edit')!.click();
+    fixture.componentInstance.editAllowed = { ...connection, enable_secrets: true };
     fixture.detectChanges();
     button(document.querySelector('.gr-dialog')!, 'Save')!.click();
     fixture.detectChanges();

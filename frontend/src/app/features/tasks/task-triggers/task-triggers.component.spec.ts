@@ -174,6 +174,7 @@ describe('TaskTriggersComponent - flake inputs', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [pushTrigger], update);
     const component = fixture.componentInstance;
     component.startEdit(pushTrigger as any);
+    component.form.branches = 'main';
     component.saveEdit();
     expect(update.mock.calls[0][3].config.include_flake_inputs).toBe(true);
   });
@@ -182,6 +183,7 @@ describe('TaskTriggersComponent - flake inputs', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [pushTrigger], () => NEVER);
     const component = fixture.componentInstance;
     component.startEdit(pushTrigger as any);
+    component.form.branches = 'main';
     fixture.detectChanges();
     component.saveEdit();
     fixture.detectChanges();
@@ -275,6 +277,7 @@ describe('TaskTriggersComponent - write failures', () => {
     const fixture = setup(writer, [trigger], () => throwError(() => new Error('Http failure response for /triggers/t1: 500')));
     const component = fixture.componentInstance;
     component.startEdit(trigger as any);
+    component.form.branch = 'main';
     component.saveEdit();
     fixture.detectChanges();
     expect(component.showEditDialog()).toBe(true);
@@ -285,5 +288,68 @@ describe('TaskTriggersComponent - write failures', () => {
     component.cancelEdit();
     component.startEdit(trigger as any);
     expect(component.error()).toBeNull();
+  });
+});
+
+describe('TaskTriggersComponent - validation', () => {
+  const writer = { managed: false, canEdit: true, canTrigger: true };
+  const fieldError = () => document.querySelector('.gr-dialog .field-error')?.textContent?.trim() ?? '';
+
+  function withCreate(update = vi.fn((..._args: any[]) => of({}))) {
+    const fixture = setup(writer, [trigger], update);
+    const create = vi.fn(() => of({}));
+    Object.assign(TestBed.inject(TriggersService), { create });
+    return { fixture, component: fixture.componentInstance, create, update };
+  }
+
+  it.each([5, null, 12.5])('refuses a polling interval of %s without sending it', (interval) => {
+    const { fixture, component, create } = withCreate();
+    component.startCreate();
+    component.form.interval_secs = interval;
+    component.saveCreate();
+    fixture.detectChanges();
+    expect(fieldError()).toContain('at least 10 seconds');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('asks for an integration before creating a push trigger', () => {
+    const { fixture, component, create } = withCreate();
+    component.startCreate();
+    component.form.type = 'reporter_push';
+    component.saveCreate();
+    fixture.detectChanges();
+    expect(fieldError()).toBe('Select an integration.');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a cron expression with the wrong number of fields', () => {
+    const { fixture, component, create } = withCreate();
+    component.startCreate();
+    component.form.type = 'time';
+    component.form.cron = '0 2 * * *';
+    component.saveCreate();
+    fixture.detectChanges();
+    expect(fieldError()).toContain('6 or 7 fields');
+    expect(create).not.toHaveBeenCalled();
+
+    component.form.cron = '0 0 2 * * *';
+    component.saveCreate();
+    expect(create).toHaveBeenCalledWith('acme', 'demo', { config: { type: 'time', cron: '0 0 2 * * *' }, active: true });
+  });
+
+  it('creates on Enter in a single-line field', () => {
+    const { fixture, component, create } = withCreate();
+    component.startCreate();
+    fixture.detectChanges();
+    document.querySelector('#trig-branch')!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it('closes the edit dialog without a request when nothing changed', () => {
+    const { component, update } = withCreate();
+    component.startEdit(trigger as any);
+    component.saveEdit();
+    expect(update).not.toHaveBeenCalled();
+    expect(component.showEditDialog()).toBe(false);
   });
 });

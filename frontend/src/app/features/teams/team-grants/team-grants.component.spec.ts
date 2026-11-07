@@ -176,6 +176,20 @@ describe('TeamGrantsComponent', () => {
     expect(service.grantProject).toHaveBeenCalledWith('acme', { team: 'infra', role: 'View', users: true, workers: false });
   });
 
+  it.each(['project', 'cache'] as const)('asks for a team on the %s grant dialog instead of ignoring the click', (kind) => {
+    const { fixture, component, service } = setup(kind, kind === 'project' ? 'users' : undefined);
+    component.openGrant();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent?.trim() === 'Grant')!
+      .click();
+    fixture.detectChanges();
+    expect(dialog.textContent).toContain('Enter a team.');
+    expect(service.grantProject).not.toHaveBeenCalled();
+    expect(service.grantCache).not.toHaveBeenCalled();
+  });
+
   it('shows a failed grant inside the grant dialog', () => {
     const { fixture, component, service, text } = setup('project', 'users');
     service.grantProject.mockReturnValue(throwError(() => new ApiError('Team not found', 404)));

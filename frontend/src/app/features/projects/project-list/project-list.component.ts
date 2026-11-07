@@ -76,6 +76,7 @@ export class ProjectListComponent implements OnInit {
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
+  createAttempted = signal(false);
 
   newProject = {
     name: '',
@@ -139,6 +140,7 @@ export class ProjectListComponent implements OnInit {
     this.newProject = { name: '', display_name: '', description: '', public: false };
     this.names.reset();
     this.createError.set(null);
+    this.createAttempted.set(false);
     this.showCreateDialog.set(true);
   }
 
@@ -147,10 +149,15 @@ export class ProjectListComponent implements OnInit {
     return this.publicProjects().filter((o) => !ownedIds.has(o.id));
   }
 
+  get missingNamesError(): string | null {
+    const missing = !this.newProject.name || !this.newProject.display_name;
+    return this.createAttempted() && missing ? 'Enter a display name and a name.' : null;
+  }
+
   createProject(): void {
-    if (this.creating() || !this.newProject.name || !this.newProject.display_name || this.names.blocksSubmit()) {
-      return;
-    }
+    if (this.creating() || this.names.blocksSubmit()) return;
+    this.createAttempted.set(true);
+    if (this.missingNamesError) return;
 
     this.creating.set(true);
     this.createError.set(null);

@@ -122,10 +122,38 @@ describe('WebhooksComponent', () => {
     );
   });
 
+  it('names the empty name and URL under their fields and sends nothing', () => {
+    const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
+    component.startCreate();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    Array.from(dialog.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.includes('Save'))!.click();
+    fixture.detectChanges();
+    expect(dialog.querySelector('#webhook-name')!.closest('gr-form-field')!.textContent).toContain('Enter a name.');
+    expect(dialog.querySelector('#webhook-url')!.closest('gr-form-field')!.textContent).toContain('Enter the URL to receive events.');
+    expect(service.create).not.toHaveBeenCalled();
+    expect(component.formOpen()).toBe(true);
+  });
+
+  it('refuses a URL without scheme, even on Enter', () => {
+    const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
+    component.startCreate();
+    component.name.set('ci');
+    component.url.set('not-a-url');
+    fixture.detectChanges();
+    const url = document.querySelector<HTMLInputElement>('#webhook-url')!;
+    url.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    fixture.detectChanges();
+    expect(url.closest('gr-form-field')!.textContent).toContain('https://');
+    expect(service.create).not.toHaveBeenCalled();
+  });
+
   it('keeps a refused save inside the open webhook dialog', () => {
     const { fixture, component, service, root } = setup({ webhookScope: 'project' }, { project: 'p' });
     service.create.mockReturnValue(throwError(() => new ApiError('Enter a full URL', 422)));
     component.startCreate();
+    component.name.set('ci');
+    component.url.set('https://example.com/hook');
     component.save();
     fixture.detectChanges();
     expect(component.formOpen()).toBe(true);
@@ -180,6 +208,8 @@ describe('WebhooksComponent', () => {
     const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
     service.create.mockReturnValue(new Subject<{ webhook: WebhookResponse; secret: string }>());
     component.startCreate();
+    component.name.set('ci');
+    component.url.set('https://example.com/hook');
     component.save();
     fixture.detectChanges();
     document.querySelector('.gr-dialog')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));

@@ -206,6 +206,7 @@ describe('TaskFlakeInputsComponent - write failures', () => {
     const fixture = setup(writer, [override], { update: () => NEVER });
     const component = fixture.componentInstance;
     component.startEdit(override);
+    component.form.url = 'github:numtide/flake-utils/main';
     fixture.detectChanges();
     component.saveEdit();
     fixture.detectChanges();
@@ -222,6 +223,7 @@ describe('TaskFlakeInputsComponent - write failures', () => {
     });
     const component = fixture.componentInstance;
     component.startEdit(override);
+    component.form.url = 'github:numtide/flake-utils/main';
     component.saveEdit();
     fixture.detectChanges();
 
@@ -229,5 +231,61 @@ describe('TaskFlakeInputsComponent - write failures', () => {
     const banner = document.body.querySelector('.gr-dialog gr-message-banner');
     expect(banner?.textContent).toContain('Failed to update override.');
     expect(document.body.textContent).not.toContain('Http failure response');
+  });
+});
+
+describe('TaskFlakeInputsComponent - validation', () => {
+  const writer = { managed: false, canEdit: true, canTrigger: true };
+  const fieldErrors = () =>
+    Array.from(document.querySelectorAll('.gr-dialog .field-error')).map((e) => e.textContent?.trim());
+
+  function withWrites() {
+    const create = vi.fn(() => of(override));
+    const update = vi.fn(() => of(override));
+    const fixture = setup(writer, [override], { create, update });
+    return { fixture, component: fixture.componentInstance, create, update };
+  }
+
+  it('names the missing input name and URL and sends nothing', () => {
+    const { fixture, component, create } = withWrites();
+    component.startCreate();
+    component.saveCreate();
+    fixture.detectChanges();
+    expect(fieldErrors()).toEqual([
+      'Enter an input name.',
+      'Enter a flake URL, or turn on the option above to use the URL from flake.nix.',
+    ]);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['nix pkgs', 'glob characters *, ?'],
+    ['1nixpkgs', 'Start a name'],
+    ['utils', 'already has an override'],
+  ])('refuses the input name %s', (name, message) => {
+    const { fixture, component, create } = withWrites();
+    component.startCreate();
+    component.form = { input_name: name, url: '', keepUrl: true };
+    component.saveCreate();
+    fixture.detectChanges();
+    expect(fieldErrors()).toEqual([expect.stringContaining(message)]);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('creates on Enter in the input name field', () => {
+    const { fixture, component, create } = withWrites();
+    component.startCreate();
+    component.form = { input_name: 'nixpkgs*', url: '', keepUrl: true };
+    fixture.detectChanges();
+    document.querySelector('#fi-input-name')!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
+    expect(create).toHaveBeenCalledWith('acme', 'demo', { input_name: 'nixpkgs*', url: null });
+  });
+
+  it('closes the edit dialog without a request when nothing changed', () => {
+    const { component, update } = withWrites();
+    component.startEdit(override);
+    component.saveEdit();
+    expect(update).not.toHaveBeenCalled();
+    expect(component.showEditDialog()).toBe(false);
   });
 });

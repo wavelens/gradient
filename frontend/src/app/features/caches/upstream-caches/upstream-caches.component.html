@@ -36,9 +36,7 @@
         @for (u of upstreamCaches(); track u.id) {
           <gr-row icon="cloud_download">
             {{ u.display_name }}
-            <gr-badge [severity]="u.upstream_cache_id ? 'info' : 'neutral'">
-              {{ u.upstream_cache_id ? 'Internal' : 'External' }}
-            </gr-badge>
+            <gr-badge [severity]="u.kind === 'internal' ? 'info' : 'neutral'">{{ kindLabel(u) }}</gr-badge>
             <gr-badge [severity]="modeSeverity(u.mode)">{{ modeLabel(u.mode) }}</gr-badge>
             @if (u.http1_only) {
               <gr-badge severity="neutral">HTTP/1.1</gr-badge>
@@ -103,15 +101,15 @@
 >
   @if (editingUpstream(); as u) {
     <div class="upstream-form">
-      <gr-form-field label="Display Name" for="edit-display-name">
-        <input grInput id="edit-display-name" [(ngModel)]="editForm.display_name" />
+      <gr-form-field label="Display Name" for="edit-display-name" [invalid]="!!editErrors().display_name" [error]="editErrors().display_name ?? ''">
+        <input grInput id="edit-display-name" [(ngModel)]="editForm.display_name" (keyup.enter)="saveUpstream()" />
       </gr-form-field>
-      @if (!u.upstream_cache_id) {
-        <gr-form-field label="Substituter URL" for="edit-url">
-          <input grInput id="edit-url" [(ngModel)]="editForm.url" />
+      @if (u.kind === 'http') {
+        <gr-form-field label="Substituter URL" for="edit-url" [invalid]="!!editErrors().url" [error]="editErrors().url ?? ''">
+          <input grInput id="edit-url" [(ngModel)]="editForm.url" (keyup.enter)="saveUpstream()" />
         </gr-form-field>
-        <gr-form-field label="Public Key" for="edit-pubkey">
-          <input grInput id="edit-pubkey" [(ngModel)]="editForm.public_key" />
+        <gr-form-field label="Public Key" for="edit-pubkey" [invalid]="!!editErrors().public_key" [error]="editErrors().public_key ?? ''">
+          <input grInput id="edit-pubkey" [(ngModel)]="editForm.public_key" (keyup.enter)="saveUpstream()" />
         </gr-form-field>
         <gr-form-field hint="For caches that break HTTP/2 transfers.">
           <gr-checkbox inputId="edit-http1-only" [(ngModel)]="editForm.http1_only" [binary]="true" label="HTTP/1.1 only" />
@@ -133,7 +131,7 @@
   }
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="savingUpstream()"></button>
-    <button grButton label="Save" icon="check" (click)="saveUpstream()" [loading]="savingUpstream()" [disabled]="savingUpstream() || !isEditFormValid()"></button>
+    <button grButton label="Save" icon="check" (click)="saveUpstream()" [loading]="savingUpstream()"></button>
   </div>
 </gr-dialog>
 
@@ -156,12 +154,12 @@
     </gr-form-field>
 
     @if (upstreamType === 'internal') {
-      <gr-form-field label="Cache Name" for="up-cache-name">
-        <input grInput id="up-cache-name" [(ngModel)]="upstreamForm.cache_name" placeholder="my-cache" />
+      <gr-form-field label="Cache Name" for="up-cache-name" [invalid]="!!addErrors().cache_name" [error]="addErrors().cache_name ?? ''">
+        <input grInput id="up-cache-name" [(ngModel)]="upstreamForm.cache_name" placeholder="my-cache" (keyup.enter)="addUpstream()" />
       </gr-form-field>
       <gr-form-field label="Display Name" for="up-display-name-int">
         <span slot="label" class="text-secondary">(optional)</span>
-        <input grInput id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" />
+        <input grInput id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" (keyup.enter)="addUpstream()" />
       </gr-form-field>
       <gr-form-field label="Mode" for="up-mode" hint="Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.">
         <gr-label-help slot="label" doc="concepts/caches/#upstream-types" title="Upstream modes" />
@@ -174,18 +172,18 @@
           />
       </gr-form-field>
     } @else if (upstreamType === 'gradient_proto') {
-      <gr-form-field label="Display Name" for="up-gp-display-name">
-        <input grInput id="up-gp-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="My Gradient Cache" />
+      <gr-form-field label="Display Name" for="up-gp-display-name" [invalid]="!!addErrors().display_name" [error]="addErrors().display_name ?? ''">
+        <input grInput id="up-gp-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="My Gradient Cache" (keyup.enter)="addUpstream()" />
       </gr-form-field>
-      <gr-form-field label="Server URL" for="up-gp-url">
-        <input grInput id="up-gp-url" [(ngModel)]="upstreamForm.url" placeholder="https://gradient.example.com" />
+      <gr-form-field label="Server URL" for="up-gp-url" [invalid]="!!addErrors().url" [error]="addErrors().url ?? ''">
+        <input grInput id="up-gp-url" [(ngModel)]="upstreamForm.url" placeholder="https://gradient.example.com" (keyup.enter)="addUpstream()" />
       </gr-form-field>
-      <gr-form-field label="Remote Cache Name" for="up-gp-remote-cache">
-        <input grInput id="up-gp-remote-cache" [(ngModel)]="upstreamForm.remote_cache" placeholder="my-cache" />
+      <gr-form-field label="Remote Cache Name" for="up-gp-remote-cache" [invalid]="!!addErrors().remote_cache" [error]="addErrors().remote_cache ?? ''">
+        <input grInput id="up-gp-remote-cache" [(ngModel)]="upstreamForm.remote_cache" placeholder="my-cache" (keyup.enter)="addUpstream()" />
       </gr-form-field>
       <gr-form-field label="API Key" for="up-gp-api-key">
         <span slot="label" class="text-secondary">(optional)</span>
-        <input grInput type="password" id="up-gp-api-key" [(ngModel)]="upstreamForm.api_key" />
+        <input grInput type="password" id="up-gp-api-key" [(ngModel)]="upstreamForm.api_key" (keyup.enter)="addUpstream()" />
       </gr-form-field>
       <gr-form-field label="Mode" for="up-gp-mode">
         <gr-label-help slot="label" doc="concepts/caches/#upstream-types" title="Upstream modes" />
@@ -198,11 +196,11 @@
           />
       </gr-form-field>
     } @else {
-      <gr-form-field label="Display Name" for="up-display-name">
-        <input grInput id="up-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="cache.nixos.org" />
+      <gr-form-field label="Display Name" for="up-display-name" [invalid]="!!addErrors().display_name" [error]="addErrors().display_name ?? ''">
+        <input grInput id="up-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="cache.nixos.org" (keyup.enter)="addUpstream()" />
       </gr-form-field>
-      <gr-form-field label="Substituter URL" for="up-url">
-        <input grInput id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" (blur)="probeHttpUrl()" />
+      <gr-form-field label="Substituter URL" for="up-url" [invalid]="!!addErrors().url" [error]="addErrors().url ?? ''">
+        <input grInput id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" (blur)="probeHttpUrl()" (keyup.enter)="addUpstream()" />
         @if (probeSuggestsProto()) {
           <div class="dialog-hint">
             <gr-icon name="lightbulb" size="sm" />
@@ -212,8 +210,8 @@
           </div>
         }
       </gr-form-field>
-      <gr-form-field label="Public Key" for="up-pubkey">
-        <input grInput id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" />
+      <gr-form-field label="Public Key" for="up-pubkey" [invalid]="!!addErrors().public_key" [error]="addErrors().public_key ?? ''">
+        <input grInput id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" (keyup.enter)="addUpstream()" />
       </gr-form-field>
       <gr-form-field hint="For caches that break HTTP/2 transfers.">
         <gr-checkbox inputId="up-http1-only" [(ngModel)]="upstreamForm.http1_only" [binary]="true" label="HTTP/1.1 only" />
@@ -223,6 +221,6 @@
   </div>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showAddDialog.set(false)" [disabled]="addingUpstream()"></button>
-    <button grButton label="Add" icon="add" (click)="addUpstream()" [loading]="addingUpstream()" [disabled]="addingUpstream() || !isAddFormValid()"></button>
+    <button grButton label="Add" icon="add" (click)="addUpstream()" [loading]="addingUpstream()"></button>
   </div>
 </gr-dialog>

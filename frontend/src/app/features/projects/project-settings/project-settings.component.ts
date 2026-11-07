@@ -8,7 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { finalize } from 'rxjs';
+import { Observable, concat, finalize, throwError, catchError } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -28,11 +28,22 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
+  SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, accessDisabledReason } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
+import { unsavedChanges } from '@shared/forms';
+import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { AccessState, ProjectResponse } from '@core/models';
+
+interface ProjectForm {
+  display_name: string;
+  description: string;
+  public: boolean;
+  hide_build_requests: boolean;
+  allow_exec_in_build_requests: boolean;
+}
 
 @Component({
   selector: 'app-project-settings',
@@ -56,12 +67,13 @@ import { AccessState, ProjectResponse } from '@core/models';
     RowComponent,
     SelectComponent,
     RowListComponent,
+    SubmitDirective,
   ],
   templateUrl: './project-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './project-settings.component.scss',
 })
-export class ProjectSettingsComponent implements OnInit {
+export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate {
   readonly visibilityOptions = [
     { label: 'Private', value: false },
     { label: 'Public', value: true },
@@ -94,13 +106,31 @@ export class ProjectSettingsComponent implements OnInit {
   projectName = '';
   breadcrumb = computed(() => this.crumbs.project(this.projectName, { label: 'Settings' }));
 
-  formData = {
+  formData: ProjectForm = {
     display_name: '',
     description: '',
     public: false,
     hide_build_requests: false,
     allow_exec_in_build_requests: false,
   };
+  private savedForm: ProjectForm = { ...this.formData };
+  readonly unsaved = unsavedChanges(() => this.formData, 'Project Settings');
+
+  get displayNameError(): string | null {
+    return this.formData.display_name.trim() ? null : 'Enter a display name.';
+  }
+
+  get saveBlockedReason(): string | null {
+    const access = this.access();
+    if (access.managed || !access.canEdit) return accessDisabledReason(access);
+    if (!this.unsaved.changed()) return 'There are no changes to save.';
+    if (this.displayNameError) return 'Fix the marked fields to save.';
+    return null;
+  }
+
+  canDeactivate(): boolean | Observable<boolean> {
+    return this.unsaved.canLeave();
+  }
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
@@ -123,6 +153,8 @@ export class ProjectSettingsComponent implements OnInit {
           hide_build_requests: project.hide_build_requests,
           allow_exec_in_build_requests: project.allow_exec_in_build_requests,
         };
+        this.savedForm = { ...this.formData };
+        this.unsaved.mark();
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -148,38 +180,41 @@ export class ProjectSettingsComponent implements OnInit {
   }
 
   saveSettings(): void {
+    if (this.saving() || this.saveBlockedReason) return;
+    const saved = this.savedForm;
+    const { public: visibility, ...fields } = this.formData;
+    const patch = Object.fromEntries(
+      Object.entries(fields).filter(([key, value]) => saved[key as keyof ProjectForm] !== value),
+    );
+    const requests: Observable<unknown>[] = [];
+    if (Object.keys(patch).length > 0) {
+      requests.push(this.failWith(this.projectsService.updateProject(this.projectName, patch), 'Failed to save settings.'));
+    }
+    if (visibility !== saved.public) {
+      const visibilityCall = visibility
+        ? this.projectsService.setPublic(this.projectName)
+        : this.projectsService.setPrivate(this.projectName);
+      requests.push(this.failWith(visibilityCall, 'Failed to update visibility.'));
+    }
+
     this.saving.set(true);
     this.saveError.set(null);
     this.saveSuccess.set(false);
-    const visibilityCall = this.formData.public
-      ? this.projectsService.setPublic(this.projectName)
-      : this.projectsService.setPrivate(this.projectName);
-
-    this.projectsService.updateProject(this.projectName, {
-      display_name: this.formData.display_name,
-      description: this.formData.description,
-      hide_build_requests: this.formData.hide_build_requests,
-      allow_exec_in_build_requests: this.formData.allow_exec_in_build_requests,
-    }).subscribe({
-      next: () => {
-        visibilityCall.subscribe({
-          next: () => {
-            this.saving.set(false);
-            this.saveSuccess.set(true);
-            this.loadProject();
-          },
-          error: (error: unknown) => {
-            this.saveError.set(apiErrorMessage(error, 'Failed to update visibility.'));
-            this.saving.set(false);
-            this.loadProject();
-          },
-        });
+    concat(...requests).subscribe({
+      complete: () => {
+        this.saving.set(false);
+        this.saveSuccess.set(true);
+        this.loadProject();
       },
-      error: (error: unknown) => {
-        this.saveError.set(apiErrorMessage(error, 'Failed to save settings.'));
+      error: (message: string) => {
+        this.saveError.set(message);
         this.saving.set(false);
       },
     });
+  }
+
+  private failWith<T>(request: Observable<T>, message: string): Observable<T> {
+    return request.pipe(catchError((error: unknown) => throwError(() => apiErrorMessage(error, message))));
   }
 
   deleteProject(): void {

@@ -116,6 +116,29 @@ describe('TeamMembersComponent', () => {
     expect(addMember).toHaveBeenCalledWith('platform', 'carol', 'member');
   });
 
+  it('asks for a username under the field instead of ignoring the click', () => {
+    const { fixture, addMember } = setup();
+    fixture.componentInstance.openAdd();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    Array.from(dialog.querySelectorAll<HTMLButtonElement>('.gr-dialog__footer button'))
+      .find((b) => b.textContent?.trim() === 'Add')!
+      .click();
+    fixture.detectChanges();
+    expect(dialog.textContent).toContain('Enter a username.');
+    expect(addMember).not.toHaveBeenCalled();
+  });
+
+  it('opens the add dialog empty after a cancelled attempt', () => {
+    const { fixture } = setup();
+    const component = fixture.componentInstance;
+    component.openAdd();
+    component.newMember = { user: 'typed-user', role: 'admin' };
+    component.showAdd.set(false);
+    component.openAdd();
+    expect(component.newMember).toEqual({ user: '', role: 'member' });
+  });
+
   it('shows a failed addition inside the add dialog', () => {
     const { fixture, addMember } = setup();
     addMember.mockReturnValue(throwError(() => new ApiError('User not found', 404)));

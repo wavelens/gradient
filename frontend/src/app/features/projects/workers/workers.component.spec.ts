@@ -585,3 +585,78 @@ describe('WorkersComponent - write failures', () => {
     expect(cmp.showGradientCiDisconnect()).toBe(true);
   });
 });
+
+describe('WorkersComponent - register and edit validation', () => {
+  const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  async function openRegister() {
+    const fixture = setup({ access: writable, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    const registerWorker = vi.fn(() => of({ peer_id: 'project-uuid', token: 'generated' }));
+    Object.assign(TestBed.inject(WorkersService), { registerWorker });
+    fixture.componentInstance.openRegisterDialog();
+    await settled(fixture);
+    return { fixture, registerWorker, dialog: document.querySelector('.gr-dialog')! };
+  }
+
+  const errors = (dialog: Element) =>
+    Array.from(dialog.querySelectorAll('.field-error')).map((e) => e.textContent?.trim() ?? '');
+
+  it('names the missing fields on submit and sends nothing', async () => {
+    const { fixture, registerWorker, dialog } = await openRegister();
+    buttonsLabelled(dialog, 'Register')[0].click();
+    fixture.detectChanges();
+    expect(errors(dialog)).toEqual(['Enter a worker name.', 'Enter a worker ID.']);
+    expect(registerWorker).not.toHaveBeenCalled();
+  });
+
+  it('refuses a worker ID that is not a UUID and a token that is not base64', async () => {
+    const { fixture, registerWorker, dialog } = await openRegister();
+    const cmp = fixture.componentInstance;
+    cmp.newWorkerName = 'Builder';
+    cmp.newWorkerId = 'builder-1';
+    cmp.newWorkerToken = 'not base64!';
+    cmp.registerWorker();
+    await settled(fixture);
+    expect(errors(dialog)).toEqual([
+      expect.stringContaining('UUID'),
+      expect.stringContaining('base64'),
+    ]);
+    expect(registerWorker).not.toHaveBeenCalled();
+  });
+
+  it('generates a UUID worker ID that registers', async () => {
+    const { fixture, registerWorker, dialog } = await openRegister();
+    const cmp = fixture.componentInstance;
+    cmp.newWorkerName = 'Builder';
+    buttonsLabelled(dialog, 'Generate')[0].click();
+    expect(cmp.workerIdError).toBeNull();
+    cmp.registerWorker();
+    expect(registerWorker).toHaveBeenCalledWith('demo', cmp.newWorkerId, 'Builder', undefined, undefined, expect.anything());
+  });
+
+  it('closes the Edit Worker dialog without a request when nothing changed', async () => {
+    const fixture = setup({ access: writable, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    const workers = TestBed.inject(WorkersService) as unknown as { patchWorker: ReturnType<typeof vi.fn> };
+    const cmp = fixture.componentInstance;
+    cmp.openRenameDialog(workerUnmanaged);
+    cmp.confirmRename();
+    expect(workers.patchWorker).not.toHaveBeenCalled();
+    expect(cmp.showRenameDialog()).toBe(false);
+  });
+
+  it('refuses an empty worker name in the Edit Worker dialog', async () => {
+    const fixture = setup({ access: writable, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    const workers = TestBed.inject(WorkersService) as unknown as { patchWorker: ReturnType<typeof vi.fn> };
+    const cmp = fixture.componentInstance;
+    cmp.openRenameDialog(workerUnmanaged);
+    await settled(fixture);
+    cmp.newName = ' ';
+    cmp.confirmRename();
+    await settled(fixture);
+    expect(errors(document.querySelector('.gr-dialog')!)).toEqual(['Enter a worker name.']);
+    expect(workers.patchWorker).not.toHaveBeenCalled();
+  });
+});

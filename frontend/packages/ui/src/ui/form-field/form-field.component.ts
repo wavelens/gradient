@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, DestroyRef, ElementRef, effect, inject, input, computed, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
+import { Component, DestroyRef, ElementRef, effect, inject, input, computed, signal, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { AbstractControl, NgControl } from '@angular/forms';
 import { FormErrors } from './form-errors';
 
@@ -29,9 +29,12 @@ export class FormFieldComponent {
   error = input<string>();
   errorMessages = input<Record<string, string>>({});
 
+  private controlChanges = signal(0);
+
   showError = computed(() => {
     const explicit = this.invalid();
     if (explicit !== null) return explicit;
+    this.controlChanges();
     const ctrl = this.control();
     return !!ctrl?.invalid && !!ctrl?.touched;
   });
@@ -44,6 +47,13 @@ export class FormFieldComponent {
 
   constructor() {
     inject(FormErrors, { optional: true })?.track(this.showError, inject(DestroyRef));
+    effect((onCleanup) => {
+      const ctrl = this.control();
+      const events = (ctrl instanceof NgControl ? ctrl.control : ctrl)?.events;
+      if (!events) return;
+      const subscription = events.subscribe(() => this.controlChanges.update((n) => n + 1));
+      onCleanup(() => subscription.unsubscribe());
+    });
     effect(() => {
       const control = (this.hostRef.nativeElement as HTMLElement).querySelector<HTMLElement>(
         'input, textarea, select, [role=combobox]',
@@ -59,6 +69,7 @@ export class FormFieldComponent {
   errorText = computed(() => {
     const explicit = this.error();
     if (explicit) return explicit;
+    this.controlChanges();
     const errors = this.control()?.errors;
     if (!errors) return '';
     return this.errorMessages()[Object.keys(errors)[0]] ?? '';

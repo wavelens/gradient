@@ -199,6 +199,16 @@ describe('TaskActionsComponent - write failures', () => {
     fixture.componentInstance.startCreate();
     fixture.detectChanges();
     const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    const fill = (selector: string, value: string) => {
+      const input = panel.querySelector<HTMLInputElement>(selector);
+      if (!input) return;
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+    };
+    fill('#action-name', 'Notify');
+    fill('#action-recipients', 'ops@example.com');
+    fill('#action-url', 'https://example.com/hook');
+    fixture.detectChanges();
     const submit = Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.includes('Create'))!;
     submit.click();
     fixture.detectChanges();

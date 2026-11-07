@@ -31,12 +31,31 @@ import {
 } from '@gradient/ui/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { AccessState, ApiKeyInfo, PermissionEntry } from '@core/models';
+import { AccessState, ApiKeyInfo, PatchApiKeyRequest, PermissionEntry } from '@core/models';
 import { permissionLabel } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
-import { isIpNetwork, splitLines } from '@shared/forms';
+import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
 
 type ScopeType = 'none' | 'project' | 'cache';
+
+interface KeyFields {
+  name: string;
+  permissions: string[];
+  project: string | null;
+  allowed_ips: string[];
+}
+
+const sameList = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((value) => b.includes(value));
+
+function keyChanges(key: ApiKeyInfo, next: KeyFields): PatchApiKeyRequest {
+  const patch: PatchApiKeyRequest = {};
+  if (next.name !== key.name) patch.name = next.name;
+  if (!sameList(next.permissions, key.permissions)) patch.permissions = next.permissions;
+  if (next.project !== (key.project ?? null)) patch.project = next.project;
+  if (!sameList(next.allowed_ips, key.allowed_ips ?? [])) patch.allowed_ips = next.allowed_ips;
+  return patch;
+}
 
 interface SelectOption {
   label: string;
@@ -100,6 +119,7 @@ export class ApiKeysComponent implements OnInit {
   showKeyDialog = signal(false);
   createdKeyValue = signal('');
   errorMessage = signal<string | null>(null);
+  attempted = signal(false);
 
   formName = '';
   formExpiresInDays: number | null = null;
@@ -162,6 +182,7 @@ export class ApiKeysComponent implements OnInit {
     this.formPermissions['viewProject'] = true;
     this.formAllowedIps = '';
     this.errorMessage.set(null);
+    this.attempted.set(false);
     this.showDialog.set(true);
   }
 
@@ -182,6 +203,7 @@ export class ApiKeysComponent implements OnInit {
     }
     this.formAllowedIps = (key.allowed_ips ?? []).join('\n');
     this.errorMessage.set(null);
+    this.attempted.set(false);
     this.showDialog.set(true);
   }
 
@@ -216,32 +238,44 @@ export class ApiKeysComponent implements OnInit {
       .map(([id]) => id);
   }
 
+  nameError(): string | null {
+    return this.attempted() && !this.formName.trim() ? 'Enter a name.' : null;
+  }
+
+  expiryError(): string | null {
+    return this.editingKey() ? null : fieldChecks.positiveInteger(this.formExpiresInDays);
+  }
+
+  cacheError(): string | null {
+    return this.attempted() && this.formScope === 'cache' && !this.formCache ? 'Select a cache.' : null;
+  }
+
+  permissionsError(): string | null {
+    return this.attempted() && this.selectedPermissions().length === 0 ? 'Select at least one permission.' : null;
+  }
+
   saveKey(): void {
+    if (this.creating() || this.saving()) return;
+    this.attempted.set(true);
+    if (this.nameError() || this.expiryError() || this.cacheError() || this.permissionsError() || this.invalidIps().length > 0) {
+      return;
+    }
     const name = this.formName.trim();
     const perms = this.selectedPermissions();
-    if (!name) {
-      this.errorMessage.set('Name is required.');
-      return;
-    }
-    if (perms.length === 0) {
-      this.errorMessage.set('Select at least one permission.');
-      return;
-    }
     const project = this.formScope === 'project' ? this.formProject : null;
     const cache = this.formScope === 'cache' ? this.formCache : null;
-    if (this.invalidIps().length > 0) return;
     const allowedIps = splitLines(this.formAllowedIps);
     const editing = this.editingKey();
     this.errorMessage.set(null);
     if (editing) {
+      const patch = keyChanges(editing, { name, permissions: perms, project, allowed_ips: allowedIps });
+      if (Object.keys(patch).length === 0) {
+        this.showDialog.set(false);
+        return;
+      }
       this.saving.set(true);
       this.userService
-        .updateApiKey(editing.id, {
-          name,
-          permissions: perms,
-          project,
-          allowed_ips: allowedIps,
-        })
+        .updateApiKey(editing.id, patch)
         .subscribe({
           next: () => {
             this.saving.set(false);

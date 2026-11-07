@@ -234,6 +234,7 @@ describe('ActionFormComponent', () => {
     fixture.detectChanges();
     const c = fixture.componentInstance;
     expect(c.generatorOptions.map((o) => o.value)).toContain('exec_tree');
+    c.name.set('exec-pr');
     c.onTypeChange('open_pr');
     c.integrationId.set('int-1');
     c.onGeneratorChange('exec_tree');
@@ -265,5 +266,74 @@ describe('ActionFormComponent', () => {
     component.recipientsRaw.set('ops@example.com');
     component.addTeamRecipient('platform');
     expect(component.recipientsRaw()).toBe('ops@example.com, team:platform');
+  });
+});
+
+describe('ActionFormComponent - validation', () => {
+  function submitAndCollect(fixture: ComponentFixture<ActionFormComponent>) {
+    const emitted: unknown[] = [];
+    fixture.componentInstance.saved.subscribe((r) => emitted.push(r));
+    fixture.componentInstance.onSubmit();
+    fixture.detectChanges();
+    const errors = Array.from(document.querySelectorAll('.gr-dialog .field-error')).map((e) => e.textContent?.trim());
+    return { emitted, errors };
+  }
+
+  it('names the missing name and recipients and emits nothing', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    const { emitted, errors } = submitAndCollect(fixture);
+    expect(errors).toEqual(['Enter a name for the action.', 'Enter at least one recipient.']);
+    expect(emitted).toEqual([]);
+  });
+
+  it('refuses recipients that are neither email addresses nor teams', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    c.name.set('Mail');
+    c.recipientsRaw.set('ops@example.com, ops, team:platform');
+    const { emitted, errors } = submitAndCollect(fixture);
+    expect(errors).toEqual(['Not an email address or team:<name> entry: ops']);
+    expect(emitted).toEqual([]);
+  });
+
+  it('refuses a web request URL that is not http or https', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    c.name.set('Webhook');
+    c.onTypeChange('send_web_request');
+    c.url.set('not-a-url');
+    const { emitted, errors } = submitAndCollect(fixture);
+    expect(errors).toEqual([expect.stringContaining('https://')]);
+    expect(emitted).toEqual([]);
+  });
+
+  it('refuses a Matrix room ID without the leading !', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    c.name.set('Matrix');
+    c.onTypeChange('send_matrix_message');
+    c.homeserver.set('https://matrix.example.org');
+    c.roomId.set('#ops:example.org');
+    c.secretValue.set('syt_abc');
+    const { emitted, errors } = submitAndCollect(fixture);
+    expect(errors).toEqual([expect.stringContaining('Start the room ID with !')]);
+    expect(emitted).toEqual([]);
+  });
+
+  it('asks for the {input} placeholder with Per Input granularity', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    c.name.set('updater');
+    c.onTypeChange('open_pr');
+    c.integrationId.set('int-1');
+    c.prGranularity.set('per_input');
+    const { emitted, errors } = submitAndCollect(fixture);
+    expect(errors).toEqual([expect.stringContaining('{input}')]);
+    expect(emitted).toEqual([]);
   });
 });

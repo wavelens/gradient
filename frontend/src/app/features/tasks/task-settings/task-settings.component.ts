@@ -8,6 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { Observable } from 'rxjs';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -34,9 +35,26 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { repositoryUrlError } from '@shared/text';
-import { WritableDirective, ManagedDisableDirective } from '@shared/access';
-import { TaskResponse, ConcurrencyPolicy } from '@core/models';
+import { WritableDirective, ManagedDisableDirective, accessDisabledReason } from '@shared/access';
+import { fieldChecks, firstFieldError, unsavedChanges } from '@shared/forms';
+import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
+import { TaskResponse, ConcurrencyPolicy, PatchTaskRequest } from '@core/models';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
+
+interface TaskForm {
+  display_name: string;
+  description: string;
+  repository: string;
+  wildcard: string;
+  keep_evaluations: number | null;
+  concurrency: ConcurrencyPolicy;
+  sign_cache: boolean;
+  wait_for_workers: boolean;
+  retry_failed_builds: boolean;
+  multi_node_evaluation: boolean;
+  exec_enabled: boolean;
+  only_evaluate: boolean;
+}
 
 @Component({
   selector: 'app-task-settings',
@@ -68,7 +86,7 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './task-settings.component.scss',
 })
-export class TaskSettingsComponent implements OnInit {
+export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private tasksService = inject(TasksService);
@@ -100,20 +118,7 @@ export class TaskSettingsComponent implements OnInit {
   taskName = '';
   breadcrumb = computed(() => this.crumbs.task(this.projectName, this.taskName, { label: 'Settings' }));
 
-  formData: {
-    display_name: string;
-    description: string;
-    repository: string;
-    wildcard: string;
-    keep_evaluations: number;
-    concurrency: ConcurrencyPolicy;
-    sign_cache: boolean;
-    wait_for_workers: boolean;
-    retry_failed_builds: boolean;
-    multi_node_evaluation: boolean;
-    exec_enabled: boolean;
-    only_evaluate: boolean;
-  } = {
+  formData: TaskForm = {
     display_name: '',
     description: '',
     repository: '',
@@ -127,6 +132,30 @@ export class TaskSettingsComponent implements OnInit {
     exec_enabled: false,
     only_evaluate: false,
   };
+  private savedForm: TaskForm = { ...this.formData };
+  readonly unsaved = unsavedChanges(() => this.formData, 'Task Settings');
+
+  get displayNameError(): string | null {
+    return this.formData.display_name.trim() ? null : 'Enter a display name.';
+  }
+
+  get keepEvaluationsError(): string | null {
+    const keep = this.formData.keep_evaluations;
+    if (keep === null || String(keep).trim() === '') return 'Enter the number of evaluations to keep.';
+    return fieldChecks.positiveInteger(keep);
+  }
+
+  get saveBlockedReason(): string | null {
+    const access = this.access();
+    if (access.managed || !access.canEdit) return accessDisabledReason(access);
+    if (!this.unsaved.changed()) return 'There are no changes to save.';
+    if (this.displayNameError || this.repositoryError || this.keepEvaluationsError) return 'Fix the marked fields to save.';
+    return null;
+  }
+
+  canDeactivate(): boolean | Observable<boolean> {
+    return this.unsaved.canLeave();
+  }
 
   concurrencyOptions: { label: string; value: ConcurrencyPolicy; disabled?: boolean }[] = [
     { label: 'Auto: abort the running evaluation once the new one builds, keep builds both need', value: 'auto' },
@@ -171,6 +200,8 @@ export class TaskSettingsComponent implements OnInit {
           exec_enabled: task.exec_enabled,
           only_evaluate: task.only_evaluate,
         };
+        this.savedForm = { ...this.formData };
+        this.unsaved.mark();
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -189,8 +220,13 @@ export class TaskSettingsComponent implements OnInit {
   }
 
   get repositoryError(): string | null {
+    const url = this.formData.repository.trim();
+    if (!url) return 'Enter the repository URL.';
     const check = this.currentRepoCheck();
-    return repositoryUrlError(this.formData.repository.trim()) ?? (check && !check.ok ? check.message : null);
+    return (
+      firstFieldError(url, fieldChecks.remoteRepository, (value) => repositoryUrlError(String(value))) ??
+      (check && !check.ok ? check.message : null)
+    );
   }
 
   get repositoryReachable(): string | null {
@@ -215,11 +251,15 @@ export class TaskSettingsComponent implements OnInit {
   }
 
   saveSettings(): void {
-    if (this.saving()) return;
+    if (this.saving() || this.saveBlockedReason) return;
+    const saved = this.savedForm;
+    const patch: PatchTaskRequest = Object.fromEntries(
+      Object.entries(this.formData).filter(([key, value]) => saved[key as keyof TaskForm] !== value),
+    );
     this.saving.set(true);
     this.errorMessage.set(null);
     this.saveSuccess.set(false);
-    this.tasksService.updateTask(this.projectName, this.taskName, this.formData).subscribe({
+    this.tasksService.updateTask(this.projectName, this.taskName, patch).subscribe({
       next: () => {
         this.saving.set(false);
         this.saveSuccess.set(true);
@@ -246,7 +286,7 @@ export class TaskSettingsComponent implements OnInit {
       next: () => {
         this.toggling.set(false);
         this.notify.success(activate ? 'Task activated' : 'Task deactivated');
-        this.loadTask();
+        this.task.set({ ...proj, active: activate });
       },
       error: (error: unknown) => {
         this.toggling.set(false);

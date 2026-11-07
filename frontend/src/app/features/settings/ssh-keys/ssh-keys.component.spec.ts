@@ -137,6 +137,33 @@ describe('SshKeysComponent', () => {
     expect(addSshKey).toHaveBeenCalledTimes(1);
   });
 
+  it('names the missing fields under them and sends nothing', () => {
+    const addSshKey = vi.fn(() => of('added'));
+    const fixture = setup([], { addSshKey });
+    fixture.componentInstance.openDialog();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    buttonsByText(dialog.querySelector('.gr-dialog__footer')!, 'add')[0].click();
+    fixture.detectChanges();
+    expect(dialog.textContent).toContain('Enter a name.');
+    expect(dialog.textContent).toContain('Paste a public key.');
+    expect(addSshKey).not.toHaveBeenCalled();
+  });
+
+  it('refuses text that is no OpenSSH public key, even on Enter', () => {
+    const addSshKey = vi.fn(() => of('added'));
+    const fixture = setup([], { addSshKey });
+    const component = fixture.componentInstance;
+    component.openDialog();
+    component.formName = 'laptop';
+    component.formPublicKey = '-----BEGIN OPENSSH PRIVATE KEY-----';
+    fixture.detectChanges();
+    document.querySelector('#ssh-key-name')!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog')!.textContent).toContain('Paste an OpenSSH public key');
+    expect(addSshKey).not.toHaveBeenCalled();
+  });
+
   describe('Add SSH Key dialog', () => {
     async function openDialog(): Promise<ComponentFixture<SshKeysComponent>> {
       const fixture = setup([]);

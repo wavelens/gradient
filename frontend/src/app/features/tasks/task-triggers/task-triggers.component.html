@@ -163,13 +163,17 @@
   </gr-form-field>
 
   @if (form.type === 'polling') {
-    <gr-form-field label="Interval (seconds)" for="trig-interval" hint="Minimum 10 seconds. Example: 300 = every 5 minutes.">
+    <gr-form-field label="Interval (seconds)" for="trig-interval" required hint="Minimum 10 seconds. Example: 300 = every 5 minutes."
+      [invalid]="(submitAttempted() || intervalModel.dirty) && !!intervalError" [error]="intervalError ?? ''">
       <input
         grInput
         id="trig-interval"
         type="number"
         min="10"
+        step="1"
         [(ngModel)]="form.interval_secs"
+        #intervalModel="ngModel"
+        (keyup.enter)="submitForm()"
       />
     </gr-form-field>
     <gr-form-field label="Branch" for="trig-branch" hint="Leave empty to track the repo's default branch (HEAD).">
@@ -178,12 +182,14 @@
         id="trig-branch"
         [(ngModel)]="form.branch"
         placeholder="HEAD (default branch)"
+        (keyup.enter)="submitForm()"
       />
     </gr-form-field>
   }
 
   @if (form.type === 'reporter_push' || form.type === 'reporter_pull_request') {
-    <gr-form-field label="Integration" for="trig-integration" hint="Inbound integration that delivers webhooks for this trigger.">
+    <gr-form-field label="Integration" for="trig-integration" required hint="Inbound integration that delivers webhooks for this trigger."
+      [invalid]="submitAttempted() && !!integrationError" [error]="integrationError ?? ''">
       <gr-select
         inputId="trig-integration"
         [(ngModel)]="form.integration_id"
@@ -198,6 +204,7 @@
         id="trig-branches"
         [(ngModel)]="form.branches"
         placeholder="main, release/*, develop"
+        (keyup.enter)="submitForm()"
       />
     </gr-form-field>
   }
@@ -209,6 +216,7 @@
         id="trig-tags"
         [(ngModel)]="form.tags"
         placeholder="v*, release-*"
+        (keyup.enter)="submitForm()"
       />
     </gr-form-field>
     <gr-checkbox
@@ -232,6 +240,7 @@
         id="trig-actions"
         [(ngModel)]="form.actions"
         placeholder="opened, synchronize, reopened"
+        (keyup.enter)="submitForm()"
       />
     </gr-form-field>
 
@@ -247,13 +256,16 @@
   }
 
   @if (form.type === 'time') {
-    <gr-form-field label="Cron Expression" for="trig-cron">
+    <gr-form-field label="Cron Expression" for="trig-cron" required
+      [invalid]="(submitAttempted() || cronModel.touched) && !!cronError" [error]="cronError ?? ''">
       <span slot="hint">Six fields: sec min hour dom mon dow (UTC). Example: <code>0 0 2 * * *</code> = 02:00 UTC daily.</span>
       <input
         grInput
         id="trig-cron"
         [(ngModel)]="form.cron"
+        #cronModel="ngModel"
         placeholder="0 0 2 * * *"
+        (keyup.enter)="submitForm()"
       />
     </gr-form-field>
   }

@@ -143,6 +143,50 @@ describe('TeamSettingsComponent', () => {
     expect(update).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps Save Changes disabled and says why while nothing changed', () => {
+    const { fixture, update } = setup(true);
+    const save = buttonByText(fixture.nativeElement, 'Save Changes');
+    expect(save.disabled).toBe(true);
+    expect(fixture.nativeElement.textContent).toContain('No changes to save.');
+    fixture.componentInstance.save();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('shows an emptied display name under the field and sends nothing, even on Enter', () => {
+    const { fixture, update } = setup(true);
+    fixture.componentInstance.form.display_name = ' ';
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    const name = input(fixture, 'team-display-name');
+    expect(name.closest('gr-form-field')!.textContent).toContain('Enter a display name.');
+    name.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    buttonByText(fixture.nativeElement, 'Save Changes').click();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('drops the saved banner as soon as the form changes again', () => {
+    const { fixture } = setup(true);
+    const component = fixture.componentInstance;
+    component.form.display_name = 'Ops';
+    component.save();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Changes saved.');
+    component.form.display_name = 'Ops Team';
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).not.toContain('Changes saved.');
+  });
+
+  it('asks before leaving only with unsaved edits', () => {
+    const { fixture, confirm } = setup(true);
+    confirm.mockImplementation(() => EMPTY);
+    expect(fixture.componentInstance.canDeactivate()).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+    fixture.componentInstance.form.oidc_group = 'ci-admins';
+    expect(fixture.componentInstance.canDeactivate()).not.toBe(true);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Team settings' }));
+  });
+
   it('asks before deleting, naming the team, then leaves for the team list', () => {
     const { fixture, remove, notify, confirm } = setup(true);
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);

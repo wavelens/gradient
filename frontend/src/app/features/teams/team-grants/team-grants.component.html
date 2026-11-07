@@ -35,9 +35,10 @@
 </gr-settings-section>
 
 <gr-dialog header="Grant Team" [(visible)]="showGrant" width="420px" [error]="grantError()" [busy]="granting()">
-  <gr-form-field label="Team" hint="A team you are not Admin of receives a request to approve.">
+  <gr-form-field label="Team" hint="A team you are not Admin of receives a request to approve."
+    [invalid]="!!teamError()" [error]="teamError() ?? ''">
     <gr-autocomplete [(ngModel)]="form.team" [suggestions]="suggestions()" (completeMethod)="search($event)"
-      [forceSelection]="false" />
+      [forceSelection]="false" (enter)="grant()" />
   </gr-form-field>
   @if (part() === 'users') {
     <gr-form-field label="Role">

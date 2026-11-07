@@ -34,6 +34,28 @@ import { WritableDirective, ManagedDisableDirective, AccessService } from '@shar
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
 import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, ProtocolProbe } from '@core/models';
+import { fieldChecks } from '@shared/forms';
+
+type UpstreamErrors = Partial<Record<'cache_name' | 'display_name' | 'url' | 'remote_cache' | 'public_key', string | null>>;
+
+const DISPLAY_NAME_REQUIRED = 'Enter a display name.';
+const NIX_PUBLIC_KEY = /^[^\s:]+:[A-Za-z0-9+/]+={0,2}$/;
+
+const required = (value: string, attempted: boolean, message: string): string | null =>
+  attempted && !value.trim() ? message : null;
+
+const urlError = (value: string, attempted: boolean): string | null =>
+  required(value, attempted, 'Enter the cache URL.') ?? fieldChecks.httpUrl(value);
+
+function publicKeyError(value: string, attempted: boolean): string | null {
+  const key = value.trim();
+  if (!key) return attempted ? 'Enter the public key.' : null;
+  return NIX_PUBLIC_KEY.test(key)
+    ? null
+    : 'Enter the key in name:key format. Example: cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=.';
+}
+
+const hasError = (errors: UpstreamErrors): boolean => Object.values(errors).some((message) => !!message);
 
 @Component({
   selector: 'app-upstream-caches',
@@ -91,6 +113,8 @@ export class UpstreamCachesComponent implements OnInit {
   editingUpstream = signal<UpstreamCacheItem | null>(null);
   addError = signal<string | null>(null);
   editError = signal<string | null>(null);
+  addAttempted = signal(false);
+  editAttempted = signal(false);
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Upstream Caches' }));
@@ -141,40 +165,51 @@ export class UpstreamCachesComponent implements OnInit {
     });
   }
 
-  isAddFormValid(): boolean {
-    if (this.upstreamType === 'internal') {
-      return this.upstreamForm.cache_name.trim().length > 0;
+  addErrors(): UpstreamErrors {
+    const form = this.upstreamForm;
+    const attempted = this.addAttempted();
+    switch (this.upstreamType) {
+      case 'internal':
+        return { cache_name: required(form.cache_name, attempted, 'Enter a cache name.') };
+      case 'gradient_proto':
+        return {
+          display_name: required(form.display_name, attempted, DISPLAY_NAME_REQUIRED),
+          url: urlError(form.url, attempted),
+          remote_cache: required(form.remote_cache, attempted, 'Enter the cache name on the other server.'),
+        };
+      case 'http':
+        return {
+          display_name: required(form.display_name, attempted, DISPLAY_NAME_REQUIRED),
+          url: urlError(form.url, attempted),
+          public_key: publicKeyError(form.public_key, attempted),
+        };
     }
-    if (this.upstreamType === 'gradient_proto') {
-      return (
-        this.upstreamForm.url.trim().length > 0 &&
-        this.upstreamForm.remote_cache.trim().length > 0 &&
-        this.upstreamForm.display_name.trim().length > 0
-      );
-    }
-    return (
-      this.upstreamForm.display_name.trim().length > 0 &&
-      this.upstreamForm.url.trim().length > 0 &&
-      this.upstreamForm.public_key.trim().length > 0
-    );
   }
 
-  isEditFormValid(): boolean {
-    const upstream = this.editingUpstream();
-    if (!upstream) return false;
-    const isExternal = !upstream.upstream_cache_id;
-    if (!isExternal) return true;
-    return (
-      this.editForm.display_name.trim().length > 0 &&
-      this.editForm.url.trim().length > 0 &&
-      this.editForm.public_key.trim().length > 0
-    );
+  editErrors(): UpstreamErrors {
+    const form = this.editForm;
+    const attempted = this.editAttempted();
+    const errors: UpstreamErrors = { display_name: required(form.display_name, attempted, DISPLAY_NAME_REQUIRED) };
+    if (this.editingUpstream()?.kind !== 'http') return errors;
+    return { ...errors, url: urlError(form.url, attempted), public_key: publicKeyError(form.public_key, attempted) };
+  }
+
+  kindLabel(upstream: UpstreamCacheItem): string {
+    switch (upstream.kind) {
+      case 'internal':
+        return 'Internal';
+      case 'http':
+        return 'HTTP';
+      default:
+        return 'Gradient Proto';
+    }
   }
 
   openAddDialog(): void {
     this.upstreamType = 'internal';
     this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', http1_only: false, remote_cache: '', api_key: '', mode: 'ReadWrite' };
     this.addError.set(null);
+    this.addAttempted.set(false);
     this.probeSuggestsProto.set(false);
     this.showAddDialog.set(true);
   }
@@ -189,28 +224,24 @@ export class UpstreamCachesComponent implements OnInit {
       http1_only: upstream.http1_only,
     };
     this.editError.set(null);
+    this.editAttempted.set(false);
     this.showEditDialog.set(true);
   }
 
   saveUpstream(): void {
     const upstream = this.editingUpstream();
-    if (!upstream) return;
-    if (!this.isEditFormValid()) {
-      this.editError.set('Please fill in all required fields.');
-      return;
-    }
+    if (!upstream || this.savingUpstream()) return;
+    this.editAttempted.set(true);
+    if (hasError(this.editErrors())) return;
     this.editError.set(null);
     this.savingUpstream.set(true);
-    const isExternal = !upstream.upstream_cache_id;
-    const data: PatchUpstreamRequest = {
-      display_name: this.editForm.display_name || undefined,
-    };
-    if (!isExternal) {
-      data.mode = this.editForm.mode;
-    } else {
-      data.url = this.editForm.url || undefined;
-      data.public_key = this.editForm.public_key || undefined;
+    const data: PatchUpstreamRequest = { display_name: this.editForm.display_name.trim() };
+    if (upstream.kind === 'http') {
+      data.url = this.editForm.url.trim();
+      data.public_key = this.editForm.public_key.trim();
       data.http1_only = this.editForm.http1_only;
+    } else {
+      data.mode = this.editForm.mode;
     }
     this.cachesService.updateUpstream(this.cacheName, upstream.id, data).subscribe({
       next: () => {
@@ -227,10 +258,9 @@ export class UpstreamCachesComponent implements OnInit {
   }
 
   addUpstream(): void {
-    if (!this.isAddFormValid()) {
-      this.addError.set('Please fill in all required fields.');
-      return;
-    }
+    if (this.addingUpstream()) return;
+    this.addAttempted.set(true);
+    if (hasError(this.addErrors())) return;
     this.addError.set(null);
     this.addingUpstream.set(true);
     let obs;

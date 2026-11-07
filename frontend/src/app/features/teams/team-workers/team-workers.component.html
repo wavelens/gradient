@@ -76,14 +76,15 @@
 </gr-settings-section>
 
 <gr-dialog header="Register Worker" [(visible)]="showRegister" width="480px" [error]="registerError()" [busy]="busy() === 'register'">
-  <gr-form-field label="Worker ID" for="team-worker-id" hint="The worker's UUID from services.gradient.worker.id.">
-    <input grInput id="team-worker-id" [(ngModel)]="form.worker_id" />
+  <gr-form-field label="Worker ID" for="team-worker-id" hint="The worker's UUID from services.gradient.worker.id."
+    [invalid]="!!workerIdError()" [error]="workerIdError() ?? ''">
+    <input grInput id="team-worker-id" [(ngModel)]="form.worker_id" (keyup.enter)="register()" />
   </gr-form-field>
-  <gr-form-field label="Display Name" for="team-worker-name">
-    <input grInput id="team-worker-name" [(ngModel)]="form.display_name" />
+  <gr-form-field label="Display Name" for="team-worker-name" [invalid]="!!displayNameError()" [error]="displayNameError() ?? ''">
+    <input grInput id="team-worker-name" [(ngModel)]="form.display_name" (keyup.enter)="register()" />
   </gr-form-field>
   <gr-form-field label="URL" for="team-worker-url" hint="Optional. Set it when the server dials the worker.">
-    <input grInput id="team-worker-url" [(ngModel)]="form.url" placeholder="wss://worker.example.com/proto" />
+    <input grInput id="team-worker-url" [(ngModel)]="form.url" placeholder="wss://worker.example.com/proto" (keyup.enter)="register()" />
   </gr-form-field>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" [disabled]="busy() === 'register'" (click)="showRegister.set(false)"></button>
@@ -106,8 +107,8 @@
 <gr-dialog header="Edit Worker" [visible]="editing() !== null" (hide)="editing.set(null)" width="480px" [error]="editError()" [busy]="busy() === 'edit'">
   @if (editing(); as worker) {
     @if (!worker.gradient_ci) {
-      <gr-form-field label="Display Name" for="team-worker-edit-name">
-        <input grInput id="team-worker-edit-name" [(ngModel)]="editName" />
+      <gr-form-field label="Display Name" for="team-worker-edit-name" [invalid]="!!editNameError()" [error]="editNameError() ?? ''">
+        <input grInput id="team-worker-edit-name" [(ngModel)]="editName" (keyup.enter)="saveEdit()" />
       </gr-form-field>
     }
     <gr-form-field label="Allowed" hint="Changes take effect on the worker's next reconnect.">
@@ -116,7 +117,7 @@
   }
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" [disabled]="busy() === 'edit'" (click)="editing.set(null)"></button>
-    <button grButton label="Save" icon="check" [loading]="busy() === 'edit'" [disabled]="!editName.trim()" (click)="saveEdit()"></button>
+    <button grButton label="Save" icon="check" [loading]="busy() === 'edit'" (click)="saveEdit()"></button>
   </div>
 </gr-dialog>
 

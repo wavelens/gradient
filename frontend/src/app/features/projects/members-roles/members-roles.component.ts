@@ -38,8 +38,12 @@ import {
   RoleResponse_ProjectRoleOwner,
   PermissionEntry,
   PendingInvitationItem,
+  PatchRoleRequest,
 } from '@core/models';
 import { permissionLabel } from '@shared/text';
+import { Observable } from 'rxjs';
+
+const ROLE_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 interface RoleFormState {
   name: string;
@@ -96,6 +100,7 @@ export class MembersRolesComponent implements OnInit {
   addingMember = signal(false);
   updatingRole = signal<string | null>(null);
   savingRole = signal(false);
+  roleAttempted = signal(false);
 
   members = signal<MemberItem[]>([]);
   invitations = signal<PendingInvitationItem[]>([]);
@@ -271,6 +276,7 @@ export class MembersRolesComponent implements OnInit {
       permissions: this.permissionTemplate(false),
     };
     this.roleError.set(null);
+    this.roleAttempted.set(false);
     this.showRoleDialog.set(true);
   }
 
@@ -281,6 +287,7 @@ export class MembersRolesComponent implements OnInit {
     for (const id of role.permissions) map[id] = true;
     this.roleForm = { name: role.name, permissions: map };
     this.roleError.set(null);
+    this.roleAttempted.set(false);
     this.showRoleDialog.set(true);
   }
 
@@ -296,21 +303,41 @@ export class MembersRolesComponent implements OnInit {
       .map(([id]) => id);
   }
 
-  saveRole(): void {
-    if (!this.roleForm.name.trim()) {
-      this.roleError.set('Role name is required.');
-      return;
+  get roleNameError(): string | null {
+    const name = this.roleForm.name.trim();
+    if (!name) return 'Enter a role name.';
+    if (!ROLE_NAME.test(name)) {
+      return "Use only lowercase characters, digits and hyphens. Don't put a hyphen at the start or end of the name.";
     }
+    const editing = this.editingRole();
+    const taken = this.roles().some((r) => r.id !== editing?.id && r.name.toLowerCase() === name.toLowerCase());
+    return taken ? "Roles with this name already exist. Case doesn't matter in role names." : null;
+  }
+
+  saveRole(): void {
+    if (this.savingRole()) return;
+    this.roleAttempted.set(true);
+    if (this.roleNameError) return;
+
+    const editing = this.editingRole();
+    const name = this.roleForm.name.trim();
+    const permissions = this.selectedPermissions();
+    let obs: Observable<unknown>;
+    if (editing) {
+      const patch: PatchRoleRequest = {};
+      if (name !== editing.name) patch.name = name;
+      if ([...permissions].sort().join() !== [...editing.permissions].sort().join()) patch.permissions = permissions;
+      if (Object.keys(patch).length === 0) {
+        this.showRoleDialog.set(false);
+        return;
+      }
+      obs = this.projectsService.updateRole(this.projectName, editing.id, patch);
+    } else {
+      obs = this.projectsService.createRole(this.projectName, { name, permissions });
+    }
+
     this.savingRole.set(true);
     this.roleError.set(null);
-    const editing = this.editingRole();
-    const data = {
-      name: this.roleForm.name.trim(),
-      permissions: this.selectedPermissions(),
-    };
-    const obs = editing
-      ? this.projectsService.updateRole(this.projectName, editing.id, data)
-      : this.projectsService.createRole(this.projectName, data);
     obs.subscribe({
       next: () => {
         this.savingRole.set(false);

@@ -219,6 +219,76 @@ describe('UpstreamCachesComponent - HTTP/1.1 only', () => {
   });
 });
 
+describe('UpstreamCachesComponent - field checks', () => {
+  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
+  const protoUpstream = {
+    ...httpUpstream,
+    id: 'u3',
+    display_name: 'Remote',
+    mode: 'ReadWrite' as const,
+    kind: 'gradientproto',
+    url: 'https://gradient.example.com',
+    public_key: null,
+    remote_cache: 'main',
+  };
+  const fieldText = (id: string) => document.querySelector(`#${id}`)!.closest('gr-form-field')!.textContent ?? '';
+
+  it('edits the mode of a Gradient Proto upstream instead of a public key', () => {
+    const updateUpstream = vi.fn().mockReturnValue(of('ok'));
+    const fixture = setup(admin, [protoUpstream], updateUpstream);
+    const component = fixture.componentInstance;
+    expect(fixture.nativeElement.textContent).toContain('Gradient Proto');
+    component.openEditDialog(protoUpstream);
+    fixture.detectChanges();
+    expect(document.querySelector('#edit-pubkey')).toBeNull();
+    expect(document.querySelector('#edit-mode')).not.toBeNull();
+    component.editForm.mode = 'ReadOnly';
+    component.saveUpstream();
+    expect(updateUpstream).toHaveBeenCalledWith('demo', 'u3', { display_name: 'Remote', mode: 'ReadOnly' });
+  });
+
+  it('shows an emptied URL under its field and sends nothing', () => {
+    const updateUpstream = vi.fn().mockReturnValue(of('ok'));
+    const fixture = setup(admin, [httpUpstream], updateUpstream);
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstream);
+    component.editForm.url = '';
+    fixture.detectChanges();
+    findByText(document.querySelector('.gr-dialog__footer')!, 'save')!.click();
+    fixture.detectChanges();
+    expect(fieldText('edit-url')).toContain('Enter the cache URL.');
+    expect(updateUpstream).not.toHaveBeenCalled();
+  });
+
+  it('refuses a public key without a name before asking the server', () => {
+    const updateUpstream = vi.fn().mockReturnValue(of('ok'));
+    const fixture = setup(admin, [httpUpstream], updateUpstream);
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstream);
+    component.editForm.public_key = '6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=';
+    fixture.detectChanges();
+    expect(fieldText('edit-pubkey')).toContain('name:key');
+    document.querySelector('#edit-pubkey')!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    expect(updateUpstream).not.toHaveBeenCalled();
+  });
+
+  it('names every missing field of a new HTTP upstream and adds nothing', () => {
+    const addHttpUpstream = vi.fn(() => of('ok'));
+    const fixture = setup(admin);
+    Object.assign(TestBed.inject(CachesService), { addHttpUpstream });
+    const component = fixture.componentInstance;
+    component.openAddDialog();
+    component.upstreamType = 'http';
+    fixture.detectChanges();
+    findByText(document.querySelector('.gr-dialog__footer')!, 'add')!.click();
+    fixture.detectChanges();
+    expect(fieldText('up-display-name')).toContain('Enter a display name.');
+    expect(fieldText('up-url')).toContain('Enter the cache URL.');
+    expect(fieldText('up-pubkey')).toContain('Enter the public key.');
+    expect(addHttpUpstream).not.toHaveBeenCalled();
+  });
+});
+
 describe('UpstreamCachesComponent - activation', () => {
   it('deactivates an active upstream cache without touching its other settings', () => {
     const updateUpstream = vi.fn().mockReturnValue(of('ok'));

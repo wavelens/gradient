@@ -29,6 +29,7 @@ import {
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { relativeTime } from '@shared/text';
+import { fieldChecks } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 
 @Component({
@@ -78,6 +79,12 @@ export class WebhooksComponent implements OnInit {
   events = signal<string[]>([]);
   globs = signal('');
   active = signal(true);
+  attempted = signal(false);
+  nameError = computed(() => (this.attempted() && !this.name().trim() ? 'Enter a name.' : null));
+  urlError = computed(() => {
+    if (!this.url().trim()) return this.attempted() ? 'Enter the URL to receive events.' : null;
+    return fieldChecks.httpUrl(this.url());
+  });
 
   revealedSecret = signal<string | null>(null);
   testResult = signal<{ id: string; delivery: DeliveryListItem_WebhookDeliveryId | null } | null>(null);
@@ -149,6 +156,7 @@ export class WebhooksComponent implements OnInit {
 
   private fill(hook: WebhookResponse | null): void {
     this.formError.set(null);
+    this.attempted.set(false);
     this.editing.set(hook);
     this.name.set(hook?.name ?? '');
     this.url.set(hook?.url ?? '');
@@ -168,7 +176,10 @@ export class WebhooksComponent implements OnInit {
   }
 
   save(): void {
-    const body = { name: this.name(), url: this.url(), events: this.patterns(), active: this.active() };
+    if (this.saving()) return;
+    this.attempted.set(true);
+    if (this.nameError() || this.urlError()) return;
+    const body = { name: this.name().trim(), url: this.url().trim(), events: this.patterns(), active: this.active() };
     const target = this.editing();
     this.saving.set(true);
     this.formError.set(null);

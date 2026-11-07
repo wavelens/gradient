@@ -22,6 +22,7 @@ import {
   ProjectResponse,
   IntegrationResponse,
   CreateIntegrationRequest,
+  PatchIntegrationRequest,
 } from '@core/models';
 import {
   BadgeComponent,
@@ -43,6 +44,7 @@ import {
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
+import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
 
 interface Option<T> {
   label: string;
@@ -103,10 +105,38 @@ export class IntegrationsComponent implements OnInit {
   );
 
   private readonly namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+  submitAttempted = signal(false);
 
-  get nameInvalid(): boolean {
-    const n = this.formData.name.trim();
-    return n.length > 0 && !this.namePattern.test(n);
+  get nameError(): string | null {
+    const name = this.formData.name.trim();
+    if (!name) return 'Enter a name.';
+    if (!this.namePattern.test(name)) return 'Lowercase letters, digits and dashes only. Cannot start or end with a dash.';
+    const editing = this.editingIntegration();
+    const kind = editing?.kind ?? this.formData.kind;
+    const taken = this.integrations().some((i) => i.id !== editing?.id && i.kind === kind && i.name === name);
+    return taken ? 'An integration of this kind with this name is already in this project.' : null;
+  }
+
+  get displayNameError(): string | null {
+    return this.formData.display_name.trim() ? null : 'Enter a display name.';
+  }
+
+  get installationIdError(): string | null {
+    const id = this.formData.installation_id.trim();
+    return id ? fieldChecks.positiveInteger(id) : 'Enter the Installation ID.';
+  }
+
+  get endpointUrlError(): string | null {
+    return fieldChecks.httpUrl(this.formData.endpoint_url);
+  }
+
+  get allowedIpsError(): string | null {
+    const invalid = splitLines(this.formData.allowed_ips).filter((entry) => !isIpNetwork(entry));
+    return invalid.length > 0 ? 'Not an IP address or CIDR range: ' + invalid.join(', ') : null;
+  }
+
+  private kindFieldsError(kind: string): string | null {
+    return kind === 'inbound' ? this.allowedIpsError : this.endpointUrlError;
   }
 
   showCreateDialog = signal(false);
@@ -225,15 +255,10 @@ export class IntegrationsComponent implements OnInit {
       allowed_ips: '',
       installation_id: '',
     };
+    this.editingIntegration.set(null);
     this.errorMessage.set(null);
+    this.submitAttempted.set(false);
     this.showCreateDialog.set(true);
-  }
-
-  private parseAllowedIps(): string[] {
-    return this.formData.allowed_ips
-      .split('\n')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
   }
 
   generateSecret(): void {
@@ -245,14 +270,13 @@ export class IntegrationsComponent implements OnInit {
   }
 
   createIntegration(): void {
-    if (!this.formData.name.trim() || this.nameInvalid) return;
+    if (this.saving()) return;
+    this.submitAttempted.set(true);
+    const github = this.formData.git_host_type === 'github';
+    if (this.nameError || (github ? this.installationIdError : this.kindFieldsError(this.formData.kind))) return;
 
-    if (this.formData.git_host_type === 'github') {
+    if (github) {
       const installationId = Number(this.formData.installation_id.trim());
-      if (!Number.isInteger(installationId) || installationId <= 0) {
-        this.errorMessage.set('App installation ID must be a positive integer.');
-        return;
-      }
       this.saving.set(true);
       this.errorMessage.set(null);
       const body: CreateIntegrationRequest = {
@@ -279,7 +303,7 @@ export class IntegrationsComponent implements OnInit {
 
     this.saving.set(true);
     this.errorMessage.set(null);
-    const body: any = {
+    const body: CreateIntegrationRequest = {
       name: this.formData.name.trim(),
       kind: this.formData.kind,
       git_host_type: this.formData.git_host_type,
@@ -289,7 +313,7 @@ export class IntegrationsComponent implements OnInit {
     }
     if (this.formData.kind === 'inbound') {
       if (this.formData.secret.trim()) body.secret = this.formData.secret.trim();
-      body.allowed_ips = this.parseAllowedIps();
+      body.allowed_ips = splitLines(this.formData.allowed_ips);
     } else {
       if (this.formData.endpoint_url.trim()) body.endpoint_url = this.formData.endpoint_url.trim();
       if (this.formData.access_token.trim()) body.access_token = this.formData.access_token.trim();
@@ -322,19 +346,20 @@ export class IntegrationsComponent implements OnInit {
       installation_id: '',
     };
     this.errorMessage.set(null);
+    this.submitAttempted.set(false);
     this.showEditDialog.set(true);
   }
 
   saveEdit(): void {
     const target = this.editingIntegration();
-    if (!target) return;
-    this.saving.set(true);
-    this.errorMessage.set(null);
-    const body: any = {};
-    if (this.formData.name.trim() && this.formData.name !== target.name) {
+    if (!target || this.saving()) return;
+    this.submitAttempted.set(true);
+    if (this.nameError || this.displayNameError || this.kindFieldsError(target.kind)) return;
+    const body: PatchIntegrationRequest = {};
+    if (this.formData.name.trim() !== target.name) {
       body.name = this.formData.name.trim();
     }
-    if (this.formData.display_name.trim() && this.formData.display_name !== target.display_name) {
+    if (this.formData.display_name.trim() !== target.display_name) {
       body.display_name = this.formData.display_name.trim();
     }
     if (this.formData.git_host_type !== target.git_host_type) {
@@ -351,12 +376,18 @@ export class IntegrationsComponent implements OnInit {
       if (this.formData.secret.trim()) {
         body.secret = this.formData.secret.trim();
       }
-      const allowed = this.parseAllowedIps();
-      const current = (target.allowed_ips ?? []).join('\n');
-      if (this.formData.allowed_ips !== current) {
+      const allowed = splitLines(this.formData.allowed_ips);
+      if (allowed.join('\n') !== (target.allowed_ips ?? []).join('\n')) {
         body.allowed_ips = allowed;
       }
     }
+    if (Object.keys(body).length === 0) {
+      this.showEditDialog.set(false);
+      this.editingIntegration.set(null);
+      return;
+    }
+    this.saving.set(true);
+    this.errorMessage.set(null);
     this.integrationsService.patchProjectIntegration(this.projectName, target.id, body).subscribe({
       next: () => {
         this.saving.set(false);

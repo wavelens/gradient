@@ -286,6 +286,100 @@ describe('TaskSettingsComponent - repository URL errors', () => {
   });
 });
 
+describe('TaskSettingsComponent - validation and unsaved edits', () => {
+  const editor = { managed: false, canEdit: true };
+
+  async function typeInto(fixture: ComponentFixture<TaskSettingsComponent>, selector: string, value: string) {
+    await fixture.whenStable();
+    const input = (fixture.nativeElement as HTMLElement).querySelector(selector) as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  const save = (fixture: ComponentFixture<TaskSettingsComponent>) =>
+    findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement;
+  const fieldError = (fixture: ComponentFixture<TaskSettingsComponent>) =>
+    (fixture.nativeElement as HTMLElement).querySelector('.field-error')?.textContent?.trim() ?? '';
+
+  it('disables Save and says why while nothing changed', () => {
+    const fixture = setup(editor);
+    expect(save(fixture).disabled).toBe(true);
+    expect((fixture.nativeElement as HTMLElement).querySelector('.save-hint')?.textContent).toContain('no changes');
+  });
+
+  it.each(['0', '-5', '1.5'])('refuses %s evaluations to keep without sending it', async (value) => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, undefined, updateTask);
+    await typeInto(fixture, '#proj-keep', value);
+    expect(fieldError(fixture)).toContain('1 or higher');
+    expect(save(fixture).disabled).toBe(true);
+    fixture.componentInstance.saveSettings();
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('refuses an empty number of evaluations instead of saving null', async () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, undefined, updateTask);
+    await typeInto(fixture, '#proj-keep', '');
+    expect(fieldError(fixture)).toContain('number of evaluations');
+    fixture.componentInstance.saveSettings();
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('refuses a local repository path without sending it', async () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, undefined, updateTask);
+    await typeInto(fixture, '#proj-repo', 'file:///etc');
+    expect(fieldError(fixture)).toContain('remote repository');
+    fixture.componentInstance.saveSettings();
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('refuses an empty display name', async () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, undefined, updateTask);
+    await typeInto(fixture, '#proj-display', '  ');
+    expect(fieldError(fixture)).toContain('display name');
+    fixture.componentInstance.saveSettings();
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('sends only the changed fields when Enter is pressed in a field', async () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, undefined, updateTask);
+    await typeInto(fixture, '#proj-display', 'Renamed');
+    const input = (fixture.nativeElement as HTMLElement).querySelector('#proj-display') as HTMLInputElement;
+    input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
+    expect(updateTask).toHaveBeenCalledWith('acme', 'demo', { display_name: 'Renamed' });
+  });
+
+  it('hides the saved banner as soon as the form changes again', async () => {
+    const fixture = setup(editor);
+    await typeInto(fixture, '#proj-display', 'Renamed');
+    fixture.componentInstance.saveSettings();
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Changes saved.');
+    await typeInto(fixture, '#proj-display', 'Renamed again');
+    expect(root.textContent).not.toContain('Changes saved.');
+  });
+
+  it('asks before leaving only with unsaved edits', async () => {
+    const confirm = vi.fn(() => EMPTY);
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm } });
+    const fixture = setup(editor);
+    expect(fixture.componentInstance.canDeactivate()).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+
+    await typeInto(fixture, '#proj-display', 'Renamed');
+    expect(fixture.componentInstance.canDeactivate()).not.toBe(true);
+    expect(confirm).toHaveBeenCalledOnce();
+  });
+});
+
 describe('TaskSettingsComponent - write failures', () => {
   const admin = { managed: false, canEdit: true, canTrigger: true };
   const refused = new ApiError('You need admin rights on this project', 403);
@@ -333,9 +427,10 @@ describe('TaskSettingsComponent - write failures', () => {
     expect(deleteTask).not.toHaveBeenCalled();
   });
 
-  it('sends one update when Save Changes is clicked twice', () => {
+  it('sends one update when Save Changes is clicked twice', async () => {
     const updateTask = vi.fn(() => NEVER);
     const fixture = setup(admin, undefined, updateTask);
+    await typeRepository(fixture, 'git@example.org:other.git');
     const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement;
     save.click();
     fixture.detectChanges();

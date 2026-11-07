@@ -201,6 +201,60 @@ describe('MembersRolesComponent - writes', () => {
   });
 });
 
+describe('MembersRolesComponent - role form', () => {
+  const custom = { id: 'r2', name: 'releaser', builtin: false, permissions: ['trigger'], project: 'o' } as unknown as RoleResponse_ProjectRoleOwner;
+
+  async function withRoleWrites() {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const writes = { createRole: vi.fn(() => of(custom)), updateRole: vi.fn(() => of(custom)) };
+    Object.assign(TestBed.inject(ProjectsService), writes);
+    await settled(fixture);
+    return { fixture, cmp: fixture.componentInstance, writes };
+  }
+
+  const fieldError = () => document.querySelector('.gr-dialog .field-error')?.textContent?.trim() ?? '';
+
+  it('refuses a role named like a built-in role in another letter case', async () => {
+    const { fixture, cmp, writes } = await withRoleWrites();
+    cmp.openCreateRoleDialog();
+    cmp.roleForm.name = 'admin';
+    cmp.saveRole();
+    fixture.detectChanges();
+    expect(fieldError()).toContain('already exist');
+    expect(writes.createRole).not.toHaveBeenCalled();
+  });
+
+  it('refuses a role name with uppercase letters or spaces', async () => {
+    const { fixture, cmp, writes } = await withRoleWrites();
+    cmp.openCreateRoleDialog();
+    cmp.roleForm.name = 'Bad Name';
+    cmp.saveRole();
+    fixture.detectChanges();
+    expect(fieldError()).toContain('lowercase');
+    expect(writes.createRole).not.toHaveBeenCalled();
+  });
+
+  it('closes the edit dialog without a request when nothing changed', async () => {
+    const { cmp, writes } = await withRoleWrites();
+    cmp.roles.set([...cmp.roles(), custom]);
+    cmp.openEditRoleDialog(custom);
+    cmp.roleForm.permissions = { trigger: true };
+    cmp.saveRole();
+    expect(writes.updateRole).not.toHaveBeenCalled();
+    expect(cmp.showRoleDialog()).toBe(false);
+  });
+
+  it('sends only the changed role name', async () => {
+    const { cmp, writes } = await withRoleWrites();
+    cmp.roles.set([...cmp.roles(), custom]);
+    cmp.openEditRoleDialog(custom);
+    cmp.roleForm.permissions = { trigger: true };
+    cmp.roleForm.name = 'deployer';
+    cmp.saveRole();
+    expect(writes.updateRole).toHaveBeenCalledWith('acme', 'r2', { name: 'deployer' });
+  });
+});
+
 describe('MembersRolesComponent - load errors', () => {
   it('shows a failed member load with Try Again instead of No members', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });

@@ -119,4 +119,34 @@ describe('ProjectDetailComponent create task', () => {
     expect(cmp.showCreateDialog()).toBe(true);
     expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
+
+  it('says what is missing when Create is clicked on an empty form', () => {
+    const { fixture } = render(true);
+    const createTask = vi.fn(() => of(undefined));
+    (TestBed.inject(TasksService) as unknown as { createTask: typeof createTask }).createTask = createTask;
+    const cmp = fixture.componentInstance;
+    cmp.openCreateDialog();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    const create = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Create')!;
+    expect(create.disabled).toBe(false);
+    create.click();
+    fixture.detectChanges();
+    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Enter a display name and a name.');
+    expect(dialog.querySelector('.field-error')?.textContent).toContain('Enter the repository URL.');
+    expect(createTask).not.toHaveBeenCalled();
+  });
+
+  it('refuses a local repository path with a reason and sends nothing', () => {
+    const { fixture } = render(true);
+    const createTask = vi.fn(() => of(undefined));
+    (TestBed.inject(TasksService) as unknown as { createTask: typeof createTask }).createTask = createTask;
+    const cmp = fixture.componentInstance;
+    cmp.openCreateDialog();
+    cmp.newTask = { ...cmp.newTask, name: 'web', display_name: 'Web', repository: 'file:///etc' };
+    cmp.createTask();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog .field-error')?.textContent).toContain('remote repository');
+    expect(createTask).not.toHaveBeenCalled();
+  });
 });

@@ -322,11 +322,16 @@ describe('IntegrationsComponent - create github integration', () => {
     const comp = fixture.componentInstance;
     comp.formData.name = 'github-app';
     comp.formData.git_host_type = 'github';
+    comp.openCreateDialog();
+    comp.formData.name = 'github-app';
+    comp.formData.git_host_type = 'github';
     comp.formData.installation_id = 'not-a-number';
     comp.createIntegration();
+    fixture.detectChanges();
 
     expect(createSpy).not.toHaveBeenCalled();
-    expect(comp.errorMessage()).toContain('positive integer');
+    expect(document.querySelector('.gr-dialog .field-error')?.textContent).toContain('1 or higher');
+    expect(comp.errorMessage()).toBeNull();
   });
 });
 
@@ -425,5 +430,70 @@ describe('IntegrationsComponent - write failures', () => {
     expect(create).toHaveBeenCalledTimes(1);
     expect(comp.showCreateDialog()).toBe(true);
     expect(dialog.getAttribute('aria-busy')).toBe('true');
+  });
+});
+
+describe('IntegrationsComponent - validation', () => {
+  const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
+  const fieldErrors = () =>
+    Array.from(document.querySelectorAll('.gr-dialog .field-error')).map((e) => e.textContent?.trim() ?? '');
+
+  async function withWrites() {
+    const fixture = setup(writable, [baseIntegration]);
+    const writes = {
+      createProjectIntegration: vi.fn(() => of(baseIntegration)),
+      patchProjectIntegration: vi.fn(() => of(baseIntegration)),
+    };
+    Object.assign(TestBed.inject(IntegrationsService), writes);
+    await settled(fixture);
+    return { fixture, comp: fixture.componentInstance, writes };
+  }
+
+  it('refuses a name another integration of the same kind already uses', async () => {
+    const { fixture, comp, writes } = await withWrites();
+    comp.openCreateDialog();
+    comp.formData.name = baseIntegration.name;
+    comp.formData.kind = baseIntegration.kind as IntegrationsComponent['formData']['kind'];
+    comp.createIntegration();
+    fixture.detectChanges();
+    expect(fieldErrors()).toContain('An integration of this kind with this name is already in this project.');
+    expect(writes.createProjectIntegration).not.toHaveBeenCalled();
+  });
+
+  it('refuses source addresses that are not IP networks', async () => {
+    const { fixture, comp, writes } = await withWrites();
+    comp.openCreateDialog();
+    comp.formData.name = 'other';
+    comp.formData.allowed_ips = '10.0.0.0/8\nnot-an-ip';
+    comp.createIntegration();
+    fixture.detectChanges();
+    expect(fieldErrors()).toContain('Not an IP address or CIDR range: not-an-ip');
+    expect(writes.createProjectIntegration).not.toHaveBeenCalled();
+  });
+
+  it('shows an error for a renamed integration with an invalid name and sends nothing', async () => {
+    const { fixture, comp, writes } = await withWrites();
+    comp.openEditDialog(baseIntegration);
+    comp.formData.name = 'Bad Name';
+    comp.saveEdit();
+    fixture.detectChanges();
+    expect(fieldErrors()).toContain('Lowercase letters, digits and dashes only. Cannot start or end with a dash.');
+    expect(writes.patchProjectIntegration).not.toHaveBeenCalled();
+  });
+
+  it('closes the edit dialog without an empty PATCH when nothing changed', async () => {
+    const { comp, writes } = await withWrites();
+    comp.openEditDialog(baseIntegration);
+    comp.saveEdit();
+    expect(writes.patchProjectIntegration).not.toHaveBeenCalled();
+    expect(comp.showEditDialog()).toBe(false);
+  });
+
+  it('sends only the changed display name', async () => {
+    const { comp, writes } = await withWrites();
+    comp.openEditDialog(baseIntegration);
+    comp.formData.display_name = 'Gitea Staging';
+    comp.saveEdit();
+    expect(writes.patchProjectIntegration).toHaveBeenCalledWith('acme', baseIntegration.id, { display_name: 'Gitea Staging' });
   });
 });

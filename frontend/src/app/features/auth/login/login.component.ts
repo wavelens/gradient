@@ -86,23 +86,26 @@ export class LoginComponent {
   }
 
   onSubmit(): void {
-    if (this.loginForm.valid) {
-      this.loading.set(true);
-      this.errorMessage.set(null);
-
-      const { username, password, rememberMe } = this.loginForm.value;
-
-      this.authService.login(username, password, rememberMe).subscribe({
-        next: () => {
-          this.loading.set(false);
-          this.navigateAfterLogin();
-        },
-        error: (error) => {
-          this.loading.set(false);
-          this.errorMessage.set(error.message || 'Login failed. Please try again.');
-        },
-      });
+    if (this.loading()) return;
+    if (this.loginForm.invalid) {
+      this.loginForm.markAllAsTouched();
+      return;
     }
+    this.loading.set(true);
+    this.errorMessage.set(null);
+
+    const { username, password, rememberMe } = this.loginForm.value;
+
+    this.authService.login(username, password, rememberMe).subscribe({
+      next: () => {
+        this.loading.set(false);
+        this.navigateAfterLogin();
+      },
+      error: (error) => {
+        this.loading.set(false);
+        this.errorMessage.set(error.message || 'Login failed. Please try again.');
+      },
+    });
   }
 
   loginWithOIDC(): void {

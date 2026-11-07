@@ -213,24 +213,31 @@
       <gr-copy-field [value]="projectId()!" />
     </gr-form-field>
   }
-  <gr-form-field label="Name" for="worker-name">
+  <gr-form-field label="Name" for="worker-name" required
+    [invalid]="(registerAttempted() || workerNameModel.touched) && !!workerNameError" [error]="workerNameError ?? ''">
     <input
       grInput
       id="worker-name"
       [(ngModel)]="newWorkerName"
+      #workerNameModel="ngModel"
       placeholder="e.g. Primary Build Server"
       (keyup.enter)="registerWorker()"
     />
   </gr-form-field>
-  <gr-form-field label="Worker ID" for="worker-id">
+  <gr-form-field label="Worker ID" for="worker-id" required hint="A UUID for worker identification. Use &quot;Generate&quot; to create one."
+    [invalid]="(registerAttempted() || workerIdModel.touched) && !!workerIdError" [error]="workerIdError ?? ''">
     <gr-label-help slot="label" doc="guides/remote-worker/#1-pick-a-worker-id" title="Pick a worker ID" />
-    <input
-      grInput
-      id="worker-id"
-      [(ngModel)]="newWorkerId"
-      placeholder="e.g. a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
-      (keyup.enter)="registerWorker()"
-    />
+    <div class="field-actions">
+      <input
+        grInput
+        id="worker-id"
+        [(ngModel)]="newWorkerId"
+        #workerIdModel="ngModel"
+        placeholder="e.g. a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+        (keyup.enter)="registerWorker()"
+      />
+      <button grButton type="button" label="Generate" severity="secondary" (click)="generateWorkerId()"></button>
+    </div>
   </gr-form-field>
   <gr-form-field label="Worker URL" for="worker-url">
     <span slot="label" class="text-secondary">(optional)</span>
@@ -241,14 +248,17 @@
       placeholder="e.g. wss://worker.example.com/proto"
     />
   </gr-form-field>
-  <gr-form-field label="Token" for="worker-token">
+  <gr-form-field label="Token" for="worker-token" hint="Base64 text, such as the output of openssl rand -base64 48. Blank fields let the server generate a token."
+    [invalid]="(registerAttempted() || workerTokenModel.touched) && !!workerTokenError" [error]="workerTokenError ?? ''">
     <gr-label-help slot="label" doc="guides/remote-worker/#2-register-the-worker" title="Register a worker" />
     <span slot="label" class="text-secondary">(optional)</span>
     <input
       grInput
       id="worker-token"
       [(ngModel)]="newWorkerToken"
+      #workerTokenModel="ngModel"
       placeholder="Output of: openssl rand -base64 48"
+      (keyup.enter)="registerWorker()"
     />
   </gr-form-field>
   <gr-form-field label="Allowed">
@@ -263,7 +273,7 @@
       icon="add"
       (click)="registerWorker()"
       [loading]="registering()"
-      [disabled]="registering() || !newWorkerId.trim() || !newWorkerName.trim()"
+      [disabled]="registering()"
     ></button>
   </div>
 </gr-dialog>
@@ -339,11 +349,13 @@
   @if (renamingWorker(); as worker) {
     <gr-field-row label="Worker" [value]="worker.worker_id" mono />
     @if (!worker.gradient_ci) {
-      <gr-form-field label="Name" for="rename-name">
+      <gr-form-field label="Name" for="rename-name" required
+        [invalid]="(renameAttempted() || renameModel.touched) && !!renameNameError" [error]="renameNameError ?? ''">
         <input
           grInput
           id="rename-name"
           [(ngModel)]="newName"
+          #renameModel="ngModel"
           placeholder="e.g. Primary Build Server"
           (keyup.enter)="confirmRename()"
         />
@@ -362,7 +374,7 @@
       icon="check"
       (click)="confirmRename()"
       [loading]="renaming()"
-      [disabled]="renaming() || !newName.trim()"
+      [disabled]="renaming()"
     ></button>
   </div>
 </gr-dialog>

@@ -74,6 +74,7 @@ export class TeamMembersComponent implements OnInit {
   addError = signal<string | null>(null);
   busy = signal<string | null>(null);
   showAdd = signal(false);
+  addAttempted = signal(false);
   newMember: { user: string; role: TeamRole } = { user: '', role: 'member' };
 
   readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'State', group: 'Group' };
@@ -120,12 +121,20 @@ export class TeamMembersComponent implements OnInit {
   }
 
   openAdd(): void {
+    this.newMember = { user: '', role: 'member' };
     this.addError.set(null);
+    this.addAttempted.set(false);
     this.showAdd.set(true);
   }
 
+  userError(): string | null {
+    return this.addAttempted() && !this.newMember.user.trim() ? 'Enter a username.' : null;
+  }
+
   addMember(): void {
-    if (!this.newMember.user || this.busy() === 'add') return;
+    if (this.busy() === 'add') return;
+    this.addAttempted.set(true);
+    if (this.userError()) return;
     this.busy.set('add');
     this.addError.set(null);
     this.teams.addMember(this.teamName, this.newMember.user, this.newMember.role).subscribe({

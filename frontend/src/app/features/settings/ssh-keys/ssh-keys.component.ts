@@ -25,6 +25,9 @@ import {
   RowListComponent,
 } from '@gradient/ui/ui';
 
+const OPENSSH_PUBLIC_KEY =
+  /^(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-nistp(?:256|384|521)|sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)\s+[A-Za-z0-9+/]+={0,3}(?:\s.*)?$/;
+
 function sshKeyComment(publicKey: string): string {
   return publicKey.trim().split(/\s+/).slice(2).join(' ');
 }
@@ -60,6 +63,7 @@ export class SshKeysComponent implements OnInit {
   errorMessage = signal<string | null>(null);
   keys = signal<SshKeyInfo[]>([]);
   showDialog = signal(false);
+  attempted = signal(false);
   formName = '';
   formPublicKey = '';
   private nameFromKey = '';
@@ -92,7 +96,18 @@ export class SshKeysComponent implements OnInit {
     this.formPublicKey = '';
     this.nameFromKey = '';
     this.errorMessage.set(null);
+    this.attempted.set(false);
     this.showDialog.set(true);
+  }
+
+  nameError(): string | null {
+    return this.attempted() && !this.formName.trim() ? 'Enter a name.' : null;
+  }
+
+  publicKeyError(): string | null {
+    const key = this.formPublicKey.trim();
+    if (!key) return this.attempted() ? 'Paste a public key.' : null;
+    return OPENSSH_PUBLIC_KEY.test(key) ? null : 'Paste an OpenSSH public key, for example the contents of ~/.ssh/id_ed25519.pub.';
   }
 
   onPublicKeyChange(publicKey: string): void {
@@ -106,6 +121,9 @@ export class SshKeysComponent implements OnInit {
   }
 
   addKey(): void {
+    if (this.saving()) return;
+    this.attempted.set(true);
+    if (this.nameError() || this.publicKeyError()) return;
     this.saving.set(true);
     this.errorMessage.set(null);
     this.userService.addSshKey(this.formName.trim(), this.formPublicKey.trim()).subscribe({

@@ -68,10 +68,12 @@
             label="Username"
             for="username"
             [control]="username"
+            [invalid]="usernameInvalid"
+            [error]="usernameRefusal"
             [errorMessages]="{
               required: 'Username is required',
-              pattern: 'Username can only contain letters, numbers, hyphens, and underscores',
-              usernameTaken: 'This username is already taken'
+              pattern: 'Username can only contain letters, numbers, hyphens and underscores',
+              usernameCheckFailed: 'Username Check Failed'
             }"
           >
             <input
@@ -84,6 +86,9 @@
             />
             @if (username?.pending) {
               <span class="field-info">Checking availability...</span>
+            }
+            @if (username?.hasError('usernameCheckFailed')) {
+              <button grButton type="button" size="small" text label="Retry" (click)="recheckUsername()"></button>
             }
           </gr-form-field>
 
@@ -178,7 +183,7 @@
             class="w-full"
             [label]="loading() ? 'Creating account...' : 'Create Account'"
             [loading]="loading()"
-            [disabled]="!registerForm.valid || loading()"
+            [disabled]="registerForm.pending || loading()"
           ></button>
         </form>
 

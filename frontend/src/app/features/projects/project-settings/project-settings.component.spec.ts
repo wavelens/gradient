@@ -81,6 +81,93 @@ async function settled(fixture: ComponentFixture<ProjectSettingsComponent>) {
   fixture.detectChanges();
 }
 
+async function typeDisplayName(fixture: ComponentFixture<ProjectSettingsComponent>, value: string) {
+  await settled(fixture);
+  const input = (fixture.nativeElement as HTMLElement).querySelector('#display-name') as HTMLInputElement;
+  input.value = value;
+  input.dispatchEvent(new Event('input'));
+  await settled(fixture);
+}
+
+describe('ProjectSettingsComponent - validation and unsaved edits', () => {
+  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
+  const save = (fixture: ComponentFixture<ProjectSettingsComponent>) =>
+    findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement;
+
+  function spyOnWrites() {
+    const writes = {
+      updateProject: vi.fn(() => of('ok')),
+      setPublic: vi.fn(() => of('ok')),
+      setPrivate: vi.fn(() => of('ok')),
+    };
+    Object.assign(TestBed.inject(ProjectsService), writes);
+    return writes;
+  }
+
+  it('disables Save and says why while nothing changed', async () => {
+    const fixture = setup(admin);
+    await settled(fixture);
+    expect(save(fixture).disabled).toBe(true);
+    expect((fixture.nativeElement as HTMLElement).querySelector('.save-hint')?.textContent).toContain('no changes');
+  });
+
+  it('shows an error for an empty display name and sends nothing', async () => {
+    const fixture = setup(admin);
+    const writes = spyOnWrites();
+    await typeDisplayName(fixture, ' ');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.field-error')?.textContent).toContain('display name');
+    expect(save(fixture).disabled).toBe(true);
+    fixture.componentInstance.saveSettings();
+    expect(writes.updateProject).not.toHaveBeenCalled();
+  });
+
+  it('sends only the changed fields and skips an unchanged visibility on Enter', async () => {
+    const fixture = setup(admin);
+    const writes = spyOnWrites();
+    await typeDisplayName(fixture, 'Renamed');
+    (fixture.nativeElement as HTMLElement)
+      .querySelector('#display-name')!
+      .dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
+    expect(writes.updateProject).toHaveBeenCalledWith('acme', { display_name: 'Renamed' });
+    expect(writes.setPublic).not.toHaveBeenCalled();
+    expect(writes.setPrivate).not.toHaveBeenCalled();
+  });
+
+  it('changes only the visibility when only the visibility changed', async () => {
+    const fixture = setup(admin);
+    const writes = spyOnWrites();
+    await settled(fixture);
+    fixture.componentInstance.formData = { ...fixture.componentInstance.formData, public: true };
+    fixture.componentInstance.saveSettings();
+    expect(writes.updateProject).not.toHaveBeenCalled();
+    expect(writes.setPublic).toHaveBeenCalledWith('acme');
+  });
+
+  it('hides the saved banner as soon as the form changes again', async () => {
+    const fixture = setup(admin);
+    spyOnWrites();
+    await typeDisplayName(fixture, 'Renamed');
+    fixture.componentInstance.saveSettings();
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Changes saved.');
+    await typeDisplayName(fixture, 'Renamed again');
+    expect(root.textContent).not.toContain('Changes saved.');
+  });
+
+  it('asks before leaving only with unsaved edits', async () => {
+    const fixture = setup(admin);
+    confirm.mockImplementation(() => EMPTY);
+    await settled(fixture);
+    expect(fixture.componentInstance.canDeactivate()).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+
+    await typeDisplayName(fixture, 'Renamed');
+    expect(fixture.componentInstance.canDeactivate()).not.toBe(true);
+    expect(confirm).toHaveBeenCalledOnce();
+  });
+});
+
 describe('ProjectSettingsComponent - access gating', () => {
   it('hides Save / Delete under read-only access', async () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
@@ -151,6 +238,7 @@ describe('ProjectSettingsComponent - write failures', () => {
     await settled(fixture);
     const updateProject = vi.fn(() => new Subject<void>());
     Object.assign(TestBed.inject(ProjectsService), { updateProject, setPrivate: () => of(undefined) });
+    await typeDisplayName(fixture, 'Renamed');
     const save = findByText(fixture.nativeElement, 'save changes')!;
     save.click();
     fixture.detectChanges();

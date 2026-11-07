@@ -27,7 +27,7 @@ import {
 } from '@gradient/ui/ui';
 import { EvalStatusBadgeComponent, LabelHelpComponent, StarButtonComponent } from '@shared/ui';
 import { repositoryUrlError } from '@shared/text';
-import { NameFieldsComponent, nameAvailability } from '@shared/forms';
+import { NameFieldsComponent, fieldChecks, firstFieldError, nameAvailability } from '@shared/forms';
 import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 
@@ -78,6 +78,8 @@ export class ProjectDetailComponent implements OnInit {
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
+  createAttempted = signal(false);
+  repositoryTouched = signal(false);
   starred = signal(false);
 
   projectName = '';
@@ -120,6 +122,8 @@ export class ProjectDetailComponent implements OnInit {
     this.newTask = { name: '', display_name: '', description: '', repository: '', wildcard: 'packages.x86_64-linux.**' };
     this.names.reset();
     this.createError.set(null);
+    this.createAttempted.set(false);
+    this.repositoryTouched.set(false);
     this.showCreateDialog.set(true);
   }
 
@@ -131,14 +135,20 @@ export class ProjectDetailComponent implements OnInit {
   }
 
   get repositoryError(): string | null {
-    return repositoryUrlError(this.newTask.repository.trim());
+    const url = this.newTask.repository.trim();
+    if (!url) return this.createAttempted() || this.repositoryTouched() ? 'Enter the repository URL.' : null;
+    return firstFieldError(url, fieldChecks.remoteRepository, (value) => repositoryUrlError(String(value)));
+  }
+
+  get missingNamesError(): string | null {
+    const missing = !this.newTask.name || !this.newTask.display_name;
+    return this.createAttempted() && missing ? 'Enter a display name and a name.' : null;
   }
 
   createTask(): void {
-    if (this.creating() || !this.newTask.name || !this.newTask.display_name || !this.newTask.repository || this.names.blocksSubmit()) {
-      return;
-    }
-    if (this.repositoryError || this.wildcardInvalid) return;
+    if (this.creating() || this.names.blocksSubmit()) return;
+    this.createAttempted.set(true);
+    if (this.missingNamesError || this.repositoryError || this.wildcardInvalid) return;
 
     this.creating.set(true);
     this.createError.set(null);

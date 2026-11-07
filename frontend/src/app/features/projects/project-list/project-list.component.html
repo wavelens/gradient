@@ -78,7 +78,7 @@
 <gr-dialog
   header="Create Project"
   [(visible)]="showCreateDialog"
-  [error]="createError()"
+  [error]="createError() ?? missingNamesError"
   [busy]="creating()"
   width="500px"
 >
@@ -124,7 +124,7 @@
       grButton
       label="Create"
       (click)="createProject()"
-      [disabled]="!newProject.name || !newProject.display_name || names.blocksSubmit() || creating()"
+      [disabled]="names.blocksSubmit() || creating()"
       [loading]="creating()"
     ></button>
   </div>

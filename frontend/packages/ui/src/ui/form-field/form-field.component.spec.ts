@@ -77,6 +77,25 @@ describe('gr-form-field', () => {
     expect(root.querySelector('.field-error')?.textContent).toContain('Required field');
   });
 
+  it('shows the error once the user leaves an empty required field', async () => {
+    const fixture = TestBed.createComponent(FormFieldComponent);
+    const ctrl = new FormControl('', Validators.required);
+    fixture.componentRef.setInput('control', ctrl);
+    fixture.componentRef.setInput('errorMessages', { required: 'Username is required' });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.field-error')).toBeNull();
+
+    ctrl.markAsTouched();
+    fixture.detectChanges();
+    expect(root.querySelector('.field-error')?.textContent).toContain('Username is required');
+
+    ctrl.setValue('alice');
+    fixture.detectChanges();
+    expect(root.querySelector('.field-error')).toBeNull();
+  });
+
   it('marks the projected control invalid and points it at the message', async () => {
     const fixture = await render(TemplateDrivenHost);
     const input = (fixture.nativeElement as HTMLElement).querySelector('input')!;

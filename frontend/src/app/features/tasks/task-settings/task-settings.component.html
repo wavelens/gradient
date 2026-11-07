@@ -12,7 +12,7 @@
   @if (errorMessage()) {
     <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
   }
-  @if (saveSuccess()) {
+  @if (saveSuccess() && !unsaved.changed()) {
     <gr-message-banner type="success">Changes saved.</gr-message-banner>
   }
 
@@ -22,18 +22,18 @@
       <input grInput id="proj-name" [value]="proj.name" disabled />
     </gr-form-field>
 
-    <gr-form-field label="Display Name" for="proj-display">
-      <input grInput id="proj-display" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" />
+    <gr-form-field label="Display Name" for="proj-display" required [invalid]="!!displayNameError" [error]="displayNameError ?? ''">
+      <input grInput id="proj-display" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
 
     <gr-form-field label="Description" for="proj-desc">
       <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
     </gr-form-field>
 
-    <gr-form-field label="Repository URL" for="proj-repo" [invalid]="!!repositoryError" [error]="repositoryError ?? ''">
+    <gr-form-field label="Repository URL" for="proj-repo" required [invalid]="!!repositoryError" [error]="repositoryError ?? ''">
       <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path" />
       <div class="repo-row phone-icon-buttons">
-        <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" />
+        <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
         <button *appWritable="access()" grButton type="button" label="Test connection" icon="lan"
                 severity="secondary" [loading]="checkingRepo()"
                 [disabled]="checkingRepo() || !formData.repository.trim()"
@@ -52,12 +52,12 @@
 
     <gr-form-field label="Evaluation Wildcard" for="proj-wildcard">
       <gr-label-help slot="label" doc="reference/wildcards/" title="Pattern for selecting which outputs to evaluate" />
-      <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" />
+      <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
 
-    <gr-form-field label="Keep Evaluations" for="proj-keep">
+    <gr-form-field label="Keep Evaluations" for="proj-keep" required [invalid]="!!keepEvaluationsError" [error]="keepEvaluationsError ?? ''">
       <gr-label-help slot="label" doc="concepts/projects-and-tasks/#task" title="Number of completed evaluations to retain for metrics and history" />
-      <input grInput id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" />
+      <input grInput id="proj-keep" type="number" min="1" step="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
 
     <gr-form-field label="Trigger Concurrency" for="proj-concurrency">
@@ -135,16 +135,18 @@
       </gr-form-field>
     }
 
-    <div class="form-actions">
+    <div class="form-actions" *appWritable="access()">
       <button
-        *appWritable="access()"
         grButton
         label="Save Changes"
         icon="check"
         (grSubmit)="saveSettings()"
         [loading]="saving()"
-        [appManagedDisable]="access()"
+        [disabled]="!!saveBlockedReason"
       ></button>
+      @if (saveBlockedReason; as reason) {
+        <small class="text-secondary save-hint" role="status">{{ reason }}</small>
+      }
     </div>
 
   </gr-settings-section>

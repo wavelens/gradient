@@ -105,4 +105,17 @@ describe('ProjectListComponent', () => {
     expect(cmp.showCreateDialog()).toBe(true);
     expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
+
+  it('says what is missing when Create is clicked on an empty form', () => {
+    const { fixture } = render(() => of(EMPTY_PAGE));
+    const createProject = vi.fn(() => of(undefined));
+    (TestBed.inject(ProjectsService) as unknown as { createProject: typeof createProject }).createProject = createProject;
+    fixture.componentInstance.openCreateDialog();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Create')!.click();
+    fixture.detectChanges();
+    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Enter a display name and a name.');
+    expect(createProject).not.toHaveBeenCalled();
+  });
 });

@@ -62,7 +62,7 @@
 }
 
 <gr-dialog header="Add Member" [(visible)]="showAdd" width="420px" [error]="addError()" [busy]="busy() === 'add'">
-  <gr-form-field label="Username">
+  <gr-form-field label="Username" [invalid]="!!userError()" [error]="userError() ?? ''">
     <gr-autocomplete [(ngModel)]="newMember.user" [suggestions]="suggestions()" (completeMethod)="search($event)"
       [forceSelection]="false" (enter)="addMember()" />
   </gr-form-field>

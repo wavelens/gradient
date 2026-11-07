@@ -57,7 +57,7 @@
           class="w-full"
           [label]="loading() ? 'Signing in...' : 'Sign In'"
           [loading]="loading()"
-          [disabled]="!loginForm.valid || loading()"
+          [disabled]="loading()"
         ></button>
       </form>
     }

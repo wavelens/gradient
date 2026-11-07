@@ -82,24 +82,27 @@
   [error]="errorMessage()"
   [busy]="creating() || saving()"
 >
-  <gr-form-field label="Name" for="key-name">
+  <gr-form-field label="Name" for="key-name" [invalid]="!!nameError()" [error]="nameError() ?? ''">
     <input
       grInput
       id="key-name"
       [(ngModel)]="formName"
       placeholder="e.g. CI/CD Pipeline"
+      (keyup.enter)="saveKey()"
     />
   </gr-form-field>
 
   @if (!editingKey()) {
-    <gr-form-field label="Expires in (days)" for="key-expires">
+    <gr-form-field label="Expires in (days)" for="key-expires" [invalid]="!!expiryError()" [error]="expiryError() ?? ''">
       <input
         grInput
         id="key-expires"
         type="number"
         min="1"
+        step="1"
         [(ngModel)]="formExpiresInDays"
         placeholder="Leave blank for no expiry"
+        (keyup.enter)="saveKey()"
       />
     </gr-form-field>
   }
@@ -130,7 +133,7 @@
   }
 
   @if (formScope === 'cache') {
-    <gr-form-field label="Cache" for="key-cache">
+    <gr-form-field label="Cache" for="key-cache" [invalid]="!!cacheError()" [error]="cacheError() ?? ''">
       <gr-select
         inputId="key-cache"
         [options]="cacheOptions()"
@@ -155,7 +158,7 @@
 
   <gr-divider />
 
-  <gr-form-field label="Permissions">
+  <gr-form-field label="Permissions" [invalid]="!!permissionsError()" [error]="permissionsError() ?? ''">
     <app-permission-picker [permissions]="activePermissions()" [(selection)]="formPermissions" />
   </gr-form-field>
 
@@ -173,7 +176,6 @@
       [icon]="editingKey() ? 'check' : 'add'"
       (click)="saveKey()"
       [loading]="creating() || saving()"
-      [disabled]="creating() || saving() || !formName.trim() || invalidIps().length > 0"
     ></button>
   </div>
 </gr-dialog>

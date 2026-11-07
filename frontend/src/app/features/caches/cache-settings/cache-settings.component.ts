@@ -8,6 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { of } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -26,11 +27,37 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
-import { CacheResponse } from '@core/models';
+import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
+import { CacheResponse, PatchCacheRequest } from '@core/models';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
+import { unsavedChanges } from '@shared/forms';
+
+interface CacheForm {
+  display_name: string;
+  description: string;
+  priority: number | null;
+  local_priority: number | null;
+  max_storage_gb: number | null;
+  pull_through: boolean;
+  public: boolean;
+}
+
+type CheckedField = 'display_name' | 'priority' | 'local_priority' | 'max_storage_gb';
+
+const CHECKED_FIELDS: CheckedField[] = ['display_name', 'priority', 'local_priority', 'max_storage_gb'];
+const PATCH_FIELDS = ['display_name', 'description', 'priority', 'local_priority', 'max_storage_gb', 'pull_through'] as const;
+const PRIORITY_RANGE = 'Enter an integer from 0 to 255.';
+
+const isBlank = (value: unknown): boolean => value === null || value === undefined || String(value).trim() === '';
+
+function isWholeNumber(value: unknown, min: number, max: number): boolean {
+  if (isBlank(value)) return false;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= min && number <= max;
+}
 
 @Component({
   selector: 'app-cache-settings',
@@ -57,9 +84,15 @@ import { ConfirmService } from '@shared/confirm';
   ],
   templateUrl: './cache-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
+  styles: `
+    .save-hint {
+      align-self: center;
+    }
+  `,
 })
-export class CacheSettingsComponent implements OnInit {
+export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   private route = inject(ActivatedRoute);
+  private accessService = inject(AccessService);
   private router = inject(Router);
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
@@ -85,15 +118,21 @@ export class CacheSettingsComponent implements OnInit {
     { label: 'Public', value: true },
   ];
 
-  formData = {
+  formData: CacheForm = {
     display_name: '',
     description: '',
     priority: 50,
-    local_priority: null as number | null,
+    local_priority: null,
     max_storage_gb: 0,
     pull_through: true,
     public: false,
   };
+  private saved: CacheForm = { ...this.formData };
+  readonly unsaved = unsavedChanges(() => this.formData, 'Cache Settings');
+
+  canDeactivate() {
+    return this.unsaved.canLeave();
+  }
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
@@ -107,7 +146,7 @@ export class CacheSettingsComponent implements OnInit {
       next: (cache) => {
         this.cache.set(cache);
         this.crumbs.rememberCache(this.cacheName, cache.display_name);
-        this.formData = {
+        this.saved = {
           display_name: cache.display_name,
           description: cache.description,
           priority: cache.priority,
@@ -116,6 +155,8 @@ export class CacheSettingsComponent implements OnInit {
           pull_through: cache.pull_through ?? true,
           public: cache.public,
         };
+        this.formData = { ...this.saved };
+        this.unsaved.mark();
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -125,41 +166,61 @@ export class CacheSettingsComponent implements OnInit {
     });
   }
 
-  get priorityInvalid(): boolean {
-    const p = this.formData.priority;
-    return p === null || p === undefined || isNaN(Number(p)) || p < 0 || p > 255;
+  fieldError(field: CheckedField): string | null {
+    const value = this.formData[field];
+    switch (field) {
+      case 'display_name':
+        return String(value ?? '').trim() ? null : 'Enter a display name.';
+      case 'priority':
+        return isWholeNumber(value, 0, 255) ? null : PRIORITY_RANGE;
+      case 'local_priority':
+        return isBlank(value) || isWholeNumber(value, 0, 255) ? null : PRIORITY_RANGE;
+      case 'max_storage_gb':
+        return isWholeNumber(value, 0, Number.MAX_SAFE_INTEGER)
+          ? null
+          : 'Enter 0 for no limit, otherwise an integer of at least 1 in GB.';
+    }
   }
 
-  get maxStorageInvalid(): boolean {
-    const v = this.formData.max_storage_gb;
-    return v === null || v === undefined || isNaN(Number(v)) || v < 0;
+  canSave(): boolean {
+    return (
+      !this.saving() &&
+      !this.accessService.shouldDisableInput(this.access()) &&
+      this.unsaved.changed() &&
+      CHECKED_FIELDS.every((field) => !this.fieldError(field))
+    );
   }
 
   saveSettings(): void {
-    if (this.priorityInvalid || this.maxStorageInvalid) return;
+    if (!this.canSave()) return;
+    const values: CacheForm = { ...this.formData, display_name: this.formData.display_name.trim() };
+    const patch: PatchCacheRequest = {};
+    for (const field of PATCH_FIELDS) {
+      if (values[field] !== this.saved[field]) Object.assign(patch, { [field]: values[field] });
+    }
+    const visibilityChanged = values.public !== this.saved.public;
     this.saving.set(true);
     this.saveError.set(null);
     this.saveSuccess.set(false);
 
-    const visibilityCall = this.formData.public
-      ? this.cachesService.setCachePublic(this.cacheName)
-      : this.cachesService.setCachePrivate(this.cacheName);
+    const finish = () => {
+      this.saving.set(false);
+      this.saved = values;
+      this.formData = { ...values };
+      this.unsaved.mark();
+      this.saveSuccess.set(true);
+      this.loadCache();
+    };
+    const update = Object.keys(patch).length > 0 ? this.cachesService.updateCache(this.cacheName, patch) : of('');
 
-    this.cachesService.updateCache(this.cacheName, {
-      display_name: this.formData.display_name,
-      description: this.formData.description,
-      priority: this.formData.priority,
-      local_priority: this.formData.local_priority,
-      max_storage_gb: this.formData.max_storage_gb,
-      pull_through: this.formData.pull_through,
-    }).subscribe({
+    update.subscribe({
       next: () => {
+        if (!visibilityChanged) return finish();
+        const visibilityCall = values.public
+          ? this.cachesService.setCachePublic(this.cacheName)
+          : this.cachesService.setCachePrivate(this.cacheName);
         visibilityCall.subscribe({
-          next: () => {
-            this.saving.set(false);
-            this.saveSuccess.set(true);
-            this.loadCache();
-          },
+          next: finish,
           error: (error: unknown) => {
             this.saveError.set(apiErrorMessage(error, 'Failed to update visibility.'));
             this.saving.set(false);

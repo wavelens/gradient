@@ -166,15 +166,16 @@
   <gr-form-field
     label="Name"
     for="int-name"
-    [invalid]="nameInvalid"
-    error="Lowercase letters, digits, and dashes only. Cannot start or end with a dash."
-    hint="Used in the webhook URL. Lowercase letters, digits, and dashes."
+    required
+    [invalid]="(submitAttempted() || createNameModel.touched) && !!nameError"
+    [error]="nameError ?? ''"
+    hint="Used in the webhook URL. Lowercase letters, digits and dashes."
   >
     <gr-label-help slot="label" doc="guides/gitea/#1-create-the-integrations" title="Learn about Git host integrations" />
-    <input grInput id="int-name" [(ngModel)]="formData.name" placeholder="e.g. main-gitea" />
+    <input grInput id="int-name" [(ngModel)]="formData.name" #createNameModel="ngModel" placeholder="e.g. main-gitea" (keyup.enter)="createIntegration()" />
   </gr-form-field>
   <gr-form-field label="Display Name" for="int-display-name" hint="Human-readable label shown in the integrations list.">
-    <input grInput id="int-display-name" [(ngModel)]="formData.display_name" placeholder="Defaults to the name" />
+    <input grInput id="int-display-name" [(ngModel)]="formData.display_name" placeholder="Defaults to the name" (keyup.enter)="createIntegration()" />
   </gr-form-field>
   <gr-form-field label="Kind" for="int-kind">
     <gr-label-help slot="label" doc="guides/gitea/#1-create-the-integrations" title="Inbound vs outbound integrations" />
@@ -197,10 +198,11 @@
   </gr-form-field>
 
   @if (formData.git_host_type === 'github') {
-    <gr-form-field label="App Installation ID" for="int-installation-id" hint="The numeric installation ID of the GitHub App installation.">
+    <gr-form-field label="App Installation ID" for="int-installation-id" required hint="The numeric installation ID of the GitHub App installation."
+      [invalid]="(submitAttempted() || installationModel.touched) && !!installationIdError" [error]="installationIdError ?? ''">
       <gr-label-help slot="label" doc="guides/github/#3-install-the-app" title="Install the GitHub App" />
-      <input grInput id="int-installation-id" [(ngModel)]="formData.installation_id"
-        placeholder="e.g. 12345678" />
+      <input grInput id="int-installation-id" [(ngModel)]="formData.installation_id" #installationModel="ngModel"
+        placeholder="e.g. 12345678" (keyup.enter)="createIntegration()" />
     </gr-form-field>
   } @else if (formData.kind === 'inbound') {
     <div class="dialog-info">
@@ -213,13 +215,15 @@
         <button grButton type="button" icon="refresh" severity="secondary" (click)="generateSecret()"></button>
       </div>
     </gr-form-field>
-    <gr-form-field label="Allowed source IPs / CIDRs" for="int-allowed-ips" hint="One CIDR per line. Leave blank to accept webhooks from any source.">
-      <textarea id="int-allowed-ips" grInput rows="3" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
+    <gr-form-field label="Allowed source IPs / CIDRs" for="int-allowed-ips" hint="One CIDR per line. Leave blank to accept webhooks from any source."
+      [invalid]="(submitAttempted() || createIpsModel.touched) && !!allowedIpsError" [error]="allowedIpsError ?? ''">
+      <textarea id="int-allowed-ips" grInput rows="3" [(ngModel)]="formData.allowed_ips" #createIpsModel="ngModel" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
     </gr-form-field>
   } @else {
-    <gr-form-field label="Endpoint URL" for="int-endpoint" hint="Base URL of the Git host instance.">
-      <input grInput id="int-endpoint" [(ngModel)]="formData.endpoint_url"
-        placeholder="e.g. https://gitea.example.com" />
+    <gr-form-field label="Endpoint URL" for="int-endpoint" hint="Base URL of the Git host instance."
+      [invalid]="(submitAttempted() || createEndpointModel.touched) && !!endpointUrlError" [error]="endpointUrlError ?? ''">
+      <input grInput id="int-endpoint" [(ngModel)]="formData.endpoint_url" #createEndpointModel="ngModel"
+        placeholder="e.g. https://gitea.example.com" (keyup.enter)="createIntegration()" />
     </gr-form-field>
     <gr-form-field label="Access Token" for="int-token">
       <input grInput id="int-token" type="password" [(ngModel)]="formData.access_token"
@@ -229,7 +233,7 @@
 
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
-    <button grButton label="Create" icon="check" (click)="createIntegration()" [loading]="saving()" [disabled]="saving() || !formData.name.trim() || nameInvalid"></button>
+    <button grButton label="Create" icon="check" (click)="createIntegration()" [loading]="saving()" [disabled]="saving()"></button>
   </div>
 </gr-dialog>
 
@@ -242,11 +246,13 @@
   width="520px"
 >
   @if (editingIntegration(); as target) {
-    <gr-form-field label="Name" for="edit-name">
-      <input grInput id="edit-name" [(ngModel)]="formData.name" />
+    <gr-form-field label="Name" for="edit-name" required
+      [invalid]="(submitAttempted() || editNameModel.dirty) && !!nameError" [error]="nameError ?? ''">
+      <input grInput id="edit-name" [(ngModel)]="formData.name" #editNameModel="ngModel" (keyup.enter)="saveEdit()" />
     </gr-form-field>
-    <gr-form-field label="Display Name" for="edit-display-name">
-      <input grInput id="edit-display-name" [(ngModel)]="formData.display_name" />
+    <gr-form-field label="Display Name" for="edit-display-name" required
+      [invalid]="(submitAttempted() || editDisplayNameModel.dirty) && !!displayNameError" [error]="displayNameError ?? ''">
+      <input grInput id="edit-display-name" [(ngModel)]="formData.display_name" #editDisplayNameModel="ngModel" (keyup.enter)="saveEdit()" />
     </gr-form-field>
     <gr-form-field label="Git Host" for="edit-git-host">
       <gr-select
@@ -268,12 +274,14 @@
           <button grButton type="button" label="Clear Secret" icon="delete" severity="danger" size="small" class="mt-sm" (click)="clearSecret()" [disabled]="saving()"></button>
         }
       </gr-form-field>
-      <gr-form-field label="Allowed source IPs / CIDRs" for="edit-allowed-ips" hint="One CIDR per line. Leave blank to accept webhooks from any source.">
-        <textarea id="edit-allowed-ips" grInput rows="3" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
+      <gr-form-field label="Allowed source IPs / CIDRs" for="edit-allowed-ips" hint="One CIDR per line. Leave blank to accept webhooks from any source."
+        [invalid]="(submitAttempted() || editIpsModel.dirty) && !!allowedIpsError" [error]="allowedIpsError ?? ''">
+        <textarea id="edit-allowed-ips" grInput rows="3" [(ngModel)]="formData.allowed_ips" #editIpsModel="ngModel" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
       </gr-form-field>
     } @else {
-      <gr-form-field label="Endpoint URL" for="edit-endpoint">
-        <input grInput id="edit-endpoint" [(ngModel)]="formData.endpoint_url" />
+      <gr-form-field label="Endpoint URL" for="edit-endpoint"
+        [invalid]="(submitAttempted() || editEndpointModel.dirty) && !!endpointUrlError" [error]="endpointUrlError ?? ''">
+        <input grInput id="edit-endpoint" [(ngModel)]="formData.endpoint_url" #editEndpointModel="ngModel" (keyup.enter)="saveEdit()" />
       </gr-form-field>
       <gr-form-field label="Access Token" for="edit-token">
         <input grInput id="edit-token" type="password" [(ngModel)]="formData.access_token" placeholder="Leave blank to keep existing" />

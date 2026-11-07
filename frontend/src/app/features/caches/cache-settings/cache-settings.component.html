@@ -16,8 +16,8 @@
         <input grInput id="cache-name" [value]="c.name" disabled />
       </gr-form-field>
 
-      <gr-form-field label="Display Name" for="display-name">
-        <input grInput id="display-name" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" />
+      <gr-form-field label="Display Name" for="display-name" [invalid]="!!fieldError('display_name')" [error]="fieldError('display_name') ?? ''">
+        <input grInput id="display-name" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
       </gr-form-field>
 
       <gr-form-field label="Description" for="description">
@@ -33,8 +33,8 @@
       <gr-form-field
         label="Priority"
         for="priority"
-        [invalid]="priorityInvalid"
-        error="Priority must be between 0 and 255"
+        [invalid]="!!fieldError('priority')"
+        [error]="fieldError('priority') ?? ''"
       >
         <gr-label-help slot="label" doc="ui/settings/#cache-settings" title="Priority sent to Nix clients (0-255). Lower values are queried first." />
         <input
@@ -45,28 +45,34 @@
           max="255"
           [(ngModel)]="formData.priority"
           [appManagedDisable]="access()"
+          (keyup.enter)="saveSettings()"
         />
       </gr-form-field>
 
       <gr-form-field
         label="Local Priority"
         for="local-priority"
+        [invalid]="!!fieldError('local_priority')"
+        [error]="fieldError('local_priority') ?? ''"
       >
         <gr-label-help slot="label" doc="ui/settings/#cache-settings" title="Priority sent to clients on the local network. Empty: same as Priority." />
         <input
           grInput
           type="number"
           id="local-priority"
+          min="0"
+          max="255"
           [(ngModel)]="formData.local_priority"
           [appManagedDisable]="access()"
+          (keyup.enter)="saveSettings()"
         />
       </gr-form-field>
 
       <gr-form-field
         label="Max Storage (GB)"
         for="max-storage"
-        [invalid]="maxStorageInvalid"
-        error="Set 0 for unlimited, otherwise at least 1 GB"
+        [invalid]="!!fieldError('max_storage_gb')"
+        [error]="fieldError('max_storage_gb') ?? ''"
       >
         <gr-label-help slot="label" doc="ui/settings/#cache-settings" title="Storage limit of this cache. 0 is unlimited." />
         <input
@@ -74,8 +80,10 @@
           type="number"
           id="max-storage"
           min="0"
+          step="1"
           [(ngModel)]="formData.max_storage_gb"
           [appManagedDisable]="access()"
+          (keyup.enter)="saveSettings()"
         />
       </gr-form-field>
 
@@ -109,20 +117,22 @@
       @if (saveError()) {
         <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
       }
-      @if (saveSuccess()) {
+      @if (saveSuccess() && !unsaved.changed()) {
         <gr-message-banner type="success">Changes saved.</gr-message-banner>
       }
 
-      <div class="form-actions">
+      <div *appWritable="access()" class="form-actions">
         <button
-          *appWritable="access()"
           grButton
           label="Save Changes"
           icon="check"
           (grSubmit)="saveSettings()"
           [loading]="saving()"
-          [appManagedDisable]="access()"
+          [disabled]="access().managed || !unsaved.changed()"
         ></button>
+        @if (!access().managed && !unsaved.changed()) {
+          <small class="text-secondary save-hint">No changes to save.</small>
+        }
       </div>
     </gr-settings-section>
 

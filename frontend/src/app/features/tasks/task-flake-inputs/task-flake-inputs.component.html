@@ -115,14 +115,17 @@
 
 <!-- Shared form template -->
 <ng-template #overrideForm>
-  <gr-form-field label="Input Name" for="fi-input-name">
+  <gr-form-field label="Input Name" for="fi-input-name" required
+    [invalid]="(submitAttempted() || inputNameModel.dirty) && !!inputNameError" [error]="inputNameError ?? ''">
     <gr-label-help slot="label" doc="guides/flake-updates/#1-track-the-inputs" title="Track flake inputs" />
     <span slot="hint">Input name from your flake.nix, or a glob like <code>nixpkgs*</code> / <code>*</code> to match many. A literal name wins over a glob.</span>
     <input
       grInput
       id="fi-input-name"
       [(ngModel)]="form.input_name"
+      #inputNameModel="ngModel"
       placeholder="nixpkgs or nixpkgs*"
+      (keyup.enter)="submitForm()"
     />
   </gr-form-field>
 
@@ -134,12 +137,15 @@
   />
 
   @if (!form.keepUrl) {
-    <gr-form-field label="URL" for="fi-url" hint="Nix flake URL to substitute for this input.">
+    <gr-form-field label="URL" for="fi-url" required hint="Nix flake URL to substitute for this input."
+      [invalid]="(submitAttempted() || urlModel.touched) && !!urlError" [error]="urlError ?? ''">
       <input
         grInput
         id="fi-url"
         [(ngModel)]="form.url"
+        #urlModel="ngModel"
         placeholder="github:NixOS/nixpkgs/nixos-24.05"
+        (keyup.enter)="submitForm()"
       />
     </gr-form-field>
   }
