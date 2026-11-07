@@ -50,6 +50,7 @@
 // ── Form Actions ─────────────────────────────────────────────────────────────
 .gr-form-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: $spacing-sm;
   margin-top: $spacing-lg;
 

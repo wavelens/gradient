@@ -363,7 +363,7 @@ export class ApiKeysComponent implements OnInit {
         consequence: `${key.name} stops working immediately. Scripts and pipelines that use the key lose access.`,
         confirmLabel: 'Revoke',
         failure: 'Revoking the API key failed.',
-        severity: 'warn',
+        severity: 'danger',
         action: () => this.userService.revokeApiKey(key.id),
       })
       .subscribe(() => {

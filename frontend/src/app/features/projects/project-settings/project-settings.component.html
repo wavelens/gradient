@@ -76,7 +76,7 @@
     @if (saveSuccess() && !unsaved.changed()) {
       <gr-message-banner type="success">Changes saved.</gr-message-banner>
     }
-    <div class="form-actions" *appWritable="access()">
+    <div class="gr-form-actions" *appWritable="access()">
       <button
         grButton
         label="Save Changes"
@@ -138,7 +138,7 @@
         <p class="text-secondary">No SSH key generated yet.</p>
         <button
           *appWritable="sshKeyAccess()"
-          grButton
+          grButton severity="secondary"
           label="Generate SSH Key"
           icon="key"
           (click)="generateSSHKey()"

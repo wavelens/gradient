@@ -23,7 +23,7 @@
               {{ request.display_name }}
               <span slot="meta">{{ requestMeta(request) }}</span>
               <div slot="actions">
-                <button grButton label="Approve" icon="check" severity="success" size="small"
+                <button grButton label="Approve" icon="check" severity="secondary" size="small"
                   [loading]="busy() === request.id" (click)="approve(request.id)"></button>
                 <button grButton label="Deny" icon="close" severity="danger" size="small"
                   [disabled]="busy() === request.id" (click)="deny(request)"></button>

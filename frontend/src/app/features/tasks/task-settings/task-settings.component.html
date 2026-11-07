@@ -119,7 +119,7 @@
       @if (saveSuccess() && !unsaved.changed()) {
         <gr-message-banner type="success">Changes saved.</gr-message-banner>
       }
-      <div class="form-actions" *appWritable="access()">
+      <div class="gr-form-actions" *appWritable="access()">
         <button
           grButton
           label="Save Changes"
@@ -176,7 +176,7 @@
         grButton
         [label]="proj.active ? 'Deactivate' : 'Activate'"
         [icon]="proj.active ? 'pause' : 'play_arrow'"
-        [severity]="proj.active ? 'warn' : 'success'"
+        severity="secondary"
         (click)="toggleActive()"
         [loading]="toggling()"
         [appManagedDisable]="access()"
@@ -194,7 +194,7 @@
             grButton
             label="Transfer Ownership"
             icon="send"
-            severity="warn"
+            severity="danger"
             (click)="showTransferDialog.set(true)"
             [appManagedDisable]="access()"
         ></button>
@@ -242,6 +242,6 @@ width="420px"
 </div>
 <div grDialogFooter>
   <button grButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
-  <button grButton label="Transfer" icon="send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName.trim()"></button>
+  <button grButton label="Transfer" icon="send" severity="danger" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName.trim()"></button>
 </div>
 </gr-dialog>

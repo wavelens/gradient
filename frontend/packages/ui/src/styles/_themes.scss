@@ -34,8 +34,6 @@
   --gr-green-800: #115c26;
   --gr-green-900: #0f5323;
   --gr-green-700: #166c2e;
-  --gr-green-825: #195728;
-  --gr-green-725: #1e672f;
   --gr-green-600: #1a7f37;
   --gr-green-575: #1c843a;
   --gr-emerald-400: #34d399;
@@ -48,8 +46,6 @@
   --gr-sage-800: #2f5a39;
   --gr-sage-700: #366340;
   --gr-sage-500: #4b9b5d;
-  --gr-sage-300: #8fc79c;
-  --gr-sage-200: #a5d4b0;
   --gr-red-200: #fca5a5;
   --gr-red-300: #f87171;
   --gr-red-700: #a40e19;
@@ -95,9 +91,9 @@
   --gr-border-subtle: var(--gr-gray-760);
   --gr-accent: var(--gr-green-400);
   --gr-accent-hover: var(--gr-green-300);
-  --gr-accent-fill: var(--gr-green-825);
-  --gr-accent-fill-hover: var(--gr-green-725);
-  --gr-accent-fg: var(--gr-gray-100);
+  --gr-accent-fill: var(--gr-green-600);
+  --gr-accent-fill-hover: var(--gr-green-575);
+  --gr-accent-fg: var(--gr-white);
   --gr-focus-ring: var(--gr-white);
   --gr-text-primary: var(--gr-gray-100);
   --gr-text-secondary: var(--gr-gray-300);
@@ -149,9 +145,9 @@
   --gr-border-subtle: var(--gr-gray-60);
   --gr-accent: var(--gr-sage-700);
   --gr-accent-hover: var(--gr-sage-800);
-  --gr-accent-fill: var(--gr-sage-200);
-  --gr-accent-fill-hover: var(--gr-sage-300);
-  --gr-accent-fg: var(--gr-black);
+  --gr-accent-fill: var(--gr-sage-700);
+  --gr-accent-fill-hover: var(--gr-sage-800);
+  --gr-accent-fg: var(--gr-white);
   --gr-focus-ring: var(--gr-ink-900);
   --gr-text-primary: var(--gr-ink-900);
   --gr-text-secondary: var(--gr-slate-600);

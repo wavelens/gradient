@@ -38,7 +38,7 @@ export function unsavedChanges(read: () => unknown, page: string): UnsavedChange
           target: page,
           consequence: 'All edits disappear.',
           confirmLabel: 'Leave',
-          severity: 'warn',
+          severity: 'danger',
           failure: 'All edits disappear.',
           action: () => of(true),
         })

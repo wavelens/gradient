@@ -42,7 +42,7 @@
       @if (saved() && !unsaved.changed()) {
         <gr-message-banner type="success">Changes saved.</gr-message-banner>
       }
-      <div *appWritable="access()" class="form-actions">
+      <div *appWritable="access()" class="gr-form-actions">
         <button grButton label="Save Changes" icon="check" [loading]="saving()" (grSubmit)="save()"
           [disabled]="access().managed || !unsaved.changed()"></button>
         @if (!access().managed && !unsaved.changed()) {

@@ -206,7 +206,7 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
     const banner = (fixture.nativeElement as HTMLElement).querySelector('gr-message-banner');
 
     expect(banner?.textContent).toContain('branch does not exist');
-    expect(banner?.parentElement?.querySelector('.form-actions button')?.textContent).toContain('Save Changes');
+    expect(banner?.parentElement?.querySelector('.gr-form-actions button')?.textContent).toContain('Save Changes');
     expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
   });
 

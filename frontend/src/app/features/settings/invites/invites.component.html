@@ -13,7 +13,7 @@
           {{ invite.scope_display_name }}
           <gr-badge severity="success">Joined</gr-badge>
           <span slot="meta">Role {{ invite.role }}</span>
-          <a slot="actions" grButton icon="arrow_forward" [routerLink]="joinedLink(invite)"
+          <a slot="actions" grButton severity="secondary" icon="arrow_forward" [routerLink]="joinedLink(invite)"
              [label]="invite.kind === 'cache' ? 'Open cache' : invite.kind === 'team' ? 'Open team' : 'Open project'"></a>
         </gr-row>
       }
@@ -42,7 +42,7 @@
           </span>
           <button
             slot="actions"
-            grButton
+            grButton severity="secondary"
             label="Accept"
             icon="check"
             [disabled]="pendingToken() === invite.token"

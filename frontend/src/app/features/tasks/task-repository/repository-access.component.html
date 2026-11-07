@@ -48,13 +48,13 @@
         }
       }
       @if (provisioner()) {
-        <button grButton label="Install deploy key" icon="key" (click)="installDeployKey()" [loading]="installingKey()"
+        <button grButton severity="secondary" label="Install deploy key" icon="key" (click)="installDeployKey()" [loading]="installingKey()"
           [disabled]="installingKey()" data-testid="install-deploy-key"></button>
       }
       @if (!editing()) {
         <button grButton label="Edit URL" icon="edit" severity="secondary" (click)="startEdit()"></button>
       }
-      <button grButton label="Test access" icon="lan" (click)="testAccess()" [loading]="testing()" [disabled]="testing()"></button>
+      <button grButton severity="secondary" label="Test access" icon="lan" (click)="testAccess()" [loading]="testing()" [disabled]="testing()"></button>
     </div>
   }
 </gr-settings-section>

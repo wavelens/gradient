@@ -6,7 +6,7 @@
 
 <gr-settings-section title="Teams" [card]="false" maxWidth="none">
   @if (canEdit()) {
-    <button slot="actions" grButton label="Grant Team" (click)="openGrant()"></button>
+    <button slot="actions" grButton severity="secondary" label="Grant Team" (click)="openGrant()"></button>
   }
   @if (shownGrants().length > 0) {
     <gr-row-list>

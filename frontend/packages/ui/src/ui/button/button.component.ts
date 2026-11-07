@@ -7,7 +7,7 @@
 import { Component, ElementRef, booleanAttribute, computed, inject, input, ChangeDetectionStrategy } from '@angular/core';
 import { SubmitDirective } from '../form-field/submit.directive';
 
-export type ButtonSeverity = 'primary' | 'secondary' | 'success' | 'warn' | 'danger';
+export type ButtonSeverity = 'primary' | 'secondary' | 'danger';
 
 /// Attribute component on a native <button>/<a>, so callers keep native
 /// `disabled`, `type` and `routerLink` bindings and nothing here fights them.

@@ -6,7 +6,7 @@
 
 <gr-settings-section title="Members" [description]="countLabel()" [card]="false" maxWidth="none">
   @if (canEdit()) {
-    <button slot="actions" grButton label="Add Member" icon="person_add" (click)="openAdd()"></button>
+    <button slot="actions" grButton severity="secondary" label="Add Member" icon="person_add" (click)="openAdd()"></button>
   }
   <gr-load-state
     [loading]="loading()"

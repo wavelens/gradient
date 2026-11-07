@@ -18,7 +18,7 @@ export function abortExecJobConfirm<T>(target: string, action: () => Observable<
     consequence: "The exec job stops and doesn't restart.",
     confirmLabel: 'Abort',
     failure: 'Failed to abort the exec job.',
-    severity: 'warn',
+    severity: 'danger',
     action,
   };
 }

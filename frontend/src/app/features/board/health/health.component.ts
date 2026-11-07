@@ -142,7 +142,7 @@ export class BoardHealthComponent implements OnInit {
       consequence: 'Deep GC runs delete stored files that no row in the database references. A round already in progress can start again from the beginning.',
       confirmLabel: 'Run Deep GC',
       failure: 'Failed to start deep GC.',
-      severity: 'warn',
+      severity: 'danger',
       action: () => this.admin.startDeepGc(),
     }).subscribe(() => {
       this.notify.success('Deep GC started');
@@ -157,7 +157,7 @@ export class BoardHealthComponent implements OnInit {
       consequence: 'No new evaluations or builds start and in-flight evaluations wait. A disable or a server restart can end draining.',
       confirmLabel: 'Enable Draining',
       failure: 'Failed to enable draining.',
-      severity: 'warn',
+      severity: 'danger',
       action: () => this.admin.setDraining(true),
     }).subscribe(() => {
       this.notify.success('Draining enabled');

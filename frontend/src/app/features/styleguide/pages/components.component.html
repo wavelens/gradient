@@ -6,15 +6,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 <p>Interactive primitives. Every control below is the same one features import.</p>
 
 <h2>Buttons</h2>
-<button grButton label="Primary"></button>
-<button grButton label="Secondary" severity="secondary"></button>
-<button grButton label="Success" severity="success"></button>
-<button grButton label="Danger" severity="danger"></button>
-<button grButton label="Warn" severity="warn"></button>
-<button grButton label="With icon" icon="add"></button>
-<button grButton icon="delete" severity="danger" aria-label="Delete"></button>
-<button grButton label="Text" [text]="true"></button>
-<button grButton label="Loading" [loading]="true"></button>
+<div class="gr-form-actions">
+  <button grButton label="Primary"></button>
+  <button grButton label="Secondary" severity="secondary"></button>
+  <button grButton label="Danger" icon="delete" severity="danger"></button>
+  <button grButton label="Disabled" disabled></button>
+  <button grButton label="Loading" [loading]="true"></button>
+  <button grButton icon="delete" severity="danger" aria-label="Delete row"></button>
+  <button grButton label="Text" [text]="true"></button>
+</div>
 
 <h2>Form field</h2>
 <p>Works with template-driven forms, which is what most of the app uses. The help link is

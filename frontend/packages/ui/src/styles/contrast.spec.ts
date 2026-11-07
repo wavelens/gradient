@@ -27,6 +27,7 @@ const PAIRS: Array<[string, string, number]> = [
   ['--gr-text-secondary', '--gr-surface-raised', 4.5],
   ['--gr-accent-fg', '--gr-accent-fill', 4.5],
   ['--gr-accent-fg', '--gr-accent-fill-hover', 4.5],
+  ['--gr-accent-fill', '--gr-surface-base', 3],
   ['--gr-status-danger-fg', '--gr-status-danger', 4.5],
   ['--gr-status-warning-fg', '--gr-status-warning', 4.5],
   ['--gr-text-muted', '--gr-surface-base', 4.5],

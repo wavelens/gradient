@@ -10,6 +10,9 @@
   --gr-btn-bg: var(--gr-accent-fill);
   --gr-btn-bg-hover: var(--gr-accent-fill-hover);
   --gr-btn-fg: var(--gr-accent-fg);
+  --gr-btn-fg-hover: var(--gr-btn-fg);
+  --gr-btn-border: var(--gr-btn-bg);
+  --gr-btn-border-hover: var(--gr-btn-bg-hover);
   --gr-btn-accent: var(--gr-accent);
 
   display: inline-flex;
@@ -19,7 +22,7 @@
   gap: $spacing-sm;
   padding: 0 0.8rem;
   height: $control-height;
-  border: 1px solid var(--gr-btn-bg);
+  border: 1px solid var(--gr-btn-border);
   border-radius: $border-radius-sm;
   background: var(--gr-btn-bg);
   color: var(--gr-btn-fg);
@@ -28,6 +31,7 @@
   font-weight: 600;
   // Matches .gr-input so buttons and fields line up when set side by side.
   line-height: $line-height-tight;
+  white-space: nowrap;
   cursor: pointer;
   text-decoration: none;
   transition: background-color $transition-fast, border-color $transition-fast, color $transition-fast;
@@ -35,7 +39,8 @@
 
 :host(:hover:not(:disabled, .gr-button--blocked)) {
   background: var(--gr-btn-bg-hover);
-  border-color: var(--gr-btn-accent);
+  border-color: var(--gr-btn-border-hover);
+  color: var(--gr-btn-fg-hover);
 }
 
 :host(:focus-visible) {
@@ -43,54 +48,42 @@
   outline-offset: $focus-ring-offset;
 }
 
-:host(:disabled),
-:host(.gr-button--loading) {
-  opacity: 0.6;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-:host(.gr-button--blocked) {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-:host(.gr-button--primary) {
-  --gr-btn-bg: var(--gr-accent-fill);
-  --gr-btn-bg-hover: var(--gr-accent-fill-hover);
-  --gr-btn-fg: var(--gr-accent-fg);
-  --gr-btn-accent: var(--gr-accent);
-}
-
 :host(.gr-button--secondary) {
-  // The fill separates it from the card it sits on, so the outline can stay as
-  // quiet as every other panel edge.
   --gr-btn-bg: var(--gr-surface-active);
   --gr-btn-bg-hover: var(--gr-surface-hover);
   --gr-btn-fg: var(--gr-text-primary);
-  --gr-btn-accent: var(--gr-text-primary);
-  border-color: var(--gr-border-subtle);
-}
-
-:host(.gr-button--success) {
-  --gr-btn-bg: var(--gr-accent-fill);
-  --gr-btn-bg-hover: var(--gr-accent-fill-hover);
-  --gr-btn-fg: var(--gr-accent-fg);
-  --gr-btn-accent: var(--gr-accent);
-}
-
-:host(.gr-button--warn) {
-  --gr-btn-bg: var(--gr-status-warning);
-  --gr-btn-bg-hover: var(--gr-status-warning-hover);
-  --gr-btn-fg: var(--gr-status-warning-fg);
-  --gr-btn-accent: var(--gr-status-warning);
+  --gr-btn-border: var(--gr-border-subtle);
+  --gr-btn-border-hover: var(--gr-border);
+  --gr-btn-accent: var(--gr-text-muted);
 }
 
 :host(.gr-button--danger) {
-  --gr-btn-bg: var(--gr-status-danger);
-  --gr-btn-bg-hover: var(--gr-status-danger-hover);
-  --gr-btn-fg: var(--gr-status-danger-fg);
+  --gr-btn-bg: transparent;
+  --gr-btn-bg-hover: var(--gr-status-danger);
+  --gr-btn-fg: var(--gr-status-danger);
+  --gr-btn-fg-hover: var(--gr-status-danger-fg);
+  --gr-btn-border: color-mix(in srgb, var(--gr-status-danger) 55%, transparent);
+  --gr-btn-border-hover: var(--gr-status-danger);
   --gr-btn-accent: var(--gr-status-danger);
+}
+
+// Disabled buttons drop the severity color completely. They don't look like muted enabled buttons.
+:host(:disabled:not(.gr-button--loading)),
+:host(.gr-button--blocked) {
+  --gr-btn-bg: transparent;
+  --gr-btn-fg: var(--gr-text-muted);
+  --gr-btn-border: var(--gr-border-subtle);
+  --gr-btn-accent: var(--gr-text-muted);
+  cursor: not-allowed;
+}
+
+:host(:disabled),
+:host(.gr-button--loading) {
+  pointer-events: none;
+}
+
+:host(.gr-button--loading) {
+  cursor: progress;
 }
 
 :host(.gr-button--small) {
@@ -99,7 +92,14 @@
   font-size: $font-size-sm;
 }
 
-:host(.gr-button--icon-only) { padding: 0.4rem; }
+:host(.gr-button--icon-only) {
+  width: $control-height;
+  padding: 0;
+}
+
+:host(.gr-button--icon-only.gr-button--small) {
+  width: $control-height-sm;
+}
 
 :host(.gr-button--text) {
   background: none;
@@ -107,13 +107,6 @@
   color: var(--gr-btn-accent);
 }
 
-// The neutral text button is an affordance, not a call to action: it rests
-// quiet and brightens under the pointer.
-:host(.gr-button--text.gr-button--secondary) {
-  color: var(--gr-text-muted);
-}
-
-// A text button has no box to tint, so the hover reads on the glyph itself.
 :host(.gr-button--text:hover:not(:disabled)) {
   background: none;
   border-color: transparent;

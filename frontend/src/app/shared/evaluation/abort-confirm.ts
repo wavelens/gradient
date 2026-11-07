@@ -19,7 +19,7 @@ export function abortEvaluationConfirm<T>(target: string, action: () => Observab
     consequence: 'Running builds that no other evaluation needs get canceled.',
     confirmLabel: 'Abort',
     failure: 'Evaluation abort failed.',
-    severity: 'warn',
+    severity: 'danger',
     action,
   };
 }
@@ -31,7 +31,7 @@ export function abortBuildConfirm<T>(target: string, action: () => Observable<T>
     consequence: 'The build for this evaluation stops.',
     confirmLabel: 'Abort',
     failure: 'Build abort failed.',
-    severity: 'warn',
+    severity: 'danger',
     action,
   };
 }

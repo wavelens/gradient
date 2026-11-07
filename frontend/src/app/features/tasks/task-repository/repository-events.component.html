@@ -26,12 +26,16 @@
         <gr-copy-field [value]="url" />
       </gr-form-field>
     }
-    @if (hostLinks(); as link) {
-      <a grButton label="Open settings for webhooks" icon="open_in_new" severity="secondary" size="small" [href]="link.webhooks" target="_blank" rel="noopener noreferrer"></a>
-    }
-    @if (provisioner() && inbound.serves_repository) {
-      <button grButton label="Install webhook" icon="add_link" size="small" (click)="installWebhook()"
-        [loading]="installingWebhook()" [disabled]="installingWebhook()" data-testid="install-webhook"></button>
+    @if (hostLinks() || (provisioner() && inbound.serves_repository)) {
+      <div class="gr-form-actions">
+        @if (hostLinks(); as link) {
+          <a grButton label="Open settings for webhooks" icon="open_in_new" severity="secondary" [href]="link.webhooks" target="_blank" rel="noopener noreferrer"></a>
+        }
+        @if (provisioner() && inbound.serves_repository) {
+          <button grButton severity="secondary" label="Install webhook" icon="add_link" (click)="installWebhook()"
+            [loading]="installingWebhook()" [disabled]="installingWebhook()" data-testid="install-webhook"></button>
+        }
+      </div>
     }
     <p class="text-secondary" role="status" data-testid="last-event">
       <strong>Last event</strong>

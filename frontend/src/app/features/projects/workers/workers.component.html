@@ -186,7 +186,7 @@
       grButton
       [label]="worker.active ? 'Deactivate' : 'Activate'"
       [icon]="worker.active ? 'pause' : 'play_arrow'"
-      [severity]="worker.active ? 'warn' : 'success'"
+      severity="secondary"
       size="small"
       class="worker-action-btn"
       [disabled]="togglingId() !== null || deletingId() !== null || testingId() !== null"
@@ -295,7 +295,7 @@
   </div>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="cancelToggleWorker()" [disabled]="togglingId() !== null"></button>
-    <button grButton label="Deactivate" icon="pause" severity="warn" (click)="confirmToggleWorker()" [loading]="togglingId() !== null"></button>
+    <button grButton label="Deactivate" icon="pause" severity="danger" (click)="confirmToggleWorker()" [loading]="togglingId() !== null"></button>
   </div>
 </gr-dialog>
 

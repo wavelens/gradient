@@ -118,7 +118,7 @@ export class GithubAppComponent implements OnInit {
         target: 'GitHub App credentials',
         consequence: this.leaveWarning,
         confirmLabel: 'Leave',
-        severity: 'warn',
+        severity: 'danger',
         failure: 'Failed to leave the page.',
         action: () => of(true),
       })

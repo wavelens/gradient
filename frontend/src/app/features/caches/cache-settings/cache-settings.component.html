@@ -121,7 +121,7 @@
         <gr-message-banner type="success">Changes saved.</gr-message-banner>
       }
 
-      <div *appWritable="access()" class="form-actions">
+      <div *appWritable="access()" class="gr-form-actions">
         <button
           grButton
           label="Save Changes"
@@ -182,7 +182,7 @@
               grButton
               [label]="c.active ? 'Deactivate' : 'Activate'"
               [icon]="c.active ? 'close' : 'check'"
-              [severity]="c.active ? 'danger' : 'success'"
+              [severity]="c.active ? 'danger' : 'secondary'"
               (click)="toggleActive()"
               [loading]="toggling()"
             ></button>
