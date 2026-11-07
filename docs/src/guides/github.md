@@ -38,7 +38,7 @@ Install the App from its GitHub page on the account that owns the repositories. 
 
 Gradient compares the granted repositories with task repository URLs. `https://`, SSH and `github:owner/repo` URLs all match. Gradient links each matching project to a `github-<account>` integration pair.
 
-Projects created after the installation lack the integration. Open **Integrations -> New Integration** and pick **Git Host** GitHub. Enter the **App Installation ID** from the App's installation page on GitHub.
+Tasks created after installation connect automatically. Gradient can query GitHub for the App installation for that repository at task creation or a repository URL change. Gradient can then link that installation to the project.
 
 ## 4. Wire the Task
 
@@ -46,10 +46,7 @@ A task links the two integrations: triggers use the inbound one, actions use the
 
 === "UI"
 
-    A task whose repository URL matches gets a **Push (reporter)** trigger and a **Git Status** action without manual work. All other tasks require adding both by hand.
-
-    - **Triggers -> New Trigger**: add **Push (reporter)**, plus **Pull Request (reporter)** for pull requests, each bound to the `github-<account>` integration.
-    - **Actions -> New Action**: add **Git Status** bound to the `github-<account>` integration.
+    Tasks with a matching repository URL get push and pull request builds and commit statuses without manual work. **Task settings -> Repository** can show the connection and toggle each part on or off.
 
 === "Declarative"
 

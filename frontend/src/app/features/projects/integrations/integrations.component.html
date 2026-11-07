@@ -163,14 +163,14 @@
     [error]="nameError ?? ''"
     hint="Used in the webhook URL. Lowercase letters, digits and dashes."
   >
-    <gr-label-help slot="label" doc="guides/gitea/#1-create-the-integrations" title="Learn about Git host integrations" />
+    <gr-label-help slot="label" doc="guides/gitea/#inbound-and-outbound" title="Learn about Git host integrations" />
     <input grInput id="int-name" [(ngModel)]="formData.name" #createNameModel="ngModel" placeholder="e.g. main-gitea" (keyup.enter)="createIntegration()" />
   </gr-form-field>
   <gr-form-field label="Display Name" for="int-display-name" hint="Human-readable label shown in the integrations list.">
     <input grInput id="int-display-name" [(ngModel)]="formData.display_name" placeholder="Defaults to the name" (keyup.enter)="createIntegration()" />
   </gr-form-field>
   <gr-form-field label="Kind" for="int-kind">
-    <gr-label-help slot="label" doc="guides/gitea/#1-create-the-integrations" title="Inbound vs outbound integrations" />
+    <gr-label-help slot="label" doc="guides/gitea/#inbound-and-outbound" title="Inbound vs outbound integrations" />
     <gr-select
       inputId="int-kind"
       [(ngModel)]="formData.kind"

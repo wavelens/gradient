@@ -38,9 +38,7 @@ flowchart LR
 - Outbound requests run under the token's account. Statuses and comments show up under that account's name.
 - Writer checks and comment reactions rely on the outbound integration tied to the task's **Git Status** action.
 
-## 1. Create the Integrations
-
-### Access Token
+## 1. Create an Access Token
 
 GitLab project and group access tokens each create a bot user. A group token applies to every project in that group.
 
@@ -52,99 +50,82 @@ GitLab project and group access tokens each create a bot user. A group token app
 
 A personal access token from a dedicated account works as an alternative. That account needs the Developer role on each project.
 
-### Integrations
+## 2. Connect the Repository
 
-=== "UI"
+1. Click **Connect repository** in the project. Enter the repository URL and click **Create task**.
+2. Click **Connect gitlab.example.com** in the **Events and Status** step. Select GitLab. Keep the base URL as is and paste the token. Click **Connect**.
+3. Click **Start the first evaluation** in the **First Build** step.
 
-    Create two integrations in the project under **Integrations -> New Integration**, one of each kind.
+**Connect** can run all of these steps at once.
 
-    | Kind | Fields |
-    |---|---|
-    | Inbound | Name, **Git Host** GitLab and a **Webhook Secret**. The refresh button generates a secret. The secret shows only once, so copy it immediately. Created integrations show the **Webhook URL**. |
-    | Outbound | Name, **Git Host** GitLab, **Endpoint URL** (e.g. `https://gitlab.com`, without `/api/v4`) and the **Access Token** |
+- Gradient can create a webhook receiver and a status reporter for GitLab.
+- A task can build on pushes and merge requests and report commit status.
+- Give the token the **Maintainer** role. Gradient can install a webhook and a deploy key in the project.
 
-=== "Declarative"
-
-    ```nix
-    services.gradient.state.integrations = {
-      gitlab-in = {
-        project = "acme";
-        kind = "inbound";
-        git_host_type = "gitlab";
-        secret_file = "/run/secrets/gitlab-webhook-secret"; # (1)!
-        created_by = "alice";
-      };
-      gitlab-out = {
-        project = "acme";
-        kind = "outbound";
-        git_host_type = "gitlab";
-        endpoint_url = "https://gitlab.com"; # (2)!
-        access_token_file = "/run/secrets/gitlab-token"; # (3)!
-        created_by = "alice";
-      };
-    };
-    ```
-
-    1.  Any random string, e.g. `openssl rand -hex 32`. The GitLab webhook must use the same value.
-    2.  Base URL of GitLab, without `/api/v4`.
-    3.  The access token from above, as the only content of the file.
-
-    The webhook URL is `https://gradient.example.com/api/v1/hooks/gitlab/acme/gitlab-in`.
-
-## 2. Add the Webhook on GitLab
-
-In the GitLab project or group, go to **Settings -> Webhooks -> Add new webhook**.
+Gradient shows the webhook URL and secret a single time for the **Developer** role. Add both in the GitLab project or group under **Settings -> Webhooks -> Add new webhook**.
 
 | Field | Value |
 |---|---|
-| URL | The webhook URL from step 1 |
-| Secret token | The secret from step 1 |
+| URL | The webhook URL |
+| Secret token | The secret |
 | Trigger | **Push events**, **Tag push events**, **Comments**, **Merge request events**, **Releases events** |
 
-Merge request events and the `/gradient` comment commands need their own triggers. A push-only webhook cannot deliver them.
+Add the deploy key from the **Access** step under **Settings -> Repository -> Deploy keys** for repository URLs that use SSH. Click **Test access** next.
 
-## 3. Wire the Task
+Existing tasks have the same settings under **Task settings -> Repository**. The **Install webhook** and **Install deploy key** buttons apply to a token with the Maintainer role.
 
-A task links the two integrations: triggers use the inbound one, actions use the outbound one.
+## Declarative Setup
 
-=== "UI"
+```nix
+services.gradient.state.integrations = {
+  gitlab-in = {
+    project = "acme";
+    kind = "inbound";
+    git_host_type = "gitlab";
+    secret_file = "/run/secrets/gitlab-webhook-secret"; # (1)!
+    created_by = "alice";
+  };
+  gitlab-out = {
+    project = "acme";
+    kind = "outbound";
+    git_host_type = "gitlab";
+    endpoint_url = "https://gitlab.com"; # (2)!
+    access_token_file = "/run/secrets/gitlab-token"; # (3)!
+    created_by = "alice";
+  };
+};
+```
 
-    A new task receives a **Push (reporter)** trigger and a **Git Status** action on its own. Two requirements must hold.
+1.  Any random string, e.g. `openssl rand -hex 32`. The GitLab webhook must use the same value.
+2.  Base URL of GitLab, without `/api/v4`.
+3.  The access token from above, as the only content of the file.
 
-    - The task came into existence after both integrations.
-    - Exactly one inbound and one outbound integration match the repository host.
+The webhook URL is `https://gradient.example.com/api/v1/hooks/gitlab/acme/gitlab-in`.
 
-    In all other cases, add trigger and action by hand.
+A declared task ships without any trigger or action. Define both in the task's `triggers` and `actions` lists.
 
-    - **Triggers -> New Trigger**: add **Push (reporter)**, plus **Pull Request (reporter)** for merge requests. Each points at the inbound integration.
-    - **Actions -> New Action**: add **Git Status** pointing at the outbound integration.
+```nix
+services.gradient.state.tasks.app = {
+  project = "acme";
+  repository = "https://gitlab.com/acme/app.git";
+  created_by = "alice";
+  triggers = [
+    { type = "reporter_push"; integration = "gitlab-in"; } # (1)!
+    { type = "reporter_pull_request"; integration = "gitlab-in"; } # (2)!
+  ];
+  actions = [
+    {
+      name = "report-status";
+      type = "git_host_status_report";
+      config.integration = "gitlab-out"; # (3)!
+    }
+  ];
+};
+```
 
-=== "Declarative"
-
-    A declared task ships without any trigger or action. Define both in the task's `triggers` and `actions` lists.
-
-    ```nix
-    services.gradient.state.tasks.app = {
-      project = "acme";
-      repository = "https://gitlab.com/acme/app.git";
-      created_by = "alice";
-      triggers = [
-        { type = "reporter_push"; integration = "gitlab-in"; } # (1)!
-        { type = "reporter_pull_request"; integration = "gitlab-in"; } # (2)!
-      ];
-      actions = [
-        {
-          name = "report-status";
-          type = "git_host_status_report";
-          config.integration = "gitlab-out"; # (3)!
-        }
-      ];
-    };
-    ```
-
-    1.  The `integration` field on the trigger names the inbound integration. Branch and tag filters belong in `config`, see [Trigger Types](../reference/state.md#trigger-types).
-    2.  Optional. Covers merge request evaluations, with fork merge requests held until a maintainer approves them.
-    3.  `config.integration` names the outbound integration.
+1.  The `integration` field on the trigger names the inbound integration. Branch and tag filters belong in `config`, see [Trigger Types](../reference/state.md#trigger-types).
+2.  Optional. Covers merge request evaluations, with fork merge requests held until a maintainer approves them.
+3.  `config.integration` names the outbound integration.
 
 ## Verify Deployment
 

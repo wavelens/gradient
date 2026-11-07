@@ -38,9 +38,7 @@ flowchart LR
 - Outbound calls act as the token's account. Statuses and comments appear under that account's name.
 - Writer checks and comment reactions use the outbound integration of the task's **Git Status** action.
 
-## 1. Create the Integrations
-
-### Bot Account and Token
+## 1. Create a Bot Account
 
 Gitea and Forgejo tie tokens to individual users. A dedicated bot account keeps statuses and comments apart from personal accounts.
 
@@ -73,101 +71,84 @@ The token needs these scopes.
       --token-name gradient --scopes write:repository,write:issue,read:user --raw
     ```
 
-### Integrations
+## 2. Connect the Repository
 
-=== "UI"
+1. Click **Connect repository** in the project. Enter the repository URL and click **Create task**.
+2. Click **Connect gitea.example.com** in the **Events and Status** step. Select Gitea or Forgejo. Keep the base URL as is and paste the bot token. Click **Connect**.
+3. Click **Start the first evaluation** in the **First Build** step.
 
-    Open **Integrations -> New Integration** in the project twice, once per kind.
+**Connect** can run all of these steps at once.
 
-    | Kind | Fields |
-    |---|---|
-    | Inbound | Name, **Git Host** Gitea or Forgejo and a **Webhook Secret**. The refresh button can generate a secret. The secret is visible only once, copy it right away. Created integrations display the **Webhook URL**. |
-    | Outbound | Name, **Git Host**, **Endpoint URL** (e.g. `https://gitea.example.com`, without `/api/v1`) and the bot's **Access Token** |
+- Gradient can create a webhook receiver and a status reporter for the Git host.
+- Tasks build pushes and pull requests and report commit statuses.
+- With admin rights on the token, Gradient can install a webhook and a deploy key in the repository.
 
-=== "Declarative"
-
-    ```nix
-    services.gradient.state.integrations = {
-      gitea-in = {
-        project = "acme";
-        kind = "inbound";
-        git_host_type = "gitea"; # (1)!
-        secret_file = "/run/secrets/gitea-webhook-secret"; # (2)!
-        created_by = "alice";
-      };
-      gitea-out = {
-        project = "acme";
-        kind = "outbound";
-        git_host_type = "gitea";
-        endpoint_url = "https://gitea.example.com"; # (3)!
-        access_token_file = "/run/secrets/gitea-token"; # (4)!
-        created_by = "alice";
-      };
-    };
-    ```
-
-    1.  `forgejo` for Forgejo.
-    2.  Any random string, e.g. `openssl rand -hex 32`. Set the same value in the Git host webhook.
-    3.  Base URL of the Git host, without `/api/v1`.
-    4.  The bot's token from above, as the only content of the file.
-
-    The webhook URL is `https://gradient.example.com/api/v1/hooks/gitea/acme/gitea-in` (`forgejo` instead of `gitea` for Forgejo).
-
-## 2. Add the Webhook on the Git Host
-
-In the repository or organization on the Git host, go to **Settings -> Webhooks -> Add Webhook**.
+Gradient shows the webhook URL and secret once if the token lacks admin rights. Add them under **Settings -> Webhooks -> Add Webhook** on the Git host.
 
 | Field | Value |
 |---|---|
-| Target URL | The webhook URL from step 1 |
+| Target URL | The webhook URL |
 | HTTP method, content type | `POST`, `application/json` |
-| Secret | The secret from step 1 |
+| Secret | The secret |
 | Trigger on | Custom events: **Push**, **Pull Request**, **Issue Comment**, **Pull Request Comment**, **Pull Request Review**, **Release** |
 
-A webhook limited to push events cannot deliver pull requests or the `/gradient` comment commands.
+Add the deploy key from step **Access** under **Settings -> Deploy Keys** for a repository URL over SSH, then click **Test access**.
 
-## 3. Wire the Task
+Existing tasks keep the same settings under **Task settings -> Repository**. Tokens with admin permissions have the **Install webhook** button and the **Install deploy key** button.
 
-A task links the two integrations. Triggers point to the inbound integration, actions to the outbound integration.
+## Declarative Setup
 
-=== "UI"
+```nix
+services.gradient.state.integrations = {
+  gitea-in = {
+    project = "acme";
+    kind = "inbound";
+    git_host_type = "gitea"; # (1)!
+    secret_file = "/run/secrets/gitea-webhook-secret"; # (2)!
+    created_by = "alice";
+  };
+  gitea-out = {
+    project = "acme";
+    kind = "outbound";
+    git_host_type = "gitea";
+    endpoint_url = "https://gitea.example.com"; # (3)!
+    access_token_file = "/run/secrets/gitea-token"; # (4)!
+    created_by = "alice";
+  };
+};
+```
 
-    Tasks created in the UI come with a **Push (reporter)** trigger and a **Git Status** action by default. Both apply under two conditions.
+1.  `forgejo` for Forgejo.
+2.  Any random string, e.g. `openssl rand -hex 32`. Set the same value in the Git host webhook.
+3.  Base URL of the Git host, without `/api/v1`.
+4.  The bot's token from above, as the only content of the file.
 
-    - The task came into existence after both integrations.
-    - Exactly one inbound and one outbound integration exist for the repository host.
+The webhook URL is `https://gradient.example.com/api/v1/hooks/gitea/acme/gitea-in` (`forgejo` instead of `gitea` for Forgejo).
 
-    Any other task needs both entries added manually.
+Declaratively defined tasks ship without a trigger or action. Add both to the task's `triggers` and `actions` lists.
 
-    - **Triggers -> New Trigger**: add **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each bound to the inbound integration.
-    - **Actions -> New Action**: add **Git Status** bound to the outbound integration.
+```nix
+services.gradient.state.tasks.app = {
+  project = "acme";
+  repository = "https://gitea.example.com/acme/app.git";
+  created_by = "alice";
+  triggers = [
+    { type = "reporter_push"; integration = "gitea-in"; } # (1)!
+    { type = "reporter_pull_request"; integration = "gitea-in"; } # (2)!
+  ];
+  actions = [
+    {
+      name = "report-status";
+      type = "git_host_status_report";
+      config.integration = "gitea-out"; # (3)!
+    }
+  ];
+};
+```
 
-=== "Declarative"
-
-    Declaratively defined tasks ship without a trigger or action. Add both to the task's `triggers` and `actions` lists.
-
-    ```nix
-    services.gradient.state.tasks.app = {
-      project = "acme";
-      repository = "https://gitea.example.com/acme/app.git";
-      created_by = "alice";
-      triggers = [
-        { type = "reporter_push"; integration = "gitea-in"; } # (1)!
-        { type = "reporter_pull_request"; integration = "gitea-in"; } # (2)!
-      ];
-      actions = [
-        {
-          name = "report-status";
-          type = "git_host_status_report";
-          config.integration = "gitea-out"; # (3)!
-        }
-      ];
-    };
-    ```
-
-    1.  The `integration` field at trigger level points to the inbound integration. Put branch and tag filters into `config`, see [Trigger Types](../reference/state.md#trigger-types).
-    2.  Optional. Covers evaluations of pull requests. Fork pull requests stay pending until a maintainer gives approval.
-    3.  The `config.integration` field points to the outbound integration.
+1.  The `integration` field at trigger level points to the inbound integration. Put branch and tag filters into `config`, see [Trigger Types](../reference/state.md#trigger-types).
+2.  Optional. Covers evaluations of pull requests. Fork pull requests stay pending until a maintainer gives approval.
+3.  The `config.integration` field points to the outbound integration.
 
 ## Verify Deployment
 
