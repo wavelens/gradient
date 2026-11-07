@@ -7,13 +7,12 @@
 import { EVERY_PERMISSION } from '@core/resolvers/access-route.testing';
 import type { ProjectResponse } from '@core/models';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
-import { Observable, Subject, of, throwError } from 'rxjs';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { Observable, of, throwError } from 'rxjs';
 import { ProjectDetailComponent } from './project-detail.component';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
 import { TasksService } from '@core/services/tasks.service';
-import { ApiError } from '@core/services/api.service';
 
 const NO_TASKS = { items: [], total: 0, page: 1 };
 
@@ -97,88 +96,20 @@ describe('ProjectDetailComponent tasks', () => {
   });
 });
 
-describe('ProjectDetailComponent create task', () => {
-  it('keeps a failed create inside the open Create Task dialog', () => {
-    const { fixture } = render(true);
-    const service = TestBed.inject(TasksService) as unknown as { createTask: () => unknown };
-    service.createTask = () => throwError(() => new ApiError('Repository is not reachable', 400));
-    const cmp = fixture.componentInstance;
-    cmp.showCreateDialog.set(true);
-    cmp.newTask = {
-      name: 'web',
-      display_name: 'Web',
-      description: '',
-      repository: 'https://github.com/acme/web',
-      wildcard: 'packages.x86_64-linux.**',
-    };
-    cmp.createTask();
+describe('ProjectDetailComponent connect repository', () => {
+  it('links writers to the Connect repository flow', async () => {
+    const { root, fixture } = render(true);
+    await fixture.whenStable();
     fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Repository is not reachable');
-    expect(cmp.showCreateDialog()).toBe(true);
+    const links = Array.from(root.querySelectorAll('a')).filter((a) => a.textContent?.includes('Connect repository'));
+    expect(links.map((a) => a.getAttribute('href'))).toContain('/project/acme/connect');
   });
 
-  it('opens the created task', () => {
-    const { fixture } = render(true);
-    (TestBed.inject(TasksService) as unknown as { createTask: () => unknown }).createTask = () => of('Task created');
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
-    const cmp = fixture.componentInstance;
-    cmp.showCreateDialog.set(true);
-    cmp.newTask = { name: 'web', display_name: 'Web', description: '', repository: 'https://github.com/acme/web', wildcard: 'packages.x86_64-linux.**' };
-    cmp.createTask();
-    expect(String(navigate.mock.calls[0][0])).toBe('/project/acme/task/web');
-  });
-
-  it('sends one create and stays open while the request runs', () => {
-    const { fixture } = render(true);
-    const createTask = vi.fn(() => new Subject<void>());
-    (TestBed.inject(TasksService) as unknown as { createTask: typeof createTask }).createTask = createTask;
-    const cmp = fixture.componentInstance;
-    cmp.showCreateDialog.set(true);
-    cmp.newTask = {
-      name: 'web',
-      display_name: 'Web',
-      description: '',
-      repository: 'https://github.com/acme/web',
-      wildcard: 'packages.x86_64-linux.**',
-    };
-    cmp.createTask();
+  it('tells view-only members whom to ask instead of offering the flow', async () => {
+    const { root, fixture } = render(true, undefined, { role: 'View', permissions: ['viewProject'] });
+    await fixture.whenStable();
     fixture.detectChanges();
-    cmp.createTask();
-    const dialog = document.querySelector('.gr-dialog')!;
-    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    fixture.detectChanges();
-    expect(createTask).toHaveBeenCalledTimes(1);
-    expect(cmp.showCreateDialog()).toBe(true);
-    expect(dialog.getAttribute('aria-busy')).toBe('true');
-  });
-
-  it('says what is missing when Create is clicked on an empty form', () => {
-    const { fixture } = render(true);
-    const createTask = vi.fn(() => of(undefined));
-    (TestBed.inject(TasksService) as unknown as { createTask: typeof createTask }).createTask = createTask;
-    const cmp = fixture.componentInstance;
-    cmp.openCreateDialog();
-    fixture.detectChanges();
-    const dialog = document.querySelector('.gr-dialog')!;
-    const create = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Create')!;
-    expect(create.disabled).toBe(false);
-    create.click();
-    fixture.detectChanges();
-    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Enter a display name and a name.');
-    expect(dialog.querySelector('.field-error')?.textContent).toContain('Enter the repository URL.');
-    expect(createTask).not.toHaveBeenCalled();
-  });
-
-  it('refuses a local repository path with a reason and sends nothing', () => {
-    const { fixture } = render(true);
-    const createTask = vi.fn(() => of(undefined));
-    (TestBed.inject(TasksService) as unknown as { createTask: typeof createTask }).createTask = createTask;
-    const cmp = fixture.componentInstance;
-    cmp.openCreateDialog();
-    cmp.newTask = { ...cmp.newTask, name: 'web', display_name: 'Web', repository: 'file:///etc' };
-    cmp.createTask();
-    fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog .field-error')?.textContent).toContain('remote repository');
-    expect(createTask).not.toHaveBeenCalled();
+    expect(root.textContent).not.toContain('Connect repository');
+    expect(root.textContent).toContain('Ask a project administrator');
   });
 });

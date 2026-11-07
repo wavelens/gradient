@@ -8,7 +8,7 @@
   <gr-page-layout [breadcrumb]="breadcrumb()" [title]="project.display_name" [subtitle]="project.description || 'No description'">
   <div slot="actions">
     @if (canCreateTask()) {
-      <button grButton label="Create Task" icon="add" (click)="openCreateDialog()"></button>
+      <a grButton label="Connect repository" icon="add" [routerLink]="links.projectPage(projectName, 'connect')"></a>
     }
     @if (project.role) {
       <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
@@ -25,11 +25,11 @@
     errorTitle="Failed to load tasks"
     emptyIcon="folder"
     emptyTitle="No tasks yet"
-    [emptyMessage]="canCreateTask() ? 'Create your first task to start evaluating Nix builds' : 'No tasks have been created yet'"
+    [emptyMessage]="canCreateTask() ? 'Connect a repository to start a Nix build.' : 'No tasks yet. Ask a project administrator to connect a repository.'"
     (retry)="tasks.reload()"
   >
     @if (canCreateTask()) {
-      <button slot="empty-action" grButton label="Create Task" (click)="openCreateDialog()"></button>
+      <a slot="empty-action" grButton label="Connect repository" [routerLink]="links.projectPage(projectName, 'connect')"></a>
     }
     <div class="section">
       <h2>Tasks</h2>
@@ -54,85 +54,3 @@
   </gr-load-state>
 </gr-page-layout>
 }
-
-<!-- Create Task Dialog -->
-<gr-dialog
-header="Create Task"
-[(visible)]="showCreateDialog"
-[error]="createError() ?? missingNamesError"
-[busy]="creating()"
-width="550px"
->
-<div>
-  <app-name-fields
-    noun="task"
-    [names]="names"
-    [(displayName)]="newTask.display_name"
-    [(name)]="newTask.name"
-    (submitted)="createTask()"
-  />
-
-  <gr-form-field label="Description" for="proj-desc">
-    <textarea
-      grInput
-      id="proj-desc"
-      [(ngModel)]="newTask.description"
-      placeholder="Describe your task..."
-      rows="2"
-    ></textarea>
-  </gr-form-field>
-
-  <gr-form-field
-    label="Repository URL"
-    for="proj-repo"
-    required
-    hint="Git repository URL to evaluate"
-    [invalid]="!!repositoryError"
-    [error]="repositoryError ?? ''"
-  >
-    <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path" />
-    <input
-      grInput
-      id="proj-repo"
-      [(ngModel)]="newTask.repository"
-      placeholder="https://github.com/user/repo"
-      (blur)="repositoryTouched.set(true)"
-      (keyup.enter)="createTask()"
-    />
-  </gr-form-field>
-
-  <gr-form-field
-    label="Evaluation Wildcard"
-    for="proj-wildcard"
-    [invalid]="wildcardInvalid"
-    error="Each pattern must be non-empty, not start with a period, and contain no spaces."
-    hint="Pattern for the outputs to evaluate (default: packages.x86_64-linux.**)"
-  >
-    <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" />
-    <input
-      grInput
-      id="proj-wildcard"
-      [(ngModel)]="newTask.wildcard"
-      placeholder="**"
-      (keyup.enter)="createTask()"
-    />
-  </gr-form-field>
-</div>
-
-<div grDialogFooter>
-  <button
-    grButton
-    label="Cancel"
-    severity="secondary"
-    (click)="showCreateDialog.set(false)"
-    [disabled]="creating()"
-  ></button>
-  <button
-    grButton
-    label="Create"
-    (grSubmit)="createTask()"
-    [disabled]="names.blocksSubmit() || creating()"
-    [loading]="creating()"
-  ></button>
-</div>
-</gr-dialog>

@@ -75,6 +75,16 @@ export const routes: Routes = [
           ),
       },
 
+      {
+        path: 'connect',
+        title: 'Connect repository',
+        canActivate: [authGuard],
+        loadComponent: () =>
+          import('./features/tasks/connect-repository/connect-repository.component').then(
+            (m) => m.ConnectRepositoryComponent,
+          ),
+      },
+
       // Task tree with parent layout + access resolver
       {
         path: 'task/:task',

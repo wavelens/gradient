@@ -6,7 +6,7 @@
 
 import { PRIMARY_OUTLET, Params, UrlSegment, UrlSegmentGroup, UrlTree } from '@angular/router';
 
-export type ProjectPage = 'settings' | 'members' | 'workers' | 'integrations' | 'secrets' | 'webhooks' | 'caches';
+export type ProjectPage = 'settings' | 'connect' | 'members' | 'workers' | 'integrations' | 'secrets' | 'webhooks' | 'caches';
 export type TaskPage = 'settings' | 'repository' | 'triggers' | 'actions' | 'flake-inputs' | 'metrics';
 export type CachePage = 'settings' | 'upstream-caches' | 'nars' | 'members-roles' | 'subscriptions' | 'webhooks';
 export type TeamPage = 'settings' | 'webhooks';

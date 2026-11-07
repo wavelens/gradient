@@ -1,0 +1,90 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Connect repository"
+  subtitle="Gradient can build each new commit in a repository and report the result to the Git host.">
+  <ol class="connect-steps" aria-label="Steps">
+    @for (s of steps; track s.id; let i = $index) {
+      <li [class.current]="s.id === step()" [class.done]="i < stepIndex()" [attr.aria-current]="s.id === step() ? 'step' : null">
+        <span class="connect-steps__number">{{ i + 1 }}</span>{{ s.label }}
+      </li>
+    }
+  </ol>
+  <p class="text-secondary">Step {{ stepIndex() + 1 }}/{{ steps.length }}</p>
+
+  @switch (step()) {
+    @case ('repository') {
+      <gr-settings-section title="Repository">
+        @if (createError(); as error) {
+          <gr-message-banner type="error">{{ error }}</gr-message-banner>
+        }
+        <gr-form-field label="Repository URL" for="connect-repo" required hint="URL of the Git repository to evaluate"
+          [invalid]="!!repositoryError" [error]="repositoryError ?? ''">
+          <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path" />
+          <input grInput id="connect-repo" [ngModel]="form.repository" (ngModelChange)="repositoryChanged($event)"
+            placeholder="ssh://git@forgejo.example.com/acme/app.git" (keyup.enter)="createTask()" />
+        </gr-form-field>
+        <app-name-fields noun="task" [names]="names" [(displayName)]="form.display_name" [(name)]="form.name" (submitted)="createTask()" />
+        @if (missingNamesError; as error) {
+          <p class="text-secondary" role="alert">{{ error }}</p>
+        }
+        <gr-form-field label="Evaluation Wildcard" for="connect-wildcard" hint="Pattern for the outputs to evaluate (default: packages.x86_64-linux.**)">
+          <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" />
+          <input grInput id="connect-wildcard" [(ngModel)]="form.wildcard" (keyup.enter)="createTask()" />
+        </gr-form-field>
+        <div class="gr-form-actions gr-form-actions--end">
+          <a grButton label="Back" severity="secondary" [routerLink]="['/project', projectName]"></a>
+          <button grButton label="Create task" icon="add" (grSubmit)="createTask()" [loading]="creating()"
+            [disabled]="creating() || names.blocksSubmit()"></button>
+        </div>
+      </gr-settings-section>
+    }
+    @case ('access') {
+      @if (state(); as repo) {
+        <app-repository-access [project]="projectName" [task]="taskName()!" [state]="repo" (changed)="loadState()" />
+      }
+    }
+    @case ('events') {
+      @if (state(); as repo) {
+        <app-repository-events [project]="projectName" [task]="taskName()!" [state]="repo" (saved)="state.set($event)" />
+      }
+    }
+    @case ('build') {
+      <gr-settings-section title="First Build">
+        @if (caches(); as list) {
+          @if (hasActiveCache()) {
+            <p role="status" data-testid="cache-ok">The project can push builds to {{ cacheNames() }}.</p>
+          } @else {
+            <gr-message-banner type="warning" data-testid="cache-missing">
+              <strong>Builds need a cache</strong>
+              This project doesn't push builds to any Nix binary cache yet. Register the project for a cache subscription before the first build.
+            </gr-message-banner>
+            <div class="gr-form-actions">
+              <a grButton label="Open the cache subscription" icon="open_in_new" severity="secondary"
+                [routerLink]="['/project', projectName, 'caches']" target="_blank"></a>
+              <button grButton label="Check again" icon="refresh" severity="secondary" (click)="loadCaches()"></button>
+            </div>
+          }
+        }
+        <div class="gr-form-actions gr-form-actions--end">
+          <a grButton label="Open task" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName()]"></a>
+          <button grButton label="Start the first evaluation" icon="play_arrow" (click)="startEvaluation()"
+            [loading]="starting()" [disabled]="starting()"></button>
+        </div>
+      </gr-settings-section>
+    }
+  }
+
+  @if (step() === 'access' || step() === 'events') {
+    <div class="gr-form-actions gr-form-actions--end">
+      @if (step() === 'events') {
+        <button grButton label="Back" severity="secondary" (click)="back()"></button>
+      }
+      <button grButton label="Skip for now" severity="secondary" (click)="next()"></button>
+      <button grButton label="Continue" icon="arrow_forward" (click)="next()"></button>
+    </div>
+  }
+</gr-page-layout>

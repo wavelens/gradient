@@ -1,0 +1,37 @@
+@use '@gradient/ui/styles/variables' as *;
+
+.connect-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-md;
+  list-style: none;
+  margin: 0 0 $spacing-sm;
+  padding: 0;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+    color: var(--gr-text-secondary);
+  }
+
+  li.current {
+    color: var(--gr-text-primary);
+    font-weight: 600;
+  }
+
+  li.done .connect-steps__number {
+    background: var(--gr-status-success);
+    color: var(--gr-surface-base);
+  }
+}
+
+.connect-steps__number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: 1px solid var(--gr-border);
+}
