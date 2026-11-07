@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { Router, UrlTree, provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { of, EMPTY } from 'rxjs';
 import { vi } from 'vitest';
 import { BoardLiveJobsComponent } from './live-jobs.component';
@@ -26,6 +26,7 @@ const PENDING: PendingJobSummary = {
   queued_at: '2026-06-08T00:00:00Z',
   dependency_count: 3,
   subject: null,
+  permissions: [],
 };
 
 function setup(): ComponentFixture<BoardLiveJobsComponent> {
@@ -284,12 +285,59 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     fixture.detectChanges();
 
     const row = (fixture.nativeElement as HTMLElement).querySelector('tbody tr') as HTMLElement;
-    expect(Array.from(row.querySelectorAll('td')).slice(0, 2).map((c) => c.textContent?.trim()))
-      .toEqual(['exec', 'nightly: apps.x86_64-linux.train']);
-    const router = TestBed.inject(Router);
-    const navigate = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
-    row.click();
-    expect(router.serializeUrl(navigate.mock.calls[0][0] as UrlTree)).toBe('/board/jobs/x1');
+    const cells = Array.from(row.querySelectorAll('td'));
+    expect([cells[0], cells[2]].map((c) => c.textContent?.trim())).toEqual(['exec', 'nightly: apps.x86_64-linux.train']);
+    expect(cells[2].querySelector('a')?.getAttribute('href')).toBe('/board/jobs/x1');
+  });
+
+  function pendingRow(job: PendingJobSummary, superuser = false): HTMLElement {
+    TestBed.configureTestingModule({
+      imports: [BoardLiveJobsComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: BoardService,
+          useValue: {
+            getAssignedJobs: () => of({ jobs: [], other_running: 0 }),
+            getPendingJobs: () => of({ jobs: [job], other_pending: 0 }),
+          },
+        },
+        { provide: BoardLiveService, useValue: { connect: () => EMPTY } },
+        authAs(superuser),
+      ],
+    });
+    const fixture = TestBed.createComponent(BoardLiveJobsComponent);
+    fixture.componentInstance.setView('pending');
+    fixture.detectChanges();
+    return (fixture.nativeElement as HTMLElement).querySelector('tbody tr') as HTMLElement;
+  }
+
+  it('links a pending evaluation to its project and task and offers the next step for its waiting reason', () => {
+    const row = pendingRow({
+      ...PENDING,
+      kind: 0,
+      build_id: null,
+      project_name: 'sandbox',
+      task: 'oktask',
+      waiting_reason: { kind: 'no_cache' },
+      permissions: ['viewProject', 'manageSubscriptions'],
+    });
+
+    const hrefs = Array.from(row.querySelectorAll('a')).map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual([
+      '/project/sandbox',
+      '/project/sandbox/task/oktask?eval=e1abc123',
+      '/board/jobs/e1abc123',
+      '/project/sandbox/caches',
+    ]);
+    expect(row.querySelector('td.waiting')?.textContent).toContain('Cache not configured');
+  });
+
+  it('shows a hint instead of the action to a viewer who may not fix the waiting reason', () => {
+    const row = pendingRow({ ...PENDING, project_name: 'sandbox', waiting_reason: { kind: 'no_cache' }, permissions: ['viewProject'] });
+
+    expect(row.querySelector('td.waiting a')).toBeNull();
+    expect(row.querySelector('td.waiting .hint')?.textContent).toContain('Ask a project admin');
   });
 
   it('loads pending jobs when switching to pending view', () => {

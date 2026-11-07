@@ -1727,7 +1727,7 @@ paths:
       tags:
       - board
       summary: Pending (unassigned) jobs
-      description: Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job.
+      description: Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job. `project_name`, `task` and `waiting_reason` come from the evaluation of the job; `permissions` are the caller's permissions in its project.
       operationId: getBoardPendingJobs
       responses:
         '200':
@@ -19894,6 +19894,7 @@ components:
       - evaluation_id
       - queued_at
       - dependency_count
+      - permissions
       properties:
         kind:
           type: integer
@@ -19928,6 +19929,22 @@ components:
           - string
           - 'null'
           format: uuid
+        project_name:
+          type:
+          - string
+          - 'null'
+        task:
+          type:
+          - string
+          - 'null'
+        waiting_reason:
+          oneOf:
+          - $ref: '#/components/schemas/WaitingReason'
+          - type: 'null'
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
     PendingJobsResponse:
       type: object
       required:

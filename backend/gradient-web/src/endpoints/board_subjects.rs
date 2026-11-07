@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::endpoints::evals::current_waiting_reason;
 use crate::metrics_scope::MetricsScope;
 use gradient_db::exec_jobs::labels::ExecJobLabel;
-use gradient_db::lookup::by_id;
+use gradient_db::lookup::{by_id, by_ids};
 use gradient_db::scheduling::assignment_record::{exec_job_of_key, shared_build_of_key};
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_types::input::vec_to_hex;
@@ -215,6 +216,42 @@ pub async fn board_projects<C: ConnectionTrait>(
         .collect())
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PendingEvaluation {
+    pub task: Option<String>,
+    pub waiting_reason: Option<WaitingReason>,
+}
+
+pub async fn pending_evaluations<C: ConnectionTrait>(
+    db: &C,
+    evaluations: &[EvaluationId],
+) -> Result<HashMap<EvaluationId, PendingEvaluation>, DbErr> {
+    if evaluations.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let evaluations = by_ids::<EEvaluation, _>(db, evaluations).await?;
+    let task_ids: Vec<TaskId> = evaluations.values().filter_map(|e| e.task).collect();
+    let tasks = by_ids::<ETask, _>(db, &task_ids).await?;
+
+    Ok(evaluations
+        .into_iter()
+        .map(|(id, evaluation)| {
+            let task = evaluation
+                .task
+                .and_then(|task| tasks.get(&task))
+                .map(|t| t.name.clone());
+            let waiting_reason = current_waiting_reason(&evaluation);
+            (
+                id,
+                PendingEvaluation {
+                    task,
+                    waiting_reason,
+                },
+            )
+        })
+        .collect())
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct JobEvaluationView {
     pub repository: String,
@@ -364,6 +401,52 @@ mod tests {
                 node_index: 1,
                 nodes: 2,
             })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pending_evaluation_names_its_task_and_only_a_current_waiting_reason() {
+        use gradient_entity::evaluation::EvaluationStatus;
+        let task = MTask {
+            id: TaskId::now_v7(),
+            name: "nightly".into(),
+            ..Default::default()
+        };
+        let waiting = MEvaluation {
+            id: EvaluationId::now_v7(),
+            task: Some(task.id),
+            status: EvaluationStatus::Waiting,
+            waiting_reason: Some(WaitingReason::NoCache.to_json()),
+            ..Default::default()
+        };
+        let queued = MEvaluation {
+            id: EvaluationId::now_v7(),
+            status: EvaluationStatus::Queued,
+            waiting_reason: Some(WaitingReason::NoCache.to_json()),
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![waiting.clone(), queued.clone()]])
+            .append_query_results([vec![task]])
+            .into_connection();
+
+        let pending = pending_evaluations(&db, &[waiting.id, queued.id])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            pending[&waiting.id],
+            PendingEvaluation {
+                task: Some("nightly".into()),
+                waiting_reason: Some(WaitingReason::NoCache),
+            }
+        );
+        assert_eq!(pending[&queued.id], PendingEvaluation::default());
+        assert!(
+            pending_evaluations(&empty_db(), &[])
+                .await
+                .unwrap()
+                .is_empty()
         );
     }
 

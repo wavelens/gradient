@@ -12,11 +12,13 @@ import { Subscription } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
 import { AuthService } from '@core/services/auth.service';
-import { LoadStateComponent, TableComponent } from '@gradient/ui/ui';
+import { ButtonComponent, LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
 import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel } from '../job-kind';
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 import { links } from '@shared/routing';
+import { type WaitingExplanation, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
+import { relativeTime } from '@shared/text';
 
 type KindFilter = 'all' | JobKindName;
 type StatusFilter = 'all' | 'pending' | 'assigned';
@@ -35,7 +37,7 @@ interface DecisionRow {
 @Component({
   selector: 'app-board-live-jobs',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, TableComponent, LoadStateComponent],
+  imports: [CommonModule, FormsModule, RouterModule, ButtonComponent, TableComponent, LoadStateComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
@@ -136,19 +138,45 @@ interface DecisionRow {
           @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
         </div>
         <gr-table class="jobs">
-          <thead><tr><th>Kind</th><th>Derivation / Evaluation / Exec</th><th>Deps</th><th>Queued</th></tr></thead>
+          <thead><tr><th>Kind</th><th>Project / task</th><th>Derivation / Evaluation / Exec</th><th>Waiting for</th><th>Deps</th><th>Age</th></tr></thead>
           <tbody>
             @for (row of pendingRows(); track pendingKey(row.job)) {
               @let p = row.job;
               @let subject = rowSubject(row);
-              <tr class="clickable" [routerLink]="links.boardPendingJob(p)">
+              <tr>
                 <td>{{ jobKindName(p.kind) }}</td>
-                <td class="mono subject" [title]="subject">{{ subject }}</td>
+                <td class="origin">
+                  @if (p.project_name; as project) {
+                    <a [routerLink]="links.project(project)">{{ project }}</a>
+                    @if (p.task; as task) {
+                      / <a [routerLink]="links.task(project, task, p.evaluation_id)">{{ task }}</a>
+                    }
+                  } @else {
+                    <span class="muted">-</span>
+                  }
+                </td>
+                <td class="mono subject"><a [routerLink]="links.boardPendingJob(p)" [title]="subject">{{ subject }}</a></td>
+                <td class="waiting">
+                  @if (waitingFor(p); as wait) {
+                    <div class="wait">
+                      <span [title]="wait.detail">{{ wait.title }}</span>
+                      @if (wait.action; as action) {
+                        @if (action.kind === 'link') {
+                          <a grButton size="small" severity="secondary" [label]="action.label" [icon]="action.icon" [routerLink]="action.link"></a>
+                        }
+                      } @else if (wait.hint) {
+                        <span class="muted hint">{{ wait.hint }}</span>
+                      }
+                    </div>
+                  } @else {
+                    <span class="muted">Waiting</span>
+                  }
+                </td>
                 <td>{{ p.dependency_count }}</td>
-                <td>{{ p.queued_at | date: 'HH:mm:ss' }}</td>
+                <td class="age" [title]="p.queued_at | date: 'medium'">{{ relativeTime(p.queued_at) }}</td>
               </tr>
             } @empty {
-              <tr><td colspan="4" class="muted">No pending jobs.</td></tr>
+              <tr><td colspan="6" class="muted">No pending jobs.</td></tr>
             }
           </tbody>
         </gr-table>
@@ -175,6 +203,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   protected readonly jobKindName = jobKindName;
   protected readonly jobSubjectLabel = jobSubjectLabel;
   protected readonly collapseClusters = collapseClusters;
+  protected readonly relativeTime = relativeTime;
 
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
@@ -239,6 +268,11 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   subJobLabel(count: number): string {
     return count === 1 ? '1 sub job' : `${count} sub jobs`;
+  }
+
+  waitingFor(p: PendingJobSummary): WaitingExplanation | null {
+    if (!p.waiting_reason || !p.project_name) return null;
+    return explainWaiting(p.waiting_reason, p.project_name, waitingAccessFrom(p.permissions ?? [], false, this.superuser()));
   }
 
   pendingKey(p: PendingJobSummary): string {

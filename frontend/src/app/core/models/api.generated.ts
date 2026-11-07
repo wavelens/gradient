@@ -1990,6 +1990,10 @@ export interface PendingJobSummary {
   subject?: string | null;
   exec_job?: BoardExecJob | null;
   cluster_job?: string | null;
+  project_name?: string | null;
+  task?: string | null;
+  waiting_reason?: WaitingReason | null;
+  permissions: Permission[];
 }
 
 export interface PendingJobsResponse {

@@ -6,16 +6,18 @@
 
 use super::board_subjects::{
     BoardExecJob, BoardProject, JobEvaluationView, JobSubject, JobSubjects, WorkerNames,
-    board_projects, job_evaluation,
+    board_projects, job_evaluation, pending_evaluations,
 };
 use super::exec_jobs::query::{ExecJobAttemptView, attempt_view};
 use super::exec_jobs::timeline::with_reported_phases;
+use crate::access::key_limited_project_mask;
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use crate::lookup::require;
 use crate::metrics_scope::MetricsScope;
+use crate::permissions::{Permission, mask_to_vec};
 use crate::resource::Resource;
 use crate::store_paths::original_text;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -119,6 +121,10 @@ pub struct PendingJobSummary {
     pub subject: Option<String>,
     pub exec_job: Option<BoardExecJob>,
     pub cluster_job: Option<Uuid>,
+    pub project_name: Option<String>,
+    pub task: Option<String>,
+    pub waiting_reason: Option<WaitingReason>,
+    pub permissions: Vec<Permission>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -133,12 +139,13 @@ pub struct PendingJobsResponse {
     operation_id = "getBoardPendingJobs",
     tag = "board",
     summary = "Pending (unassigned) jobs",
-    description = "Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job.",
+    description = "Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job. `project_name`, `task` and `waiting_reason` come from the evaluation of the job; `permissions` are the caller's permissions in its project.",
     responses((status = OK, description = "Pending jobs plus other_pending count", body = PendingJobsResponse), WebError)
 )]
 pub async fn get_pending_jobs(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<PendingJobsResponse>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
@@ -149,12 +156,41 @@ pub async fn get_pending_jobs(
         .partition(|j| scope.allows(&Uuid::from(j.project)));
     let other_pending = hidden.len() as u64;
     let subjects = JobSubjects::load(&state.web_db, snapshot.iter().map(pending_subject)).await?;
+    let evaluation_ids: Vec<EvaluationId> = snapshot.iter().map(|j| j.evaluation_id).collect();
+    let evaluations = pending_evaluations(&state.web_db, &evaluation_ids).await?;
+    let project_ids: Vec<ProjectId> = snapshot.iter().map(|j| j.project).collect();
+    let projects = board_projects(
+        &state.web_db,
+        &project_ids
+            .iter()
+            .copied()
+            .map(Uuid::from)
+            .collect::<Vec<_>>(),
+    )
+    .await?;
+    let grants = match &maybe_user {
+        Some(user) if !project_ids.is_empty() => {
+            gradient_db::access::project_grants(&state.web_db, user.id, project_ids).await?
+        }
+        _ => HashMap::new(),
+    };
 
     let jobs = snapshot
         .into_iter()
         .map(|j| {
             let subject = Some(pending_subject(&j));
+            let evaluation = evaluations
+                .get(&j.evaluation_id)
+                .cloned()
+                .unwrap_or_default();
+            let permissions = grants.get(&j.project).map_or(0, |grant| {
+                key_limited_project_mask(grant.permissions, j.project, api_key.as_ref())
+            });
             PendingJobSummary {
+                project_name: projects.get(&Uuid::from(j.project)).map(|p| p.name.clone()),
+                task: evaluation.task,
+                waiting_reason: evaluation.waiting_reason,
+                permissions: mask_to_vec(permissions),
                 kind: i16::from(j.kind),
                 project: j.project.into(),
                 evaluation_id: j.evaluation_id.into(),

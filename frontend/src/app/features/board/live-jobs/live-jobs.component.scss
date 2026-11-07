@@ -21,3 +21,8 @@ tbody tr.negative td { color: var(--gr-status-warning); }
     
 
 td.subject { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.origin, td.age { white-space: nowrap; }
+td.origin a, td.subject a { color: inherit; text-decoration: none; }
+td.origin a:hover, td.subject a:hover { color: var(--gr-status-info); text-decoration: underline; }
+td.waiting .wait { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; }
+td.waiting .hint { font-size: $font-size-xs; }

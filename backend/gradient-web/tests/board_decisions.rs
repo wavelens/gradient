@@ -54,3 +54,23 @@ async fn assign_decisions_superuser_returns_empty_ring() {
     assert_eq!(body["error"], false);
     assert_eq!(body["message"].as_array().map(Vec::len), Some(0));
 }
+
+#[tokio::test]
+async fn pending_jobs_of_an_idle_scheduler_are_empty() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_user(mock_db(), session_id, superuser());
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/board/jobs/pending")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(
+        body["message"],
+        serde_json::json!({ "jobs": [], "other_pending": 0 })
+    );
+}
