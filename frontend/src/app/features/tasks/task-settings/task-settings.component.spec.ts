@@ -443,7 +443,7 @@ describe('TaskSettingsComponent - write failures', () => {
     try {
       const fixture = setup(admin);
       tasks()['transferOwnership'] = () => of('ok');
-      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
       const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
       const component = fixture.componentInstance;
       component.showTransferDialog.set(true);
@@ -452,7 +452,8 @@ describe('TaskSettingsComponent - write failures', () => {
 
       expect(component.showTransferDialog()).toBe(false);
       expect(success).toHaveBeenCalledWith('Task transferred to other');
-      expect(navigate).toHaveBeenCalledExactlyOnceWith(['/project', 'other', 'task', 'demo']);
+      expect(navigate).toHaveBeenCalledOnce();
+      expect(String(navigate.mock.calls[0][0])).toBe('/project/other/task/demo');
       vi.advanceTimersByTime(5000);
       expect(navigate).toHaveBeenCalledOnce();
     } finally {

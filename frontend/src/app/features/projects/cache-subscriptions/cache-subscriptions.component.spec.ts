@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
@@ -17,6 +18,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { ConfigService } from '@core/services/config.service';
+import { AuthService } from '@core/services/auth.service';
 import { AccessState } from '@core/models/access.model';
 import { By } from '@angular/platform-browser';
 import { CreateCacheDialogComponent } from '@shared/forms';
@@ -68,6 +70,7 @@ function setup(access: AccessState, query: Record<string, string> = {}): Compone
       { provide: ConfirmService, useValue: { confirm } },
       { provide: CachesService, useValue: { getCaches: () => of({ items: [] }), getPublicCaches: () => of([]) } },
       { provide: ConfigService, useValue: { createCache: 'all', canCreate: () => true } },
+      { provide: AuthService, useValue: { isAuthenticated: () => true, user: signal({ superuser: false, can_create_cache: true }) } },
     ],
   });
   return TestBed.createComponent(CacheSubscriptionsComponent);

@@ -108,7 +108,7 @@ function taskFor(
     last_evaluations: [evalSummary('e1', primaryStatus, primary), ...extraEvals],
     can_edit: access.canEdit,
     can_trigger: access.canTrigger,
-    permissions: [...(access.canEdit ? ['editTask' as const] : []), ...(access.canTrigger ? ['triggerEvaluation' as const] : [])],
+    permissions: [...(access.canEdit ? ['editTask' as const, 'manageWorkers' as const] : []), ...(access.canTrigger ? ['triggerEvaluation' as const] : [])],
     managed: access.managed,
   };
 }

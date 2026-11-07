@@ -44,7 +44,6 @@ import {
   EvaluationMessageResponse,
   LogChunkIndex,
   EvaluationStatus,
-  BuildStatus,
   BuildWithOutputs,
   DependencyGraphNode,
   TriggerType,
