@@ -129,7 +129,7 @@
                     @if (integration.has_secret) {
                       <gr-badge severity="success">Configured</gr-badge>
                     } @else {
-                      <gr-badge severity="warning">Not set</gr-badge>
+                      <gr-badge severity="danger">Not set. All deliveries fail until a secret is in place.</gr-badge>
                     }
                   </gr-form-field>
                   <gr-form-field label="Events to enable">
@@ -207,16 +207,7 @@
         placeholder="e.g. 12345678" (keyup.enter)="createIntegration()" />
     </gr-form-field>
   } @else if (formData.kind === 'inbound') {
-    <div class="dialog-info">
-      <gr-icon name="info" />
-      The webhook URL is shown after the integration is created. Enable push, pull/merge-request, comment, and review events on the Git host webhook. A push-only webhook never delivers PR CI or <code>/gradient</code> commands.
-    </div>
-    <gr-form-field label="Webhook Secret" for="int-secret" hint="Copy this into the webhook secret field of the Git host. Store it now - it will not be shown again.">
-      <div class="field-actions">
-        <input grInput id="int-secret" [(ngModel)]="formData.secret" placeholder="Leave blank to omit verification" />
-        <button grButton type="button" icon="refresh" severity="secondary" aria-label="Generate secret" (click)="generateSecret()"></button>
-      </div>
-    </gr-form-field>
+    <gr-message-banner type="info">Gradient can create a webhook secret and show it only once after integration creation.</gr-message-banner>
     <gr-form-field label="Allowed source IPs / CIDRs" for="int-allowed-ips" hint="One CIDR per line. Leave blank to accept webhooks from any source."
       [invalid]="(submitAttempted() || createIpsModel.touched) && !!allowedIpsError" [error]="allowedIpsError ?? ''">
       <textarea id="int-allowed-ips" grInput rows="3" [(ngModel)]="formData.allowed_ips" #createIpsModel="ngModel" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
@@ -266,15 +257,11 @@
       />
     </gr-form-field>
     @if (target.kind === 'inbound') {
-      <gr-form-field label="Webhook Secret" for="edit-secret">
+      <gr-form-field label="Webhook Secret" for="edit-secret" hint="Enter a new secret to replace the current secret, or generate a new secret.">
         <div class="field-actions">
           <input grInput id="edit-secret" [(ngModel)]="formData.secret" placeholder="Leave blank to keep existing" />
           <button grButton type="button" icon="refresh" severity="secondary" aria-label="Generate secret" (click)="generateSecret()"></button>
         </div>
-        <small class="text-secondary">Currently {{ target.has_secret ? 'configured' : 'not set' }}. Entering a new value replaces it.</small>
-        @if (target.has_secret) {
-          <button grButton type="button" label="Clear Secret" icon="delete" severity="danger" size="small" class="mt-sm" (click)="clearSecret()" [disabled]="saving()"></button>
-        }
       </gr-form-field>
       <gr-form-field label="Allowed source IPs / CIDRs" for="edit-allowed-ips" hint="One CIDR per line. Leave blank to accept webhooks from any source."
         [invalid]="(submitAttempted() || editIpsModel.dirty) && !!allowedIpsError" [error]="allowedIpsError ?? ''">
@@ -297,5 +284,25 @@
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
     <button grButton label="Save" icon="check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
+  </div>
+</gr-dialog>
+
+<gr-dialog
+  header="Webhook secret"
+  [(visible)]="showSecretDialog"
+  [closable]="false"
+  width="560px"
+>
+  @if (createdInbound(); as created) {
+    <p>Copy the webhook URL and secret to the webhook settings in the Git host now. The secret is visible only one time.</p>
+    <gr-form-field label="Webhook URL">
+      <gr-copy-field [value]="inboundUrl(created.integration)" />
+    </gr-form-field>
+    <gr-form-field label="Secret">
+      <gr-copy-field [value]="created.secret" />
+    </gr-form-field>
+  }
+  <div grDialogFooter>
+    <button grButton label="Done" icon="check" (click)="showSecretDialog.set(false)"></button>
   </div>
 </gr-dialog>

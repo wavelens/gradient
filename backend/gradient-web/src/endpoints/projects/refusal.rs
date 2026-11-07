@@ -50,6 +50,10 @@ pub(crate) enum ProjectRefusal {
     ManagedSecret { name: String },
     #[error("project key unusable for sops: {reason}")]
     UnusableSopsKey { reason: String },
+    #[error(
+        "Inbound integrations need a webhook secret. Enter a new secret instead of clearing the current secret."
+    )]
+    WebhookSecretRequired,
 }
 
 impl Refusal for ProjectRefusal {
@@ -65,7 +69,8 @@ impl Refusal for ProjectRefusal {
             | Self::NotSubscribedToCache
             | Self::InvalidSecretName { .. }
             | Self::EmptySecretValue
-            | Self::SecretValueTooLarge => RefusalStatus::BadRequest,
+            | Self::SecretValueTooLarge
+            | Self::WebhookSecretRequired => RefusalStatus::BadRequest,
             Self::IntegrationNameTaken { .. }
             | Self::WorkerIdBelongsToTeamWorker
             | Self::WorkerIdRegistered

@@ -368,10 +368,10 @@ describe('IntegrationsComponent - write failures', () => {
     expect(deleteProjectIntegration).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { action: 'webhook secret', run: (c: IntegrationsComponent) => c.clearSecret(), title: 'Clear webhook secret', patch: { secret: '' } },
-    { action: 'access token', run: (c: IntegrationsComponent) => c.clearAccessToken(), title: 'Clear access token', patch: { access_token: '' } },
-  ])('asks before clearing the stored $action and sends nothing on cancel', async ({ run, title, patch }) => {
+  it('asks before clearing the stored access token and sends nothing on cancel', async () => {
+    const run = (c: IntegrationsComponent) => c.clearAccessToken();
+    const title = 'Clear access token';
+    const patch = { access_token: '' };
     const fixture = setup(writable, [baseIntegration]);
     const patchProjectIntegration = vi.fn(() => of(undefined));
     Object.assign(TestBed.inject(IntegrationsService), { patchProjectIntegration });
@@ -385,6 +385,21 @@ describe('IntegrationsComponent - write failures', () => {
     expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title, target: 'Gitea Prod' }));
     expect(patchProjectIntegration).toHaveBeenCalledWith('acme', 'i1', patch);
     expect(component.editingIntegration()).toBeNull();
+  });
+
+  it('shows the generated webhook secret once after creating an inbound integration', async () => {
+    const fixture = setup(writable, []);
+    const create = vi.fn(() => of({ ...baseIntegration, generated_secret: 'f00d' }));
+    (TestBed.inject(IntegrationsService) as unknown as { createProjectIntegration: typeof create }).createProjectIntegration = create;
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    comp.openCreateDialog();
+    comp.formData.name = 'gitea-prod';
+    comp.createIntegration();
+    fixture.detectChanges();
+    expect(create.mock.calls[0]).not.toHaveProperty('1.secret');
+    expect(comp.showSecretDialog()).toBe(true);
+    expect(comp.createdInbound()?.secret).toBe('f00d');
   });
 
   it('keeps a failed create inside the open New Integration dialog', async () => {

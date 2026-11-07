@@ -379,7 +379,7 @@ pub async fn git_host_webhook(
 
     let encrypted_secret = integration.secret.as_ref().ok_or_else(|| {
         warn!(integration_id = %integration.id, "Integration has no secret configured");
-        WebError::from(GitHostHookRefusal::IntegrationNotFound)
+        WebError::from(GitHostHookRefusal::SecretNotConfigured)
     })?;
 
     let plaintext_secret = decrypt_secret_with_file(

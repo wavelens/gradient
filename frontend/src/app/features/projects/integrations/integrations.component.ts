@@ -138,6 +138,8 @@ export class IntegrationsComponent implements OnInit {
 
   showCreateDialog = signal(false);
   showEditDialog = signal(false);
+  showSecretDialog = signal(false);
+  createdInbound = signal<{ integration: IntegrationResponse; secret: string } | null>(null);
   editingIntegration = signal<IntegrationResponse | null>(null);
   errorMessage = signal<string | null>(null);
 
@@ -301,17 +303,20 @@ export class IntegrationsComponent implements OnInit {
       body.display_name = this.formData.display_name.trim();
     }
     if (this.formData.kind === 'inbound') {
-      if (this.formData.secret.trim()) body.secret = this.formData.secret.trim();
       body.allowed_ips = splitLines(this.formData.allowed_ips);
     } else {
       if (this.formData.endpoint_url.trim()) body.endpoint_url = this.formData.endpoint_url.trim();
       if (this.formData.access_token.trim()) body.access_token = this.formData.access_token.trim();
     }
     this.integrationsService.createProjectIntegration(this.projectName, body).subscribe({
-      next: () => {
+      next: (created) => {
         this.saving.set(false);
         this.showCreateDialog.set(false);
         this.notify.success('Integration created');
+        if (created.generated_secret) {
+          this.createdInbound.set({ integration: created, secret: created.generated_secret });
+          this.showSecretDialog.set(true);
+        }
         this.loadIntegrations();
       },
       error: (error: unknown) => {
@@ -390,21 +395,6 @@ export class IntegrationsComponent implements OnInit {
         this.saving.set(false);
       },
     });
-  }
-
-  clearSecret(): void {
-    const target = this.editingIntegration();
-    if (!target) return;
-    this.confirm
-      .confirm({
-        title: 'Clear webhook secret',
-        target: target.display_name,
-        consequence: `The result of this action is removal of the saved webhook secret for ${target.display_name}.`,
-        confirmLabel: 'Clear',
-        failure: 'Failed to clear secret.',
-        action: () => this.integrationsService.patchProjectIntegration(this.projectName, target.id, { secret: '' }),
-      })
-      .subscribe(() => this.cleared('Webhook secret cleared'));
   }
 
   clearAccessToken(): void {

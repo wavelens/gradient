@@ -15,6 +15,7 @@ use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{admin_role, project, project_member};
 use gradient_fixtures::test_date;
+use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID};
 use gradient_types::{GitHostType, SessionId};
@@ -297,4 +298,93 @@ async fn delete_unmanaged_integration_of_state_managed_project_succeeds() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["message"], true);
+}
+
+fn server_with_crypt_key(db: MockDatabase) -> axum_test::TestServer {
+    let path = std::env::temp_dir().join(format!("gradient-test-crypt-{}", Uuid::now_v7()));
+    std::fs::write(&path, "this-is-a-32-byte-crypt-key!!!!").unwrap();
+    TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = path.to_string_lossy().into_owned())
+        .server()
+}
+
+#[tokio::test]
+async fn inbound_create_without_secret_returns_generated_secret_once() {
+    let session_id = SessionId::now_v7();
+    let db = with_project_manage(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<integration::Model>::new()])
+        .append_query_results([vec![gitea_inbound_row()]]);
+
+    let res = server_with_crypt_key(db)
+        .put("/api/v1/projects/test-project/integrations")
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&serde_json::json!({
+            "name": "my-gitea-hook",
+            "kind": "inbound",
+            "git_host_type": "gitea",
+        }))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    let secret = body["message"]["generated_secret"].as_str().unwrap();
+    assert_eq!(secret.len(), 64);
+    assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[tokio::test]
+async fn inbound_create_with_secret_returns_no_generated_secret() {
+    let session_id = SessionId::now_v7();
+    let db = with_project_manage(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<integration::Model>::new()])
+        .append_query_results([vec![gitea_inbound_row()]]);
+
+    let res = server_with_crypt_key(db)
+        .put("/api/v1/projects/test-project/integrations")
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&serde_json::json!({
+            "name": "my-gitea-hook",
+            "kind": "inbound",
+            "git_host_type": "gitea",
+            "secret": "chosen-by-the-user",
+        }))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert!(body["message"]["generated_secret"].is_null());
+}
+
+#[tokio::test]
+async fn clearing_inbound_secret_is_rejected() {
+    let session_id = SessionId::now_v7();
+    let row = gitea_inbound_row();
+    let db = with_project_manage(with_auth(mock_db(), session_id))
+        .append_query_results([vec![row.clone()]]);
+
+    let res = server_with_crypt_key(db)
+        .patch(&delete_url(row.id))
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&serde_json::json!({ "secret": "" }))
+        .await;
+
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("need a webhook secret"),
+        "{body}"
+    );
 }

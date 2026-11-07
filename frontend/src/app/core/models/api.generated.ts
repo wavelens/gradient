@@ -1401,6 +1401,7 @@ export interface IntegrationResponse {
   created_by: UserId;
   created_at: string;
   managed: boolean;
+  generated_secret?: string | null;
 }
 
 export interface IntegrationSummaryResponse {

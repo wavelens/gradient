@@ -49,6 +49,7 @@ pub struct IntegrationResponse {
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
     pub managed: bool,
+    pub generated_secret: Option<String>,
 }
 
 impl IntegrationResponse {
@@ -72,6 +73,7 @@ impl IntegrationResponse {
             created_by: integration.created_by,
             created_at: integration.created_at,
             managed: integration.managed,
+            generated_secret: None,
         }
     }
 }
@@ -229,7 +231,7 @@ pub async fn get_integration_summaries(
     operation_id = "createProjectIntegration",
     tag = "integrations",
     summary = "Create integration",
-    description = "Creates a named inbound or outbound integration. `secret` and\n`access_token` are stored encrypted and never returned in responses.\nName is unique within `(project, kind)`.\n\nOne **inbound** integration can serve Gitea/Forgejo/GitLab\nsimultaneously - the caller picks the Git host path segment in the webhook\nURL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).\nThe stored `git_host_type` is display metadata only for inbound.\n\n`git_host_type: \"github\"` integrations are creatable by supplying\n`installation_id`. The server App must be configured (else `400`);\nthe installation id is validated against the App (invalid id returns\n`400`). An inbound and outbound integration pair is created\nautomatically, named `github-<account>`. Multiple installations per project\nare supported (one per GitHub account).",
+    description = "Creates a named inbound or outbound integration. `secret` and\n`access_token` are stored encrypted and never returned in responses.\nName is unique within `(project, kind)`.\n\nCreating an inbound integration without `secret` makes the server generate one. The create response returns it once in `generated_secret`. Later responses only show `has_secret`.\n\nOne **inbound** integration can serve Gitea/Forgejo/GitLab\nsimultaneously - the caller picks the Git host path segment in the webhook\nURL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).\nThe stored `git_host_type` is display metadata only for inbound.\n\n`git_host_type: \"github\"` integrations are creatable by supplying\n`installation_id`. The server App must be configured (else `400`);\nthe installation id is validated against the App (invalid id returns\n`400`). An inbound and outbound integration pair is created\nautomatically, named `github-<account>`. Multiple installations per project\nare supported (one per GitHub account).",
     params(ProjectPath),
     request_body = CreateIntegrationRequest,
     responses((status = OK, description = "Integration created", body = IntegrationResponse), WebError)
@@ -296,12 +298,19 @@ pub async fn put_integration(
         return Err(WebError::already_exists(Resource::IntegrationName));
     }
 
-    let encrypted_secret = match body.secret.as_deref() {
-        Some(s) if !s.is_empty() => Some(
+    let supplied_secret = body
+        .secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let generated_secret =
+        (kind == IntegrationKind::Inbound && supplied_secret.is_none()).then(new_webhook_secret);
+    let encrypted_secret = match supplied_secret.or(generated_secret.as_deref()) {
+        Some(s) => Some(
             encrypt_secret_with_file(&state.config.secrets.crypt_file, s)
                 .context("encrypt secret")?,
         ),
-        _ => None,
+        None => None,
     };
 
     let encrypted_token = match body.access_token.as_deref() {
@@ -348,9 +357,17 @@ pub async fn put_integration(
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?;
 
-    Ok(ok_json(
-        integration_response(&state.web_db, integration).await?,
-    ))
+    let mut response = integration_response(&state.web_db, integration).await?;
+    response.generated_secret = generated_secret;
+    Ok(ok_json(response))
+}
+
+fn new_webhook_secret() -> String {
+    use rand::RngExt as _;
+
+    let mut raw = [0u8; 32];
+    rand::rng().fill(&mut raw);
+    hex::encode(raw)
 }
 
 #[utoipa::path(
@@ -384,7 +401,7 @@ pub async fn get_integration(
     operation_id = "patchProjectIntegration",
     tag = "integrations",
     summary = "Update integration",
-    description = "Patch-updates an integration. Omit a field to leave it unchanged.\nPass an empty string for `secret` or `access_token` to **clear** it.\n\n`git_host_type=github` rows are managed by the App and installation; PATCH\nrejects them with `400`. Delete the row to remove the integration.\nState-managed integrations are rejected with `403`.",
+    description = "Patch-updates an integration. Omit a field to leave it unchanged.\nPass an empty string for `access_token` to **clear** it. Inbound integrations reject an empty `secret` with `400`.\n\n`git_host_type=github` rows are managed by the App and installation; PATCH\nrejects them with `400`. Delete the row to remove the integration.\nState-managed integrations are rejected with `403`.",
     params(ProjectPath, ("id" = IntegrationId, Path)),
     request_body = PatchIntegrationRequest,
     responses((status = OK, description = "Updated integration", body = IntegrationResponse), WebError)
@@ -449,11 +466,15 @@ pub async fn patch_integration(
     }
 
     if let Some(secret) = body.secret {
+        let secret = secret.trim();
+        if secret.is_empty() && kind == IntegrationKind::Inbound {
+            return Err(ProjectRefusal::WebhookSecretRequired.into());
+        }
         active.secret = Set(if secret.is_empty() {
             None
         } else {
             Some(
-                encrypt_secret_with_file(&state.config.secrets.crypt_file, &secret)
+                encrypt_secret_with_file(&state.config.secrets.crypt_file, secret)
                     .context("encrypt secret")?,
             )
         });

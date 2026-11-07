@@ -531,6 +531,42 @@ async fn git_host_webhook_integration_not_found() {
 }
 
 #[tokio::test]
+async fn git_host_webhook_without_secret_names_the_missing_secret() {
+    let secretless = gradient_entity::integration::Model {
+        secret: None,
+        ..integration_row("unused")
+    };
+    let db = mock_db()
+        .append_query_results([vec![project_row("test-project")]])
+        .append_query_results([vec![secretless]])
+        .into_connection();
+
+    let state = make_state(
+        db,
+        Some(temp_secret_file("any-32-byte-secret-here!!!!!!!!")),
+        None,
+    );
+    let server = TestServer::new(create_router(state).expect("router"));
+
+    let response = server
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
+        .add_header("X-Gitea-Event", "push")
+        .add_header("X-Gitea-Signature", "doesnotmatter")
+        .bytes(GITEA_PUSH_BODY.as_bytes().into())
+        .await;
+
+    response.assert_status_unauthorized();
+    let json: Value = response.json();
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("no webhook secret"),
+        "{json}"
+    );
+}
+
+#[tokio::test]
 async fn git_host_webhook_branch_glob_no_match_skipped() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");

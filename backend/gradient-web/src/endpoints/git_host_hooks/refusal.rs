@@ -17,6 +17,8 @@ pub(crate) enum GitHostHookRefusal {
     MalformedPayload,
     #[error("integration not found")]
     IntegrationNotFound,
+    #[error("integration has no webhook secret. set a secret for the integration in Gradient")]
+    SecretNotConfigured,
     #[error("unsupported Git host")]
     UnsupportedGitHost,
     #[error("Webhook source IP not allowed")]
@@ -27,7 +29,7 @@ impl Refusal for GitHostHookRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::GithubAppNotConfigured => RefusalStatus::ServiceUnavailable,
-            Self::InvalidSignature => RefusalStatus::Unauthorized,
+            Self::InvalidSignature | Self::SecretNotConfigured => RefusalStatus::Unauthorized,
             Self::MalformedPayload | Self::UnsupportedGitHost => RefusalStatus::BadRequest,
             Self::IntegrationNotFound => RefusalStatus::NotFound,
             Self::SourceIpNotAllowed => RefusalStatus::Forbidden,

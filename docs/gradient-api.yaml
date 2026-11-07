@@ -7157,6 +7157,8 @@ paths:
         `access_token` are stored encrypted and never returned in responses.
         Name is unique within `(project, kind)`.
 
+        Creating an inbound integration without `secret` makes the server generate one. The create response returns it once in `generated_secret`. Later responses only show `has_secret`.
+
         One **inbound** integration can serve Gitea/Forgejo/GitLab
         simultaneously - the caller picks the Git host path segment in the webhook
         URL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).
@@ -7322,7 +7324,7 @@ paths:
       summary: Update integration
       description: |-
         Patch-updates an integration. Omit a field to leave it unchanged.
-        Pass an empty string for `secret` or `access_token` to **clear** it.
+        Pass an empty string for `access_token` to **clear** it. Inbound integrations reject an empty `secret` with `400`.
 
         `git_host_type=github` rows are managed by the App and installation; PATCH
         rejects them with `400`. Delete the row to remove the integration.
@@ -17984,6 +17986,10 @@ components:
           format: date-time
         managed:
           type: boolean
+        generated_secret:
+          type:
+          - string
+          - 'null'
     IntegrationSummaryResponse:
       type: object
       required:
