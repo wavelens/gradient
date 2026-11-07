@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { NEVER, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, type Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { TaskTriggersComponent } from './task-triggers.component';
 import { TriggersService } from '@core/services/triggers.service';
@@ -18,6 +18,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
 import { AccessState } from '@core/models/access.model';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
@@ -248,20 +249,26 @@ describe('TaskTriggersComponent - write failures', () => {
     expect(fixture.componentInstance.makingDefaultId()).toBeNull();
   });
 
-  it('reports a failed delete and a successful one', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('asks first, naming the trigger, then deletes it', () => {
+    const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm } });
     const fixture = setup(writer);
-    const service = failingService(fixture);
-    const notify = TestBed.inject(NotifyService);
-    const failure = vi.spyOn(notify, 'failure');
-    const success = vi.spyOn(notify, 'success');
-    service['delete'] = () => throwError(() => refused);
-    fixture.componentInstance.deleteTrigger('t1');
-    expect(failure).toHaveBeenCalledWith('Failed to delete trigger', refused);
-
-    service['delete'] = () => of(undefined);
-    fixture.componentInstance.deleteTrigger('t1');
+    const remove = vi.fn(() => of(undefined));
+    failingService(fixture)['delete'] = remove;
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+    findByText(fixture.nativeElement, 'delete')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete Trigger', target: 'Polling: every 5 min' }));
+    expect(remove).toHaveBeenCalledWith('acme', 'demo', 't1');
     expect(success).toHaveBeenCalledWith('Trigger deleted');
+  });
+
+  it('sends nothing when the delete is cancelled', () => {
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm: vi.fn(() => EMPTY) } });
+    const fixture = setup(writer);
+    const remove = vi.fn(() => of(undefined));
+    failingService(fixture)['delete'] = remove;
+    findByText(fixture.nativeElement, 'delete')!.click();
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it('shows a rejected save inside the open dialog, not raw transport text', () => {

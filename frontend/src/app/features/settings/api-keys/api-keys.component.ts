@@ -30,6 +30,7 @@ import {
   TooltipDirective,
 } from '@gradient/ui/ui';
 import { ManagedDisableDirective } from '@shared/access';
+import { ConfirmService } from '@shared/confirm';
 import { AccessState, ApiKeyInfo, PermissionEntry } from '@core/models';
 import { permissionLabel } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
@@ -75,13 +76,12 @@ export class ApiKeysComponent implements OnInit {
   private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   loading = signal(true);
   loadError = signal<unknown>(null);
   creating = signal(false);
   saving = signal(false);
-  deletingId = signal<string | null>(null);
-  revokingId = signal<string | null>(null);
 
   keys = signal<ApiKeyInfo[]>([]);
   availablePermissions = signal<PermissionEntry[]>([]);
@@ -275,33 +275,36 @@ export class ApiKeysComponent implements OnInit {
   }
 
   revokeKey(key: ApiKeyInfo): void {
-    this.revokingId.set(key.id);
-    this.userService.revokeApiKey(key.id).subscribe({
-      next: () => {
-        this.revokingId.set(null);
+    this.confirm
+      .confirm({
+        title: 'Revoke API key',
+        target: key.name,
+        consequence: `${key.name} stops working immediately. Scripts and pipelines that use the key lose access.`,
+        confirmLabel: 'Revoke',
+        failure: 'Revoking the API key failed.',
+        severity: 'warn',
+        action: () => this.userService.revokeApiKey(key.id),
+      })
+      .subscribe(() => {
         this.notify.success('API key revoked');
         this.loadKeys();
-      },
-      error: (err: unknown) => {
-        this.revokingId.set(null);
-        this.notify.failure('Failed to revoke API key', err);
-      },
-    });
+      });
   }
 
   deleteKey(key: ApiKeyInfo): void {
-    this.deletingId.set(key.id);
-    this.userService.deleteApiKey(key.name).subscribe({
-      next: () => {
-        this.deletingId.set(null);
+    this.confirm
+      .confirm({
+        title: 'Delete API key',
+        target: key.name,
+        consequence: `${key.name} no longer appears in the list and stops working. Scripts and pipelines that use the key lose access.`,
+        confirmLabel: 'Delete',
+        failure: 'Deleting the API key failed.',
+        action: () => this.userService.deleteApiKey(key.name),
+      })
+      .subscribe(() => {
         this.notify.success('API key deleted');
         this.loadKeys();
-      },
-      error: (err: unknown) => {
-        this.deletingId.set(null);
-        this.notify.failure('Failed to delete API key', err);
-      },
-    });
+      });
   }
 
   permissionTooltip(key: ApiKeyInfo): string {

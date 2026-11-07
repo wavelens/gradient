@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { vi } from 'vitest';
 import { SshKeysComponent } from './ssh-keys.component';
 import { UserService } from '@core/services/user.service';
@@ -18,6 +19,7 @@ import { ApiError } from '@core/services/api.service';
 import { SshKeyInfo } from '@core/models';
 
 let notify = { success: vi.fn(), failure: vi.fn() };
+const confirm = vi.fn();
 
 const key: SshKeyInfo = {
   id: 'k1',
@@ -32,6 +34,7 @@ function setup(
   overrides: Partial<Record<keyof UserService, unknown>> = {},
 ): ComponentFixture<SshKeysComponent> {
   notify = { success: vi.fn(), failure: vi.fn() };
+  confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   TestBed.configureTestingModule({
     imports: [SshKeysComponent],
     providers: [
@@ -41,6 +44,7 @@ function setup(
       { provide: UserService, useValue: { getSshKeys: () => of(keys), ...overrides } },
       { provide: ConfigService, useValue: { sshEnabled: true, sshPort: 2222 } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(SshKeysComponent);
@@ -86,21 +90,21 @@ describe('SshKeysComponent', () => {
     expect(values.some((v) => v.includes('Port 2222') && v.includes('User <project>'))).toBe(true);
   });
 
-  it('deletes a key by id', () => {
+  it('asks before deleting a key, naming it, then deletes it by id', () => {
     const deleteSshKey = vi.fn(() => of('SSH key deleted'));
     const fixture = setup([key], { deleteSshKey });
     buttonsByText(fixture.nativeElement, 'delete')[0].click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete SSH key', target: 'laptop' }));
     expect(deleteSshKey).toHaveBeenCalledWith('k1');
     expect(notify.success).toHaveBeenCalledWith('Deleted SSH key');
   });
 
-  it('reports a failed delete and enables Delete again', () => {
-    const failure = new ApiError('database is down', 500);
-    const fixture = setup([key], { deleteSshKey: () => throwError(() => failure) });
+  it('sends no delete when the confirmation is cancelled', () => {
+    const deleteSshKey = vi.fn(() => of('SSH key deleted'));
+    const fixture = setup([key], { deleteSshKey });
+    confirm.mockImplementation(() => EMPTY);
     buttonsByText(fixture.nativeElement, 'delete')[0].click();
-    fixture.detectChanges();
-    expect(notify.failure).toHaveBeenCalledWith('Failed to delete SSH key', failure);
-    expect(buttonsByText(fixture.nativeElement, 'delete')[0].disabled).toBe(false);
+    expect(deleteSshKey).not.toHaveBeenCalled();
   });
 
   it('keeps a refused key inside the add dialog', () => {

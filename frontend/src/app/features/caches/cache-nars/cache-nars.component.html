@@ -101,8 +101,6 @@
                 icon="delete"
                 severity="danger"
                 [text]="true"
-                [loading]="deletingHash() === row.hash"
-                [disabled]="rowDisabled()"
                 (click)="askDelete(row)"
                 title="Delete"
               ></button>
@@ -133,25 +131,3 @@
   [summary]="selected()"
   (closed)="closeDrawer()"
 />
-
-<gr-dialog
-  header="Delete NAR"
-  [visible]="pendingDelete() !== null"
-  (visibleChange)="$event || cancelDelete()"
-  width="480px"
-  [busy]="deletingHash() !== null"
-  [error]="deleteError()"
->
-  @if (pendingDelete(); as row) {
-    <p>
-      Remove <code class="mono">{{ row.hash }}</code> from this cache?
-    </p>
-    <p class="text-secondary">
-      If other caches still hold this NAR, only this cache's signature is removed. Otherwise the NAR blob is deleted permanently.
-    </p>
-  }
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="cancelDelete()" [disabled]="deletingHash() !== null"></button>
-    <button grButton label="Delete" severity="danger" icon="delete" (click)="confirmDelete()" [loading]="deletingHash() !== null"></button>
-  </div>
-</gr-dialog>

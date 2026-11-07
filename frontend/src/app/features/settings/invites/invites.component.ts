@@ -10,6 +10,7 @@ import { ActivatedRoute } from '@angular/router';
 import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
 import { InviteItem } from '@core/models';
+import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -39,6 +40,7 @@ export class InvitesComponent implements OnInit {
   private userService = inject(UserService);
   private route = inject(ActivatedRoute);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   loading = signal(true);
   pendingToken = signal<string | null>(null);
@@ -84,18 +86,19 @@ export class InvitesComponent implements OnInit {
     });
   }
 
-  decline(token: string): void {
-    this.pendingToken.set(token);
-    this.userService.declineInvite(token).subscribe({
-      next: () => {
-        this.pendingToken.set(null);
+  decline(invite: InviteItem): void {
+    this.confirm
+      .confirm({
+        title: 'Decline Invitation',
+        target: invite.scope_display_name,
+        consequence: 'Joining later needs a new invitation.',
+        confirmLabel: 'Decline',
+        failure: 'Failed to decline the invitation.',
+        action: () => this.userService.declineInvite(invite.token),
+      })
+      .subscribe(() => {
         this.notify.success('Invitation declined');
         this.load();
-      },
-      error: (err: unknown) => {
-        this.pendingToken.set(null);
-        this.notify.failure('Invitation decline failed', err);
-      },
-    });
+      });
   }
 }

@@ -34,8 +34,7 @@
             label="Revoke"
             icon="logout"
             severity="danger"
-            [disabled]="s.current || revokingId() === s.id"
-            [loading]="revokingId() === s.id"
+            [disabled]="s.current"
             (click)="revoke(s)"
           ></button>
         </gr-row>

@@ -12,6 +12,7 @@ import { AuthService } from '@core/services/auth.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { TeamResponse, TeamGrants, TeamRequestItem } from '@core/models';
+import { ConfirmService } from '@shared/confirm';
 import {
   ButtonComponent,
   LoadingSpinnerComponent,
@@ -48,6 +49,7 @@ export class TeamOverviewComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private authService = inject(AuthService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   teamName = '';
   breadcrumb = computed(() => this.crumbs.team(this.teamName));
@@ -88,27 +90,36 @@ export class TeamOverviewComponent implements OnInit {
   }
 
   approve(id: string): void {
-    this.decide(id, this.teams.approveRequest(this.teamName, id), 'Request approved', 'Failed to approve request');
-  }
-
-  deny(id: string): void {
-    this.decide(id, this.teams.denyRequest(this.teamName, id), 'Request denied', 'Failed to deny request');
-  }
-
-  private decide(id: string, call: ReturnType<TeamsService['approveRequest']>, done: string, failed: string): void {
     this.busy.set(id);
-    call.subscribe({
+    this.teams.approveRequest(this.teamName, id).subscribe({
       next: () => {
         this.busy.set(null);
-        this.notify.success(done);
-        this.loadRequests();
-        this.loadGrants();
+        this.decided('Request approved');
       },
       error: (err: unknown) => {
         this.busy.set(null);
-        this.notify.failure(failed, err);
+        this.notify.failure('Failed to approve request', err);
       },
     });
+  }
+
+  deny(request: TeamRequestItem): void {
+    this.confirm
+      .confirm({
+        title: 'Deny Request',
+        target: request.display_name,
+        consequence: 'The request is deleted and nothing is granted.',
+        confirmLabel: 'Deny',
+        failure: 'Failed to deny request.',
+        action: () => this.teams.denyRequest(this.teamName, request.id),
+      })
+      .subscribe(() => this.decided('Request denied'));
+  }
+
+  private decided(done: string): void {
+    this.notify.success(done);
+    this.loadRequests();
+    this.loadGrants();
   }
 
   private loadGrants(): void {

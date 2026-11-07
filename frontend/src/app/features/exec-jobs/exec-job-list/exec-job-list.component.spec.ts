@@ -6,12 +6,13 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { EMPTY, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import type { ExecJobSummary } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { ExecJobListComponent } from './exec-job-list.component';
 
 function queuedJob(): ExecJobSummary {
@@ -151,14 +152,21 @@ describe('ExecJobListComponent', () => {
   });
 
   describe('job actions', () => {
-    function renderJob(status: ExecJobSummary['status'], canTrigger: boolean, dispatchedJob: string | null = null) {
+    function renderJob(
+      status: ExecJobSummary['status'],
+      canTrigger: boolean,
+      dispatchedJob: string | null = null,
+      confirmed = true,
+    ) {
       const abort = vi.fn(() => of('Success'));
+      const confirm = vi.fn((request: ConfirmRequest) => (confirmed ? request.action() : EMPTY));
       const job: ExecJobSummary = { ...queuedJob(), status, dispatched_job: dispatchedJob };
       TestBed.configureTestingModule({
         imports: [ExecJobListComponent],
         providers: [
           provideRouter([]),
           { provide: ExecJobsService, useValue: { forEvaluation: () => of([job]), abort } },
+          { provide: ConfirmService, useValue: { confirm } },
         ],
       });
       const fixture = TestBed.createComponent(ExecJobListComponent);
@@ -167,7 +175,7 @@ describe('ExecJobListComponent', () => {
       fixture.componentRef.setInput('task', 'demo');
       fixture.componentRef.setInput('canTrigger', canTrigger);
       fixture.detectChanges();
-      return { fixture, abort };
+      return { fixture, abort, confirm };
     }
 
     function openMenu(fixture: ReturnType<typeof renderJob>['fixture'], via: 'kebab' | 'contextmenu'): HTMLElement[] {
@@ -205,21 +213,20 @@ describe('ExecJobListComponent', () => {
       expect(labels(openMenu(fixture, 'kebab'))).not.toContain('Abort');
     });
 
-    it('aborts the job from the menu', () => {
-      const { fixture, abort } = renderJob('running', true);
+    it('asks first, naming the entry point, then aborts the job from the menu', () => {
+      const { fixture, abort, confirm } = renderJob('running', true);
       const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
       openMenu(fixture, 'kebab').find((item) => item.textContent?.includes('Abort'))!.click();
+      expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'apps.x86_64-linux.train' }));
       expect(abort).toHaveBeenCalledWith('j1');
       expect(success).toHaveBeenCalledWith('Exec job aborted');
     });
 
-    it('reports a refused abort with the server reason', () => {
-      const { fixture, abort } = renderJob('running', true);
-      const refused = new ApiError('Exec job already finished', 409);
-      abort.mockReturnValue(throwError(() => refused));
-      const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+    it('sends nothing when the abort is cancelled', () => {
+      const { fixture, abort, confirm } = renderJob('running', true, null, false);
       openMenu(fixture, 'kebab').find((item) => item.textContent?.includes('Abort'))!.click();
-      expect(failure).toHaveBeenCalledWith('Failed to abort exec job', refused);
+      expect(confirm).toHaveBeenCalled();
+      expect(abort).not.toHaveBeenCalled();
     });
   });
 });

@@ -30,6 +30,7 @@ import {
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { ConfirmService } from '@shared/confirm';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import {
   MemberItem,
@@ -78,6 +79,7 @@ export class CacheMembersRolesComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private userService = inject(UserService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = injectCacheAccess();
 
@@ -87,11 +89,8 @@ export class CacheMembersRolesComponent implements OnInit {
   membersLoading = signal(true);
   rolesLoading = signal(true);
   addingMember = signal(false);
-  removingMember = signal<string | null>(null);
-  revokingUser = signal<string | null>(null);
   updatingRole = signal<string | null>(null);
   savingRole = signal(false);
-  deletingRole = signal<string | null>(null);
 
   members = signal<MemberItem[]>([]);
   invitations = signal<PendingInvitationItem[]>([]);
@@ -151,18 +150,19 @@ export class CacheMembersRolesComponent implements OnInit {
   }
 
   revokeInvitation(username: string): void {
-    this.revokingUser.set(username);
-    this.cachesService.revokeInvitation(this.cacheName, username).subscribe({
-      next: () => {
-        this.revokingUser.set(null);
+    this.confirm
+      .confirm({
+        title: 'Revoke Invitation',
+        target: username,
+        consequence: `The invitation to ${username} can no longer grant access. Another invitation can follow later.`,
+        confirmLabel: 'Revoke',
+        failure: 'Failed to revoke the invitation.',
+        action: () => this.cachesService.revokeInvitation(this.cacheName, username),
+      })
+      .subscribe(() => {
         this.notify.success('Invitation revoked');
         this.loadInvitations();
-      },
-      error: (error: unknown) => {
-        this.revokingUser.set(null);
-        this.notify.failure('Failed to revoke invitation', error);
-      },
-    });
+      });
   }
 
   loadRoles(): void {
@@ -240,18 +240,19 @@ export class CacheMembersRolesComponent implements OnInit {
   }
 
   removeMember(username: string): void {
-    this.removingMember.set(username);
-    this.cachesService.removeMember(this.cacheName, username).subscribe({
-      next: () => {
-        this.removingMember.set(null);
+    this.confirm
+      .confirm({
+        title: 'Remove member',
+        target: username,
+        consequence: `${username} can no longer access this cache.`,
+        confirmLabel: 'Remove',
+        failure: 'Failed to remove member.',
+        action: () => this.cachesService.removeMember(this.cacheName, username),
+      })
+      .subscribe(() => {
         this.notify.success('Member removed');
         this.loadMembers();
-      },
-      error: (error: unknown) => {
-        this.removingMember.set(null);
-        this.notify.failure('Failed to remove member', error);
-      },
-    });
+      });
   }
 
   openCreateRoleDialog(): void {
@@ -317,18 +318,19 @@ export class CacheMembersRolesComponent implements OnInit {
 
   deleteRole(role: RoleResponse_CacheRoleOwner): void {
     if (role.builtin) return;
-    this.deletingRole.set(role.id);
-    this.cachesService.deleteRole(this.cacheName, role.id).subscribe({
-      next: () => {
-        this.deletingRole.set(null);
+    this.confirm
+      .confirm({
+        title: 'Delete role',
+        target: role.name,
+        consequence: `Complete removal of ${role.name} from the cache.`,
+        confirmLabel: 'Delete',
+        failure: 'Failed to delete role.',
+        action: () => this.cachesService.deleteRole(this.cacheName, role.id),
+      })
+      .subscribe(() => {
         this.notify.success('Role deleted');
         this.loadRoles();
-      },
-      error: (error: unknown) => {
-        this.deletingRole.set(null);
-        this.notify.failure('Failed to delete role', error);
-      },
-    });
+      });
   }
 
 

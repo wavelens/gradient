@@ -312,6 +312,23 @@ describe('ProfileComponent - delete confirmation', () => {
     expect(document.body.querySelector('#confirm-username')).not.toBeNull();
   });
 
+  it('names the saved account and checks against it, not against an unsaved username edit', async () => {
+    const fixture = setup({ managed: false, oidc: false, password: false, provider: { connected: true, canDisconnect: false } });
+    const component = fixture.componentInstance;
+    component.formData.username = 'mallory';
+    component.openDeleteDialog();
+    component.deleteUsernameConfirm = 'mallory';
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const dialog = document.body.querySelector('.gr-dialog') as HTMLElement;
+    expect(dialog.querySelector('p strong')?.textContent).toBe('alice');
+    const confirmButton = Array.from(dialog.querySelectorAll<HTMLButtonElement>('.gr-dialog__footer button')).find(
+      (b) => b.textContent?.trim() === 'Delete Account',
+    )!;
+    expect(confirmButton.disabled).toBe(true);
+  });
+
   it('keeps a failed deletion inside the open dialog', () => {
     const fixture = setup({ managed: false, oidc: false, writeFailure: new ApiError('Wrong password', 403) });
     const component = fixture.componentInstance;

@@ -8,11 +8,11 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Observable, of, throwError } from 'rxjs';
+import { EMPTY, Observable, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { InvitesComponent } from './invites.component';
 import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
-import { ApiError } from '@core/services/api.service';
 import { InviteItem } from '@core/models';
 
 const projectInvite: InviteItem = {
@@ -39,6 +39,7 @@ function setup(invites: InviteItem[], queryToken: string | null = null, getInvit
   const accept = vi.fn().mockReturnValue(of('Invitation accepted'));
   const decline = vi.fn().mockReturnValue(of('Invitation declined'));
   const notify = { success: vi.fn(), failure: vi.fn() };
+  const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
 
   TestBed.configureTestingModule({
     imports: [InvitesComponent],
@@ -63,12 +64,13 @@ function setup(invites: InviteItem[], queryToken: string | null = null, getInvit
         },
       },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
 
   const fixture: ComponentFixture<InvitesComponent> = TestBed.createComponent(InvitesComponent);
   fixture.detectChanges();
-  return { fixture, accept, decline, notify };
+  return { fixture, accept, decline, notify, confirm };
 }
 
 function buttonByText(root: HTMLElement, text: string): HTMLButtonElement | undefined {
@@ -118,21 +120,19 @@ describe('InvitesComponent', () => {
     expect(accept).toHaveBeenCalledWith('tok-project');
   });
 
-  it('declines an invite by token when Decline is clicked', () => {
-    const { fixture, decline } = setup([projectInvite]);
+  it('asks before declining, naming what the invite is for, then declines by token', () => {
+    const { fixture, decline, notify, confirm } = setup([projectInvite]);
     buttonByText(fixture.nativeElement, 'Decline')?.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Wavelens', confirmLabel: 'Decline' }));
     expect(decline).toHaveBeenCalledWith('tok-project');
+    expect(notify.success).toHaveBeenCalledWith('Invitation declined');
   });
 
-  it('reports a failed decline as a toast without a page banner', () => {
-    const { fixture, decline, notify } = setup([projectInvite]);
-    const failure = new ApiError('Invitation expired', 410);
-    decline.mockReturnValue(throwError(() => failure));
+  it('keeps the invite when declining is cancelled', () => {
+    const { fixture, decline, confirm } = setup([projectInvite]);
+    confirm.mockImplementation(() => EMPTY);
     buttonByText(fixture.nativeElement, 'Decline')?.click();
-    fixture.detectChanges();
-    expect(notify.failure).toHaveBeenCalledWith('Invitation decline failed', failure);
-    expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')).toBeNull();
-    expect(fixture.componentInstance.pendingToken()).toBeNull();
+    expect(decline).not.toHaveBeenCalled();
   });
 
   it('reports an accepted invitation', () => {

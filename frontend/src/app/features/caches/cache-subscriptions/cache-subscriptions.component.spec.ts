@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Observable, of, throwError } from 'rxjs';
+import { EMPTY, Observable, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ApiError } from '@core/services/api.service';
 import { CacheSubscriptionRequestsComponent } from './cache-subscriptions.component';
 import { CachesService } from '@core/services/caches.service';
@@ -32,6 +33,7 @@ function buttonByText(root: HTMLElement, text: string): HTMLButtonElement | unde
 function setup(requests: SubscriptionRequestItem[], load?: () => Observable<SubscriptionRequestItem[]>) {
   const approve = vi.fn().mockReturnValue(of('Subscription approved'));
   const deny = vi.fn().mockReturnValue(of('Subscription request denied'));
+  const confirm = vi.fn((confirmRequest: ConfirmRequest) => confirmRequest.action());
 
   TestBed.configureTestingModule({
     imports: [CacheSubscriptionRequestsComponent],
@@ -52,6 +54,7 @@ function setup(requests: SubscriptionRequestItem[], load?: () => Observable<Subs
           denySubscriptionRequest: deny,
         },
       },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
 
@@ -59,7 +62,7 @@ function setup(requests: SubscriptionRequestItem[], load?: () => Observable<Subs
     CacheSubscriptionRequestsComponent,
   );
   fixture.detectChanges();
-  return { fixture, approve, deny };
+  return { fixture, approve, deny, confirm };
 }
 
 describe('CacheSubscriptionRequestsComponent', () => {
@@ -94,10 +97,18 @@ describe('CacheSubscriptionRequestsComponent', () => {
     expect(approve).toHaveBeenCalledWith('prod', 'wavelens');
   });
 
-  it('denies a request by project name', () => {
-    const { fixture, deny } = setup([request]);
+  it('asks before denying a request, naming the project, then denies it by project name', () => {
+    const { fixture, deny, confirm } = setup([request]);
     buttonByText(fixture.nativeElement, 'Deny')?.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Wavelens' }));
     expect(deny).toHaveBeenCalledWith('prod', 'wavelens');
+  });
+
+  it('sends no denial when the confirmation is cancelled', () => {
+    const { fixture, deny, confirm } = setup([request]);
+    confirm.mockImplementation(() => EMPTY);
+    buttonByText(fixture.nativeElement, 'Deny')?.click();
+    expect(deny).not.toHaveBeenCalled();
   });
 
   it('shows a failed approve as an error toast with the server reason, not as raw text', () => {

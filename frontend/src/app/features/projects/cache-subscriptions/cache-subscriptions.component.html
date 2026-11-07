@@ -68,8 +68,6 @@
                 icon="close"
                 severity="danger"
                 size="small"
-                [loading]="unsubscribingId() === cache.id"
-                [disabled]="unsubscribingId() !== null"
                 [appManagedDisable]="access()"
                 (click)="unsubscribeCache(cache)"
               ></button>

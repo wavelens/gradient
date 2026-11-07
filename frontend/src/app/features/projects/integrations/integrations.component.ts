@@ -42,6 +42,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { ConfirmService } from '@shared/confirm';
 
 interface Option<T> {
   label: string;
@@ -85,13 +86,13 @@ export class IntegrationsComponent implements OnInit {
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
   loading = signal(true);
   loadError = signal<unknown>(null);
   saving = signal(false);
-  deletingId = signal<string | null>(null);
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Integrations' }));
@@ -374,60 +375,54 @@ export class IntegrationsComponent implements OnInit {
   clearSecret(): void {
     const target = this.editingIntegration();
     if (!target) return;
-    this.saving.set(true);
-    this.errorMessage.set(null);
-    this.integrationsService
-      .patchProjectIntegration(this.projectName, target.id, { secret: '' })
-      .subscribe({
-        next: () => {
-          this.saving.set(false);
-          this.loadIntegrations();
-          this.showEditDialog.set(false);
-          this.editingIntegration.set(null);
-          this.notify.success('Webhook secret cleared');
-        },
-        error: (error: unknown) => {
-          this.errorMessage.set(apiErrorMessage(error, 'Failed to clear secret.'));
-          this.saving.set(false);
-        },
-      });
+    this.confirm
+      .confirm({
+        title: 'Clear webhook secret',
+        target: target.display_name,
+        consequence: `The result of this action is removal of the saved webhook secret for ${target.display_name}.`,
+        confirmLabel: 'Clear',
+        failure: 'Failed to clear secret.',
+        action: () => this.integrationsService.patchProjectIntegration(this.projectName, target.id, { secret: '' }),
+      })
+      .subscribe(() => this.cleared('Webhook secret cleared'));
   }
 
   clearAccessToken(): void {
     const target = this.editingIntegration();
     if (!target) return;
-    this.saving.set(true);
-    this.errorMessage.set(null);
-    this.integrationsService
-      .patchProjectIntegration(this.projectName, target.id, { access_token: '' })
-      .subscribe({
-        next: () => {
-          this.saving.set(false);
-          this.loadIntegrations();
-          this.showEditDialog.set(false);
-          this.editingIntegration.set(null);
-          this.notify.success('Access token cleared');
-        },
-        error: (error: unknown) => {
-          this.errorMessage.set(apiErrorMessage(error, 'Failed to clear token.'));
-          this.saving.set(false);
-        },
-      });
+    this.confirm
+      .confirm({
+        title: 'Clear access token',
+        target: target.display_name,
+        consequence: `The result of this action is removal of the saved access token for ${target.display_name}.`,
+        confirmLabel: 'Clear',
+        failure: 'Failed to clear token.',
+        action: () => this.integrationsService.patchProjectIntegration(this.projectName, target.id, { access_token: '' }),
+      })
+      .subscribe(() => this.cleared('Access token cleared'));
+  }
+
+  private cleared(message: string): void {
+    this.loadIntegrations();
+    this.showEditDialog.set(false);
+    this.editingIntegration.set(null);
+    this.notify.success(message);
   }
 
   deleteIntegration(integration: IntegrationResponse): void {
-    this.deletingId.set(integration.id);
-    this.integrationsService.deleteProjectIntegration(this.projectName, integration.id).subscribe({
-      next: () => {
-        this.deletingId.set(null);
+    this.confirm
+      .confirm({
+        title: 'Delete integration',
+        target: integration.display_name,
+        consequence: `The result of this action is deletion of ${integration.display_name}. Events can no longer go in or out. This action is permanent.`,
+        confirmLabel: 'Delete',
+        failure: 'Integration deletion failed.',
+        action: () => this.integrationsService.deleteProjectIntegration(this.projectName, integration.id),
+      })
+      .subscribe(() => {
         this.notify.success('Integration deleted');
         this.loadIntegrations();
-      },
-      error: (error: unknown) => {
-        this.deletingId.set(null);
-        this.notify.failure('Integration delete failed', error);
-      },
-    });
+      });
   }
 
   inboundGitHost(id: string): InboundGitHost {

@@ -185,7 +185,7 @@
             label="Delete Cache"
             icon="delete"
             severity="danger"
-            (click)="openDeleteDialog()"
+            (click)="deleteCache()"
             [appManagedDisable]="access()"
           ></button>
         </gr-row>
@@ -194,11 +194,3 @@
   </gr-page-layout>
 }
 </gr-load-state>
-
-<gr-dialog header="Delete Cache" [(visible)]="showDeleteDialog" [error]="deleteError()" [busy]="deleting()" width="400px">
-  <p>Are you sure you want to delete <strong>{{ cache()?.display_name }}</strong>? This action cannot be undone.</p>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button grButton label="Delete" severity="danger" (click)="deleteCache()" [loading]="deleting()" [disabled]="deleting()"></button>
-  </div>
-</gr-dialog>

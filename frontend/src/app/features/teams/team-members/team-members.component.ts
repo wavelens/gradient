@@ -11,6 +11,8 @@ import { TeamsService } from '@core/services/teams.service';
 import { UserService } from '@core/services/user.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
+import { AuthService } from '@core/services/auth.service';
+import { ConfirmService } from '@shared/confirm';
 import {
   TeamRole,
   TeamResponse,
@@ -55,6 +57,8 @@ export class TeamMembersComponent implements OnInit {
   private teams = inject(TeamsService);
   private users = inject(UserService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
+  private auth = inject(AuthService);
 
   readonly roles: { label: string; value: TeamRole }[] = [
     { label: 'Admin', value: 'admin' },
@@ -154,32 +158,35 @@ export class TeamMembersComponent implements OnInit {
   }
 
   removeMember(user: string): void {
-    this.busy.set(user);
-    this.teams.removeMember(this.teamName, user).subscribe({
-      next: () => {
-        this.busy.set(null);
+    const self = this.auth.user()?.username === user;
+    this.confirm
+      .confirm({
+        title: 'Remove member',
+        target: user,
+        consequence: self ? 'You lose access to this team and its settings.' : `${user} can no longer access this team.`,
+        confirmLabel: 'Remove',
+        failure: 'Failed to remove the member.',
+        action: () => this.teams.removeMember(this.teamName, user),
+      })
+      .subscribe(() => {
         this.notify.success('Member removed');
         this.load();
-      },
-      error: (err: unknown) => {
-        this.busy.set(null);
-        this.notify.failure('Member removal failed', err);
-      },
-    });
+      });
   }
 
   revokeInvitation(user: string): void {
-    this.busy.set(user);
-    this.teams.revokeInvitation(this.teamName, user).subscribe({
-      next: () => {
-        this.busy.set(null);
+    this.confirm
+      .confirm({
+        title: 'Revoke invitation',
+        target: user,
+        consequence: `The invitation to ${user} becomes invalid. You can invite them again later.`,
+        confirmLabel: 'Revoke',
+        failure: 'Failed to revoke the invitation.',
+        action: () => this.teams.revokeInvitation(this.teamName, user),
+      })
+      .subscribe(() => {
         this.notify.success('Invitation revoked');
         this.load();
-      },
-      error: (err: unknown) => {
-        this.busy.set(null);
-        this.notify.failure('Invitation revoke failed', err);
-      },
-    });
+      });
   }
 }

@@ -11,11 +11,10 @@ import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
-import { apiErrorMessage } from '@core/services/api.service';
+import { ConfirmService } from '@shared/confirm';
 import {
   ButtonComponent,
   CardGridComponent,
-  DialogComponent,
   IconComponent,
   InputDirective,
   LoadStateComponent,
@@ -41,7 +40,6 @@ type SortOrder = 'asc' | 'desc';
     CommonModule,
     FormsModule,
     RouterModule,
-    DialogComponent,
     ButtonComponent,
     InputDirective,
     SkeletonComponent,
@@ -64,10 +62,9 @@ export class CacheNarsComponent implements OnInit {
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = injectCacheAccess();
-
-  rowDisabled = computed(() => this.deletingHash() !== null);
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cache(this.cacheName, { label: 'NARs' }));
@@ -86,11 +83,8 @@ export class CacheNarsComponent implements OnInit {
   statsFailed = signal(false);
   readonly placeholders = Array.from({ length: 10 });
   loadError = signal<unknown>(null);
-  deleteError = signal<string | null>(null);
 
   selected = signal<NarSummary | null>(null);
-  pendingDelete = signal<NarSummary | null>(null);
-  deletingHash = signal<string | null>(null);
 
   totalPages = computed(() => {
     const pp = this.perPage();
@@ -199,34 +193,22 @@ export class CacheNarsComponent implements OnInit {
   }
 
   askDelete(row: NarSummary): void {
-    this.deleteError.set(null);
-    this.pendingDelete.set(row);
-  }
-
-  cancelDelete(): void {
-    if (this.deletingHash()) return;
-    this.pendingDelete.set(null);
-  }
-
-  confirmDelete(): void {
-    const row = this.pendingDelete();
-    if (!row) return;
-    this.deleteError.set(null);
-    this.deletingHash.set(row.hash);
-    this.cachesService.deleteCacheNar(this.cacheName, row.hash).subscribe({
-      next: () => {
+    this.confirm
+      .confirm({
+        title: 'Delete NAR',
+        target: row.hash,
+        consequence:
+          "If other caches still hold this NAR, only this cache's signature is removed. Otherwise the NAR blob is deleted permanently.",
+        confirmLabel: 'Delete',
+        failure: 'Failed to delete NAR.',
+        action: () => this.cachesService.deleteCacheNar(this.cacheName, row.hash),
+      })
+      .subscribe(() => {
         this.rows.update((rows) => rows?.filter((r) => r.hash !== row.hash) ?? rows);
         this.total.set(Math.max(0, this.total() - 1));
-        this.deletingHash.set(null);
-        this.pendingDelete.set(null);
         this.notify.success('NAR removed');
         this.loadStats();
-      },
-      error: (error: unknown) => {
-        this.deleteError.set(apiErrorMessage(error, 'Failed to delete NAR.'));
-        this.deletingHash.set(null);
-      },
-    });
+      });
   }
 
   readonly relativeTime = relativeTime;

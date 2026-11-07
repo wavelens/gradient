@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { IntegrationsComponent } from './integrations.component';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -63,12 +64,15 @@ function activatedRouteStub() {
   } as Partial<ActivatedRoute>;
 }
 
+const confirm = vi.fn();
+
 function setup(
   access: AccessState,
   integrations: IntegrationResponse[],
   githubAppAvailable = false,
   githubAppInstallUrl: string | null = null,
 ): ComponentFixture<IntegrationsComponent> {
+  confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   TestBed.configureTestingModule({
     imports: [IntegrationsComponent],
     providers: [
@@ -95,6 +99,7 @@ function setup(
         },
       },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   return TestBed.createComponent(IntegrationsComponent);
@@ -346,16 +351,46 @@ describe('IntegrationsComponent - load errors', () => {
 describe('IntegrationsComponent - write failures', () => {
   const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
 
-  it('shows a failed delete as an error toast with the server reason', async () => {
+  it('asks before deleting an integration, naming it', async () => {
     const fixture = setup(writable, [baseIntegration]);
-    const service = TestBed.inject(IntegrationsService) as unknown as { deleteProjectIntegration: () => unknown };
-    service.deleteProjectIntegration = () => throwError(() => new ApiError('Integration is used by a task', 409));
+    const deleteProjectIntegration = vi.fn(() => of(undefined));
+    Object.assign(TestBed.inject(IntegrationsService), { deleteProjectIntegration });
     await settled(fixture);
-    fixture.componentInstance.deleteIntegration(baseIntegration);
+    findByText(fixture.nativeElement, 'delete')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete integration', target: 'Gitea Prod' }));
+    expect(deleteProjectIntegration).toHaveBeenCalledWith('acme', 'i1');
     expect(TestBed.inject(MessageService).messages()).toContainEqual(
-      expect.objectContaining({ severity: 'error', summary: 'Integration delete failed', detail: 'Integration is used by a task' }),
+      expect.objectContaining({ severity: 'success', summary: 'Integration deleted' }),
     );
-    expect(fixture.componentInstance.deletingId()).toBeNull();
+  });
+
+  it('sends no delete when the confirmation is cancelled', async () => {
+    const fixture = setup(writable, [baseIntegration]);
+    const deleteProjectIntegration = vi.fn(() => of(undefined));
+    Object.assign(TestBed.inject(IntegrationsService), { deleteProjectIntegration });
+    confirm.mockImplementation(() => EMPTY);
+    await settled(fixture);
+    findByText(fixture.nativeElement, 'delete')!.click();
+    expect(deleteProjectIntegration).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { action: 'webhook secret', run: (c: IntegrationsComponent) => c.clearSecret(), title: 'Clear webhook secret', patch: { secret: '' } },
+    { action: 'access token', run: (c: IntegrationsComponent) => c.clearAccessToken(), title: 'Clear access token', patch: { access_token: '' } },
+  ])('asks before clearing the stored $action and sends nothing on cancel', async ({ run, title, patch }) => {
+    const fixture = setup(writable, [baseIntegration]);
+    const patchProjectIntegration = vi.fn(() => of(undefined));
+    Object.assign(TestBed.inject(IntegrationsService), { patchProjectIntegration });
+    await settled(fixture);
+    const component = fixture.componentInstance;
+    component.editingIntegration.set(baseIntegration);
+    confirm.mockImplementationOnce(() => EMPTY);
+    run(component);
+    expect(patchProjectIntegration).not.toHaveBeenCalled();
+    run(component);
+    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title, target: 'Gitea Prod' }));
+    expect(patchProjectIntegration).toHaveBeenCalledWith('acme', 'i1', patch);
+    expect(component.editingIntegration()).toBeNull();
   });
 
   it('keeps a failed create inside the open New Integration dialog', async () => {

@@ -8,12 +8,12 @@ import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { BehaviorSubject, NEVER, Observable, of, throwError } from 'rxjs';
+import { BehaviorSubject, EMPTY, NEVER, Observable, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { CacheNarsComponent } from './cache-nars.component';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { NarSummary, NarStats, Paginated } from '@core/models';
-import { ApiError } from '@core/services/api.service';
 
 const NAR = {
   hash: 'abc123',
@@ -26,7 +26,11 @@ const NAR = {
 };
 const PAGE: Paginated<NarSummary[]> = { items: [NAR], total: 1, page: 1, per_page: 50 };
 
-function render(nars: () => Observable<Paginated<NarSummary[]>>, stats: () => Observable<NarStats> = () => NEVER) {
+function render(
+  nars: () => Observable<Paginated<NarSummary[]>>,
+  stats: () => Observable<NarStats> = () => NEVER,
+  confirm: (request: ConfirmRequest) => Observable<unknown> = (request) => request.action(),
+) {
   const query = new BehaviorSubject(convertToParamMap({}));
   const getCache = vi.fn(() => NEVER);
   TestBed.configureTestingModule({
@@ -47,6 +51,7 @@ function render(nars: () => Observable<Paginated<NarSummary[]>>, stats: () => Ob
           parent: { data: of({}) },
         },
       },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   TestBed.inject(BreadcrumbsService).rememberCache('main', 'Main');
@@ -105,39 +110,23 @@ describe('CacheNarsComponent loading', () => {
 });
 
 describe('CacheNarsComponent delete', () => {
-  it('keeps a failed delete inside the open dialog and clears it on the next attempt', () => {
-    const { fixture } = render(() => of(PAGE));
+  it('asks before deleting, naming the NAR hash, then drops the row', () => {
+    const confirm = vi.fn((request: ConfirmRequest) => request.action());
+    const { fixture } = render(() => of(PAGE), undefined, confirm);
     const service = TestBed.inject(CachesService) as unknown as { deleteCacheNar: () => unknown };
-    service.deleteCacheNar = () => throwError(() => new ApiError('NAR is pinned by a running build', 409));
-    const cmp = fixture.componentInstance;
-    cmp.askDelete(NAR);
-    fixture.detectChanges();
-    cmp.confirmDelete();
-    fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('NAR is pinned by a running build');
-    expect(cmp.pendingDelete()).toEqual(NAR);
-
-    cmp.cancelDelete();
-    cmp.askDelete(NAR);
-    fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog gr-message-banner')).toBeNull();
+    service.deleteCacheNar = vi.fn(() => of('ok'));
+    fixture.componentInstance.askDelete(NAR);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete NAR', target: 'abc123' }));
+    expect(service.deleteCacheNar).toHaveBeenCalledWith('main', 'abc123');
+    expect(fixture.componentInstance.rows()).toEqual([]);
   });
 
-  it('keeps the delete dialog open with its close button while the delete runs', () => {
-    const { fixture } = render(() => of(PAGE));
+  it('sends nothing when the deletion is cancelled', () => {
+    const { fixture } = render(() => of(PAGE), undefined, vi.fn(() => EMPTY));
     const service = TestBed.inject(CachesService) as unknown as { deleteCacheNar: () => unknown };
-    service.deleteCacheNar = vi.fn(() => NEVER);
-    const cmp = fixture.componentInstance;
-    cmp.askDelete(NAR);
-    fixture.detectChanges();
-    cmp.confirmDelete();
-    fixture.detectChanges();
-    const dialog = document.querySelector('.gr-dialog') as HTMLElement;
-    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    fixture.detectChanges();
-    expect(cmp.pendingDelete()).toEqual(NAR);
-    expect(dialog.getAttribute('aria-busy')).toBe('true');
-    expect(dialog.querySelector<HTMLButtonElement>('.gr-dialog__close')?.disabled).toBe(true);
+    service.deleteCacheNar = vi.fn(() => of('ok'));
+    fixture.componentInstance.askDelete(NAR);
+    expect(service.deleteCacheNar).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.rows()).toEqual([NAR]);
   });
 });

@@ -14,7 +14,8 @@ import { ApiError } from '@core/services/api.service';
 import { inBackground } from '@core/interceptors/request-context';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
-import { deviceLabel, execJobMenu, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
+import { ConfirmService } from '@shared/confirm';
+import { abortExecJobConfirm, deviceLabel, execJobMenu, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 
 const POLL_MS = 4000;
 
@@ -29,6 +30,7 @@ const POLL_MS = 4000;
 export class ExecJobListComponent implements OnChanges {
   private execJobs = inject(ExecJobsService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   evaluation = input.required<string>();
   evaluationRunning = input(false);
@@ -94,12 +96,9 @@ export class ExecJobListComponent implements OnChanges {
   }
 
   private abort(job: ExecJobSummary): void {
-    this.execJobs.abort(job.id).subscribe({
-      next: () => {
-        this.notify.success('Exec job aborted');
-        this.watch();
-      },
-      error: (error: unknown) => this.notify.failure('Failed to abort exec job', error),
+    this.confirm.confirm(abortExecJobConfirm(job.entry_point, () => this.execJobs.abort(job.id))).subscribe(() => {
+      this.notify.success('Exec job aborted');
+      this.watch();
     });
   }
 

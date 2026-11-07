@@ -26,7 +26,7 @@
                 <button grButton label="Approve" icon="check" severity="success" size="small"
                   [loading]="busy() === request.id" (click)="approve(request.id)"></button>
                 <button grButton label="Deny" icon="close" severity="danger" size="small"
-                  [disabled]="busy() === request.id" (click)="deny(request.id)"></button>
+                  [disabled]="busy() === request.id" (click)="deny(request)"></button>
               </div>
             </gr-row>
           }

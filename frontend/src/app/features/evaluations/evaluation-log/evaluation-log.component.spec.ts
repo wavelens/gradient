@@ -13,8 +13,9 @@ import { EvaluationLogComponent } from './evaluation-log.component';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, type Observable, Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { NotifyService } from '@core/services/notify.service';
 import { UserInfoResponse, BuildItem, EvaluationResponse, EvaluationStatus } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
@@ -24,13 +25,18 @@ function build(id: string, name: string, status = 'Completed', depth = 0): Build
   return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, build_started_at: null, dispatched_job: null, depth, prioritized: false, ifd: false };
 }
 
-function setup(): { fixture: ComponentFixture<EvaluationLogComponent>; cmp: EvaluationLogComponent } {
+function setup(): {
+  fixture: ComponentFixture<EvaluationLogComponent>;
+  cmp: EvaluationLogComponent;
+  confirm: ReturnType<typeof vi.fn>;
+} {
+  const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   TestBed.configureTestingModule({
     imports: [EvaluationLogComponent],
-    providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
+    providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting(), { provide: ConfirmService, useValue: { confirm } }],
   });
   const fixture = TestBed.createComponent(EvaluationLogComponent);
-  return { fixture, cmp: fixture.componentInstance };
+  return { fixture, cmp: fixture.componentInstance, confirm };
 }
 
 type Internals = {
@@ -589,14 +595,25 @@ describe('EvaluationLogComponent', () => {
         expect(open(cmp, target({ status: 'FailedPermanent' })).has('Retry')).toBe(false);
       });
 
-      it('aborts the build, then reloads the build list', () => {
-        const { cmp } = setup();
+      it('asks first, naming the build, then aborts it and reloads the build list', () => {
+        const { cmp, confirm } = setup();
         const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortBuild').mockReturnValue(of('Success'));
         inEvaluation(cmp, 'Building');
         const reload = reloadedAs(cmp, 'Building');
-        open(cmp, target({ status: 'Building' })).get('Abort')!.command!();
+        const build = target({ status: 'Building' });
+        open(cmp, build).get('Abort')!.command!();
+        expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Build', target: cmp.buildDisplayName(build.name) }));
         expect(abort).toHaveBeenCalledWith('b1');
         expect(reload).toHaveBeenCalled();
+      });
+
+      it('sends no build abort when it is cancelled', () => {
+        const { cmp, confirm } = setup();
+        confirm.mockImplementation(() => EMPTY);
+        const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortBuild').mockReturnValue(of('Success'));
+        inEvaluation(cmp, 'Building');
+        open(cmp, target({ status: 'Building' })).get('Abort')!.command!();
+        expect(abort).not.toHaveBeenCalled();
       });
 
       it('retries a build of a failed evaluation, then follows the reopened evaluation live', () => {
@@ -971,67 +988,36 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.triggerAccess().canEdit).toBe(false);
     });
 
-    it('aborts only after the confirmation, then closes it', () => {
-      const { cmp } = setup();
-      const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(of('ok') as never);
+    it('asks first on a plain click of Abort, naming the task and commit, then aborts', () => {
+      const { cmp, confirm } = setup();
+      cmp.evaluationId = 'eval-1';
+      cmp.evaluation.set({ id: 'eval-1', status: 'Building', commit: 'abc1234def5678', task_name: 'ci', task_display_name: 'CI' } as EvaluationResponse);
+      const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(of('ok'));
       vi.spyOn(cmp, 'loadEvaluation').mockImplementation(() => {});
-      cmp.abortConfirmOpen.set(true);
-      expect(abort).not.toHaveBeenCalled();
-      cmp.abortEvaluation();
-      expect(abort).toHaveBeenCalledOnce();
-      expect(cmp.abortConfirmOpen()).toBe(false);
+      const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+      cmp.requestAbort(new MouseEvent('click'));
+      expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Evaluation', target: 'CI · abc1234d' }));
+      expect(abort).toHaveBeenCalledWith('eval-1');
+      expect(success).toHaveBeenCalledWith('Evaluation aborted');
     });
 
-    it('asks first on a plain click of Abort, aborts at once on a Ctrl click', () => {
-      const { cmp } = setup();
-      const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(of('ok') as never);
-      vi.spyOn(cmp, 'loadEvaluation').mockImplementation(() => {});
+    it('sends nothing when the abort is cancelled', () => {
+      const { cmp, confirm } = setup();
+      confirm.mockImplementation(() => EMPTY);
+      const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(of('ok'));
       cmp.requestAbort(new MouseEvent('click'));
-      expect(cmp.abortConfirmOpen()).toBe(true);
+      expect(confirm).toHaveBeenCalledOnce();
       expect(abort).not.toHaveBeenCalled();
-      cmp.abortConfirmOpen.set(false);
+    });
+
+    it('aborts at once on a Ctrl click, with no confirmation', () => {
+      const { cmp, confirm } = setup();
+      const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(of('ok'));
+      vi.spyOn(cmp, 'loadEvaluation').mockImplementation(() => {});
       cmp.requestAbort(new MouseEvent('click', { ctrlKey: true }));
       expect(abort).toHaveBeenCalledOnce();
-      expect(cmp.abortConfirmOpen()).toBe(false);
-    });
-
-    it('keeps the confirmation open on Escape and backdrop while the abort runs', () => {
-      const { fixture, cmp } = setup();
-      fixture.detectChanges();
-      const pending = new Subject<string>();
-      vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(pending as never);
-      cmp.requestAbort(new MouseEvent('click'));
-      fixture.detectChanges();
-      const panel = () => document.querySelector('.gr-dialog') as HTMLElement;
-      Array.from(panel().querySelectorAll('button')).find((b) => b.textContent?.includes('Abort'))!.click();
-      fixture.detectChanges();
-
-      panel().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-      (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-      fixture.detectChanges();
-      expect(cmp.abortConfirmOpen()).toBe(true);
-      expect(panel().getAttribute('aria-busy')).toBe('true');
-
-      pending.error(new ApiError('Evaluation already finished', 409));
-      fixture.detectChanges();
-      expect(panel().querySelector('gr-message-banner')?.textContent).toContain('Evaluation already finished');
-    });
-
-    it('keeps the confirmation open with the server reason when the abort is refused', () => {
-      const { cmp } = setup();
-      vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation')
-        .mockReturnValue(throwError(() => new ApiError('Evaluation already finished', 409)));
-      const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
-      cmp.requestAbort(new MouseEvent('click'));
-      cmp.abortEvaluation();
-      expect(cmp.abortConfirmOpen()).toBe(true);
+      expect(confirm).not.toHaveBeenCalled();
       expect(cmp.aborting()).toBe(false);
-      expect(cmp.abortError()).toBe('Evaluation already finished');
-      expect(failure).not.toHaveBeenCalled();
-
-      cmp.abortConfirmOpen.set(false);
-      cmp.requestAbort(new MouseEvent('click'));
-      expect(cmp.abortError()).toBeNull();
     });
 
     it('reports a refused Ctrl-click abort as a toast, since no dialog is open', () => {
@@ -1041,7 +1027,7 @@ describe('EvaluationLogComponent', () => {
       const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
       cmp.requestAbort(new MouseEvent('click', { ctrlKey: true }));
       expect(failure).toHaveBeenCalledWith('Failed to abort evaluation', refused);
-      expect(cmp.abortError()).toBeNull();
+      expect(cmp.aborting()).toBe(false);
     });
   });
 

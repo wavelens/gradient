@@ -42,7 +42,7 @@
             icon="close"
             severity="danger"
             [disabled]="pendingToken() === invite.token"
-            (click)="decline(invite.token)"
+            (click)="decline(invite)"
           ></button>
         </gr-row>
       }

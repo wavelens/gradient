@@ -6,8 +6,9 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { Subject, of, throwError } from 'rxjs';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { TeamSettingsComponent } from './team-settings.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -33,6 +34,7 @@ function setup(superuser: boolean, managed = false) {
   const get = vi.fn(() => of<TeamResponse>({ ...team, managed, oidc_group: managed ? 'ci-admins' : null }));
   const remove = vi.fn().mockReturnValue(of('Team deleted'));
   const notify = { success: vi.fn(), failure: vi.fn() };
+  const confirm = vi.fn((request: ConfirmRequest) => request.action());
   TestBed.configureTestingModule({
     imports: [TeamSettingsComponent],
     providers: [
@@ -41,11 +43,16 @@ function setup(superuser: boolean, managed = false) {
       { provide: TeamsService, useValue: { get, update, remove } },
       { provide: AuthService, useValue: { user: signal({ superuser }) } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(TeamSettingsComponent);
   fixture.detectChanges();
-  return { fixture, update, get, remove, notify };
+  return { fixture, update, get, remove, notify, confirm };
+}
+
+function buttonByText(root: HTMLElement, label: string): HTMLButtonElement {
+  return Array.from(root.querySelectorAll('button')).find((b) => b.querySelector('.gr-button__label')?.textContent?.trim() === label)!;
 }
 
 function input(fixture: { nativeElement: HTMLElement }, id: string): HTMLInputElement {
@@ -136,31 +143,20 @@ describe('TeamSettingsComponent', () => {
     expect(update).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the delete dialog open while the deletion runs', () => {
-    const { fixture, remove } = setup(true);
-    remove.mockReturnValue(new Subject());
-    const component = fixture.componentInstance;
-    component.openDelete();
-    fixture.detectChanges();
-    component.remove();
-    fixture.detectChanges();
-    const dialog = document.querySelector('.gr-dialog')!;
-    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    fixture.detectChanges();
-    expect(component.showDelete()).toBe(true);
-    expect(dialog.getAttribute('aria-busy')).toBe('true');
+  it('asks before deleting, naming the team, then leaves for the team list', () => {
+    const { fixture, remove, notify, confirm } = setup(true);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    buttonByText(fixture.nativeElement, 'Delete Team').click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete team', target: 'Platform' }));
+    expect(remove).toHaveBeenCalledWith('platform');
+    expect(notify.success).toHaveBeenCalledWith('Team deleted');
+    expect(navigate).toHaveBeenCalledWith(['/teams']);
   });
 
-  it('keeps a failed deletion inside the open dialog', () => {
-    const { fixture, remove } = setup(true);
-    remove.mockReturnValue(throwError(() => new ApiError('Team still owns projects', 409)));
-    const component = fixture.componentInstance;
-    component.openDelete();
-    component.remove();
-    fixture.detectChanges();
-    expect(component.showDelete()).toBe(true);
-    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Team still owns projects');
-    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Team still owns projects');
+  it('sends no delete when the confirmation is cancelled', () => {
+    const { fixture, remove, confirm } = setup(true);
+    confirm.mockImplementation(() => EMPTY);
+    buttonByText(fixture.nativeElement, 'Delete Team').click();
+    expect(remove).not.toHaveBeenCalled();
   });
 });

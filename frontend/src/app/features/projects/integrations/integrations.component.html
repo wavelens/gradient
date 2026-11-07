@@ -95,8 +95,6 @@
                     icon="delete"
                     severity="danger"
                     size="small"
-                    [loading]="deletingId() === integration.id"
-                    [disabled]="deletingId() !== null"
                     (click)="deleteIntegration(integration)"
                     [appManagedDisable]="integrationAccess().get(integration.id)"
                   ></button>

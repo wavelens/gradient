@@ -21,8 +21,7 @@
               <gr-badge severity="warning">Pending</gr-badge>
             }
             @if (canEdit()) {
-              <button grButton icon="close" severity="danger" size="small" [loading]="busy() === grant.team"
-                (click)="remove(grant)"></button>
+              <button grButton icon="close" severity="danger" size="small" (click)="remove(grant)"></button>
             }
           </div>
         </gr-row>
@@ -35,7 +34,7 @@
   }
 </gr-settings-section>
 
-<gr-dialog header="Grant Team" [(visible)]="showGrant" width="420px" [error]="grantError()" [busy]="busy() === 'grant'">
+<gr-dialog header="Grant Team" [(visible)]="showGrant" width="420px" [error]="grantError()" [busy]="granting()">
   <gr-form-field label="Team" hint="A team you are not Admin of receives a request to approve.">
     <gr-autocomplete [(ngModel)]="form.team" [suggestions]="suggestions()" (completeMethod)="search($event)"
       [forceSelection]="false" />
@@ -46,7 +45,7 @@
     </gr-form-field>
   }
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" [disabled]="busy() === 'grant'" (click)="showGrant.set(false)"></button>
-    <button grButton label="Grant" [loading]="busy() === 'grant'" (click)="grant()"></button>
+    <button grButton label="Cancel" severity="secondary" [disabled]="granting()" (click)="showGrant.set(false)"></button>
+    <button grButton label="Grant" [loading]="granting()" (click)="grant()"></button>
   </div>
 </gr-dialog>

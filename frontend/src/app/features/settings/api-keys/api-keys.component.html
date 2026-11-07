@@ -56,8 +56,6 @@
                   icon="block"
                   severity="warn"
                   (click)="revokeKey(key)"
-                  [loading]="revokingId() === key.id"
-                  [disabled]="revokingId() !== null"
                   [appManagedDisable]="rowAccess(key)"
                 ></button>
               }
@@ -67,8 +65,6 @@
                 icon="delete"
                 severity="danger"
                 (click)="deleteKey(key)"
-                [loading]="deletingId() === key.id"
-                [disabled]="deletingId() !== null"
                 [appManagedDisable]="rowAccess(key)"
               ></button>
             </div>

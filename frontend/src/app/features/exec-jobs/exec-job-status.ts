@@ -7,7 +7,21 @@
 import type { DeviceRequest, ExecJobStatus, ExecJobSummary, ExecUnmet, GuestSize, WaitingReason } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
 import type { MenuItem } from '@gradient/ui/ui';
+import type { ConfirmRequest } from '@shared/confirm';
+import type { Observable } from 'rxjs';
 import { boardJobLink } from '@features/board/job-kind';
+
+export function abortExecJobConfirm<T>(target: string, action: () => Observable<T>): ConfirmRequest<T> {
+  return {
+    title: 'Abort Exec Job',
+    target,
+    consequence: "The exec job stops and doesn't restart.",
+    confirmLabel: 'Abort',
+    failure: 'Failed to abort the exec job.',
+    severity: 'warn',
+    action,
+  };
+}
 
 export function execJobPhase(status: ExecJobStatus): StatusPhase {
   switch (status) {

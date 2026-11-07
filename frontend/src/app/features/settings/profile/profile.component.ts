@@ -96,6 +96,7 @@ export class ProfileComponent implements OnInit {
   }));
 
   showDeleteDialog = signal(false);
+  savedUsername = signal('');
   errorMessage = signal<string | null>(null);
   successMessage = signal<string | null>(null);
   deleteError = signal<string | null>(null);
@@ -166,6 +167,7 @@ export class ProfileComponent implements OnInit {
         this.isManaged.set(settings.managed);
         this.hasPassword.set(settings.has_password);
         this.loginProviders.set(settings.login_providers);
+        this.savedUsername.set(settings.username);
         this.formData = {
           username: settings.username,
           name: settings.name,

@@ -27,6 +27,7 @@ import {
   TableComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
+import { ConfirmService } from '@shared/confirm';
 import { relativeTime } from '@shared/text';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 
@@ -57,6 +58,7 @@ export class WebhooksComponent implements OnInit {
   private service = inject(WebhooksService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   scope!: WebhookScopeRef;
   title = '';
@@ -66,10 +68,7 @@ export class WebhooksComponent implements OnInit {
   loadError = signal<unknown>(null);
   saving = signal(false);
   formError = signal<string | null>(null);
-  deleteError = signal<string | null>(null);
-  deleting = signal(false);
   togglingId = signal<string | null>(null);
-  rotatingId = signal<string | null>(null);
   webhooks = signal<WebhookResponse[]>([]);
 
   editing = signal<WebhookResponse | null>(null);
@@ -81,7 +80,6 @@ export class WebhooksComponent implements OnInit {
   active = signal(true);
 
   revealedSecret = signal<string | null>(null);
-  confirmDeleteId = signal<string | null>(null);
   testResult = signal<{ id: string; delivery: DeliveryListItem_WebhookDeliveryId | null } | null>(null);
   deliveriesFor = signal<WebhookResponse | null>(null);
   deliveries = signal<DeliveryListItem_WebhookDeliveryId[]>([]);
@@ -218,14 +216,16 @@ export class WebhooksComponent implements OnInit {
   }
 
   rotate(hook: WebhookResponse): void {
-    this.rotatingId.set(hook.id);
-    this.service
-      .rotateSecret(this.scope, hook.id)
-      .pipe(finalize(() => this.rotatingId.set(null)))
-      .subscribe({
-        next: (res) => this.revealedSecret.set(res.secret),
-        error: (err: unknown) => this.notify.failure("Can't rotate webhook secret", err),
-      });
+    this.confirm
+      .confirm({
+        title: 'Rotate webhook secret',
+        target: hook.name,
+        consequence: 'The current secret can no longer verify deliveries. Pass the new secret to the receiving service.',
+        confirmLabel: 'Rotate',
+        failure: "Can't rotate webhook secret.",
+        action: () => this.service.rotateSecret(this.scope, hook.id),
+      })
+      .subscribe((res) => this.revealedSecret.set(res.secret));
   }
 
   testing(hook: WebhookResponse): boolean {
@@ -270,26 +270,18 @@ export class WebhooksComponent implements OnInit {
   }
 
   startDelete(hook: WebhookResponse): void {
-    this.deleteError.set(null);
-    this.confirmDeleteId.set(hook.id);
-  }
-
-  confirmDelete(): void {
-    const id = this.confirmDeleteId();
-    if (!id || this.deleting()) return;
-    this.deleting.set(true);
-    this.deleteError.set(null);
-    this.service.delete(this.scope, id).subscribe({
-      next: () => {
-        this.deleting.set(false);
-        this.confirmDeleteId.set(null);
+    this.confirm
+      .confirm({
+        title: 'Delete webhook',
+        target: hook.name,
+        consequence: 'Deletes the webhook and its delivery history. The deletion is permanent.',
+        confirmLabel: 'Delete',
+        failure: "Can't delete webhook.",
+        action: () => this.service.delete(this.scope, hook.id),
+      })
+      .subscribe(() => {
         this.notify.success('Webhook deleted');
         this.load();
-      },
-      error: (err: unknown) => {
-        this.deleting.set(false);
-        this.deleteError.set(apiErrorMessage(err, "Can't delete webhook."));
-      },
-    });
+      });
   }
 }

@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ApiKeysComponent } from './api-keys.component';
 import { UserService } from '@core/services/user.service';
 import { ApiError } from '@core/services/api.service';
@@ -43,9 +44,11 @@ const managedKey: ApiKeyInfo = {
 };
 
 let notify = { success: vi.fn(), failure: vi.fn() };
+const confirm = vi.fn();
 
 function setup(keys: ApiKeyInfo[], user: object = {}): ComponentFixture<ApiKeysComponent> {
   notify = { success: vi.fn(), failure: vi.fn() };
+  confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   TestBed.configureTestingModule({
     imports: [ApiKeysComponent],
     providers: [
@@ -65,6 +68,7 @@ function setup(keys: ApiKeyInfo[], user: object = {}): ComponentFixture<ApiKeysC
         useValue: { getProjects: () => of({ items: [], total: 0, page: 1, per_page: 100 }) },
       },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(ApiKeysComponent);
@@ -198,27 +202,25 @@ describe('ApiKeysComponent - dialogs', () => {
 });
 
 describe('ApiKeysComponent - row actions', () => {
-  it('reports a failed revoke and clears the busy state', () => {
-    const failure = new ApiError('database is down', 500);
-    const fixture = setup([unmanagedKey], { revokeApiKey: () => throwError(() => failure) });
-    buttonsByText(fixture.nativeElement, 'revoke')[0].click();
-    fixture.detectChanges();
-    expect(notify.failure).toHaveBeenCalledWith('Failed to revoke API key', failure);
-    expect(fixture.componentInstance.revokingId()).toBeNull();
+  it.each([
+    { action: 'revoke', title: 'Revoke API key', method: 'revokeApiKey', sent: 'k1', toast: 'API key revoked' },
+    { action: 'delete', title: 'Delete API key', method: 'deleteApiKey', sent: 'CI key', toast: 'API key deleted' },
+  ])('asks before the $action, naming the key', ({ action, title, method, sent, toast }) => {
+    const request = vi.fn(() => of('ok'));
+    const fixture = setup([unmanagedKey], { [method]: request });
+    buttonsByText(fixture.nativeElement, action)[0].click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title, target: 'CI key' }));
+    expect(request).toHaveBeenCalledWith(sent);
+    expect(notify.success).toHaveBeenCalledWith(toast);
   });
 
-  it('reports a failed delete and clears the busy state', () => {
-    const failure = new ApiError('database is down', 500);
-    const fixture = setup([unmanagedKey], { deleteApiKey: () => throwError(() => failure) });
-    buttonsByText(fixture.nativeElement, 'delete')[0].click();
-    fixture.detectChanges();
-    expect(notify.failure).toHaveBeenCalledWith('Failed to delete API key', failure);
-    expect(fixture.componentInstance.deletingId()).toBeNull();
-  });
-
-  it('confirms a deleted key', () => {
-    const fixture = setup([unmanagedKey], { deleteApiKey: () => of('ok') });
-    buttonsByText(fixture.nativeElement, 'delete')[0].click();
-    expect(notify.success).toHaveBeenCalledWith('API key deleted');
+  it.each(['revoke', 'delete'])('sends no %s when the confirmation is cancelled', (action) => {
+    const revokeApiKey = vi.fn(() => of('ok'));
+    const deleteApiKey = vi.fn(() => of('ok'));
+    const fixture = setup([unmanagedKey], { revokeApiKey, deleteApiKey });
+    confirm.mockImplementation(() => EMPTY);
+    buttonsByText(fixture.nativeElement, action)[0].click();
+    expect(revokeApiKey).not.toHaveBeenCalled();
+    expect(deleteApiKey).not.toHaveBeenCalled();
   });
 });

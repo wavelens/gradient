@@ -57,6 +57,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, canOpenTeam } from '@shared/access';
+import { ConfirmService } from '@shared/confirm';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 
 @Component({
@@ -100,6 +101,7 @@ export class WorkersComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private messageService = inject(MessageService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
   private teamsService = inject(TeamsService);
   private authService = inject(AuthService);
   config = inject(ConfigService);
@@ -288,20 +290,21 @@ export class WorkersComponent implements OnInit {
   }
 
   deleteWorker(worker: ProjectWorkerEntry): void {
-    this.removeWorker(worker).subscribe({
-      error: (error: unknown) => this.notify.failure('Worker delete failed', error),
-    });
+    this.confirm
+      .confirm({
+        title: 'Delete worker',
+        target: worker.display_name,
+        consequence: `Removal of ${worker.display_name} from this project. Builds no longer run on this worker.`,
+        confirmLabel: 'Delete',
+        failure: 'Failed to remove worker.',
+        action: () => this.workersService.deleteWorker(this.projectName, worker.worker_id),
+      })
+      .subscribe(() => this.workerDeleted());
   }
 
-  private removeWorker(worker: ProjectWorkerEntry): Observable<unknown> {
-    this.deletingId.set(worker.worker_id);
-    return this.workersService.deleteWorker(this.projectName, worker.worker_id).pipe(
-      tap(() => {
-        this.notify.success('Worker deleted');
-        this.loadWorkers();
-      }),
-      finalize(() => this.deletingId.set(null)),
-    );
+  private workerDeleted(): void {
+    this.notify.success('Worker deleted');
+    this.loadWorkers();
   }
 
   requestToggleWorker(worker: ProjectWorkerEntry): void {
@@ -426,10 +429,17 @@ export class WorkersComponent implements OnInit {
 
   disconnectGradientCi(worker: ProjectWorkerEntry): void {
     this.disconnectError.set(null);
-    this.removeWorker(worker).subscribe({
-      next: () => this.showGradientCiDisconnect.set(false),
-      error: (error: unknown) => this.disconnectError.set(apiErrorMessage(error, 'Worker delete failed.')),
-    });
+    this.deletingId.set(worker.worker_id);
+    this.workersService
+      .deleteWorker(this.projectName, worker.worker_id)
+      .pipe(finalize(() => this.deletingId.set(null)))
+      .subscribe({
+        next: () => {
+          this.showGradientCiDisconnect.set(false);
+          this.workerDeleted();
+        },
+        error: (error: unknown) => this.disconnectError.set(apiErrorMessage(error, 'Worker delete failed.')),
+      });
   }
 
   closeTokenDialog(): void {

@@ -15,6 +15,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
+import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -75,13 +76,13 @@ export class TaskActionsComponent implements OnInit {
   private teamsService = inject(TeamsService);
   private tasksService = inject(TasksService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = injectTaskAccess();
 
   rowDisabled = computed(
     () =>
       this.testingId() !== null ||
-      this.deletingId() !== null ||
       this.accessSvc.shouldDisableInput(this.access()),
   );
 
@@ -90,14 +91,12 @@ export class TaskActionsComponent implements OnInit {
   triggerRowDisabled = computed(
     () =>
       this.testingId() !== null ||
-      this.deletingId() !== null ||
       this.accessSvc.shouldDisableInput(this.triggerAccess()),
   );
 
   loading = signal(true);
   loadError = signal<unknown>(null);
   saving = signal(false);
-  deletingId = signal<string | null>(null);
   testingId = signal<string | null>(null);
   testSuccessId = signal<string | null>(null);
   testFailureId = signal<string | null>(null);
@@ -120,8 +119,6 @@ export class TaskActionsComponent implements OnInit {
   revealedToken = signal<string | null>(null);
 
   error = signal<string | null>(null);
-  confirmDeleteId = signal<string | null>(null);
-  deleteError = signal<string | null>(null);
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
@@ -218,32 +215,18 @@ export class TaskActionsComponent implements OnInit {
     });
   }
 
-  requestDelete(id: string): void {
-    this.deleteError.set(null);
-    this.confirmDeleteId.set(id);
-  }
-
-  confirmDelete(): void {
-    const id = this.confirmDeleteId();
-    if (!id || this.deletingId()) return;
-    this.deletingId.set(id);
-    this.deleteError.set(null);
-    this.actionsService.delete(this.projectName, this.taskName, id).subscribe({
-      next: () => {
-        this.deletingId.set(null);
-        this.confirmDeleteId.set(null);
-        this.notify.success('Action deleted');
-        this.loadActions();
-      },
-      error: (error: unknown) => {
-        this.deletingId.set(null);
-        this.deleteError.set(apiErrorMessage(error, 'Failed to delete the action.'));
-      },
+  deleteAction(action: ActionResponse): void {
+    this.confirm.confirm({
+      title: 'Delete Action',
+      target: action.name,
+      consequence: "Events no longer trigger this action. This operation can't be undone.",
+      confirmLabel: 'Delete',
+      failure: 'Deleting the action failed.',
+      action: () => this.actionsService.delete(this.projectName, this.taskName, action.id),
+    }).subscribe(() => {
+      this.notify.success('Action deleted');
+      this.loadActions();
     });
-  }
-
-  cancelDelete(): void {
-    this.confirmDeleteId.set(null);
   }
 
   testAction(id: string): void {

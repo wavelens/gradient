@@ -15,7 +15,6 @@ import { apiErrorMessage } from '@core/services/api.service';
 import {
   ButtonComponent,
   CheckboxComponent,
-  DialogComponent,
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
@@ -31,6 +30,7 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheResponse } from '@core/models';
 import { LabelHelpComponent } from '@shared/ui';
+import { ConfirmService } from '@shared/confirm';
 
 @Component({
   selector: 'app-cache-settings',
@@ -39,7 +39,6 @@ import { LabelHelpComponent } from '@shared/ui';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogComponent,
     ButtonComponent,
     InputDirective,
     LoadStateComponent,
@@ -65,6 +64,7 @@ export class CacheSettingsComponent implements OnInit {
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = injectCacheAccess();
 
@@ -72,11 +72,8 @@ export class CacheSettingsComponent implements OnInit {
   loadError = signal<unknown>(null);
   saving = signal(false);
   toggling = signal(false);
-  deleting = signal(false);
 
   cache = signal<CacheResponse | null>(null);
-  showDeleteDialog = signal(false);
-  deleteError = signal<string | null>(null);
   saveError = signal<string | null>(null);
   saveSuccess = signal(false);
 
@@ -199,24 +196,20 @@ export class CacheSettingsComponent implements OnInit {
     });
   }
 
-  openDeleteDialog(): void {
-    this.deleteError.set(null);
-    this.showDeleteDialog.set(true);
-  }
-
   deleteCache(): void {
-    this.deleting.set(true);
-    this.deleteError.set(null);
-    this.cachesService.deleteCache(this.cacheName).subscribe({
-      next: () => {
+    this.confirm
+      .confirm({
+        title: 'Delete cache',
+        target: this.cache()?.display_name ?? this.cacheName,
+        consequence: "This action can't be undone.",
+        confirmLabel: 'Delete',
+        failure: 'Cache deletion failed.',
+        action: () => this.cachesService.deleteCache(this.cacheName),
+      })
+      .subscribe(() => {
         this.notify.success('Cache deleted');
         this.router.navigate(['/caches']);
-      },
-      error: (error: unknown) => {
-        this.deleteError.set(apiErrorMessage(error, 'Cache deletion failed.'));
-        this.deleting.set(false);
-      },
-    });
+      });
   }
 
 }

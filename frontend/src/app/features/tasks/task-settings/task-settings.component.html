@@ -217,7 +217,7 @@
             label="Delete Task"
             icon="delete"
             severity="danger"
-            (click)="openDeleteDialog()"
+            (click)="deleteTask()"
             [appManagedDisable]="access()"
         ></button>
       </gr-row>
@@ -255,20 +255,5 @@ width="420px"
 <div grDialogFooter>
   <button grButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
   <button grButton label="Transfer" icon="send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName.trim()"></button>
-</div>
-</gr-dialog>
-
-<!-- Delete Confirmation Dialog -->
-<gr-dialog
-header="Delete Task"
-[(visible)]="showDeleteDialog"
-[busy]="deleting()"
-[error]="deleteError()"
-width="400px"
->
-<p>Are you sure you want to delete <strong>{{ task()?.display_name }}</strong>? This action cannot be undone.</p>
-<div grDialogFooter>
-  <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-  <button grButton label="Delete" severity="danger" (click)="deleteTask()" [loading]="deleting()" [disabled]="deleting()"></button>
 </div>
 </gr-dialog>

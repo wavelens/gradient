@@ -30,7 +30,7 @@
             @if (canEdit() && member.source !== 'state') {
               <gr-select [ngModel]="member.role" [options]="roles" optionLabel="label" optionValue="value"
                 (ngModelChange)="updateRole(member.user, $event)" />
-              <button grButton icon="close" severity="danger" size="small" [loading]="busy() === member.user"
+              <button grButton icon="close" severity="danger" size="small" [disabled]="busy() === member.user"
                 (click)="removeMember(member.user)"></button>
             } @else {
               <gr-badge severity="neutral">{{ member.role }}</gr-badge>
@@ -51,7 +51,7 @@
           <span slot="meta">Role {{ invitation.role }} · Expires {{ invitation.expires_at | date: 'medium' }}</span>
           @if (canEdit()) {
             <div slot="actions">
-              <button grButton label="Revoke" severity="danger" size="small" [loading]="busy() === invitation.user"
+              <button grButton label="Revoke" severity="danger" size="small"
                 (click)="revokeInvitation(invitation.user)"></button>
             </div>
           }

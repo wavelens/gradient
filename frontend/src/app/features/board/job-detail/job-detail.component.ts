@@ -9,11 +9,9 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, Location } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { BoardService, AssignedJobDetail, InstanceContextView, Windowed } from '@core/services/board.service';
-import { Observable } from 'rxjs';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { AuthService } from '@core/services/auth.service';
-import { apiErrorMessage } from '@core/services/api.service';
 import {
   ButtonComponent,
   DialogComponent,
@@ -25,7 +23,10 @@ import {
 import { formatBytes, formatDuration, formatMegabytes, serverTime } from '@shared/text';
 import { LabelHelpComponent } from '@shared/ui';
 import { JobTimelineComponent } from './job-timeline.component';
-import { EXEC_KIND, execJobLink, jobKindName, jobSubjectLabel } from '../job-kind';
+import { BUILD_KIND, EXEC_KIND, execJobLink, jobKindName, jobSubjectLabel } from '../job-kind';
+import { abortExecJobConfirm } from '@features/exec-jobs/exec-job-status';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget } from '@shared/evaluation';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import {
   PendingJobSummary,
   RuleDescription,
@@ -52,7 +53,7 @@ interface RuleRow {
       </a>
       @if (canAbort()) {
         <button grButton label="Abort" icon="close" severity="danger" size="small"
-                [loading]="aborting()" [disabled]="aborting()" (click)="openAbort()"></button>
+                (click)="abort()"></button>
       }
     </div>
 
@@ -389,22 +390,6 @@ interface RuleRow {
         <button grButton label="Close" severity="secondary" (click)="buildDialog.set(false)"></button>
       </div>
     </gr-dialog>
-
-    <gr-dialog
-      header="Abort job"
-      [(visible)]="abortOpen"
-      [busy]="aborting()"
-      [error]="abortError()"
-      width="400px"
-    >
-      <p>Do you really want to abort the {{ abortTarget() }}?</p>
-      <div grDialogFooter>
-        <button grButton label="Cancel" severity="secondary" [disabled]="aborting()"
-                (click)="abortOpen.set(false)"></button>
-        <button grButton label="Abort" severity="danger" [loading]="aborting()"
-                [disabled]="aborting()" (click)="abortJob()"></button>
-      </div>
-    </gr-dialog>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './job-detail.component.scss',
@@ -415,6 +400,7 @@ export class BoardJobDetailComponent implements OnInit {
   private evaluations = inject(EvaluationsService);
   private execJobs = inject(ExecJobsService);
   private auth = inject(AuthService);
+  private confirm = inject(ConfirmService);
   private destroyRef = inject(DestroyRef);
   private location = inject(Location);
 
@@ -429,9 +415,6 @@ export class BoardJobDetailComponent implements OnInit {
   buildDialog = signal(false);
   buildLoading = signal(false);
   buildError = signal<string | null>(null);
-  abortOpen = signal(false);
-  aborting = signal(false);
-  abortError = signal<string | null>(null);
 
   goBack(event: MouseEvent): void {
     if (!this.cameFromApp || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -443,12 +426,6 @@ export class BoardJobDetailComponent implements OnInit {
     const j = this.job();
     if (!j || j.passed_over || j.finished_at || this.auth.user()?.superuser !== true) return false;
     return j.kind !== EXEC_KIND || !!j.exec_job;
-  });
-
-  abortTarget = computed(() => {
-    const kind = this.job()?.kind;
-    if (kind === EXEC_KIND) return 'exec job';
-    return kind === 1 ? 'build' : 'evaluation';
   });
 
   protected readonly jobKindName = jobKindName;
@@ -551,32 +528,21 @@ export class BoardJobDetailComponent implements OnInit {
     });
   }
 
-  private abortRequest(j: AssignedJobDetail): Observable<unknown> {
-    if (j.kind === EXEC_KIND && j.exec_job) return this.execJobs.abort(j.exec_job.id);
-    return this.board.abortJob(j.id);
+  private abortConfirm(j: AssignedJobDetail): ConfirmRequest<unknown> {
+    if (j.kind === EXEC_KIND && j.exec_job) {
+      const exec = j.exec_job;
+      return abortExecJobConfirm(jobSubjectLabel(null, exec), () => this.execJobs.abort(exec.id));
+    }
+    const action = () => this.board.abortJob(j.id);
+    if (j.kind === BUILD_KIND) return abortBuildConfirm(j.pname ?? j.derivations[0]?.pname ?? j.id, action);
+    const task = j.evaluation?.task ?? (j.project_display_name || j.project_name);
+    return abortEvaluationConfirm(evaluationAbortTarget(task, j.evaluation?.commit), action);
   }
 
-  openAbort(): void {
-    this.abortError.set(null);
-    this.abortOpen.set(true);
-  }
-
-  abortJob(): void {
+  abort(): void {
     const j = this.job();
     if (!j) return;
-    this.aborting.set(true);
-    this.abortError.set(null);
-    this.abortRequest(j).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: () => {
-        this.aborting.set(false);
-        this.abortOpen.set(false);
-        this.loadJob(j.id);
-      },
-      error: (error: unknown) => {
-        this.aborting.set(false);
-        this.abortError.set(apiErrorMessage(error, 'Failed to abort the job.'));
-      },
-    });
+    this.confirm.confirm(this.abortConfirm(j)).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.loadJob(j.id));
   }
 
   openBuild(buildId: string): void {

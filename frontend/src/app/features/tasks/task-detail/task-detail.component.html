@@ -136,7 +136,7 @@
             @if (isRunning(sel.status)) {
               <button *appWritable="triggerAccess()" grButton size="small" label="Abort" icon="close"
                       severity="danger" [loading]="aborting()" [disabled]="aborting()"
-                      (click)="requestAbort($event, sel.id)"></button>
+                      (click)="requestAbort($event, sel)"></button>
             } @else if (retryEvaluationItem(); as retry) {
               <button grButton size="small" label="Retry" icon="replay" severity="secondary"
                       [disabled]="retry.disabled" (click)="retry.command?.()"></button>
@@ -266,23 +266,6 @@
         (actionClick)="access().canTrigger && startEvaluation()" />
     </div>
   }
-
-  <gr-dialog
-    header="Abort evaluation"
-    [visible]="abortTarget() !== null"
-    (visibleChange)="!$event && abortTarget.set(null)"
-    [busy]="aborting()"
-    [error]="abortError()"
-    width="400px"
-  >
-    <p>Do you really want to abort the eval?</p>
-    <div grDialogFooter>
-      <button grButton label="Cancel" severity="secondary" [disabled]="aborting()"
-              (click)="abortTarget.set(null)"></button>
-      <button grButton label="Abort" severity="danger" [loading]="aborting()"
-              [disabled]="aborting()" (click)="confirmAbort()"></button>
-    </div>
-  </gr-dialog>
 
   <gr-dialog
     header="Diagnostic report"

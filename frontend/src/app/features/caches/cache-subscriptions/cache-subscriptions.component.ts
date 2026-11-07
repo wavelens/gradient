@@ -11,6 +11,7 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
 import { SubscriptionRequestItem } from '@core/models';
+import { ConfirmService } from '@shared/confirm';
 import {
   ButtonComponent,
   LoadStateComponent,
@@ -39,6 +40,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Subscriptions' }));
@@ -82,18 +84,19 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
     });
   }
 
-  deny(project: string): void {
-    this.deciding.set(project);
-    this.cachesService.denySubscriptionRequest(this.cacheName, project).subscribe({
-      next: () => {
-        this.deciding.set(null);
+  deny(request: SubscriptionRequestItem): void {
+    this.confirm
+      .confirm({
+        title: 'Deny Subscription Request',
+        target: request.project_display_name,
+        consequence: `${request.project_display_name} can't use this cache. The project can apply again later.`,
+        confirmLabel: 'Deny',
+        failure: 'Failed to deny the subscription request.',
+        action: () => this.cachesService.denySubscriptionRequest(this.cacheName, request.project),
+      })
+      .subscribe(() => {
         this.notify.success('Denied subscription request');
         this.load();
-      },
-      error: (error: unknown) => {
-        this.deciding.set(null);
-        this.notify.failure('Failed to deny subscription request', error);
-      },
-    });
+      });
   }
 }

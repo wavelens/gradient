@@ -13,6 +13,7 @@ import { IntegrationsService } from '@core/services/integrations.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
+import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
   BadgeSeverity,
@@ -109,13 +110,13 @@ export class TaskTriggersComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = injectTaskAccess();
 
   rowDisabled = computed(
     () =>
       this.firingId() !== null ||
-      this.deletingId() !== null ||
       this.makingDefaultId() !== null ||
       this.accessSvc.shouldDisableInput(this.access()),
   );
@@ -125,14 +126,12 @@ export class TaskTriggersComponent implements OnInit {
   triggerRowDisabled = computed(
     () =>
       this.firingId() !== null ||
-      this.deletingId() !== null ||
       this.accessSvc.shouldDisableInput(this.triggerAccess()),
   );
 
   loading = signal(true);
   loadError = signal<unknown>(null);
   saving = signal(false);
-  deletingId = signal<string | null>(null);
   makingDefaultId = signal<string | null>(null);
   firingId = signal<string | null>(null);
   fireSuccessId = signal<string | null>(null);
@@ -306,19 +305,17 @@ export class TaskTriggersComponent implements OnInit {
     });
   }
 
-  deleteTrigger(id: string): void {
-    if (!confirm('Delete this trigger? This cannot be undone.')) return;
-    this.deletingId.set(id);
-    this.triggersService.delete(this.projectName, this.taskName, id).subscribe({
-      next: () => {
-        this.deletingId.set(null);
-        this.notify.success('Trigger deleted');
-        this.loadTriggers();
-      },
-      error: (error: unknown) => {
-        this.deletingId.set(null);
-        this.notify.failure('Failed to delete trigger', error);
-      },
+  deleteTrigger(trigger: TriggerOut): void {
+    this.confirm.confirm({
+      title: 'Delete Trigger',
+      target: `${this.typeLabel(trigger.type)}: ${this.configSummary(trigger)}`,
+      consequence: "Evaluations no longer start from this trigger. You can't undo this.",
+      confirmLabel: 'Delete',
+      failure: 'Failed to delete the trigger.',
+      action: () => this.triggersService.delete(this.projectName, this.taskName, trigger.id),
+    }).subscribe(() => {
+      this.notify.success('Trigger deleted');
+      this.loadTriggers();
     });
   }
 

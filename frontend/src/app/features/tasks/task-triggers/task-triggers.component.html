@@ -101,10 +101,9 @@
                 icon="delete"
                 severity="danger"
                 size="small"
-                [loading]="deletingId() === trigger.id"
                 [disabled]="rowDisabled() || trigger.is_default"
                 [grTooltip]="trigger.is_default ? 'Make another trigger the default first' : ''"
-                (click)="deleteTrigger(trigger.id)"
+                (click)="deleteTrigger(trigger)"
               ></button>
             </div>
           </div>

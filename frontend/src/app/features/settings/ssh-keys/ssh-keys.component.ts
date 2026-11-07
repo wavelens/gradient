@@ -12,6 +12,7 @@ import { ConfigService } from '@core/services/config.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { SshKeyInfo } from '@core/models';
+import { ConfirmService } from '@shared/confirm';
 import {
   ButtonComponent,
   CopyFieldComponent,
@@ -51,11 +52,11 @@ export class SshKeysComponent implements OnInit {
   private userService = inject(UserService);
   private config = inject(ConfigService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   loading = signal(true);
   loadError = signal<unknown>(null);
   saving = signal(false);
-  deletingId = signal<string | null>(null);
   errorMessage = signal<string | null>(null);
   keys = signal<SshKeyInfo[]>([]);
   showDialog = signal(false);
@@ -122,17 +123,18 @@ export class SshKeysComponent implements OnInit {
   }
 
   deleteKey(key: SshKeyInfo): void {
-    this.deletingId.set(key.id);
-    this.userService.deleteSshKey(key.id).subscribe({
-      next: () => {
-        this.deletingId.set(null);
+    this.confirm
+      .confirm({
+        title: 'Delete SSH key',
+        target: key.name,
+        consequence: 'Connections that use this key are refused.',
+        confirmLabel: 'Delete',
+        failure: 'Failed to delete the SSH key.',
+        action: () => this.userService.deleteSshKey(key.id),
+      })
+      .subscribe(() => {
         this.notify.success('Deleted SSH key');
         this.loadKeys();
-      },
-      error: (err: unknown) => {
-        this.deletingId.set(null);
-        this.notify.failure('Failed to delete SSH key', err);
-      },
-    });
+      });
   }
 }

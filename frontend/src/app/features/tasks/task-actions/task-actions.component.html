@@ -107,9 +107,8 @@
                   icon="delete"
                   severity="danger"
                   size="small"
-                  [loading]="deletingId() === action.id"
                   [disabled]="rowDisabled()"
-                  (click)="requestDelete(action.id)"
+                  (click)="deleteAction(action)"
                 ></button>
               </div>
             </div>
@@ -152,21 +151,6 @@
     (closed)="closeDeliveries()"
   />
 }
-
-<gr-dialog
-  header="Delete Action"
-  [visible]="confirmDeleteId() !== null"
-  (visibleChange)="$event || cancelDelete()"
-  [busy]="deletingId() !== null"
-  [error]="deleteError()"
-  width="400px"
->
-  <p>Delete this action? This cannot be undone.</p>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" [disabled]="deletingId() !== null" (click)="cancelDelete()"></button>
-    <button grButton label="Delete" severity="danger" [loading]="deletingId() !== null" (click)="confirmDelete()"></button>
-  </div>
-</gr-dialog>
 
 <gr-dialog
   header="Save this token now"

@@ -64,18 +64,10 @@
         <gr-row>
           Delete Team
           <span slot="meta">Removes the team, its grants, requests, invitations and workers.</span>
-          <button slot="actions" grButton label="Delete Team" icon="delete" severity="danger" (click)="openDelete()"
+          <button slot="actions" grButton label="Delete Team" icon="delete" severity="danger" (click)="remove()"
             [appManagedDisable]="access()"></button>
         </gr-row>
       </gr-settings-section>
     }
   }
 </gr-page-layout>
-
-<gr-dialog header="Delete Team" [(visible)]="showDelete" width="400px" [error]="deleteError()" [busy]="deleting()">
-  <p>Are you sure you want to delete <strong>{{ team()?.display_name }}</strong>? This action cannot be undone.</p>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showDelete.set(false)" [disabled]="deleting()"></button>
-    <button grButton label="Delete" severity="danger" (click)="remove()" [loading]="deleting()"></button>
-  </div>
-</gr-dialog>

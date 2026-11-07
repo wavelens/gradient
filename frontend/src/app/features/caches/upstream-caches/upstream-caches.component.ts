@@ -29,6 +29,7 @@ import {
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { LabelHelpComponent } from '@shared/ui';
+import { ConfirmService } from '@shared/confirm';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
@@ -68,15 +69,11 @@ export class UpstreamCachesComponent implements OnInit {
   private accessSvc = inject(AccessService);
   private messageService = inject(MessageService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = injectCacheAccess();
 
-  rowBusy = computed(
-    () =>
-      this.removingUpstreamId() !== null ||
-      this.togglingUpstreamId() !== null ||
-      this.testingUpstreamId() !== null,
-  );
+  rowBusy = computed(() => this.togglingUpstreamId() !== null || this.testingUpstreamId() !== null);
 
   rowDisabled = computed(() => this.rowBusy() || this.accessSvc.shouldDisableInput(this.access()));
 
@@ -84,7 +81,6 @@ export class UpstreamCachesComponent implements OnInit {
   loadError = signal<unknown>(null);
   addingUpstream = signal(false);
   savingUpstream = signal(false);
-  removingUpstreamId = signal<string | null>(null);
   testingUpstreamId = signal<string | null>(null);
   togglingUpstreamId = signal<string | null>(null);
   probeSuggestsProto = signal(false);
@@ -328,19 +324,20 @@ export class UpstreamCachesComponent implements OnInit {
     });
   }
 
-  removeUpstream(id: string): void {
-    this.removingUpstreamId.set(id);
-    this.cachesService.removeUpstream(this.cacheName, id).subscribe({
-      next: () => {
-        this.removingUpstreamId.set(null);
+  removeUpstream(upstream: UpstreamCacheItem): void {
+    this.confirm
+      .confirm({
+        title: 'Remove upstream cache',
+        target: upstream.display_name,
+        consequence: `This cache stops using ${upstream.display_name} as an upstream. You can add it again later.`,
+        confirmLabel: 'Remove',
+        failure: 'Failed to remove the upstream cache.',
+        action: () => this.cachesService.removeUpstream(this.cacheName, upstream.id),
+      })
+      .subscribe(() => {
         this.notify.success('Upstream cache removed');
         this.loadUpstreamCaches();
-      },
-      error: (error: unknown) => {
-        this.removingUpstreamId.set(null);
-        this.notify.failure('Upstream cache removal failed', error);
-      },
-    });
+      });
   }
 
   /// Writing is the consequential mode, so it reads warmer than reading.

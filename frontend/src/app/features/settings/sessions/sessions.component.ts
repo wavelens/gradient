@@ -10,6 +10,7 @@ import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
 import { SessionInfo } from '@core/models';
 import { deviceName } from '@shared/text';
+import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -37,10 +38,10 @@ import {
 export class SessionsComponent implements OnInit {
   private userService = inject(UserService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
   protected readonly deviceName = deviceName;
 
   loading = signal(true);
-  revokingId = signal<string | null>(null);
   sessions = signal<SessionInfo[]>([]);
   loadError = signal<unknown>(null);
 
@@ -67,17 +68,18 @@ export class SessionsComponent implements OnInit {
     if (s.current) {
       return;
     }
-    this.revokingId.set(s.id);
-    this.userService.revokeSession(s.id).subscribe({
-      next: () => {
-        this.revokingId.set(null);
+    this.confirm
+      .confirm({
+        title: 'Revoke session',
+        target: `${deviceName(s.user_agent)} (${s.ip || 'Unknown IP'})`,
+        consequence: 'Sessions on that device end. Sign in again to use the device.',
+        confirmLabel: 'Revoke',
+        failure: 'Failed to revoke the session.',
+        action: () => this.userService.revokeSession(s.id),
+      })
+      .subscribe(() => {
         this.notify.success('Session revoked');
         this.load();
-      },
-      error: (err: unknown) => {
-        this.revokingId.set(null);
-        this.notify.failure('Failed to revoke session', err);
-      },
-    });
+      });
   }
 }

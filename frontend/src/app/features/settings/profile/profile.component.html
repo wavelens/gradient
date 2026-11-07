@@ -156,9 +156,9 @@
   [error]="deleteError()"
   [busy]="deleting()"
 >
-  <p>Are you sure you want to permanently delete your account? This action cannot be undone.</p>
+  <p>Delete the account <strong>{{ savedUsername() }}</strong> for good. No way to undo this action.</p>
   @if (!hasPassword()) {
-    <gr-form-field label="Type your username to confirm" for="confirm-username" [hint]="formData.username">
+    <gr-form-field label="Type your username to confirm" for="confirm-username" [hint]="savedUsername()">
       <input grInput id="confirm-username" [(ngModel)]="deleteUsernameConfirm" />
     </gr-form-field>
   } @else {
@@ -174,7 +174,7 @@
       severity="danger"
       (click)="deleteAccount()"
       [loading]="deleting()"
-      [disabled]="deleting() || (!hasPassword() ? deleteUsernameConfirm !== formData.username : deletePassword.length === 0)"
+      [disabled]="deleting() || (!hasPassword() ? deleteUsernameConfirm !== savedUsername() : deletePassword.length === 0)"
     ></button>
   </div>
 </gr-dialog>

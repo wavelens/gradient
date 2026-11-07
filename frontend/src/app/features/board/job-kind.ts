@@ -11,6 +11,7 @@ export type JobKindName = 'eval' | 'build' | 'exec';
 const KIND_NAMES: JobKindName[] = ['eval', 'build', 'exec'];
 
 export const EXEC_KIND = KIND_NAMES.indexOf('exec');
+export const BUILD_KIND = KIND_NAMES.indexOf('build');
 
 export function jobKindName(kind: number): string {
   return KIND_NAMES[kind] ?? String(kind);

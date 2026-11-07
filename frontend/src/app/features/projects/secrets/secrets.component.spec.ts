@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Observable, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { vi } from 'vitest';
 import { SecretsComponent } from './secrets.component';
 import { ProjectSecretsService } from '@core/services/project-secrets.service';
@@ -53,6 +54,7 @@ function setup(access: AccessState = admin) {
     put: vi.fn(() => of(listed[0])),
     remove: vi.fn(() => of(undefined)),
   };
+  const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   TestBed.configureTestingModule({
     imports: [SecretsComponent],
     providers: [
@@ -62,10 +64,11 @@ function setup(access: AccessState = admin) {
       { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ project: 'acme' }) } } },
       { provide: ProjectSecretsService, useValue: service },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(SecretsComponent);
-  return { fixture, service };
+  return { fixture, service, confirm };
 }
 
 async function settled(fixture: ComponentFixture<SecretsComponent>) {
@@ -110,8 +113,22 @@ describe('SecretsComponent', () => {
     expect(text).not.toContain('s3cr3t-value');
   });
 
-  it('puts a new secret from the Set secret dialog', async () => {
-    const { fixture, service } = setup();
+  it('puts a new secret from the Set secret dialog without asking', async () => {
+    const { fixture, service, confirm } = setup();
+    await settled(fixture);
+    buttonIn(fixture.nativeElement, 'Set secret')!.click();
+    await settled(fixture);
+    typeInto('secret-name', 'new-token');
+    typeInto('secret-value', 'v');
+    await settled(fixture);
+    buttonIn(document.body, 'Save')!.click();
+    await settled(fixture);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(service.put).toHaveBeenCalledWith('acme', 'new-token', 'v');
+  });
+
+  it('asks before Set secret overwrites an existing secret of the same name', async () => {
+    const { fixture, service, confirm } = setup();
     await settled(fixture);
     buttonIn(fixture.nativeElement, 'Set secret')!.click();
     await settled(fixture);
@@ -120,7 +137,24 @@ describe('SecretsComponent', () => {
     await settled(fixture);
     buttonIn(document.body, 'Save')!.click();
     await settled(fixture);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'wandb-token', confirmLabel: 'Replace' }));
     expect(service.put).toHaveBeenCalledWith('acme', 'wandb-token', 'v');
+    expect(fixture.componentInstance.formOpen()).toBe(false);
+  });
+
+  it('keeps the existing secret when the overwrite is cancelled', async () => {
+    const { fixture, service, confirm } = setup();
+    confirm.mockImplementation(() => EMPTY);
+    await settled(fixture);
+    buttonIn(fixture.nativeElement, 'Set secret')!.click();
+    await settled(fixture);
+    typeInto('secret-name', 'wandb-token');
+    typeInto('secret-value', 'v');
+    await settled(fixture);
+    buttonIn(document.body, 'Save')!.click();
+    await settled(fixture);
+    expect(service.put).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.formOpen()).toBe(true);
   });
 
   it('disables Replace and Delete on a managed secret', async () => {
@@ -132,54 +166,22 @@ describe('SecretsComponent', () => {
     expect(buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.disabled).toBe(false);
   });
 
-  it('asks in a dialog before deleting a secret', async () => {
-    const { fixture, service } = setup();
+  it('asks before deleting a secret, naming it', async () => {
+    const { fixture, service, confirm } = setup();
+    await settled(fixture);
+    buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.click();
+    await settled(fixture);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete secret', target: 'wandb-token' }));
+    expect(service.remove).toHaveBeenCalledWith('acme', 'wandb-token');
+  });
+
+  it('sends no delete when the confirmation is cancelled', async () => {
+    const { fixture, service, confirm } = setup();
+    confirm.mockImplementation(() => EMPTY);
     await settled(fixture);
     buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.click();
     await settled(fixture);
     expect(service.remove).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('Delete secret wandb-token?');
-    buttonIn(document.body.querySelector('.cdk-overlay-container')!, 'Delete')!.click();
-    await settled(fixture);
-    expect(service.remove).toHaveBeenCalledWith('acme', 'wandb-token');
-  });
-
-  it('keeps a failed delete open with the server reason inside the dialog', async () => {
-    const { fixture, service } = setup();
-    service.remove.mockReturnValue(throwError(() => new ApiError('Secret is in use', 409)));
-    await settled(fixture);
-    buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.click();
-    await settled(fixture);
-    buttonIn(document.body.querySelector('.cdk-overlay-container')!, 'Delete')!.click();
-    await settled(fixture);
-    const dialog = document.body.querySelector('.gr-dialog')!;
-    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Secret is in use');
-    expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')).toBeNull();
-
-    buttonIn(dialog, 'Cancel')!.click();
-    await settled(fixture);
-    buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.click();
-    await settled(fixture);
-    expect(document.body.querySelector('.gr-dialog gr-message-banner')).toBeNull();
-  });
-
-  it('keeps the delete dialog open and sends one request while the delete runs', async () => {
-    const { fixture, service } = setup();
-    const pending = new Subject<undefined>();
-    service.remove.mockReturnValue(pending);
-    await settled(fixture);
-    buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.click();
-    await settled(fixture);
-    const dialog = document.body.querySelector('.gr-dialog')!;
-    buttonIn(dialog, 'Delete')!.click();
-    await settled(fixture);
-    buttonIn(dialog, 'Delete')!.click();
-    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    await settled(fixture);
-    expect(service.remove).toHaveBeenCalledTimes(1);
-    expect(fixture.componentInstance.deleteName()).toBe('wandb-token');
-    expect(buttonIn(dialog, 'Cancel')!.disabled).toBe(true);
   });
 
   it('keeps a failed save inside the Set secret dialog', async () => {
@@ -188,7 +190,7 @@ describe('SecretsComponent', () => {
     await settled(fixture);
     buttonIn(fixture.nativeElement, 'Set secret')!.click();
     await settled(fixture);
-    typeInto('secret-name', 'wandb-token');
+    typeInto('secret-name', 'new-token');
     typeInto('secret-value', 'v');
     await settled(fixture);
     buttonIn(document.body, 'Save')!.click();

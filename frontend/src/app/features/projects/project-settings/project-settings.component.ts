@@ -8,7 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Observable, finalize, tap } from 'rxjs';
+import { finalize } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -19,7 +19,6 @@ import {
   ButtonComponent,
   CheckboxComponent,
   CopyFieldComponent,
-  DialogComponent,
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
@@ -32,6 +31,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { ConfirmService } from '@shared/confirm';
 import { AccessState, ProjectResponse } from '@core/models';
 
 @Component({
@@ -42,7 +42,6 @@ import { AccessState, ProjectResponse } from '@core/models';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogComponent,
     ButtonComponent,
     InputDirective,
     CopyFieldComponent,
@@ -74,6 +73,7 @@ export class ProjectSettingsComponent implements OnInit {
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
   protected config = inject(ConfigService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
@@ -81,7 +81,6 @@ export class ProjectSettingsComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   saving = signal(false);
-  deleting = signal(false);
   sshLoading = signal(true);
   sshError = signal<unknown>(null);
   generatingSSH = signal(false);
@@ -89,10 +88,6 @@ export class ProjectSettingsComponent implements OnInit {
   project = signal<ProjectResponse | null>(null);
   sshKey = signal<string>('');
 
-  showDeleteDialog = signal(false);
-  deleteError = signal<string | null>(null);
-  showRegenerateKeyDialog = signal(false);
-  regenerateError = signal<string | null>(null);
   saveError = signal<string | null>(null);
   saveSuccess = signal(false);
 
@@ -187,53 +182,48 @@ export class ProjectSettingsComponent implements OnInit {
     });
   }
 
-  openDeleteDialog(): void {
-    this.deleteError.set(null);
-    this.showDeleteDialog.set(true);
-  }
-
   deleteProject(): void {
-    this.deleting.set(true);
-    this.deleteError.set(null);
-    this.projectsService.deleteProject(this.projectName).subscribe({
-      next: () => {
+    this.confirm
+      .confirm({
+        title: 'Delete project',
+        target: this.project()?.display_name ?? this.projectName,
+        consequence: "This action can't be undone.",
+        confirmLabel: 'Delete',
+        failure: 'Project deletion failed.',
+        action: () => this.projectsService.deleteProject(this.projectName),
+      })
+      .subscribe(() => {
         this.notify.success('Project deleted');
         this.router.navigate(['/projects']);
-      },
-      error: (error: unknown) => {
-        this.deleteError.set(apiErrorMessage(error, 'Project deletion failed.'));
-        this.deleting.set(false);
-      },
-    });
+      });
   }
 
-  openRegenerateKeyDialog(): void {
-    this.regenerateError.set(null);
-    this.showRegenerateKeyDialog.set(true);
-  }
-
-  confirmRegenerateSSHKey(): void {
-    this.regenerateError.set(null);
-    this.requestSSHKey().subscribe({
-      next: () => this.showRegenerateKeyDialog.set(false),
-      error: (error: unknown) => this.regenerateError.set(apiErrorMessage(error, 'SSH key generation failed.')),
-    });
+  regenerateSSHKey(): void {
+    this.confirm
+      .confirm({
+        title: 'Regenerate SSH key',
+        target: this.project()?.display_name ?? this.projectName,
+        consequence: 'The existing key will stop working immediately and any repositories using it will lose access.',
+        confirmLabel: 'Regenerate',
+        failure: 'SSH key generation failed.',
+        action: () => this.projectsService.generateSSHKey(this.projectName),
+      })
+      .subscribe((key) => this.showSSHKey(key));
   }
 
   generateSSHKey(): void {
-    this.requestSSHKey().subscribe({
-      error: (error: unknown) => this.notify.failure('SSH key generation failed', error),
-    });
+    this.generatingSSH.set(true);
+    this.projectsService
+      .generateSSHKey(this.projectName)
+      .pipe(finalize(() => this.generatingSSH.set(false)))
+      .subscribe({
+        next: (key) => this.showSSHKey(key),
+        error: (error: unknown) => this.notify.failure('SSH key generation failed', error),
+      });
   }
 
-  private requestSSHKey(): Observable<string> {
-    this.generatingSSH.set(true);
-    return this.projectsService.generateSSHKey(this.projectName).pipe(
-      tap((key) => {
-        this.sshKey.set(key);
-        this.notify.success('SSH key generated');
-      }),
-      finalize(() => this.generatingSSH.set(false)),
-    );
+  private showSSHKey(key: string): void {
+    this.sshKey.set(key);
+    this.notify.success('SSH key generated');
   }
 }

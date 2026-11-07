@@ -46,8 +46,6 @@
                 icon="delete"
                 severity="danger"
                 (click)="deleteKey(key)"
-                [loading]="deletingId() === key.id"
-                [disabled]="deletingId() !== null"
               ></button>
             </div>
           </gr-row>

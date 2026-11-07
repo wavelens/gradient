@@ -50,7 +50,7 @@
             <button grButton label="Test" icon="play_arrow" severity="secondary" size="small" [loading]="testing(hook)" (click)="test(hook)"></button>
             <button grButton label="Deliveries" icon="list" severity="secondary" size="small" (click)="openDeliveries(hook)"></button>
             <button grButton [label]="hook.active ? 'Disable' : 'Enable'" icon="power_settings_new" severity="secondary" size="small" [loading]="togglingId() === hook.id" (click)="toggleActive(hook)"></button>
-            <button grButton label="Rotate secret" icon="key" severity="secondary" size="small" [loading]="rotatingId() === hook.id" (click)="rotate(hook)"></button>
+            <button grButton label="Rotate secret" icon="key" severity="secondary" size="small" (click)="rotate(hook)"></button>
             <button grButton label="Edit" icon="edit" severity="secondary" size="small" (click)="startEdit(hook)"></button>
             <button grButton label="Delete" icon="delete" severity="danger" size="small" (click)="startDelete(hook)"></button>
           </div>
@@ -86,14 +86,6 @@
   <pre class="secret-reveal">{{ revealedSecret() }}</pre>
   <div grDialogFooter>
     <button grButton label="I've copied it" icon="check" (click)="revealedSecret.set(null)"></button>
-  </div>
-</gr-dialog>
-
-<gr-dialog header="Delete Webhook" [visible]="confirmDeleteId() !== null" (visibleChange)="$event || confirmDeleteId.set(null)" width="400px" [error]="deleteError()" [busy]="deleting()">
-  <p>Delete this webhook and its delivery history? This cannot be undone.</p>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" [disabled]="deleting()" (click)="confirmDeleteId.set(null)"></button>
-    <button grButton label="Delete" severity="danger" [loading]="deleting()" (click)="confirmDelete()"></button>
   </div>
 </gr-dialog>
 

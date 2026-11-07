@@ -18,7 +18,9 @@ import {
   LoadStateComponent,
   PageLayoutComponent,
 } from '@gradient/ui/ui';
+import { Observable, defaultIfEmpty, of } from 'rxjs';
 import { LabelHelpComponent } from '@shared/ui';
+import { ConfirmService } from '@shared/confirm';
 import { ManifestResult } from '@core/models';
 
 @Component({
@@ -34,6 +36,7 @@ export class GithubAppComponent implements OnInit {
   private admin = inject(AdminService);
   private route = inject(ActivatedRoute);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   host = signal<string>('');
   loading = signal(false);
@@ -47,7 +50,7 @@ export class GithubAppComponent implements OnInit {
   private keysVisible = computed(() => this.showResult() && this.credentials() !== null);
 
   private readonly leaveWarning =
-    'The generated credentials are shown only once and cannot be recovered. Leave anyway?';
+    "The server only shows the generated credentials once and there's no way to recover them.";
 
   ngOnInit(): void {
     const ready = this.route.snapshot.queryParamMap.get('ready');
@@ -105,8 +108,19 @@ export class GithubAppComponent implements OnInit {
     });
   }
 
-  canDeactivate(): boolean {
-    return !this.keysVisible() || window.confirm(this.leaveWarning);
+  canDeactivate(): boolean | Observable<boolean> {
+    if (!this.keysVisible()) return true;
+    return this.confirm
+      .confirm({
+        title: 'Leave page',
+        target: 'GitHub App credentials',
+        consequence: this.leaveWarning,
+        confirmLabel: 'Leave',
+        severity: 'warn',
+        failure: 'Failed to leave the page.',
+        action: () => of(true),
+      })
+      .pipe(defaultIfEmpty(false));
   }
 
   @HostListener('window:beforeunload', ['$event'])

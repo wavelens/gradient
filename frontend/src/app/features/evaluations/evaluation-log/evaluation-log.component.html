@@ -304,19 +304,3 @@
     </main>
   </div>
 }
-
-<gr-dialog
-  header="Abort evaluation"
-  [(visible)]="abortConfirmOpen"
-  [busy]="aborting()"
-  [error]="abortError()"
-  width="400px"
->
-  <p>Do you really want to abort the eval?</p>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" [disabled]="aborting()"
-            (click)="abortConfirmOpen.set(false)"></button>
-    <button grButton label="Abort" severity="danger" [loading]="aborting()"
-            [disabled]="aborting()" (click)="abortEvaluation()"></button>
-  </div>
-</gr-dialog>

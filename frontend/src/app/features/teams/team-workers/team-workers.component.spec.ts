@@ -9,7 +9,8 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
-import { Observable, Subject, of, throwError } from 'rxjs';
+import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ApiError } from '@core/services/api.service';
 import { TeamWorkersComponent } from './team-workers.component';
 import { TeamsService } from '@core/services/teams.service';
@@ -46,6 +47,7 @@ function setup(
   const registerWorker = vi.fn().mockReturnValue(of({ token: 'secret' }));
   const removeWorker = vi.fn().mockReturnValue(of('removed'));
   const notify = { success: vi.fn(), failure: vi.fn() };
+  const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   TestBed.configureTestingModule({
     imports: [TeamWorkersComponent],
     providers: [
@@ -56,12 +58,13 @@ function setup(
       { provide: ConfigService, useValue: { gradientCiEnabled: true, gradientCiUrl: 'https://servers.gradient.ci' } },
       { provide: TeamsService, useValue: { workers: list, updateWorker, registerWorker, removeWorker } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(TeamWorkersComponent);
   fixture.componentRef.setInput('team', { ...team, role });
   fixture.detectChanges();
-  return { fixture, updateWorker, registerWorker, removeWorker, notify, root: fixture.nativeElement as HTMLElement };
+  return { fixture, updateWorker, registerWorker, removeWorker, notify, confirm, root: fixture.nativeElement as HTMLElement };
 }
 
 function button(root: Element, label: string): HTMLButtonElement | undefined {
@@ -143,11 +146,19 @@ describe('TeamWorkersComponent', () => {
     expect(fixture.componentInstance.busy()).toBeNull();
   });
 
-  it('confirms a deleted worker', () => {
-    const { fixture, removeWorker, notify } = setup();
-    fixture.componentInstance.remove(connection);
+  it('asks before deleting a worker, naming it, then confirms the deletion', () => {
+    const { root, removeWorker, notify, confirm } = setup();
+    root.querySelector<HTMLButtonElement>('gr-row button.gr-button--danger')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete worker', target: 'Gradient.CI Servers' }));
     expect(removeWorker).toHaveBeenCalledWith('platform', 'g1');
     expect(notify.success).toHaveBeenCalledWith('Worker deleted');
+  });
+
+  it('sends no delete when the confirmation is cancelled', () => {
+    const { fixture, removeWorker, confirm } = setup();
+    confirm.mockImplementation(() => EMPTY);
+    fixture.componentInstance.remove(connection);
+    expect(removeWorker).not.toHaveBeenCalled();
   });
 
   it('hides offline workers until asked to show them', () => {

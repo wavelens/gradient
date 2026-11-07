@@ -39,7 +39,7 @@
                   [options]="roles()"
                   optionLabel="name"
                   optionValue="name"
-                  [disabled]="updatingRole() === member.id || removingMember() !== null || rolesLoading()"
+                  [disabled]="updatingRole() === member.id || rolesLoading()"
                   [appManagedDisable]="access()"
                   (ngModelChange)="updateMemberRole(member.id, $event)"
                 />
@@ -48,8 +48,7 @@
                   grButton
                   icon="close"
                   severity="danger"
-                  [loading]="removingMember() === member.id"
-                  [disabled]="removingMember() !== null || updatingRole() !== null"
+                  [disabled]="updatingRole() !== null"
                   [appManagedDisable]="access()"
                   (click)="removeMember(member.id)"
                 ></button>
@@ -78,8 +77,6 @@
               label="Revoke"
               icon="close"
               severity="danger"
-              [loading]="revokingUser() === invitation.user"
-              [disabled]="revokingUser() !== null"
               [appManagedDisable]="access()"
               (click)="revokeInvitation(invitation.user)"
             ></button>
@@ -132,7 +129,7 @@
                     icon="edit"
                     severity="secondary"
                    
-                    [disabled]="savingRole() || deletingRole() !== null"
+                    [disabled]="savingRole()"
                     [appManagedDisable]="access()"
                     (click)="openEditRoleDialog(role)"
                   ></button>
@@ -142,8 +139,6 @@
                     icon="delete"
                     severity="danger"
                    
-                    [loading]="deletingRole() === role.id"
-                    [disabled]="deletingRole() !== null"
                     [appManagedDisable]="access()"
                     (click)="deleteRole(role)"
                   ></button>

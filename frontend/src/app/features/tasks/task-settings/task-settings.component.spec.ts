@@ -5,10 +5,10 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { NEVER, Observable, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { TaskSettingsComponent } from './task-settings.component';
 import { TasksService } from '@core/services/tasks.service';
@@ -17,6 +17,7 @@ import { AccessState } from '@core/models/access.model';
 import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 
 type AccessCase = { managed: boolean; canEdit: boolean; canTrigger?: boolean };
 
@@ -310,45 +311,26 @@ describe('TaskSettingsComponent - write failures', () => {
     expect(success).toHaveBeenCalledWith('Task deactivated');
   });
 
-  it('keeps the delete dialog open with the server reason when the delete is refused', () => {
+  it('asks first, naming the task, then deletes it and leaves the page', () => {
+    const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm } });
     const fixture = setup(admin);
-    tasks()['deleteTask'] = () => throwError(() => refused);
-    const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
-    const component = fixture.componentInstance;
-    component.openDeleteDialog();
-    fixture.detectChanges();
-    component.deleteTask();
-    fixture.detectChanges();
-
-    expect(component.deleting()).toBe(false);
-    expect(component.showDeleteDialog()).toBe(true);
-    expect(document.body.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('You need admin rights on this project');
-    expect(failure).not.toHaveBeenCalled();
-
-    component.showDeleteDialog.set(false);
-    component.openDeleteDialog();
-    expect(component.deleteError()).toBeNull();
+    const deleteTask = vi.fn(() => of('ok'));
+    tasks()['deleteTask'] = deleteTask;
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    findByText(fixture.nativeElement, 'delete task')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete Task', target: 'Demo' }));
+    expect(deleteTask).toHaveBeenCalledWith('acme', 'demo');
+    expect(navigate).toHaveBeenCalledWith(['/project', 'acme']);
   });
 
-  it('keeps the delete dialog open on Escape and sends one request while the delete runs', () => {
+  it('sends nothing when the delete is cancelled', () => {
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm: vi.fn(() => EMPTY) } });
     const fixture = setup(admin);
-    const deleteTask = vi.fn(() => NEVER);
+    const deleteTask = vi.fn(() => of('ok'));
     tasks()['deleteTask'] = deleteTask;
-    const component = fixture.componentInstance;
-    component.openDeleteDialog();
-    fixture.detectChanges();
-    const panel = document.querySelector('.gr-dialog') as HTMLElement;
-    const confirm = Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete')!;
-    confirm.click();
-    fixture.detectChanges();
-    confirm.click();
-    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    fixture.detectChanges();
-
-    expect(deleteTask).toHaveBeenCalledOnce();
-    expect(component.showDeleteDialog()).toBe(true);
-    expect(panel.getAttribute('aria-busy')).toBe('true');
+    findByText(fixture.nativeElement, 'delete task')!.click();
+    expect(deleteTask).not.toHaveBeenCalled();
   });
 
   it('sends one update when Save Changes is clicked twice', () => {

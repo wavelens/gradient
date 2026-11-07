@@ -23,6 +23,7 @@ import {
 } from '@gradient/ui/ui';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
+import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -70,19 +71,15 @@ export class TaskFlakeInputsComponent implements OnInit {
   private messageService = inject(MessageService);
   private accessSvc = inject(AccessService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = injectTaskAccess();
 
-  rowDisabled = computed(
-    () =>
-      this.deletingId() !== null ||
-      this.accessSvc.shouldDisableInput(this.access()),
-  );
+  rowDisabled = computed(() => this.accessSvc.shouldDisableInput(this.access()));
 
   loading = signal(true);
   loadError = signal<unknown>(null);
   saving = signal(false);
-  deletingId = signal<string | null>(null);
 
   projectName = '';
   taskName = '';
@@ -194,19 +191,17 @@ export class TaskFlakeInputsComponent implements OnInit {
     });
   }
 
-  deleteOverride(id: string): void {
-    if (!confirm('Delete this flake input override? This cannot be undone.')) return;
-    this.deletingId.set(id);
-    this.overridesService.delete(this.projectName, this.taskName, id).subscribe({
-      next: () => {
-        this.deletingId.set(null);
-        this.notify.success('Deleted the override for the flake input');
-        this.loadOverrides();
-      },
-      error: (error: unknown) => {
-        this.deletingId.set(null);
-        this.notify.failure('Failed to delete the override for the flake input', error);
-      },
+  deleteOverride(override: FlakeInputOverrideOut): void {
+    this.confirm.confirm({
+      title: 'Remove Override for Flake Input',
+      target: override.input_name,
+      consequence: "Later evaluations use this input again as flake.lock pinned it. This action can't be undone.",
+      confirmLabel: 'Remove',
+      failure: 'Failed to remove the override for this flake input.',
+      action: () => this.overridesService.delete(this.projectName, this.taskName, override.id),
+    }).subscribe(() => {
+      this.notify.success('Deleted the override for the flake input');
+      this.loadOverrides();
     });
   }
 

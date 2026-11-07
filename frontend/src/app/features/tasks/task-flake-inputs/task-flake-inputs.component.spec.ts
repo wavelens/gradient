@@ -8,16 +8,16 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { NEVER, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, type Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { TaskFlakeInputsComponent } from './task-flake-inputs.component';
 import { NotifyService } from '@core/services/notify.service';
-import { ApiError } from '@core/services/api.service';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessState } from '@core/models/access.model';
 import { FlakeInputOverrideOut } from '@core/models';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
@@ -145,21 +145,29 @@ describe('TaskFlakeInputsComponent', () => {
     expect(comp.editingId()).toBe('o2');
   });
 
-  it('delete calls service after confirm', () => {
-    let deletedId: string | undefined;
-    const svc: Partial<FlakeInputOverridesService> = {
-      list: () => of([override]),
-      delete: (project, proj, id) => { deletedId = id; return of({ deleted: true }); },
-    };
-    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [override], svc);
-    const comp = fixture.componentInstance;
+  function deleteButton(fixture: ComponentFixture<TaskFlakeInputsComponent>): HTMLButtonElement {
+    return (Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[])
+      .find((b) => (b.textContent ?? '').trim().toLowerCase().includes('delete'))!;
+  }
 
-    const origConfirm = window.confirm;
-    window.confirm = () => true;
-    comp.deleteOverride('o1');
-    window.confirm = origConfirm;
+  it('asks first, naming the input, then deletes the override', () => {
+    const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm } });
+    const remove = vi.fn(() => of({ deleted: true }));
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [override], { delete: remove });
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+    deleteButton(fixture).click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'utils' }));
+    expect(remove).toHaveBeenCalledWith('acme', 'demo', 'o1');
+    expect(success).toHaveBeenCalledWith('Deleted the override for the flake input');
+  });
 
-    expect(deletedId).toBe('o1');
+  it('sends nothing when the delete is cancelled', () => {
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm: vi.fn(() => EMPTY) } });
+    const remove = vi.fn(() => of({ deleted: true }));
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [override], { delete: remove });
+    deleteButton(fixture).click();
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it('hides write buttons under read-only access', () => {
@@ -193,22 +201,6 @@ describe('TaskFlakeInputsComponent - load errors', () => {
 
 describe('TaskFlakeInputsComponent - write failures', () => {
   const writer = { managed: false, canEdit: true, canTrigger: true };
-
-  it('reports a failed delete with the server reason and a successful one', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const refused = new ApiError('You need write access to change overrides', 403);
-    const fixture = setup(writer, [override], { delete: () => throwError(() => refused) });
-    const notify = TestBed.inject(NotifyService);
-    const failure = vi.spyOn(notify, 'failure');
-    const success = vi.spyOn(notify, 'success');
-    fixture.componentInstance.deleteOverride('o1');
-    expect(failure).toHaveBeenCalledWith('Failed to delete the override for the flake input', refused);
-    expect(fixture.componentInstance.deletingId()).toBeNull();
-
-    (TestBed.inject(FlakeInputOverridesService) as unknown as Record<string, unknown>)['delete'] = () => of({ deleted: true });
-    fixture.componentInstance.deleteOverride('o1');
-    expect(success).toHaveBeenCalledWith('Deleted the override for the flake input');
-  });
 
   it('keeps the edit dialog open on Escape while the save runs', () => {
     const fixture = setup(writer, [override], { update: () => NEVER });

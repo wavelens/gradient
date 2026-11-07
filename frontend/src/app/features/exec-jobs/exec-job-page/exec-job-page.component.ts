@@ -14,7 +14,6 @@ import {
   BadgeComponent,
   ButtonComponent,
   CopyFieldComponent,
-  DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
@@ -35,9 +34,9 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
-import { apiErrorMessage } from '@core/services/api.service';
+import { ConfirmService } from '@shared/confirm';
 import type { ExecJobPullRequestView, ExecJobResponse } from '@core/models';
-import { deviceLabel, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
+import { abortExecJobConfirm, deviceLabel, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 import { ExecJobInfoComponent } from '../exec-job-info/exec-job-info.component';
@@ -67,7 +66,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
   selector: 'app-exec-job-page',
   standalone: true,
   imports: [
-    RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent, DialogComponent,
+    RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MenuComponent, MessageBannerComponent,
     SelectButtonComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
     LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent,
@@ -88,6 +87,7 @@ export class ExecJobPageComponent implements OnInit {
   private breadcrumbs = inject(BreadcrumbsService);
   private accessService = inject(AccessService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
   private viewer = viewChild(LogViewerComponent);
 
   access = injectTaskAccess();
@@ -106,9 +106,6 @@ export class ExecJobPageComponent implements OnInit {
   logLines = signal<readonly string[]>([]);
   initialLine: number | null = null;
   pullRequests = signal<ExecJobPullRequestView[]>([]);
-  abortOpen = signal(false);
-  aborting = signal(false);
-  abortError = signal<string | null>(null);
   starting = signal(false);
   switchingKeep = signal(false);
   errorMessage = signal<string | null>(null);
@@ -153,7 +150,7 @@ export class ExecJobPageComponent implements OnInit {
     if (!job) return [];
     return execJobMenu(job, this.triggerAccess().canEdit, {
       terminal: { command: () => this.showView('terminal') },
-      abort: () => this.openAbort(),
+      abort: () => this.abort(),
     });
   });
   crumbs = computed(() =>
@@ -252,26 +249,11 @@ export class ExecJobPageComponent implements OnInit {
     this.terminal.set(terminalSocket(`/exec/${this.jobId}/${TERMINAL_PATHS[mode](this.node())}`));
   }
 
-  openAbort(): void {
-    this.abortError.set(null);
-    this.abortOpen.set(true);
-  }
-
-  confirmAbort(): void {
-    if (this.aborting()) return;
-    this.aborting.set(true);
-    this.abortError.set(null);
-    this.execJobs.abort(this.jobId).subscribe({
-      next: () => {
-        this.aborting.set(false);
-        this.abortOpen.set(false);
-        this.notify.success('Exec job aborted');
-        this.watch();
-      },
-      error: (error: unknown) => {
-        this.aborting.set(false);
-        this.abortError.set(apiErrorMessage(error, 'Failed to abort the exec job.'));
-      },
+  abort(): void {
+    const target = this.job()?.entry_point ?? this.jobId;
+    this.confirm.confirm(abortExecJobConfirm(target, () => this.execJobs.abort(this.jobId))).subscribe(() => {
+      this.notify.success('Exec job aborted');
+      this.watch();
     });
   }
 

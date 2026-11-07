@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { NEVER, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, type Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { TaskActionsComponent } from './task-actions.component';
 import { NotifyService } from '@core/services/notify.service';
@@ -21,6 +21,7 @@ import { TeamsService } from '@core/services/teams.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
 import { ActionResponse } from '@core/models';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
@@ -169,49 +170,26 @@ describe('TaskActionsComponent - write failures', () => {
   const writer = { managed: false, canEdit: true, canTrigger: true };
   const refused = new ApiError('You need write access to change actions', 403);
 
-  it('keeps the delete dialog open with the server reason, then closes it on success', () => {
+  it('asks first, naming the action, then deletes it', () => {
+    const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm } });
     const fixture = setup(writer);
-    const service = TestBed.inject(ActionsService) as unknown as Record<string, unknown>;
-    const notify = TestBed.inject(NotifyService);
-    const failure = vi.spyOn(notify, 'failure');
-    const success = vi.spyOn(notify, 'success');
-    const component = fixture.componentInstance;
-
-    service['delete'] = () => throwError(() => refused);
-    component.requestDelete('a-1');
-    fixture.detectChanges();
-    component.confirmDelete();
-    fixture.detectChanges();
-    expect(component.deletingId()).toBeNull();
-    expect(component.confirmDeleteId()).toBe('a-1');
-    expect(document.body.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('You need write access to change actions');
-    expect(failure).not.toHaveBeenCalled();
-
-    service['delete'] = () => of({ deleted: true });
-    component.requestDelete('a-1');
-    expect(component.deleteError()).toBeNull();
-    component.confirmDelete();
-    expect(component.confirmDeleteId()).toBeNull();
+    const remove = vi.fn(() => of({ deleted: true }));
+    (TestBed.inject(ActionsService) as unknown as Record<string, unknown>)['delete'] = remove;
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+    findByText(fixture.nativeElement, 'delete')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete Action', target: 'Notify Ops' }));
+    expect(remove).toHaveBeenCalledWith('acme', 'demo', 'a-1');
     expect(success).toHaveBeenCalledWith('Action deleted');
   });
 
-  it('keeps the delete dialog open on Escape and sends one request while the delete runs', () => {
+  it('sends nothing when the delete is cancelled', () => {
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm: vi.fn(() => EMPTY) } });
     const fixture = setup(writer);
-    const remove = vi.fn(() => NEVER);
+    const remove = vi.fn(() => of({ deleted: true }));
     (TestBed.inject(ActionsService) as unknown as Record<string, unknown>)['delete'] = remove;
-    const component = fixture.componentInstance;
-    component.requestDelete('a-1');
-    fixture.detectChanges();
-    const panel = document.querySelector('.gr-dialog') as HTMLElement;
-    const confirm = Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete')!;
-    confirm.click();
-    fixture.detectChanges();
-    confirm.click();
-    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    fixture.detectChanges();
-    expect(remove).toHaveBeenCalledOnce();
-    expect(component.confirmDeleteId()).toBe('a-1');
-    expect(panel.getAttribute('aria-busy')).toBe('true');
+    findByText(fixture.nativeElement, 'delete')!.click();
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it('sends one create when Create is clicked twice', () => {

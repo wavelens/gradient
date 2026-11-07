@@ -14,6 +14,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
+import { ConfirmService } from '@shared/confirm';
 import {
   AutoCompleteComponent,
   ButtonComponent,
@@ -75,19 +76,17 @@ export class TaskSettingsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   protected config = inject(ConfigService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = injectTaskAccess();
 
   loading = signal(true);
   loadError = signal<unknown>(null);
   saving = signal(false);
-  deleting = signal(false);
   toggling = signal(false);
   transferring = signal(false);
 
   task = signal<TaskResponse | null>(null);
-  showDeleteDialog = signal(false);
-  deleteError = signal<string | null>(null);
   showTransferDialog = signal(false);
   errorMessage = signal<string | null>(null);
   saveSuccess = signal(false);
@@ -298,24 +297,17 @@ export class TaskSettingsComponent implements OnInit {
     });
   }
 
-  openDeleteDialog(): void {
-    this.deleteError.set(null);
-    this.showDeleteDialog.set(true);
-  }
-
   deleteTask(): void {
-    if (this.deleting()) return;
-    this.deleting.set(true);
-    this.deleteError.set(null);
-    this.tasksService.deleteTask(this.projectName, this.taskName).subscribe({
-      next: () => {
-        this.notify.success('Task deleted');
-        this.router.navigate(['/project', this.projectName]);
-      },
-      error: (error: unknown) => {
-        this.deleting.set(false);
-        this.deleteError.set(apiErrorMessage(error, 'Failed to delete the task.'));
-      },
+    this.confirm.confirm({
+      title: 'Delete Task',
+      target: this.task()?.display_name || this.taskName,
+      consequence: "The task and all of its evaluations get removed. This action can't be undone.",
+      confirmLabel: 'Delete',
+      failure: 'Failed to delete the task.',
+      action: () => this.tasksService.deleteTask(this.projectName, this.taskName),
+    }).subscribe(() => {
+      this.notify.success('Task deleted');
+      this.router.navigate(['/project', this.projectName]);
     });
   }
 }

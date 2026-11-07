@@ -14,10 +14,10 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { AccessState, TeamResponse, PatchTeamRequest } from '@core/models';
 import { ManagedDisableDirective, WritableDirective } from '@shared/access';
+import { ConfirmService } from '@shared/confirm';
 import {
   ButtonComponent,
   CheckboxComponent,
-  DialogComponent,
   FormFieldComponent,
   InputDirective,
   LoadingSpinnerComponent,
@@ -48,7 +48,6 @@ interface SettingsForm {
     WritableDirective,
     ButtonComponent,
     CheckboxComponent,
-    DialogComponent,
     FormFieldComponent,
     InputDirective,
     LoadingSpinnerComponent,
@@ -69,6 +68,7 @@ export class TeamSettingsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private authService = inject(AuthService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   readonly roleOptions = [
     { label: 'None', value: '' },
@@ -82,11 +82,8 @@ export class TeamSettingsComponent implements OnInit {
   team = signal<TeamResponse | null>(null);
   loading = signal(true);
   saving = signal(false);
-  deleting = signal(false);
   saved = signal(false);
   error = signal<string | null>(null);
-  deleteError = signal<string | null>(null);
-  showDelete = signal(false);
   form: SettingsForm = this.formOf(null);
 
   isSuperuser = computed(() => this.authService.user()?.superuser === true);
@@ -134,24 +131,20 @@ export class TeamSettingsComponent implements OnInit {
     });
   }
 
-  openDelete(): void {
-    this.deleteError.set(null);
-    this.showDelete.set(true);
-  }
-
   remove(): void {
-    this.deleting.set(true);
-    this.deleteError.set(null);
-    this.teams.remove(this.teamName).subscribe({
-      next: () => {
+    this.confirm
+      .confirm({
+        title: 'Delete team',
+        target: this.team()?.display_name ?? this.teamName,
+        consequence: "This action can't be undone.",
+        confirmLabel: 'Delete',
+        failure: 'Failed to delete the team.',
+        action: () => this.teams.remove(this.teamName),
+      })
+      .subscribe(() => {
         this.notify.success('Team deleted');
         this.router.navigate(['/teams']);
-      },
-      error: (err: unknown) => {
-        this.deleting.set(false);
-        this.deleteError.set(apiErrorMessage(err, 'Failed to delete the team.'));
-      },
-    });
+      });
   }
 
   private accessFor(canEdit: boolean): AccessState {

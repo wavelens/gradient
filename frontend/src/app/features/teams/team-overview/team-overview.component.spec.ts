@@ -9,7 +9,8 @@ import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { EMPTY, Observable, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { TeamOverviewComponent } from './team-overview.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -44,6 +45,8 @@ const request: TeamRequestItem = {
 
 function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().mockReturnValue(of('ok'))) {
   const notify = { success: vi.fn(), failure: vi.fn() };
+  const confirm = vi.fn((confirmRequest: ConfirmRequest): Observable<unknown> => confirmRequest.action());
+  const denyRequest = vi.fn().mockReturnValue(of('ok'));
   TestBed.configureTestingModule({
     imports: [TeamOverviewComponent],
     providers: [
@@ -62,15 +65,17 @@ function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().m
           grants: () => of({ projects: [], caches: [] }),
           requests: () => of([request]),
           approveRequest,
+          denyRequest,
         },
       },
       { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(TeamOverviewComponent);
   fixture.detectChanges();
-  return { fixture, notify, root: fixture.nativeElement as HTMLElement };
+  return { fixture, notify, confirm, denyRequest, root: fixture.nativeElement as HTMLElement };
 }
 
 function render(): HTMLElement {
@@ -105,4 +110,25 @@ describe('TeamOverviewComponent', () => {
     fixture.componentInstance.approve('r1');
     expect(notify.success).toHaveBeenCalledWith('Request approved');
   });
+
+  it('asks before denying a request, naming who asked', () => {
+    const { root, notify, confirm, denyRequest } = setup('admin');
+    denyButton(root).click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Acme', confirmLabel: 'Deny' }));
+    expect(denyRequest).toHaveBeenCalledWith('platform', 'r1');
+    expect(notify.success).toHaveBeenCalledWith('Request denied');
+  });
+
+  it('sends no denial when the confirmation is cancelled', () => {
+    const { root, confirm, denyRequest } = setup('admin');
+    confirm.mockImplementation(() => EMPTY);
+    denyButton(root).click();
+    expect(denyRequest).not.toHaveBeenCalled();
+  });
 });
+
+function denyButton(root: HTMLElement): HTMLButtonElement {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find(
+    (b) => b.querySelector('.gr-button__label')?.textContent?.trim() === 'Deny',
+  )!;
+}

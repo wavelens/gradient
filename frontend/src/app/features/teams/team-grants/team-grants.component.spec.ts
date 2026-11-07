@@ -7,7 +7,8 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { GrantedPart, TeamGrantsComponent } from './team-grants.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -40,6 +41,7 @@ function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false)
     updateCacheGrant: vi.fn().mockReturnValue(of('ok')),
   };
   const notify = { success: vi.fn(), failure: vi.fn() };
+  const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   TestBed.configureTestingModule({
     imports: [TeamGrantsComponent],
     providers: [
@@ -47,6 +49,7 @@ function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false)
       { provide: TeamsService, useValue: service },
       { provide: AuthService, useValue: { user: signal({ superuser }) } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(TeamGrantsComponent);
@@ -59,7 +62,7 @@ function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false)
   const changed = vi.fn();
   fixture.componentInstance.changed.subscribe(changed);
   const text = () => (fixture.nativeElement as HTMLElement).textContent || '';
-  return { fixture, component: fixture.componentInstance, service, text, changed, notify };
+  return { fixture, component: fixture.componentInstance, service, text, changed, notify, confirm };
 }
 
 function grantOf(team: string): TeamGrantEntry {
@@ -205,14 +208,45 @@ describe('TeamGrantsComponent', () => {
     expect(component.showGrant()).toBe(true);
   });
 
-  it('reports a failed removal as a toast', () => {
-    const { component, service, notify, changed } = setup('cache');
-    const failure = new ApiError('Forbidden', 403);
-    service.removeCacheGrant.mockReturnValue(throwError(() => failure));
-    component.remove(grantOf('platform'));
-    expect(notify.failure).toHaveBeenCalledWith('Failed to remove team', failure);
-    expect(component.busy()).toBeNull();
-    expect(changed).not.toHaveBeenCalled();
+  describe('removal', () => {
+    it('asks before removing, naming the team, then removes it', () => {
+      const { fixture, service, notify, changed, confirm } = setup('cache');
+      (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('gr-row button.gr-button--danger')!.click();
+      expect(confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ target: 'Platform', consequence: 'Members of Platform lose their role on this cache.' }),
+      );
+      expect(service.removeCacheGrant).toHaveBeenCalledWith('acme', 'platform');
+      expect(notify.success).toHaveBeenCalledWith('Removed team');
+      expect(changed).toHaveBeenCalled();
+    });
+
+    it('sends nothing when the removal is cancelled', () => {
+      const { component, service, changed, confirm } = setup('cache');
+      confirm.mockImplementation(() => EMPTY);
+      component.remove(grantOf('platform'));
+      expect(service.removeCacheGrant).not.toHaveBeenCalled();
+      expect(changed).not.toHaveBeenCalled();
+    });
+
+    it('says what the project loses when only the workers go', () => {
+      const { component, confirm } = setup('project', 'workers');
+      component.remove(grantOf('platform'));
+      expect(confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ consequence: 'This project can no longer run builds on Platform workers.' }),
+      );
+    });
+
+    it('warns that removing one part of a pending grant withdraws the whole request', () => {
+      const pendingBoth: TeamGrantEntry = { team: 'lab', display_name: 'Lab', role: 'View', users: true, workers: true, pending: true };
+      const { component, service, confirm } = setup('project', 'users');
+      component.remove(pendingBoth);
+      expect(confirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          consequence: 'The whole pending request for Lab can no longer get approval, with workers included.',
+        }),
+      );
+      expect(service.removeProjectGrant).toHaveBeenCalledWith('acme', 'lab');
+    });
   });
 
   it('grants a cache only users with a role', () => {

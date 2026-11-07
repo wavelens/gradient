@@ -31,6 +31,7 @@ import {
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { ConfirmService } from '@shared/confirm';
 import {
   AccessState,
   MemberItem,
@@ -80,6 +81,7 @@ export class MembersRolesComponent implements OnInit {
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
@@ -92,11 +94,8 @@ export class MembersRolesComponent implements OnInit {
   rolesLoadError = signal<unknown>(null);
   invitationsLoadError = signal<unknown>(null);
   addingMember = signal(false);
-  removingMember = signal<string | null>(null);
-  revokingUser = signal<string | null>(null);
   updatingRole = signal<string | null>(null);
   savingRole = signal(false);
-  deletingRole = signal<string | null>(null);
 
   members = signal<MemberItem[]>([]);
   invitations = signal<PendingInvitationItem[]>([]);
@@ -154,18 +153,19 @@ export class MembersRolesComponent implements OnInit {
   }
 
   revokeInvitation(username: string): void {
-    this.revokingUser.set(username);
-    this.projectsService.revokeInvitation(this.projectName, username).subscribe({
-      next: () => {
-        this.revokingUser.set(null);
+    this.confirm
+      .confirm({
+        title: 'Revoke invitation',
+        target: username,
+        consequence: `The invitation to ${username} no longer works. You can invite them again later.`,
+        confirmLabel: 'Revoke',
+        failure: 'Failed to revoke the invitation.',
+        action: () => this.projectsService.revokeInvitation(this.projectName, username),
+      })
+      .subscribe(() => {
         this.notify.success('Invitation revoked');
         this.loadInvitations();
-      },
-      error: (error: unknown) => {
-        this.revokingUser.set(null);
-        this.notify.failure('Failed to revoke invitation', error);
-      },
-    });
+      });
   }
 
   loadRoles(): void {
@@ -247,18 +247,19 @@ export class MembersRolesComponent implements OnInit {
   }
 
   removeMember(username: string): void {
-    this.removingMember.set(username);
-    this.projectsService.removeMember(this.projectName, username).subscribe({
-      next: () => {
-        this.removingMember.set(null);
+    this.confirm
+      .confirm({
+        title: 'Remove member',
+        target: username,
+        consequence: `${username} can no longer access this project.`,
+        confirmLabel: 'Remove',
+        failure: 'Failed to remove the member.',
+        action: () => this.projectsService.removeMember(this.projectName, username),
+      })
+      .subscribe(() => {
         this.notify.success('Member removed');
         this.loadMembers();
-      },
-      error: (error: unknown) => {
-        this.removingMember.set(null);
-        this.notify.failure('Failed to remove member', error);
-      },
-    });
+      });
   }
 
   // ── Roles ────────────────────────────────────────────────────────────────
@@ -326,18 +327,19 @@ export class MembersRolesComponent implements OnInit {
 
   deleteRole(role: RoleResponse_ProjectRoleOwner): void {
     if (role.builtin) return;
-    this.deletingRole.set(role.id);
-    this.projectsService.deleteRole(this.projectName, role.id).subscribe({
-      next: () => {
-        this.deletingRole.set(null);
+    this.confirm
+      .confirm({
+        title: 'Delete role',
+        target: role.name,
+        consequence: `${role.name} is gone for good.`,
+        confirmLabel: 'Delete',
+        failure: 'Failed to delete the role.',
+        action: () => this.projectsService.deleteRole(this.projectName, role.id),
+      })
+      .subscribe(() => {
         this.notify.success('Role deleted');
         this.loadRoles();
-      },
-      error: (error: unknown) => {
-        this.deletingRole.set(null);
-        this.notify.failure('Failed to delete role', error);
-      },
-    });
+      });
   }
 
 

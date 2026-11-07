@@ -31,6 +31,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { ConfirmService } from '@shared/confirm';
 import { CreateCacheButtonComponent, CreateCacheDialogComponent } from '@shared/forms';
 import { AccessState, CacheSubscriptionItem } from '@core/models';
 
@@ -71,6 +72,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   private auth = inject(AuthService);
   private config = inject(ConfigService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
   canCreateCache = computed(() => this.config.canCreate(this.config.createCache, this.auth.user()?.superuser === true));
@@ -79,7 +81,6 @@ export class CacheSubscriptionsComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   subscribing = signal(false);
-  unsubscribingId = signal<string | null>(null);
   showSubscribeDialog = signal(false);
   errorMessage = signal<string | null>(null);
 
@@ -174,18 +175,22 @@ export class CacheSubscriptionsComponent implements OnInit {
     });
   }
 
-  unsubscribeCache(cache: { id: string; name: string }): void {
-    this.unsubscribingId.set(cache.id);
-    this.projectsService.unsubscribeCache(this.projectName, cache.name).subscribe({
-      next: () => {
-        this.unsubscribingId.set(null);
+  unsubscribeCache(cache: CacheSubscriptionItem): void {
+    const pending = cache.status === 'pending';
+    this.confirm
+      .confirm({
+        title: pending ? 'Withdraw Subscription Request' : 'Unsubscribe from Cache',
+        target: cache.name,
+        consequence: pending
+          ? `Delete the subscription request to ${cache.name}.`
+          : `Builds for this project no longer use ${cache.name}.`,
+        confirmLabel: pending ? 'Withdraw' : 'Unsubscribe',
+        failure: 'Failed to delete the subscription.',
+        action: () => this.projectsService.unsubscribeCache(this.projectName, cache.name),
+      })
+      .subscribe(() => {
         this.notify.success('Removed cache subscription');
         this.loadCaches();
-      },
-      error: (error: unknown) => {
-        this.unsubscribingId.set(null);
-        this.notify.failure('Failed to remove subscription', error);
-      },
-    });
+      });
   }
 }

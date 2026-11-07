@@ -8,12 +8,13 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { NEVER, Observable, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, Observable, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { UpstreamCachesComponent, probeSummary } from './upstream-caches.component';
 import { CachesService } from '@core/services/caches.service';
 import { AccessState } from '@core/models/access.model';
 import { MessageService } from '@gradient/ui/ui';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
@@ -68,6 +69,7 @@ function setup(
   access: AccessState,
   upstreamCaches: unknown[] | (() => Observable<unknown[]>) = oneUpstream,
   updateUpstream: (...args: unknown[]) => unknown = () => of('ok'),
+  extra: { removeUpstream?: unknown; confirm?: unknown } = {},
 ): ComponentFixture<UpstreamCachesComponent> {
   TestBed.configureTestingModule({
     imports: [UpstreamCachesComponent],
@@ -82,8 +84,10 @@ function setup(
           getCache: () => of({ display_name: 'Demo' }),
           getUpstreamCaches: Array.isArray(upstreamCaches) ? () => of(upstreamCaches) : upstreamCaches,
           updateUpstream,
+          removeUpstream: extra.removeUpstream ?? vi.fn(() => of('ok')),
         },
       },
+      ...(extra.confirm ? [{ provide: ConfirmService, useValue: { confirm: extra.confirm } }] : []),
     ],
   });
   const fixture = TestBed.createComponent(UpstreamCachesComponent);
@@ -278,5 +282,28 @@ describe('UpstreamCachesComponent - write failures', () => {
     expect(updateUpstream).toHaveBeenCalledTimes(1);
     expect(component.showEditDialog()).toBe(true);
     expect(dialog.getAttribute('aria-busy')).toBe('true');
+  });
+});
+
+describe('UpstreamCachesComponent - removal', () => {
+  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  it('asks before removing and names the upstream cache', () => {
+    const removeUpstream = vi.fn(() => of('ok'));
+    const confirm = vi.fn((request: ConfirmRequest) => request.action());
+    const fixture = setup(admin, oneUpstream, undefined, { removeUpstream, confirm });
+    findIconButton(fixture.nativeElement, 'delete')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Upstream A' }));
+    expect(removeUpstream).toHaveBeenCalledWith('demo', 'u1');
+    expect(TestBed.inject(MessageService).messages()).toContainEqual(
+      expect.objectContaining({ severity: 'success', summary: 'Upstream cache removed' }),
+    );
+  });
+
+  it('sends nothing when the removal is cancelled', () => {
+    const removeUpstream = vi.fn(() => of('ok'));
+    const fixture = setup(admin, oneUpstream, undefined, { removeUpstream, confirm: vi.fn(() => EMPTY) });
+    findIconButton(fixture.nativeElement, 'delete')!.click();
+    expect(removeUpstream).not.toHaveBeenCalled();
   });
 });

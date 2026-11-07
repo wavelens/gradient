@@ -10,7 +10,7 @@ import { ActivatedRoute, ParamMap, Router, convertToParamMap, provideRouter } fr
 import { HttpHeaders, HttpResponse, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { vi } from 'vitest';
-import { BehaviorSubject, NEVER, Subject, of, throwError } from 'rxjs';
+import { BehaviorSubject, EMPTY, NEVER, type Observable, Subject, of, throwError } from 'rxjs';
 import { TaskDetailComponent } from './task-detail.component';
 import { TasksService } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
@@ -22,6 +22,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
 import { AccessState } from '@core/models/access.model';
 import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 
 function zeroCounts(): BuildStatusCounts {
   return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0 };
@@ -158,10 +159,12 @@ function setup(
   query: BehaviorSubject<ParamMap>;
   frames: Subject<LiveEvent>;
   notify: { success: ReturnType<typeof vi.fn>; failure: ReturnType<typeof vi.fn> };
+  confirm: ReturnType<typeof vi.fn>;
 } {
   const query = new BehaviorSubject(convertToParamMap({}));
   const frames = new Subject<LiveEvent>();
   const notify = { success: vi.fn(), failure: vi.fn() };
+  const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   const tasksService = makeTasksService(access, serviceOverrides);
   const evaluationsService = {
     prioritizeEvaluation: () => of('Success'),
@@ -187,11 +190,12 @@ function setup(
       { provide: StarsService, useValue: { starred: vi.fn(() => of(true)), set: () => of(true) } },
       { provide: LiveService, useValue: { connect: () => frames } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(TaskDetailComponent);
   fixture.detectChanges();
-  return { fixture, tasksService, evaluationsService, query, frames, notify };
+  return { fixture, tasksService, evaluationsService, query, frames, notify, confirm };
 }
 
 const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
@@ -921,102 +925,55 @@ describe('TaskDetailComponent - evaluation selection', () => {
 });
 
 describe('TaskDetailComponent - abort modal', () => {
-  it('abort opens the confirm modal without immediately calling the service', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
-    const spy = vi.spyOn(tasksService, 'abortEvaluation');
-    fixture.componentInstance.abortTarget.set('e1');
-    fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog')).toBeTruthy();
-    expect(spy).not.toHaveBeenCalled();
+  const edit = { managed: false, canEdit: true, canTrigger: true };
+  const abortButton = (fixture: ComponentFixture<TaskDetailComponent>) =>
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.panel-actions button[label="Abort"]')!;
+
+  it('asks first on a plain click of Abort, naming the task and commit, then aborts', () => {
+    const { fixture, tasksService, confirm, notify } = setup(edit);
+    const spy = vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(of('Success'));
+    abortButton(fixture).click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Evaluation', target: 'Demo · abc1234d' }));
+    expect(spy).toHaveBeenCalledWith('acme', 'demo', 'e1');
+    expect(notify.success).toHaveBeenCalledWith('Evaluation aborted');
   });
 
-  it('asks first on a plain click of Abort', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+  it('sends nothing when the abort is cancelled', () => {
+    const { fixture, tasksService, confirm } = setup(edit);
+    confirm.mockImplementation(() => EMPTY);
     const spy = vi.spyOn(tasksService, 'abortEvaluation');
-    const component = fixture.componentInstance;
-    component.requestAbort(new MouseEvent('click'), 'e1');
-    expect(component.abortTarget()).toBe('e1');
+    abortButton(fixture).click();
+    expect(confirm).toHaveBeenCalledOnce();
     expect(spy).not.toHaveBeenCalled();
   });
 
   it('aborts at once on a Ctrl click, with no confirm modal', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const { fixture, tasksService, confirm } = setup(edit);
     const spy = vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(NEVER);
     const component = fixture.componentInstance;
-    component.requestAbort(new MouseEvent('click', { ctrlKey: true }), 'e1');
+    component.requestAbort(new MouseEvent('click', { ctrlKey: true }), component.evaluations()[0]);
     expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, 'e1');
-    expect(component.abortTarget()).toBeNull();
-  });
-
-  it('confirmAbort calls the service with the targeted evaluation id', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
-    const spy = vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(of('Success'));
-    const component = fixture.componentInstance;
-    component.abortTarget.set('e1');
-    component.confirmAbort();
-    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, 'e1');
-  });
-
-  /// Aborting takes a server round trip, so the dialog stays up and busy
-  /// rather than closing on a request that has not landed yet.
-  it('holds the dialog open and busy while the abort is in flight', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
-    vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(NEVER);
-    const component = fixture.componentInstance;
-    component.abortTarget.set('e1');
-    component.confirmAbort();
+    expect(confirm).not.toHaveBeenCalled();
     expect(component.aborting()).toBe(true);
-    expect(component.abortTarget()).toBe('e1');
-  });
-
-  it('ignores Escape and the backdrop while the abort is in flight', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
-    vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(NEVER);
-    const component = fixture.componentInstance;
-    component.requestAbort(new MouseEvent('click'), 'e1');
-    fixture.detectChanges();
-    component.confirmAbort();
-    fixture.detectChanges();
-    const panel = document.querySelector('.gr-dialog') as HTMLElement;
-    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    fixture.detectChanges();
-    expect(component.abortTarget()).toBe('e1');
-    expect(panel.getAttribute('aria-busy')).toBe('true');
-  });
-
-  it('keeps the dialog open with the server reason when the abort is refused', () => {
-    const { fixture, tasksService, notify } = setup({ managed: false, canEdit: true, canTrigger: true });
-    vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(throwError(() => new ApiError('Evaluation already finished', 409)));
-    const component = fixture.componentInstance;
-    component.requestAbort(new MouseEvent('click'), 'e1');
-    component.confirmAbort();
-    fixture.detectChanges();
-    expect(component.aborting()).toBe(false);
-    expect(component.abortTarget()).toBe('e1');
-    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Evaluation already finished');
-    expect(notify.failure).not.toHaveBeenCalled();
-
-    component.abortTarget.set(null);
-    component.requestAbort(new MouseEvent('click'), 'e1');
-    expect(component.abortError()).toBeNull();
   });
 
   it('reports a refused Ctrl-click abort as a toast, since no dialog is open', () => {
-    const { fixture, tasksService, notify } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const { fixture, tasksService, notify } = setup(edit);
     const error = new ApiError('Evaluation already finished', 409);
     vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(throwError(() => error));
-    fixture.componentInstance.requestAbort(new MouseEvent('click', { ctrlKey: true }), 'e1');
+    const component = fixture.componentInstance;
+    component.requestAbort(new MouseEvent('click', { ctrlKey: true }), component.evaluations()[0]);
     expect(notify.failure).toHaveBeenCalledWith('Failed to abort evaluation', error);
+    expect(component.aborting()).toBe(false);
   });
 
-  it('ignores a second confirm while one abort is still running', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+  it('ignores a second Ctrl click while one abort is still running', () => {
+    const { fixture, tasksService } = setup(edit);
     const spy = vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(NEVER);
     const component = fixture.componentInstance;
-    component.abortTarget.set('e1');
-    component.confirmAbort();
-    component.confirmAbort();
+    const ctrlClick = new MouseEvent('click', { ctrlKey: true });
+    component.requestAbort(ctrlClick, component.evaluations()[0]);
+    component.requestAbort(ctrlClick, component.evaluations()[0]);
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });
@@ -1397,14 +1354,24 @@ describe('TaskDetailComponent entry point abort and retry', () => {
   const run = (fixture: ComponentFixture<TaskDetailComponent>, label: string) =>
     fixture.componentInstance.pkgMenuModel().find(i => i.label === label)!.command!();
 
-  it('aborts a pending entry point of a running evaluation by its build id', () => {
-    const { fixture, evaluationsService } = setup(edit);
+  it('asks first, naming the entry point, then aborts it by its build id', () => {
+    const { fixture, evaluationsService, confirm } = setup(edit);
     const spy = vi.spyOn(evaluationsService, 'abortBuild');
     const labels = pkgLabels(fixture, entryPoint('Building'));
     expect(labels).toContain('Abort');
     expect(labels).not.toContain('Retry');
     run(fixture, 'Abort');
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Build', target: 'packages."x86_64-linux".hello' }));
     expect(spy).toHaveBeenCalledWith('b-hello');
+  });
+
+  it('sends no entry point abort when it is cancelled', () => {
+    const { fixture, evaluationsService, confirm } = setup(edit);
+    confirm.mockImplementation(() => EMPTY);
+    const spy = vi.spyOn(evaluationsService, 'abortBuild');
+    pkgLabels(fixture, entryPoint('Building'));
+    run(fixture, 'Abort');
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it('retries a failed entry point by its build id', () => {

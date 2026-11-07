@@ -23,6 +23,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { TeamGrantEntry, TeamSummary } from '@core/models';
 import { canOpenTeam } from '@shared/access';
+import { ConfirmService } from '@shared/confirm';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -67,6 +68,7 @@ export class TeamGrantsComponent implements OnInit {
   private teams = inject(TeamsService);
   private authService = inject(AuthService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   kind = input.required<'project' | 'cache'>();
   name = input.required<string>();
@@ -82,7 +84,7 @@ export class TeamGrantsComponent implements OnInit {
   myTeams = signal<TeamSummary[]>([]);
   suggestions = signal<string[]>([]);
   grantError = signal<string | null>(null);
-  busy = signal<string | null>(null);
+  granting = signal(false);
   showGrant = signal(false);
   form: GrantForm = { team: '', role: '' };
 
@@ -124,21 +126,51 @@ export class TeamGrantsComponent implements OnInit {
     const request =
       this.kind() === 'project' ? this.grantProject(form) : this.teams.grantCache(this.name(), form.team, form.role);
     this.grantError.set(null);
-    this.run('grant', request, {
-      done: () => {
+    this.granting.set(true);
+    request.subscribe({
+      next: () => {
+        this.granting.set(false);
         this.showGrant.set(false);
         this.notify.success('Granted to team');
+        this.refresh();
       },
-      failed: (err) => this.grantError.set(apiErrorMessage(err, 'Failed to grant to team.')),
+      error: (err: unknown) => {
+        this.granting.set(false);
+        this.grantError.set(apiErrorMessage(err, 'Failed to grant to team.'));
+      },
     });
   }
 
   remove(grant: TeamGrantEntry): void {
-    const request = this.kind() === 'project' ? this.removeFromProject(grant) : this.teams.removeCacheGrant(this.name(), grant.team);
-    this.run(grant.team, request, {
-      done: () => this.notify.success('Removed team'),
-      failed: (err) => this.notify.failure('Failed to remove team', err),
-    });
+    this.confirm
+      .confirm({
+        title: 'Remove Team',
+        target: grant.display_name,
+        consequence: this.removalConsequence(grant),
+        confirmLabel: 'Remove',
+        failure: 'Could not remove the team.',
+        action: () =>
+          this.kind() === 'project' ? this.removeFromProject(grant) : this.teams.removeCacheGrant(this.name(), grant.team),
+      })
+      .subscribe(() => {
+        this.notify.success('Removed team');
+        this.refresh();
+      });
+  }
+
+  private removalConsequence(grant: TeamGrantEntry): string {
+    const team = grant.display_name;
+    const users = this.part() === 'users';
+    const otherPart = this.kind() === 'project' && (users ? grant.workers : grant.users);
+    if (grant.pending) {
+      return otherPart
+        ? `The whole pending request for ${team} can no longer get approval, with ${users ? 'workers' : 'member roles'} included.`
+        : `The pending request for ${team} can no longer get approval.`;
+    }
+    if (this.kind() === 'cache') return `Members of ${team} lose their role on this cache.`;
+    return users
+      ? `Members of ${team} lose their role on this project.`
+      : `This project can no longer run builds on ${team} workers.`;
   }
 
   private teamNamed(typed: string): string {
@@ -170,19 +202,8 @@ export class TeamGrantsComponent implements OnInit {
     return this.teams.removeProjectGrant(this.name(), grant.team);
   }
 
-  private run(key: string, request: Observable<string>, outcome: { done: () => void; failed: (err: unknown) => void }): void {
-    this.busy.set(key);
-    request.subscribe({
-      next: () => {
-        this.busy.set(null);
-        outcome.done();
-        this.load();
-        this.changed.emit();
-      },
-      error: (err: unknown) => {
-        this.busy.set(null);
-        outcome.failed(err);
-      },
-    });
+  private refresh(): void {
+    this.load();
+    this.changed.emit();
   }
 }

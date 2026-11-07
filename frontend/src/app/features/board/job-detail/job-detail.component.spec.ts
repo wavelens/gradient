@@ -7,8 +7,9 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter, RouterLink } from '@angular/router';
 import { By } from '@angular/platform-browser';
-import { EMPTY, Subject, of, throwError } from 'rxjs';
-import { ApiError } from '@core/services/api.service';
+import { EMPTY, type Observable, of, throwError } from 'rxjs';
+import { vi } from 'vitest';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { BoardJobDetailComponent } from './job-detail.component';
 import { BoardService, AssignedJobDetail } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
@@ -470,57 +471,48 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     expect(job.textContent).not.toContain('Fetch flake');
   });
 
-  it('aborts the exec job, not its evaluation', () => {
+  function fakeConfirm(confirmed = true) {
+    const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => (confirmed ? request.action() : EMPTY));
+    TestBed.overrideProvider(ConfirmService, { useValue: { confirm } });
+    return confirm;
+  }
+
+  it('aborts the exec job, not its evaluation, after naming it', () => {
     const aborted: string[] = [];
-    TestBed.overrideProvider(ExecJobsService, { useValue: { abort: (id: string) => { aborted.push(id); return EMPTY; } } });
+    const confirm = fakeConfirm();
+    TestBed.overrideProvider(ExecJobsService, { useValue: { abort: (id: string) => { aborted.push(id); return of('Success'); } } });
     TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: true }) } });
     const fixture = setup({ getJob: () => of({ ...EXEC_DETAIL, finished_at: null, outcome: null }) });
     const cmp = fixture.componentInstance;
     expect(cmp.canAbort()).toBe(true);
-    expect(cmp.abortTarget()).toBe('exec job');
-    cmp.abortJob();
+    cmp.abort();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Exec Job', target: 'nightly: apps.x86_64-linux.train (node 1)' }));
     expect(aborted).toEqual(['x1']);
   });
 
-  it('aborts a running build or eval job on the board, with or without its build', () => {
+  it('aborts a running build or eval job on the board, naming the package or the task and commit', () => {
     const aborted: string[] = [];
+    const confirm = fakeConfirm();
     TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: true }) } });
-    const abortJob = (id: string) => { aborted.push(id); return EMPTY; };
+    const abortJob = (id: string) => { aborted.push(id); return of('Success'); };
     const fixture = setup({ getJob: () => of({ ...DETAIL, build_id: null }), abortJob });
     const cmp = fixture.componentInstance;
     expect(cmp.canAbort()).toBe(true);
-    cmp.abortJob();
+    cmp.abort();
+    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Abort Build', target: 'foo' }));
     cmp.job.set({ ...EVAL_DETAIL, id: 'job-2', finished_at: null });
-    cmp.abortJob();
+    cmp.abort();
+    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Abort Evaluation', target: 'ci · abc1234d' }));
     expect(aborted).toEqual(['job-1', 'job-2']);
   });
 
-  it('keeps the abort dialog open while the abort runs and shows a refusal inside it', () => {
-    const pending = new Subject<string>();
+  it('sends nothing when the abort is cancelled', () => {
+    const abortJob = vi.fn(() => of('Success'));
+    fakeConfirm(false);
     TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: true }) } });
-    const fixture = setup({ abortJob: () => pending });
-    const cmp = fixture.componentInstance;
-    cmp.openAbort();
-    fixture.detectChanges();
-    const panel = () => document.querySelector('.gr-dialog') as HTMLElement | null;
-    const confirm = Array.from(panel()!.querySelectorAll('button')).find((b) => b.textContent?.includes('Abort'))!;
-    confirm.click();
-    fixture.detectChanges();
-
-    panel()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    fixture.detectChanges();
-    expect(cmp.abortOpen()).toBe(true);
-    expect(panel()!.getAttribute('aria-busy')).toBe('true');
-
-    pending.error(new ApiError('Job already finished', 409));
-    fixture.detectChanges();
-    expect(cmp.abortOpen()).toBe(true);
-    expect(panel()!.querySelector('gr-message-banner')?.textContent).toContain('Job already finished');
-
-    cmp.abortOpen.set(false);
-    cmp.openAbort();
-    expect(cmp.abortError()).toBeNull();
+    const fixture = setup({ abortJob });
+    fixture.componentInstance.abort();
+    expect(abortJob).not.toHaveBeenCalled();
   });
 
   it('finds a pending exec job by its exec job id', () => {

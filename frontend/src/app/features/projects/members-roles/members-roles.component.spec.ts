@@ -8,8 +8,10 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
+import { RoleResponse_ProjectRoleOwner } from '@core/models';
 import { MembersRolesComponent } from './members-roles.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { UserService } from '@core/services/user.service';
@@ -32,9 +34,13 @@ const revokeInvitation = vi.fn().mockReturnValue(of('Invitation revoked'));
 const getMembers = vi.fn();
 const removeMember = vi.fn();
 const addMember = vi.fn();
+const deleteRole = vi.fn();
 const notify = { success: vi.fn(), failure: vi.fn() };
+const confirm = vi.fn();
 
 function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
+  confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
+  deleteRole.mockReset().mockReturnValue(of(true));
   revokeInvitation.mockReset().mockReturnValue(of('Invitation revoked'));
   getMembers.mockReset().mockReturnValue(of([{ id: 'alice', name: 'Admin' }]));
   removeMember.mockReset().mockReturnValue(of('ok'));
@@ -71,8 +77,10 @@ function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
           revokeInvitation,
           removeMember,
           addMember,
+          deleteRole,
         },
       },
+      { provide: ConfirmService, useValue: { confirm } },
       { provide: UserService, useValue: { listUsers: () => of([]) } },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
       { provide: NotifyService, useValue: notify },
@@ -116,34 +124,48 @@ describe('MembersRolesComponent - pending invitations', () => {
     expect(text).toContain('bob');
   });
 
-  it('revokes a pending invitation', async () => {
+  it('asks before revoking a pending invitation, naming the invited user', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
     (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'bob' }));
     expect(revokeInvitation).toHaveBeenCalledWith('acme', 'bob');
+    expect(notify.success).toHaveBeenCalledWith('Invitation revoked');
   });
 
-  it('reports a failed revoke as a toast, not inside the closed Add Member dialog', async () => {
+  it('sends no revoke when the confirmation is cancelled', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
-    revokeInvitation.mockReturnValue(throwError(() => failure));
+    confirm.mockImplementation(() => EMPTY);
     await settled(fixture);
     (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
-    expect(notify.failure).toHaveBeenCalledWith('Failed to revoke invitation', failure);
-    expect(fixture.componentInstance.memberError()).toBeNull();
-    expect(fixture.componentInstance.revokingUser()).toBeNull();
+    expect(revokeInvitation).not.toHaveBeenCalled();
   });
 });
 
-describe('MembersRolesComponent - write failures', () => {
-  it('reports a failed member removal', async () => {
+describe('MembersRolesComponent - writes', () => {
+  it('asks before removing a member, naming the member', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
-    removeMember.mockReturnValue(throwError(() => failure));
+    await settled(fixture);
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('gr-row-list button.gr-button--danger')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Remove member', target: 'alice' }));
+    expect(removeMember).toHaveBeenCalledWith('acme', 'alice');
+    expect(notify.success).toHaveBeenCalledWith('Member removed');
+  });
+
+  it('sends no member removal when the confirmation is cancelled', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    confirm.mockImplementation(() => EMPTY);
     await settled(fixture);
     fixture.componentInstance.removeMember('alice');
-    expect(notify.failure).toHaveBeenCalledWith('Failed to remove member', failure);
-    expect(fixture.componentInstance.removingMember()).toBeNull();
+    expect(removeMember).not.toHaveBeenCalled();
+  });
+
+  it('asks before deleting a role, naming the role', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    fixture.componentInstance.deleteRole({ id: 'r2', name: 'releaser', builtin: false } as RoleResponse_ProjectRoleOwner);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete role', target: 'releaser' }));
+    expect(deleteRole).toHaveBeenCalledWith('acme', 'r2');
   });
 
   it('keeps a failed add inside the open Add Member dialog', async () => {

@@ -8,8 +8,9 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { CacheMembersRolesComponent } from './cache-members-roles.component';
 import { CachesService } from '@core/services/caches.service';
 import { UserService } from '@core/services/user.service';
@@ -38,8 +39,10 @@ const getMembers = vi.fn();
 const removeMember = vi.fn();
 const deleteRole = vi.fn();
 const notify = { success: vi.fn(), failure: vi.fn() };
+const confirm = vi.fn();
 
 function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
+  confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   revokeInvitation.mockReset().mockReturnValue(of('Invitation revoked'));
   getMembers.mockReset().mockReturnValue(of([{ id: 'alice', name: 'Admin' }]));
   removeMember.mockReset().mockReturnValue(of('ok'));
@@ -84,6 +87,7 @@ function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
       },
       { provide: UserService, useValue: { searchUsers: () => of([]) } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   return TestBed.createComponent(CacheMembersRolesComponent);
@@ -134,23 +138,22 @@ describe('CacheMembersRolesComponent - pending invitations', () => {
     expect(text).toContain('bob');
   });
 
-  it('revokes a pending invitation', async () => {
+  it('asks before revoking a pending invitation, naming the invited user', async () => {
     const fixture = setup(true);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
-    expect(revokeInvitation).toHaveBeenCalledWith('my-cache', 'bob');
-  });
-
-  it('reports a failed revoke as a toast, not inside the closed Add Member dialog', async () => {
-    const fixture = setup(true);
-    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
-    revokeInvitation.mockReturnValue(throwError(() => failure));
     await settled(fixture);
     (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
-    expect(notify.failure).toHaveBeenCalledWith('Failed to revoke invitation', failure);
-    expect(fixture.componentInstance.memberError()).toBeNull();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'bob' }));
+    expect(revokeInvitation).toHaveBeenCalledWith('my-cache', 'bob');
+    expect(notify.success).toHaveBeenCalledWith('Invitation revoked');
+  });
+
+  it('sends no revoke when the confirmation is cancelled', async () => {
+    const fixture = setup(true);
+    confirm.mockImplementation(() => EMPTY);
+    await settled(fixture);
+    (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
+    expect(revokeInvitation).not.toHaveBeenCalled();
+    expect(notify.success).not.toHaveBeenCalled();
   });
 });
 
@@ -177,24 +180,30 @@ describe('CacheMembersRolesComponent - busy dialogs', () => {
   });
 });
 
-describe('CacheMembersRolesComponent - write failures', () => {
-  it('reports a failed member removal', async () => {
+describe('CacheMembersRolesComponent - confirmed removals', () => {
+  it('asks before removing a member, naming the member', async () => {
     const fixture = setup(true);
-    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
-    removeMember.mockReturnValue(throwError(() => failure));
     await settled(fixture);
-    fixture.componentInstance.removeMember('alice');
-    expect(notify.failure).toHaveBeenCalledWith('Failed to remove member', failure);
-    expect(fixture.componentInstance.removingMember()).toBeNull();
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('gr-row-list button.gr-button--danger')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Remove member', target: 'alice' }));
+    expect(removeMember).toHaveBeenCalledWith('my-cache', 'alice');
+    expect(notify.success).toHaveBeenCalledWith('Member removed');
   });
 
-  it('reports a failed role delete', async () => {
+  it('sends no member removal when the confirmation is cancelled', async () => {
     const fixture = setup(true);
-    const failure = new ApiError('Role is still assigned', 409);
-    deleteRole.mockReturnValue(throwError(() => failure));
+    confirm.mockImplementation(() => EMPTY);
+    await settled(fixture);
+    fixture.componentInstance.removeMember('alice');
+    expect(removeMember).not.toHaveBeenCalled();
+  });
+
+  it('asks before deleting a role, naming the role', async () => {
+    const fixture = setup(true);
     await settled(fixture);
     fixture.componentInstance.deleteRole({ id: 'r2', name: 'releaser', builtin: false } as RoleResponse_CacheRoleOwner);
-    expect(notify.failure).toHaveBeenCalledWith('Failed to delete role', failure);
-    expect(fixture.componentInstance.deletingRole()).toBeNull();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete role', target: 'releaser' }));
+    expect(deleteRole).toHaveBeenCalledWith('my-cache', 'r2');
+    expect(notify.success).toHaveBeenCalledWith('Role deleted');
   });
 });

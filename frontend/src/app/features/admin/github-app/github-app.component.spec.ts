@@ -9,7 +9,9 @@ import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
+import type { Mock } from 'vitest';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { GithubAppComponent } from './github-app.component';
 import { AdminService } from '@core/services/admin.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -23,6 +25,7 @@ type MockedAdmin = {
 describe('GithubAppComponent', () => {
   let admin: MockedAdmin;
   let notify: { success: ReturnType<typeof vi.fn>; failure: ReturnType<typeof vi.fn> };
+  let confirm: Mock<(request: ConfirmRequest) => Observable<unknown>>;
 
   function setup(queryParams: Record<string, string> = {}) {
     admin = {
@@ -30,6 +33,8 @@ describe('GithubAppComponent', () => {
       fetchGithubAppCredentials: vi.fn(),
     };
     notify = { success: vi.fn(), failure: vi.fn() };
+    confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
+    vi.spyOn(window, 'confirm');
     TestBed.configureTestingModule({
       imports: [GithubAppComponent],
       providers: [
@@ -38,6 +43,7 @@ describe('GithubAppComponent', () => {
         provideHttpClientTesting(),
         { provide: AdminService, useValue: admin },
         { provide: NotifyService, useValue: notify },
+        { provide: ConfirmService, useValue: { confirm } },
         {
           provide: ActivatedRoute,
           useValue: {
@@ -169,26 +175,34 @@ describe('GithubAppComponent', () => {
       return fixture;
     }
 
+    function leaving(fixture: ComponentFixture<GithubAppComponent>): boolean[] {
+      const answers: boolean[] = [];
+      const result = fixture.componentInstance.canDeactivate();
+      if (typeof result === 'boolean') answers.push(result);
+      else result.subscribe((answer) => answers.push(answer));
+      return answers;
+    }
+
     it('allows leaving the setup view without prompting', () => {
-      const confirmSpy = vi.spyOn(window, 'confirm');
       setup({});
       const fixture = TestBed.createComponent(GithubAppComponent);
       fixture.detectChanges();
-      expect(fixture.componentInstance.canDeactivate()).toBe(true);
-      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(leaving(fixture)).toEqual([true]);
+      expect(confirm).not.toHaveBeenCalled();
     });
 
     it('prompts and blocks leaving when the user cancels', () => {
-      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
       const fixture = withCredentials();
-      expect(fixture.componentInstance.canDeactivate()).toBe(false);
-      expect(confirmSpy).toHaveBeenCalledOnce();
+      confirm.mockImplementation(() => EMPTY);
+      expect(leaving(fixture)).toEqual([false]);
+      expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'GitHub App credentials' }));
+      expect(window.confirm).not.toHaveBeenCalled();
     });
 
     it('prompts and allows leaving when the user confirms', () => {
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
       const fixture = withCredentials();
-      expect(fixture.componentInstance.canDeactivate()).toBe(true);
+      expect(leaving(fixture)).toEqual([true]);
+      expect(confirm).toHaveBeenCalledOnce();
     });
 
     it('flags beforeunload while credentials are shown', () => {

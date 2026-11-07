@@ -19,6 +19,7 @@ import { TasksService, ReportOptions } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
+import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -51,7 +52,7 @@ import {
   WalkMode,
   EvaluationStatus,
 } from '@core/models';
-import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, unmetRequirementLabel, waitingTitle, formatWaitingReason } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, unmetRequirementLabel, waitingTitle, formatWaitingReason } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -81,6 +82,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private tasksService = inject(TasksService);
   private evaluationsService = inject(EvaluationsService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
   private accessService = inject(AccessService);
   private live = inject(LiveService);
   private document = inject(DOCUMENT);
@@ -109,9 +111,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   starting = signal(false);
   private evaluationsBeforeStart: Set<string> | null = null;
   starred = signal(false);
-  abortTarget = signal<string | null>(null);
   aborting = signal(false);
-  abortError = signal<string | null>(null);
   tick = signal(Date.now());
 
   projectName = '';
@@ -404,37 +404,38 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.document.removeEventListener('keydown', this.cancelNewEvaluationSelect, true);
   };
 
-  requestAbort(event: MouseEvent, id: string): void {
+  requestAbort(event: MouseEvent, evaluation: EvaluationSummary): void {
     if (event.ctrlKey || event.metaKey) {
-      this.abort(id);
+      this.abortAtOnce(evaluation.id);
       return;
     }
-    this.abortError.set(null);
-    this.abortTarget.set(id);
+    const target = evaluationAbortTarget(this.task()?.display_name || this.taskName, evaluation.commit);
+    this.confirm.confirm(abortEvaluationConfirm(target, () => this.abortRequest(evaluation.id)))
+      .subscribe(() => this.evaluationAborted());
   }
 
-  confirmAbort(): void {
-    const id = this.abortTarget();
-    if (id) this.abort(id);
-  }
-
-  private abort(id: string): void {
+  private abortAtOnce(id: string): void {
     if (this.aborting()) return;
     this.aborting.set(true);
-    this.abortError.set(null);
-    this.tasksService.abortEvaluation(this.projectName, this.taskName, id).subscribe({
+    this.abortRequest(id).subscribe({
       next: () => {
         this.aborting.set(false);
-        this.abortTarget.set(null);
-        this.notify.success('Evaluation aborted');
-        this.loadTaskData();
+        this.evaluationAborted();
       },
       error: (error: unknown) => {
         this.aborting.set(false);
-        if (this.abortTarget() === id) this.abortError.set(apiErrorMessage(error, 'Failed to abort the evaluation.'));
-        else this.notify.failure('Failed to abort evaluation', error);
+        this.notify.failure('Failed to abort evaluation', error);
       },
     });
+  }
+
+  private abortRequest(id: string): Observable<string> {
+    return this.tasksService.abortEvaluation(this.projectName, this.taskName, id);
+  }
+
+  private evaluationAborted(): void {
+    this.notify.success('Evaluation aborted');
+    this.loadTaskData();
   }
 
   private startLiveUpdates(): void {
@@ -682,6 +683,13 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       && evaluation.builds.failed + evaluation.builds.aborted > 0;
   }
 
+  private abortBuild(ep: EntryPointSummary): void {
+    this.confirm.confirm(abortBuildConfirm(ep.eval, () => this.evaluationsService.abortBuild(ep.build_id))).subscribe(() => {
+      this.notify.success('Build aborted');
+      this.loadTaskData();
+    });
+  }
+
   private runAction(request: Observable<string>, success: string, failure: string): void {
     request.subscribe({
       next: () => {
@@ -773,9 +781,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
                'Build prioritized', 'Failed to prioritize build') }]
         : []),
       ...(evaluation && this.canAbortEntryPoint(ep, evaluation)
-        ? [{ label: 'Abort', icon: 'stop_circle',
-             command: () => this.runAction(this.evaluationsService.abortBuild(ep.build_id),
-               'Build aborted', 'Failed to abort build') }]
+        ? [{ label: 'Abort', icon: 'stop_circle', command: () => this.abortBuild(ep) }]
         : []),
       ...(evaluation && this.canRetryEntryPoint(ep, evaluation)
         ? [{ label: 'Retry', icon: 'replay',

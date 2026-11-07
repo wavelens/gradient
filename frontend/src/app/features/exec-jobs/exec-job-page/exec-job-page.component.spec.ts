@@ -6,12 +6,13 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
-import { NEVER, of, throwError } from 'rxjs';
+import { EMPTY, type Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import type { ExecJobResponse, ExecJobStatus } from '@core/models';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { ApiError } from '@core/services/api.service';
 import { MessageService } from '@gradient/ui/ui';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { ExecJobPageComponent } from './exec-job-page.component';
 
 vi.mock('@xterm/xterm', () => ({
@@ -102,6 +103,7 @@ function keptJob(exitCode: number | null): ExecJobResponse {
 interface Setup {
   fixture: ComponentFixture<ExecJobPageComponent>;
   abort: ReturnType<typeof vi.fn>;
+  confirm: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
   log: ReturnType<typeof vi.fn>;
   keepVmRunning: ReturnType<typeof vi.fn>;
@@ -117,6 +119,7 @@ function setup(
   canTrigger = true,
 ): Setup {
   const abort = vi.fn(() => of('Success'));
+  const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   const run = vi.fn(() => of('Success'));
   const log = vi.fn(() => of(LOG));
   const keepVmRunning = vi.fn(() => of('Success'));
@@ -146,12 +149,13 @@ function setup(
           letVmStop,
         },
       },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
   const fixture = TestBed.createComponent(ExecJobPageComponent);
   fixture.detectChanges();
-  return { fixture, abort, run, log, keepVmRunning, letVmStop, navigate };
+  return { fixture, abort, confirm, run, log, keepVmRunning, letVmStop, navigate };
 }
 
 function toasts() {
@@ -318,7 +322,7 @@ describe('ExecJobPageComponent', () => {
   });
 
   it('opens the job menu of the task page from the log entry, by right click or its dots', () => {
-    const { fixture } = setup('running');
+    const { fixture, confirm } = setup('running');
     const root = fixture.nativeElement as HTMLElement;
     const log = root.querySelector('.log-sidebar .sidebar-item') as HTMLElement;
     log.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
@@ -329,8 +333,7 @@ describe('ExecJobPageComponent', () => {
     expect(log.querySelector('.sidebar-kebab')).not.toBeNull();
 
     Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item')).find((item) => item.textContent?.includes('Abort'))!.click();
-    fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog')?.textContent).toContain('abort this exec job');
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'apps.x86_64-linux.train' }));
   });
 
   it('links a finished job to its assignment on the Job Board', () => {
@@ -340,55 +343,21 @@ describe('ExecJobPageComponent', () => {
     expect(item?.routerLink).toEqual(['/board', 'jobs', 'dj1']);
   });
 
-  it('asks in the dialog before it aborts', () => {
-    const { fixture, abort } = setup('running');
+  it('asks first, naming the entry point, then aborts', () => {
+    const { fixture, abort, confirm } = setup('running');
     abortButton(fixture.nativeElement)?.click();
-    fixture.detectChanges();
-    expect(abort).not.toHaveBeenCalled();
-
-    const confirm = Array.from(document.querySelectorAll('.gr-dialog button'))
-      .find((b) => (b.textContent ?? '').includes('Abort')) as HTMLButtonElement | undefined;
-    confirm?.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Exec Job', target: 'apps.x86_64-linux.train' }));
     expect(abort).toHaveBeenCalledWith('j1');
     expect(toasts()).toContainEqual(expect.objectContaining({ severity: 'success', summary: 'Exec job aborted' }));
   });
 
-  it('keeps a refused abort inside the open dialog and the page banner for load errors only', () => {
-    const { fixture, abort } = setup('running');
-    abort.mockReturnValue(throwError(() => new ApiError('Exec job already finished', 409)));
-    const component = fixture.componentInstance;
-    component.openAbort();
-    fixture.detectChanges();
-    component.confirmAbort();
-    fixture.detectChanges();
-    expect(component.aborting()).toBe(false);
-    expect(component.abortOpen()).toBe(true);
-    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Exec job already finished');
+  it('sends nothing and shows no toast when the abort is cancelled', () => {
+    const { fixture, abort, confirm } = setup('running');
+    confirm.mockImplementation(() => EMPTY);
+    abortButton(fixture.nativeElement)?.click();
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(abort).not.toHaveBeenCalled();
     expect(toasts()).toEqual([]);
-    expect(component.errorMessage()).toBeNull();
-
-    component.abortOpen.set(false);
-    component.openAbort();
-    expect(component.abortError()).toBeNull();
-  });
-
-  it('keeps the abort dialog open on Escape and backdrop while the abort runs', () => {
-    const { fixture, abort } = setup('running');
-    abort.mockReturnValue(NEVER);
-    const component = fixture.componentInstance;
-    component.openAbort();
-    fixture.detectChanges();
-    const panel = document.querySelector('.gr-dialog') as HTMLElement;
-    const confirm = Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.includes('Abort'))!;
-    confirm.click();
-    fixture.detectChanges();
-    confirm.click();
-    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    fixture.detectChanges();
-    expect(abort).toHaveBeenCalledOnce();
-    expect(component.abortOpen()).toBe(true);
-    expect(panel.getAttribute('aria-busy')).toBe('true');
   });
 
   it('keeps updating after one failed poll', () => {

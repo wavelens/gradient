@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Observable, Subject, of, throwError } from 'rxjs';
+import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { CacheSubscriptionsComponent } from './cache-subscriptions.component';
@@ -34,8 +35,10 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 const subscribeCache = vi.fn((): Observable<unknown> => of(undefined));
 const unsubscribeCache = vi.fn((): Observable<unknown> => of(undefined));
 const notify = { success: vi.fn(), failure: vi.fn() };
+const confirm = vi.fn();
 
 function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponent> {
+  confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   subscribeCache.mockReset().mockReturnValue(of(undefined));
   unsubscribeCache.mockReset().mockReturnValue(of(undefined));
   notify.success.mockClear();
@@ -61,6 +64,7 @@ function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponen
         },
       },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
       { provide: CachesService, useValue: {} },
       { provide: ConfigService, useValue: { createCache: 'all', canCreate: () => true } },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
@@ -158,18 +162,34 @@ describe('CacheSubscriptionsComponent - load errors', () => {
   });
 });
 
-describe('CacheSubscriptionsComponent - write failures', () => {
-  it('reports a failed unsubscribe', async () => {
+describe('CacheSubscriptionsComponent - unsubscribe', () => {
+  it('asks before unsubscribing, naming the cache', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
-    unsubscribeCache.mockReturnValue(throwError(() => failure));
     await settled(fixture);
     (findByText(fixture.nativeElement, 'unsubscribe') as HTMLButtonElement).click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'shared', confirmLabel: 'Unsubscribe' }));
     expect(unsubscribeCache).toHaveBeenCalledWith('acme', 'shared');
-    expect(notify.failure).toHaveBeenCalledWith('Failed to remove subscription', failure);
-    expect(fixture.componentInstance.unsubscribingId()).toBeNull();
+    expect(notify.success).toHaveBeenCalledWith('Removed cache subscription');
   });
 
+  it('asks before withdrawing a pending subscription request', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    (findByText(fixture.nativeElement, 'cancel request') as HTMLButtonElement).click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'staging', confirmLabel: 'Withdraw' }));
+    expect(unsubscribeCache).toHaveBeenCalledWith('acme', 'staging');
+  });
+
+  it('keeps the subscription when the confirmation is cancelled', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    confirm.mockImplementation(() => EMPTY);
+    await settled(fixture);
+    (findByText(fixture.nativeElement, 'unsubscribe') as HTMLButtonElement).click();
+    expect(unsubscribeCache).not.toHaveBeenCalled();
+  });
+});
+
+describe('CacheSubscriptionsComponent - write failures', () => {
   it('keeps a failed subscribe inside the open dialog', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     subscribeCache.mockReturnValue(throwError(() => new ApiError('Cache nightly is private', 403)));

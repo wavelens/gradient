@@ -6,11 +6,13 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { EMPTY, type Observable, of, throwError } from 'rxjs';
 import { BoardHealthComponent } from './health.component';
 import { BoardService } from '@core/services/board.service';
 import { AdminService } from '@core/services/admin.service';
 import { ConfigService } from '@core/services/config.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { BoardHealth, AdminTaskDto } from '@core/models';
 
 const HEALTH: BoardHealth = {
@@ -57,22 +59,29 @@ const TASK: AdminTaskDto = {
   created_by: null,
 };
 
+let confirm: ReturnType<typeof vi.fn>;
+let startDeepGc: ReturnType<typeof vi.fn>;
+
 function setup(
   githubAppEnabled: boolean,
   health: BoardHealth = HEALTH,
   setDraining = vi.fn(() => of({ draining: true })),
+  confirmed = true,
 ): ComponentFixture<BoardHealthComponent> {
+  confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => (confirmed ? request.action() : EMPTY));
+  startDeepGc = vi.fn(() => of({ task_id: 't2', status: 'pending' }));
   TestBed.configureTestingModule({
     imports: [BoardHealthComponent],
     providers: [
       provideRouter([]),
       { provide: BoardService, useValue: { getHealth: () => of(health) } },
       { provide: ConfigService, useValue: { githubAppEnabled } },
+      { provide: ConfirmService, useValue: { confirm } },
       {
         provide: AdminService,
         useValue: {
           listTasks: () => of([TASK]),
-          startDeepGc: () => of({ task_id: 't2', status: 'pending' }),
+          startDeepGc,
           setDraining,
         },
       },
@@ -81,6 +90,11 @@ function setup(
   const fixture = TestBed.createComponent(BoardHealthComponent);
   fixture.detectChanges();
   return fixture;
+}
+
+function adminButton(fixture: ComponentFixture<BoardHealthComponent>, label: string): HTMLButtonElement {
+  return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button.btn'))
+    .find((b) => b.textContent?.includes(label))!;
 }
 
 describe('BoardHealthComponent', () => {
@@ -165,14 +179,50 @@ describe('BoardHealthComponent', () => {
       expect(fixture.nativeElement.textContent).toContain('Instance is draining');
     });
 
-    it('toggles draining via the admin service when clicked', () => {
+    it('asks first, naming all projects, before it enables draining', () => {
       const setDraining = vi.fn(() => of({ draining: true }));
       const fixture = setup(true, HEALTH, setDraining);
-      const button: HTMLButtonElement = Array.from(
-        fixture.nativeElement.querySelectorAll('button.btn'),
-      ).find((b) => (b as HTMLButtonElement).textContent?.includes('Enable Draining')) as HTMLButtonElement;
-      button.click();
+      adminButton(fixture, 'Enable Draining').click();
+      expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Enable Draining', target: 'All projects on this instance' }));
       expect(setDraining).toHaveBeenCalledWith(true);
+    });
+
+    it('sends nothing when enabling draining is cancelled', () => {
+      const setDraining = vi.fn(() => of({ draining: true }));
+      const fixture = setup(true, HEALTH, setDraining, false);
+      adminButton(fixture, 'Enable Draining').click();
+      expect(confirm).toHaveBeenCalledOnce();
+      expect(setDraining).not.toHaveBeenCalled();
+    });
+
+    it('disables draining at once and reports a failure', () => {
+      const refused = new Error('boom');
+      const setDraining = vi.fn(() => throwError(() => refused));
+      const fixture = setup(true, { ...HEALTH, draining: true }, setDraining);
+      const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+      adminButton(fixture, 'Disable Draining').click();
+      expect(confirm).not.toHaveBeenCalled();
+      expect(setDraining).toHaveBeenCalledWith(false);
+      expect(failure).toHaveBeenCalledWith('Failed to disable draining', refused);
+    });
+  });
+
+  describe('deep GC', () => {
+    afterEach(() => TestBed.resetTestingModule());
+
+    it('asks first, then starts a round and reloads the tasks', () => {
+      const fixture = setup(true);
+      const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+      adminButton(fixture, 'Run Deep GC').click();
+      expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Run Deep GC', target: 'All storage backends' }));
+      expect(startDeepGc).toHaveBeenCalledOnce();
+      expect(success).toHaveBeenCalledWith('Deep GC started');
+    });
+
+    it('sends nothing when the round is cancelled', () => {
+      const fixture = setup(true, HEALTH, undefined, false);
+      adminButton(fixture, 'Run Deep GC').click();
+      expect(startDeepGc).not.toHaveBeenCalled();
     });
   });
 

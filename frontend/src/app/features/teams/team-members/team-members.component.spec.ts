@@ -4,16 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
 import { TeamMembersComponent } from './team-members.component';
 import { TeamsService } from '@core/services/teams.service';
 import { NotifyService } from '@core/services/notify.service';
+import { AuthService } from '@core/services/auth.service';
 import { ApiError } from '@core/services/api.service';
-import { TeamResponse, TeamMemberItem } from '@core/models';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
+import { PendingInvitationItem, TeamResponse, TeamMemberItem } from '@core/models';
 
 const team: TeamResponse = {
   id: 't1',
@@ -34,10 +37,17 @@ const members: TeamMemberItem[] = [
   { user: 'dave', name: 'Dave', role: 'member', source: 'state' },
 ];
 
-function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), managed = false, listMembers = vi.fn().mockReturnValue(of(members))) {
+function setup(
+  removeMember = vi.fn().mockReturnValue(of('User removed')),
+  managed = false,
+  listMembers = vi.fn().mockReturnValue(of(members)),
+  invitations: PendingInvitationItem[] = [],
+) {
   const addMember = vi.fn().mockReturnValue(of('Invitation sent'));
   const updateMember = vi.fn().mockReturnValue(of('ok'));
+  const revokeInvitation = vi.fn().mockReturnValue(of('ok'));
   const notify = { success: vi.fn(), failure: vi.fn() };
+  const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   TestBed.configureTestingModule({
     imports: [TeamMembersComponent],
     providers: [
@@ -48,20 +58,22 @@ function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), manag
         provide: TeamsService,
         useValue: {
           members: listMembers,
-          invitations: () => of([]),
+          invitations: () => of(invitations),
           addMember,
           updateMember,
           removeMember,
-          revokeInvitation: vi.fn().mockReturnValue(of('ok')),
+          revokeInvitation,
         },
       },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
+      { provide: AuthService, useValue: { user: signal({ username: 'alice' }) } },
     ],
   });
   const fixture = TestBed.createComponent(TeamMembersComponent);
   fixture.componentRef.setInput('team', { ...team, managed });
   fixture.detectChanges();
-  return { fixture, addMember, updateMember, removeMember, notify };
+  return { fixture, addMember, updateMember, removeMember, revokeInvitation, notify, confirm };
 }
 
 describe('TeamMembersComponent', () => {
@@ -136,14 +148,6 @@ describe('TeamMembersComponent', () => {
     expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 
-  it('reports why the last admin cannot be removed', () => {
-    const failure = new ApiError('Cannot remove the last Admin from the team.', 409);
-    const { fixture, notify } = setup(vi.fn().mockReturnValue(throwError(() => failure)));
-    fixture.componentInstance.removeMember('alice');
-    expect(notify.failure).toHaveBeenCalledWith('Member removal failed', failure);
-    expect(fixture.componentInstance.busy()).toBeNull();
-  });
-
   it('reports a refused role change', () => {
     const { fixture, updateMember, notify } = setup();
     const failure = new ApiError('Forbidden', 403);
@@ -152,9 +156,44 @@ describe('TeamMembersComponent', () => {
     expect(notify.failure).toHaveBeenCalledWith('Role change failed', failure);
   });
 
-  it('confirms a removed member', () => {
-    const { fixture, notify } = setup();
-    fixture.componentInstance.removeMember('bob');
+  it('asks before removing a member, naming the member, then confirms the removal', () => {
+    const { fixture, notify, removeMember, confirm } = setup();
+    removeButton(fixture.nativeElement, 'bob').click();
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Remove member', target: 'bob', consequence: 'bob can no longer access this team.' }),
+    );
+    expect(removeMember).toHaveBeenCalledWith('platform', 'bob');
     expect(notify.success).toHaveBeenCalledWith('Member removed');
   });
+
+  it('warns admins that removing themselves takes away their own access', () => {
+    const { fixture, confirm } = setup();
+    removeButton(fixture.nativeElement, 'alice').click();
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ target: 'alice', consequence: 'You lose access to this team and its settings.' }),
+    );
+  });
+
+  it('sends no removal when the confirmation is cancelled', () => {
+    const { fixture, removeMember, confirm } = setup();
+    confirm.mockImplementation(() => EMPTY);
+    removeButton(fixture.nativeElement, 'bob').click();
+    expect(removeMember).not.toHaveBeenCalled();
+  });
+
+  it('asks before revoking a pending invitation, naming the invited user', () => {
+    const invitations = [{ user: 'carol', name: 'Carol', role: 'member', created_at: '2026-10-01T10:00:00', expires_at: '2026-10-08T10:00:00' }];
+    const { fixture, confirm, revokeInvitation } = setup(undefined, false, undefined, invitations);
+    const revoke = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent?.trim() === 'Revoke',
+    )!;
+    revoke.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Revoke invitation', target: 'carol' }));
+    expect(revokeInvitation).toHaveBeenCalledWith('platform', 'carol');
+  });
 });
+
+function removeButton(root: HTMLElement, user: string): HTMLButtonElement {
+  const row = Array.from(root.querySelectorAll('gr-row')).find((r) => r.querySelector('.mono')?.textContent === user)!;
+  return row.querySelector<HTMLButtonElement>('button.gr-button--danger')!;
+}

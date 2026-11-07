@@ -28,6 +28,7 @@ import {
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
 import { WritableDirective } from '@shared/access';
+import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { relativeTime } from '@shared/text';
 
@@ -62,6 +63,7 @@ export class SecretsComponent implements OnInit {
   private projectAccess = inject(ProjectAccessService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   protected readonly relativeTime = relativeTime;
   protected readonly docsUrl = docsUrl('exec/secrets/');
@@ -78,10 +80,6 @@ export class SecretsComponent implements OnInit {
   value = signal('');
   saving = signal(false);
   formError = signal<string | null>(null);
-
-  deleteName = signal<string | null>(null);
-  deleting = signal(false);
-  deleteError = signal<string | null>(null);
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Secrets' }));
@@ -127,14 +125,27 @@ export class SecretsComponent implements OnInit {
 
   save(): void {
     if (!this.canSave()) return;
+    const name = this.name();
+    const value = this.value();
+    if (!this.replacing() && this.secrets().some((secret) => secret.name === name)) {
+      this.confirm
+        .confirm({
+          title: 'Replace Secret',
+          target: name,
+          consequence: 'A secret with this name already exists. Replacements overwrite the current value with no restore.',
+          confirmLabel: 'Replace',
+          failure: 'Failed to save the secret.',
+          action: () => this.secretsService.put(this.projectName, name, value),
+        })
+        .subscribe(() => this.saved());
+      return;
+    }
     this.saving.set(true);
     this.formError.set(null);
-    this.secretsService.put(this.projectName, this.name(), this.value()).subscribe({
+    this.secretsService.put(this.projectName, name, value).subscribe({
       next: () => {
         this.saving.set(false);
-        this.closeForm();
-        this.notify.success('Secret saved');
-        this.loadSecrets();
+        this.saved();
       },
       error: (error: unknown) => {
         this.formError.set(apiErrorMessage(error, 'Failed to save the secret.'));
@@ -143,33 +154,31 @@ export class SecretsComponent implements OnInit {
     });
   }
 
+  private saved(): void {
+    this.closeForm();
+    this.notify.success('Secret saved');
+    this.loadSecrets();
+  }
+
   closeForm(): void {
     this.formOpen.set(false);
     this.value.set('');
   }
 
   startDelete(name: string): void {
-    this.deleteError.set(null);
-    this.deleteName.set(name);
-  }
-
-  confirmDelete(): void {
-    const name = this.deleteName();
-    if (!name) return;
-    this.deleting.set(true);
-    this.deleteError.set(null);
-    this.secretsService.remove(this.projectName, name).subscribe({
-      next: () => {
-        this.deleting.set(false);
-        this.deleteName.set(null);
+    this.confirm
+      .confirm({
+        title: 'Delete secret',
+        target: name,
+        consequence: 'Exec jobs that list it fail until it is set again.',
+        confirmLabel: 'Delete',
+        failure: 'Failed to delete the secret.',
+        action: () => this.secretsService.remove(this.projectName, name),
+      })
+      .subscribe(() => {
         this.notify.success('Secret deleted');
         this.loadSecrets();
-      },
-      error: (error: unknown) => {
-        this.deleteError.set(apiErrorMessage(error, 'Failed to delete the secret.'));
-        this.deleting.set(false);
-      },
-    });
+      });
   }
 
   private openForm(name: string, replacing: boolean): void {

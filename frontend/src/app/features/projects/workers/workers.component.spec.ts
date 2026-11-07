@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { WorkersComponent } from './workers.component';
 import { WorkersService } from '@core/services/workers.service';
@@ -25,6 +26,7 @@ import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 
 const notify = { success: vi.fn(), failure: vi.fn() };
+const confirm = vi.fn();
 
 type MockedProjects = {
   getProject: ReturnType<typeof vi.fn>;
@@ -81,6 +83,7 @@ function setup(opts: {
   };
   notify.success.mockClear();
   notify.failure.mockClear();
+  confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   const projects: MockedProjects = {
     getProject: vi.fn(() => of({ id: 'project-uuid', display_name: 'Project' } as never)),
     getSubscribedCaches: vi.fn(() => of(opts.caches)),
@@ -104,6 +107,7 @@ function setup(opts: {
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(opts.access) } },
       { provide: ActivatedRoute, useValue: activatedRouteStub() },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
       {
         provide: ConfigService,
         useValue: { gradientCiEnabled: opts.gradientCi ?? true, gradientCiUrl: 'https://servers.gradient.ci' },
@@ -470,21 +474,32 @@ describe('WorkersComponent - load errors', () => {
 describe('WorkersComponent - write failures', () => {
   const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
 
-  it('reports a failed delete and a failed deactivate instead of logging them', async () => {
+  it('asks before deleting a worker, naming it, then confirms the deletion', async () => {
+    const fixture = setup({ access: writable, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    const workers = TestBed.inject(WorkersService) as unknown as { deleteWorker: ReturnType<typeof vi.fn> };
+    fixture.componentInstance.deleteWorker(workerUnmanaged);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete worker', target: 'Builder' }));
+    expect(workers.deleteWorker).toHaveBeenCalledWith('demo', 'w1');
+    expect(notify.success).toHaveBeenCalledWith('Worker deleted');
+  });
+
+  it('sends no delete when the confirmation is cancelled', async () => {
+    const fixture = setup({ access: writable, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    confirm.mockImplementation(() => EMPTY);
+    const workers = TestBed.inject(WorkersService) as unknown as { deleteWorker: ReturnType<typeof vi.fn> };
+    fixture.componentInstance.deleteWorker(workerUnmanaged);
+    expect(workers.deleteWorker).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed deactivate instead of logging it', async () => {
     const fixture = setup({ access: writable, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);
     const failure = new ApiError('The server failed to process the request. Try again later.', 500);
-    const workers = TestBed.inject(WorkersService) as unknown as {
-      deleteWorker: ReturnType<typeof vi.fn>;
-      setWorkerActive: ReturnType<typeof vi.fn>;
-    };
-    workers.deleteWorker.mockReturnValue(throwError(() => failure));
+    const workers = TestBed.inject(WorkersService) as unknown as { setWorkerActive: ReturnType<typeof vi.fn> };
     workers.setWorkerActive.mockReturnValue(throwError(() => failure));
     const cmp = fixture.componentInstance;
-
-    cmp.deleteWorker(workerUnmanaged);
-    expect(notify.failure).toHaveBeenCalledWith('Worker delete failed', failure);
-    expect(cmp.deletingId()).toBeNull();
 
     cmp.requestToggleWorker(workerUnmanaged);
     expect(notify.failure).toHaveBeenCalledWith('Worker deactivation failed', failure);

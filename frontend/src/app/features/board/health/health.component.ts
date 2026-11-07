@@ -11,6 +11,8 @@ import { CardGridComponent, LoadStateComponent, TableComponent, StatCardComponen
 import { BoardService } from '@core/services/board.service';
 import { AdminService } from '@core/services/admin.service';
 import { ConfigService } from '@core/services/config.service';
+import { NotifyService } from '@core/services/notify.service';
+import { ConfirmService } from '@shared/confirm';
 import { formatBytes, formatDuration } from '@shared/text';
 import { BoardHealth, AdminTaskDto } from '@core/models';
 
@@ -77,11 +79,12 @@ import { BoardHealth, AdminTaskDto } from '@core/models';
           <a class="btn" routerLink="/admin/github-app">Set up GitHub App</a>
         }
         <a class="btn" routerLink="/admin/webhooks">Instance Webhooks</a>
-        <button class="btn" (click)="runDeepGc()" [disabled]="gcBusy()">Run Deep GC</button>
-        <button class="btn" [class.danger]="!h.draining" (click)="toggleDraining(h.draining)" [disabled]="drainBusy()">
-          {{ h.draining ? 'Disable Draining' : 'Enable Draining' }}
-        </button>
-        @if (gcNotice(); as n) { <span class="notice">{{ n }}</span> }
+        <button class="btn" (click)="runDeepGc()">Run Deep GC</button>
+        @if (h.draining) {
+          <button class="btn" (click)="disableDraining()" [disabled]="drainBusy()">Disable Draining</button>
+        } @else {
+          <button class="btn danger" (click)="enableDraining()">Enable Draining</button>
+        }
       </div>
 
       <gr-table class="http">
@@ -111,13 +114,13 @@ export class BoardHealthComponent implements OnInit {
   private board = inject(BoardService);
   private admin = inject(AdminService);
   protected config = inject(ConfigService);
+  private confirm = inject(ConfirmService);
+  private notify = inject(NotifyService);
 
   health = signal<BoardHealth | null>(null);
   healthLoading = signal(true);
   healthError = signal<unknown>(null);
   tasks = signal<AdminTaskDto[]>([]);
-  gcBusy = signal(false);
-  gcNotice = signal<string | null>(null);
   drainBusy = signal(false);
 
   readonly bytes = formatBytes;
@@ -131,19 +134,43 @@ export class BoardHealthComponent implements OnInit {
   }
 
   runDeepGc(): void {
-    this.gcBusy.set(true);
-    this.gcNotice.set(null);
-    this.admin.startDeepGc().subscribe({
-      next: () => { this.gcBusy.set(false); this.loadTasks(); },
-      error: (e) => { this.gcBusy.set(false); this.gcNotice.set(e?.message ?? 'Deep GC failed to start'); },
+    this.confirm.confirm({
+      title: 'Run Deep GC',
+      target: 'All storage backends',
+      consequence: 'Deep GC runs delete stored files that no row in the database references. A round already in progress can start again from the beginning.',
+      confirmLabel: 'Run Deep GC',
+      failure: 'Failed to start deep GC.',
+      severity: 'warn',
+      action: () => this.admin.startDeepGc(),
+    }).subscribe(() => {
+      this.notify.success('Deep GC started');
+      this.loadTasks();
     });
   }
 
-  toggleDraining(current: boolean): void {
+  enableDraining(): void {
+    this.confirm.confirm({
+      title: 'Enable Draining',
+      target: 'All projects on this instance',
+      consequence: 'No new evaluations or builds start and in-flight evaluations wait. A disable or a server restart can end draining.',
+      confirmLabel: 'Enable Draining',
+      failure: 'Failed to enable draining.',
+      severity: 'warn',
+      action: () => this.admin.setDraining(true),
+    }).subscribe(() => {
+      this.notify.success('Draining enabled');
+      this.refreshHealth();
+    });
+  }
+
+  disableDraining(): void {
     this.drainBusy.set(true);
-    this.admin.setDraining(!current).subscribe({
+    this.admin.setDraining(false).subscribe({
       next: () => { this.drainBusy.set(false); this.refreshHealth(); },
-      error: () => this.drainBusy.set(false),
+      error: (error: unknown) => {
+        this.drainBusy.set(false);
+        this.notify.failure('Failed to disable draining', error);
+      },
     });
   }
 

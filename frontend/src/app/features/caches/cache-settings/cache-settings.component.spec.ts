@@ -5,10 +5,11 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { CacheSettingsComponent } from './cache-settings.component';
 import { CachesService } from '@core/services/caches.service';
 import { AccessState } from '@core/models/access.model';
@@ -16,6 +17,7 @@ import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 
 const notify = { success: vi.fn(), failure: vi.fn() };
+const confirm = vi.fn();
 
 function cacheFor(access: AccessState) {
   return {
@@ -51,6 +53,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 function setup(access: AccessState): ComponentFixture<CacheSettingsComponent> {
   notify.success.mockClear();
   notify.failure.mockClear();
+  confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   TestBed.configureTestingModule({
     imports: [CacheSettingsComponent],
     providers: [
@@ -60,6 +63,7 @@ function setup(access: AccessState): ComponentFixture<CacheSettingsComponent> {
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
       { provide: CachesService, useValue: { getCache: () => of(cacheFor(access)) } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(CacheSettingsComponent);
@@ -115,33 +119,25 @@ describe('CacheSettingsComponent - write failures', () => {
     expect(fixture.componentInstance.toggling()).toBe(false);
   });
 
-  it('keeps the delete dialog open with the server reason when the delete fails', () => {
+  it('asks before deleting, naming the cache, then leaves for the cache list', () => {
     const fixture = setup(admin);
     const service = TestBed.inject(CachesService) as unknown as { deleteCache: () => unknown };
-    service.deleteCache = () => throwError(() => new ApiError('Cache is still used by 2 projects', 409));
+    service.deleteCache = vi.fn(() => of(undefined));
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     findByText(fixture.nativeElement, 'delete cache')!.click();
-    fixture.detectChanges();
-    findByText(document.querySelector('.gr-dialog') as HTMLElement, 'delete')!.click();
-    fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Cache is still used by 2 projects');
-    expect(fixture.componentInstance.showDeleteDialog()).toBe(true);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete cache', target: 'Demo' }));
+    expect(service.deleteCache).toHaveBeenCalledWith('demo');
+    expect(notify.success).toHaveBeenCalledWith('Cache deleted');
+    expect(navigate).toHaveBeenCalledWith(['/caches']);
   });
 
-  it('keeps the delete dialog open while the delete runs', () => {
+  it('sends no delete when the confirmation is cancelled', () => {
     const fixture = setup(admin);
+    confirm.mockImplementation(() => EMPTY);
     const service = TestBed.inject(CachesService) as unknown as { deleteCache: () => unknown };
-    service.deleteCache = vi.fn(() => new Subject<void>());
+    service.deleteCache = vi.fn(() => of(undefined));
     findByText(fixture.nativeElement, 'delete cache')!.click();
-    fixture.detectChanges();
-    const dialog = document.querySelector('.gr-dialog') as HTMLElement;
-    findByText(dialog, 'delete')!.click();
-    fixture.detectChanges();
-    findByText(dialog, 'delete')!.click();
-    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    fixture.detectChanges();
-    expect(service.deleteCache).toHaveBeenCalledTimes(1);
-    expect(fixture.componentInstance.showDeleteDialog()).toBe(true);
+    expect(service.deleteCache).not.toHaveBeenCalled();
   });
 
   it('sends one save when Save Changes is clicked twice', () => {

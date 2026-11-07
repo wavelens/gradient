@@ -24,6 +24,7 @@ import {
   PatchWorkerRequest,
 } from '@core/models';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent } from '@shared/ui';
+import { ConfirmService } from '@shared/confirm';
 import { Observable, map } from 'rxjs';
 import {
   BadgeComponent,
@@ -63,6 +64,7 @@ export class TeamWorkersComponent implements OnInit {
   private teams = inject(TeamsService);
   private authService = inject(AuthService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
   config = inject(ConfigService);
 
   team = input.required<TeamResponse>();
@@ -191,17 +193,18 @@ export class TeamWorkersComponent implements OnInit {
   }
 
   remove(worker: TeamWorkerEntry): void {
-    this.busy.set(worker.worker_id);
-    this.teams.removeWorker(this.teamName, worker.worker_id).subscribe({
-      next: () => {
-        this.busy.set(null);
+    this.confirm
+      .confirm({
+        title: 'Delete worker',
+        target: worker.display_name,
+        consequence: `${worker.display_name} is deleted and stops running builds for this team.`,
+        confirmLabel: 'Delete',
+        failure: 'Failed to delete the worker.',
+        action: () => this.teams.removeWorker(this.teamName, worker.worker_id),
+      })
+      .subscribe(() => {
         this.notify.success('Worker deleted');
         this.load();
-      },
-      error: (err: unknown) => {
-        this.busy.set(null);
-        this.notify.failure('Failed to delete worker', err);
-      },
-    });
+      });
   }
 }

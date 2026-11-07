@@ -7,7 +7,8 @@
 import { ApplicationRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { Observable, Subject, of, throwError } from 'rxjs';
+import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ApiError } from '@core/services/api.service';
 import { WebhooksComponent } from './webhooks.component';
 import { WebhooksService } from '@core/services/webhooks.service';
@@ -47,6 +48,7 @@ function setup(
     deliveries: vi.fn(() => of([])),
   };
   const notify = { success: vi.fn(), failure: vi.fn() };
+  const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   TestBed.configureTestingModule({
     imports: [WebhooksComponent],
     providers: [
@@ -58,11 +60,18 @@ function setup(
       { provide: EventsService, useValue: { catalog$: of([]) } },
       { provide: ActivatedRoute, useValue: { snapshot: { data, paramMap: convertToParamMap(params) } } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(WebhooksComponent);
   fixture.detectChanges();
-  return { fixture, component: fixture.componentInstance, service, notify, root: fixture.nativeElement as HTMLElement };
+  return { fixture, component: fixture.componentInstance, service, notify, confirm, root: fixture.nativeElement as HTMLElement };
+}
+
+function rowButton(root: HTMLElement, label: string): HTMLButtonElement {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('.webhook-actions button')).find(
+    (b) => b.querySelector('.gr-button__label')?.textContent === label,
+  )!;
 }
 
 describe('WebhooksComponent', () => {
@@ -129,57 +138,42 @@ describe('WebhooksComponent', () => {
 
   it.each([
     { action: 'toggle', summary: "Can't disable webhook", run: (c: WebhooksComponent) => c.toggleActive(hook) },
-    { action: 'rotate', summary: "Can't rotate webhook secret", run: (c: WebhooksComponent) => c.rotate(hook) },
     { action: 'test', summary: "Can't send test delivery", run: (c: WebhooksComponent) => c.test(hook) },
   ])('reports a failed $action as a toast', ({ summary, run }) => {
     const { component, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' });
     const failure = new ApiError('database is down', 500);
     service.update.mockReturnValue(throwError(() => failure));
-    service.rotateSecret.mockReturnValue(throwError(() => failure));
     service.test.mockReturnValue(throwError(() => failure));
     run(component);
     expect(notify.failure).toHaveBeenCalledWith(summary, failure);
+  });
+
+  it.each([
+    { action: 'delete', label: 'Delete', title: 'Delete webhook', method: 'delete' as const },
+    { action: 'rotate', label: 'Rotate secret', title: 'Rotate webhook secret', method: 'rotateSecret' as const },
+  ])('asks before the $action, naming the webhook', ({ label, title, method }) => {
+    const { root, service, confirm } = setup({ webhookScope: 'project' }, { project: 'p' });
+    rowButton(root, label).click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title, target: 'ci' }));
+    expect(service[method]).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1');
+  });
+
+  it.each([
+    { action: 'delete', label: 'Delete', method: 'delete' as const },
+    { action: 'rotate', label: 'Rotate secret', method: 'rotateSecret' as const },
+  ])('sends no $action when the confirmation is cancelled', ({ label, method }) => {
+    const { root, service, confirm, component } = setup({ webhookScope: 'project' }, { project: 'p' });
+    confirm.mockImplementation(() => EMPTY);
+    rowButton(root, label).click();
+    expect(service[method]).not.toHaveBeenCalled();
     expect(component.revealedSecret()).toBeNull();
   });
 
-  it('keeps a failed delete inside the delete dialog and confirms a later success', () => {
-    const { fixture, component, service, notify, root } = setup({ webhookScope: 'project' }, { project: 'p' });
-    service.delete.mockReturnValueOnce(throwError(() => new ApiError('Webhook is managed', 409)));
-    component.startDelete(hook);
-    component.confirmDelete();
-    fixture.detectChanges();
-    expect(component.confirmDeleteId()).toBe('w1');
-    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Webhook is managed');
-    expect(root.textContent).not.toContain('Webhook is managed');
-
-    component.confirmDelete();
-    expect(component.confirmDeleteId()).toBeNull();
-    expect(component.deleteError()).toBeNull();
+  it('confirms a deletion with a toast and a reload', () => {
+    const { root, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' });
+    rowButton(root, 'Delete').click();
     expect(notify.success).toHaveBeenCalledWith('Webhook deleted');
-  });
-
-  it('keeps the delete dialog open and sends one DELETE while the request runs', () => {
-    const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
-    const pending = new Subject<{ deleted: boolean }>();
-    service.delete.mockReturnValue(pending);
-    component.startDelete(hook);
-    fixture.detectChanges();
-    const deleteButton = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.gr-dialog__footer button')).find((b) => b.querySelector('.gr-button__label')?.textContent === 'Delete')!;
-
-    deleteButton().click();
-    fixture.detectChanges();
-    deleteButton().click();
-    document.querySelector('.gr-dialog')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    document.querySelector<HTMLElement>('.gr-dialog-backdrop')!.click();
-    fixture.detectChanges();
-
-    expect(service.delete).toHaveBeenCalledTimes(1);
-    expect(component.confirmDeleteId()).toBe('w1');
-    expect(document.querySelector('.gr-dialog')?.getAttribute('aria-busy')).toBe('true');
-
-    pending.next({ deleted: true });
-    pending.complete();
-    expect(component.confirmDeleteId()).toBeNull();
+    expect(service.list).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the webhook form open while saving', () => {
@@ -210,7 +204,6 @@ describe('WebhooksComponent', () => {
 
   it.each([
     { action: 'toggle', label: 'Disable', method: 'update' as const },
-    { action: 'rotate', label: 'Rotate secret', method: 'rotateSecret' as const },
     { action: 'test', label: 'Test', method: 'test' as const },
   ])('sends one $action request for two clicks on the row button', ({ label, method }) => {
     const { fixture, service, root } = setup({ webhookScope: 'project' }, { project: 'p' });

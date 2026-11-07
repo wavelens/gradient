@@ -6,7 +6,8 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { EMPTY, Observable, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { SessionsComponent } from './sessions.component';
 import { UserService } from '@core/services/user.service';
 import { ApiError } from '@core/services/api.service';
@@ -18,17 +19,19 @@ const OTHER = { ...CURRENT, id: 's2', current: false };
 
 function setup(getSessions: ReturnType<typeof vi.fn>, revokeSession = vi.fn().mockReturnValue(of('ok'))) {
   const notify = { success: vi.fn(), failure: vi.fn() };
+  const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   TestBed.configureTestingModule({
     imports: [SessionsComponent],
     providers: [
       provideRouter([]),
       { provide: UserService, useValue: { getSessions, revokeSession } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(SessionsComponent);
   fixture.detectChanges();
-  return { fixture, notify, root: fixture.nativeElement as HTMLElement };
+  return { fixture, notify, confirm, root: fixture.nativeElement as HTMLElement };
 }
 
 describe('SessionsComponent', () => {
@@ -45,18 +48,30 @@ describe('SessionsComponent', () => {
     expect(root.textContent).toContain('This device');
   });
 
-  it('reports a failed revoke as a toast and a later success separately', () => {
-    const revokeSession = vi.fn()
-      .mockReturnValueOnce(throwError(() => new ApiError('boom', 500)))
-      .mockReturnValue(of('ok'));
-    const { fixture, notify, root } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])), revokeSession);
-    const component = fixture.componentInstance;
-    component.revoke(OTHER);
-    expect(notify.failure).toHaveBeenCalledWith('Failed to revoke session', expect.any(ApiError));
-    expect(component.revokingId()).toBeNull();
-    component.revoke(OTHER);
-    fixture.detectChanges();
+  it('asks before revoking a session, naming its device and address', () => {
+    const revokeSession = vi.fn().mockReturnValue(of('ok'));
+    const { notify, root, confirm } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])), revokeSession);
+    revokeButtons(root)[1].click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Revoke session', target: 'Firefox (10.0.0.1)' }));
+    expect(revokeSession).toHaveBeenCalledWith('s2');
     expect(notify.success).toHaveBeenCalledWith('Session revoked');
-    expect(root.querySelector('gr-message-banner')).toBeNull();
+  });
+
+  it('sends no revoke when the confirmation is cancelled', () => {
+    const revokeSession = vi.fn().mockReturnValue(of('ok'));
+    const { root, confirm } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])), revokeSession);
+    confirm.mockImplementation(() => EMPTY);
+    revokeButtons(root)[1].click();
+    expect(revokeSession).not.toHaveBeenCalled();
+  });
+
+  it('never offers to revoke the session of this device', () => {
+    const { root, confirm } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])));
+    expect(revokeButtons(root)[0].disabled).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
   });
 });
+
+function revokeButtons(root: HTMLElement): HTMLButtonElement[] {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('gr-row button'));
+}

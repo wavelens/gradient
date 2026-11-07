@@ -70,9 +70,8 @@
                   icon="delete"
                   severity="danger"
                   size="small"
-                  [loading]="deletingId() === override.id"
                   [disabled]="rowDisabled()"
-                  (click)="deleteOverride(override.id)"
+                  (click)="deleteOverride(override)"
                 ></button>
               </div>
             </div>

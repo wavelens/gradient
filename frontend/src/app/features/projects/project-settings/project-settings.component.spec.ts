@@ -5,10 +5,11 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Subject, of, throwError } from 'rxjs';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
+import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ProjectSettingsComponent } from './project-settings.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
@@ -18,6 +19,7 @@ import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 
 const notify = { success: vi.fn(), failure: vi.fn() };
+const confirm = vi.fn();
 
 function projectFor(access: AccessState): ProjectResponse {
   return {
@@ -46,6 +48,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 function setup(access: AccessState):ComponentFixture<ProjectSettingsComponent> {
   notify.success.mockClear();
   notify.failure.mockClear();
+  confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   TestBed.configureTestingModule({
     imports: [ProjectSettingsComponent],
     providers: [
@@ -65,6 +68,7 @@ function setup(access: AccessState):ComponentFixture<ProjectSettingsComponent> {
       },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
       { provide: NotifyService, useValue: notify },
+      { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(ProjectSettingsComponent);
@@ -142,20 +146,6 @@ describe('ProjectSettingsComponent - write failures', () => {
     expect(fixture.componentInstance.generatingSSH()).toBe(false);
   });
 
-  it('keeps the delete dialog open with the server reason when the delete fails', async () => {
-    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    await settled(fixture);
-    const service = TestBed.inject(ProjectsService) as unknown as { deleteProject: () => unknown };
-    service.deleteProject = () => throwError(() => new ApiError('Project still has running evaluations', 409));
-    findByText(fixture.nativeElement, 'delete project')!.click();
-    fixture.detectChanges();
-    findByText(document.body.querySelector('.gr-dialog')!, 'delete')!.click();
-    fixture.detectChanges();
-    const dialog = document.body.querySelector('.gr-dialog')!;
-    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Project still has running evaluations');
-    expect(fixture.componentInstance.showDeleteDialog()).toBe(true);
-  });
-
   it('sends one PATCH when Save Changes is clicked twice', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
@@ -168,41 +158,51 @@ describe('ProjectSettingsComponent - write failures', () => {
     expect(updateProject).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the delete dialog open while the delete runs', async () => {
-    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+});
+
+describe('ProjectSettingsComponent - confirmed actions', () => {
+  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  it('asks before deleting, naming the project, then leaves for the project list', async () => {
+    const fixture = setup(admin);
     await settled(fixture);
-    const deleteProject = vi.fn(() => new Subject<void>());
+    const deleteProject = vi.fn(() => of(undefined));
     Object.assign(TestBed.inject(ProjectsService), { deleteProject });
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     findByText(fixture.nativeElement, 'delete project')!.click();
-    fixture.detectChanges();
-    const dialog = document.body.querySelector('.gr-dialog')!;
-    findByText(dialog as HTMLElement, 'delete')!.click();
-    fixture.detectChanges();
-    findByText(dialog as HTMLElement, 'delete')!.click();
-    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    fixture.detectChanges();
-    expect(deleteProject).toHaveBeenCalledTimes(1);
-    expect(fixture.componentInstance.showDeleteDialog()).toBe(true);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete project', target: projectFor(admin).display_name }));
+    expect(deleteProject).toHaveBeenCalledWith('acme');
+    expect(navigate).toHaveBeenCalledWith(['/projects']);
   });
 
-  it('keeps the Regenerate SSH Key dialog open while it runs and shows a failure inside it', async () => {
-    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+  it('sends no delete when the confirmation is cancelled', async () => {
+    const fixture = setup(admin);
     await settled(fixture);
-    const pending = new Subject<string>();
-    Object.assign(TestBed.inject(ProjectsService), { generateSSHKey: () => pending });
-    findByText(fixture.nativeElement, 'regenerate key')!.click();
-    fixture.detectChanges();
-    const dialog = document.body.querySelector('.gr-dialog')!;
-    findByText(dialog as HTMLElement, 'regenerate')!.click();
-    fixture.detectChanges();
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    fixture.detectChanges();
-    expect(fixture.componentInstance.showRegenerateKeyDialog()).toBe(true);
+    confirm.mockImplementation(() => EMPTY);
+    const deleteProject = vi.fn(() => of(undefined));
+    Object.assign(TestBed.inject(ProjectsService), { deleteProject });
+    findByText(fixture.nativeElement, 'delete project')!.click();
+    expect(deleteProject).not.toHaveBeenCalled();
+  });
 
-    pending.error(new ApiError('No permission for this action.', 403));
-    fixture.detectChanges();
-    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('No permission for this action.');
-    expect(fixture.componentInstance.showRegenerateKeyDialog()).toBe(true);
-    expect(notify.failure).not.toHaveBeenCalled();
+  it('asks before regenerating the SSH key, then shows the new key', async () => {
+    const fixture = setup(admin);
+    await settled(fixture);
+    const generateSSHKey = vi.fn(() => of('ssh-ed25519 NEWKEY acme'));
+    Object.assign(TestBed.inject(ProjectsService), { generateSSHKey });
+    findByText(fixture.nativeElement, 'regenerate key')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Regenerate SSH key' }));
+    expect(fixture.componentInstance.sshKey()).toBe('ssh-ed25519 NEWKEY acme');
+    expect(notify.success).toHaveBeenCalledWith('SSH key generated');
+  });
+
+  it('keeps the old SSH key when regenerating is cancelled', async () => {
+    const fixture = setup(admin);
+    await settled(fixture);
+    confirm.mockImplementation(() => EMPTY);
+    const generateSSHKey = vi.fn(() => of('ssh-ed25519 NEWKEY acme'));
+    Object.assign(TestBed.inject(ProjectsService), { generateSSHKey });
+    findByText(fixture.nativeElement, 'regenerate key')!.click();
+    expect(generateSSHKey).not.toHaveBeenCalled();
   });
 });

@@ -159,7 +159,7 @@
             label="Regenerate Key"
             icon="refresh"
             severity="danger"
-            (click)="openRegenerateKeyDialog()"
+            (click)="regenerateSSHKey()"
             [disabled]="generatingSSH()"
             [appManagedDisable]="access()"
           ></button>
@@ -174,7 +174,7 @@
           label="Delete Project"
           icon="delete"
           severity="danger"
-          (click)="openDeleteDialog()"
+          (click)="deleteProject()"
           [appManagedDisable]="access()"
         ></button>
       </gr-row>
@@ -183,33 +183,3 @@
 </gr-page-layout>
 }
 </gr-load-state>
-
-<!-- Regenerate SSH Key Confirmation Dialog -->
-<gr-dialog
-header="Regenerate SSH Key"
-[(visible)]="showRegenerateKeyDialog"
-[error]="regenerateError()"
-[busy]="generatingSSH()"
-width="400px"
->
-<p>Are you sure you want to regenerate the SSH key? The existing key will stop working immediately and any repositories using it will lose access.</p>
-<div grDialogFooter>
-  <button grButton label="Cancel" severity="secondary" (click)="showRegenerateKeyDialog.set(false)" [disabled]="generatingSSH()"></button>
-  <button grButton label="Regenerate" severity="danger" icon="refresh" (click)="confirmRegenerateSSHKey()" [loading]="generatingSSH()" [disabled]="generatingSSH()"></button>
-</div>
-</gr-dialog>
-
-<!-- Delete Confirmation Dialog -->
-<gr-dialog
-header="Delete Project"
-[(visible)]="showDeleteDialog"
-[error]="deleteError()"
-[busy]="deleting()"
-width="400px"
->
-<p>Are you sure you want to delete <strong>{{ project()?.display_name }}</strong>? This action cannot be undone.</p>
-<div grDialogFooter>
-  <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-  <button grButton label="Delete" severity="danger" (click)="deleteProject()" [loading]="deleting()" [disabled]="deleting()"></button>
-</div>
-</gr-dialog>
