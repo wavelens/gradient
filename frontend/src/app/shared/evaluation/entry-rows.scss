@@ -42,6 +42,7 @@
 // The link stretches across the row so a middle click opens it in a new tab; the kebab stacks above it.
 .entry-link {
   position: absolute;
+  z-index: 1;
   inset: 0;
   padding: 0;
   border-radius: inherit;
@@ -52,6 +53,7 @@
 
 .entry-kebab {
   position: relative;
+  z-index: 2;
   padding-left: $spacing-sm;
   border: none;
   border-left: 1px solid var(--gr-border-subtle);
