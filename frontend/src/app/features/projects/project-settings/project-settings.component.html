@@ -128,7 +128,7 @@
     @if (sshLoading() || sshError()) {
       <gr-load-state flat [loading]="sshLoading()" [error]="sshError()" empty loadingMessage="Loading SSH key..." errorTitle="Failed to load SSH key" (retry)="loadSSHKey()" />
     } @else {
-      <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
+      <p class="text-secondary">Three roles in Gradient depend on this OpenSSH key. The key can fetch private repositories as a deploy key, decrypt secrets encrypted in the repository as a recipient and log in to servers for remote builds as a login key.</p>
       @if (sshKey()) {
         <gr-form-field label="Public Key">
           <gr-label-help slot="label" doc="concepts/projects-and-tasks/#project" title="Project SSH key" />

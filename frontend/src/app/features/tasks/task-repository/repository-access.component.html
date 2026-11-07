@@ -33,6 +33,9 @@
     <gr-form-field label="Deploy key" hint="Gradient can clone the repository with the project SSH key. Add this key to the repository as a read-only deploy key.">
       <gr-copy-field multiline [rows]="3" [value]="key" />
     </gr-form-field>
+    @if (isGitHub()) {
+      <p class="text-secondary" data-testid="github-deploy-key">GitHub can accept each deploy key for only one repository. Add the key to an account for a machine user or connect GitHub through a GitHub App to cover more repositories.</p>
+    }
   } @else {
     <p class="text-secondary">Public HTTPS repositories need no key.</p>
   }

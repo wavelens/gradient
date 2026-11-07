@@ -296,7 +296,7 @@ describe('ProjectSettingsComponent - confirmed actions', () => {
     const generateSSHKey = vi.fn(() => of('ssh-ed25519 NEWKEY acme'));
     Object.assign(TestBed.inject(ProjectsService), { generateSSHKey });
     findByText(fixture.nativeElement, 'regenerate key')!.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Regenerate SSH key' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Regenerate SSH key', consequence: expect.stringContaining('authorized_keys') }));
     expect(fixture.componentInstance.sshKey()).toBe('ssh-ed25519 NEWKEY acme');
     expect(notify.success).toHaveBeenCalledWith('SSH key generated');
   });

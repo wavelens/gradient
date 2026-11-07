@@ -69,6 +69,11 @@ describe('RepositoryAccessComponent', () => {
     expect(updateTask).not.toHaveBeenCalled();
   });
 
+  it('explains that GitHub takes a deploy key on one repository only', () => {
+    const el = render({ repository: 'git@github.com:acme/app.git' }, {}).nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="github-deploy-key"]')?.textContent).toContain('only one repository');
+  });
+
   it('hides the edit and test buttons from read-only members', () => {
     const el = render({ can_edit: false }, {}).nativeElement as HTMLElement;
     expect(el.textContent).not.toContain('Test access');

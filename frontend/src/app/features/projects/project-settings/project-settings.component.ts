@@ -241,7 +241,8 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
       .confirm({
         title: 'Regenerate SSH key',
         target: this.project()?.display_name ?? this.projectName,
-        consequence: 'The existing key will stop working immediately and any repositories using it will lose access.',
+        consequence:
+          "Three things stop working right away with the current key. A repository with this deploy key can lose access. The project can't decrypt secrets that are encrypted in the repository until someone can encrypt them again with the new key. Servers for remote builds reject Gradient until the new key is present in authorized_keys.",
         confirmLabel: 'Regenerate',
         failure: 'SSH key generation failed.',
         action: () => this.projectsService.generateSSHKey(this.projectName),

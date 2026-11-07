@@ -17,7 +17,7 @@ import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
-import { RepositoryFetchBannerComponent, gitHostSettingsLinks } from '@shared/git';
+import { RepositoryFetchBannerComponent, gitHostSettingsLinks, repositoryHost } from '@shared/git';
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { relativeTime } from '@shared/text';
 import { fieldChecks, firstFieldError } from '@shared/forms';
@@ -59,6 +59,7 @@ export class RepositoryAccessComponent {
     return firstFieldError(url, fieldChecks.remoteRepository, (value) => repositoryUrlError(String(value)));
   });
   links = computed(() => gitHostSettingsLinks(this.state().repository, this.gitHost()));
+  isGitHub = computed(() => repositoryHost(this.state().repository) === 'github.com');
   fetchOk = computed(() => {
     const fetch = this.state().fetch;
     return fetch && !fetch.failed ? fetch : null;
