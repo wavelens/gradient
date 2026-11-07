@@ -5,22 +5,26 @@
 -->
 
 <gr-page-layout [breadcrumb]="breadcrumb()" [title]="title" subtitle="Signed POSTs of durable events to your endpoints">
-  <button slot="actions" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
-
-  @if (error()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ error() }}
-    </div>
+  @if (!loading() && !loadError()) {
+    <button slot="actions" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
   }
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading webhooks..." />
-  } @else if (webhooks().length === 0) {
-    <gr-empty-state icon="webhook" title="No webhooks" message="Create a webhook to receive events as signed HTTP requests.">
-      <button slot="action" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
-    </gr-empty-state>
-  } @else {
+  @if (error()) {
+    <gr-message-banner type="error">{{ error() }}</gr-message-banner>
+  }
+
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="webhooks().length === 0"
+    loadingMessage="Loading webhooks..."
+    errorTitle="Failed to load webhooks"
+    emptyIcon="webhook"
+    emptyTitle="No webhooks"
+    emptyMessage="Create a webhook to receive events as signed HTTP requests."
+    (retry)="load()"
+  >
+    <button slot="empty-action" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
     <div class="webhook-list">
       @for (hook of webhooks(); track hook.id) {
         <div class="webhook-row">
@@ -57,7 +61,7 @@
         </div>
       }
     </div>
-  }
+  </gr-load-state>
 </gr-page-layout>
 
 <gr-dialog [header]="editing() ? 'Edit Webhook' : 'New Webhook'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px">
@@ -98,9 +102,9 @@
 </gr-dialog>
 
 <gr-dialog header="Delivery history" [visible]="deliveriesFor() !== null" (visibleChange)="$event || deliveriesFor.set(null)" width="860px">
-  @if (deliveries().length === 0) {
-    <p class="state-msg">No deliveries yet.</p>
-  } @else {
+  <gr-load-state flat [loading]="deliveriesLoading()" [error]="deliveriesError()" [empty]="deliveries().length === 0"
+                 loadingMessage="Loading deliveries..." errorTitle="Failed to load deliveries"
+                 emptyIcon="send" emptyTitle="No deliveries yet" (retry)="loadDeliveries()">
     <gr-table>
       <thead>
         <tr><th>Time</th><th>Event</th><th>Result</th><th>Status</th><th>Duration</th></tr>
@@ -117,5 +121,5 @@
         }
       </tbody>
     </gr-table>
-  }
+  </gr-load-state>
 </gr-dialog>

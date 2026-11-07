@@ -12,8 +12,7 @@ import { deviceName } from '@shared/text';
 import {
   BadgeComponent,
   ButtonComponent,
-  EmptyStateComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -27,8 +26,7 @@ import {
     CommonModule,
     BadgeComponent,
     ButtonComponent,
-    EmptyStateComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
@@ -45,6 +43,7 @@ export class SessionsComponent implements OnInit {
   revokingId = signal<string | null>(null);
   sessions = signal<SessionInfo[]>([]);
   errorMessage = signal<string | null>(null);
+  loadError = signal<unknown>(null);
 
   ngOnInit(): void {
     this.load();
@@ -52,13 +51,14 @@ export class SessionsComponent implements OnInit {
 
   load(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.userService.getSessions().subscribe({
       next: (sessions) => {
         this.sessions.set(sessions);
         this.loading.set(false);
       },
-      error: () => {
-        this.errorMessage.set('Failed to load sessions.');
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });
@@ -69,6 +69,7 @@ export class SessionsComponent implements OnInit {
       return;
     }
     this.revokingId.set(s.id);
+    this.errorMessage.set(null);
     this.userService.revokeSession(s.id).subscribe({
       next: () => {
         this.revokingId.set(null);

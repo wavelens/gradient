@@ -13,15 +13,17 @@
     <gr-message-banner slot="banner" type="error">{{ errorMessage() }}</gr-message-banner>
   }
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading subscription requests..." />
-  } @else if (requests().length === 0) {
-    <gr-empty-state
-      icon="hub"
-      title="No pending requests"
-      message="A project that asks to subscribe to this cache appears here for approval."
-    />
-  } @else {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="requests().length === 0"
+    loadingMessage="Loading subscription requests..."
+    errorTitle="Failed to load subscription requests"
+    emptyIcon="hub"
+    emptyTitle="No pending requests"
+    emptyMessage="A project that asks to subscribe to this cache appears here for approval."
+    (retry)="load()"
+  >
     <gr-row-list>
       @for (request of requests(); track request.project) {
         <gr-row icon="folder">
@@ -51,5 +53,5 @@
         </gr-row>
       }
     </gr-row-list>
-  }
+  </gr-load-state>
 </gr-page-layout>

@@ -5,8 +5,9 @@
 -->
 
 <gr-page-layout title="Profile Settings" subtitle="Manage your personal information">
-  @if (loading()) {
-    <gr-loading-spinner message="Loading profile..." />
+  @if (loading() || loadError()) {
+    <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading profile..."
+                   errorTitle="Failed to load profile" (retry)="loadSettings()" />
   } @else {
     @if (errorMessage()) {
       <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>

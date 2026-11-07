@@ -16,7 +16,7 @@ import {
   DialogComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -40,7 +40,7 @@ import { LabelHelpComponent } from '@shared/ui';
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     PageLayoutComponent,
@@ -66,6 +66,7 @@ export class CacheSettingsComponent implements OnInit {
   access = injectCacheAccess();
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   saving = signal(false);
   toggling = signal(false);
   deleting = signal(false);
@@ -100,6 +101,7 @@ export class CacheSettingsComponent implements OnInit {
 
   loadCache(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.cachesService.getCache(this.cacheName).subscribe({
       next: (cache) => {
         this.cache.set(cache);
@@ -115,8 +117,8 @@ export class CacheSettingsComponent implements OnInit {
         };
         this.loading.set(false);
       },
-      error: (error) => {
-        console.error('Failed to load cache:', error);
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });

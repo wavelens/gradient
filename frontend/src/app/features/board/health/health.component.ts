@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { CardGridComponent, LoadingSpinnerComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
+import { CardGridComponent, LoadStateComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { BoardService } from '@core/services/board.service';
 import { AdminService } from '@core/services/admin.service';
 import { ConfigService } from '@core/services/config.service';
@@ -17,8 +17,10 @@ import { BoardHealth, AdminTaskDto } from '@core/models';
 @Component({
   selector: 'app-board-health',
   standalone: true,
-  imports: [CommonModule, CardGridComponent, StatCardComponent, RouterModule, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, CardGridComponent, StatCardComponent, RouterModule, TableComponent, LoadStateComponent],
   template: `
+    <gr-load-state [loading]="healthLoading()" [error]="healthError()" [empty]="!health()"
+                   loadingMessage="Loading system health..." errorTitle="Failed to load health" (retry)="refreshHealth()">
     @if (health(); as h) {
       @if (h.draining) {
         <div class="drain-banner">Instance is draining: scheduling is paused and in-flight evaluations are parked. Clears on restart.</div>
@@ -99,9 +101,8 @@ import { BoardHealth, AdminTaskDto } from '@core/models';
           }
         </tbody>
       </gr-table>
-    } @else {
-      <gr-loading-spinner message="Loading system health..." />
     }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './health.component.scss',
@@ -112,6 +113,8 @@ export class BoardHealthComponent implements OnInit {
   protected config = inject(ConfigService);
 
   health = signal<BoardHealth | null>(null);
+  healthLoading = signal(true);
+  healthError = signal<unknown>(null);
   tasks = signal<AdminTaskDto[]>([]);
   gcBusy = signal(false);
   gcNotice = signal<string | null>(null);
@@ -144,8 +147,19 @@ export class BoardHealthComponent implements OnInit {
     });
   }
 
-  private refreshHealth(): void {
-    this.board.getHealth().subscribe((h) => this.health.set(h));
+  refreshHealth(): void {
+    this.healthLoading.set(true);
+    this.healthError.set(null);
+    this.board.getHealth().subscribe({
+      next: (h) => {
+        this.health.set(h);
+        this.healthLoading.set(false);
+      },
+      error: (error: unknown) => {
+        this.healthError.set(error);
+        this.healthLoading.set(false);
+      },
+    });
   }
 
   ngOnInit(): void {

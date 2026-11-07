@@ -25,6 +25,7 @@ import {
   EmptyStateComponent,
   IconComponent,
   InViewDirective,
+  LoadStateComponent,
   MenuComponent,
   MenuItem,
   MessageService,
@@ -57,7 +58,7 @@ import { buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commit
   standalone: true,
   imports: [
     CommonModule, FormsModule, RouterModule, BadgeComponent, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
-    SkeletonComponent, EmptyStateComponent, WritableDirective,
+    SkeletonComponent, EmptyStateComponent, LoadStateComponent, WritableDirective,
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent,
     ExecJobListComponent,
@@ -96,6 +97,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   entryPointsTotal = signal(0);
   failedAttributes = signal<FailedAttributeSummary[]>([]);
   entryPointsLoading = signal(false);
+  entryPointsError = signal<unknown>(null);
+  moreEntryPointsError = signal<unknown>(null);
   // Mirrors the server's own page size and its hard cap, so "show more" pages with
   // an offset instead of asking for a limit the server would clamp.
   private static readonly ENTRY_POINTS_PAGE = 25;
@@ -298,7 +301,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     }
     this.lastEntryPointsFetch = Date.now();
     const switching = evaluationId !== this.entryPointsEvalId;
-    if (switching) this.entryPointsLoading.set(true);
+    if (switching) {
+      this.entryPointsLoading.set(true);
+      this.entryPointsError.set(null);
+      this.moreEntryPointsError.set(null);
+    }
     // A refresh re-reads the first page only, never the whole scrolled window:
     // the server walks one dependency closure per entry point it returns, so
     // re-reading a 500-row window every 4 s costs twenty times what the visible
@@ -312,6 +319,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         // evaluation and search term, so a slow earlier request can't clobber a newer one.
         if (this.selectedId() !== evaluationId || this.searchTerm() !== term) return;
         this.entryPointsLoading.set(false);
+        this.entryPointsError.set(null);
         this.entryPointsTotal.set(page.total);
         if (!term) this.listSpansPages.set(page.total > TaskDetailComponent.ENTRY_POINTS_PAGE);
         if (JSON.stringify(page.failed_attributes) !== JSON.stringify(this.failedAttributes())) {
@@ -328,9 +336,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         this.entryPointsSig = sig;
         this.entryPoints.set(next);
       },
-      error: (error) => {
-        if (this.selectedId() === evaluationId) this.entryPointsLoading.set(false);
-        console.error('Failed to load entry points:', error);
+      error: (error: unknown) => {
+        if (this.selectedId() !== evaluationId) return;
+        this.entryPointsLoading.set(false);
+        this.entryPointsError.set(error);
       },
     });
   }
@@ -349,6 +358,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const evaluationId = this.selected()?.id;
     if (!evaluationId || this.entryPointsAppending) return;
     this.entryPointsAppending = true;
+    this.moreEntryPointsError.set(null);
     const offset = this.entryPoints().length;
     const term = this.searchTerm();
     this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, TaskDetailComponent.ENTRY_POINTS_PAGE, offset, term).subscribe({
@@ -363,9 +373,9 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         this.entryPointsSig = this.entryPointSignature(next);
         this.entryPoints.set(next);
       },
-      error: (error) => {
+      error: (error: unknown) => {
         this.entryPointsAppending = false;
-        console.error('Failed to load more entry points:', error);
+        if (this.selectedId() === evaluationId) this.moreEntryPointsError.set(error);
       },
     });
   }
@@ -466,6 +476,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   closeEmptySearch(): void {
     if (!this.searchField()?.nativeElement.value.trim()) this.closeSearch();
+  }
+
+  reloadEntryPoints(): void {
+    this.entryPointsEvalId = undefined;
+    this.loadEntryPoints(this.selectedId() ?? undefined);
   }
 
   private applySearch(term: string): void {

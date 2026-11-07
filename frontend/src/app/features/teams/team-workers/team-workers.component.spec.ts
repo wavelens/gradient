@@ -9,7 +9,8 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { TeamWorkersComponent } from './team-workers.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -35,7 +36,11 @@ const connection: TeamWorkerEntry = {
 
 const offline = { ...connection, worker_id: 'w2', display_name: 'Sleeper', gradient_ci: false, connected: false };
 
-function setup(role: 'admin' | 'member' = 'admin', workers: TeamWorkerEntry[] = [connection]) {
+function setup(
+  role: 'admin' | 'member' = 'admin',
+  workers: TeamWorkerEntry[] = [connection],
+  list: () => Observable<TeamWorkerEntry[]> = () => of(workers),
+) {
   const updateWorker = vi.fn().mockReturnValue(of('updated'));
   TestBed.configureTestingModule({
     imports: [TeamWorkersComponent],
@@ -45,7 +50,7 @@ function setup(role: 'admin' | 'member' = 'admin', workers: TeamWorkerEntry[] = 
       provideHttpClientTesting(),
       { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
       { provide: ConfigService, useValue: { gradientCiEnabled: true, gradientCiUrl: 'https://servers.gradient.ci' } },
-      { provide: TeamsService, useValue: { workers: () => of(workers), updateWorker } },
+      { provide: TeamsService, useValue: { workers: list, updateWorker } },
     ],
   });
   const fixture = TestBed.createComponent(TeamWorkersComponent);
@@ -102,5 +107,19 @@ describe('TeamWorkersComponent', () => {
   it('links a Gradient.CI connection to its site', () => {
     const { root } = setup('member');
     expect(root.querySelector('a[href="https://servers.gradient.ci"]')).not.toBeNull();
+  });
+
+  it('shows a failed worker load with Try Again, never as no online workers', () => {
+    let fail = true;
+    const { fixture, root } = setup('member', [connection], () =>
+      fail ? throwError(() => new ApiError('database is down', 500)) : of([connection]),
+    );
+    expect(root.textContent).toContain('Failed to load workers');
+    expect(root.textContent).not.toContain('No online workers');
+
+    fail = false;
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Gradient.CI Servers');
   });
 });

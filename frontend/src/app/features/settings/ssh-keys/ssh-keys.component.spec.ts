@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { SshKeysComponent } from './ssh-keys.component';
 import { UserService } from '@core/services/user.service';
@@ -50,6 +50,18 @@ function buttonsByText(root: HTMLElement, text: string): HTMLButtonElement[] {
 }
 
 describe('SshKeysComponent', () => {
+  it('shows a failed load with Try Again instead of No SSH keys', () => {
+    const getSshKeys = vi.fn().mockReturnValueOnce(throwError(() => new Error('database is down'))).mockReturnValue(of([key]));
+    const fixture = setup([], { getSshKeys });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load SSH keys');
+    expect(root.textContent).not.toContain('No SSH keys');
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(getSshKeys).toHaveBeenCalledTimes(2);
+    expect(root.textContent).toContain('laptop');
+  });
+
   it('lists keys with their fingerprint', () => {
     const fixture = setup([key]);
     const text = fixture.nativeElement.textContent;

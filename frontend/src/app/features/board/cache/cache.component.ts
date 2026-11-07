@@ -8,24 +8,24 @@ import { Component, inject, signal, computed, ChangeDetectionStrategy } from '@a
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { switchMap } from 'rxjs';
+import { map, merge, switchMap, timer } from 'rxjs';
 import { LiveService } from '@core/services/live.service';
-import { CardGridComponent, LoadingSpinnerComponent, StatCardComponent, TabSwitchComponent } from '@gradient/ui/ui';
+import { CardGridComponent, LoadStateComponent, StatCardComponent, TabSwitchComponent } from '@gradient/ui/ui';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { clockTime, formatBytes, formatCount, formatDuration, formatPercent } from '@shared/text';
 import { BoardCacheSnapshot, BoardUpstreamCache, EventEnvelope, TrafficKind } from '@core/models';
 
 const WINDOW_HOURS = 24;
+const FIRST_FRAME_MS = 10_000;
 
 @Component({
   selector: 'app-board-cache',
   standalone: true,
-  imports: [CommonModule, FormsModule, TabSwitchComponent, CardGridComponent, StatCardComponent, MetricChartComponent, LabelHelpComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, FormsModule, TabSwitchComponent, CardGridComponent, StatCardComponent, MetricChartComponent, LabelHelpComponent, LoadStateComponent],
   template: `
-    @if (!snapshot()) {
-      <gr-loading-spinner message="Loading cache stats..." />
-    } @else {
+    <gr-load-state [loading]="!stalled()" [error]="stalled()" [empty]="!snapshot()"
+                   loadingMessage="Loading cache stats..." errorTitle="Failed to load cache activity" (retry)="retry()">
       <gr-card-grid class="kpis" min="160px">
         <gr-stat-card compact label="Compressed size" [value]="bytes(stats()?.totals?.bytes ?? 0)" />
         <gr-stat-card compact label="NAR size" [value]="bytes(stats()?.totals?.nar_bytes ?? 0)" />
@@ -92,7 +92,7 @@ const WINDOW_HOURS = 24;
           [valueFormatter]="duration"
         ></gr-metric-chart>
       }
-    }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache.component.scss',
@@ -100,6 +100,8 @@ const WINDOW_HOURS = 24;
 export class BoardCacheComponent {
   private live = inject(LiveService);
   snapshot = signal<BoardCacheSnapshot | null>(null);
+  stalled = signal<string | null>(null);
+  private attempt = signal(0);
   readonly trafficOptions: { label: string; value: TrafficKind }[] = [
     { label: 'Total', value: 'total' },
     { label: 'External', value: 'external' },
@@ -136,16 +138,31 @@ export class BoardCacheComponent {
   readonly duration = formatDuration;
 
   constructor() {
-    toObservable(this.traffic)
+    toObservable(computed(() => ({ traffic: this.traffic(), attempt: this.attempt() })))
       .pipe(
-        switchMap((traffic) =>
-          this.live.connect<EventEnvelope<BoardCacheSnapshot>>(
-            `/board/cache/live?window_hours=${WINDOW_HOURS}&traffic=${traffic}`
+        switchMap(({ traffic }) =>
+          merge(
+            this.live
+              .connect<EventEnvelope<BoardCacheSnapshot>>(`/board/cache/live?window_hours=${WINDOW_HOURS}&traffic=${traffic}`)
+              .pipe(map((frame) => frame.content)),
+            timer(FIRST_FRAME_MS).pipe(map(() => null)),
           )
         ),
         takeUntilDestroyed()
       )
-      .subscribe((frame) => this.snapshot.set(frame.content));
+      .subscribe((content) => {
+        if (content) {
+          this.snapshot.set(content);
+          this.stalled.set(null);
+        } else if (!this.snapshot()) {
+          this.stalled.set('The server sent no cache statistics in 10 seconds.');
+        }
+      });
+  }
+
+  retry(): void {
+    this.stalled.set(null);
+    this.attempt.update((n) => n + 1);
   }
 }
 

@@ -11,9 +11,16 @@
   @if (error(); as message) {
     <gr-message-banner type="error">{{ message }}</gr-message-banner>
   }
-  @if (loading()) {
-    <gr-loading-spinner message="Loading members..." />
-  } @else if (members().length > 0) {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="members().length === 0"
+    loadingMessage="Loading members..."
+    errorTitle="Failed to load team members"
+    emptyIcon="group"
+    emptyTitle="No members"
+    (retry)="load()"
+  >
     <gr-row-list>
       @for (member of members(); track member.user) {
         <gr-row icon="person">
@@ -35,9 +42,7 @@
         </gr-row>
       }
     </gr-row-list>
-  } @else {
-    <gr-empty-state icon="group" title="No members" />
-  }
+  </gr-load-state>
 </gr-settings-section>
 
 @if (invitations().length > 0) {

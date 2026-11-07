@@ -18,7 +18,7 @@ import {
   DialogComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -46,7 +46,7 @@ const CONNECT_ERRORS: Record<string, string> = {
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     ManagedDisableDirective,
     PageLayoutComponent,
     FormFieldComponent,
@@ -68,6 +68,7 @@ export class ProfileComponent implements OnInit {
   theme = inject(ThemeService);
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   saving = signal(false);
   deleting = signal(false);
   isOidc = signal(false);
@@ -147,6 +148,7 @@ export class ProfileComponent implements OnInit {
 
   loadSettings(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.userService.getUserSettings().subscribe({
       next: (settings) => {
         this.isOidc.set(settings.is_oidc);
@@ -160,8 +162,8 @@ export class ProfileComponent implements OnInit {
         };
         this.loading.set(false);
       },
-      error: (error) => {
-        console.error('Failed to load user settings:', error);
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });

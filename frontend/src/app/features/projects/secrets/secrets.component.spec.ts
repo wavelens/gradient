@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { SecretsComponent } from './secrets.component';
 import { ProjectSecretsService } from '@core/services/project-secrets.service';
@@ -80,6 +80,25 @@ function typeInto(id: string, value: string) {
 }
 
 describe('SecretsComponent', () => {
+  it('shows a refused load as one error without the empty state', async () => {
+    const { fixture, service } = setup();
+    service.list.mockReturnValue(throwError(() => ({ status: 403, message: 'You do not have permission to perform this action.' })));
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Failed to load secrets');
+    expect(text).not.toContain('No secrets');
+  });
+
+  it('loads the secrets again on Try Again', async () => {
+    const { fixture, service } = setup();
+    service.list.mockReturnValueOnce(throwError(() => new Error('down')));
+    await settled(fixture);
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    await settled(fixture);
+    expect(service.list).toHaveBeenCalledTimes(2);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('wandb-token');
+  });
+
   it('lists each secret name and never a value', async () => {
     const { fixture, service } = setup();
     service.list.mockReturnValue(of(listed.map((secret) => ({ ...secret, value: 's3cr3t-value' }))));

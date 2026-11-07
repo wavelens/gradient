@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Subject, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { firstLoad } from './first-load';
 
 describe('firstLoad', () => {
@@ -32,6 +32,47 @@ describe('firstLoad', () => {
       .pipe(load.track())
       .subscribe({ error: () => {} });
     expect(load.loading()).toBe(false);
+  });
+
+  it('keeps a failure of the first paint so the page can show it instead of empty charts', () => {
+    const load = firstLoad();
+    const ok = new Subject<number>();
+    ok.pipe(load.track()).subscribe();
+    throwError(() => new Error('down')).pipe(load.track()).subscribe();
+    ok.next(1);
+    ok.complete();
+    expect(load.loading()).toBe(false);
+    expect(load.received()).toBe(true);
+    expect((load.error() as Error).message).toBe('down');
+  });
+
+  it('ignores a failed poll once the page is on screen, and a later answer clears an old failure', () => {
+    const load = firstLoad();
+    throwError(() => new Error('down')).pipe(load.track()).subscribe();
+    const poll = new Subject<number>();
+    poll.pipe(load.track()).subscribe();
+    poll.next(1);
+    expect(load.error()).toBeNull();
+    throwError(() => new Error('again')).pipe(load.track()).subscribe();
+    expect(load.error()).toBeNull();
+  });
+
+  it('reports a failed reload the user asked for, without a spinner', () => {
+    const load = firstLoad();
+    of(1).pipe(load.track()).subscribe();
+    load.refresh();
+    throwError(() => new Error('window switch failed')).pipe(load.track()).subscribe();
+    expect(load.loading()).toBe(false);
+    expect((load.error() as Error).message).toBe('window switch failed');
+  });
+
+  it('starts over for Try Again', () => {
+    const load = firstLoad();
+    throwError(() => new Error('down')).pipe(load.track()).subscribe();
+    load.restart();
+    expect(load.loading()).toBe(true);
+    expect(load.error()).toBeNull();
+    expect(load.received()).toBe(false);
   });
 
   it('stays cleared across the poll that follows', () => {

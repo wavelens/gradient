@@ -16,10 +16,9 @@ import {
   BadgeComponent,
   ButtonComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -58,7 +57,7 @@ interface RoleFormState {
     ButtonComponent,
     InputDirective,
     AutoCompleteComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     PageLayoutComponent,
@@ -68,7 +67,6 @@ interface RoleFormState {
     RowComponent,
     BadgeComponent,
     SelectComponent,
-    EmptyStateComponent,
     MessageBannerComponent,
   ],
   templateUrl: './cache-members-roles.component.html',
@@ -102,6 +100,9 @@ export class CacheMembersRolesComponent implements OnInit {
   userSuggestions = signal<string[]>([]);
   memberError = signal<string | null>(null);
   roleError = signal<string | null>(null);
+  membersLoadError = signal<unknown>(null);
+  rolesLoadError = signal<unknown>(null);
+  invitationsLoadError = signal<unknown>(null);
 
   showAddMemberDialog = signal(false);
   showRoleDialog = signal(false);
@@ -127,19 +128,24 @@ export class CacheMembersRolesComponent implements OnInit {
 
   loadMembers(): void {
     this.membersLoading.set(true);
+    this.membersLoadError.set(null);
     this.cachesService.getMembers(this.cacheName).subscribe({
       next: (members) => {
         this.members.set(members);
         this.membersLoading.set(false);
       },
-      error: () => this.membersLoading.set(false),
+      error: (error: unknown) => {
+        this.membersLoadError.set(error);
+        this.membersLoading.set(false);
+      },
     });
   }
 
   loadInvitations(): void {
+    this.invitationsLoadError.set(null);
     this.cachesService.getInvitations(this.cacheName).subscribe({
       next: (invitations) => this.invitations.set(invitations),
-      error: () => this.invitations.set([]),
+      error: (error: unknown) => this.invitationsLoadError.set(error),
     });
   }
 
@@ -159,6 +165,7 @@ export class CacheMembersRolesComponent implements OnInit {
 
   loadRoles(): void {
     this.rolesLoading.set(true);
+    this.rolesLoadError.set(null);
     this.cachesService.getRoles(this.cacheName).subscribe({
       next: (response) => {
         this.roles.set(response.roles);
@@ -168,7 +175,10 @@ export class CacheMembersRolesComponent implements OnInit {
         }
         this.rolesLoading.set(false);
       },
-      error: () => this.rolesLoading.set(false),
+      error: (error: unknown) => {
+        this.rolesLoadError.set(error);
+        this.rolesLoading.set(false);
+      },
     });
   }
 

@@ -14,9 +14,9 @@ import {
   ButtonComponent,
   CardGridComponent,
   DialogComponent,
-  EmptyStateComponent,
   IconComponent,
   InputDirective,
+  LoadStateComponent,
   PageLayoutComponent,
   SkeletonComponent,
   StatCardComponent,
@@ -47,7 +47,7 @@ type SortOrder = 'asc' | 'desc';
     CacheNarsDetailDrawerComponent,
     IconComponent,
     PageLayoutComponent,
-    EmptyStateComponent,
+    LoadStateComponent,
     StatCardComponent,
     CardGridComponent,
     TableComponent,
@@ -82,7 +82,7 @@ export class CacheNarsComponent implements OnInit {
   stats = signal<NarStats | null>(null);
   statsFailed = signal(false);
   readonly placeholders = Array.from({ length: 10 });
-  loadError = signal<string | null>(null);
+  loadError = signal<unknown>(null);
   deleteError = signal<string | null>(null);
 
   selected = signal<NarSummary | null>(null);
@@ -122,8 +122,8 @@ export class CacheNarsComponent implements OnInit {
         this.total.set(r.total);
         this.loading.set(false);
       },
-      error: (err) => {
-        this.loadError.set(err?.message ?? 'Failed to load NARs.');
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });

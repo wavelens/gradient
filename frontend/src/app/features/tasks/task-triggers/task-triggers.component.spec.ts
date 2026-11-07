@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { TaskTriggersComponent } from './task-triggers.component';
 import { TriggersService } from '@core/services/triggers.service';
@@ -183,5 +183,24 @@ describe('TaskTriggersComponent - flake inputs', () => {
     component.form.include_flake_inputs = false;
     component.saveEdit();
     expect(update.mock.calls[0][3].config.include_flake_inputs).toBeUndefined();
+  });
+});
+
+describe('TaskTriggersComponent - load errors', () => {
+  it('shows a failed load as an error, never as the empty state and loads again on Try Again', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
+    const service = TestBed.inject(TriggersService) as unknown as { list: () => unknown };
+    service.list = () => throwError(() => new Error('database is down'));
+    fixture.componentInstance.loadTriggers();
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load triggers');
+    expect(root.textContent).toContain('database is down');
+    expect(root.textContent).not.toContain('No triggers configured');
+
+    service.list = () => of([]);
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    fixture.detectChanges();
+    expect(root.textContent).toContain('No triggers configured');
   });
 });

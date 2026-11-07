@@ -13,8 +13,8 @@
       (click)="openCreateDialog()"
       [appManagedDisable]="access()"
     ></button>
-  @if (loading()) {
-    <gr-loading-spinner message="Loading integrations..." />
+  @if (loading() || loadError()) {
+    <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading integrations..." errorTitle="Failed to load integrations" (retry)="loadIntegrations()" />
   } @else {
     @if (githubAppAvailable() && !githubAppInstalled()) {
       <gr-message-banner type="warning" data-testid="no-github-app-banner">

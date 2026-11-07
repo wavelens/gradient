@@ -20,7 +20,7 @@ import {
   ButtonComponent,
   CardGridComponent,
   EmptyStateComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -54,7 +54,7 @@ interface FailureGroup {
     CardGridComponent,
     EmptyStateComponent,
     EvalStatusBadgeComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -75,6 +75,7 @@ export class EvaluationSummaryComponent implements OnInit {
   evaluation = signal<EvaluationResponse | null>(null);
   summary = signal<EvaluationFailureSummary | null>(null);
   loading = signal(true);
+  loadError = signal<unknown>(null);
 
   running = computed(() => {
     const evaluation = this.evaluation();
@@ -130,6 +131,12 @@ export class EvaluationSummaryComponent implements OnInit {
   ngOnInit(): void {
     this.project = this.route.snapshot.paramMap.get('project') ?? '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') ?? '';
+    this.load();
+  }
+
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
     forkJoin({
       evaluation: this.evaluations.getEvaluation(this.evaluationId),
       summary: this.evaluations.getEvaluationSummary(this.evaluationId),
@@ -140,7 +147,10 @@ export class EvaluationSummaryComponent implements OnInit {
         this.summary.set(summary);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

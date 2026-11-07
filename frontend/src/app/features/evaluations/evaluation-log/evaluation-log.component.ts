@@ -29,6 +29,7 @@ import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
+import { ApiError } from '@core/services/api.service';
 import { AccessService, WritableDirective } from '@shared/access';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
@@ -49,7 +50,7 @@ import {
   BadgeSeverity,
   ButtonComponent,
   DialogComponent,
-  EmptyStateComponent,
+  LoadStateComponent,
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
@@ -69,7 +70,7 @@ import { saveResponse } from '@shared/download';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, EmptyStateComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, ToastComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, ToastComponent, WritableDirective],
   providers: [MessageService],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -98,6 +99,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   @ViewChild(LogViewerComponent) logViewer?: LogViewerComponent;
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
+  messagesLoading = signal(false);
+  messagesError = signal<unknown>(null);
   evaluation = signal<EvaluationResponse | null>(null);
   private liveProgress = signal<EvaluationProgress | null>(null);
   progress = computed(() => {
@@ -277,6 +281,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   loadEvaluation(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.evalService.getEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (evaluation) => {
         this.rememberTaskName(evaluation);
@@ -292,7 +297,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.startDurationTimer(evaluation);
         this.startLiveUpdates(evaluation.status);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        if (!(error instanceof ApiError && error.status === 404)) this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 
@@ -323,14 +331,26 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       });
   }
 
-  loadMessages(): void {
+  loadMessages(background = false): void {
+    if (!background) {
+      this.messagesLoading.set(true);
+      this.messagesError.set(null);
+    }
     this.evalService.getEvaluationMessages(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (msgs) => this.messages.set(
-        msgs.map(m => ({
-          ...m,
-          renderedHtml: this.sanitizer.bypassSecurityTrustHtml(ansiToHtml(m.message)),
-        }))
-      ),
+      next: (msgs) => {
+        this.messages.set(
+          msgs.map(m => ({
+            ...m,
+            renderedHtml: this.sanitizer.bypassSecurityTrustHtml(ansiToHtml(m.message)),
+          }))
+        );
+        this.messagesError.set(null);
+        this.messagesLoading.set(false);
+      },
+      error: (error: unknown) => {
+        if (!background) this.messagesError.set(error);
+        this.messagesLoading.set(false);
+      },
     });
   }
 
@@ -624,7 +644,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
               this.updateDuration(evaluation);
               this.stopDurationTimer();
               this.loadBuilds(); // final update
-              this.loadMessages(); // pick up any messages recorded during eval
+              this.loadMessages(true); // pick up any messages recorded during eval
             }
           },
         }),

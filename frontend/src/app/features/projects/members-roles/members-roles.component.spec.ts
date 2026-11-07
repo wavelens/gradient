@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { MembersRolesComponent } from './members-roles.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { UserService } from '@core/services/user.service';
@@ -27,9 +28,11 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 }
 
 const revokeInvitation = vi.fn().mockReturnValue(of('Invitation revoked'));
+const getMembers = vi.fn();
 
 function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
   revokeInvitation.mockClear();
+  getMembers.mockReset().mockReturnValue(of([{ id: 'alice', name: 'Admin' }]));
   TestBed.configureTestingModule({
     imports: [MembersRolesComponent],
     providers: [
@@ -41,7 +44,7 @@ function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
         provide: ProjectsService,
         useValue: {
           getProject: () => of({ display_name: 'Acme' }),
-          getMembers: () => of([{ id: 'alice', name: 'Admin' }]),
+          getMembers,
           getRoles: () =>
             of({
               roles: [{ id: 'r1', name: 'Admin', builtin: true, permissions: [], project: null }],
@@ -107,5 +110,21 @@ describe('MembersRolesComponent - pending invitations', () => {
     await settled(fixture);
     (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
     expect(revokeInvitation).toHaveBeenCalledWith('acme', 'bob');
+  });
+});
+
+describe('MembersRolesComponent - load errors', () => {
+  it('shows a failed member load with Try Again instead of No members', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    getMembers.mockReturnValueOnce(throwError(() => new ApiError('Forbidden', 403)));
+    await settled(fixture);
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.textContent).toContain('Failed to load members');
+    expect(element.textContent).toContain('No permission');
+    expect(element.textContent).not.toContain('No members');
+    element.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    await settled(fixture);
+    expect(getMembers).toHaveBeenCalledTimes(2);
+    expect(element.textContent).toContain('alice');
   });
 });

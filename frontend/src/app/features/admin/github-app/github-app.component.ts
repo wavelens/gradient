@@ -14,6 +14,7 @@ import {
   CopyFieldComponent,
   FormFieldComponent,
   InputDirective,
+  LoadStateComponent,
   PageLayoutComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
@@ -23,7 +24,7 @@ import { ManifestResult } from '@core/models';
   selector: 'app-admin-github-app',
   standalone: true,
   imports: [
-    LabelHelpComponent,CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, PageLayoutComponent, CopyFieldComponent, FormFieldComponent],
+    LabelHelpComponent,CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, LoadStateComponent, PageLayoutComponent, CopyFieldComponent, FormFieldComponent],
   templateUrl: './github-app.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './github-app.component.scss',
@@ -39,6 +40,8 @@ export class GithubAppComponent implements OnInit {
   showResult = signal(false);
   credentials = signal<ManifestResult | null>(null);
   credentialsMissing = signal(false);
+  credentialsLoading = signal(false);
+  credentialsError = signal<unknown>(null);
 
   private keysVisible = computed(() => this.showResult() && this.credentials() !== null);
 
@@ -83,14 +86,20 @@ export class GithubAppComponent implements OnInit {
     form.submit();
   }
 
-  private loadCredentials(): void {
+  loadCredentials(): void {
+    this.credentialsLoading.set(true);
+    this.credentialsError.set(null);
     this.admin.fetchGithubAppCredentials().subscribe({
-      next: (creds) => this.credentials.set(creds),
+      next: (creds) => {
+        this.credentials.set(creds);
+        this.credentialsLoading.set(false);
+      },
       error: (err) => {
+        this.credentialsLoading.set(false);
         if (err?.status === 404) {
           this.credentialsMissing.set(true);
         } else {
-          this.errorMessage.set('Failed to load credentials');
+          this.credentialsError.set(err);
         }
       },
     });

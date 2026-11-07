@@ -8,7 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { BoardService } from '@core/services/board.service';
 import { AuthService } from '@core/services/auth.service';
-import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
+import { LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { firstLoad } from '../first-load';
@@ -20,11 +20,10 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 @Component({
   selector: 'app-board-expensive-jobs',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, LabelHelpComponent, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, MetricChartComponent, LabelHelpComponent, TableComponent, LoadStateComponent],
   template: `
-    @if (first.loading()) {
-      <gr-loading-spinner message="Loading jobs..." />
-    } @else {
+    <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
+                   loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
       <nav class="tabs">
         @for (t of tabs; track t.key) {
           <button [class.active]="tab() === t.key" (click)="setTab(t.key)">{{ t.label }}</button>
@@ -77,7 +76,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
           [valueFormatter]="duration"
         ></gr-metric-chart>
       }
-    }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './expensive-jobs.component.scss',
@@ -112,6 +111,11 @@ export class BoardExpensiveJobsComponent implements OnInit {
     this.load();
   }
 
+  retry(): void {
+    this.first.restart();
+    this.load();
+  }
+
   private load(): void {
     if (this.tab() === 'time') {
       this.board.getExpensive(this.windowDays()).pipe(this.first.track()).subscribe((b) => this.builds.set(b));
@@ -122,19 +126,18 @@ export class BoardExpensiveJobsComponent implements OnInit {
         .subscribe((r) => this.resources.set(r));
     }
     if (this.auth.user()?.superuser !== true) return;
-    this.board.getTopProjects(this.windowDays()).pipe(this.first.track()).subscribe({
-      next: (o) => this.topProjects.set(o),
-      error: () => this.topProjects.set([]),
-    });
+    this.board.getTopProjects(this.windowDays()).pipe(this.first.track()).subscribe((o) => this.topProjects.set(o));
   }
 
   setTab(t: Tab): void {
     this.tab.set(t);
+    this.first.refresh();
     this.load();
   }
 
   setWindow(e: Event): void {
     this.windowDays.set(Number((e.target as HTMLSelectElement).value));
+    this.first.refresh();
     this.load();
   }
 }

@@ -20,7 +20,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   PageLayoutComponent,
   SelectComponent,
   TooltipDirective,
@@ -87,7 +87,7 @@ const DEFAULT_FORM: TriggerFormState = {
     InputDirective,
     SelectComponent,
     CheckboxComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     IconComponent,
@@ -127,6 +127,7 @@ export class TaskTriggersComponent implements OnInit {
   );
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   saving = signal(false);
   deletingId = signal<string | null>(null);
   makingDefaultId = signal<string | null>(null);
@@ -171,12 +172,16 @@ export class TaskTriggersComponent implements OnInit {
 
   loadTriggers(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.triggersService.list(this.projectName, this.taskName).subscribe({
       next: (list) => {
         this.triggers.set(list);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

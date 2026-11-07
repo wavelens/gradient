@@ -8,9 +8,16 @@
   @if (canCreateTeam) {
     <button slot="actions" grButton label="New Team" icon="add" (click)="openCreate()"></button>
   }
-  @if (loading()) {
-    <gr-loading-spinner message="Loading teams..." />
-  } @else if (items().length > 0) {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="items().length === 0"
+    loadingMessage="Loading teams..."
+    errorTitle="Failed to load teams"
+    emptyIcon="groups"
+    emptyTitle="No teams"
+    (retry)="load()"
+  >
     <gr-row-list>
       @for (team of items(); track team.name) {
         <gr-row icon="groups" [link]="['/team', team.name]" linkLabel="Open team">
@@ -20,9 +27,7 @@
         </gr-row>
       }
     </gr-row-list>
-  } @else {
-    <gr-empty-state icon="groups" title="No teams" />
-  }
+  </gr-load-state>
 </gr-page-layout>
 
 <gr-dialog header="New Team" [(visible)]="showCreate" width="420px">

@@ -5,13 +5,9 @@
 -->
 
 <gr-dialog header="Delivery history" width="860px" [(visible)]="visible" (hide)="closed.emit()">
-  @if (loading()) {
-    <p class="state-msg">Loading…</p>
-  } @else if (loadError(); as err) {
-    <p class="state-msg error">{{ err }}</p>
-  } @else if (deliveries().length === 0) {
-    <p class="state-msg">No deliveries yet.</p>
-  } @else {
+  <gr-load-state flat [loading]="loading()" [error]="loadError()" [empty]="deliveries().length === 0"
+                 loadingMessage="Loading deliveries..." errorTitle="Failed to load deliveries"
+                 emptyIcon="send" emptyTitle="No deliveries yet" (retry)="loadPage()">
     <gr-table>
         <thead>
           <tr>
@@ -65,8 +61,7 @@
           }
         </tbody>
     </gr-table>
-
-  }
+  </gr-load-state>
 
   @if (offset() > 0 || hasMore()) {
     <div grDialogFooter>

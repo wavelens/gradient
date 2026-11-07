@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { ApplicationRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { WebhooksComponent } from './webhooks.component';
 import { WebhooksService } from '@core/services/webhooks.service';
 import { CachesService } from '@core/services/caches.service';
@@ -29,9 +31,13 @@ const hook: WebhookResponse = {
   updated_at: '2026-09-26T12:00:00',
 };
 
-function setup(data: Record<string, unknown>, params: Record<string, string>) {
+function setup(
+  data: Record<string, unknown>,
+  params: Record<string, string>,
+  list: () => Observable<WebhookResponse[]> = () => of([hook]),
+) {
   const service = {
-    list: vi.fn(() => of([hook])),
+    list: vi.fn(list),
     create: vi.fn(() => of({ webhook: hook, secret: 'whs_abc' })),
     update: vi.fn(() => of(hook)),
     delete: vi.fn(() => of({ deleted: true })),
@@ -102,5 +108,27 @@ describe('WebhooksComponent', () => {
       { kind: 'instance' },
       expect.objectContaining({ events: ['task.star', 'gc.*', 'build.*'] }),
     );
+  });
+
+  it('explains a refused list instead of offering to create webhooks', () => {
+    const { root } = setup({ webhookScope: 'cache' }, { cache: 'main' }, () => throwError(() => new ApiError('Forbidden', 403)));
+    expect(root.textContent).toContain('Failed to load webhooks');
+    expect(root.textContent).toContain('No permission');
+    expect(root.textContent).not.toContain('No webhooks');
+    expect(root.textContent).not.toContain('New Webhook');
+  });
+
+  it('shows failed deliveries as an error, never as no deliveries', () => {
+    const { component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
+    service.deliveries.mockReturnValueOnce(throwError(() => new ApiError('database is down', 500)));
+    component.openDeliveries(hook);
+    TestBed.inject(ApplicationRef).tick();
+    expect(document.body.textContent).toContain('Failed to load deliveries');
+    expect(document.body.textContent).not.toContain('No deliveries yet');
+
+    document.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    TestBed.inject(ApplicationRef).tick();
+    expect(service.deliveries).toHaveBeenCalledTimes(2);
+    expect(document.body.textContent).toContain('No deliveries yet');
   });
 });

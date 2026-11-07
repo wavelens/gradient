@@ -8,14 +8,17 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { WorkerMetricsComponent } from './worker-metrics.component';
 import { WorkersService } from '@core/services/workers.service';
 import { ProjectsService } from '@core/services/projects.service';
 
 const WORKER_ID = 'a0000000-0000-0000-0000-000000000001';
 
-function setup(displayName: string): ComponentFixture<WorkerMetricsComponent> {
+const metrics = (displayName: string) =>
+  of({ worker_id: WORKER_ID, display_name: displayName, samples: [], connections: [], jobs_dispatched: 4 });
+
+function setup(displayName: string, load: () => Observable<unknown> = () => metrics(displayName)): ComponentFixture<WorkerMetricsComponent> {
   TestBed.configureTestingModule({
     imports: [WorkerMetricsComponent],
     providers: [
@@ -31,16 +34,7 @@ function setup(displayName: string): ComponentFixture<WorkerMetricsComponent> {
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Test Project' }) } },
       {
         provide: WorkersService,
-        useValue: {
-          getWorkerMetrics: () =>
-            of({
-              worker_id: WORKER_ID,
-              display_name: displayName,
-              samples: [],
-              connections: [],
-              jobs_dispatched: 4,
-            }),
-        },
+        useValue: { getWorkerMetrics: vi.fn(load) },
       },
     ],
   });
@@ -78,5 +72,24 @@ describe('WorkerMetricsComponent', () => {
     await settled(fixture);
     expect(crumbs(fixture)).toEqual(['Projects', 'Test Project', 'Settings', 'Workers', 'builder-1']);
     expect(fixture.nativeElement.querySelector('.back')).toBeNull();
+  });
+
+  it('shows a failed load as an error instead of zero-filled charts', async () => {
+    const fixture = setup('builder-1', () => throwError(() => new Error('worker unknown')));
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Failed to load worker stats');
+    expect(text).toContain('worker unknown');
+    expect(fixture.nativeElement.querySelector('gr-stat-card')).toBeNull();
+  });
+
+  it('loads the stats again on Try Again', async () => {
+    let calls = 0;
+    const fixture = setup('builder-1', () => (++calls === 1 ? throwError(() => new Error('down')) : metrics('builder-1')));
+    await settled(fixture);
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    await settled(fixture);
+    expect(calls).toBe(2);
+    expect(fixture.nativeElement.querySelector('gr-stat-card')).not.toBeNull();
   });
 });

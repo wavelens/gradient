@@ -17,11 +17,10 @@ import {
   CheckboxComponent,
   type Crumb,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
-  IconComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
+  MessageBannerComponent,
   PageLayoutComponent,
   TableComponent,
 } from '@gradient/ui/ui';
@@ -41,11 +40,10 @@ import { ActionEventsComponent } from '../tasks/task-actions/action-events.compo
     ButtonComponent,
     CheckboxComponent,
     DialogComponent,
-    EmptyStateComponent,
     FormFieldComponent,
-    IconComponent,
     InputDirective,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
+    MessageBannerComponent,
     PageLayoutComponent,
     TableComponent,
   ],
@@ -63,6 +61,7 @@ export class WebhooksComponent implements OnInit {
   breadcrumb = computed(() => this.trail());
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   saving = signal(false);
   error = signal<string | null>(null);
   webhooks = signal<WebhookResponse[]>([]);
@@ -80,6 +79,8 @@ export class WebhooksComponent implements OnInit {
   testResult = signal<{ id: string; delivery: DeliveryListItem_WebhookDeliveryId | null } | null>(null);
   deliveriesFor = signal<WebhookResponse | null>(null);
   deliveries = signal<DeliveryListItem_WebhookDeliveryId[]>([]);
+  deliveriesLoading = signal(false);
+  deliveriesError = signal<unknown>(null);
 
   relativeTime = relativeTime;
 
@@ -121,13 +122,14 @@ export class WebhooksComponent implements OnInit {
 
   load(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.service.list(this.scope).subscribe({
       next: (list) => {
         this.webhooks.set(list);
         this.loading.set(false);
       },
-      error: (err) => {
-        this.error.set(err?.message || 'Failed to load webhooks.');
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });
@@ -210,7 +212,26 @@ export class WebhooksComponent implements OnInit {
   openDeliveries(hook: WebhookResponse): void {
     this.deliveriesFor.set(hook);
     this.deliveries.set([]);
-    this.service.deliveries(this.scope, hook.id).subscribe((list) => this.deliveries.set(list));
+    this.loadDeliveries();
+  }
+
+  loadDeliveries(): void {
+    const hook = this.deliveriesFor();
+    if (!hook) return;
+    this.deliveriesLoading.set(true);
+    this.deliveriesError.set(null);
+    this.service.deliveries(this.scope, hook.id).subscribe({
+      next: (list) => {
+        if (this.deliveriesFor() !== hook) return;
+        this.deliveries.set(list);
+        this.deliveriesLoading.set(false);
+      },
+      error: (error: unknown) => {
+        if (this.deliveriesFor() !== hook) return;
+        this.deliveriesError.set(error);
+        this.deliveriesLoading.set(false);
+      },
+    });
   }
 
   confirmDelete(): void {

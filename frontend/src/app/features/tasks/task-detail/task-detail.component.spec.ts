@@ -621,6 +621,42 @@ describe('TaskDetailComponent - error surfacing (issue #280)', () => {
   });
 });
 
+describe('TaskDetailComponent - entry point load errors', () => {
+  const access = { managed: false, canEdit: true, canTrigger: true };
+
+  it('shows a failed package load as an error, never as "No packages"', () => {
+    const { fixture } = setup(access, { primaryStatus: 'Completed', getEntryPoints: () => throwError(() => new Error('database is down')) });
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Failed to load builds');
+    expect(text).toContain('database is down');
+    expect(text).not.toContain('No packages');
+  });
+
+  it('loads the packages again on Try Again', () => {
+    const { fixture, tasksService } = setup(access, { primaryStatus: 'Completed', getEntryPoints: () => throwError(() => new Error('down')) });
+    fixture.detectChanges();
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [epSummary('a')], total: 1, failed_attributes: [] }));
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.entryPoints().map(e => e.id)).toEqual(['a']);
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Failed to load builds');
+  });
+
+  it('replaces the endless skeleton with Try Again when the next page fails', () => {
+    const { fixture, tasksService } = setup(access, {
+      primaryStatus: 'Completed',
+      getEntryPoints: () => of({ entry_points: [epSummary('a')], total: 2, failed_attributes: [] }),
+    });
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(throwError(() => new Error('down')));
+    fixture.componentInstance.loadMoreEntryPoints();
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.pkg-more')).toBeNull();
+    expect(root.textContent).toContain('Failed to load builds');
+  });
+});
+
 describe('TaskDetailComponent - evaluation selection', () => {
   it('selecting an evaluation loads its entry points', () => {
     const e2 = evalSummary('e2', 'Completed');

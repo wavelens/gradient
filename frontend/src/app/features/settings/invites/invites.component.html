@@ -13,15 +13,17 @@
     <gr-message-banner slot="banner" type="success">{{ successMessage() }}</gr-message-banner>
   }
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading invitations..." />
-  } @else if (invites().length === 0) {
-    <gr-empty-state
-      icon="mail"
-      title="No pending invitations"
-      message="Invitations to projects, caches and teams appear here."
-    />
-  } @else {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="invites().length === 0"
+    loadingMessage="Loading invitations..."
+    errorTitle="Failed to load invitations"
+    emptyIcon="mail"
+    emptyTitle="No pending invitations"
+    emptyMessage="Invitations to projects, caches and teams appear here."
+    (retry)="load()"
+  >
     <gr-row-list>
       @for (invite of invites(); track invite.token) {
         <gr-row [icon]="invite.kind === 'cache' ? 'inventory_2' : invite.kind === 'team' ? 'groups' : 'folder'">
@@ -53,5 +55,5 @@
         </gr-row>
       }
     </gr-row-list>
-  }
+  </gr-load-state>
 </gr-page-layout>

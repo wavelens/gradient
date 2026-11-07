@@ -21,9 +21,8 @@ import {
   BadgeComponent,
   ButtonComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   RowComponent,
   RowListComponent,
@@ -41,9 +40,8 @@ import {
     BadgeComponent,
     ButtonComponent,
     DialogComponent,
-    EmptyStateComponent,
     FormFieldComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     MessageBannerComponent,
     RowComponent,
     RowListComponent,
@@ -64,6 +62,7 @@ export class TeamMembersComponent implements OnInit {
 
   team = input.required<TeamResponse>();
   loading = signal(true);
+  loadError = signal<unknown>(null);
   members = signal<TeamMemberItem[]>([]);
   invitations = signal<PendingInvitationItem[]>([]);
   suggestions = signal<string[]>([]);
@@ -87,12 +86,17 @@ export class TeamMembersComponent implements OnInit {
   }
 
   load(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
     this.teams.members(this.teamName).subscribe({
       next: (members) => {
         this.members.set(members);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
     this.teams.invitations(this.teamName).subscribe({
       next: (invitations) => this.invitations.set(invitations),

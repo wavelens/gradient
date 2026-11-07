@@ -11,6 +11,7 @@ import { WorkersService } from '@core/services/workers.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   CardGridComponent,
+  LoadStateComponent,
   PageLayoutComponent,
   StatCardComponent,
   TableComponent,
@@ -28,6 +29,7 @@ import { WorkerSamplePoint, WorkerConnectionEntry } from '@core/models';
     MetricChartComponent,
     PageLayoutComponent,
     CardGridComponent,
+    LoadStateComponent,
     StatCardComponent,
     TableComponent,
   ],
@@ -39,6 +41,7 @@ import { WorkerSamplePoint, WorkerConnectionEntry } from '@core/models';
     >
       <span slot="meta" class="mono">{{ workerId }}</span>
 
+      <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!loaded()" errorTitle="Failed to load worker stats" (retry)="load()">
       <gr-card-grid min="160px">
         <gr-stat-card label="Samples" [value]="samples().length" />
         <gr-stat-card label="Jobs assigned" [value]="jobsAssigned()" />
@@ -64,6 +67,7 @@ import { WorkerSamplePoint, WorkerConnectionEntry } from '@core/models';
           }
         </tbody>
       </gr-table>
+      </gr-load-state>
     </gr-page-layout>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -80,6 +84,9 @@ export class WorkerMetricsComponent implements OnInit {
   samples = signal<WorkerSamplePoint[]>([]);
   connections = signal<WorkerConnectionEntry[]>([]);
   jobsAssigned = signal(0);
+  loading = signal(true);
+  loaded = signal(false);
+  loadError = signal<unknown>(null);
 
   /// The id is the last resort: history outlives the registration that named it.
   workerName = computed(() => this.displayName() || this.workerId);
@@ -107,11 +114,25 @@ export class WorkerMetricsComponent implements OnInit {
   ngOnInit(): void {
     this.project = this.route.snapshot.paramMap.get('project') ?? '';
     this.workerId = this.route.snapshot.paramMap.get('workerId') ?? '';
-    this.workers.getWorkerMetrics(this.project, this.workerId).subscribe((stats) => {
-      this.displayName.set(stats.display_name);
-      this.samples.set(stats.samples);
-      this.connections.set(stats.connections);
-      this.jobsAssigned.set(stats.jobs_dispatched);
+    this.load();
+  }
+
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
+    this.workers.getWorkerMetrics(this.project, this.workerId).subscribe({
+      next: (stats) => {
+        this.displayName.set(stats.display_name);
+        this.samples.set(stats.samples);
+        this.connections.set(stats.connections);
+        this.jobsAssigned.set(stats.jobs_dispatched);
+        this.loaded.set(true);
+        this.loading.set(false);
+      },
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 }

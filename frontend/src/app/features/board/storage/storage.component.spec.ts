@@ -79,6 +79,18 @@ describe('BoardStorageComponent', () => {
     vi.unstubAllEnvs();
   });
 
+  it('says why a window switch failed instead of keeping the old charts silently', () => {
+    getStorage.mockReturnValueOnce(throwError(() => new Error('storage stats unavailable')));
+    fixture.componentInstance.select(24);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Failed to load storage');
+    expect(fixture.nativeElement.textContent).toContain('storage stats unavailable');
+
+    fixture.componentInstance.retry();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('gr-metric-chart').length).toBe(4);
+  });
+
   it('keeps polling after a failed fetch', () => {
     getStorage.mockReturnValueOnce(throwError(() => new Error('down')));
     fixture.componentInstance.select(1);

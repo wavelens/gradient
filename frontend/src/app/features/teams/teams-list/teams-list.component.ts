@@ -14,8 +14,7 @@ import {
   BadgeComponent,
   ButtonComponent,
   DialogComponent,
-  EmptyStateComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -31,8 +30,7 @@ import { NameFieldsComponent, nameAvailability } from '@shared/forms';
     BadgeComponent,
     ButtonComponent,
     DialogComponent,
-    EmptyStateComponent,
-        LoadingSpinnerComponent,
+    LoadStateComponent,
     MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
@@ -54,6 +52,7 @@ export class TeamsListComponent implements OnInit {
   }
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   items = signal<TeamSummary[]>([]);
   showCreate = signal(false);
   creating = signal(false);
@@ -73,12 +72,21 @@ export class TeamsListComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
     this.teams.list().subscribe({
       next: (items) => {
         this.items.set(items);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

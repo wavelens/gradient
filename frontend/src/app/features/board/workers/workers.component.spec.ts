@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
 import type { WorkerLoad, WorkerLoadAverage } from '@core/models';
 import { BoardWorkersComponent } from './workers.component';
@@ -24,8 +24,8 @@ const AVERAGE: WorkerLoadAverage = {
   by_architecture: [bucket('x86_64-linux', 1, 4), bucket('aarch64-linux', 0.5, 2)],
 };
 
-function setup() {
-  const getWorkerLoadAverage = vi.fn((_hours: number) => of(AVERAGE));
+function setup(average: () => Observable<WorkerLoadAverage> = () => of(AVERAGE)) {
+  const getWorkerLoadAverage = vi.fn((_hours: number) => average());
   TestBed.configureTestingModule({
     imports: [BoardWorkersComponent],
     providers: [
@@ -43,7 +43,7 @@ function setup() {
   });
   const fixture = TestBed.createComponent(BoardWorkersComponent);
   fixture.detectChanges();
-  return { cmp: fixture.componentInstance, getWorkerLoadAverage };
+  return { cmp: fixture.componentInstance, getWorkerLoadAverage, fixture };
 }
 
 describe('BoardWorkersComponent - load range', () => {
@@ -57,6 +57,19 @@ describe('BoardWorkersComponent - load range', () => {
     const { cmp } = setup();
     cmp.load.set({ ...NOW, by_capability: [bucket('build', 1, 300)] });
     expect(cmp.capLoad().series[0].data).toEqual([0.3]);
+  });
+
+  it('says the average failed instead of drawing empty radars like an idle fleet', () => {
+    const { cmp, fixture } = setup(() => throwError(() => new Error('Internal server error')));
+    cmp.setLoadRange('24h');
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load worker load');
+    expect(root.textContent).toContain('Internal server error');
+
+    cmp.setLoadRange('now');
+    fixture.detectChanges();
+    expect(root.textContent).not.toContain('Failed to load worker load');
   });
 
   it('averages both radar charts over the picked range', () => {

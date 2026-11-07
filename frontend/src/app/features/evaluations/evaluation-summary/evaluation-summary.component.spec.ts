@@ -128,10 +128,22 @@ describe('EvaluationSummaryComponent', () => {
     expect(crumbs(fixture)).toEqual(['Projects', 'MyProject', 'Summary']);
   });
 
-  it('explains a summary that cannot be loaded and still leads back to the project', () => {
+  it('gives the reason a summary failed to load, not a missing evaluation, and still leads back to the project', () => {
     const fixture = setup(null);
 
-    expect(text(fixture)).toContain('Summary not available');
+    expect(text(fixture)).toContain('Failed to load summary');
+    expect(text(fixture)).toContain('not found');
+    expect(text(fixture)).not.toContain('does not exist or is not visible');
     expect(crumbs(fixture)).toEqual(['Projects', 'MyProject', 'Summary']);
+  });
+
+  it('loads the summary again on Try Again', () => {
+    const fixture = setup(null);
+    const evaluations = TestBed.inject(EvaluationsService) as unknown as { getEvaluationSummary: () => unknown };
+    evaluations.getEvaluationSummary = () => of(SUMMARY);
+
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(sections(fixture)).toContain('Fixed 1');
   });
 });

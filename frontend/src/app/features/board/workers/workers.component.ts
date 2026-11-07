@@ -12,7 +12,7 @@ import { BoardService } from '@core/services/board.service';
 import { firstLoad } from '../first-load';
 import { clockTime, formatMegabytes, formatPercent } from '@shared/text';
 import { oneOf, queryParamSignal } from '@shared/routing';
-import { BadgeComponent, LoadingSpinnerComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
+import { BadgeComponent, LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent, SegmentedBarComponent, ratioSegments } from '@shared/ui';
 import { workerAxisLabel } from '../worker-label';
 import { BoardWorker, BoardFleetPoint, DeviceClass, WorkerLoad, WorkerLoadAverage } from '@core/models';
@@ -27,13 +27,12 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
   selector: 'app-board-workers',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, RouterModule, MetricChartComponent, TableComponent, LoadingSpinnerComponent, BadgeComponent,
+    CommonModule, FormsModule, RouterModule, MetricChartComponent, TableComponent, LoadStateComponent, BadgeComponent,
     SegmentedBarComponent, TabSwitchComponent,
   ],
   template: `
-    @if (first.loading()) {
-      <gr-loading-spinner message="Loading workers..." />
-    } @else {
+    <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
+                   loadingMessage="Loading workers..." errorTitle="Failed to load workers" (retry)="retry()">
       <gr-metric-chart
         title="Fleet over time (connected vs draining)"
         doc="ui/job-board/#workers"
@@ -52,6 +51,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         [colors]="['#17a2b8', '#6f42c1', '#e83e8c']"
       ></gr-metric-chart>
 
+      <gr-load-state [error]="averageError()" errorTitle="Failed to load worker load" (retry)="loadAverage()" />
       <div class="row">
         <gr-metric-chart
           title="Load by capability (busy %)"
@@ -140,7 +140,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
           }
         </tbody>
       </gr-table>
-    }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './workers.component.scss',
@@ -152,6 +152,7 @@ export class BoardWorkersComponent implements OnInit {
   fleet = signal<BoardFleetPoint[]>([]);
   load = signal<WorkerLoad | null>(null);
   averageLoad = signal<WorkerLoadAverage | null>(null);
+  averageError = signal<unknown>(null);
   readonly loadRanges: { label: string; value: LoadRange }[] = [
     { label: 'Now', value: 'now' },
     { label: '24h', value: '24h' },
@@ -211,6 +212,15 @@ export class BoardWorkersComponent implements OnInit {
   ]);
 
   ngOnInit(): void {
+    this.loadAll();
+  }
+
+  retry(): void {
+    this.first.restart();
+    this.loadAll();
+  }
+
+  private loadAll(): void {
     this.board.getWorkers().pipe(this.first.track()).subscribe((w) => this.workers.set(w));
     this.board.getFleet(24).pipe(this.first.track()).subscribe((f) => this.fleet.set(f));
     this.board.getWorkerLoad().pipe(this.first.track()).subscribe((l) => this.load.set(l));
@@ -222,10 +232,14 @@ export class BoardWorkersComponent implements OnInit {
     this.loadAverage();
   }
 
-  private loadAverage(): void {
+  loadAverage(): void {
     const range = this.loadRange();
+    this.averageError.set(null);
     if (range === 'now') return;
     this.averageLoad.set(null);
-    this.board.getWorkerLoadAverage(LOAD_RANGE_HOURS[range]).subscribe((l) => this.averageLoad.set(l));
+    this.board.getWorkerLoadAverage(LOAD_RANGE_HOURS[range]).subscribe({
+      next: (l) => this.averageLoad.set(l),
+      error: (error: unknown) => this.averageError.set(error),
+    });
   }
 }

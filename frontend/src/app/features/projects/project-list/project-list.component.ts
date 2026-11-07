@@ -16,11 +16,10 @@ import {
   ButtonComponent,
   CardGridComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   NavCardComponent,
   PageLayoutComponent,
   SelectComponent,
@@ -38,9 +37,7 @@ import { ProjectSummary, PublicProjectSummary } from '@core/models';
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    InputDirective,
-    LoadingSpinnerComponent,
-    EmptyStateComponent,
+    LoadStateComponent,
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
@@ -71,6 +68,7 @@ export class ProjectListComponent implements OnInit {
   }
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   projects = signal<ProjectSummary[]>([]);
   projectsTotal = signal(0);
   projectsPage = signal(1);
@@ -89,6 +87,7 @@ export class ProjectListComponent implements OnInit {
   publicTotal = signal(0);
   publicPage = signal(1);
   publicLoading = signal(false);
+  publicError = signal<unknown>(null);
 
   ngOnInit(): void {
     if (this.authService.isAuthenticated()) {
@@ -103,6 +102,7 @@ export class ProjectListComponent implements OnInit {
 
   loadProjects(page = this.projectsPage()): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.projectsService.getProjects(page).subscribe({
       next: (result) => {
         this.projects.set(result.items);
@@ -110,8 +110,8 @@ export class ProjectListComponent implements OnInit {
         this.projectsPage.set(result.page);
         this.loading.set(false);
       },
-      error: (error) => {
-        console.error('Failed to load projects:', error);
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });
@@ -119,6 +119,7 @@ export class ProjectListComponent implements OnInit {
 
   loadPublicProjects(page = this.publicPage()): void {
     this.publicLoading.set(true);
+    this.publicError.set(null);
     this.projectsService.getPublicProjects(page).subscribe({
       next: (result) => {
         this.publicProjects.set(result.items);
@@ -126,7 +127,10 @@ export class ProjectListComponent implements OnInit {
         this.publicPage.set(result.page);
         this.publicLoading.set(false);
       },
-      error: () => this.publicLoading.set(false),
+      error: (error: unknown) => {
+        this.publicError.set(error);
+        this.publicLoading.set(false);
+      },
     });
   }
 

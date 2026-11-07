@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { BadgeComponent, ButtonComponent, DialogComponent, TableComponent } from '@gradient/ui/ui';
+import { BadgeComponent, ButtonComponent, DialogComponent, LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { Component, inject, input, output, signal, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActionsService } from '../../../core/services/actions.service';
@@ -17,7 +17,7 @@ import {
 @Component({
   selector: 'app-action-deliveries',
   standalone: true,
-  imports: [CommonModule, BadgeComponent, TableComponent, ButtonComponent, DialogComponent],
+  imports: [CommonModule, BadgeComponent, TableComponent, ButtonComponent, DialogComponent, LoadStateComponent],
   templateUrl: './action-deliveries.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './action-deliveries.component.scss',
@@ -34,7 +34,7 @@ export class ActionDeliveriesComponent implements OnInit {
   visible = signal(true);
   deliveries = signal<DeliveryListItem_TaskActionDeliveryId[]>([]);
   loading = signal(true);
-  loadError = signal<string | null>(null);
+  loadError = signal<unknown>(null);
   expanded = signal<Map<string, DeliveryDetail_TaskActionDeliveryId | 'loading' | 'error'>>(new Map());
   offset = signal(0);
   readonly limit = 50;
@@ -53,8 +53,8 @@ export class ActionDeliveriesComponent implements OnInit {
         this.hasMore.set(rows.length === this.limit);
         this.loading.set(false);
       },
-      error: (e) => {
-        this.loadError.set(e?.message ?? 'Failed to load deliveries');
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });

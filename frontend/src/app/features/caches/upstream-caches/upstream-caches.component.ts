@@ -16,11 +16,10 @@ import {
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageService,
   PageLayoutComponent,
   RowComponent,
@@ -46,13 +45,12 @@ import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, Protoco
     ButtonComponent,
     CheckboxComponent,
     InputDirective,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
-    EmptyStateComponent,
     SelectComponent,
     BadgeComponent,
     RowListComponent,
@@ -83,6 +81,7 @@ export class UpstreamCachesComponent implements OnInit {
   rowDisabled = computed(() => this.rowBusy() || this.accessSvc.shouldDisableInput(this.access()));
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   addingUpstream = signal(false);
   savingUpstream = signal(false);
   removingUpstreamId = signal<string | null>(null);
@@ -133,12 +132,16 @@ export class UpstreamCachesComponent implements OnInit {
 
   loadUpstreamCaches(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.cachesService.getUpstreamCaches(this.cacheName).subscribe({
       next: (list) => {
         this.upstreamCaches.set(list);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

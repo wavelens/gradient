@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { CacheMembersRolesComponent } from './cache-members-roles.component';
 import { CachesService } from '@core/services/caches.service';
 import { UserService } from '@core/services/user.service';
@@ -31,9 +32,11 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 }
 
 const revokeInvitation = vi.fn().mockReturnValue(of('Invitation revoked'));
+const getMembers = vi.fn();
 
 function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
   revokeInvitation.mockClear();
+  getMembers.mockReset().mockReturnValue(of([{ id: 'alice', name: 'Admin' }]));
   TestBed.configureTestingModule({
     imports: [CacheMembersRolesComponent],
     providers: [
@@ -45,7 +48,7 @@ function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
         provide: CachesService,
         useValue: {
           getCache: () => of({ display_name: 'Prod' }),
-          getMembers: () => of([{ id: 'alice', name: 'Admin' }]),
+          getMembers,
           getRoles: () =>
             of({
               roles: [{ id: 'r1', name: 'Admin', builtin: true, managed: false, permissions: [], cache: null }],
@@ -87,6 +90,19 @@ describe('CacheMembersRolesComponent', () => {
     const fixture = setup();
     await settled(fixture);
     expect(fixture.nativeElement.textContent).toContain('Members');
+  });
+
+  it('shows a failed member load with Try Again instead of No members', async () => {
+    const fixture = setup();
+    getMembers.mockReturnValueOnce(throwError(() => new ApiError('database is down', 500)));
+    await settled(fixture);
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.textContent).toContain('Failed to load members');
+    expect(element.textContent).not.toContain('No members');
+    element.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    await settled(fixture);
+    expect(getMembers).toHaveBeenCalledTimes(2);
+    expect(element.textContent).toContain('alice');
   });
 
   it('hides Add Member and New Role buttons under read-only access (no writable)', async () => {

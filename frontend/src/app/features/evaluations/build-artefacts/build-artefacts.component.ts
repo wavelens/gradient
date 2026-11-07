@@ -13,7 +13,7 @@ import {
   BadgeComponent,
   ButtonComponent,
   EmptyStateComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -25,7 +25,7 @@ import { BuildProduct } from '@core/models';
 @Component({
   selector: 'app-build-artefacts',
   standalone: true,
-  imports: [RouterModule, LoadingSpinnerComponent, PageLayoutComponent, EmptyStateComponent, BadgeComponent, ButtonComponent, RowListComponent, RowComponent],
+  imports: [RouterModule, LoadStateComponent, PageLayoutComponent, EmptyStateComponent, BadgeComponent, ButtonComponent, RowListComponent, RowComponent],
   templateUrl: './build-artefacts.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './build-artefacts.component.scss',
@@ -38,6 +38,7 @@ export class BuildArtefactsComponent implements OnInit {
   private projectsService = inject(ProjectsService);
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   artefacts = signal<BuildProduct[]>([]);
   private downloadToken = signal<string | null>(null);
 
@@ -66,12 +67,17 @@ export class BuildArtefactsComponent implements OnInit {
   }
 
   loadArtefacts(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
     this.evalService.getBuildDownloads(this.buildId).subscribe({
       next: (products) => {
         this.artefacts.set(products);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

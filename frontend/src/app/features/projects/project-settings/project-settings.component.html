@@ -4,9 +4,9 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-@if (loading()) {
-  <gr-loading-spinner message="Loading project settings..." />
-} @else if (project(); as project) {
+<gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!project()" loadingMessage="Loading project settings..."
+               errorTitle="Failed to load project settings" (retry)="loadProject()">
+@if (project(); as project) {
   <gr-page-layout [breadcrumb]="breadcrumb()" title="Project Settings">
       <!-- General Settings -->
   <gr-settings-section title="General">
@@ -122,8 +122,8 @@
 
   <!-- SSH Key -->
   <gr-settings-section title="SSH Key">
-    @if (sshLoading()) {
-      <gr-loading-spinner message="Loading SSH key..." />
+    @if (sshLoading() || sshError()) {
+      <gr-load-state flat [loading]="sshLoading()" [error]="sshError()" empty loadingMessage="Loading SSH key..." errorTitle="Failed to load SSH key" (retry)="loadSSHKey()" />
     } @else {
       <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
       @if (sshKey()) {
@@ -182,6 +182,7 @@
   }
 </gr-page-layout>
 }
+</gr-load-state>
 
 <!-- Regenerate SSH Key Confirmation Dialog -->
 <gr-dialog

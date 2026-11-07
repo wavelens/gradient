@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { CacheSubscriptionRequestsComponent } from './cache-subscriptions.component';
 import { CachesService } from '@core/services/caches.service';
 import { SubscriptionRequestItem } from '@core/models';
@@ -27,7 +28,7 @@ function buttonByText(root: HTMLElement, text: string): HTMLButtonElement | unde
   ) as HTMLButtonElement | undefined;
 }
 
-function setup(requests: SubscriptionRequestItem[]) {
+function setup(requests: SubscriptionRequestItem[], load?: () => Observable<SubscriptionRequestItem[]>) {
   const approve = vi.fn().mockReturnValue(of('Subscription approved'));
   const deny = vi.fn().mockReturnValue(of('Subscription request denied'));
 
@@ -45,7 +46,7 @@ function setup(requests: SubscriptionRequestItem[]) {
         provide: CachesService,
         useValue: {
           getCache: () => of({ display_name: 'Prod' }),
-          getSubscriptionRequests: () => of(requests),
+          getSubscriptionRequests: load ?? (() => of(requests)),
           approveSubscriptionRequest: approve,
           denySubscriptionRequest: deny,
         },
@@ -69,6 +70,21 @@ describe('CacheSubscriptionRequestsComponent', () => {
   it('shows an empty state when nothing is waiting', () => {
     const { fixture } = setup([]);
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('No pending requests');
+  });
+
+  it('shows a refused load as an error, never next to the empty state', () => {
+    const load = vi.fn()
+      .mockReturnValueOnce(throwError(() => new ApiError('Forbidden', 403)))
+      .mockReturnValue(of([request]));
+    const { fixture } = setup([], load);
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.textContent).toContain('Failed to load subscription requests');
+    expect(element.textContent).toContain('No permission');
+    expect(element.textContent).not.toContain('No pending requests');
+    element.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(element.textContent).toContain('Wavelens');
+    expect(element.textContent).not.toContain('Failed to load');
   });
 
   it('approves a request by project name', () => {

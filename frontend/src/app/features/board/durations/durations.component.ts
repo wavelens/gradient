@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService } from '@core/services/board.service';
-import { LoadingSpinnerComponent } from '@gradient/ui/ui';
+import { LoadStateComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { clockTime, formatDuration } from '@shared/text';
@@ -16,11 +16,10 @@ import { MetricPoint, DurationsHeatmap } from '@core/models';
 @Component({
   selector: 'app-board-durations',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, MetricChartComponent, LoadStateComponent],
   template: `
-    @if (first.loading()) {
-      <gr-loading-spinner message="Loading durations..." />
-    } @else {
+    <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
+                   loadingMessage="Loading durations..." errorTitle="Failed to load durations" (retry)="retry()">
       <gr-metric-chart
         title="Build duration distribution (count by band × hour)"
         doc="ui/job-board/"
@@ -49,7 +48,7 @@ import { MetricPoint, DurationsHeatmap } from '@core/models';
         [colors]="['#6f42c1', '#fd7e14']"
         [valueFormatter]="duration"
       ></gr-metric-chart>
-    }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './durations.component.scss',
@@ -91,6 +90,15 @@ export class BoardDurationsComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  retry(): void {
+    this.first.restart();
+    this.load();
+  }
+
+  private load(): void {
     this.board.query('builds.duration_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.build.set(p));
     this.board.query('dispatch.wait_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.wait.set(p));
     this.board.query('deps.wait_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.deps.set(p));

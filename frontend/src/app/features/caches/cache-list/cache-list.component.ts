@@ -15,7 +15,7 @@ import {
   CardGridComponent,
   EmptyStateComponent,
   IconComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   NavCardComponent,
   PageLayoutComponent,
 } from '@gradient/ui/ui';
@@ -28,7 +28,7 @@ import { Cache } from '@core/models';
   imports: [
     CommonModule,
     RouterModule,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     EmptyStateComponent,
     IconComponent,
     PageLayoutComponent,
@@ -53,11 +53,17 @@ export class CacheListComponent implements OnInit {
   }
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   caches = signal<Cache[]>([]);
   showCreateDialog = signal(false);
 
   publicCaches = signal<Cache[]>([]);
   publicLoading = signal(false);
+  publicError = signal<unknown>(null);
+
+  get showPublic(): boolean {
+    return this.config.publicListing;
+  }
 
   ngOnInit(): void {
     if (this.authService.isAuthenticated()) {
@@ -72,13 +78,14 @@ export class CacheListComponent implements OnInit {
 
   loadCaches(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.cachesService.getCaches(1, 100).subscribe({
       next: (caches) => {
         this.caches.set(caches.items);
         this.loading.set(false);
       },
-      error: (error) => {
-        console.error('Failed to load caches:', error);
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });
@@ -86,12 +93,16 @@ export class CacheListComponent implements OnInit {
 
   loadPublicCaches(): void {
     this.publicLoading.set(true);
+    this.publicError.set(null);
     this.cachesService.getPublicCaches().subscribe({
       next: (caches) => {
         this.publicCaches.set(caches);
         this.publicLoading.set(false);
       },
-      error: () => this.publicLoading.set(false),
+      error: (error: unknown) => {
+        this.publicError.set(error);
+        this.publicLoading.set(false);
+      },
     });
   }
 

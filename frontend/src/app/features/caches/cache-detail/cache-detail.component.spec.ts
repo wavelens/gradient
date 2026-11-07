@@ -8,7 +8,8 @@ import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { NEVER, of } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { CacheDetailComponent } from './cache-detail.component';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
@@ -92,6 +93,37 @@ describe('CacheDetailComponent loading', () => {
     expect(root.querySelector('h1')?.textContent).toContain('Main');
     expect(root.querySelectorAll('.stat-value gr-skeleton').length).toBe(5);
     expect(root.querySelectorAll('gr-metric-chart gr-skeleton').length).toBe(2);
+  });
+
+  it('shows failed stats as an error with Try Again, not as zeros', () => {
+    const getCacheStats = vi.fn().mockReturnValueOnce(throwError(() => new ApiError('database is down', 500))).mockReturnValue(NEVER);
+    TestBed.configureTestingModule({
+      imports: [CacheDetailComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: CachesService, useValue: { getCache: () => NEVER, getCacheStats } },
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) },
+            parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', active: true, public: true } } }) },
+          },
+        },
+        { provide: StarsService, useValue: { starred: () => of(false), set: () => of(true) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(CacheDetailComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+
+    expect(root.textContent).toContain('Failed to load cache stats');
+    expect(root.textContent).not.toContain('Packages stored');
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(getCacheStats).toHaveBeenCalledTimes(2);
+    expect(root.textContent).toContain('Packages stored');
   });
 });
 

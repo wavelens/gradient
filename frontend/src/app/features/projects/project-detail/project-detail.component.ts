@@ -8,21 +8,18 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { forkJoin } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { StarsService } from '@core/services/stars.service';
 import {
   ButtonComponent,
   CardGridComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   NavCardComponent,
   PageLayoutComponent,
   SubmitDirective,
@@ -31,6 +28,7 @@ import { EvalStatusBadgeComponent, LabelHelpComponent, StarButtonComponent } fro
 import { repositoryUrlError } from '@shared/text';
 import { NameFieldsComponent, nameAvailability } from '@shared/forms';
 import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
+import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 
 const RESERVED_TASK_NAMES = ['build-request'];
 
@@ -44,9 +42,7 @@ const RESERVED_TASK_NAMES = ['build-request'];
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    InputDirective,
-    LoadingSpinnerComponent,
-    EmptyStateComponent,
+    LoadStateComponent,
     LabelHelpComponent,
     EvalStatusBadgeComponent,
     IconComponent,
@@ -65,7 +61,6 @@ const RESERVED_TASK_NAMES = ['build-request'];
 export class ProjectDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
   protected authService = inject(AuthService);
-  private projectsService = inject(ProjectsService);
   private tasksService = inject(TasksService);
   private stars = inject(StarsService);
   private crumbs = inject(BreadcrumbsService);
@@ -75,7 +70,8 @@ export class ProjectDetailComponent implements OnInit {
   );
 
   loading = signal(true);
-  project = signal<ProjectResponse | null>(null);
+  loadError = signal<unknown>(null);
+  project = signal<ProjectResponse>((this.route.snapshot.data['projectAccess'] as ProjectAccessData).project);
   tasks = signal<TaskResponse[]>([]);
   tasksTotal = signal(0);
   tasksPage = signal(1);
@@ -100,26 +96,21 @@ export class ProjectDetailComponent implements OnInit {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.starTarget = { kind: 'project', project: this.projectName };
     this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
-    this.loadProjectData();
+    this.loadTasks();
   }
 
-  loadProjectData(): void {
+  loadTasks(): void {
     this.loading.set(true);
-
-    forkJoin({
-      project: this.projectsService.getProject(this.projectName),
-      tasks: this.tasksService.getTasks(this.projectName, this.tasksPage()),
-    }).subscribe({
-      next: ({ project, tasks }) => {
-        this.project.set(project);
-        this.crumbs.rememberProject(this.projectName, project.display_name);
+    this.loadError.set(null);
+    this.tasksService.getTasks(this.projectName, this.tasksPage()).subscribe({
+      next: (tasks) => {
         this.tasks.set(tasks.items);
         this.tasksTotal.set(tasks.total);
         this.tasksPage.set(tasks.page);
         this.loading.set(false);
       },
-      error: (error) => {
-        console.error('Failed to load project data:', error);
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });
@@ -157,7 +148,7 @@ export class ProjectDetailComponent implements OnInit {
         next: () => {
           this.creating.set(false);
           this.showCreateDialog.set(false);
-          this.loadProjectData();
+          this.loadTasks();
         },
         error: (error) => {
           this.createError.set(error?.message || 'Failed to create task.');

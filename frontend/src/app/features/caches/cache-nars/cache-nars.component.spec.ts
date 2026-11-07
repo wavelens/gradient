@@ -83,6 +83,20 @@ describe('CacheNarsComponent loading', () => {
     expect(root.querySelector('gr-table')?.getAttribute('aria-busy')).toBe('true');
   });
 
+  it('replaces stale rows with the error when a reload fails, and loads again on Try Again', () => {
+    let calls = 0;
+    const { fixture, query, root } = render(() => (++calls === 2 ? throwError(() => ({ status: 500, message: 'database is down' })) : of(PAGE)));
+    query.next(convertToParamMap({ page: '2' }));
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Failed to load NARs');
+    expect(root.textContent).toContain('database is down');
+    expect(root.querySelector('tbody')).toBeNull();
+    expect(root.textContent).not.toContain('No NARs found');
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(root.querySelector('tbody')?.textContent).toContain('abc123');
+  });
+
   it('drops the stat cards when the stats fail', () => {
     const { root } = render(() => of(PAGE), () => throwError(() => ({ status: 500 })));
     expect(root.querySelector('gr-stat-card')).toBeNull();

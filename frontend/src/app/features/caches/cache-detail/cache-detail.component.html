@@ -25,7 +25,7 @@
       }
     </div>
 
-    <!-- Stats -->
+  <gr-load-state [error]="statsError()" errorTitle="Failed to load cache stats" (retry)="loadStats()">
   <div class="section">
     <h2>Storage</h2>
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
@@ -56,12 +56,11 @@
       </gr-metric-chart>
   </div>
 
-  <!-- Traffic -->
   <div class="section">
     <h2>Traffic</h2>
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
-      <gr-stat-card label="Requests (last hour)" [value]="statsLoading() ? null : formatCount($any(stats()?.hours | slice:-1)[0]?.requests ?? 0)" />
-      <gr-stat-card label="Traffic (last hour)" [value]="statsLoading() ? null : formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0)" />
+      <gr-stat-card label="Requests (last hour)" [value]="statsLoading() ? null : formatCount((stats()?.hours ?? []).at(-1)?.requests ?? 0)" />
+      <gr-stat-card label="Traffic (last hour)" [value]="statsLoading() ? null : formatBytes((stats()?.hours ?? []).at(-1)?.bytes ?? 0)" />
     </gr-card-grid>
 
     <gr-metric-chart title="Traffic over time"
@@ -94,6 +93,7 @@
           />
       </gr-metric-chart>
   </div>
+  </gr-load-state>
 
   <gr-settings-section
     title="How to Use This Cache"

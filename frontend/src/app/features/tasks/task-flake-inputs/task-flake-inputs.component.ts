@@ -15,11 +15,10 @@ import {
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageService,
   PageLayoutComponent,
   ToastComponent,
@@ -54,13 +53,12 @@ const DEFAULT_FORM: FlakeInputFormState = {
     InputDirective,
     CheckboxComponent,
     ToastComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
-    EmptyStateComponent,
     BadgeComponent,
   ],
   providers: [MessageService],
@@ -84,6 +82,7 @@ export class TaskFlakeInputsComponent implements OnInit {
   );
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   saving = signal(false);
   deletingId = signal<string | null>(null);
 
@@ -107,12 +106,16 @@ export class TaskFlakeInputsComponent implements OnInit {
 
   loadOverrides(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.overridesService.list(this.projectName, this.taskName).subscribe({
       next: (list) => {
         this.overrides.set(list);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

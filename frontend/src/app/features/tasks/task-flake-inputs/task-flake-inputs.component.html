@@ -15,21 +15,25 @@
       (click)="startCreate()"
       [appManagedDisable]="access()"
     ></button>
-  @if (loading()) {
-    <gr-loading-spinner message="Loading overrides..." />
-  } @else {
-    @if (overrides().length === 0) {
-      <gr-empty-state icon="tune" title="No overrides configured" message="No overrides configured. The task's flake.lock is used as-is.">
-        <button slot="action"
-          *appWritable="access()"
-          grButton
-          label="New Override"
-          icon="add"
-          (click)="startCreate()"
-          [appManagedDisable]="access()"
-          ></button>
-      </gr-empty-state>
-    } @else {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="overrides().length === 0"
+    loadingMessage="Loading overrides..."
+    errorTitle="Failed to load flake inputs"
+    emptyIcon="tune"
+    emptyTitle="No overrides configured"
+    emptyMessage="No overrides configured. The task's flake.lock is used as-is."
+    (retry)="loadOverrides()"
+  >
+    <button slot="empty-action"
+      *appWritable="access()"
+      grButton
+      label="New Override"
+      icon="add"
+      (click)="startCreate()"
+      [appManagedDisable]="access()"
+      ></button>
       <div class="overrides-list">
         @for (override of overrides(); track override.id) {
           <div class="override-row">
@@ -77,8 +81,7 @@
           </div>
         }
       </div>
-    }
-  }
+  </gr-load-state>
 </gr-page-layout>
 
 <!-- Create Dialog -->

@@ -17,10 +17,9 @@ import {
   BadgeComponent,
   ButtonComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -59,7 +58,7 @@ interface RoleFormState {
     ButtonComponent,
     InputDirective,
     AutoCompleteComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     PageLayoutComponent,
@@ -69,7 +68,6 @@ interface RoleFormState {
     RowComponent,
     BadgeComponent,
     SelectComponent,
-    EmptyStateComponent,
     MessageBannerComponent,
   ],
   templateUrl: './members-roles.component.html',
@@ -89,6 +87,9 @@ export class MembersRolesComponent implements OnInit {
 
   membersLoading = signal(true);
   rolesLoading = signal(true);
+  membersLoadError = signal<unknown>(null);
+  rolesLoadError = signal<unknown>(null);
+  invitationsLoadError = signal<unknown>(null);
   addingMember = signal(false);
   removingMember = signal<string | null>(null);
   revokingUser = signal<string | null>(null);
@@ -130,19 +131,24 @@ export class MembersRolesComponent implements OnInit {
 
   loadMembers(): void {
     this.membersLoading.set(true);
+    this.membersLoadError.set(null);
     this.projectsService.getMembers(this.projectName).subscribe({
       next: (members) => {
         this.members.set(members);
         this.membersLoading.set(false);
       },
-      error: () => this.membersLoading.set(false),
+      error: (error: unknown) => {
+        this.membersLoadError.set(error);
+        this.membersLoading.set(false);
+      },
     });
   }
 
   loadInvitations(): void {
+    this.invitationsLoadError.set(null);
     this.projectsService.getInvitations(this.projectName).subscribe({
       next: (invitations) => this.invitations.set(invitations),
-      error: () => this.invitations.set([]),
+      error: (error: unknown) => this.invitationsLoadError.set(error),
     });
   }
 
@@ -162,6 +168,7 @@ export class MembersRolesComponent implements OnInit {
 
   loadRoles(): void {
     this.rolesLoading.set(true);
+    this.rolesLoadError.set(null);
     this.projectsService.getRoles(this.projectName).subscribe({
       next: (response) => {
         this.roles.set(response.roles);
@@ -171,7 +178,10 @@ export class MembersRolesComponent implements OnInit {
         }
         this.rolesLoading.set(false);
       },
-      error: () => this.rolesLoading.set(false),
+      error: (error: unknown) => {
+        this.rolesLoadError.set(error);
+        this.rolesLoading.set(false);
+      },
     });
   }
 

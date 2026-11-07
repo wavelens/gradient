@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { InvitesComponent } from './invites.component';
 import { UserService } from '@core/services/user.service';
 import { InviteItem } from '@core/models';
@@ -33,7 +33,7 @@ const teamInvite: InviteItem = {
   role: 'Member',
 };
 
-function setup(invites: InviteItem[], queryToken: string | null = null) {
+function setup(invites: InviteItem[], queryToken: string | null = null, getInvites: () => Observable<InviteItem[]> = () => of(invites)) {
   const accept = vi.fn().mockReturnValue(of('Invitation accepted'));
   const decline = vi.fn().mockReturnValue(of('Invitation declined'));
 
@@ -54,7 +54,7 @@ function setup(invites: InviteItem[], queryToken: string | null = null) {
       {
         provide: UserService,
         useValue: {
-          getInvites: () => of(invites),
+          getInvites,
           acceptInvite: accept,
           declineInvite: decline,
         },
@@ -72,6 +72,20 @@ function buttonByText(root: HTMLElement, text: string): HTMLButtonElement | unde
     (b.textContent || '').trim().includes(text),
   ) as HTMLButtonElement | undefined;
 }
+
+describe('InvitesComponent - loading', () => {
+  it('shows a failed load with Try Again instead of No pending invitations', () => {
+    const getInvites = vi.fn().mockReturnValueOnce(throwError(() => new Error('database is down'))).mockReturnValue(of([projectInvite]));
+    const { fixture } = setup([], null, getInvites);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load invitations');
+    expect(root.textContent).not.toContain('No pending invitations');
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(getInvites).toHaveBeenCalledTimes(2);
+    expect(root.textContent).toContain('Wavelens');
+  });
+});
 
 describe('InvitesComponent', () => {
   it('lists a team invite as a team', () => {

@@ -66,6 +66,27 @@ describe('BoardCacheComponent', () => {
     expect(root.textContent).toContain('nix-community.cachix.org');
   });
 
+  it('stops the spinner and offers Try Again when no snapshot ever arrives', () => {
+    vi.useFakeTimers();
+    try {
+      const { fixture, sockets, root } = render();
+      vi.advanceTimersByTime(10_000);
+      fixture.detectChanges();
+      expect(root.querySelector('gr-loading-spinner')).toBeNull();
+      expect(root.textContent).toContain('Failed to load cache activity');
+
+      root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+      fixture.detectChanges();
+      expect(sockets).toHaveLength(2);
+      expect(sockets[0].closed).toBe(true);
+      sockets[1].frames.next(snapshot('cache.nixos.org'));
+      fixture.detectChanges();
+      expect(root.textContent).toContain('cache.nixos.org');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('charts the busiest caches in the pushed order, by display name', () => {
     const { fixture, sockets, root } = render();
     const frame = snapshot('cache.nixos.org');

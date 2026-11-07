@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { TaskFlakeInputsComponent } from './task-flake-inputs.component';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -166,5 +166,24 @@ describe('TaskFlakeInputsComponent', () => {
     const deleteBtn = buttons.find((b) => (b.textContent ?? '').trim().toLowerCase().includes('delete'));
     expect(editBtn).toBeUndefined();
     expect(deleteBtn).toBeUndefined();
+  });
+});
+
+describe('TaskFlakeInputsComponent - load errors', () => {
+  it('shows a failed load as an error, never as the empty state and loads again on Try Again', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
+    const service = TestBed.inject(FlakeInputOverridesService) as unknown as { list: () => unknown };
+    service.list = () => throwError(() => new Error('database is down'));
+    fixture.componentInstance.loadOverrides();
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load flake inputs');
+    expect(root.textContent).toContain('database is down');
+    expect(root.textContent).not.toContain('No overrides configured');
+
+    service.list = () => of([]);
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    fixture.detectChanges();
+    expect(root.textContent).toContain('No overrides configured');
   });
 });

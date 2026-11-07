@@ -4,9 +4,9 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-@if (loading()) {
-  <gr-loading-spinner message="Loading task settings..." />
-} @else if (task(); as proj) {
+<gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!task()" loadingMessage="Loading task settings..."
+               errorTitle="Failed to load task settings" (retry)="loadTask()">
+@if (task(); as proj) {
   <gr-page-layout [breadcrumb]="breadcrumb()" title="Task Settings">
   <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></a>
   @if (errorMessage()) {
@@ -225,6 +225,7 @@
   }
 </gr-page-layout>
 }
+</gr-load-state>
 
 <!-- Transfer Ownership Dialog -->
 <gr-dialog

@@ -43,4 +43,19 @@ describe('ActionDeliveriesComponent', () => {
     detailReq.flush({ error: false, message: { ...delivery, request_body: '{}', response_body: '{"err":1}' } });
     expect(fixture.componentInstance.expanded().get('d1')).toBeTruthy();
   });
+
+  it('shows a failed load as an error with Try Again, never as no deliveries', () => {
+    httpMock
+      .expectOne((r) => r.url.includes('/actions/a-id/deliveries'))
+      .flush({ error: true, message: 'database is down' }, { status: 500, statusText: 'Server Error' });
+    fixture.detectChanges();
+    expect(document.body.textContent).toContain('Failed to load deliveries');
+    expect(document.body.textContent).toContain('database is down');
+    expect(document.body.textContent).not.toContain('No deliveries yet');
+
+    document.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    httpMock.expectOne((r) => r.url.includes('/actions/a-id/deliveries')).flush({ error: false, message: [] });
+    fixture.detectChanges();
+    expect(document.body.textContent).toContain('No deliveries yet');
+  });
 });

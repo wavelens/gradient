@@ -20,7 +20,7 @@ import {
   DialogComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -49,7 +49,7 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
     SelectComponent,
     CheckboxComponent,
     CopyFieldComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     PageLayoutComponent,
@@ -76,6 +76,7 @@ export class TaskSettingsComponent implements OnInit {
   access = injectTaskAccess();
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   saving = signal(false);
   deleting = signal(false);
   toggling = signal(false);
@@ -144,6 +145,7 @@ export class TaskSettingsComponent implements OnInit {
 
   loadTask(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.tasksService.getTaskInfo(this.projectName, this.taskName).subscribe({
       next: (task) => {
         if (task.name === 'build-request') {
@@ -168,8 +170,8 @@ export class TaskSettingsComponent implements OnInit {
         };
         this.loading.set(false);
       },
-      error: (error) => {
-        console.error('Failed to load task:', error);
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });

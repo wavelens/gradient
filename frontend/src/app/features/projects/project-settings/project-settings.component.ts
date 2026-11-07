@@ -19,7 +19,7 @@ import {
   DialogComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -44,7 +44,7 @@ import { AccessState, ProjectResponse } from '@core/models';
     InputDirective,
     CopyFieldComponent,
     CheckboxComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     PageLayoutComponent,
@@ -75,9 +75,11 @@ export class ProjectSettingsComponent implements OnInit {
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   saving = signal(false);
   deleting = signal(false);
   sshLoading = signal(true);
+  sshError = signal<unknown>(null);
   generatingSSH = signal(false);
 
   project = signal<ProjectResponse | null>(null);
@@ -108,6 +110,7 @@ export class ProjectSettingsComponent implements OnInit {
 
   loadProject(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.projectsService.getProject(this.projectName).subscribe({
       next: (project) => {
         this.project.set(project);
@@ -121,8 +124,8 @@ export class ProjectSettingsComponent implements OnInit {
         };
         this.loading.set(false);
       },
-      error: (error) => {
-        console.error('Failed to load project:', error);
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });
@@ -130,13 +133,14 @@ export class ProjectSettingsComponent implements OnInit {
 
   loadSSHKey(): void {
     this.sshLoading.set(true);
+    this.sshError.set(null);
     this.projectsService.getSSHKey(this.projectName).subscribe({
       next: (key) => {
         this.sshKey.set(key);
         this.sshLoading.set(false);
       },
       error: (error) => {
-        console.error('Failed to load SSH key:', error);
+        this.sshError.set(error);
         this.sshLoading.set(false);
       },
     });

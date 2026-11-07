@@ -17,9 +17,8 @@ import {
   BadgeComponent,
   ButtonComponent,
   DialogComponent,
-  EmptyStateComponent,
   IconComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   PageLayoutComponent,
   BadgeSeverity,
 } from '@gradient/ui/ui';
@@ -52,14 +51,13 @@ interface IntegrationOption {
     FormsModule,
     DialogComponent,
     ButtonComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     ActionFormComponent,
     ActionDeliveriesComponent,
     IconComponent,
     PageLayoutComponent,
-    EmptyStateComponent,
     BadgeComponent,
   ],
   templateUrl: './task-actions.component.html',
@@ -94,6 +92,7 @@ export class TaskActionsComponent implements OnInit {
   );
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   saving = signal(false);
   deletingId = signal<string | null>(null);
   testingId = signal<string | null>(null);
@@ -134,12 +133,16 @@ export class TaskActionsComponent implements OnInit {
 
   loadActions(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.actionsService.list(this.projectName, this.taskName).subscribe({
       next: (list) => {
         this.actions.set(list);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

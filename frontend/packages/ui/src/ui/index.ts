@@ -23,6 +23,7 @@ export * from './icon/icon.component';
 export * from './in-view/in-view.directive';
 export * from './on-screen/on-screen';
 export * from './input/input.directive';
+export * from './load-state/load-state.component';
 export * from './loading-spinner/loading-spinner.component';
 export * from './logo/logo.component';
 export * from './menu/menu.component';

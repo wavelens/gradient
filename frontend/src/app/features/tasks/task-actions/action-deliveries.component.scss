@@ -6,13 +6,6 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-.state-msg {
-  padding: $spacing-lg;
-  color: var(--gr-text-secondary);
-  text-align: center;
-
-  &.error { color: var(--gr-status-danger); }
-}
 .detail-row td {
   background: var(--gr-surface-sunken);
   padding: $spacing-md $spacing-lg;

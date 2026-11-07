@@ -12,8 +12,7 @@ import { InviteItem } from '@core/models';
 import {
   BadgeComponent,
   ButtonComponent,
-  EmptyStateComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -27,8 +26,7 @@ import {
     CommonModule,
     BadgeComponent,
     ButtonComponent,
-    EmptyStateComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
@@ -47,6 +45,7 @@ export class InvitesComponent implements OnInit {
   invites = signal<InviteItem[]>([]);
   errorMessage = signal<string | null>(null);
   successMessage = signal<string | null>(null);
+  loadError = signal<unknown>(null);
 
   ngOnInit(): void {
     this.load();
@@ -59,13 +58,14 @@ export class InvitesComponent implements OnInit {
 
   load(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.userService.getInvites().subscribe({
       next: (invites) => {
         this.invites.set(invites);
         this.loading.set(false);
       },
-      error: () => {
-        this.errorMessage.set('Failed to load invitations.');
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });
@@ -73,6 +73,7 @@ export class InvitesComponent implements OnInit {
 
   accept(token: string): void {
     this.pendingToken.set(token);
+    this.clearMessages();
     this.userService.acceptInvite(token).subscribe({
       next: () => {
         this.pendingToken.set(null);
@@ -88,6 +89,7 @@ export class InvitesComponent implements OnInit {
 
   decline(token: string): void {
     this.pendingToken.set(token);
+    this.clearMessages();
     this.userService.declineInvite(token).subscribe({
       next: () => {
         this.pendingToken.set(null);
@@ -99,5 +101,10 @@ export class InvitesComponent implements OnInit {
         this.errorMessage.set(e.message || 'Failed to decline the invitation.');
       },
     });
+  }
+
+  private clearMessages(): void {
+    this.errorMessage.set(null);
+    this.successMessage.set(null);
   }
 }

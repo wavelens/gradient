@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { IntegrationsComponent } from './integrations.component';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -320,5 +320,23 @@ describe('IntegrationsComponent - create github integration', () => {
 
     expect(createSpy).not.toHaveBeenCalled();
     expect(comp.errorMessage()).toContain('positive integer');
+  });
+});
+
+describe('IntegrationsComponent - load errors', () => {
+  it('shows a failed load as an error, never as the empty state and loads again on Try Again', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
+    const service = TestBed.inject(IntegrationsService) as unknown as { listProjectIntegrations: () => unknown };
+    service.listProjectIntegrations = () => throwError(() => new Error('database is down'));
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load integrations');
+    expect(root.textContent).toContain('database is down');
+    expect(root.textContent).not.toContain('No integrations');
+
+    service.listProjectIntegrations = () => of([]);
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    await settled(fixture);
+    expect(root.textContent).not.toContain('Failed to load integrations');
   });
 });

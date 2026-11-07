@@ -32,7 +32,7 @@ const members: TeamMemberItem[] = [
   { user: 'dave', name: 'Dave', role: 'member', source: 'state' },
 ];
 
-function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), managed = false) {
+function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), managed = false, listMembers = vi.fn().mockReturnValue(of(members))) {
   const addMember = vi.fn().mockReturnValue(of('Invitation sent'));
   TestBed.configureTestingModule({
     imports: [TeamMembersComponent],
@@ -43,7 +43,7 @@ function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), manag
       {
         provide: TeamsService,
         useValue: {
-          members: () => of(members),
+          members: listMembers,
           invitations: () => of([]),
           addMember,
           updateMember: vi.fn().mockReturnValue(of('ok')),
@@ -60,6 +60,18 @@ function setup(removeMember = vi.fn().mockReturnValue(of('User removed')), manag
 }
 
 describe('TeamMembersComponent', () => {
+  it('shows a failed member load with Try Again instead of No members', () => {
+    const listMembers = vi.fn().mockReturnValueOnce(throwError(() => new Error('database is down'))).mockReturnValue(of(members));
+    const { fixture } = setup(undefined, false, listMembers);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load team members');
+    expect(root.textContent).not.toContain('No members');
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(listMembers).toHaveBeenCalledTimes(2);
+    expect(root.textContent).toContain('alice');
+  });
+
   it('lists members and marks the ones added by a group or the state', () => {
     const { fixture } = setup();
     const text = (fixture.nativeElement as HTMLElement).textContent || '';

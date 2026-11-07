@@ -8,100 +8,118 @@
   @if (canCreateCache) {
     <app-create-cache-button slot="actions" (create)="openCreateDialog()" />
   }
-  @if (loading()) {
-    <gr-loading-spinner message="Loading caches..." />
-  } @else {
-    @if (activeCaches.length > 0) {
-      <div class="section">
-        <gr-card-grid>
-          @for (cache of activeCaches; track cache.id) {
-            <gr-nav-card
-              icon="storage"
-              [title]="cache.display_name"
-              [description]="cache.description || 'No description'"
-              [link]="['/caches', cache.name]"
-            >
-              <div slot="meta">
-                <gr-badge severity="success">Active</gr-badge>
-                @if (cache.public) {
-                  <gr-badge severity="info">Public</gr-badge>
-                }
-              </div>
-            </gr-nav-card>
-          }
-        </gr-card-grid>
-      </div>
-    }
-
-    <!-- Inactive Caches -->
-    @if (inactiveCaches.length > 0) {
-      <div class="section">
-        <h2>Inactive Caches</h2>
-        <gr-card-grid>
-          @for (cache of inactiveCaches; track cache.id) {
-            <gr-nav-card
-              muted
-              icon="cloud_off"
-              [title]="cache.display_name"
-              [description]="cache.description || 'No description'"
-              [link]="['/caches', cache.name]"
-            >
-              <div slot="meta">
-                <gr-badge severity="danger">Inactive</gr-badge>
-                @if (cache.public) {
-                  <gr-badge severity="info">Public</gr-badge>
-                }
-              </div>
-            </gr-nav-card>
-          }
-        </gr-card-grid>
-      </div>
-    }
-
-    <!-- Empty State -->
-    @if (caches().length === 0) {
-      <gr-empty-state
-        icon="storage"
-        title="No caches yet"
-        [message]="canCreateCache ? 'Create your first cache to store build artifacts' : 'No caches have been created yet'"
-      >
-        @if (canCreateCache) {
-          <app-create-cache-button slot="action" (create)="openCreateDialog()" />
+  @if (authService.isAuthenticated()) {
+    <gr-load-state
+      [loading]="loading()"
+      [error]="loadError()"
+      [empty]="caches().length === 0"
+      loadingMessage="Loading caches..."
+      errorTitle="Failed to load caches"
+      (retry)="loadCaches()"
+    >
+      <div slot="empty">
+        @if (!publicLoading() && filteredPublicCaches.length === 0) {
+          <gr-empty-state
+            icon="storage"
+            title="No caches yet"
+            [message]="canCreateCache ? 'Create your first cache to store build artifacts' : 'No caches have been created yet'"
+          >
+            @if (canCreateCache) {
+              <app-create-cache-button slot="action" (create)="openCreateDialog()" />
+            }
+          </gr-empty-state>
         }
-      </gr-empty-state>
-    }
+      </div>
+
+      @if (activeCaches.length > 0) {
+        <div class="section">
+          <gr-card-grid>
+            @for (cache of activeCaches; track cache.id) {
+              <gr-nav-card
+                icon="storage"
+                [title]="cache.display_name"
+                [description]="cache.description || 'No description'"
+                [link]="['/caches', cache.name]"
+              >
+                <div slot="meta">
+                  <gr-badge severity="success">Active</gr-badge>
+                  @if (cache.public) {
+                    <gr-badge severity="info">Public</gr-badge>
+                  }
+                </div>
+              </gr-nav-card>
+            }
+          </gr-card-grid>
+        </div>
+      }
+
+      @if (inactiveCaches.length > 0) {
+        <div class="section">
+          <h2>Inactive Caches</h2>
+          <gr-card-grid>
+            @for (cache of inactiveCaches; track cache.id) {
+              <gr-nav-card
+                muted
+                icon="cloud_off"
+                [title]="cache.display_name"
+                [description]="cache.description || 'No description'"
+                [link]="['/caches', cache.name]"
+              >
+                <div slot="meta">
+                  <gr-badge severity="danger">Inactive</gr-badge>
+                  @if (cache.public) {
+                    <gr-badge severity="info">Public</gr-badge>
+                  }
+                </div>
+              </gr-nav-card>
+            }
+          </gr-card-grid>
+        </div>
+      }
+    </gr-load-state>
   }
 
-  <!-- Public Caches -->
-  @if (publicLoading() && !loading()) {
-    <gr-loading-spinner message="Loading public caches..." />
-  } @else if (filteredPublicCaches.length > 0) {
-    <div class="discover-header">
-      <h2>Discover Public Caches</h2>
-    </div>
-    <div class="cache-grid">
-      @for (cache of filteredPublicCaches; track cache.id) {
-        <a [routerLink]="['/caches', cache.name]" class="cache-card">
-          <div class="cache-icon">
-            <gr-icon name="public" size="xl" />
-          </div>
-          <div class="cache-content">
-            <h3>{{ cache.display_name }}</h3>
-            <p class="text-secondary">{{ cache.description || 'No description' }}</p>
-            <div class="cache-meta">
-              <span class="meta-item">
-                <gr-icon name="sort" size="sm" />
-                Priority: {{ cache.priority }}
-              </span>
-              <gr-badge severity="info">Public</gr-badge>
+  @if (showPublic) {
+    <gr-load-state
+      [loading]="publicLoading() && !loading()"
+      [error]="publicError()"
+      [empty]="filteredPublicCaches.length === 0"
+      loadingMessage="Loading public caches..."
+      errorTitle="Failed to load public caches"
+      (retry)="loadPublicCaches()"
+    >
+      <div slot="empty">
+        @if (!authService.isAuthenticated()) {
+          <gr-empty-state icon="storage" title="No caches yet" message="No caches have been created yet" />
+        }
+      </div>
+      <div class="discover-header">
+        <h2>Discover Public Caches</h2>
+      </div>
+      <div class="cache-grid">
+        @for (cache of filteredPublicCaches; track cache.id) {
+          <a [routerLink]="['/caches', cache.name]" class="cache-card">
+            <div class="cache-icon">
+              <gr-icon name="public" size="xl" />
             </div>
-          </div>
-          <div class="cache-arrow">
-            <gr-icon name="arrow_forward" />
-          </div>
-        </a>
-      }
-    </div>
+            <div class="cache-content">
+              <h3>{{ cache.display_name }}</h3>
+              <p class="text-secondary">{{ cache.description || 'No description' }}</p>
+              <div class="cache-meta">
+                <span class="meta-item">
+                  <gr-icon name="sort" size="sm" />
+                  Priority: {{ cache.priority }}
+                </span>
+                <gr-badge severity="info">Public</gr-badge>
+              </div>
+            </div>
+            <div class="cache-arrow">
+              <gr-icon name="arrow_forward" />
+            </div>
+          </a>
+        }
+      </div>
+    </gr-load-state>
   }
 </gr-page-layout>
 

@@ -74,6 +74,22 @@ function buttonsByText(root: HTMLElement, text: string): HTMLButtonElement[] {
   );
 }
 
+describe('ApiKeysComponent - loading', () => {
+  it('shows a failed load with Try Again instead of No API keys', () => {
+    const getApiKeys = vi.fn()
+      .mockReturnValueOnce(throwError(() => new ApiError('database is down', 500)))
+      .mockReturnValue(of([unmanagedKey]));
+    const fixture = setup([], { getApiKeys });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load API keys');
+    expect(root.textContent).not.toContain('No API keys');
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(getApiKeys).toHaveBeenCalledTimes(2);
+    expect(root.textContent).toContain('CI key');
+  });
+});
+
 describe('ApiKeysComponent - managed-key gating', () => {
   it('renders Edit / Revoke / Delete enabled for an unmanaged key', () => {
     const fixture = setup([unmanagedKey]);

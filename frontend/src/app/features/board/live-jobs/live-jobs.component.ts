@@ -12,7 +12,7 @@ import { Subscription } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
 import { AuthService } from '@core/services/auth.service';
-import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
+import { LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
 import { BoardRow, JobKindName, boardJobLink, collapseClusters, jobKindName, jobSubjectLabel } from '../job-kind';
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
@@ -34,11 +34,10 @@ interface DecisionRow {
 @Component({
   selector: 'app-board-live-jobs',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, FormsModule, RouterModule, TableComponent, LoadStateComponent],
   template: `
-    @if (first.loading()) {
-      <gr-loading-spinner message="Loading jobs..." />
-    } @else {
+    <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
+                   loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
       <div class="view-toggle">
         <button [class.active]="view() === 'assigned'" (click)="setView('assigned')">Assigned</button>
         <button [class.active]="view() === 'pending'" (click)="setView('pending')">Pending</button>
@@ -153,7 +152,7 @@ interface DecisionRow {
           </tbody>
         </gr-table>
       }
-    }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './live-jobs.component.scss',
@@ -272,9 +271,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
-    this.loadAssigned();
-    if (this.view() === 'pending') this.loadPending();
-    if (this.showDecisions()) this.loadDecisions();
+    this.load();
     this.sub = this.live.connect().subscribe({
       next: ({ event, content: ev }) => {
         if (event === 'worker.job_dispatched' && ev.project) {
@@ -302,6 +299,17 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     });
   }
 
+  retry(): void {
+    this.first.restart();
+    this.load();
+  }
+
+  private load(): void {
+    this.loadAssigned();
+    if (this.view() === 'pending') this.loadPending();
+    if (this.showDecisions()) this.loadDecisions();
+  }
+
   ngOnDestroy(): void {
     this.sub?.unsubscribe();
     clearTimeout(this.refreshTimer);
@@ -309,19 +317,18 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   setView(v: 'assigned' | 'pending'): void {
     this.view.set(v);
+    this.first.refresh();
     if (v === 'pending') this.loadPending();
   }
 
   setScoreScope(scope: ScoreScope): void {
     this.scoreScope.set(scope);
+    this.first.refresh();
     if (this.showDecisions()) this.loadDecisions();
   }
 
   private loadDecisions(): void {
-    this.board.getAssignmentDecisions().pipe(this.first.track()).subscribe({
-      next: (d) => this.decisions.set(d),
-      error: () => this.decisions.set([]),
-    });
+    this.board.getAssignmentDecisions().pipe(this.first.track()).subscribe((d) => this.decisions.set(d));
   }
 
   private loadAssigned(): void {

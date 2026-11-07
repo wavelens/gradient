@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { UpstreamCachesComponent, probeSummary } from './upstream-caches.component';
 import { CachesService } from '@core/services/caches.service';
 import { AccessState } from '@core/models/access.model';
@@ -64,7 +65,7 @@ function findIconButton(root: HTMLElement, icon: string): HTMLButtonElement | nu
 
 function setup(
   access: AccessState,
-  upstreamCaches: unknown[] = oneUpstream,
+  upstreamCaches: unknown[] | (() => Observable<unknown[]>) = oneUpstream,
   updateUpstream: (...args: unknown[]) => unknown = () => of('ok'),
 ): ComponentFixture<UpstreamCachesComponent> {
   TestBed.configureTestingModule({
@@ -78,7 +79,7 @@ function setup(
         provide: CachesService,
         useValue: {
           getCache: () => of({ display_name: 'Demo' }),
-          getUpstreamCaches: () => of(upstreamCaches),
+          getUpstreamCaches: Array.isArray(upstreamCaches) ? () => of(upstreamCaches) : upstreamCaches,
           updateUpstream,
         },
       },
@@ -88,6 +89,22 @@ function setup(
   fixture.detectChanges();
   return fixture;
 }
+
+describe('UpstreamCachesComponent - loading', () => {
+  it('shows a failed load with Try Again instead of No upstream caches', () => {
+    const load = vi.fn()
+      .mockReturnValueOnce(throwError(() => new ApiError('database is down', 500)))
+      .mockReturnValue(of(oneUpstream));
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, load);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load upstream caches');
+    expect(root.textContent).not.toContain('No upstream caches');
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(root.textContent).toContain('Upstream A');
+  });
+});
 
 describe('UpstreamCachesComponent - HTTP upstream probe', () => {
   const realFetch = globalThis.fetch;

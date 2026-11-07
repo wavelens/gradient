@@ -36,6 +36,14 @@
       }
     </div>
   } @else {
+    <gr-load-state
+      [loading]="credentialsLoading()"
+      [error]="credentialsError()"
+      [empty]="credentials() === null && !credentialsMissing()"
+      loadingMessage="Loading credentials..."
+      errorTitle="Failed to load settings for GitHub App"
+      (retry)="loadCredentials()"
+    >
     @if (credentialsMissing()) {
       <div class="error" data-testid="github-app-credentials-missing">
         Credentials are no longer available - re-run the manifest flow.
@@ -80,5 +88,6 @@
         </p>
       </div>
     }
+    </gr-load-state>
   }
 </gr-page-layout>

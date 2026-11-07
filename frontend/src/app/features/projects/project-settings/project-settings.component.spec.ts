@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { ProjectSettingsComponent } from './project-settings.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
@@ -87,5 +87,38 @@ describe('ProjectSettingsComponent - access gating', () => {
     expect(save!.disabled).toBe(true);
     expect(del).not.toBeNull();
     expect(del!.disabled).toBe(true);
+  });
+});
+
+describe('ProjectSettingsComponent - SSH key load errors', () => {
+  it('shows a failed key load as an error instead of offering to generate a key', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const service = TestBed.inject(ProjectsService) as unknown as { getSSHKey: () => unknown };
+    service.getSSHKey = () => throwError(() => new Error('database is down'));
+    fixture.componentInstance.loadSSHKey();
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load SSH key');
+    expect(root.textContent).not.toContain('No SSH key generated yet.');
+
+    service.getSSHKey = () => of('ssh-ed25519 AAAA acme');
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    fixture.detectChanges();
+    expect(root.textContent).not.toContain('Failed to load SSH key');
+  });
+});
+
+describe('ProjectSettingsComponent - project load errors', () => {
+  it('shows a failed project load with Try Again instead of a blank page', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const service = TestBed.inject(ProjectsService) as unknown as { getProject: () => unknown };
+    service.getProject = () => throwError(() => new Error('database is down'));
+    fixture.componentInstance.loadProject();
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load project settings');
+    expect(root.textContent).toContain('database is down');
   });
 });

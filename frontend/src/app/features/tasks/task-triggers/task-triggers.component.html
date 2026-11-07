@@ -15,9 +15,25 @@
       (click)="startCreate()"
       [appManagedDisable]="access()"
     ></button>
-  @if (loading()) {
-    <gr-loading-spinner message="Loading triggers..." />
-  } @else {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="triggers().length === 0"
+    loadingMessage="Loading triggers..."
+    errorTitle="Failed to load triggers"
+    emptyIcon="schedule_send"
+    emptyTitle="No triggers configured"
+    emptyMessage="Create a trigger to start evaluations on a schedule, push event, or pull request."
+    (retry)="loadTriggers()"
+  >
+    <button slot="empty-action"
+      *appWritable="access()"
+      grButton
+      label="New Trigger"
+      icon="add"
+      (click)="startCreate()"
+      [appManagedDisable]="access()"
+    ></button>
     <div class="triggers-list">
       @for (trigger of triggers(); track trigger.id) {
         <div class="trigger-row">
@@ -95,7 +111,7 @@
         </div>
       }
     </div>
-  }
+  </gr-load-state>
 </gr-page-layout>
 
 <!-- Create Dialog -->

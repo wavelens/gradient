@@ -8,7 +8,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { ProfileComponent } from './profile.component';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
@@ -25,6 +26,7 @@ interface SetupOptions {
   password?: boolean;
   provider?: { connected: boolean; canDisconnect: boolean };
   query?: Record<string, string>;
+  loadFailure?: ApiError;
 }
 
 function settings(opts: SetupOptions) {
@@ -55,7 +57,7 @@ function setup(opts: SetupOptions): ComponentFixture<ProfileComponent> {
       {
         provide: UserService,
         useValue: {
-          getUserSettings: () => of(settings(opts)),
+          getUserSettings: () => (opts.loadFailure ? throwError(() => opts.loadFailure) : of(settings(opts))),
           updateUserSettings: (body: unknown) => {
             profileWrites.push(body);
             return of({});
@@ -257,5 +259,19 @@ describe('ProfileComponent - delete confirmation', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     expect(document.body.querySelector('#confirm-username')).not.toBeNull();
+  });
+
+  it('never offers an empty profile form to save after a failed load', () => {
+    const opts: SetupOptions = { managed: false, oidc: false, loadFailure: new ApiError('database is down', 500) };
+    const fixture = setup(opts);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load profile');
+    expect(root.querySelector('#name')).toBeNull();
+
+    opts.loadFailure = undefined;
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    fixture.detectChanges();
+    expect(root.textContent).not.toContain('Failed to load profile');
+    expect(root.textContent).toContain('Personal Information');
   });
 });

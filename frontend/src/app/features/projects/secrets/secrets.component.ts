@@ -17,10 +17,9 @@ import {
   ButtonComponent,
   CopyFieldComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -42,11 +41,10 @@ const SECRET_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
     ButtonComponent,
     CopyFieldComponent,
     DialogComponent,
-    EmptyStateComponent,
     FormFieldComponent,
     InputDirective,
     LabelHelpComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
@@ -69,6 +67,7 @@ export class SecretsComponent implements OnInit {
 
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
   loading = signal(true);
+  loadError = signal<unknown>(null);
   secrets = signal<ProjectSecretSummary[]>([]);
   pageError = signal<string | null>(null);
   sopsRecipient = signal<SopsRecipientResponse | null>(null);
@@ -104,13 +103,14 @@ export class SecretsComponent implements OnInit {
 
   loadSecrets(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.secretsService.list(this.projectName).subscribe({
       next: (secrets) => {
         this.secrets.set(secrets);
         this.loading.set(false);
       },
-      error: (error) => {
-        this.pageError.set(error?.message || 'Failed to load secrets.');
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });

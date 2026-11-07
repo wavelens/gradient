@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { TaskActionsComponent } from './task-actions.component';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
@@ -140,5 +140,24 @@ describe('TaskActionsComponent', () => {
     (comp as any).actionsService = { create: () => of({ action, token: 'gat_secret' }), list: () => of([action]) };
     comp.onCreateSaved({ name: 'X', config: { type: 'send_web_request', url: 'u' } } as any);
     expect(comp.revealedToken()).toBe('gat_secret');
+  });
+});
+
+describe('TaskActionsComponent - load errors', () => {
+  it('shows a failed load as an error, never as the empty state and loads again on Try Again', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
+    const service = TestBed.inject(ActionsService) as unknown as { list: () => unknown };
+    service.list = () => throwError(() => new Error('database is down'));
+    fixture.componentInstance.loadActions();
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load actions');
+    expect(root.textContent).toContain('database is down');
+    expect(root.textContent).not.toContain('No actions configured');
+
+    service.list = () => of([]);
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    fixture.detectChanges();
+    expect(root.textContent).toContain('No actions configured');
   });
 });

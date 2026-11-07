@@ -28,10 +28,9 @@ import {
   ButtonComponent,
   CopyFieldComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   RowComponent,
   RowListComponent,
@@ -49,10 +48,9 @@ import {
     ButtonComponent,
     CopyFieldComponent,
     DialogComponent,
-    EmptyStateComponent,
     FormFieldComponent,
     InputDirective,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     MessageBannerComponent,
     RowComponent,
     RowListComponent,
@@ -70,6 +68,7 @@ export class TeamWorkersComponent implements OnInit {
   workers = signal<TeamWorkerEntry[]>([]);
   showOffline = signal(false);
   loading = signal(true);
+  loadError = signal<unknown>(null);
   busy = signal<string | null>(null);
   error = signal<string | null>(null);
   showRegister = signal(false);
@@ -107,12 +106,17 @@ export class TeamWorkersComponent implements OnInit {
   }
 
   load(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
     this.teams.workers(this.teamName).subscribe({
       next: (workers) => {
         this.workers.set(workers);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

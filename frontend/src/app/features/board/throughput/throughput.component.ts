@@ -8,7 +8,7 @@ import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@ang
 import { CommonModule } from '@angular/common';
 import { forkJoin } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
-import { LoadingSpinnerComponent } from '@gradient/ui/ui';
+import { LoadStateComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { workerAxisLabel } from '../worker-label';
@@ -18,11 +18,10 @@ import { BoardWorker, MetricPoint } from '@core/models';
 @Component({
   selector: 'app-board-throughput',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, MetricChartComponent, LoadStateComponent],
   template: `
-    @if (first.loading()) {
-      <gr-loading-spinner message="Loading throughput..." />
-    } @else {
+    <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
+                   loadingMessage="Loading throughput..." errorTitle="Failed to load throughput" (retry)="retry()">
       <gr-metric-chart
         title="Build pipeline (hourly)"
         doc="ui/job-board/"
@@ -49,7 +48,7 @@ import { BoardWorker, MetricPoint } from '@core/models';
         [categories]="workerCategories()"
         [colors]="['#fd7e14']"
       ></gr-metric-chart>
-    }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './throughput.component.scss',
@@ -66,6 +65,15 @@ export class BoardThroughputComponent implements OnInit {
   workerSeries = signal<{ name: string; data: number[] }[]>([]);
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  retry(): void {
+    this.first.restart();
+    this.load();
+  }
+
+  private load(): void {
     forkJoin({
       created: this.board.query('builds.created', 'hour'),
       completed: this.board.query('builds.completed', 'hour'),

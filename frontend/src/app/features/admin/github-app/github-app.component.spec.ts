@@ -9,7 +9,7 @@ import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { GithubAppComponent } from './github-app.component';
 import { AdminService } from '@core/services/admin.service';
 
@@ -105,6 +105,21 @@ describe('GithubAppComponent', () => {
       '[data-testid="github-app-credentials-missing"]',
     );
     expect(banner).toBeTruthy();
+  });
+
+  it('shows a spinner while credentials load and a failed load with Try Again', () => {
+    setup({ ready: '1' });
+    admin.fetchGithubAppCredentials.mockReturnValueOnce(throwError(() => ({ status: 500, message: 'database is down' })));
+    const fixture = TestBed.createComponent(GithubAppComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load settings for GitHub App');
+    expect(root.textContent).toContain('database is down');
+    admin.fetchGithubAppCredentials.mockReturnValue(new Subject());
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(admin.fetchGithubAppCredentials).toHaveBeenCalledTimes(2);
+    expect(root.textContent).toContain('Loading credentials...');
   });
 
   describe('navigation guard while credentials are shown', () => {

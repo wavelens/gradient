@@ -14,10 +14,9 @@ import {
   ButtonComponent,
   CopyFieldComponent,
   DialogComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -37,10 +36,9 @@ function sshKeyComment(publicKey: string): string {
     ButtonComponent,
     CopyFieldComponent,
     DialogComponent,
-    EmptyStateComponent,
     FormFieldComponent,
     InputDirective,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
@@ -54,6 +52,7 @@ export class SshKeysComponent implements OnInit {
   private config = inject(ConfigService);
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   saving = signal(false);
   deletingId = signal<string | null>(null);
   errorMessage = signal<string | null>(null);
@@ -73,12 +72,16 @@ export class SshKeysComponent implements OnInit {
 
   loadKeys(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.userService.getSshKeys().subscribe({
       next: (keys) => {
         this.keys.set(keys);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

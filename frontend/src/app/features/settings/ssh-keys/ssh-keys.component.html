@@ -17,14 +17,18 @@
     <gr-copy-field [value]="sshConfig" multiline />
   </gr-form-field>
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading SSH keys..." />
-  } @else {
-    @if (keys().length === 0) {
-      <gr-empty-state icon="terminal" title="No SSH keys" message="Add a public key to connect over ssh-ng://.">
-        <button slot="action" grButton label="Add SSH Key" icon="add" (click)="openDialog()"></button>
-      </gr-empty-state>
-    } @else {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="keys().length === 0"
+    loadingMessage="Loading SSH keys..."
+    errorTitle="Failed to load SSH keys"
+    emptyIcon="terminal"
+    emptyTitle="No SSH keys"
+    emptyMessage="Add a public key to connect over ssh-ng://."
+    (retry)="loadKeys()"
+  >
+    <button slot="empty-action" grButton label="Add SSH Key" icon="add" (click)="openDialog()"></button>
       <gr-row-list>
         @for (key of keys(); track key.id) {
           <gr-row icon="terminal">
@@ -49,8 +53,7 @@
           </gr-row>
         }
       </gr-row-list>
-    }
-  }
+  </gr-load-state>
 </gr-page-layout>
 
 <gr-dialog [(visible)]="showDialog" width="520px" header="Add SSH Key">

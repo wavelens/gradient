@@ -21,8 +21,8 @@
       [appManagedDisable]="access()"
       (click)="openSubscribeDialog()"
     ></button>
-  @if (loading()) {
-    <gr-loading-spinner message="Loading cache subscriptions..." />
+  @if (loading() || loadError()) {
+    <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading cache subscriptions..." errorTitle="Failed to load caches" (retry)="loadCaches()" />
   } @else {
     @if (caches().length === 0) {
       <gr-empty-state icon="storage" title="No cache subscriptions" message="Subscribe to a Nix binary cache to have builds pushed there automatically.">

@@ -9,12 +9,17 @@
     <gr-message-banner slot="banner" type="error">{{ errorMessage() }}</gr-message-banner>
   }
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading sessions..." />
-  } @else if (sessions().length === 0) {
-    <gr-empty-state icon="devices" title="No active sessions"
-      message="Sessions appear here once you sign in on a device." />
-  } @else {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="sessions().length === 0"
+    loadingMessage="Loading sessions..."
+    errorTitle="Failed to load sessions"
+    emptyIcon="devices"
+    emptyTitle="No active sessions"
+    emptyMessage="Sessions appear here once you sign in on a device."
+    (retry)="load()"
+  >
     <gr-row-list>
       @for (s of sessions(); track s.id) {
         <gr-row icon="computer">
@@ -40,5 +45,5 @@
         </gr-row>
       }
     </gr-row-list>
-  }
+  </gr-load-state>
 </gr-page-layout>

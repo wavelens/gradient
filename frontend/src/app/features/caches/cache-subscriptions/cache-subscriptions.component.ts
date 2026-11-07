@@ -12,8 +12,7 @@ import { CachesService } from '@core/services/caches.service';
 import { SubscriptionRequestItem } from '@core/models';
 import {
   ButtonComponent,
-  EmptyStateComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -26,8 +25,7 @@ import {
   imports: [
     CommonModule,
     ButtonComponent,
-    EmptyStateComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
@@ -48,6 +46,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   deciding = signal<string | null>(null);
   requests = signal<SubscriptionRequestItem[]>([]);
   errorMessage = signal<string | null>(null);
+  loadError = signal<unknown>(null);
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
@@ -56,13 +55,14 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
 
   load(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.cachesService.getSubscriptionRequests(this.cacheName).subscribe({
       next: (requests) => {
         this.requests.set(requests);
         this.loading.set(false);
       },
-      error: () => {
-        this.errorMessage.set('Failed to load subscription requests.');
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });
@@ -70,6 +70,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
 
   approve(project: string): void {
     this.deciding.set(project);
+    this.errorMessage.set(null);
     this.cachesService.approveSubscriptionRequest(this.cacheName, project).subscribe({
       next: () => {
         this.deciding.set(null);
@@ -84,6 +85,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
 
   deny(project: string): void {
     this.deciding.set(project);
+    this.errorMessage.set(null);
     this.cachesService.denySubscriptionRequest(this.cacheName, project).subscribe({
       next: () => {
         this.deciding.set(null);

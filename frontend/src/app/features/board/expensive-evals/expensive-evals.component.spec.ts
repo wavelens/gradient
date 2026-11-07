@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { BoardExpensiveEvalsComponent } from './expensive-evals.component';
 import { BoardService } from '@core/services/board.service';
 import { ExpensiveEval } from '@core/models';
@@ -54,6 +54,26 @@ function rows(): HTMLTableRowElement[] {
 }
 
 describe('BoardExpensiveEvalsComponent', () => {
+  it('shows the reason of a failed load instead of an empty table and loads again on Try Again', () => {
+    const getExpensiveEvalsByResource = vi.fn()
+      .mockReturnValueOnce(throwError(() => new Error('metrics store is down')))
+      .mockReturnValue(of(EVALS));
+    TestBed.configureTestingModule({
+      imports: [BoardExpensiveEvalsComponent],
+      providers: [provideRouter([]), { provide: BoardService, useValue: { getExpensiveEvalsByResource } }],
+    });
+    const fixture = TestBed.createComponent(BoardExpensiveEvalsComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load evaluations');
+    expect(root.textContent).toContain('metrics store is down');
+    expect(root.querySelectorAll('tbody tr')).toHaveLength(0);
+
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(root.querySelectorAll('tbody tr')).toHaveLength(2);
+  });
+
   it('links each evaluation to its project and task by display name', () => {
     const links = Array.from(rows()[0].cells[1].querySelectorAll('a'));
     expect(links.map((a) => a.textContent?.trim())).toEqual(['Acme Corp', 'NixOS Systems']);

@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService } from '@core/services/board.service';
-import { CardGridComponent, LoadingSpinnerComponent, PopoverComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
+import { CardGridComponent, LoadStateComponent, PopoverComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { clockTime, formatDuration } from '@shared/text';
@@ -16,11 +16,10 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
 @Component({
   selector: 'app-board-scheduler',
   standalone: true,
-  imports: [CommonModule, CardGridComponent, StatCardComponent, PopoverComponent, MetricChartComponent, LabelHelpComponent, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, CardGridComponent, StatCardComponent, PopoverComponent, MetricChartComponent, LabelHelpComponent, TableComponent, LoadStateComponent],
   template: `
-    @if (first.loading()) {
-      <gr-loading-spinner message="Loading scheduler stats..." />
-    } @else {
+    <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
+                   loadingMessage="Loading scheduler stats..." errorTitle="Failed to load scheduler stats" (retry)="retry()">
       <gr-card-grid class="kpis" min="180px">
         <gr-stat-card compact label="Scored assignments (24h)" [value]="summary()?.sample_size ?? 0" />
         <gr-stat-card compact label="Avg score" [value]="summary()?.score_avg | number: '1.2-2'" />
@@ -74,7 +73,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
           <div class="rule-help"><strong>{{ a.rule }}</strong><p>{{ a.description }}</p></div>
         }
       </gr-popover>
-    }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './scheduler.component.scss',
@@ -124,6 +123,15 @@ export class BoardSchedulerComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  retry(): void {
+    this.first.restart();
+    this.load();
+  }
+
+  private load(): void {
     this.board.query('dispatch.wait_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.wait.set(p));
     this.board.query('deps.wait_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.deps.set(p));
     this.board.getScoringSummary(24).pipe(this.first.track()).subscribe((s) => this.summary.set(s));

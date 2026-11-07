@@ -5,11 +5,16 @@
 -->
 
 <gr-page-layout [breadcrumb]="breadcrumb()" title="Task Metrics" [subtitle]="'Build and evaluation statistics over the last ' + (keepEvaluations()) + ' completed evaluations.'">
-  @if (loading()) {
-    <gr-loading-spinner message="Loading metrics..." />
-  } @else if (metrics().length === 0) {
-    <gr-empty-state icon="bar_chart" title="No completed evaluations yet." />
-  } @else {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="metrics().length === 0"
+    loadingMessage="Loading metrics..."
+    errorTitle="Failed to load task metrics"
+    emptyIcon="bar_chart"
+    emptyTitle="No completed evaluations yet."
+    (retry)="load()"
+  >
     <div class="charts-grid">
 
       <gr-metric-chart
@@ -69,5 +74,5 @@
       />
 
     </div>
-  }
+  </gr-load-state>
 </gr-page-layout>

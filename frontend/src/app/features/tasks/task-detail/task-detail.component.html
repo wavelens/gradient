@@ -209,7 +209,9 @@
             <div class="pkg-label"><h3>{{ selectedFetchRows().length && !searchTerm() ? 'Flake Inputs' : 'Packages' }}</h3></div>
           }
           @if (entryPoints().length > 0 || matchingFailedAttributes().length > 0) {
-            @if (entryPoints().length < entryPointsTotal()) {
+            @if (moreEntryPointsError(); as moreError) {
+              <gr-load-state flat [error]="moreError" errorTitle="Failed to load builds" (retry)="loadMoreEntryPoints()" />
+            } @else if (entryPoints().length < entryPointsTotal()) {
               <div class="entry-row pkg pkg-more" aria-busy="true" [attr.aria-label]="'Loading packages, ' + entryPoints().length + ' of ' + entryPointsTotal()"
                    (grInView)="loadMoreEntryPoints()" [grInViewKey]="entryPoints().length" grInViewMargin="100%">
                 <gr-skeleton class="phase-swatch" />
@@ -218,6 +220,8 @@
                 <gr-skeleton class="pkg-deps" width="5rem" />
               </div>
             }
+          } @else if (entryPointsError(); as loadError) {
+            <gr-load-state flat [error]="loadError" errorTitle="Failed to load builds" (retry)="reloadEntryPoints()" />
           } @else if (!entryPointsLoading() && searchTerm()) {
             <gr-empty-state flat icon="search_off" title="No matching packages"
               [message]="'No package of this evaluation contains &quot;' + searchTerm() + '&quot;.'" />

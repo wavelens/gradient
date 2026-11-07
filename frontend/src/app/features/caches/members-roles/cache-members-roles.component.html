@@ -18,10 +18,17 @@
         [disabled]="rolesLoading() || roles().length === 0"
         [appManagedDisable]="access()"
       ></button>
-    @if (membersLoading()) {
-      <gr-loading-spinner message="Loading members..." />
-    } @else {
-      @if (members().length > 0) {
+    <gr-load-state
+      [loading]="membersLoading()"
+      [error]="membersLoadError()"
+      [empty]="members().length === 0"
+      loadingMessage="Loading members..."
+      errorTitle="Failed to load members"
+      emptyIcon="group"
+      emptyTitle="No members"
+      emptyMessage="Add a member to give someone access."
+      (retry)="loadMembers()"
+    >
         <gr-row-list>
           @for (member of members(); track member.id) {
             <gr-row icon="person">
@@ -50,15 +57,12 @@
             </gr-row>
           }
         </gr-row-list>
-      } @else {
-        <gr-empty-state icon="group" title="No members"
-          message="Add a member to give someone access." />
-      }
-  }
+    </gr-load-state>
   </gr-settings-section>
 
-  @if (invitations().length > 0) {
+  @if (invitations().length > 0 || invitationsLoadError()) {
     <gr-settings-section title="Pending Invitations" [card]="false" maxWidth="none">
+      <gr-load-state flat [error]="invitationsLoadError()" errorTitle="Failed to load invitations" (retry)="loadInvitations()">
       <gr-row-list>
         @for (invitation of invitations(); track invitation.user) {
           <gr-row icon="mail">
@@ -82,6 +86,7 @@
           </gr-row>
         }
       </gr-row-list>
+      </gr-load-state>
     </gr-settings-section>
   }
 
@@ -100,10 +105,17 @@
         [disabled]="rolesLoading() || availablePermissions().length === 0"
         [appManagedDisable]="access()"
       ></button>
-    @if (rolesLoading()) {
-      <gr-loading-spinner message="Loading roles..." />
-    } @else {
-      @if (roles().length > 0) {
+    <gr-load-state
+      [loading]="rolesLoading()"
+      [error]="rolesLoadError()"
+      [empty]="roles().length === 0"
+      loadingMessage="Loading roles..."
+      errorTitle="Failed to load roles"
+      emptyIcon="shield"
+      emptyTitle="No roles"
+      emptyMessage="Create a role to describe what members may do."
+      (retry)="loadRoles()"
+    >
         <gr-row-list>
           @for (role of roles(); track role.id) {
             <gr-row icon="shield">
@@ -140,11 +152,7 @@
             </gr-row>
           }
         </gr-row-list>
-      } @else {
-        <gr-empty-state icon="shield" title="No roles"
-          message="Create a role to describe what members may do." />
-      }
-  }
+    </gr-load-state>
   </gr-settings-section>
 </gr-page-layout>
 

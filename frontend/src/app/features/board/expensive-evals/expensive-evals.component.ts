@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
+import { LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { firstLoad } from '../first-load';
 import { formatQuantity } from '@shared/text';
@@ -19,11 +19,10 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
 @Component({
   selector: 'app-board-expensive-evals',
   standalone: true,
-  imports: [CommonModule, RouterModule, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, TableComponent, LoadStateComponent],
   template: `
-    @if (first.loading()) {
-      <gr-loading-spinner message="Loading evaluations..." />
-    } @else {
+    <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
+                   loadingMessage="Loading evaluations..." errorTitle="Failed to load evaluations" (retry)="retry()">
       <nav class="tabs">
         @for (t of tabs; track t.key) {
           <button [class.active]="tab() === t.key" (click)="setTab(t.key)">{{ t.label }}</button>
@@ -60,7 +59,7 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
           }
         </tbody>
       </gr-table>
-    }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './expensive-evals.component.scss',
@@ -89,6 +88,11 @@ export class BoardExpensiveEvalsComponent implements OnInit {
     this.load();
   }
 
+  retry(): void {
+    this.first.restart();
+    this.load();
+  }
+
   private load(): void {
     this.board
       .getExpensiveEvalsByResource(this.tab(), this.windowDays())
@@ -98,11 +102,13 @@ export class BoardExpensiveEvalsComponent implements OnInit {
 
   setTab(t: Tab): void {
     this.tab.set(t);
+    this.first.refresh();
     this.load();
   }
 
   setWindow(e: Event): void {
     this.windowDays.set(Number((e.target as HTMLSelectElement).value));
+    this.first.refresh();
     this.load();
   }
 }

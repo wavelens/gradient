@@ -9,6 +9,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, Subject, catchError, interval, map, startWith, switchMap } from 'rxjs';
 import { inBackground } from '@core/interceptors/request-context';
 import { BoardService } from '@core/services/board.service';
+import { LoadStateComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { clockTime, monthDay, formatCount, formatDuration } from '@shared/text';
@@ -27,7 +28,7 @@ interface StorageView {
 @Component({
   selector: 'app-board-storage',
   standalone: true,
-  imports: [MetricChartComponent],
+  imports: [MetricChartComponent, LoadStateComponent],
   template: `
     <div class="windows">
       @for (w of windows; track w) {
@@ -37,6 +38,8 @@ interface StorageView {
       }
     </div>
 
+    <gr-load-state [loading]="!view() && !loadError()" [error]="loadError()" [empty]="!view()"
+                   errorTitle="Failed to load storage" (retry)="retry()">
     <gr-metric-chart
       title="Storage latency (avg / max)"
       doc="ui/job-board/#storage-metrics"
@@ -79,6 +82,7 @@ interface StorageView {
       [valueFormatter]="count"
       [secondary]="{ title: 'failures', valueFormatter: count }"
     ></gr-metric-chart>
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './storage.component.scss',
@@ -96,6 +100,7 @@ export class BoardStorageComponent implements OnInit {
 
   hours = queryParamSignal('hours', 6, oneOf(WINDOWS));
   view = signal<StorageView | null>(null);
+  loadError = signal<unknown>(null);
 
   private buckets = computed(() => this.view()?.buckets ?? []);
   private stats = computed(() => this.view()?.stats);
@@ -162,19 +167,30 @@ export class BoardStorageComponent implements OnInit {
         switchMap((tick) => this.fetch(this.hours(), tick >= 0)),
         takeUntilDestroyed(this.destroyRef)
       )
-      .subscribe((v) => this.view.set(v));
+      .subscribe((v) => {
+        this.view.set(v);
+        this.loadError.set(null);
+      });
     this.reload.next();
   }
 
   select(hours: number): void {
     this.hours.set(hours);
+    this.retry();
+  }
+
+  retry(): void {
+    this.loadError.set(null);
     this.reload.next();
   }
 
   private fetch(hours: number, poll: boolean): Observable<StorageView> {
     return this.board.getStorage(hours, poll ? inBackground() : undefined).pipe(
       map((stats) => ({ stats, buckets: windowBuckets(stats.granularity, hours, Date.now()) })),
-      catchError(() => EMPTY)
+      catchError((error: unknown) => {
+        if (!poll) this.loadError.set(error);
+        return EMPTY;
+      })
     );
   }
 }

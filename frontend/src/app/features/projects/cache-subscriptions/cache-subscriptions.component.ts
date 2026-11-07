@@ -22,7 +22,7 @@ import {
   EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -45,7 +45,7 @@ import { AccessState, CacheSubscriptionItem } from '@core/models';
     BadgeComponent,
     ButtonComponent,
     AutoCompleteComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     IconComponent,
@@ -76,6 +76,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   showCreateDialog = signal(false);
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   subscribing = signal(false);
   unsubscribingId = signal<string | null>(null);
   showSubscribeDialog = signal(false);
@@ -96,12 +97,16 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   loadCaches(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.projectsService.getSubscribedCaches(this.projectName).subscribe({
       next: (list) => {
         this.caches.set(list);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

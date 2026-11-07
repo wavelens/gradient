@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { WorkersComponent } from './workers.component';
 import { WorkersService } from '@core/services/workers.service';
@@ -438,5 +438,23 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
     const fixture = setup({ access: writable, workers: [offline], caches });
     await settled(fixture);
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('dial timed out after 10 s');
+  });
+});
+
+describe('WorkersComponent - load errors', () => {
+  it('shows a failed load as an error, never as the empty state and loads again on Try Again', async () => {
+    const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [], caches: [], gradientCi: false });
+    const service = TestBed.inject(WorkersService) as unknown as { getWorkers: () => unknown };
+    service.getWorkers = () => throwError(() => new Error('database is down'));
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load workers');
+    expect(root.textContent).toContain('database is down');
+    expect(root.textContent).not.toContain('No workers registered');
+
+    service.getWorkers = () => of([]);
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    await settled(fixture);
+    expect(root.textContent).not.toContain('Failed to load workers');
   });
 });

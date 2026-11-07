@@ -9,8 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import {
   ButtonComponent,
-  EmptyStateComponent,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   PageLayoutComponent,
 } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
@@ -30,7 +29,7 @@ const CHART_COLORS = {
 @Component({
   selector: 'app-entry-point-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, ButtonComponent, MetricChartComponent, LoadingSpinnerComponent, PageLayoutComponent, EmptyStateComponent],
+  imports: [CommonModule, RouterModule, ButtonComponent, MetricChartComponent, LoadStateComponent, PageLayoutComponent],
   templateUrl: './entry-point-metrics.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './entry-point-metrics.component.scss',
@@ -41,6 +40,7 @@ export class EntryPointMetricsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   points = signal<EntryPointMetricPoint[]>([]);
   evalAttr = signal('');
   keepEvaluations = signal(30);
@@ -58,14 +58,22 @@ export class EntryPointMetricsComponent implements OnInit {
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     const evalParam = this.route.snapshot.queryParamMap.get('eval') || '';
     this.evalAttr.set(evalParam);
+    this.load();
+  }
 
-    this.tasksService.getEntryPointMetrics(this.projectName, this.taskName, evalParam).subscribe({
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
+    this.tasksService.getEntryPointMetrics(this.projectName, this.taskName, this.evalAttr()).subscribe({
       next: (data: EntryPointMetricsResponse) => {
         this.points.set(data.points);
         this.keepEvaluations.set(data.keep_evaluations);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

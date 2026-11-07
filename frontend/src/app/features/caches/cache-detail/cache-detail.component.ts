@@ -19,6 +19,7 @@ import {
   CopyFieldComponent,
   DividerComponent,
   FormFieldComponent,
+  LoadStateComponent,
   PageLayoutComponent,
   TabSwitchComponent,
   SettingsSectionComponent,
@@ -67,6 +68,7 @@ const CHART_COLORS = {
     SettingsSectionComponent,
     DividerComponent,
     FormFieldComponent,
+    LoadStateComponent,
     StatCardComponent,
     CardGridComponent,
     TabSwitchComponent,
@@ -89,6 +91,7 @@ export class CacheDetailComponent implements OnInit {
   cache = linkedSignal<CacheResponse | null>(() => this.access()?.cache ?? null);
   statsLoading = signal(true);
   stats = signal<CacheStatsResponse | null>(null);
+  statsError = signal<unknown>(null);
   readonly windows: { key: Window; label: string }[] = [
     { key: 'minutes', label: 'Minutes' },
     { key: 'hours', label: 'Hours' },
@@ -191,12 +194,16 @@ export class CacheDetailComponent implements OnInit {
 
   loadStats(): void {
     this.statsLoading.set(true);
+    this.statsError.set(null);
     this.cachesService.getCacheStats(this.cacheName, this.traffic()).subscribe({
       next: (stats) => {
         this.stats.set(stats);
         this.statsLoading.set(false);
       },
-      error: () => this.statsLoading.set(false),
+      error: (error: unknown) => {
+        this.statsError.set(error);
+        this.statsLoading.set(false);
+      },
     });
   }
 

@@ -8,7 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { BoardService } from '@core/services/board.service';
 import { AuthService } from '@core/services/auth.service';
-import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
+import { LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { workerAxisLabel } from '../worker-label';
@@ -20,11 +20,10 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
 @Component({
   selector: 'app-board-network',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, TableComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, MetricChartComponent, TableComponent, LoadStateComponent],
   template: `
-    @if (first.loading()) {
-      <gr-loading-spinner message="Loading network stats..." />
-    } @else {
+    <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
+                   loadingMessage="Loading network stats..." errorTitle="Failed to load network" (retry)="retry()">
       <gr-metric-chart
         title="NAR egress (served per hour)"
         doc="ui/job-board/"
@@ -82,7 +81,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
           </tbody>
         </gr-table>
       }
-    }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './network.component.scss',
@@ -153,6 +152,15 @@ export class BoardNetworkComponent implements OnInit {
   ]);
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  retry(): void {
+    this.first.restart();
+    this.load();
+  }
+
+  private load(): void {
     this.board.getNetwork(24).pipe(this.first.track()).subscribe((s) => this.stats.set(s));
   }
 }

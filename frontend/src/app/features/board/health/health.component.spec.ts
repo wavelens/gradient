@@ -6,7 +6,7 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { BoardHealthComponent } from './health.component';
 import { BoardService } from '@core/services/board.service';
 import { AdminService } from '@core/services/admin.service';
@@ -84,6 +84,33 @@ function setup(
 }
 
 describe('BoardHealthComponent', () => {
+  it('replaces the endless spinner with the reason and loads again on Try Again', () => {
+    const getHealth = vi.fn()
+      .mockReturnValueOnce(throwError(() => new Error('health endpoint failed')))
+      .mockReturnValue(of(HEALTH));
+    TestBed.configureTestingModule({
+      imports: [BoardHealthComponent],
+      providers: [
+        provideRouter([]),
+        { provide: BoardService, useValue: { getHealth } },
+        { provide: ConfigService, useValue: { githubAppEnabled: true } },
+        { provide: AdminService, useValue: { listTasks: () => of([]) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(BoardHealthComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load health');
+    expect(root.textContent).toContain('health endpoint failed');
+    expect(root.textContent).not.toContain('Loading system health...');
+
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(getHealth).toHaveBeenCalledTimes(2);
+    expect(root.textContent).toContain('build-dispatch');
+    TestBed.resetTestingModule();
+  });
+
   describe('when GitHub App is configured', () => {
     let fixture: ComponentFixture<BoardHealthComponent>;
 

@@ -31,7 +31,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   SelectComponent,
@@ -58,7 +58,7 @@ interface Option<T> {
     ButtonComponent,
     InputDirective,
     SelectComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     LabelHelpComponent,
     WritableDirective,
     ManagedDisableDirective,
@@ -86,6 +86,7 @@ export class IntegrationsComponent implements OnInit {
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   saving = signal(false);
   deletingId = signal<string | null>(null);
 
@@ -185,6 +186,7 @@ export class IntegrationsComponent implements OnInit {
 
   loadIntegrations(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.integrationsService.listProjectIntegrations(this.projectName).subscribe({
       next: (list) => {
         this.integrations.set(list);
@@ -200,7 +202,10 @@ export class IntegrationsComponent implements OnInit {
         this.selectedGitHostByIntegration.set(map);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

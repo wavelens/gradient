@@ -43,7 +43,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MenuComponent,
   MenuItem,
   MessageBannerComponent,
@@ -71,7 +71,7 @@ import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.com
     ButtonComponent,
     InputDirective,
     ToastComponent,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective,
     IconComponent, MessageBannerComponent,
@@ -123,6 +123,7 @@ export class WorkersComponent implements OnInit {
   ];
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   registering = signal(false);
   renaming = signal(false);
   deletingId = signal<string | null>(null);
@@ -226,13 +227,14 @@ export class WorkersComponent implements OnInit {
 
   loadWorkers(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.workersService.getWorkers(this.projectName).subscribe({
       next: (workers) => {
         this.workers.set(workers);
         this.loading.set(false);
       },
-      error: (err) => {
-        console.error('Failed to load workers:', err);
+      error: (error: unknown) => {
+        this.loadError.set(error);
         this.loading.set(false);
       },
     });

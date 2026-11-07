@@ -17,10 +17,9 @@ import {
   CopyFieldComponent,
   DialogComponent,
   DividerComponent,
-  EmptyStateComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -57,11 +56,10 @@ interface SelectOption {
     SelectComponent,
     SelectButtonComponent,
     TooltipDirective,
-    LoadingSpinnerComponent,
+    LoadStateComponent,
     ManagedDisableDirective,
     PageLayoutComponent,
     FormFieldComponent,
-    EmptyStateComponent,
     BadgeComponent,
     CopyFieldComponent,
     RowListComponent,
@@ -78,6 +76,7 @@ export class ApiKeysComponent implements OnInit {
   private cachesService = inject(CachesService);
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   creating = signal(false);
   saving = signal(false);
   deletingId = signal<string | null>(null);
@@ -138,12 +137,16 @@ export class ApiKeysComponent implements OnInit {
 
   loadKeys(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.userService.getApiKeys().subscribe({
       next: (keys) => {
         this.keys.set(keys);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

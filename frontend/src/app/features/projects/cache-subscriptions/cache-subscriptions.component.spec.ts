@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { CacheSubscriptionsComponent } from './cache-subscriptions.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
@@ -128,5 +128,23 @@ describe('CacheSubscriptionsComponent - pending requests', () => {
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'cancel request')).not.toBeNull();
     expect(findByText(fixture.nativeElement, 'unsubscribe')).not.toBeNull();
+  });
+});
+
+describe('CacheSubscriptionsComponent - load errors', () => {
+  it('shows a failed load as an error, never as the empty state and loads again on Try Again', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const service = TestBed.inject(ProjectsService) as unknown as { getSubscribedCaches: () => unknown };
+    service.getSubscribedCaches = () => throwError(() => new Error('database is down'));
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load caches');
+    expect(root.textContent).toContain('database is down');
+    expect(root.textContent).not.toContain('No cache subscriptions');
+
+    service.getSubscribedCaches = () => of([]);
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
+    await settled(fixture);
+    expect(root.textContent).not.toContain('Failed to load caches');
   });
 });

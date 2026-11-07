@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import { EmptyStateComponent, LoadingSpinnerComponent, PageLayoutComponent } from '@gradient/ui/ui';
+import { LoadStateComponent, PageLayoutComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -26,7 +26,7 @@ const CHART_COLORS = {
 @Component({
   selector: 'app-task-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, MetricChartComponent, LoadingSpinnerComponent, PageLayoutComponent, EmptyStateComponent],
+  imports: [CommonModule, RouterModule, MetricChartComponent, LoadStateComponent, PageLayoutComponent],
   templateUrl: './task-metrics.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './task-metrics.component.scss',
@@ -37,6 +37,7 @@ export class TaskMetricsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
 
   loading = signal(true);
+  loadError = signal<unknown>(null);
   metrics = signal<TaskMetricPoint[]>([]);
   keepEvaluations = signal(30);
   projectName = '';
@@ -46,13 +47,22 @@ export class TaskMetricsComponent implements OnInit {
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
+    this.load();
+  }
+
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
     this.tasksService.getTaskMetrics(this.projectName, this.taskName).subscribe({
       next: (data: TaskMetricsResponse) => {
         this.metrics.set(data.points);
         this.keepEvaluations.set(data.keep_evaluations);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

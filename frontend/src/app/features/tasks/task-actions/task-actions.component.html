@@ -22,21 +22,25 @@
     </div>
   }
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading actions..." />
-  } @else {
-    @if (actions().length === 0) {
-      <gr-empty-state icon="notifications_active" title="No actions configured" message="Create an action to send mail, post webhooks, or report build status back to the Git host.">
-        <button slot="action"
-          *appWritable="access()"
-          grButton
-          label="New Action"
-          icon="add"
-          (click)="startCreate()"
-          [appManagedDisable]="access()"
-          ></button>
-      </gr-empty-state>
-    } @else {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="actions().length === 0"
+    loadingMessage="Loading actions..."
+    errorTitle="Failed to load actions"
+    emptyIcon="notifications_active"
+    emptyTitle="No actions configured"
+    emptyMessage="Create an action to send mail, post webhooks, or report build status back to the Git host."
+    (retry)="loadActions()"
+  >
+    <button slot="empty-action"
+      *appWritable="access()"
+      grButton
+      label="New Action"
+      icon="add"
+      (click)="startCreate()"
+      [appManagedDisable]="access()"
+      ></button>
       <div class="actions-list">
         @for (action of actions(); track action.id) {
           <div class="action-row">
@@ -119,8 +123,7 @@
           </div>
         }
       </div>
-    }
-  }
+  </gr-load-state>
 </gr-page-layout>
 
 <app-action-form

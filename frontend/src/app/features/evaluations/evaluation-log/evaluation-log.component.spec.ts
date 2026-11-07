@@ -13,7 +13,8 @@ import { EvaluationLogComponent } from './evaluation-log.component';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { Subject, of } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { UserInfoResponse, BuildItem, EvaluationResponse, EvaluationStatus } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import type { LogViewerComponent } from '@shared/log';
@@ -1030,6 +1031,66 @@ describe('EvaluationLogComponent', () => {
         '/project/proj/task/nightly',
         '/project/proj/task/nightly?eval=eval-1',
       ]);
+      fixture.destroy();
+    });
+  });
+
+  describe('load failures', () => {
+    const EVALUATION = {
+      id: 'eval-1', status: 'Failed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
+      started_at: null, finished_at: null, trigger: null,
+    };
+
+    function render(service: Record<string, unknown>) {
+      TestBed.configureTestingModule({
+        imports: [EvaluationLogComponent],
+        providers: [
+          provideRouter([]), provideHttpClient(), provideHttpClientTesting(),
+          { provide: ActivatedRoute, useValue: {
+            snapshot: { paramMap: convertToParamMap({ project: 'proj', evaluationId: 'eval-1' }), queryParamMap: convertToParamMap({}), fragment: null },
+          } },
+          { provide: EvaluationsService, useValue: {
+            getEvaluation: () => of(EVALUATION),
+            getBuilds: () => of({ builds: [], total: 0, active_count: 0 }),
+            getEvaluationMessages: () => of([]),
+            ...service,
+          } },
+        ],
+      });
+      const fixture = TestBed.createComponent(EvaluationLogComponent);
+      fixture.detectChanges();
+      return { fixture, root: fixture.nativeElement as HTMLElement };
+    }
+
+    it('says a server error is a failed load, not a deleted evaluation, and loads again on Try Again', () => {
+      const getEvaluation = vi.fn()
+        .mockReturnValueOnce(throwError(() => new ApiError('database is down', 500)))
+        .mockReturnValue(of(EVALUATION));
+      const { fixture, root } = render({ getEvaluation });
+      expect(root.textContent).toContain('Failed to load evaluation');
+      expect(root.textContent).toContain('database is down');
+      expect(root.textContent).not.toContain('Evaluation not found');
+
+      root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+      fixture.detectChanges();
+      expect(getEvaluation).toHaveBeenCalledTimes(2);
+      expect(fixture.componentInstance.evaluation()?.id).toBe('eval-1');
+      fixture.destroy();
+    });
+
+    it('keeps the not-found wording for a 404', () => {
+      const { fixture, root } = render({ getEvaluation: () => throwError(() => new ApiError('Evaluation not found', 404)) });
+      expect(root.textContent).toContain('Evaluation not found');
+      expect(root.textContent).not.toContain('Failed to load evaluation');
+      fixture.destroy();
+    });
+
+    it('shows a failed message load instead of "No messages"', () => {
+      const { fixture, root } = render({ getEvaluationMessages: () => throwError(() => new ApiError('messages unavailable', 500)) });
+      fixture.componentInstance.selectEvaluationSection();
+      fixture.detectChanges();
+      expect(root.textContent).toContain('Failed to load evaluation messages');
+      expect(root.textContent).not.toContain('No messages');
       fixture.destroy();
     });
   });

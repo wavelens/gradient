@@ -6,15 +6,13 @@
 
 <gr-toast />
 
-@if (loading()) {
+@if (loading() || !evaluation()) {
   <div class="full-loading">
-    <gr-loading-spinner message="Loading evaluation..." />
-  </div>
-} @else if (!evaluation()) {
-  <div class="error-state">
-    <gr-empty-state icon="search_off" title="Evaluation not found" message="The evaluation was deleted or never existed.">
-      <button slot="action" grButton label="Back to Project" icon="arrow_back" [routerLink]="['/project', projectName]"></button>
-    </gr-empty-state>
+    <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading evaluation..."
+                   errorTitle="Failed to load evaluation" emptyIcon="search_off" emptyTitle="Evaluation not found"
+                   emptyMessage="The evaluation was deleted or never existed." (retry)="loadEvaluation()">
+      <button slot="empty-action" grButton label="Back to Project" icon="arrow_back" [routerLink]="['/project', projectName]"></button>
+    </gr-load-state>
   </div>
 } @else if (evaluation(); as ev) {
   <div class="log-page">
@@ -200,9 +198,9 @@
         @if (selectedSection() === 'messages') {
           <div class="messages-panel">
             <div class="messages-panel-header">Evaluation Messages</div>
-            @if (messages().length === 0) {
-              <div class="no-messages">No messages</div>
-            } @else {
+            <gr-load-state [loading]="messagesLoading()" [error]="messagesError()" [empty]="messages().length === 0" flat
+                           errorTitle="Failed to load evaluation messages" (retry)="loadMessages()">
+              <div slot="empty" class="no-messages">No messages</div>
               <div class="messages-list">
                 @for (msg of messages(); track msg.id) {
                   <div class="message-item message-item--{{ msg.level.toLowerCase() }}">
@@ -216,7 +214,7 @@
                   </div>
                 }
               </div>
-            }
+            </gr-load-state>
           </div>
         } @else if (!selectedBuildId()) {
           @if (ev.status === 'Fetching') {

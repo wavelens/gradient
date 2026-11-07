@@ -21,9 +21,17 @@
     <gr-message-banner type="error">{{ message }}</gr-message-banner>
   }
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading workers..." />
-  } @else if (shownWorkers().length > 0) {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="shownWorkers().length === 0"
+    loadingMessage="Loading workers..."
+    errorTitle="Failed to load workers"
+    emptyIcon="construction"
+    emptyTitle="No online workers"
+    emptyMessage="A team worker builds for every project that grants the team's workers."
+    (retry)="load()"
+  >
     <gr-row-list>
       @for (worker of shownWorkers(); track worker.worker_id) {
         <gr-row [icon]="worker.gradient_ci ? 'cloud' : 'construction'">
@@ -67,10 +75,7 @@
         </gr-row>
       }
     </gr-row-list>
-  } @else {
-    <gr-empty-state icon="construction" title="No online workers"
-      message="A team worker builds for every project that grants the team's workers." />
-  }
+  </gr-load-state>
 </gr-settings-section>
 
 <gr-dialog header="Register Worker" [(visible)]="showRegister" width="480px">

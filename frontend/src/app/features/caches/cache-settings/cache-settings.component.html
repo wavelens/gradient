@@ -4,9 +4,9 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-@if (loading()) {
-  <gr-loading-spinner message="Loading cache settings..." />
-} @else if (cache(); as c) {
+<gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!cache()" loadingMessage="Loading cache settings..."
+               errorTitle="Failed to load cache settings" (retry)="loadCache()">
+@if (cache(); as c) {
   <gr-page-layout
     [breadcrumb]="breadcrumb()"
     title="Cache Settings"
@@ -193,6 +193,7 @@
     }
   </gr-page-layout>
 }
+</gr-load-state>
 
 <gr-dialog header="Delete Cache" [(visible)]="showDeleteDialog" width="400px">
   <p>Are you sure you want to delete <strong>{{ cache()?.display_name }}</strong>? This action cannot be undone.</p>

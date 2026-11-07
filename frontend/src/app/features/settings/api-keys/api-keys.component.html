@@ -6,14 +6,18 @@
 
 <gr-page-layout [breadcrumb]="[{ label: 'Settings', link: ['/settings', 'profile'] }, { label: 'API Keys' }]" title="API Keys" subtitle="Manage API keys for programmatic access">
   <button slot="actions" grButton label="New API Key" icon="add" (click)="openCreateDialog()"></button>
-  @if (loading()) {
-    <gr-loading-spinner message="Loading API keys..." />
-  } @else {
-    @if (keys().length === 0) {
-      <gr-empty-state icon="key" title="No API keys" message="Create an API key to access Gradient programmatically.">
-        <button slot="action" grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
-      </gr-empty-state>
-    } @else {
+  <gr-load-state
+    [loading]="loading()"
+    [error]="loadError()"
+    [empty]="keys().length === 0"
+    loadingMessage="Loading API keys..."
+    errorTitle="Failed to load API keys"
+    emptyIcon="key"
+    emptyTitle="No API keys"
+    emptyMessage="Create an API key to access Gradient programmatically."
+    (retry)="loadKeys()"
+  >
+    <button slot="empty-action" grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
       <gr-row-list>
         @for (key of keys(); track key.id) {
           <gr-row icon="key" [muted]="!!key.revoked_at">
@@ -71,8 +75,7 @@
           </gr-row>
         }
       </gr-row-list>
-    }
-  }
+  </gr-load-state>
 </gr-page-layout>
 
 <!-- Create / Edit Dialog -->

@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
-import { CardGridComponent, LoadingSpinnerComponent, StatCardComponent } from '@gradient/ui/ui';
+import { CardGridComponent, LoadStateComponent, StatCardComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { clockTime } from '@shared/text';
@@ -18,11 +18,10 @@ import { MetricPoint } from '@core/models';
 @Component({
   selector: 'app-board-overview',
   standalone: true,
-  imports: [CommonModule, CardGridComponent, StatCardComponent, MetricChartComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, CardGridComponent, StatCardComponent, MetricChartComponent, LoadStateComponent],
   template: `
-    @if (first.loading()) {
-      <gr-loading-spinner message="Loading overview..." />
-    } @else {
+    <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
+                   loadingMessage="Loading overview..." errorTitle="Failed to load overview" (retry)="retry()">
       <gr-card-grid class="kpis" min="180px">
         <gr-stat-card compact label="Connected workers" [value]="workers()" />
         <gr-stat-card compact label="Jobs pending" [value]="pending()" />
@@ -38,7 +37,7 @@ import { MetricPoint } from '@core/models';
         [categories]="categories()"
         [colors]="['#28a745']"
       ></gr-metric-chart>
-    }
+    </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './overview.component.scss',
@@ -57,15 +56,7 @@ export class BoardOverviewComponent implements OnInit, OnDestroy {
   categories = signal<string[]>([]);
 
   ngOnInit(): void {
-    this.board.getWorkers().pipe(this.first.track()).subscribe((w) => this.workers.set(w.length));
-    this.board
-      .getAssignedJobs()
-      .pipe(this.first.track())
-      .subscribe((r) => this.assignedCount.set(r.jobs.length + r.other_running));
-    this.board
-      .query('builds.completed', 'hour')
-      .pipe(this.first.track())
-      .subscribe((points) => this.applyCompleted(points));
+    this.load();
     this.sub = this.live.connect().subscribe({
       next: (ev) => {
         if (ev.event === 'worker.queue_depth') {
@@ -78,6 +69,23 @@ export class BoardOverviewComponent implements OnInit, OnDestroy {
       },
       error: () => {},
     });
+  }
+
+  retry(): void {
+    this.first.restart();
+    this.load();
+  }
+
+  private load(): void {
+    this.board.getWorkers().pipe(this.first.track()).subscribe((w) => this.workers.set(w.length));
+    this.board
+      .getAssignedJobs()
+      .pipe(this.first.track())
+      .subscribe((r) => this.assignedCount.set(r.jobs.length + r.other_running));
+    this.board
+      .query('builds.completed', 'hour')
+      .pipe(this.first.track())
+      .subscribe((points) => this.applyCompleted(points));
   }
 
   ngOnDestroy(): void {
