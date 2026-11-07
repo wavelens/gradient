@@ -56,6 +56,8 @@ pub struct UpstreamCacheItem {
     pub display_name: String,
     pub mode: CacheSubscriptionMode,
     pub upstream_cache_id: Option<CacheId>,
+    /// The name of the internal upstream cache (for a link to that cache). The API can return this name when the cache is public or the caller has `manageUpstreamCaches` here.
+    pub upstream_cache_name: Option<String>,
     pub url: Option<String>,
     pub public_key: Option<String>,
     pub kind: String,
@@ -64,13 +66,14 @@ pub struct UpstreamCacheItem {
     pub active: bool,
 }
 
-impl From<MCacheUpstream> for UpstreamCacheItem {
-    fn from(upstream: MCacheUpstream) -> Self {
+impl UpstreamCacheItem {
+    fn new(upstream: MCacheUpstream, upstream_cache_name: Option<String>) -> Self {
         Self {
             id: upstream.id,
             display_name: upstream.display_name,
             mode: upstream.mode,
             upstream_cache_id: upstream.upstream_cache,
+            upstream_cache_name,
             url: upstream.url,
             public_key: upstream.public_key,
             kind: format!("{:?}", upstream.kind).to_lowercase(),
@@ -166,12 +169,38 @@ async fn load_upstream(
     responses((status = OK, description = "List of upstream entries", body = Vec<UpstreamCacheItem>), WebError)
 )]
 pub async fn get_upstream_caches(
-    CacheScope { cache, db, .. }: CacheScope<Readable>,
+    CacheScope {
+        cache,
+        db,
+        user: maybe_user,
+        ..
+    }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<Vec<UpstreamCacheItem>>>> {
-    let upstream_caches = gradient_db::caches::upstream::of_cache(&db.web_db, cache.id)
-        .await?
+    let upstreams = gradient_db::caches::upstream::of_cache(&db.web_db, cache.id).await?;
+    let manages = match &maybe_user {
+        Some(user) => gradient_db::access::cache_permission_mask(&db.web_db, cache.id, user.id)
+            .await?
+            .is_some_and(|mask| {
+                crate::permissions::cache_mask_grants(
+                    mask,
+                    crate::permissions::CachePermission::ManageUpstreamCaches,
+                )
+            }),
+        None => false,
+    };
+    let internal: Vec<CacheId> = upstreams.iter().filter_map(|u| u.upstream_cache).collect();
+    let linked: std::collections::HashMap<CacheId, MCache> =
+        gradient_db::lookup::by_ids::<ECache, _>(&db.web_db, &internal).await?;
+    let upstream_caches = upstreams
         .into_iter()
-        .map(UpstreamCacheItem::from)
+        .map(|upstream| {
+            let name = upstream
+                .upstream_cache
+                .and_then(|id| linked.get(&id))
+                .filter(|target| manages || target.public)
+                .map(|target| target.name.clone());
+            UpstreamCacheItem::new(upstream, name)
+        })
         .collect();
 
     Ok(ok_json(upstream_caches))

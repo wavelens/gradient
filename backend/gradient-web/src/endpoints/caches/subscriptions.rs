@@ -12,7 +12,7 @@ use crate::endpoints::projects::workers::reauth_project_workers;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::resource::Resource;
-use crate::scope::{CacheScope, Requires, RequiresUnmanaged, can};
+use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use axum::extract::State;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
@@ -97,6 +97,83 @@ pub async fn get_cache_subscription_requests(
         .collect();
 
     Ok(ok_json(items))
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct CacheSubscriberItem {
+    pub project: String,
+    pub project_display_name: String,
+    pub mode: CacheSubscriptionMode,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct CacheSubscribersResponse {
+    pub projects: Vec<CacheSubscriberItem>,
+    pub hidden: usize,
+}
+
+#[utoipa::path(
+    get,
+    path = "/caches/{cache}/subscribers",
+    operation_id = "listCacheSubscribers",
+    tag = "caches",
+    summary = "List of subscribed projects",
+    description = "Projects that subscribe to this cache and their subscription mode. Follows the visibility of GET /caches/{cache}. The caller can view a project when the project is public, when the caller is a member, or through manageCacheSubscriptions on the cache. hidden is the number of other subscribed projects.",
+    params(CachePath),
+    responses((status = OK, description = "Subscribed projects that the caller can view. Ordered by display name.", body = CacheSubscribersResponse), WebError)
+)]
+pub async fn get_cache_subscribers(
+    CacheScope {
+        cache,
+        user: maybe_user,
+        db,
+        ..
+    }: CacheScope<Readable>,
+) -> WebResult<Json<BaseResponse<CacheSubscribersResponse>>> {
+    let subscriptions =
+        gradient_db::projects::caches::subscriptions_to(&db.web_db, cache.id).await?;
+    let project_ids: Vec<ProjectId> = subscriptions.iter().map(|s| s.project).collect();
+    let projects: HashMap<ProjectId, MProject> =
+        by_ids::<EProject, _>(&db.web_db, &project_ids).await?;
+
+    let (sees_all, member_of) = match &maybe_user {
+        Some(user) => {
+            let manages = gradient_db::access::cache_permission_mask(&db.web_db, cache.id, user.id)
+                .await?
+                .is_some_and(|mask| {
+                    crate::permissions::cache_mask_grants(
+                        mask,
+                        crate::permissions::CachePermission::ManageCacheSubscriptions,
+                    )
+                });
+            let member_of =
+                gradient_db::access::project_role_names(&db.web_db, user.id, project_ids.clone())
+                    .await?;
+            (user.superuser || manages, member_of)
+        }
+        None => (false, HashMap::new()),
+    };
+
+    let mut visible: Vec<CacheSubscriberItem> = subscriptions
+        .iter()
+        .filter_map(|s| {
+            let project = projects.get(&s.project)?;
+            (sees_all || project.public || member_of.contains_key(&project.id)).then(|| {
+                CacheSubscriberItem {
+                    project: project.name.clone(),
+                    project_display_name: project.display_name.clone(),
+                    mode: s.mode.clone(),
+                }
+            })
+        })
+        .collect();
+    visible.sort_by(|a, b| a.project_display_name.cmp(&b.project_display_name));
+    let hidden = projects.len() - visible.len();
+
+    Ok(ok_json(CacheSubscribersResponse {
+        projects: visible,
+        hidden,
+    }))
 }
 
 async fn load_request(

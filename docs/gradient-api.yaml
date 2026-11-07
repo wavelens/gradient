@@ -4328,6 +4328,39 @@ paths:
       security:
       - {}
       - bearerAuth: []
+  /api/v1/caches/{cache}/subscribers:
+    get:
+      tags:
+      - caches
+      summary: List of subscribed projects
+      description: Projects that subscribe to this cache and their subscription mode. Follows the visibility of GET /caches/{cache}. The caller can view a project when the project is public, when the caller is a member, or through manageCacheSubscriptions on the cache. hidden is the number of other subscribed projects.
+      operationId: listCacheSubscribers
+      parameters:
+      - name: cache
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Subscribed projects that the caller can view. Ordered by display name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/CacheSubscribersResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
   /api/v1/caches/{cache}/subscription-requests:
     get:
       tags:
@@ -15081,6 +15114,32 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CacheMetricPoint'
+    CacheSubscriberItem:
+      type: object
+      required:
+      - project
+      - project_display_name
+      - mode
+      properties:
+        project:
+          type: string
+        project_display_name:
+          type: string
+        mode:
+          $ref: '#/components/schemas/CacheSubscriptionMode'
+    CacheSubscribersResponse:
+      type: object
+      required:
+      - projects
+      - hidden
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/CacheSubscriberItem'
+        hidden:
+          type: integer
+          minimum: 0
     CacheSubscriptionItem:
       type: object
       required:
@@ -21464,6 +21523,11 @@ components:
           oneOf:
           - $ref: '#/components/schemas/CacheId'
           - type: 'null'
+        upstream_cache_name:
+          type:
+          - string
+          - 'null'
+          description: The name of the internal upstream cache (for a link to that cache). The API can return this name when the cache is public or the caller has `manageUpstreamCaches` here.
         url:
           type:
           - string

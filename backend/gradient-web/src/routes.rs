@@ -375,6 +375,7 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(caches::management::get_cache))
                 .routes(routes!(caches::keys::get_cache_public_key))
                 .routes(routes!(caches::upstream_caches::get_upstream_caches))
+                .routes(routes!(caches::subscriptions::get_cache_subscribers))
                 .routes(routes!(stats::get_cache_stats))
                 .routes(routes!(caches::nars::list))
                 .routes(routes!(caches::nars::stats))

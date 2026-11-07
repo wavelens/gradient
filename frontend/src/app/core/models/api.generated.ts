@@ -418,6 +418,17 @@ export interface CacheStatsResponse {
   weeks: CacheMetricPoint[];
 }
 
+export interface CacheSubscriberItem {
+  project: string;
+  project_display_name: string;
+  mode: CacheSubscriptionMode;
+}
+
+export interface CacheSubscribersResponse {
+  projects: CacheSubscriberItem[];
+  hidden: number;
+}
+
 export interface CacheSubscriptionItem {
   id: CacheId;
   name: string;
@@ -2655,6 +2666,7 @@ export interface UpstreamCacheItem {
   display_name: string;
   mode: CacheSubscriptionMode;
   upstream_cache_id?: CacheId | null;
+  upstream_cache_name?: string | null;
   url?: string | null;
   public_key?: string | null;
   kind: string;
