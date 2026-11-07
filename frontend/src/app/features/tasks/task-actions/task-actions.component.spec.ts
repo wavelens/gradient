@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { TaskActionsComponent } from './task-actions.component';
 import { NotifyService } from '@core/services/notify.service';
@@ -169,7 +169,7 @@ describe('TaskActionsComponent - write failures', () => {
   const writer = { managed: false, canEdit: true, canTrigger: true };
   const refused = new ApiError('You need write access to change actions', 403);
 
-  it('reports a failed delete with the server reason and a successful one', () => {
+  it('keeps the delete dialog open with the server reason, then closes it on success', () => {
     const fixture = setup(writer);
     const service = TestBed.inject(ActionsService) as unknown as Record<string, unknown>;
     const notify = TestBed.inject(NotifyService);
@@ -179,14 +179,68 @@ describe('TaskActionsComponent - write failures', () => {
 
     service['delete'] = () => throwError(() => refused);
     component.requestDelete('a-1');
+    fixture.detectChanges();
     component.confirmDelete();
-    expect(failure).toHaveBeenCalledWith('Action deletion failed', refused);
+    fixture.detectChanges();
     expect(component.deletingId()).toBeNull();
+    expect(component.confirmDeleteId()).toBe('a-1');
+    expect(document.body.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('You need write access to change actions');
+    expect(failure).not.toHaveBeenCalled();
 
     service['delete'] = () => of({ deleted: true });
     component.requestDelete('a-1');
+    expect(component.deleteError()).toBeNull();
     component.confirmDelete();
+    expect(component.confirmDeleteId()).toBeNull();
     expect(success).toHaveBeenCalledWith('Action deleted');
+  });
+
+  it('keeps the delete dialog open on Escape and sends one request while the delete runs', () => {
+    const fixture = setup(writer);
+    const remove = vi.fn(() => NEVER);
+    (TestBed.inject(ActionsService) as unknown as Record<string, unknown>)['delete'] = remove;
+    const component = fixture.componentInstance;
+    component.requestDelete('a-1');
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    const confirm = Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete')!;
+    confirm.click();
+    fixture.detectChanges();
+    confirm.click();
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(remove).toHaveBeenCalledOnce();
+    expect(component.confirmDeleteId()).toBe('a-1');
+    expect(panel.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('sends one create when Create is clicked twice', () => {
+    const fixture = setup(writer);
+    const create = vi.fn(() => NEVER);
+    (TestBed.inject(ActionsService) as unknown as Record<string, unknown>)['create'] = create;
+    fixture.componentInstance.startCreate();
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    const submit = Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.includes('Create'))!;
+    submit.click();
+    fixture.detectChanges();
+    submit.click();
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the token on screen until the user confirms the copy', () => {
+    const fixture = setup(writer);
+    const component = fixture.componentInstance;
+    component.revealedToken.set('gat_secret');
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(component.revealedToken()).toBe('gat_secret');
+    expect(panel.querySelector('.gr-dialog__close')).toBeNull();
+    Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.includes("I've copied it"))!.click();
+    expect(component.revealedToken()).toBeNull();
   });
 
   it('reports a failed test with the server reason', () => {

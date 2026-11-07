@@ -111,6 +111,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   starred = signal(false);
   abortTarget = signal<string | null>(null);
   aborting = signal(false);
+  abortError = signal<string | null>(null);
   tick = signal(Date.now());
 
   projectName = '';
@@ -404,8 +405,12 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   };
 
   requestAbort(event: MouseEvent, id: string): void {
-    if (event.ctrlKey || event.metaKey) this.abort(id);
-    else this.abortTarget.set(id);
+    if (event.ctrlKey || event.metaKey) {
+      this.abort(id);
+      return;
+    }
+    this.abortError.set(null);
+    this.abortTarget.set(id);
   }
 
   confirmAbort(): void {
@@ -416,6 +421,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private abort(id: string): void {
     if (this.aborting()) return;
     this.aborting.set(true);
+    this.abortError.set(null);
     this.tasksService.abortEvaluation(this.projectName, this.taskName, id).subscribe({
       next: () => {
         this.aborting.set(false);
@@ -425,8 +431,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       },
       error: (error: unknown) => {
         this.aborting.set(false);
-        this.abortTarget.set(null);
-        this.notify.failure('Failed to abort evaluation', error);
+        if (this.abortTarget() === id) this.abortError.set(apiErrorMessage(error, 'Failed to abort the evaluation.'));
+        else this.notify.failure('Failed to abort evaluation', error);
       },
     });
   }

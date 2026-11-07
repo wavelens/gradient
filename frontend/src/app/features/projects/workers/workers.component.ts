@@ -8,7 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Observable, map } from 'rxjs';
+import { Observable, finalize, map, tap } from 'rxjs';
 import { ConfigService } from '@core/services/config.service';
 import { WorkersService } from '@core/services/workers.service';
 import { inBackground } from '@core/interceptors/request-context';
@@ -137,6 +137,7 @@ export class WorkersComponent implements OnInit {
   renamingWorker = signal<ProjectWorkerEntry | null>(null);
   errorMessage = signal<string | null>(null);
   renameError = signal<string | null>(null);
+  toggleError = signal<string | null>(null);
   hasNoCacheSubscribed = signal(false);
 
   projectName = '';
@@ -185,6 +186,7 @@ export class WorkersComponent implements OnInit {
   }
   showGradientCiConnect = signal(false);
   showGradientCiDisconnect = signal(false);
+  disconnectError = signal<string | null>(null);
 
   statusOf = (workerId: string): Observable<WorkerConnection | undefined> =>
     this.workersService
@@ -259,7 +261,7 @@ export class WorkersComponent implements OnInit {
   }
 
   registerWorker(): void {
-    if (!this.newWorkerId.trim() || !this.newWorkerName.trim()) return;
+    if (this.registering() || !this.newWorkerId.trim() || !this.newWorkerName.trim()) return;
     this.registering.set(true);
     this.errorMessage.set(null);
     const url = this.newWorkerUrl.trim() || undefined;
@@ -286,48 +288,57 @@ export class WorkersComponent implements OnInit {
   }
 
   deleteWorker(worker: ProjectWorkerEntry): void {
-    this.deletingId.set(worker.worker_id);
-    this.workersService.deleteWorker(this.projectName, worker.worker_id).subscribe({
-      next: () => {
-        this.deletingId.set(null);
-        this.notify.success('Worker deleted');
-        this.loadWorkers();
-      },
-      error: (error: unknown) => {
-        this.notify.failure('Worker delete failed', error);
-        this.deletingId.set(null);
-      },
+    this.removeWorker(worker).subscribe({
+      error: (error: unknown) => this.notify.failure('Worker delete failed', error),
     });
   }
 
+  private removeWorker(worker: ProjectWorkerEntry): Observable<unknown> {
+    this.deletingId.set(worker.worker_id);
+    return this.workersService.deleteWorker(this.projectName, worker.worker_id).pipe(
+      tap(() => {
+        this.notify.success('Worker deleted');
+        this.loadWorkers();
+      }),
+      finalize(() => this.deletingId.set(null)),
+    );
+  }
+
   requestToggleWorker(worker: ProjectWorkerEntry): void {
-    this.pendingToggleWorker.set(worker);
     if (worker.live && worker.active) {
-      // Worker is connected and being deactivated - warn user
+      this.pendingToggleWorker.set(worker);
+      this.toggleError.set(null);
       this.showToggleWarningDialog.set(true);
-    } else {
-      this.confirmToggleWorker();
+      return;
     }
+    this.setActive(worker).subscribe({
+      error: (error: unknown) =>
+        this.notify.failure(worker.active ? 'Worker deactivation failed' : 'Worker activation failed', error),
+    });
   }
 
   confirmToggleWorker(): void {
     const worker = this.pendingToggleWorker();
-    if (!worker) return;
-    this.showToggleWarningDialog.set(false);
-    this.togglingId.set(worker.worker_id);
-    this.workersService.setWorkerActive(this.projectName, worker.worker_id, !worker.active).subscribe({
+    if (!worker || this.togglingId() !== null) return;
+    this.toggleError.set(null);
+    this.setActive(worker).subscribe({
       next: () => {
-        this.togglingId.set(null);
+        this.showToggleWarningDialog.set(false);
         this.pendingToggleWorker.set(null);
+      },
+      error: (error: unknown) => this.toggleError.set(apiErrorMessage(error, 'Worker deactivation failed.')),
+    });
+  }
+
+  private setActive(worker: ProjectWorkerEntry): Observable<unknown> {
+    this.togglingId.set(worker.worker_id);
+    return this.workersService.setWorkerActive(this.projectName, worker.worker_id, !worker.active).pipe(
+      tap(() => {
         this.notify.success(worker.active ? 'Worker deactivated' : 'Worker activated');
         this.loadWorkers();
-      },
-      error: (error: unknown) => {
-        this.notify.failure(worker.active ? 'Worker deactivation failed' : 'Worker activation failed', error);
-        this.togglingId.set(null);
-        this.pendingToggleWorker.set(null);
-      },
-    });
+      }),
+      finalize(() => this.togglingId.set(null)),
+    );
   }
 
   cancelToggleWorker(): void {
@@ -345,7 +356,7 @@ export class WorkersComponent implements OnInit {
 
   confirmRename(): void {
     const worker = this.renamingWorker();
-    if (!worker || !this.newName.trim()) return;
+    if (!worker || this.renaming() || !this.newName.trim()) return;
     this.renaming.set(true);
     this.renameError.set(null);
     const body: PatchWorkerRequest = changedCapabilities(worker, this.editAllowed);
@@ -408,9 +419,17 @@ export class WorkersComponent implements OnInit {
     }
   }
 
+  openGradientCiDisconnect(): void {
+    this.disconnectError.set(null);
+    this.showGradientCiDisconnect.set(true);
+  }
+
   disconnectGradientCi(worker: ProjectWorkerEntry): void {
-    this.showGradientCiDisconnect.set(false);
-    this.deleteWorker(worker);
+    this.disconnectError.set(null);
+    this.removeWorker(worker).subscribe({
+      next: () => this.showGradientCiDisconnect.set(false),
+      error: (error: unknown) => this.disconnectError.set(apiErrorMessage(error, 'Worker delete failed.')),
+    });
   }
 
   closeTokenDialog(): void {

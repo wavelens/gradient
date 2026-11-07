@@ -8,6 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { Observable, finalize, tap } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -91,6 +92,7 @@ export class ProjectSettingsComponent implements OnInit {
   showDeleteDialog = signal(false);
   deleteError = signal<string | null>(null);
   showRegenerateKeyDialog = signal(false);
+  regenerateError = signal<string | null>(null);
   saveError = signal<string | null>(null);
   saveSuccess = signal(false);
 
@@ -205,23 +207,33 @@ export class ProjectSettingsComponent implements OnInit {
     });
   }
 
+  openRegenerateKeyDialog(): void {
+    this.regenerateError.set(null);
+    this.showRegenerateKeyDialog.set(true);
+  }
+
   confirmRegenerateSSHKey(): void {
-    this.showRegenerateKeyDialog.set(false);
-    this.generateSSHKey();
+    this.regenerateError.set(null);
+    this.requestSSHKey().subscribe({
+      next: () => this.showRegenerateKeyDialog.set(false),
+      error: (error: unknown) => this.regenerateError.set(apiErrorMessage(error, 'SSH key generation failed.')),
+    });
   }
 
   generateSSHKey(): void {
-    this.generatingSSH.set(true);
-    this.projectsService.generateSSHKey(this.projectName).subscribe({
-      next: (key) => {
-        this.sshKey.set(key);
-        this.generatingSSH.set(false);
-        this.notify.success('SSH key generated');
-      },
-      error: (error: unknown) => {
-        this.notify.failure('SSH key generation failed', error);
-        this.generatingSSH.set(false);
-      },
+    this.requestSSHKey().subscribe({
+      error: (error: unknown) => this.notify.failure('SSH key generation failed', error),
     });
+  }
+
+  private requestSSHKey(): Observable<string> {
+    this.generatingSSH.set(true);
+    return this.projectsService.generateSSHKey(this.projectName).pipe(
+      tap((key) => {
+        this.sshKey.set(key);
+        this.notify.success('SSH key generated');
+      }),
+      finalize(() => this.generatingSSH.set(false)),
+    );
   }
 }

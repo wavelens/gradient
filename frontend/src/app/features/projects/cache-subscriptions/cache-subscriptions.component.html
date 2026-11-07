@@ -93,6 +93,7 @@
   header="Subscribe to Cache"
   [(visible)]="showSubscribeDialog"
   [error]="errorMessage()"
+  [busy]="subscribing()"
   width="440px"
 >
   <gr-form-field label="Cache Name" for="cache-name" hint="The name of the binary cache you own.">

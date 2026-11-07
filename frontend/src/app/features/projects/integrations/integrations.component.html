@@ -162,6 +162,7 @@
   header="New Integration"
   [(visible)]="showCreateDialog"
   [error]="errorMessage()"
+  [busy]="saving()"
   width="520px"
 >
   <gr-form-field
@@ -239,6 +240,7 @@
   header="Edit Integration"
   [(visible)]="showEditDialog"
   [error]="errorMessage()"
+  [busy]="saving()"
   width="520px"
 >
   @if (editingIntegration(); as target) {

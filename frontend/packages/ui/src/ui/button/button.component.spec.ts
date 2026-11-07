@@ -21,6 +21,7 @@ import { ButtonComponent, ButtonSeverity } from './button.component';
       [loading]="loading()"
       [disabled]="disabled()"
       [size]="size()"
+      (click)="clicks = clicks + 1"
     >{{ projected() }}</button>
   `,
 })
@@ -33,6 +34,7 @@ class HostComponent {
   disabled = signal(false);
   size = signal<'small' | 'normal'>('normal');
   projected = signal('');
+  clicks = 0;
 }
 
 function render() {
@@ -93,6 +95,21 @@ describe('ButtonComponent', () => {
     expect(btn().querySelector('.gr-button__spinner')).toBeTruthy();
     expect(btn().querySelector('.gr-button__icon')).toBeNull();
     expect(btn().getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('ignores a second click while its request is still running', () => {
+    const { fixture, btn } = render();
+    btn().click();
+    fixture.componentInstance.loading.set(true);
+    fixture.detectChanges();
+    btn().click();
+    btn().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    btn().click();
+    expect(fixture.componentInstance.clicks).toBe(1);
+    fixture.componentInstance.loading.set(false);
+    fixture.detectChanges();
+    btn().click();
+    expect(fixture.componentInstance.clicks).toBe(2);
   });
 
   it('marks itself icon-only when there is an icon but no label', () => {

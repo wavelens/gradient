@@ -72,7 +72,7 @@
   }
 </gr-page-layout>
 
-<gr-dialog header="Delete Team" [(visible)]="showDelete" width="400px" [error]="deleteError()">
+<gr-dialog header="Delete Team" [(visible)]="showDelete" width="400px" [error]="deleteError()" [busy]="deleting()">
   <p>Are you sure you want to delete <strong>{{ team()?.display_name }}</strong>? This action cannot be undone.</p>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showDelete.set(false)" [disabled]="deleting()"></button>

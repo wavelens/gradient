@@ -122,6 +122,7 @@ export class TeamSettingsComponent implements OnInit {
     this.saved.set(false);
     this.teams.update(this.teamName, patch).subscribe({
       next: () => {
+        this.team.set({ ...team, ...this.form });
         this.saving.set(false);
         this.saved.set(true);
         this.load();

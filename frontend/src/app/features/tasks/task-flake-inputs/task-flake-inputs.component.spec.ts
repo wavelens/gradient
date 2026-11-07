@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { TaskFlakeInputsComponent } from './task-flake-inputs.component';
 import { NotifyService } from '@core/services/notify.service';
@@ -208,6 +208,20 @@ describe('TaskFlakeInputsComponent - write failures', () => {
     (TestBed.inject(FlakeInputOverridesService) as unknown as Record<string, unknown>)['delete'] = () => of({ deleted: true });
     fixture.componentInstance.deleteOverride('o1');
     expect(success).toHaveBeenCalledWith('Deleted the override for the flake input');
+  });
+
+  it('keeps the edit dialog open on Escape while the save runs', () => {
+    const fixture = setup(writer, [override], { update: () => NEVER });
+    const component = fixture.componentInstance;
+    component.startEdit(override);
+    fixture.detectChanges();
+    component.saveEdit();
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(component.showEditDialog()).toBe(true);
+    expect(panel.getAttribute('aria-busy')).toBe('true');
   });
 
   it('shows a rejected edit inside the open dialog instead of raw transport text', () => {

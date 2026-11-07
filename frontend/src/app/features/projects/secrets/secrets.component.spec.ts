@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { SecretsComponent } from './secrets.component';
 import { ProjectSecretsService } from '@core/services/project-secrets.service';
@@ -161,6 +161,25 @@ describe('SecretsComponent', () => {
     buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.click();
     await settled(fixture);
     expect(document.body.querySelector('.gr-dialog gr-message-banner')).toBeNull();
+  });
+
+  it('keeps the delete dialog open and sends one request while the delete runs', async () => {
+    const { fixture, service } = setup();
+    const pending = new Subject<undefined>();
+    service.remove.mockReturnValue(pending);
+    await settled(fixture);
+    buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.click();
+    await settled(fixture);
+    const dialog = document.body.querySelector('.gr-dialog')!;
+    buttonIn(dialog, 'Delete')!.click();
+    await settled(fixture);
+    buttonIn(dialog, 'Delete')!.click();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    await settled(fixture);
+    expect(service.remove).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance.deleteName()).toBe('wandb-token');
+    expect(buttonIn(dialog, 'Cancel')!.disabled).toBe(true);
   });
 
   it('keeps a failed save inside the Set secret dialog', async () => {

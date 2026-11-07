@@ -7,7 +7,7 @@
 import { ApplicationRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { WebhooksComponent } from './webhooks.component';
 import { WebhooksService } from '@core/services/webhooks.service';
@@ -156,6 +156,70 @@ describe('WebhooksComponent', () => {
     expect(component.confirmDeleteId()).toBeNull();
     expect(component.deleteError()).toBeNull();
     expect(notify.success).toHaveBeenCalledWith('Webhook deleted');
+  });
+
+  it('keeps the delete dialog open and sends one DELETE while the request runs', () => {
+    const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
+    const pending = new Subject<{ deleted: boolean }>();
+    service.delete.mockReturnValue(pending);
+    component.startDelete(hook);
+    fixture.detectChanges();
+    const deleteButton = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.gr-dialog__footer button')).find((b) => b.querySelector('.gr-button__label')?.textContent === 'Delete')!;
+
+    deleteButton().click();
+    fixture.detectChanges();
+    deleteButton().click();
+    document.querySelector('.gr-dialog')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    document.querySelector<HTMLElement>('.gr-dialog-backdrop')!.click();
+    fixture.detectChanges();
+
+    expect(service.delete).toHaveBeenCalledTimes(1);
+    expect(component.confirmDeleteId()).toBe('w1');
+    expect(document.querySelector('.gr-dialog')?.getAttribute('aria-busy')).toBe('true');
+
+    pending.next({ deleted: true });
+    pending.complete();
+    expect(component.confirmDeleteId()).toBeNull();
+  });
+
+  it('keeps the webhook form open while saving', () => {
+    const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
+    service.create.mockReturnValue(new Subject<{ webhook: WebhookResponse; secret: string }>());
+    component.startCreate();
+    component.save();
+    fixture.detectChanges();
+    document.querySelector('.gr-dialog')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(component.formOpen()).toBe(true);
+    expect(document.querySelector('.gr-dialog')?.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('closes the one-time secret only through its acknowledge button', () => {
+    const { fixture, component } = setup({ webhookScope: 'project' }, { project: 'p' });
+    component.rotate(hook);
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog__close')).toBeNull();
+    document.querySelector('.gr-dialog')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    document.querySelector<HTMLElement>('.gr-dialog-backdrop')!.click();
+    fixture.detectChanges();
+    expect(component.revealedSecret()).toBe('whs_new');
+
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.gr-dialog__footer button')).find((b) => b.querySelector('.gr-button__label')?.textContent === "I've copied it")!.click();
+    expect(component.revealedSecret()).toBeNull();
+  });
+
+  it.each([
+    { action: 'toggle', label: 'Disable', method: 'update' as const },
+    { action: 'rotate', label: 'Rotate secret', method: 'rotateSecret' as const },
+    { action: 'test', label: 'Test', method: 'test' as const },
+  ])('sends one $action request for two clicks on the row button', ({ label, method }) => {
+    const { fixture, service, root } = setup({ webhookScope: 'project' }, { project: 'p' });
+    service[method].mockReturnValue(new Subject());
+    const button = () => Array.from(root.querySelectorAll<HTMLButtonElement>('.webhook-actions button')).find((b) => b.querySelector('.gr-button__label')?.textContent === label)!;
+    button().click();
+    fixture.detectChanges();
+    button().click();
+    expect(service[method]).toHaveBeenCalledTimes(1);
   });
 
   it('explains a refused list instead of offering to create webhooks', () => {

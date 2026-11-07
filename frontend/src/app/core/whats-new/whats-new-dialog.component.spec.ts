@@ -55,6 +55,13 @@ describe('WhatsNewDialogComponent', () => {
     expect(close).toHaveBeenCalled();
   });
 
+  it('marks the notes as seen on a backdrop click, like on Escape', () => {
+    const { close, fixture } = setup();
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it('jumps to a page through its dot and back again', () => {
     const { panel, click, fixture } = setup();
     (panel().querySelectorAll<HTMLButtonElement>('.dot')[2]).click();

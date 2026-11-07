@@ -217,7 +217,7 @@
             label="Delete Task"
             icon="delete"
             severity="danger"
-            (click)="showDeleteDialog.set(true)"
+            (click)="openDeleteDialog()"
             [appManagedDisable]="access()"
         ></button>
       </gr-row>
@@ -231,6 +231,7 @@
 <gr-dialog
 header="Transfer Ownership"
 [(visible)]="showTransferDialog"
+[busy]="transferring()"
 [error]="transferError()"
 width="420px"
 (hide)="onTransferDialogHide()"
@@ -261,6 +262,8 @@ width="420px"
 <gr-dialog
 header="Delete Task"
 [(visible)]="showDeleteDialog"
+[busy]="deleting()"
+[error]="deleteError()"
 width="400px"
 >
 <p>Are you sure you want to delete <strong>{{ task()?.display_name }}</strong>? This action cannot be undone.</p>

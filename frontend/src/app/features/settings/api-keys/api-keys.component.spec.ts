@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { ApiKeysComponent } from './api-keys.component';
 import { UserService } from '@core/services/user.service';
 import { ApiError } from '@core/services/api.service';
@@ -159,6 +159,41 @@ describe('ApiKeysComponent - create errors', () => {
     expect(component.showDialog()).toBe(true);
     expect(document.querySelector('.gr-dialog')?.textContent).toContain(reason);
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain(reason);
+  });
+});
+
+describe('ApiKeysComponent - dialogs', () => {
+  it('keeps the create dialog open and sends one request while creating', () => {
+    const createApiKey = vi.fn(() => new Subject<string>());
+    const fixture = setup([], { createApiKey });
+    const component = fixture.componentInstance;
+    component.openCreateDialog();
+    component.formName = 'deploy';
+    component.formPermissions = { viewProject: true };
+    component.saveKey();
+    fixture.detectChanges();
+    buttonsByText(document.querySelector('.gr-dialog__footer')!, 'create')[0].click();
+    document.querySelector('.gr-dialog')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    document.querySelector<HTMLElement>('.gr-dialog-backdrop')!.click();
+    fixture.detectChanges();
+    expect(createApiKey).toHaveBeenCalledTimes(1);
+    expect(component.showDialog()).toBe(true);
+    expect(document.querySelector('.gr-dialog')?.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('closes the new key only through Done', () => {
+    const fixture = setup([]);
+    const component = fixture.componentInstance;
+    component.showKeyDialog.set(true);
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog__close')).toBeNull();
+    document.querySelector('.gr-dialog')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    document.querySelector<HTMLElement>('.gr-dialog-backdrop')!.click();
+    fixture.detectChanges();
+    expect(component.showKeyDialog()).toBe(true);
+
+    buttonsByText(document.querySelector('.gr-dialog__footer')!, 'done')[0].click();
+    expect(component.showKeyDialog()).toBe(false);
   });
 });
 

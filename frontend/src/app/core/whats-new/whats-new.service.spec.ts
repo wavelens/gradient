@@ -68,6 +68,13 @@ describe('WhatsNewService', () => {
     expect(put).toHaveBeenCalledWith('user/whats-new', { version: CURRENT });
   });
 
+  it('remembers the running version once, even when closed twice in a row', () => {
+    const { service, put } = setup('1.9.4');
+    service.close();
+    service.close();
+    expect(put).toHaveBeenCalledOnce();
+  });
+
   it('reports a failed attempt to remember the running version', () => {
     const failure = new ApiError('database is down', 500);
     const { service, notify } = setup('1.9.4', vi.fn(() => throwError(() => failure)));

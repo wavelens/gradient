@@ -148,7 +148,7 @@ export class ProjectListComponent implements OnInit {
   }
 
   createProject(): void {
-    if (!this.newProject.name || !this.newProject.display_name) {
+    if (this.creating() || !this.newProject.name || !this.newProject.display_name || this.names.blocksSubmit()) {
       return;
     }
 

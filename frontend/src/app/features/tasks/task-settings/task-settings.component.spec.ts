@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Observable, of, throwError } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { TaskSettingsComponent } from './task-settings.component';
 import { TasksService } from '@core/services/tasks.service';
@@ -310,13 +310,55 @@ describe('TaskSettingsComponent - write failures', () => {
     expect(success).toHaveBeenCalledWith('Task deactivated');
   });
 
-  it('reports a failed delete with the server reason', () => {
+  it('keeps the delete dialog open with the server reason when the delete is refused', () => {
     const fixture = setup(admin);
     tasks()['deleteTask'] = () => throwError(() => refused);
     const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
-    fixture.componentInstance.deleteTask();
-    expect(failure).toHaveBeenCalledWith('Failed to delete task', refused);
-    expect(fixture.componentInstance.deleting()).toBe(false);
+    const component = fixture.componentInstance;
+    component.openDeleteDialog();
+    fixture.detectChanges();
+    component.deleteTask();
+    fixture.detectChanges();
+
+    expect(component.deleting()).toBe(false);
+    expect(component.showDeleteDialog()).toBe(true);
+    expect(document.body.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('You need admin rights on this project');
+    expect(failure).not.toHaveBeenCalled();
+
+    component.showDeleteDialog.set(false);
+    component.openDeleteDialog();
+    expect(component.deleteError()).toBeNull();
+  });
+
+  it('keeps the delete dialog open on Escape and sends one request while the delete runs', () => {
+    const fixture = setup(admin);
+    const deleteTask = vi.fn(() => NEVER);
+    tasks()['deleteTask'] = deleteTask;
+    const component = fixture.componentInstance;
+    component.openDeleteDialog();
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    const confirm = Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete')!;
+    confirm.click();
+    fixture.detectChanges();
+    confirm.click();
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+
+    expect(deleteTask).toHaveBeenCalledOnce();
+    expect(component.showDeleteDialog()).toBe(true);
+    expect(panel.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('sends one update when Save Changes is clicked twice', () => {
+    const updateTask = vi.fn(() => NEVER);
+    const fixture = setup(admin, undefined, updateTask);
+    const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement;
+    save.click();
+    fixture.detectChanges();
+    save.click();
+    expect(updateTask).toHaveBeenCalledOnce();
   });
 
   it('shows a refused transfer inside the open dialog, not on the page', () => {

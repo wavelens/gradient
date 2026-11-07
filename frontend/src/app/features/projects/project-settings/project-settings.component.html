@@ -159,7 +159,7 @@
             label="Regenerate Key"
             icon="refresh"
             severity="danger"
-            (click)="showRegenerateKeyDialog.set(true)"
+            (click)="openRegenerateKeyDialog()"
             [disabled]="generatingSSH()"
             [appManagedDisable]="access()"
           ></button>
@@ -188,6 +188,8 @@
 <gr-dialog
 header="Regenerate SSH Key"
 [(visible)]="showRegenerateKeyDialog"
+[error]="regenerateError()"
+[busy]="generatingSSH()"
 width="400px"
 >
 <p>Are you sure you want to regenerate the SSH key? The existing key will stop working immediately and any repositories using it will lose access.</p>
@@ -202,6 +204,7 @@ width="400px"
 header="Delete Project"
 [(visible)]="showDeleteDialog"
 [error]="deleteError()"
+[busy]="deleting()"
 width="400px"
 >
 <p>Are you sure you want to delete <strong>{{ project()?.display_name }}</strong>? This action cannot be undone.</p>

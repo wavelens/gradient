@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { ProfileComponent } from './profile.component';
 import { UserService } from '@core/services/user.service';
@@ -114,6 +114,17 @@ describe('ProfileComponent - access gating', () => {
     const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
     expect(save).not.toBeNull();
     expect(save!.disabled).toBe(true);
+  });
+
+  it('sends one profile write for two Save Changes clicks', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    const updateUserSettings = vi.fn(() => new Subject<string>());
+    TestBed.inject(UserService).updateUserSettings = updateUserSettings;
+    const save = () => findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement;
+    save().click();
+    fixture.detectChanges();
+    save().click();
+    expect(updateUserSettings).toHaveBeenCalledTimes(1);
   });
 
   it('disables Delete Account when managed', () => {
@@ -311,6 +322,23 @@ describe('ProfileComponent - delete confirmation', () => {
     expect(component.showDeleteDialog()).toBe(true);
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('Wrong password');
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Wrong password');
+  });
+
+  it('keeps the delete dialog open while the deletion runs', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    const deleteUser = vi.fn(() => new Subject<string>());
+    TestBed.inject(UserService).deleteUser = deleteUser;
+    const component = fixture.componentInstance;
+    component.openDeleteDialog();
+    component.deletePassword = 'secret';
+    component.deleteAccount();
+    fixture.detectChanges();
+    document.querySelector('.gr-dialog')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    document.querySelector<HTMLElement>('.gr-dialog-backdrop')!.click();
+    fixture.detectChanges();
+    expect(component.showDeleteDialog()).toBe(true);
+    expect(document.querySelector('.gr-dialog')?.getAttribute('aria-busy')).toBe('true');
+    expect(deleteUser).toHaveBeenCalledTimes(1);
   });
 
   it('never offers an empty profile form to save after a failed load', () => {

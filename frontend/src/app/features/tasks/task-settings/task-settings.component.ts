@@ -87,6 +87,7 @@ export class TaskSettingsComponent implements OnInit {
 
   task = signal<TaskResponse | null>(null);
   showDeleteDialog = signal(false);
+  deleteError = signal<string | null>(null);
   showTransferDialog = signal(false);
   errorMessage = signal<string | null>(null);
   saveSuccess = signal(false);
@@ -215,6 +216,7 @@ export class TaskSettingsComponent implements OnInit {
   }
 
   saveSettings(): void {
+    if (this.saving()) return;
     this.saving.set(true);
     this.errorMessage.set(null);
     this.saveSuccess.set(false);
@@ -296,8 +298,15 @@ export class TaskSettingsComponent implements OnInit {
     });
   }
 
+  openDeleteDialog(): void {
+    this.deleteError.set(null);
+    this.showDeleteDialog.set(true);
+  }
+
   deleteTask(): void {
+    if (this.deleting()) return;
     this.deleting.set(true);
+    this.deleteError.set(null);
     this.tasksService.deleteTask(this.projectName, this.taskName).subscribe({
       next: () => {
         this.notify.success('Task deleted');
@@ -305,8 +314,7 @@ export class TaskSettingsComponent implements OnInit {
       },
       error: (error: unknown) => {
         this.deleting.set(false);
-        this.showDeleteDialog.set(false);
-        this.notify.failure('Failed to delete task', error);
+        this.deleteError.set(apiErrorMessage(error, 'Failed to delete the task.'));
       },
     });
   }

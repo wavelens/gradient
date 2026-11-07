@@ -36,6 +36,7 @@ flowchart LR
 - Keep every element readable in both themes. Never hard-code black or white in a component.
 - Keep text sizes within one step of body size: 16px for interactive text, 14px for secondary text, 12px for badges only.
 - Report the result of every write through `NotifyService` (`success`, `failure`), which shows a `gr-toast`. A failed write submitted from an open `gr-dialog` keeps the dialog open and shows the reason through its `[error]` input. Take the reason from `apiErrorMessage(error, fallback)`, never from the `message` of an arbitrary error.
+- Bind `[busy]` to `gr-dialog` while a request is active. Bind `[loading]` to the button that sent the request. The dialog can't close and a second request can't start. Set `[closable]="false"` on a dialog that can display a secret once.
 
 ## Shared UI Package
 

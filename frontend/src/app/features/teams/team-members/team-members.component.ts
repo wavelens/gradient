@@ -121,7 +121,7 @@ export class TeamMembersComponent implements OnInit {
   }
 
   addMember(): void {
-    if (!this.newMember.user) return;
+    if (!this.newMember.user || this.busy() === 'add') return;
     this.busy.set('add');
     this.addError.set(null);
     this.teams.addMember(this.teamName, this.newMember.user, this.newMember.role).subscribe({

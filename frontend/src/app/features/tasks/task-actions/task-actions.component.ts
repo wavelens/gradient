@@ -121,6 +121,7 @@ export class TaskActionsComponent implements OnInit {
 
   error = signal<string | null>(null);
   confirmDeleteId = signal<string | null>(null);
+  deleteError = signal<string | null>(null);
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
@@ -181,6 +182,7 @@ export class TaskActionsComponent implements OnInit {
   }
 
   onCreateSaved(request: CreateActionRequest | UpdateActionRequest): void {
+    if (this.saving()) return;
     this.saving.set(true);
     this.error.set(null);
     this.actionsService.create(this.projectName, this.taskName, request as CreateActionRequest).subscribe({
@@ -199,7 +201,7 @@ export class TaskActionsComponent implements OnInit {
 
   onEditSaved(request: CreateActionRequest | UpdateActionRequest): void {
     const target = this.editingAction();
-    if (!target) return;
+    if (!target || this.saving()) return;
     this.saving.set(true);
     this.error.set(null);
     this.actionsService.update(this.projectName, this.taskName, target.id, request as UpdateActionRequest).subscribe({
@@ -217,13 +219,15 @@ export class TaskActionsComponent implements OnInit {
   }
 
   requestDelete(id: string): void {
+    this.deleteError.set(null);
     this.confirmDeleteId.set(id);
   }
 
   confirmDelete(): void {
     const id = this.confirmDeleteId();
-    if (!id) return;
+    if (!id || this.deletingId()) return;
     this.deletingId.set(id);
+    this.deleteError.set(null);
     this.actionsService.delete(this.projectName, this.taskName, id).subscribe({
       next: () => {
         this.deletingId.set(null);
@@ -233,8 +237,7 @@ export class TaskActionsComponent implements OnInit {
       },
       error: (error: unknown) => {
         this.deletingId.set(null);
-        this.confirmDeleteId.set(null);
-        this.notify.failure('Action deletion failed', error);
+        this.deleteError.set(apiErrorMessage(error, 'Failed to delete the action.'));
       },
     });
   }

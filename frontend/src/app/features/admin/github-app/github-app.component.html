@@ -27,7 +27,7 @@
         type="button"
         label="Create on GitHub"
         data-testid="github-app-create-button"
-        [disabled]="loading()"
+        [loading]="loading()"
         (click)="create()"
       ></button>
     </div>

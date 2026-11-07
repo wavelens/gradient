@@ -11,7 +11,6 @@ import {
   DialogComponent,
   FormFieldComponent,
   InputDirective,
-  MessageBannerComponent,
   SelectComponent,
 } from '@gradient/ui/ui';
 import { CachesService } from '@core/services/caches.service';
@@ -24,13 +23,10 @@ const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description:
 @Component({
   selector: 'app-create-cache-dialog',
   standalone: true,
-  imports: [FormsModule, ButtonComponent, DialogComponent, FormFieldComponent, InputDirective, MessageBannerComponent, SelectComponent, NameFieldsComponent],
+  imports: [FormsModule, ButtonComponent, DialogComponent, FormFieldComponent, InputDirective, SelectComponent, NameFieldsComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    <gr-dialog [header]="header()" [(visible)]="visible" width="500px">
-      @if (error(); as message) {
-        <gr-message-banner type="error">{{ message }}</gr-message-banner>
-      }
+    <gr-dialog [header]="header()" [(visible)]="visible" width="500px" [busy]="creating()" [error]="error()">
       <app-name-fields
         noun="cache"
         [names]="names"
@@ -56,7 +52,7 @@ const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description:
           grButton
           [label]="submitLabel()"
           (click)="create()"
-          [disabled]="!cache.name || !cache.display_name || names.blocksSubmit() || creating()"
+          [disabled]="!canSubmit()"
           [loading]="creating()"
         ></button>
       </div>
@@ -91,8 +87,12 @@ export class CreateCacheDialogComponent {
     });
   }
 
+  protected canSubmit(): boolean {
+    return !!this.cache.name && !!this.cache.display_name && !this.names.blocksSubmit() && !this.creating();
+  }
+
   protected create(): void {
-    if (!this.cache.name || !this.cache.display_name || this.creating()) return;
+    if (!this.canSubmit()) return;
     this.creating.set(true);
     this.error.set(null);
     this.caches.createCache(this.cache).subscribe({

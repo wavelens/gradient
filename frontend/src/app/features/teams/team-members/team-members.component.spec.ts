@@ -8,7 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { TeamMembersComponent } from './team-members.component';
 import { TeamsService } from '@core/services/teams.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -115,6 +115,25 @@ describe('TeamMembersComponent', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('User not found');
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('User not found');
+  });
+
+  it('keeps the add dialog open and sends one request while the addition runs', () => {
+    const { fixture, addMember } = setup();
+    addMember.mockReturnValue(new Subject());
+    const component = fixture.componentInstance;
+    component.openAdd();
+    fixture.detectChanges();
+    component.newMember = { user: 'carol', role: 'member' };
+    component.addMember();
+    fixture.detectChanges();
+    component.addMember();
+    const dialog = document.querySelector('.gr-dialog')!;
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(addMember).toHaveBeenCalledTimes(1);
+    expect(component.showAdd()).toBe(true);
+    expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 
   it('reports why the last admin cannot be removed', () => {

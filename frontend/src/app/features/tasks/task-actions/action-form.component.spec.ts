@@ -113,6 +113,38 @@ describe('ActionFormComponent', () => {
     expect(emitted.events).toEqual([]);
   });
 
+  it('starts empty on the next open after a create', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    c.name.set('Webhook');
+    c.onTypeChange('send_web_request');
+    c.url.set('https://example.com/hook');
+    fixture.componentRef.setInput('open', false);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('open', true);
+    fixture.detectChanges();
+    expect(c.name()).toBe('');
+    expect(c.url()).toBe('');
+    expect(c.type()).toBe('send_mail');
+  });
+
+  it('stays open on Escape and ignores a second submit while busy', () => {
+    const fixture = createFixture(true);
+    fixture.componentRef.setInput('busy', true);
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    const emitted: unknown[] = [];
+    c.saved.subscribe((r) => emitted.push(r));
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.includes('Create'))!.click();
+    fixture.detectChanges();
+    expect(c.visible()).toBe(true);
+    expect(panel.getAttribute('aria-busy')).toBe('true');
+    expect(emitted).toEqual([]);
+  });
+
   it('renders the submit error inside the dialog', () => {
     const fixture = createFixture(true);
     fixture.componentRef.setInput('open', true);

@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { ProjectSettingsComponent } from './project-settings.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
@@ -154,5 +154,55 @@ describe('ProjectSettingsComponent - write failures', () => {
     const dialog = document.body.querySelector('.gr-dialog')!;
     expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Project still has running evaluations');
     expect(fixture.componentInstance.showDeleteDialog()).toBe(true);
+  });
+
+  it('sends one PATCH when Save Changes is clicked twice', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const updateProject = vi.fn(() => new Subject<void>());
+    Object.assign(TestBed.inject(ProjectsService), { updateProject, setPrivate: () => of(undefined) });
+    const save = findByText(fixture.nativeElement, 'save changes')!;
+    save.click();
+    fixture.detectChanges();
+    save.click();
+    expect(updateProject).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the delete dialog open while the delete runs', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const deleteProject = vi.fn(() => new Subject<void>());
+    Object.assign(TestBed.inject(ProjectsService), { deleteProject });
+    findByText(fixture.nativeElement, 'delete project')!.click();
+    fixture.detectChanges();
+    const dialog = document.body.querySelector('.gr-dialog')!;
+    findByText(dialog as HTMLElement, 'delete')!.click();
+    fixture.detectChanges();
+    findByText(dialog as HTMLElement, 'delete')!.click();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(deleteProject).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance.showDeleteDialog()).toBe(true);
+  });
+
+  it('keeps the Regenerate SSH Key dialog open while it runs and shows a failure inside it', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const pending = new Subject<string>();
+    Object.assign(TestBed.inject(ProjectsService), { generateSSHKey: () => pending });
+    findByText(fixture.nativeElement, 'regenerate key')!.click();
+    fixture.detectChanges();
+    const dialog = document.body.querySelector('.gr-dialog')!;
+    findByText(dialog as HTMLElement, 'regenerate')!.click();
+    fixture.detectChanges();
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.showRegenerateKeyDialog()).toBe(true);
+
+    pending.error(new ApiError('No permission for this action.', 403));
+    fixture.detectChanges();
+    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('No permission for this action.');
+    expect(fixture.componentInstance.showRegenerateKeyDialog()).toBe(true);
+    expect(notify.failure).not.toHaveBeenCalled();
   });
 });

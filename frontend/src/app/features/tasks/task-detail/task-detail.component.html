@@ -270,7 +270,9 @@
   <gr-dialog
     header="Abort evaluation"
     [visible]="abortTarget() !== null"
-    (visibleChange)="!$event && !aborting() && abortTarget.set(null)"
+    (visibleChange)="!$event && abortTarget.set(null)"
+    [busy]="aborting()"
+    [error]="abortError()"
     width="400px"
   >
     <p>Do you really want to abort the eval?</p>
@@ -287,6 +289,7 @@
     [visible]="reportDialogOpen()"
     (visibleChange)="!$event && reportDialogOpen.set(false)"
     [error]="reportError()"
+    [busy]="reportBusy()"
     width="480px"
   >
     <p>
@@ -317,7 +320,7 @@
                    grTooltip="Off by default: exec jobs, their attempts, phases, outputs and pull requests. Environment variables and arguments stay out."></gr-checkbox>
     </div>
     <div grDialogFooter>
-      <button grButton label="Cancel" severity="secondary" (click)="reportDialogOpen.set(false)"></button>
+      <button grButton label="Cancel" severity="secondary" [disabled]="reportBusy()" (click)="reportDialogOpen.set(false)"></button>
       <button grButton label="Generate" icon="download" [loading]="reportBusy()"
               [disabled]="reportBusy()" (click)="generateReport()"></button>
     </div>

@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-dialog header="Connect Gradient.CI Servers" [visible]="visible()" (visibleChange)="onVisibleChange($event)" width="480px">
+<gr-dialog header="Connect Gradient.CI Servers" [visible]="visible()" (visibleChange)="onVisibleChange($event)" [busy]="submitting()" width="480px">
   <p>Create a key on servers.gradient.ci, then paste its connection token.</p>
   <button grButton label="Open servers.gradient.ci" icon="open_in_new" severity="secondary" (click)="openShop()"></button>
   <gr-form-field label="Connection token" for="gradient-ci-token">
@@ -28,7 +28,7 @@
     <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
   }
   <div grDialogFooter>
-    <button grButton label="Close" severity="secondary" (click)="close()"></button>
+    <button grButton label="Close" severity="secondary" [disabled]="submitting()" (click)="close()"></button>
     <button
       grButton
       label="Connect"

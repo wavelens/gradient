@@ -35,6 +35,7 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import type { ExecJobPullRequestView, ExecJobResponse } from '@core/models';
 import { deviceLabel, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
@@ -107,6 +108,7 @@ export class ExecJobPageComponent implements OnInit {
   pullRequests = signal<ExecJobPullRequestView[]>([]);
   abortOpen = signal(false);
   aborting = signal(false);
+  abortError = signal<string | null>(null);
   starting = signal(false);
   switchingKeep = signal(false);
   errorMessage = signal<string | null>(null);
@@ -151,7 +153,7 @@ export class ExecJobPageComponent implements OnInit {
     if (!job) return [];
     return execJobMenu(job, this.triggerAccess().canEdit, {
       terminal: { command: () => this.showView('terminal') },
-      abort: () => this.abortOpen.set(true),
+      abort: () => this.openAbort(),
     });
   });
   crumbs = computed(() =>
@@ -250,8 +252,15 @@ export class ExecJobPageComponent implements OnInit {
     this.terminal.set(terminalSocket(`/exec/${this.jobId}/${TERMINAL_PATHS[mode](this.node())}`));
   }
 
+  openAbort(): void {
+    this.abortError.set(null);
+    this.abortOpen.set(true);
+  }
+
   confirmAbort(): void {
+    if (this.aborting()) return;
     this.aborting.set(true);
+    this.abortError.set(null);
     this.execJobs.abort(this.jobId).subscribe({
       next: () => {
         this.aborting.set(false);
@@ -261,8 +270,7 @@ export class ExecJobPageComponent implements OnInit {
       },
       error: (error: unknown) => {
         this.aborting.set(false);
-        this.abortOpen.set(false);
-        this.notify.failure('Failed to abort exec job', error);
+        this.abortError.set(apiErrorMessage(error, 'Failed to abort the exec job.'));
       },
     });
   }

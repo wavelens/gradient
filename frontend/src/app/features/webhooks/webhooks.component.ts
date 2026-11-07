@@ -8,6 +8,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
+import { finalize } from 'rxjs';
 import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId } from '@core/models';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { WebhooksService } from '@core/services/webhooks.service';
@@ -66,6 +67,9 @@ export class WebhooksComponent implements OnInit {
   saving = signal(false);
   formError = signal<string | null>(null);
   deleteError = signal<string | null>(null);
+  deleting = signal(false);
+  togglingId = signal<string | null>(null);
+  rotatingId = signal<string | null>(null);
   webhooks = signal<WebhookResponse[]>([]);
 
   editing = signal<WebhookResponse | null>(null);
@@ -200,20 +204,33 @@ export class WebhooksComponent implements OnInit {
 
   toggleActive(hook: WebhookResponse): void {
     const active = !hook.active;
-    this.service.update(this.scope, hook.id, { active }).subscribe({
-      next: () => {
-        this.notify.success(active ? 'Webhook enabled' : 'Webhook disabled');
-        this.load();
-      },
-      error: (err: unknown) => this.notify.failure(active ? "Can't enable webhook" : "Can't disable webhook", err),
-    });
+    this.togglingId.set(hook.id);
+    this.service
+      .update(this.scope, hook.id, { active })
+      .pipe(finalize(() => this.togglingId.set(null)))
+      .subscribe({
+        next: () => {
+          this.notify.success(active ? 'Webhook enabled' : 'Webhook disabled');
+          this.load();
+        },
+        error: (err: unknown) => this.notify.failure(active ? "Can't enable webhook" : "Can't disable webhook", err),
+      });
   }
 
   rotate(hook: WebhookResponse): void {
-    this.service.rotateSecret(this.scope, hook.id).subscribe({
-      next: (res) => this.revealedSecret.set(res.secret),
-      error: (err: unknown) => this.notify.failure("Can't rotate webhook secret", err),
-    });
+    this.rotatingId.set(hook.id);
+    this.service
+      .rotateSecret(this.scope, hook.id)
+      .pipe(finalize(() => this.rotatingId.set(null)))
+      .subscribe({
+        next: (res) => this.revealedSecret.set(res.secret),
+        error: (err: unknown) => this.notify.failure("Can't rotate webhook secret", err),
+      });
+  }
+
+  testing(hook: WebhookResponse): boolean {
+    const result = this.testResult();
+    return result?.id === hook.id && result.delivery === null;
   }
 
   test(hook: WebhookResponse): void {
@@ -259,15 +276,20 @@ export class WebhooksComponent implements OnInit {
 
   confirmDelete(): void {
     const id = this.confirmDeleteId();
-    if (!id) return;
+    if (!id || this.deleting()) return;
+    this.deleting.set(true);
     this.deleteError.set(null);
     this.service.delete(this.scope, id).subscribe({
       next: () => {
+        this.deleting.set(false);
         this.confirmDeleteId.set(null);
         this.notify.success('Webhook deleted');
         this.load();
       },
-      error: (err: unknown) => this.deleteError.set(apiErrorMessage(err, "Can't delete webhook.")),
+      error: (err: unknown) => {
+        this.deleting.set(false);
+        this.deleteError.set(apiErrorMessage(err, "Can't delete webhook."));
+      },
     });
   }
 }

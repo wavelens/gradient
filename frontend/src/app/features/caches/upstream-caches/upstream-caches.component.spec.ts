@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Observable, of, throwError } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { UpstreamCachesComponent, probeSummary } from './upstream-caches.component';
 import { CachesService } from '@core/services/caches.service';
@@ -260,5 +260,23 @@ describe('UpstreamCachesComponent - write failures', () => {
     expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Public key is malformed');
     expect(component.showEditDialog()).toBe(true);
     expect(component.savingUpstream()).toBe(false);
+  });
+
+  it('keeps the Edit dialog open while the save runs', () => {
+    const updateUpstream = vi.fn(() => NEVER);
+    const fixture = setup(admin, [httpUpstream], updateUpstream);
+    const component = fixture.componentInstance;
+    component.openEditDialog(httpUpstream);
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog') as HTMLElement;
+    findByText(dialog, 'save')!.click();
+    fixture.detectChanges();
+    findByText(dialog, 'save')!.click();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(updateUpstream).toHaveBeenCalledTimes(1);
+    expect(component.showEditDialog()).toBe(true);
+    expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 });

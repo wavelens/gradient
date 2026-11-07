@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { CacheSubscriptionsComponent } from './cache-subscriptions.component';
@@ -180,5 +180,23 @@ describe('CacheSubscriptionsComponent - write failures', () => {
     cmp.subscribeCache();
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Cache nightly is private');
+  });
+
+  it('sends one subscribe and stays open while the request runs', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    subscribeCache.mockReturnValue(new Subject<void>());
+    await settled(fixture);
+    const cmp = fixture.componentInstance;
+    cmp.showSubscribeDialog.set(true);
+    cmp.newCacheName = 'nightly';
+    cmp.subscribeCache();
+    fixture.detectChanges();
+    cmp.subscribeCache();
+    const dialog = document.querySelector('.gr-dialog')!;
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(subscribeCache).toHaveBeenCalledTimes(1);
+    expect(cmp.showSubscribeDialog()).toBe(true);
+    expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 });

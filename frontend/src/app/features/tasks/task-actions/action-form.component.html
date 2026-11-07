@@ -10,6 +10,7 @@
   (visibleChange)="onVisibleChange($event)"
   width="560px"
   [error]="error()"
+  [busy]="busy()"
 >
   <gr-form-field label="Name" for="action-name">
     <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" />
@@ -270,7 +271,7 @@
   />
 
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="onCancel()"></button>
-    <button grButton [label]="mode() === 'create' ? 'Create' : 'Save'" icon="check" (click)="onSubmit()"></button>
+    <button grButton label="Cancel" severity="secondary" [disabled]="busy()" (click)="onCancel()"></button>
+    <button grButton [label]="mode() === 'create' ? 'Create' : 'Save'" icon="check" [loading]="busy()" (click)="onSubmit()"></button>
   </div>
 </gr-dialog>

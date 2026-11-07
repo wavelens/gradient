@@ -17,6 +17,7 @@ import { DialogComponent } from './dialog.component';
       [header]="header()"
       [closable]="closable()"
       [error]="error()"
+      [busy]="busy()"
       width="500px"
       (hide)="hidden.set(hidden() + 1)"
     >
@@ -33,6 +34,7 @@ class HostComponent {
   header = signal('Delete project');
   closable = signal(true);
   error = signal<string | null>(null);
+  busy = signal(false);
   hidden = signal(0);
   confirmDisabled = signal(false);
   clicks: string[] = [];
@@ -40,6 +42,9 @@ class HostComponent {
 
 const ctrlEnter = () =>
   panel()!.querySelector('.body')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+
+const escape = () =>
+  panel()!.querySelector('.body')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
 
 function render() {
   TestBed.configureTestingModule({ imports: [HostComponent] });
@@ -142,5 +147,59 @@ describe('DialogComponent', () => {
     fixture.componentInstance.error.set(null);
     fixture.detectChanges();
     expect(panel()!.querySelector('gr-message-banner')).toBeNull();
+  });
+
+  it('closes on a backdrop click like on Escape', () => {
+    const fixture = render();
+    fixture.componentInstance.open.set(true);
+    fixture.detectChanges();
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.open()).toBe(false);
+  });
+
+  it('stays open while busy: Escape, backdrop and the close button do nothing', () => {
+    const fixture = render();
+    fixture.componentInstance.open.set(true);
+    fixture.componentInstance.busy.set(true);
+    fixture.detectChanges();
+    escape();
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    const close = panel()!.querySelector('.gr-dialog__close') as HTMLButtonElement;
+    expect(close.disabled).toBe(true);
+    close.click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.open()).toBe(true);
+    expect(panel()!.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('does not submit twice through Ctrl+Enter while busy', () => {
+    const fixture = render();
+    fixture.componentInstance.open.set(true);
+    fixture.componentInstance.busy.set(true);
+    fixture.detectChanges();
+    ctrlEnter();
+    expect(fixture.componentInstance.clicks).toEqual([]);
+  });
+
+  it('keeps a secret that is shown once on screen until the user confirms', () => {
+    const fixture = render();
+    fixture.componentInstance.closable.set(false);
+    fixture.componentInstance.open.set(true);
+    fixture.detectChanges();
+    escape();
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.open()).toBe(true);
+  });
+
+  it('emits hide once even when closed twice in a row', () => {
+    const fixture = render();
+    fixture.componentInstance.open.set(true);
+    fixture.detectChanges();
+    escape();
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement | null)?.click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.hidden()).toBe(1);
   });
 });

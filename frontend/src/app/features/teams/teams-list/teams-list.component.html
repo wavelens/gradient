@@ -30,7 +30,7 @@
   </gr-load-state>
 </gr-page-layout>
 
-<gr-dialog header="New Team" [(visible)]="showCreate" width="420px" [error]="error()">
+<gr-dialog header="New Team" [(visible)]="showCreate" width="420px" [error]="error()" [busy]="creating()">
   <app-name-fields
     noun="team"
     [names]="names"
@@ -39,7 +39,7 @@
     (submitted)="create()"
   />
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showCreate.set(false)"></button>
+    <button grButton label="Cancel" severity="secondary" [disabled]="creating()" (click)="showCreate.set(false)"></button>
     <button grButton label="Create" [loading]="creating()" [disabled]="!canSubmit()" (click)="create()"></button>
   </div>
 </gr-dialog>

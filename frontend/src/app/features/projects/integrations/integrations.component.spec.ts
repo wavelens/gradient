@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { IntegrationsComponent } from './integrations.component';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -370,5 +370,25 @@ describe('IntegrationsComponent - write failures', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Name gitea-prod is already taken');
     expect(comp.showCreateDialog()).toBe(true);
+  });
+
+  it('keeps the New Integration dialog open and sends one create while it runs', async () => {
+    const fixture = setup(writable, []);
+    const create = vi.fn(() => new Subject<IntegrationResponse>());
+    (TestBed.inject(IntegrationsService) as unknown as { createProjectIntegration: typeof create }).createProjectIntegration = create;
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    comp.openCreateDialog();
+    comp.formData.name = 'gitea-prod';
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    (findByText(dialog as HTMLElement, 'create') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    (findByText(dialog as HTMLElement, 'create') as HTMLButtonElement).click();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(comp.showCreateDialog()).toBe(true);
+    expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 });

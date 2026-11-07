@@ -122,4 +122,22 @@ describe('CacheNarsComponent delete', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog gr-message-banner')).toBeNull();
   });
+
+  it('keeps the delete dialog open with its close button while the delete runs', () => {
+    const { fixture } = render(() => of(PAGE));
+    const service = TestBed.inject(CachesService) as unknown as { deleteCacheNar: () => unknown };
+    service.deleteCacheNar = vi.fn(() => NEVER);
+    const cmp = fixture.componentInstance;
+    cmp.askDelete(NAR);
+    fixture.detectChanges();
+    cmp.confirmDelete();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog') as HTMLElement;
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(cmp.pendingDelete()).toEqual(NAR);
+    expect(dialog.getAttribute('aria-busy')).toBe('true');
+    expect(dialog.querySelector<HTMLButtonElement>('.gr-dialog__close')?.disabled).toBe(true);
+  });
 });

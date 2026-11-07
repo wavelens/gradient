@@ -135,7 +135,7 @@ export class ProjectDetailComponent implements OnInit {
   }
 
   createTask(): void {
-    if (!this.newTask.name || !this.newTask.display_name || !this.newTask.repository || this.names.blocksSubmit()) {
+    if (this.creating() || !this.newTask.name || !this.newTask.display_name || !this.newTask.repository || this.names.blocksSubmit()) {
       return;
     }
     if (this.repositoryError || this.wildcardInvalid) return;

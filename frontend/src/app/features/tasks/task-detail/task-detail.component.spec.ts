@@ -969,14 +969,44 @@ describe('TaskDetailComponent - abort modal', () => {
     expect(component.abortTarget()).toBe('e1');
   });
 
-  it('reports a failed abort instead of swallowing it', () => {
+  it('ignores Escape and the backdrop while the abort is in flight', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+    vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(NEVER);
+    const component = fixture.componentInstance;
+    component.requestAbort(new MouseEvent('click'), 'e1');
+    fixture.detectChanges();
+    component.confirmAbort();
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(component.abortTarget()).toBe('e1');
+    expect(panel.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('keeps the dialog open with the server reason when the abort is refused', () => {
+    const { fixture, tasksService, notify } = setup({ managed: false, canEdit: true, canTrigger: true });
+    vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(throwError(() => new ApiError('Evaluation already finished', 409)));
+    const component = fixture.componentInstance;
+    component.requestAbort(new MouseEvent('click'), 'e1');
+    component.confirmAbort();
+    fixture.detectChanges();
+    expect(component.aborting()).toBe(false);
+    expect(component.abortTarget()).toBe('e1');
+    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Evaluation already finished');
+    expect(notify.failure).not.toHaveBeenCalled();
+
+    component.abortTarget.set(null);
+    component.requestAbort(new MouseEvent('click'), 'e1');
+    expect(component.abortError()).toBeNull();
+  });
+
+  it('reports a refused Ctrl-click abort as a toast, since no dialog is open', () => {
     const { fixture, tasksService, notify } = setup({ managed: false, canEdit: true, canTrigger: true });
     const error = new ApiError('Evaluation already finished', 409);
     vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(throwError(() => error));
-    const component = fixture.componentInstance;
-    component.abortTarget.set('e1');
-    component.confirmAbort();
-    expect(component.aborting()).toBe(false);
+    fixture.componentInstance.requestAbort(new MouseEvent('click', { ctrlKey: true }), 'e1');
     expect(notify.failure).toHaveBeenCalledWith('Failed to abort evaluation', error);
   });
 
@@ -1052,6 +1082,20 @@ describe('TaskDetailComponent diagnostic report', () => {
     c.setReportOption('include_identities', true);
     expect(c.reportOptions().include_identities).toBe(true);
     expect(c.reportOptions().include_packages).toBe(true);
+  });
+
+  it('keeps the dialog open on Escape while the report is generated', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { downloadReport: () => NEVER });
+    const c = fixture.componentInstance;
+    c.openReportDialog();
+    fixture.detectChanges();
+    c.generateReport();
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(c.reportDialogOpen()).toBe(true);
+    expect(panel.getAttribute('aria-busy')).toBe('true');
   });
 
   it('keeps the dialog open with the server reason when the report is refused', () => {

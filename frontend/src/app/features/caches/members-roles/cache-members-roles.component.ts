@@ -205,7 +205,7 @@ export class CacheMembersRolesComponent implements OnInit {
   }
 
   addMember(): void {
-    if (!this.newMember.user || !this.newMember.role) return;
+    if (!this.newMember.user || !this.newMember.role || this.addingMember()) return;
     this.addingMember.set(true);
     this.memberError.set(null);
     this.cachesService

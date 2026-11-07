@@ -90,7 +90,7 @@ export class TeamsListComponent implements OnInit {
   }
 
   create(): void {
-    if (!this.canSubmit()) return;
+    if (!this.canSubmit() || this.creating()) return;
     this.creating.set(true);
     this.error.set(null);
     this.teams.create(this.form.name, this.form.displayName).subscribe({

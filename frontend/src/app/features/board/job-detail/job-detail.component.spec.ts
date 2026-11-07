@@ -7,7 +7,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter, RouterLink } from '@angular/router';
 import { By } from '@angular/platform-browser';
-import { EMPTY, of, throwError } from 'rxjs';
+import { EMPTY, Subject, of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { BoardJobDetailComponent } from './job-detail.component';
 import { BoardService, AssignedJobDetail } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
@@ -492,6 +493,34 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     cmp.job.set({ ...EVAL_DETAIL, id: 'job-2', finished_at: null });
     cmp.abortJob();
     expect(aborted).toEqual(['job-1', 'job-2']);
+  });
+
+  it('keeps the abort dialog open while the abort runs and shows a refusal inside it', () => {
+    const pending = new Subject<string>();
+    TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: true }) } });
+    const fixture = setup({ abortJob: () => pending });
+    const cmp = fixture.componentInstance;
+    cmp.openAbort();
+    fixture.detectChanges();
+    const panel = () => document.querySelector('.gr-dialog') as HTMLElement | null;
+    const confirm = Array.from(panel()!.querySelectorAll('button')).find((b) => b.textContent?.includes('Abort'))!;
+    confirm.click();
+    fixture.detectChanges();
+
+    panel()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(cmp.abortOpen()).toBe(true);
+    expect(panel()!.getAttribute('aria-busy')).toBe('true');
+
+    pending.error(new ApiError('Job already finished', 409));
+    fixture.detectChanges();
+    expect(cmp.abortOpen()).toBe(true);
+    expect(panel()!.querySelector('gr-message-banner')?.textContent).toContain('Job already finished');
+
+    cmp.abortOpen.set(false);
+    cmp.openAbort();
+    expect(cmp.abortError()).toBeNull();
   });
 
   it('finds a pending exec job by its exec job id', () => {

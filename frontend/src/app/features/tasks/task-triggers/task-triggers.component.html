@@ -119,6 +119,7 @@
   header="New Trigger"
   [(visible)]="showCreateDialog"
   [error]="error()"
+  [busy]="saving()"
   width="560px"
   (hide)="cancelEdit()"
 >
@@ -134,6 +135,7 @@
   header="Edit Trigger"
   [(visible)]="showEditDialog"
   [error]="error()"
+  [busy]="saving()"
   width="560px"
   (hide)="cancelEdit()"
 >

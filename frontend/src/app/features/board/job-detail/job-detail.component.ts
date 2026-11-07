@@ -13,6 +13,7 @@ import { Observable } from 'rxjs';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { AuthService } from '@core/services/auth.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import {
   ButtonComponent,
   DialogComponent,
@@ -51,7 +52,7 @@ interface RuleRow {
       </a>
       @if (canAbort()) {
         <button grButton label="Abort" icon="close" severity="danger" size="small"
-                [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
+                [loading]="aborting()" [disabled]="aborting()" (click)="openAbort()"></button>
       }
     </div>
 
@@ -391,14 +392,12 @@ interface RuleRow {
 
     <gr-dialog
       header="Abort job"
-      [visible]="abortOpen()"
-      (visibleChange)="!$event && !aborting() && abortOpen.set(false)"
+      [(visible)]="abortOpen"
+      [busy]="aborting()"
+      [error]="abortError()"
       width="400px"
     >
       <p>Do you really want to abort the {{ abortTarget() }}?</p>
-      @if (abortError()) {
-        <p class="muted">{{ abortError() }}</p>
-      }
       <div grDialogFooter>
         <button grButton label="Cancel" severity="secondary" [disabled]="aborting()"
                 (click)="abortOpen.set(false)"></button>
@@ -557,6 +556,11 @@ export class BoardJobDetailComponent implements OnInit {
     return this.board.abortJob(j.id);
   }
 
+  openAbort(): void {
+    this.abortError.set(null);
+    this.abortOpen.set(true);
+  }
+
   abortJob(): void {
     const j = this.job();
     if (!j) return;
@@ -568,9 +572,9 @@ export class BoardJobDetailComponent implements OnInit {
         this.abortOpen.set(false);
         this.loadJob(j.id);
       },
-      error: (error: Error) => {
+      error: (error: unknown) => {
         this.aborting.set(false);
-        this.abortError.set(error?.message || 'Failed to abort the job.');
+        this.abortError.set(apiErrorMessage(error, 'Failed to abort the job.'));
       },
     });
   }

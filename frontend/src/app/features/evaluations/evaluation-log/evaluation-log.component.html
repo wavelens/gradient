@@ -307,8 +307,8 @@
 
 <gr-dialog
   header="Abort evaluation"
-  [visible]="abortConfirmOpen()"
-  (visibleChange)="!$event && !aborting() && abortConfirmOpen.set(false)"
+  [(visible)]="abortConfirmOpen"
+  [busy]="aborting()"
   [error]="abortError()"
   width="400px"
 >

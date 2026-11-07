@@ -79,6 +79,7 @@ export class ActionFormComponent implements OnChanges {
   tasks = input<TaskOption[]>([]);
   open = input<boolean>(false);
   error = input<string | null>(null);
+  busy = input(false);
 
   saved = output<CreateActionRequest | UpdateActionRequest>();
   closed = output<void>();
@@ -178,7 +179,7 @@ export class ActionFormComponent implements OnChanges {
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['open']) this.visible.set(this.open());
-    if (changes['existing'] || changes['mode']) this.resetFromInputs();
+    if ((changes['open'] && this.open()) || changes['existing'] || changes['mode']) this.resetFromInputs();
   }
 
   private resetFromInputs(): void {

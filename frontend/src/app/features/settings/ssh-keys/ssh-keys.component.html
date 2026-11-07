@@ -56,7 +56,7 @@
   </gr-load-state>
 </gr-page-layout>
 
-<gr-dialog [(visible)]="showDialog" width="520px" header="Add SSH Key" [error]="errorMessage()">
+<gr-dialog [(visible)]="showDialog" width="520px" header="Add SSH Key" [error]="errorMessage()" [busy]="saving()">
   <gr-form-field label="Name" for="ssh-key-name">
     <input grInput id="ssh-key-name" [(ngModel)]="formName" placeholder="e.g. Laptop" />
   </gr-form-field>

@@ -64,7 +64,7 @@
                   } @else {
                     <ng-container *ngTemplateOutlet="editAndToggle; context: { $implicit: w }" />
                     <button *appWritable="access()" grButton label="Disconnect" icon="link_off" severity="danger" size="small"
-                      (click)="showGradientCiDisconnect.set(true)"></button>
+                      (click)="openGradientCiDisconnect()"></button>
                   }
                 }
               }
@@ -205,6 +205,7 @@
   header="Register Worker"
   [(visible)]="showRegisterDialog"
   [error]="errorMessage()"
+  [busy]="registering()"
   width="480px"
 >
   @if (projectId()) {
@@ -271,6 +272,8 @@
 <gr-dialog
   header="Deactivate Connected Worker"
   [(visible)]="showToggleWarningDialog"
+  [error]="toggleError()"
+  [busy]="togglingId() !== null"
   width="440px"
 >
   <div class="dialog-warning">
@@ -281,8 +284,8 @@
     </p>
   </div>
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="cancelToggleWorker()"></button>
-    <button grButton label="Deactivate" icon="pause" severity="warn" (click)="confirmToggleWorker()"></button>
+    <button grButton label="Cancel" severity="secondary" (click)="cancelToggleWorker()" [disabled]="togglingId() !== null"></button>
+    <button grButton label="Deactivate" icon="pause" severity="warn" (click)="confirmToggleWorker()" [loading]="togglingId() !== null"></button>
   </div>
 </gr-dialog>
 
@@ -330,6 +333,7 @@
   header="Edit Worker"
   [(visible)]="showRenameDialog"
   [error]="renameError()"
+  [busy]="renaming()"
   width="480px"
 >
   @if (renamingWorker(); as worker) {
@@ -373,16 +377,22 @@
   (changed)="loadWorkers()"
 />
 
-<gr-dialog header="Disconnect Gradient.CI Servers" [(visible)]="showGradientCiDisconnect" width="440px">
+<gr-dialog
+  header="Disconnect Gradient.CI Servers"
+  [(visible)]="showGradientCiDisconnect"
+  [error]="disconnectError()"
+  [busy]="deletingId() !== null"
+  width="440px"
+>
   <p>Builds of this project stop running on Gradient.CI Servers.</p>
   <p class="text-secondary">
     The key stays on servers.gradient.ci until it is deleted on its
     <a [href]="gradientCiKeysUrl" target="_blank" rel="noopener">keys page</a>.
   </p>
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showGradientCiDisconnect.set(false)"></button>
+    <button grButton label="Cancel" severity="secondary" (click)="showGradientCiDisconnect.set(false)" [disabled]="deletingId() !== null"></button>
     @if (gradientCi().worker; as w) {
-      <button grButton label="Disconnect" icon="link_off" severity="danger" (click)="disconnectGradientCi(w)"></button>
+      <button grButton label="Disconnect" icon="link_off" severity="danger" (click)="disconnectGradientCi(w)" [loading]="deletingId() !== null"></button>
     }
   </div>
 </gr-dialog>

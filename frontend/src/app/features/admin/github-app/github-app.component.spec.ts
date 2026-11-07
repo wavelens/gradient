@@ -78,7 +78,19 @@ describe('GithubAppComponent', () => {
     fixture.componentInstance.create();
     fixture.detectChanges();
     expect(notify.failure).toHaveBeenCalledWith('Setup for GitHub App did not start', failure);
-    expect(fixture.nativeElement.querySelector('[data-testid="github-app-create-button"]').disabled).toBe(false);
+    expect(fixture.nativeElement.querySelector('[data-testid="github-app-create-button"]').getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('ignores a second click on Create on GitHub while the manifest request runs', () => {
+    setup({});
+    admin.requestGithubAppManifest.mockReturnValue(new Subject());
+    const fixture = TestBed.createComponent(GithubAppComponent);
+    fixture.detectChanges();
+    const button: HTMLButtonElement = fixture.nativeElement.querySelector('[data-testid="github-app-create-button"]');
+    button.click();
+    fixture.detectChanges();
+    button.click();
+    expect(admin.requestGithubAppManifest).toHaveBeenCalledTimes(1);
   });
 
   it('renders credentials when ready=1 and the API returns them', async () => {

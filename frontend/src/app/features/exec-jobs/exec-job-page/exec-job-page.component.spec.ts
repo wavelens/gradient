@@ -6,7 +6,7 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import type { ExecJobResponse, ExecJobStatus } from '@core/models';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
@@ -353,19 +353,42 @@ describe('ExecJobPageComponent', () => {
     expect(toasts()).toContainEqual(expect.objectContaining({ severity: 'success', summary: 'Exec job aborted' }));
   });
 
-  it('reports a refused abort as a toast and keeps the page banner for load errors only', () => {
+  it('keeps a refused abort inside the open dialog and the page banner for load errors only', () => {
     const { fixture, abort } = setup('running');
     abort.mockReturnValue(throwError(() => new ApiError('Exec job already finished', 409)));
-    fixture.componentInstance.abortOpen.set(true);
-    fixture.componentInstance.confirmAbort();
+    const component = fixture.componentInstance;
+    component.openAbort();
     fixture.detectChanges();
-    expect(fixture.componentInstance.aborting()).toBe(false);
-    expect(toasts()).toContainEqual(expect.objectContaining({
-      severity: 'error',
-      summary: 'Failed to abort exec job',
-      detail: 'Exec job already finished',
-    }));
-    expect(fixture.componentInstance.errorMessage()).toBeNull();
+    component.confirmAbort();
+    fixture.detectChanges();
+    expect(component.aborting()).toBe(false);
+    expect(component.abortOpen()).toBe(true);
+    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Exec job already finished');
+    expect(toasts()).toEqual([]);
+    expect(component.errorMessage()).toBeNull();
+
+    component.abortOpen.set(false);
+    component.openAbort();
+    expect(component.abortError()).toBeNull();
+  });
+
+  it('keeps the abort dialog open on Escape and backdrop while the abort runs', () => {
+    const { fixture, abort } = setup('running');
+    abort.mockReturnValue(NEVER);
+    const component = fixture.componentInstance;
+    component.openAbort();
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    const confirm = Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.includes('Abort'))!;
+    confirm.click();
+    fixture.detectChanges();
+    confirm.click();
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(abort).toHaveBeenCalledOnce();
+    expect(component.abortOpen()).toBe(true);
+    expect(panel.getAttribute('aria-busy')).toBe('true');
   });
 
   it('keeps updating after one failed poll', () => {

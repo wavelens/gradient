@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, Subject, of, throwError } from 'rxjs';
 import { ProjectDetailComponent } from './project-detail.component';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
@@ -94,5 +94,29 @@ describe('ProjectDetailComponent create task', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Repository is not reachable');
     expect(cmp.showCreateDialog()).toBe(true);
+  });
+
+  it('sends one create and stays open while the request runs', () => {
+    const { fixture } = render(true);
+    const createTask = vi.fn(() => new Subject<void>());
+    (TestBed.inject(TasksService) as unknown as { createTask: typeof createTask }).createTask = createTask;
+    const cmp = fixture.componentInstance;
+    cmp.showCreateDialog.set(true);
+    cmp.newTask = {
+      name: 'web',
+      display_name: 'Web',
+      description: '',
+      repository: 'https://github.com/acme/web',
+      wildcard: 'packages.x86_64-linux.**',
+    };
+    cmp.createTask();
+    fixture.detectChanges();
+    cmp.createTask();
+    const dialog = document.querySelector('.gr-dialog')!;
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(createTask).toHaveBeenCalledTimes(1);
+    expect(cmp.showCreateDialog()).toBe(true);
+    expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 });

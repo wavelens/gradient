@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { MembersRolesComponent } from './members-roles.component';
 import { ProjectsService } from '@core/services/projects.service';
@@ -158,6 +158,24 @@ describe('MembersRolesComponent - write failures', () => {
     const dialog = document.body.querySelector('.gr-dialog')!;
     expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('User carol does not exist');
     expect(fixture.componentInstance.showAddMemberDialog()).toBe(true);
+  });
+
+  it('sends one add and keeps the Add Member dialog open while it runs', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    addMember.mockReturnValue(new Subject<string>());
+    await settled(fixture);
+    (findByText(fixture.nativeElement, 'add member') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    fixture.componentInstance.newMember.user = 'carol';
+    fixture.componentInstance.addMember();
+    fixture.detectChanges();
+    fixture.componentInstance.addMember();
+    const dialog = document.body.querySelector('.gr-dialog')!;
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(addMember).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance.showAddMemberDialog()).toBe(true);
+    expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 });
 

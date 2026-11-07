@@ -123,6 +123,7 @@
   mode="create"
   [open]="showCreateDialog()"
   [error]="error()"
+  [busy]="saving()"
   [outboundIntegrations]="outboundIntegrations()"
   [teams]="mailTeams()"
   [tasks]="projectTasks()"
@@ -134,6 +135,7 @@
   mode="edit"
   [open]="showEditDialog()"
   [error]="error()"
+  [busy]="saving()"
   [existing]="editingAction()"
   [outboundIntegrations]="outboundIntegrations()"
   [teams]="mailTeams()"
@@ -155,19 +157,21 @@
   header="Delete Action"
   [visible]="confirmDeleteId() !== null"
   (visibleChange)="$event || cancelDelete()"
+  [busy]="deletingId() !== null"
+  [error]="deleteError()"
   width="400px"
 >
   <p>Delete this action? This cannot be undone.</p>
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="cancelDelete()"></button>
-    <button grButton label="Delete" severity="danger" (click)="confirmDelete()"></button>
+    <button grButton label="Cancel" severity="secondary" [disabled]="deletingId() !== null" (click)="cancelDelete()"></button>
+    <button grButton label="Delete" severity="danger" [loading]="deletingId() !== null" (click)="confirmDelete()"></button>
   </div>
 </gr-dialog>
 
 <gr-dialog
   header="Save this token now"
   [visible]="revealedToken() !== null"
-  (visibleChange)="$event || dismissToken()"
+  [closable]="false"
   width="520px"
 >
   <p>The action's token is shown below. It will not be displayed again - copy it now and store it somewhere safe.</p>

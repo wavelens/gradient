@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { WorkersComponent } from './workers.component';
 import { WorkersService } from '@core/services/workers.service';
@@ -512,5 +512,61 @@ describe('WorkersComponent - write failures', () => {
     cmp.openRenameDialog(workerUnmanaged);
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog gr-message-banner')).toBeNull();
+  });
+
+  it('keeps the deactivate dialog open while it runs and shows a failure inside it', async () => {
+    const live = {
+      capabilities: { network: true, secrets: true, exec: false, eval: true, build: true, federate: false },
+      architectures: [], system_features: [], max_concurrent_builds: 1, assigned_job_count: 0, draining: false,
+    } as unknown as ProjectWorkerEntry['live'];
+    const connected = { ...workerUnmanaged, live };
+    const fixture = setup({ access: writable, workers: [connected], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    const pending = new Subject<string>();
+    const workers = TestBed.inject(WorkersService) as unknown as { setWorkerActive: ReturnType<typeof vi.fn> };
+    workers.setWorkerActive.mockReturnValue(pending);
+    const cmp = fixture.componentInstance;
+
+    cmp.requestToggleWorker(connected);
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    buttonsLabelled(dialog, 'Deactivate')[0].click();
+    fixture.detectChanges();
+    buttonsLabelled(dialog, 'Deactivate')[0].click();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(workers.setWorkerActive).toHaveBeenCalledTimes(1);
+    expect(cmp.showToggleWarningDialog()).toBe(true);
+
+    pending.error(new ApiError('Worker has running jobs', 409));
+    fixture.detectChanges();
+    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Worker has running jobs');
+    expect(cmp.showToggleWarningDialog()).toBe(true);
+    expect(notify.failure).not.toHaveBeenCalled();
+  });
+
+  it('keeps the Gradient.CI disconnect dialog open while it runs and shows a failure inside it', async () => {
+    const fixture = setup({ access: writable, workers: [gciRegistration], caches });
+    await settled(fixture);
+    const pending = new Subject<string>();
+    const workers = TestBed.inject(WorkersService) as unknown as { deleteWorker: ReturnType<typeof vi.fn> };
+    workers.deleteWorker.mockReturnValue(pending);
+    const cmp = fixture.componentInstance;
+
+    buttonsLabelled(entry(fixture)!, 'Disconnect')[0].click();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    buttonsLabelled(dialog, 'Disconnect')[0].click();
+    fixture.detectChanges();
+    buttonsLabelled(dialog, 'Disconnect')[0].click();
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(workers.deleteWorker).toHaveBeenCalledTimes(1);
+    expect(cmp.showGradientCiDisconnect()).toBe(true);
+
+    pending.error(new ApiError('Worker is still building', 409));
+    fixture.detectChanges();
+    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Worker is still building');
+    expect(cmp.showGradientCiDisconnect()).toBe(true);
   });
 });

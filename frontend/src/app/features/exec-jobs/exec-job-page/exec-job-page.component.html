@@ -157,7 +157,7 @@
           }
           @if (open()) {
             <button *appWritable="triggerAccess()" grButton label="Abort" icon="close" severity="danger" size="small"
-                    [loading]="aborting()" [disabled]="aborting()" (click)="abortOpen.set(true)"></button>
+                    [loading]="aborting()" [disabled]="aborting()" (click)="openAbort()"></button>
           } @else {
             <button *appWritable="triggerAccess()" grButton label="Run again" icon="refresh" size="small"
                     [loading]="starting()" [disabled]="starting()" (click)="run()"></button>
@@ -244,8 +244,9 @@
 
 <gr-dialog
   header="Abort exec job"
-  [visible]="abortOpen()"
-  (visibleChange)="!$event && !aborting() && abortOpen.set(false)"
+  [(visible)]="abortOpen"
+  [busy]="aborting()"
+  [error]="abortError()"
   width="400px"
 >
   <p>Do you really want to abort this exec job? It does not restart.</p>

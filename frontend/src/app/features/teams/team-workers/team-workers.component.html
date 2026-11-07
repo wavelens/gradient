@@ -75,7 +75,7 @@
   </gr-load-state>
 </gr-settings-section>
 
-<gr-dialog header="Register Worker" [(visible)]="showRegister" width="480px" [error]="registerError()">
+<gr-dialog header="Register Worker" [(visible)]="showRegister" width="480px" [error]="registerError()" [busy]="busy() === 'register'">
   <gr-form-field label="Worker ID" for="team-worker-id" hint="The worker's UUID from services.gradient.worker.id.">
     <input grInput id="team-worker-id" [(ngModel)]="form.worker_id" />
   </gr-form-field>
@@ -86,7 +86,7 @@
     <input grInput id="team-worker-url" [(ngModel)]="form.url" placeholder="wss://worker.example.com/proto" />
   </gr-form-field>
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showRegister.set(false)"></button>
+    <button grButton label="Cancel" severity="secondary" [disabled]="busy() === 'register'" (click)="showRegister.set(false)"></button>
     <button grButton label="Register" [loading]="busy() === 'register'" (click)="register()"></button>
   </div>
 </gr-dialog>
@@ -103,7 +103,7 @@
   </div>
 </gr-dialog>
 
-<gr-dialog header="Edit Worker" [visible]="editing() !== null" (hide)="editing.set(null)" width="480px" [error]="editError()">
+<gr-dialog header="Edit Worker" [visible]="editing() !== null" (hide)="editing.set(null)" width="480px" [error]="editError()" [busy]="busy() === 'edit'">
   @if (editing(); as worker) {
     @if (!worker.gradient_ci) {
       <gr-form-field label="Display Name" for="team-worker-edit-name">
@@ -115,7 +115,7 @@
     </gr-form-field>
   }
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="editing.set(null)"></button>
+    <button grButton label="Cancel" severity="secondary" [disabled]="busy() === 'edit'" (click)="editing.set(null)"></button>
     <button grButton label="Save" icon="check" [loading]="busy() === 'edit'" [disabled]="!editName.trim()" (click)="saveEdit()"></button>
   </div>
 </gr-dialog>

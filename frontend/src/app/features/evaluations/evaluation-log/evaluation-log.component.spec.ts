@@ -995,6 +995,28 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.abortConfirmOpen()).toBe(false);
     });
 
+    it('keeps the confirmation open on Escape and backdrop while the abort runs', () => {
+      const { fixture, cmp } = setup();
+      fixture.detectChanges();
+      const pending = new Subject<string>();
+      vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(pending as never);
+      cmp.requestAbort(new MouseEvent('click'));
+      fixture.detectChanges();
+      const panel = () => document.querySelector('.gr-dialog') as HTMLElement;
+      Array.from(panel().querySelectorAll('button')).find((b) => b.textContent?.includes('Abort'))!.click();
+      fixture.detectChanges();
+
+      panel().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+      (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+      fixture.detectChanges();
+      expect(cmp.abortConfirmOpen()).toBe(true);
+      expect(panel().getAttribute('aria-busy')).toBe('true');
+
+      pending.error(new ApiError('Evaluation already finished', 409));
+      fixture.detectChanges();
+      expect(panel().querySelector('gr-message-banner')?.textContent).toContain('Evaluation already finished');
+    });
+
     it('keeps the confirmation open with the server reason when the abort is refused', () => {
       const { cmp } = setup();
       vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation')

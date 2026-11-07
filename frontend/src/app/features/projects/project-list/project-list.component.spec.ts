@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, Subject, of, throwError } from 'rxjs';
 import { ProjectListComponent } from './project-list.component';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -72,5 +72,37 @@ describe('ProjectListComponent', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Project name acme is taken');
     expect(cmp.showCreateDialog()).toBe(true);
+  });
+
+  it('ignores Enter while the project name is still being checked', () => {
+    const { fixture } = render(() => of(EMPTY_PAGE));
+    const createProject = vi.fn(() => of(undefined));
+    (TestBed.inject(ProjectsService) as unknown as { createProject: typeof createProject }).createProject = createProject;
+    const cmp = fixture.componentInstance;
+    cmp.openCreateDialog();
+    cmp.newProject.display_name = 'Acme';
+    cmp.newProject.name = 'acme';
+    (cmp as unknown as { names: { check(name: string): void } }).names.check('acme');
+    cmp.createProject();
+    expect(createProject).not.toHaveBeenCalled();
+  });
+
+  it('sends one create and stays open while the request runs', () => {
+    const { fixture } = render(() => of(EMPTY_PAGE));
+    const createProject = vi.fn(() => new Subject<void>());
+    (TestBed.inject(ProjectsService) as unknown as { createProject: typeof createProject }).createProject = createProject;
+    const cmp = fixture.componentInstance;
+    cmp.openCreateDialog();
+    cmp.newProject.name = 'acme';
+    cmp.newProject.display_name = 'Acme';
+    cmp.createProject();
+    fixture.detectChanges();
+    cmp.createProject();
+    const dialog = document.querySelector('.gr-dialog')!;
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(createProject).toHaveBeenCalledTimes(1);
+    expect(cmp.showCreateDialog()).toBe(true);
+    expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 });

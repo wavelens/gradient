@@ -84,6 +84,7 @@
   width="520px"
   [header]="editingKey() ? 'Edit API Key' : 'Create API Key'"
   [error]="errorMessage()"
+  [busy]="creating() || saving()"
 >
   <gr-form-field label="Name" for="key-name">
     <input
@@ -185,6 +186,7 @@
 <gr-dialog
   header="API Key Created"
   [(visible)]="showKeyDialog"
+  [closable]="false"
   width="500px"
 >
   <p>Your new API key has been created. Copy it now - it will not be shown again.</p>

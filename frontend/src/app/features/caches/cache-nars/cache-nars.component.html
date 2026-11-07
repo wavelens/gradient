@@ -139,7 +139,7 @@
   [visible]="pendingDelete() !== null"
   (visibleChange)="$event || cancelDelete()"
   width="480px"
-  [closable]="!deletingHash()"
+  [busy]="deletingHash() !== null"
   [error]="deleteError()"
 >
   @if (pendingDelete(); as row) {

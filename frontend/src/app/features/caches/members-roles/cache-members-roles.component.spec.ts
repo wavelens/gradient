@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { CacheMembersRolesComponent } from './cache-members-roles.component';
 import { CachesService } from '@core/services/caches.service';
@@ -151,6 +151,29 @@ describe('CacheMembersRolesComponent - pending invitations', () => {
     (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
     expect(notify.failure).toHaveBeenCalledWith('Failed to revoke invitation', failure);
     expect(fixture.componentInstance.memberError()).toBeNull();
+  });
+});
+
+describe('CacheMembersRolesComponent - busy dialogs', () => {
+  it('keeps Add Member open and sends one request while adding', async () => {
+    const fixture = setup(true);
+    const service = TestBed.inject(CachesService) as unknown as { addMember: () => unknown };
+    service.addMember = vi.fn(() => new Subject<string>());
+    await settled(fixture);
+    const component = fixture.componentInstance;
+    component.openAddMemberDialog();
+    component.newMember = { user: 'carol', role: 'Admin' };
+    await settled(fixture);
+    component.addMember();
+    component.addMember();
+    await settled(fixture);
+    const dialog = document.querySelector('.gr-dialog') as HTMLElement;
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    await settled(fixture);
+    expect(service.addMember).toHaveBeenCalledTimes(1);
+    expect(component.showAddMemberDialog()).toBe(true);
+    expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 });
 

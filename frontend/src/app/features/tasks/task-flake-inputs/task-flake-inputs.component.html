@@ -87,6 +87,7 @@
   header="New Override"
   [(visible)]="showCreateDialog"
   [error]="error()"
+  [busy]="saving()"
   width="520px"
   (hide)="cancelEdit()"
 >
@@ -102,6 +103,7 @@
   header="Edit Override"
   [(visible)]="showEditDialog"
   [error]="error()"
+  [busy]="saving()"
   width="520px"
   (hide)="cancelEdit()"
 >

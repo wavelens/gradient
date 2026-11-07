@@ -99,6 +99,7 @@
   header="Edit Upstream Cache"
   [(visible)]="showEditDialog"
   [error]="editError()"
+  [busy]="savingUpstream()"
   width="480px"
 >
   @if (editingUpstream(); as u) {
@@ -142,6 +143,7 @@
   header="Add Upstream Cache"
   [(visible)]="showAddDialog"
   [error]="addError()"
+  [busy]="addingUpstream()"
   width="480px"
 >
   <div class="upstream-form">

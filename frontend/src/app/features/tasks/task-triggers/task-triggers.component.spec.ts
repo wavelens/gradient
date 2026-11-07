@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { TaskTriggersComponent } from './task-triggers.component';
 import { TriggersService } from '@core/services/triggers.service';
@@ -175,6 +175,20 @@ describe('TaskTriggersComponent - flake inputs', () => {
     component.startEdit(pushTrigger as any);
     component.saveEdit();
     expect(update.mock.calls[0][3].config.include_flake_inputs).toBe(true);
+  });
+
+  it('keeps the edit dialog open on Escape while the save runs', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [pushTrigger], () => NEVER);
+    const component = fixture.componentInstance;
+    component.startEdit(pushTrigger as any);
+    fixture.detectChanges();
+    component.saveEdit();
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    fixture.detectChanges();
+    expect(component.showEditDialog()).toBe(true);
+    expect(panel.getAttribute('aria-busy')).toBe('true');
   });
 
   it('leaves include_flake_inputs out once the box is cleared', () => {

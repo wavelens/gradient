@@ -156,7 +156,7 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   subscribeCache(): void {
     const name = this.newCacheName.trim();
-    if (!name) return;
+    if (!name || this.subscribing()) return;
     this.subscribing.set(true);
     this.errorMessage.set(null);
     this.projectsService.subscribeCache(this.projectName, name).subscribe({

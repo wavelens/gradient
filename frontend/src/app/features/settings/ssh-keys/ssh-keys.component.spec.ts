@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { SshKeysComponent } from './ssh-keys.component';
 import { UserService } from '@core/services/user.service';
@@ -114,6 +114,23 @@ describe('SshKeysComponent', () => {
     expect(component.showDialog()).toBe(true);
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('Key already registered');
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Key already registered');
+  });
+
+  it('keeps the add dialog open while the key is being added', () => {
+    const addSshKey = vi.fn(() => new Subject<string>());
+    const fixture = setup([], { addSshKey });
+    const component = fixture.componentInstance;
+    component.openDialog();
+    component.formName = 'laptop';
+    component.formPublicKey = 'ssh-ed25519 AAAA';
+    component.addKey();
+    fixture.detectChanges();
+    document.querySelector('.gr-dialog')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    document.querySelector<HTMLElement>('.gr-dialog-backdrop')!.click();
+    fixture.detectChanges();
+    expect(component.showDialog()).toBe(true);
+    expect(document.querySelector('.gr-dialog')?.getAttribute('aria-busy')).toBe('true');
+    expect(addSshKey).toHaveBeenCalledTimes(1);
   });
 
   describe('Add SSH Key dialog', () => {

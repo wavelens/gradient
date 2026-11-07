@@ -154,6 +154,7 @@
   [(visible)]="showDeleteDialog"
   width="400px"
   [error]="deleteError()"
+  [busy]="deleting()"
 >
   <p>Are you sure you want to permanently delete your account? This action cannot be undone.</p>
   @if (!hasPassword()) {

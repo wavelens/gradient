@@ -195,7 +195,7 @@
 }
 </gr-load-state>
 
-<gr-dialog header="Delete Cache" [(visible)]="showDeleteDialog" [error]="deleteError()" width="400px">
+<gr-dialog header="Delete Cache" [(visible)]="showDeleteDialog" [error]="deleteError()" [busy]="deleting()" width="400px">
   <p>Are you sure you want to delete <strong>{{ cache()?.display_name }}</strong>? This action cannot be undone.</p>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>

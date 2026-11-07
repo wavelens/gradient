@@ -161,6 +161,7 @@
   header="Add Member"
   [(visible)]="showAddMemberDialog"
   [error]="memberError()"
+  [busy]="addingMember()"
   width="420px"
 >
   <div>
@@ -208,6 +209,7 @@
   [header]="editingRole() ? 'Edit Role' : 'New Role'"
   [(visible)]="showRoleDialog"
   [error]="roleError()"
+  [busy]="savingRole()"
   width="520px"
 >
   <div>

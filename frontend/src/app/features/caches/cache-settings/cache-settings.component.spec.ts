@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { CacheSettingsComponent } from './cache-settings.component';
 import { CachesService } from '@core/services/caches.service';
 import { AccessState } from '@core/models/access.model';
@@ -125,5 +125,34 @@ describe('CacheSettingsComponent - write failures', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Cache is still used by 2 projects');
     expect(fixture.componentInstance.showDeleteDialog()).toBe(true);
+  });
+
+  it('keeps the delete dialog open while the delete runs', () => {
+    const fixture = setup(admin);
+    const service = TestBed.inject(CachesService) as unknown as { deleteCache: () => unknown };
+    service.deleteCache = vi.fn(() => new Subject<void>());
+    findByText(fixture.nativeElement, 'delete cache')!.click();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog') as HTMLElement;
+    findByText(dialog, 'delete')!.click();
+    fixture.detectChanges();
+    findByText(dialog, 'delete')!.click();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(service.deleteCache).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance.showDeleteDialog()).toBe(true);
+  });
+
+  it('sends one save when Save Changes is clicked twice', () => {
+    const fixture = setup(admin);
+    const service = TestBed.inject(CachesService) as unknown as { updateCache: () => unknown; setCachePrivate: () => unknown };
+    service.updateCache = vi.fn(() => new Subject<void>());
+    service.setCachePrivate = () => of(undefined);
+    const save = findByText(fixture.nativeElement, 'save changes')!;
+    save.click();
+    fixture.detectChanges();
+    save.click();
+    expect(service.updateCache).toHaveBeenCalledTimes(1);
   });
 });

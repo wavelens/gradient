@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, booleanAttribute, computed, inject, input, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, booleanAttribute, computed, inject, input, ChangeDetectionStrategy } from '@angular/core';
 import { SubmitDirective } from '../form-field/submit.directive';
 
 export type ButtonSeverity = 'primary' | 'secondary' | 'success' | 'warn' | 'danger';
@@ -54,6 +54,18 @@ export class ButtonComponent {
 
   private submit = inject(SubmitDirective, { optional: true, self: true });
   protected blocked = computed(() => this.submit?.blocked() ?? false);
+
+  constructor() {
+    inject<ElementRef<HTMLElement>>(ElementRef).nativeElement.addEventListener(
+      'click',
+      (event) => {
+        if (!this.loading()) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      },
+      { capture: true },
+    );
+  }
 
   protected severityClass = computed(() => `gr-button--${this.severity() || 'primary'}`);
 }

@@ -9,7 +9,7 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { TeamWorkersComponent } from './team-workers.component';
 import { TeamsService } from '@core/services/teams.service';
@@ -101,6 +101,24 @@ describe('TeamWorkersComponent', () => {
     expect(fixture.componentInstance.showRegister()).toBe(true);
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('worker_id must be a valid UUID');
     expect(root.textContent).not.toContain('worker_id must be a valid UUID');
+  });
+
+  it('keeps the Register dialog open and sends one request while registration runs', () => {
+    const { fixture, root, registerWorker } = setup();
+    registerWorker.mockReturnValue(new Subject());
+    button(root, 'Register Worker')!.click();
+    fixture.componentInstance.form = { worker_id: 'w9', display_name: 'Builder' };
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    button(dialog, 'Register')!.click();
+    fixture.detectChanges();
+    button(dialog, 'Register')!.click();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(registerWorker).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance.showRegister()).toBe(true);
+    expect(button(dialog, 'Cancel')!.disabled).toBe(true);
   });
 
   it('keeps a failed edit inside the Edit dialog', () => {

@@ -7,7 +7,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { GrantedPart, TeamGrantsComponent } from './team-grants.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -183,6 +183,26 @@ describe('TeamGrantsComponent', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('Team not found');
     expect(text()).not.toContain('Team not found');
+  });
+
+  it('keeps the grant dialog open and sends one request while the grant runs', () => {
+    const { fixture, component, service } = setup('project', 'users');
+    service.grantProject.mockReturnValue(new Subject());
+    component.openGrant();
+    fixture.detectChanges();
+    component.form = { team: 'infra', role: 'View' };
+    const dialog = document.querySelector('.gr-dialog')!;
+    const grantButton = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.trim() === 'Grant',
+    )!;
+    grantButton.click();
+    fixture.detectChanges();
+    grantButton.click();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(service.grantProject).toHaveBeenCalledTimes(1);
+    expect(component.showGrant()).toBe(true);
   });
 
   it('reports a failed removal as a toast', () => {

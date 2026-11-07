@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { Observable, of, throwError } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import { GradientCiConnectComponent } from './gradient-ci-connect.component';
 import { ConfigService } from '@core/services/config.service';
 import { WorkersService } from '@core/services/workers.service';
@@ -13,8 +13,11 @@ import { WorkerConnection, ConnectionScope } from '@core/models';
 
 type StatusOf = (workerId: string) => Observable<WorkerConnection | undefined>;
 
-function setup(scope: ConnectionScope, statusOf: StatusOf) {
-  const connectGradientCi = vi.fn(() => of({ worker_id: 'g1' }));
+function setup(
+  scope: ConnectionScope,
+  statusOf: StatusOf,
+  connectGradientCi: () => Observable<{ worker_id: string }> = vi.fn(() => of({ worker_id: 'g1' })),
+) {
   TestBed.configureTestingModule({
     imports: [GradientCiConnectComponent],
     providers: [
@@ -64,6 +67,20 @@ describe('GradientCiConnectComponent', () => {
     expect(component.waiting()).toBe(false);
     expect(component.visible()).toBe(false);
     expect(statusOf).not.toHaveBeenCalled();
+  });
+
+  it('stays open and sends one request while the token is submitted', () => {
+    const connect = vi.fn(() => NEVER);
+    const { fixture, component } = setup('project', vi.fn(() => of(undefined)), connect);
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    component.submit();
+    fixture.detectChanges();
+    expect(component.visible()).toBe(true);
+    expect(panel.getAttribute('aria-busy')).toBe('true');
+    expect(connect).toHaveBeenCalledOnce();
   });
 
   it('finishes a team connection with a notice instead of waiting for a dial', () => {

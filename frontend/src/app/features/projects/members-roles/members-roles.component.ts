@@ -210,7 +210,7 @@ export class MembersRolesComponent implements OnInit {
   }
 
   addMember(): void {
-    if (!this.newMember.user || !this.newMember.role) return;
+    if (this.addingMember() || !this.newMember.user || !this.newMember.role) return;
     this.addingMember.set(true);
     this.memberError.set(null);
     this.projectsService

@@ -7,7 +7,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { TeamSettingsComponent } from './team-settings.component';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -111,6 +111,45 @@ describe('TeamSettingsComponent', () => {
     expect(notify.failure).toHaveBeenCalledWith('Failed to save team', failure);
     expect(component.saving()).toBe(false);
     expect(component.saved()).toBe(false);
+  });
+
+  it('sends one PATCH for two clicks on Save Changes', async () => {
+    const { fixture, update, get } = setup(true);
+    const pending = new Subject<string>();
+    update.mockReturnValue(pending);
+    get.mockReturnValue(new Subject<TeamResponse>());
+    await fixture.whenStable();
+    const name = input(fixture, 'team-display-name');
+    name.value = 'Ops';
+    name.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    const save = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.includes('Save Changes'),
+    )!;
+    save.click();
+    fixture.detectChanges();
+    save.click();
+    pending.next('Team updated');
+    pending.complete();
+    fixture.detectChanges();
+    save.click();
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the delete dialog open while the deletion runs', () => {
+    const { fixture, remove } = setup(true);
+    remove.mockReturnValue(new Subject());
+    const component = fixture.componentInstance;
+    component.openDelete();
+    fixture.detectChanges();
+    component.remove();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog')!;
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(component.showDelete()).toBe(true);
+    expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 
   it('keeps a failed deletion inside the open dialog', () => {
