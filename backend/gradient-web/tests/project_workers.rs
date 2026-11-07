@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use gradient_entity::ids::RoleId;
 use gradient_entity::role;
 use gradient_fixtures::ids::project_id;
-use gradient_fixtures::rows::{project, project_member, user};
+use gradient_fixtures::rows::{project, project_member, user, view_role};
 use gradient_test_support::web::{make_test_server, signed_in_as};
 use serde_json::json;
 use uuid::Uuid;
@@ -65,4 +65,9 @@ async fn assert_worker_changes_forbidden(role: role::Model) {
 #[tokio::test]
 async fn a_member_without_manage_workers_cannot_change_project_workers() {
     assert_worker_changes_forbidden(role_without_permissions()).await;
+}
+
+#[tokio::test]
+async fn a_view_member_cannot_change_project_workers() {
+    assert_worker_changes_forbidden(view_role()).await;
 }

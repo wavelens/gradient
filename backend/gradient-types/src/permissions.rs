@@ -141,17 +141,8 @@ pub fn write_mask() -> PermissionMask {
     ])
 }
 
-/// The View role is still keeping mutation rights on some non-secret sub-resources.
-/// Those rights are preserving historical behavior until an explicit follow-up.
 pub fn view_mask() -> PermissionMask {
-    use Permission::*;
-    mask_from(&[
-        ViewProject,
-        ManageIntegrations,
-        ManageWorkers,
-        ManageSubscriptions,
-        ManageSshKey,
-    ])
+    Permission::ViewProject.bit()
 }
 
 pub fn is_builtin_role(role_id: RoleId) -> bool {

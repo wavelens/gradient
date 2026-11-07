@@ -7879,7 +7879,7 @@ paths:
       tags:
       - projects
       summary: Regenerate SSH key pair
-      description: Generates a new Ed25519 key pair for the project. The previous key will stop working on remote servers immediately.
+      description: Generate a new Ed25519 key pair for the project. Remote servers reject the previous key immediately. Grant both the `manageProjectSettings` and `manageSshKey` permissions on the project.
       operationId: postProjectSsh
       parameters:
       - name: project
