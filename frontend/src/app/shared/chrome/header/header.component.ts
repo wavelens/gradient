@@ -6,9 +6,10 @@
 
 import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { IconComponent, MenuComponent, MenuItem } from '@gradient/ui/ui';
+import { BadgeComponent, IconComponent, MenuComponent, MenuItem } from '@gradient/ui/ui';
 import { Brand, HeaderComponent, NavLink } from '@gradient/ui/chrome';
 import { AuthService } from '@core/services/auth.service';
+import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
 import { ConfigService } from '@core/services/config.service';
 import { WhatsNewService } from '@core/whats-new/whats-new.service';
@@ -26,7 +27,7 @@ const NAV: (NavLink & { signedIn?: true; publicList?: true })[] = [
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [HeaderComponent, IconComponent, MenuComponent, RouterLink],
+  imports: [HeaderComponent, BadgeComponent, IconComponent, MenuComponent, RouterLink],
   templateUrl: './header.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './header.component.scss',
@@ -38,6 +39,7 @@ export class AppHeaderComponent {
   protected router = inject(Router);
   private config = inject(ConfigService);
   private whatsNew = inject(WhatsNewService);
+  protected invites = inject(PendingInvitesService);
 
   protected readonly brand = BRAND;
   protected nav = computed(() => {
@@ -46,13 +48,13 @@ export class AppHeaderComponent {
     return NAV.filter((link) => signedIn || (!link.signedIn && (listed || !link.publicList)));
   });
 
-  protected readonly userMenuItems: MenuItem[] = [
+  protected userMenuItems = computed<MenuItem[]>(() => [
     { label: 'Settings', icon: 'settings', routerLink: links.settings('profile') },
-    { label: 'My Invites', icon: 'mail', routerLink: links.settings('invites') },
+    { label: this.invites.count() ? `My Invites (${this.invites.count()})` : 'My Invites', icon: 'mail', routerLink: links.settings('invites') },
     ...(this.whatsNew.hasNotes ? [{ label: "What's New", icon: 'new_releases', command: () => this.whatsNew.showAll() }] : []),
     { separator: true },
     { label: 'Log out', icon: 'logout', command: () => this.logout() },
-  ];
+  ]);
 
   get registrationDisabled() { return this.config.registrationDisabled; }
 

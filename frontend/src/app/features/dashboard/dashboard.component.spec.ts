@@ -10,14 +10,16 @@ import { NEVER, Observable, of } from 'rxjs';
 import { DashboardComponent } from './dashboard.component';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
+import { PendingInvitesService } from '@core/services/pending-invites.service';
 
 type RailStub = { projects: unknown[]; caches: unknown[] };
 
-function render(rail: RailStub | Observable<RailStub>) {
+function render(rail: RailStub | Observable<RailStub>, pendingInvites = 0) {
   TestBed.configureTestingModule({
     imports: [DashboardComponent],
     providers: [
       provideRouter([]),
+      { provide: PendingInvitesService, useValue: { count: () => pendingInvites } },
       { provide: StarsService, useValue: { set: () => of(true), changed$: NEVER } },
       { provide: DashboardService, useValue: {
         rail: () => (rail instanceof Observable ? rail : of(rail)),
@@ -56,5 +58,16 @@ describe('DashboardComponent', () => {
     expect(root.querySelector('app-dashboard-task-table')).not.toBeNull();
     expect(root.querySelector('app-dashboard-start')).toBeNull();
     expect(root.querySelector('gr-loading-spinner')).toBeNull();
+  });
+
+  it('points an invited user to the pending invitations', () => {
+    const root = render({ projects: [], caches: [] }, 2);
+    const banner = root.querySelector('.invites-banner');
+    expect(banner?.textContent).toContain('2 pending invitations');
+    expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/settings/invites');
+  });
+
+  it('shows no invitation banner without pending invitations', () => {
+    expect(render({ projects: [], caches: [] }).querySelector('.invites-banner')).toBeNull();
   });
 });

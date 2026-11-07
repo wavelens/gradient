@@ -5,6 +5,19 @@
 -->
 
 <gr-page-layout title="My Invites" subtitle="Projects, caches and teams waiting for your answer">
+  @if (joined().length) {
+    <gr-row-list class="joined">
+      @for (invite of joined(); track invite.token) {
+        <gr-row [icon]="invite.kind === 'cache' ? 'inventory_2' : invite.kind === 'team' ? 'groups' : 'folder'">
+          {{ invite.scope_display_name }}
+          <gr-badge severity="success">Joined</gr-badge>
+          <span slot="meta">Role {{ invite.role }}</span>
+          <a slot="actions" grButton icon="arrow_forward" [routerLink]="joinedLink(invite)"
+             [label]="invite.kind === 'cache' ? 'Open cache' : invite.kind === 'team' ? 'Open team' : 'Open project'"></a>
+        </gr-row>
+      }
+    </gr-row-list>
+  }
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

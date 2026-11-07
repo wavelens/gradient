@@ -6,9 +6,11 @@
 
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink, type UrlTree } from '@angular/router';
 import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
+import { PendingInvitesService } from '@core/services/pending-invites.service';
+import { links } from '@shared/routing';
 import { InviteItem } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
 import {
@@ -25,6 +27,7 @@ import {
   standalone: true,
   imports: [
     CommonModule,
+    RouterLink,
     BadgeComponent,
     ButtonComponent,
     LoadStateComponent,
@@ -41,10 +44,12 @@ export class InvitesComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private pending = inject(PendingInvitesService);
 
   loading = signal(true);
   pendingToken = signal<string | null>(null);
   invites = signal<InviteItem[]>([]);
+  joined = signal<InviteItem[]>([]);
   loadError = signal<unknown>(null);
 
   ngOnInit(): void {
@@ -62,6 +67,7 @@ export class InvitesComponent implements OnInit {
     this.userService.getInvites().subscribe({
       next: (invites) => {
         this.invites.set(invites);
+        this.pending.show(invites);
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -77,6 +83,8 @@ export class InvitesComponent implements OnInit {
       next: () => {
         this.pendingToken.set(null);
         this.notify.success('Invitation accepted');
+        const invite = this.invites().find((item) => item.token === token);
+        if (invite) this.joined.update((joined) => [invite, ...joined]);
         this.load();
       },
       error: (err: unknown) => {
@@ -84,6 +92,14 @@ export class InvitesComponent implements OnInit {
         this.notify.failure('Invitation accept failed', err);
       },
     });
+  }
+
+  joinedLink(invite: InviteItem): UrlTree {
+    switch (invite.kind) {
+      case 'project': return links.project(invite.scope);
+      case 'cache': return links.cache(invite.scope);
+      case 'team': return links.team(invite.scope);
+    }
   }
 
   decline(invite: InviteItem): void {

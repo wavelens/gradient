@@ -14,6 +14,7 @@ import { InvitesComponent } from './invites.component';
 import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
 import { InviteItem } from '@core/models';
+import { PendingInvitesService } from '@core/services/pending-invites.service';
 
 const projectInvite: InviteItem = {
   kind: 'project',
@@ -94,6 +95,21 @@ describe('InvitesComponent - loading', () => {
 });
 
 describe('InvitesComponent', () => {
+  it('opens what the user joined right from the accepted invite', () => {
+    const { fixture } = setup([projectInvite]);
+    const root = fixture.nativeElement as HTMLElement;
+    buttonByText(root, 'Accept')?.click();
+    fixture.detectChanges();
+    const open = root.querySelector<HTMLAnchorElement>('.joined a[grButton]');
+    expect(open?.textContent).toContain('Open project');
+    expect(open?.getAttribute('href')).toBe('/project/wavelens');
+  });
+
+  it('shares the loaded invites with the header badge and the dashboard banner', () => {
+    setup([projectInvite, teamInvite]);
+    expect(TestBed.inject(PendingInvitesService).count()).toBe(2);
+  });
+
   it('lists a team invite as a team', () => {
     const { fixture } = setup([teamInvite]);
     const text = (fixture.nativeElement as HTMLElement).textContent || '';

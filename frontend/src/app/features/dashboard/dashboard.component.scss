@@ -12,6 +12,11 @@
   padding: $spacing-md;
 }
 
+.invites-banner {
+  display: block;
+  margin-bottom: $spacing-md;
+}
+
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
