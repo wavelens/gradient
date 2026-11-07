@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { inject } from '@angular/core';
-import { ResolveFn } from '@angular/router';
+import { Signal, inject } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Data, ResolveFn } from '@angular/router';
 import { map, tap } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -26,3 +27,11 @@ export const projectAccessResolver: ResolveFn<ProjectAccessData> = (route, state
     denyOnRefusal({ kind: 'project', name, back: '/projects' }, state.url),
   );
 };
+
+const resolvedProject = (data: Data): ProjectResponse | undefined =>
+  (data['projectAccess'] as ProjectAccessData | undefined)?.project;
+
+export function injectProject(): Signal<ProjectResponse | undefined> {
+  const route = inject(ActivatedRoute);
+  return toSignal(route.data.pipe(map(resolvedProject)), { initialValue: resolvedProject(route.snapshot.data) });
+}

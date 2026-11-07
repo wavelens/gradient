@@ -5,15 +5,14 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { IntegrationsComponent } from './integrations.component';
 import { IntegrationsService } from '@core/services/integrations.service';
-import { ProjectsService } from '@core/services/projects.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { AccessState, IntegrationResponse } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { MessageService } from '@gradient/ui/ui';
@@ -58,11 +57,6 @@ const githubInbound: IntegrationResponse = {
   kind: 'inbound',
 };
 
-function activatedRouteStub() {
-  return {
-    snapshot: { paramMap: convertToParamMap({ project: 'acme' }) },
-  } as Partial<ActivatedRoute>;
-}
 
 const confirm = vi.fn();
 
@@ -79,26 +73,20 @@ function setup(
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub() },
+      {
+        provide: ActivatedRoute,
+        useFactory: () =>
+          projectRouteStub('acme', access, {
+            github_app_available: githubAppAvailable,
+            github_app_install_url: githubAppInstallUrl,
+          }),
+      },
       {
         provide: IntegrationsService,
         useValue: {
           listProjectIntegrations: () => of(integrations),
         },
       },
-      {
-        provide: ProjectsService,
-        useValue: {
-          getProject: () =>
-            of({
-              id: 'o',
-              display_name: 'Acme',
-              github_app_available: githubAppAvailable,
-              github_app_install_url: githubAppInstallUrl,
-            }),
-        },
-      },
-      { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
       { provide: ConfirmService, useValue: { confirm } },
     ],
   });
@@ -132,6 +120,15 @@ describe('IntegrationsComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'new integration')).toBeNull();
     expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
+  });
+
+  it('explains the missing permission instead of listing integrations', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [baseIntegration]);
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('No access to Integrations');
+    expect(text).toContain('manage integrations permission');
+    expect(text).not.toContain(baseIntegration.name);
   });
 
   it('disables New Integration in a state-managed project but keeps Edit / Delete of an unmanaged integration', async () => {
@@ -256,7 +253,10 @@ describe('IntegrationsComponent - create github integration', () => {
         provideRouter([]),
         provideHttpClient(),
         provideHttpClientTesting(),
-        { provide: ActivatedRoute, useValue: activatedRouteStub() },
+        {
+          provide: ActivatedRoute,
+          useFactory: () => projectRouteStub('acme', { managed: false, canEdit: true, canTrigger: true }, { github_app_available: true }),
+        },
         {
           provide: IntegrationsService,
           useValue: {
@@ -264,13 +264,6 @@ describe('IntegrationsComponent - create github integration', () => {
             createProjectIntegration: createSpy,
           },
         },
-        {
-          provide: ProjectsService,
-          useValue: {
-            getProject: () => of({ id: 'o', display_name: 'Acme', github_app_available: true }),
-          },
-        },
-        { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve({ managed: false, canEdit: true, canTrigger: true }) } },
       ],
     });
     const fixture = TestBed.createComponent(IntegrationsComponent);
@@ -299,7 +292,10 @@ describe('IntegrationsComponent - create github integration', () => {
         provideRouter([]),
         provideHttpClient(),
         provideHttpClientTesting(),
-        { provide: ActivatedRoute, useValue: activatedRouteStub() },
+        {
+          provide: ActivatedRoute,
+          useFactory: () => projectRouteStub('acme', { managed: false, canEdit: true, canTrigger: true }, { github_app_available: true }),
+        },
         {
           provide: IntegrationsService,
           useValue: {
@@ -307,13 +303,6 @@ describe('IntegrationsComponent - create github integration', () => {
             createProjectIntegration: createSpy,
           },
         },
-        {
-          provide: ProjectsService,
-          useValue: {
-            getProject: () => of({ id: 'o', display_name: 'Acme', github_app_available: true }),
-          },
-        },
-        { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve({ managed: false, canEdit: true, canTrigger: true }) } },
       ],
     });
     const fixture = TestBed.createComponent(IntegrationsComponent);

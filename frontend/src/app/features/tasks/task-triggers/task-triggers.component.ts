@@ -30,7 +30,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
-import { injectTaskAccess } from '@core/resolvers/inject-access';
+import { injectTaskAccess, injectTaskAccessTo } from '@core/resolvers/inject-access';
 import {
   TriggerType,
   TriggerOut,
@@ -112,7 +112,8 @@ export class TaskTriggersComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
-  access = injectTaskAccess();
+  private taskAccess = injectTaskAccess();
+  access = injectTaskAccessTo('manageTriggers');
 
   rowDisabled = computed(
     () =>
@@ -121,7 +122,7 @@ export class TaskTriggersComponent implements OnInit {
       this.accessSvc.shouldDisableInput(this.access()),
   );
 
-  triggerAccess = computed(() => this.accessSvc.triggerAccess(this.access()));
+  triggerAccess = computed(() => this.accessSvc.triggerAccess(this.taskAccess()));
 
   triggerRowDisabled = computed(
     () =>

@@ -7,8 +7,10 @@
 @if (project(); as project) {
   <gr-page-layout [breadcrumb]="breadcrumb()" [title]="project.display_name" [subtitle]="project.description || 'No description'">
   <div slot="actions">
-    @if (project.role) {
+    @if (canCreateTask()) {
       <button grButton label="Create Task" icon="add" (click)="openCreateDialog()"></button>
+    }
+    @if (project.role) {
       <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></a>
     }
     @if (authService.isAuthenticated()) {
@@ -23,10 +25,10 @@
     errorTitle="Failed to load tasks"
     emptyIcon="folder"
     emptyTitle="No tasks yet"
-    [emptyMessage]="project.role ? 'Create your first task to start evaluating Nix builds' : 'No tasks have been created yet'"
+    [emptyMessage]="canCreateTask() ? 'Create your first task to start evaluating Nix builds' : 'No tasks have been created yet'"
     (retry)="loadTasks()"
   >
-    @if (project.role) {
+    @if (canCreateTask()) {
       <button slot="empty-action" grButton label="Create Task" (click)="openCreateDialog()"></button>
     }
     <div class="section">

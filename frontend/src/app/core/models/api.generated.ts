@@ -379,6 +379,8 @@ export interface CacheMetricPoint {
   requests: number;
 }
 
+export type CachePermission = "viewCache" | "readStore" | "writeStore" | "manageCacheSettings" | "manageCacheKeys" | "manageUpstreamCaches" | "manageCacheMembers" | "manageCacheRoles" | "manageCacheSubscriptions" | "deleteCache" | "manageCacheWebhooks";
+
 export interface CacheResponse {
   id: CacheId;
   name: string;
@@ -395,6 +397,7 @@ export interface CacheResponse {
   created_at: string;
   managed: boolean;
   can_edit: boolean;
+  permissions: CachePermission[];
 }
 
 export interface CacheRoleOwner {
@@ -1941,6 +1944,8 @@ export interface PendingJobsResponse {
   other_pending: number;
 }
 
+export type Permission = "viewProject" | "manageProjectSettings" | "deleteProject" | "manageMembers" | "manageRoles" | "manageIntegrations" | "manageActions" | "manageWorkers" | "manageSubscriptions" | "manageSshKey" | "createTask" | "editTask" | "triggerEvaluation" | "manageTriggers" | "manageWebhooks";
+
 export interface PermissionEntry {
   id: string;
   mutating: boolean;
@@ -1983,6 +1988,7 @@ export interface ProjectResponse {
   github_app_available: boolean;
   github_app_install_url?: string | null;
   role?: string | null;
+  permissions: Permission[];
 }
 
 export interface ProjectRoleOwner {
@@ -2381,6 +2387,7 @@ export interface TaskDetailsResponse {
   last_evaluations: EvaluationSummary[];
   can_edit: boolean;
   can_trigger: boolean;
+  permissions: Permission[];
   managed: boolean;
 }
 
@@ -2427,6 +2434,7 @@ export interface TaskResponse {
   only_evaluate: boolean;
   can_edit: boolean;
   can_trigger: boolean;
+  permissions: Permission[];
 }
 
 export interface TaskRow {

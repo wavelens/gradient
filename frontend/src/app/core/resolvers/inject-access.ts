@@ -10,7 +10,8 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { Observable, map, of } from 'rxjs';
 import { TaskAccessData } from './task-access.resolver';
 import { CacheAccessData } from './cache-access.resolver';
-import { AccessState } from '@core/models/access.model';
+import { AccessState, accessTo } from '@core/models/access.model';
+import type { CachePermission, Permission } from '@core/models/api.generated';
 
 const DEFAULT_ACCESS: AccessState = { managed: false, canEdit: false, canTrigger: false };
 
@@ -42,4 +43,14 @@ export function injectTaskAccess(): Signal<AccessState> {
 export function injectCacheAccess(): Signal<AccessState> {
   const data = injectCacheAccessData();
   return computed(() => data()?.access ?? DEFAULT_ACCESS);
+}
+
+export function injectTaskAccessTo(...required: [Permission, ...Permission[]]): Signal<AccessState> {
+  const data = injectTaskAccessData();
+  return computed(() => accessTo(data()?.task, ...required));
+}
+
+export function injectCacheAccessTo(...required: [CachePermission, ...CachePermission[]]): Signal<AccessState> {
+  const data = injectCacheAccessData();
+  return computed(() => accessTo(data()?.cache, ...required));
 }

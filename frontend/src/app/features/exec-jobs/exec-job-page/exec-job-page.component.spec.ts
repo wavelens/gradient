@@ -5,6 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { taskAccessData } from '@core/resolvers/access-route.testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { EMPTY, type Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
@@ -129,7 +130,7 @@ function setup(
       paramMap: convertToParamMap({ project: 'acme', task: 'demo', job: 'j1' }),
       queryParamMap: convertToParamMap(query),
     },
-    parent: { data: of({ taskAccess: { access: { managed: false, canEdit: canTrigger, canTrigger } } }) },
+    parent: { data: of(taskAccessData({ managed: false, canEdit: canTrigger, canTrigger })) },
   } as unknown as ActivatedRoute;
   TestBed.configureTestingModule({
     imports: [ExecJobPageComponent],
@@ -368,7 +369,7 @@ describe('ExecJobPageComponent', () => {
         .mockReturnValue(of(job('running')));
       const route = {
         snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo', job: 'j1' }) },
-        parent: { data: of({ taskAccess: { access: { managed: false, canEdit: true, canTrigger: true } } }) },
+        parent: { data: of(taskAccessData({ managed: false, canEdit: true, canTrigger: true })) },
       } as unknown as ActivatedRoute;
       TestBed.configureTestingModule({
         imports: [ExecJobPageComponent],
@@ -424,7 +425,7 @@ describe('ExecJobPageComponent', () => {
       const log = vi.fn().mockReturnValueOnce(of('hello\n')).mockReturnValue(of('hello\nbye\n'));
       const route = {
         snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo', job: 'j1' }) },
-        parent: { data: of({ taskAccess: { access: { managed: false, canEdit: true, canTrigger: true } } }) },
+        parent: { data: of(taskAccessData({ managed: false, canEdit: true, canTrigger: true })) },
       } as unknown as ActivatedRoute;
       TestBed.configureTestingModule({
         imports: [ExecJobPageComponent],

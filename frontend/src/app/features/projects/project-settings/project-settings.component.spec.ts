@@ -5,15 +5,16 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ProjectSettingsComponent } from './project-settings.component';
 import { ProjectsService } from '@core/services/projects.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { EVERY_PERMISSION, projectRouteStub } from '@core/resolvers/access-route.testing';
 import { AccessState } from '@core/models/access.model';
+import type { Permission } from '@core/models';
 import { ProjectResponse } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -35,6 +36,7 @@ function projectFor(access: AccessState): ProjectResponse {
     created_at: '2026-01-01T00:00:00',
     github_app_available: false,
     role: access.canEdit ? 'Admin' : 'View',
+    permissions: access.canEdit ? EVERY_PERMISSION : ['viewProject'],
   };
 }
 
@@ -45,7 +47,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function setup(access: AccessState):ComponentFixture<ProjectSettingsComponent> {
+function setup(access: AccessState, permissions?: Permission[]): ComponentFixture<ProjectSettingsComponent> {
   notify.success.mockClear();
   notify.failure.mockClear();
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
@@ -55,10 +57,7 @@ function setup(access: AccessState):ComponentFixture<ProjectSettingsComponent> {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      {
-        provide: ActivatedRoute,
-        useValue: { snapshot: { paramMap: convertToParamMap({ project: 'acme' }) } },
-      },
+      { provide: ActivatedRoute, useFactory: () => projectRouteStub('acme', access, permissions && { permissions }) },
       {
         provide: ProjectsService,
         useValue: {
@@ -66,7 +65,6 @@ function setup(access: AccessState):ComponentFixture<ProjectSettingsComponent> {
           getSSHKey: () => of('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEd25519 acme'),
         },
       },
-      { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
     ],
@@ -185,6 +183,25 @@ describe('ProjectSettingsComponent - access gating', () => {
     expect(save!.disabled).toBe(true);
     expect(del).not.toBeNull();
     expect(del!.disabled).toBe(true);
+  });
+});
+
+describe('ProjectSettingsComponent - permissions', () => {
+  const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  it('offers no SSH key regeneration without the manage SSH key permission', async () => {
+    const fixture = setup(writable, ['viewProject', 'manageProjectSettings', 'deleteProject']);
+    await settled(fixture);
+    expect(findByText(fixture.nativeElement, 'regenerate key')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'delete project')).not.toBeNull();
+    expect(findByText(fixture.nativeElement, 'save changes')).not.toBeNull();
+  });
+
+  it('offers SSH key regeneration but no project deletion to a role with both key permissions', async () => {
+    const fixture = setup(writable, ['viewProject', 'manageProjectSettings', 'manageSshKey']);
+    await settled(fixture);
+    expect(findByText(fixture.nativeElement, 'regenerate key')).not.toBeNull();
+    expect(findByText(fixture.nativeElement, 'delete project')).toBeNull();
   });
 });
 

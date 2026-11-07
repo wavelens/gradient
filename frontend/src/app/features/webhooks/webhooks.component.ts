@@ -9,7 +9,10 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { finalize } from 'rxjs';
-import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId } from '@core/models';
+import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo } from '@core/models';
+import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
+import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
+import { missingPermissionText } from '@shared/access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { WebhooksService } from '@core/services/webhooks.service';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -67,6 +70,7 @@ export class WebhooksComponent implements OnInit {
 
   loading = signal(true);
   loadError = signal<unknown>(null);
+  denied = signal<string | null>(null);
   saving = signal(false);
   formError = signal<string | null>(null);
   togglingId = signal<string | null>(null);
@@ -114,6 +118,7 @@ export class WebhooksComponent implements OnInit {
         this.scope = { kind: 'instance' };
         this.title = 'Instance Webhooks';
     }
+    this.denied.set(this.missingPermission());
     this.load();
   }
 
@@ -131,7 +136,23 @@ export class WebhooksComponent implements OnInit {
     }
   }
 
+  private missingPermission(): string | null {
+    if (this.scope.kind === 'project') {
+      const project = (this.route.snapshot.data['projectAccess'] as ProjectAccessData | undefined)?.project;
+      return accessTo(project, 'manageWebhooks').canEdit ? null : missingPermissionText('manageWebhooks', 'project');
+    }
+    if (this.scope.kind === 'cache') {
+      const cache = (this.route.parent?.snapshot.data['cacheAccess'] as CacheAccessData | undefined)?.cache;
+      return accessTo(cache, 'manageCacheWebhooks').canEdit ? null : missingPermissionText('manageCacheWebhooks', 'cache');
+    }
+    return null;
+  }
+
   load(): void {
+    if (this.denied()) {
+      this.loading.set(false);
+      return;
+    }
     this.loading.set(true);
     this.loadError.set(null);
     this.service.list(this.scope).subscribe({

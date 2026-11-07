@@ -10,13 +10,14 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
-import { ActivatedRoute, convertToParamMap } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 import { WorkersComponent } from './workers.component';
 import { WorkersService } from '@core/services/workers.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
+import type { Permission } from '@core/models';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { signal } from '@angular/core';
@@ -33,9 +34,6 @@ type MockedProjects = {
   getSubscribedCaches: ReturnType<typeof vi.fn>;
 };
 
-function activatedRouteStub() {
-  return { snapshot: { paramMap: convertToParamMap({ project: 'demo' }) } } as Partial<ActivatedRoute>;
-}
 
 const workerUnmanaged: ProjectWorkerEntry = {
   worker_id: 'w1',
@@ -73,6 +71,7 @@ function setup(opts: {
   testWorker?: ReturnType<typeof vi.fn>;
   gradientCi?: boolean;
   memberOf?: string[];
+  permissions?: Permission[];
 }) {
   const workersService = {
     getWorkers: vi.fn(() => of(opts.workers)),
@@ -104,8 +103,7 @@ function setup(opts: {
         },
       },
       { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
-      { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(opts.access) } },
-      { provide: ActivatedRoute, useValue: activatedRouteStub() },
+      { provide: ActivatedRoute, useFactory: () => projectRouteStub('demo', opts.access, opts.permissions && { permissions: opts.permissions }) },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
       {
@@ -159,6 +157,18 @@ describe('WorkersComponent - no-cache banner (existing)', () => {
 });
 
 describe('WorkersComponent - access gating', () => {
+  it('hides worker writes from a role without the manage workers permission', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      permissions: ['viewProject', 'createTask', 'editTask', 'manageProjectSettings'],
+      workers: [workerUnmanaged],
+      caches: [{ id: 'c', name: 'c' }],
+    });
+    await settled(fixture);
+    expect(findByText(fixture.nativeElement, 'register worker')).toBeNull();
+    expect(menuOf(fixture, workerUnmanaged)).toEqual([]);
+  });
+
   it('hides Register Worker button under read-only project access', async () => {
     const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);

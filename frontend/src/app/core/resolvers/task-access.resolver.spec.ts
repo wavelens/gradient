@@ -44,6 +44,7 @@ describe('taskAccessResolver', () => {
     last_check_at: '',
     queue: { building: 0, queued: 0 },
     can_edit: true,
+    permissions: ['editTask', 'triggerEvaluation'],
     can_trigger: true,
     managed: false,
   };

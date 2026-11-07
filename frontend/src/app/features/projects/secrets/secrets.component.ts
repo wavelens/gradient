@@ -8,11 +8,11 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { injectProject } from '@core/resolvers/project-access.resolver';
 import { ProjectSecretsService } from '@core/services/project-secrets.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
-import { AccessState, ProjectSecretSummary, SopsRecipientResponse } from '@core/models';
+import { accessTo, ProjectSecretSummary, SopsRecipientResponse } from '@core/models';
 import { docsUrl } from '@core/docs';
 import {
   BadgeComponent,
@@ -27,7 +27,7 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { WritableDirective } from '@shared/access';
+import { WritableDirective, missingPermissionText } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { relativeTime } from '@shared/text';
@@ -60,7 +60,7 @@ const SECRET_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export class SecretsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private secretsService = inject(ProjectSecretsService);
-  private projectAccess = inject(ProjectAccessService);
+  private resolvedProject = injectProject();
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
@@ -68,7 +68,8 @@ export class SecretsComponent implements OnInit {
   protected readonly relativeTime = relativeTime;
   protected readonly docsUrl = docsUrl('exec/secrets/');
 
-  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
+  access = computed(() => accessTo(this.resolvedProject(), 'manageProjectSettings'));
+  missingPermission = missingPermissionText('manageProjectSettings', 'project');
   loading = signal(true);
   loadError = signal<unknown>(null);
   secrets = signal<ProjectSecretSummary[]>([]);
@@ -88,7 +89,6 @@ export class SecretsComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
-    this.projectAccess.forProject(this.projectName).then((state) => this.access.set(state));
     this.loadSecrets();
     this.loadSopsRecipient();
   }
@@ -101,6 +101,10 @@ export class SecretsComponent implements OnInit {
   }
 
   loadSecrets(): void {
+    if (!this.access().canEdit) {
+      this.loading.set(false);
+      return;
+    }
     this.loading.set(true);
     this.loadError.set(null);
     this.secretsService.list(this.projectName).subscribe({

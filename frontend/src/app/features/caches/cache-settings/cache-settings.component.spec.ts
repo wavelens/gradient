@@ -5,6 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { cacheAccessData } from '@core/resolvers/access-route.testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
@@ -39,7 +40,7 @@ function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
     snapshot: { paramMap: convertToParamMap({ cache: 'demo' }) },
     data: of({}),
-    parent: { data: of({ cacheAccess: { cache: cacheFor(access), access } }) },
+    parent: { data: of(cacheAccessData(access, cacheFor(access))) },
   } as unknown as ActivatedRoute;
 }
 

@@ -10,16 +10,14 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { ProjectsService } from '@core/services/projects.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { injectProject } from '@core/resolvers/project-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
-  AccessState,
+  accessTo,
   GitHostType,
   InboundGitHost,
   IntegrationKind,
-  ProjectResponse,
   IntegrationResponse,
   CreateIntegrationRequest,
   PatchIntegrationRequest,
@@ -42,7 +40,7 @@ import {
   TabSwitchComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, missingPermissionText } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
 
@@ -84,13 +82,12 @@ interface Option<T> {
 export class IntegrationsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private integrationsService = inject(IntegrationsService);
-  private projectsService = inject(ProjectsService);
-  private projectAccess = inject(ProjectAccessService);
+  private resolvedProject = injectProject();
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
-  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
+  access = computed(() => accessTo(this.resolvedProject(), 'manageIntegrations'));
 
   loading = signal(true);
   loadError = signal<unknown>(null);
@@ -98,7 +95,7 @@ export class IntegrationsComponent implements OnInit {
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Integrations' }));
-  project = signal<ProjectResponse | null>(null);
+  missingPermission = missingPermissionText('manageIntegrations', 'project');
   integrations = signal<IntegrationResponse[]>([]);
   integrationAccess = computed(
     () => new Map(this.integrations().map((i) => [i.id, { ...this.access(), managed: i.managed }])),
@@ -180,12 +177,12 @@ export class IntegrationsComponent implements OnInit {
     installation_id: '',
   };
 
-  githubAppAvailable = computed(() => this.project()?.github_app_available === true);
+  githubAppAvailable = computed(() => this.resolvedProject()?.github_app_available === true);
   githubInstallations = computed(() =>
     this.integrations().filter((i) => i.git_host_type === 'github' && i.kind === 'outbound'),
   );
   githubAppInstalled = computed(() => this.githubInstallations().length > 0);
-  githubAppInstallUrl = computed(() => this.project()?.github_app_install_url ?? null);
+  githubAppInstallUrl = computed(() => this.resolvedProject()?.github_app_install_url ?? null);
 
   outboundGitHostOptions = computed<Option<GitHostType>[]>(() => [
     { label: 'Gitea', value: 'gitea' },
@@ -203,22 +200,14 @@ export class IntegrationsComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
-    this.projectAccess.forProject(this.projectName).then((s) => this.access.set(s));
-    this.loadProject();
     this.loadIntegrations();
   }
 
-  private loadProject(): void {
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => {
-        this.project.set(project);
-        this.crumbs.rememberProject(this.projectName, project.display_name);
-      },
-      error: () => {},
-    });
-  }
-
   loadIntegrations(): void {
+    if (!this.access().canEdit) {
+      this.loading.set(false);
+      return;
+    }
     this.loading.set(true);
     this.loadError.set(null);
     this.integrationsService.listProjectIntegrations(this.projectName).subscribe({

@@ -11,7 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { injectProject } from '@core/resolvers/project-access.resolver';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -33,7 +33,7 @@ import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { CreateCacheButtonComponent, CreateCacheDialogComponent } from '@shared/forms';
-import { AccessState, CacheSubscriptionItem } from '@core/models';
+import { accessTo, CacheSubscriptionItem } from '@core/models';
 
 @Component({
   selector: 'app-cache-subscriptions',
@@ -67,14 +67,14 @@ export class CacheSubscriptionsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);
-  private projectAccess = inject(ProjectAccessService);
+  private resolvedProject = injectProject();
   private crumbs = inject(BreadcrumbsService);
   private auth = inject(AuthService);
   private config = inject(ConfigService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
-  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
+  access = computed(() => accessTo(this.resolvedProject(), 'manageSubscriptions'));
   canCreateCache = computed(() => this.config.canCreate(this.config.createCache, this.auth.user()?.superuser === true));
   showCreateDialog = signal(false);
 
@@ -93,7 +93,6 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
-    this.projectAccess.forProject(this.projectName).then((s) => this.access.set(s));
     this.loadCaches();
   }
 

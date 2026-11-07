@@ -28,7 +28,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
-import { injectCacheAccess } from '@core/resolvers/inject-access';
+import { injectCacheAccess, injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { CacheResponse, PatchCacheRequest } from '@core/models';
 import { LabelHelpComponent } from '@shared/ui';
@@ -100,6 +100,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   private confirm = inject(ConfirmService);
 
   access = injectCacheAccess();
+  deleteAccess = injectCacheAccessTo('deleteCache');
 
   loading = signal(true);
   loadError = signal<unknown>(null);

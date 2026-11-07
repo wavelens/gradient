@@ -169,36 +169,40 @@
       </gr-row-list>
     </gr-settings-section>
 
-    @if (access().canEdit) {
+    @if (access().canEdit || deleteAccess().canEdit) {
       <gr-settings-section title="Danger Zone" danger>
-        <gr-row>
-          {{ c.active ? 'Deactivate Cache' : 'Activate Cache' }}
-          <span slot="meta">
-            {{ c.active ? 'Stop serving this cache to Nix clients.' : 'Start serving this cache to Nix clients.' }}
-          </span>
-          <button
-            slot="actions"
-            grButton
-            [label]="c.active ? 'Deactivate' : 'Activate'"
-            [icon]="c.active ? 'close' : 'check'"
-            [severity]="c.active ? 'danger' : 'success'"
-            (click)="toggleActive()"
-            [loading]="toggling()"
-          ></button>
-        </gr-row>
-        <gr-row>
-          Delete Cache
-          <span slot="meta">Permanently delete this cache and all its stored artifacts.</span>
-          <button
-            slot="actions"
-            grButton
-            label="Delete Cache"
-            icon="delete"
-            severity="danger"
-            (click)="deleteCache()"
-            [appManagedDisable]="access()"
-          ></button>
-        </gr-row>
+        @if (access().canEdit) {
+          <gr-row>
+            {{ c.active ? 'Deactivate Cache' : 'Activate Cache' }}
+            <span slot="meta">
+              {{ c.active ? 'Stop serving this cache to Nix clients.' : 'Start serving this cache to Nix clients.' }}
+            </span>
+            <button
+              slot="actions"
+              grButton
+              [label]="c.active ? 'Deactivate' : 'Activate'"
+              [icon]="c.active ? 'close' : 'check'"
+              [severity]="c.active ? 'danger' : 'success'"
+              (click)="toggleActive()"
+              [loading]="toggling()"
+            ></button>
+          </gr-row>
+        }
+        @if (deleteAccess().canEdit) {
+          <gr-row>
+            Delete Cache
+            <span slot="meta">Permanently delete this cache and all its stored artifacts.</span>
+            <button
+              slot="actions"
+              grButton
+              label="Delete Cache"
+              icon="delete"
+              severity="danger"
+              (click)="deleteCache()"
+              [appManagedDisable]="deleteAccess()"
+            ></button>
+          </gr-row>
+        }
       </gr-settings-section>
     }
   </gr-page-layout>

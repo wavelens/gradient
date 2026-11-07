@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { EVERY_PERMISSION } from '@core/resolvers/access-route.testing';
+import type { ProjectResponse } from '@core/models';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { Observable, Subject, of, throwError } from 'rxjs';
@@ -15,7 +17,11 @@ import { ApiError } from '@core/services/api.service';
 
 const NO_TASKS = { items: [], total: 0, page: 1 };
 
-function render(authenticated: boolean, getTasks: () => Observable<unknown> = () => of(NO_TASKS)) {
+function render(
+  authenticated: boolean,
+  getTasks: () => Observable<unknown> = () => of(NO_TASKS),
+  access: Partial<ProjectResponse> = { role: 'Admin', permissions: EVERY_PERMISSION },
+) {
   const starred = vi.fn(() => of(true));
   const tasks = vi.fn(getTasks);
   TestBed.configureTestingModule({
@@ -27,7 +33,7 @@ function render(authenticated: boolean, getTasks: () => Observable<unknown> = ()
         useValue: {
           snapshot: {
             paramMap: convertToParamMap({ project: 'acme' }),
-            data: { projectAccess: { project: { name: 'acme', display_name: 'Acme', description: '', role: 'Admin' } } },
+            data: { projectAccess: { project: { name: 'acme', display_name: 'Acme', description: '', ...access } } },
           },
         },
       },
@@ -51,6 +57,21 @@ describe('ProjectDetailComponent header', () => {
 
   it('shows no star to a guest', () => {
     expect(render(false).root.querySelector('gr-star-button')).toBeNull();
+  });
+
+  it('offers a viewer Settings but no Create Task', () => {
+    const { root } = render(true, undefined, { role: 'View', permissions: ['viewProject'] });
+    const labels = Array.from(root.querySelectorAll('[slot="actions"] [grButton]')).map((el) => el.querySelector('.gr-button__label')?.textContent?.trim());
+    expect(labels).toContain('Settings');
+    expect(labels).not.toContain('Create Task');
+    expect(root.textContent).toContain('No tasks have been created yet');
+  });
+
+  it('offers neither Settings nor Create Task to a visitor without a role', () => {
+    const { root } = render(true, undefined, { role: null, permissions: [] });
+    const labels = Array.from(root.querySelectorAll('[slot="actions"] [grButton]')).map((el) => el.querySelector('.gr-button__label')?.textContent?.trim());
+    expect(labels).not.toContain('Settings');
+    expect(labels).not.toContain('Create Task');
   });
 });
 

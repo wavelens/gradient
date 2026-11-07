@@ -11,7 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { UserService } from '@core/services/user.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { injectProject } from '@core/resolvers/project-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
@@ -33,7 +33,7 @@ import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.com
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import {
-  AccessState,
+  accessTo,
   MemberItem,
   RoleResponse_ProjectRoleOwner,
   PermissionEntry,
@@ -82,12 +82,13 @@ export class MembersRolesComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private projectsService = inject(ProjectsService);
   private userService = inject(UserService);
-  private projectAccess = inject(ProjectAccessService);
+  private resolvedProject = injectProject();
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
-  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
+  access = computed(() => accessTo(this.resolvedProject(), 'manageMembers'));
+  roleAccess = computed(() => accessTo(this.resolvedProject(), 'manageRoles'));
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Members & Roles' }));
@@ -128,7 +129,6 @@ export class MembersRolesComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
-    this.projectAccess.forProject(this.projectName).then((s) => this.access.set(s));
     this.loadRoles();
     this.loadMembers();
     this.loadInvitations();
@@ -150,6 +150,7 @@ export class MembersRolesComponent implements OnInit {
   }
 
   loadInvitations(): void {
+    if (!this.access().canEdit) return;
     this.invitationsLoadError.set(null);
     this.projectsService.getInvitations(this.projectName).subscribe({
       next: (invitations) => this.invitations.set(invitations),

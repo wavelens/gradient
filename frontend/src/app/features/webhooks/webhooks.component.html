@@ -5,16 +5,17 @@
 -->
 
 <gr-page-layout [breadcrumb]="breadcrumb()" [title]="title" subtitle="Signed POSTs of durable events to your endpoints">
-  @if (!loading() && !loadError()) {
+  @if (!loading() && !loadError() && !denied()) {
     <button slot="actions" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
   }
 
   <gr-load-state
     [loading]="loading()"
-    [error]="loadError()"
+    [error]="denied() ?? loadError()"
+    [retryable]="!denied()"
     [empty]="webhooks().length === 0"
     loadingMessage="Loading webhooks..."
-    errorTitle="Failed to load webhooks"
+    [errorTitle]="denied() ? 'No access to Webhooks' : 'Failed to load webhooks'"
     emptyIcon="webhook"
     emptyTitle="No webhooks"
     emptyMessage="Create a webhook to receive events as signed HTTP requests."

@@ -117,7 +117,7 @@ export class ExecJobPageComponent implements OnInit {
 
   terminalReachable = computed(() => {
     const job = this.job();
-    return job ? hasExecTerminal(job.status) : false;
+    return !!job && this.triggerAccess().canEdit && hasExecTerminal(job.status);
   });
   views = computed(() => [LOG_VIEW, INFO_VIEW, TIMELINE_VIEW, ...(this.terminalReachable() ? [TERMINAL_VIEW] : [])]);
   terminalModes = computed(() => {
@@ -217,7 +217,7 @@ export class ExecJobPageComponent implements OnInit {
       this.job.set(job);
       this.showLog(log);
       this.pullRequests.set(pullRequests);
-      if (hasExecTerminal(job.status)) {
+      if (this.terminalReachable()) {
         if (this.wantsTerminal) this.showView('terminal');
       } else if (this.view() === 'terminal') {
         this.showView('log');

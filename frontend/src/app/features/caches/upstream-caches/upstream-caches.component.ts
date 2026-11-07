@@ -31,7 +31,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
-import { injectCacheAccess } from '@core/resolvers/inject-access';
+import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
 import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, ProtocolProbe } from '@core/models';
 import { fieldChecks } from '@shared/forms';
@@ -93,7 +93,7 @@ export class UpstreamCachesComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
-  access = injectCacheAccess();
+  access = injectCacheAccessTo('manageUpstreamCaches');
 
   rowBusy = computed(() => this.togglingUpstreamId() !== null || this.testingUpstreamId() !== null);
 

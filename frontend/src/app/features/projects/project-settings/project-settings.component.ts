@@ -12,7 +12,6 @@ import { Observable, concat, finalize, throwError, catchError } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
@@ -35,7 +34,8 @@ import { WritableDirective, ManagedDisableDirective, accessDisabledReason } from
 import { ConfirmService } from '@shared/confirm';
 import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
-import { AccessState, ProjectResponse } from '@core/models';
+import { ProjectResponse, accessTo } from '@core/models';
+import { injectProject } from '@core/resolvers/project-access.resolver';
 
 interface ProjectForm {
   display_name: string;
@@ -82,13 +82,15 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private projectsService = inject(ProjectsService);
-  private projectAccess = inject(ProjectAccessService);
+  private resolvedProject = injectProject();
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
   protected config = inject(ConfigService);
 
-  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
+  access = computed(() => accessTo(this.resolvedProject(), 'manageProjectSettings'));
+  sshKeyAccess = computed(() => accessTo(this.resolvedProject(), 'manageProjectSettings', 'manageSshKey'));
+  deleteAccess = computed(() => accessTo(this.resolvedProject(), 'deleteProject'));
 
   loading = signal(true);
   loadError = signal<unknown>(null);
@@ -134,7 +136,6 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
-    this.projectAccess.forProject(this.projectName).then((s) => this.access.set(s));
     this.loadProject();
     this.loadSSHKey();
   }

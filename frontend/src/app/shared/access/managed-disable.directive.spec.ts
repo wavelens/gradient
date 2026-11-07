@@ -141,3 +141,57 @@ describe('ManagedDisableDirective with a ControlValueAccessor', () => {
     expect(cvaInstance().isDisabled).toBe(false);
   });
 });
+
+@Component({
+  selector: 'busy-host',
+  standalone: true,
+  imports: [FormsModule, ManagedDisableDirective, FakeInputDirective],
+  template: `
+    <button [disabled]="busy()" [appManagedDisable]="access()"></button>
+    <fake-input [ngModel]="''" [disabled]="busy()" [appManagedDisable]="access()"></fake-input>
+  `,
+})
+class BusyHostComponent {
+  busy = signal(false);
+  access = signal<AccessState>({ managed: false, canEdit: true, canTrigger: true });
+}
+
+describe('ManagedDisableDirective with its own [disabled] binding', () => {
+  let fixture: ComponentFixture<BusyHostComponent>;
+
+  const button = () => fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+  const cva = () => fixture.debugElement.children[1].injector.get(FakeInputDirective);
+  const settle = () => new Promise((resolve) => setTimeout(resolve));
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [BusyHostComponent] });
+    fixture = TestBed.createComponent(BusyHostComponent);
+  });
+
+  it('keeps a managed control disabled when the busy flag is false', async () => {
+    fixture.componentInstance.access.set({ managed: true, canEdit: true, canTrigger: true });
+    fixture.detectChanges();
+    await settle();
+    expect(button().disabled).toBe(true);
+    expect(cva().isDisabled).toBe(true);
+  });
+
+  it('disables a writable control while busy, without an access tooltip', async () => {
+    fixture.componentInstance.busy.set(true);
+    fixture.detectChanges();
+    await settle();
+    expect(button().disabled).toBe(true);
+    expect(button().title).toBe('');
+    expect(cva().isDisabled).toBe(true);
+  });
+
+  it('enables a writable control once it is no longer busy', async () => {
+    fixture.componentInstance.busy.set(true);
+    fixture.detectChanges();
+    fixture.componentInstance.busy.set(false);
+    fixture.detectChanges();
+    await settle();
+    expect(button().disabled).toBe(false);
+    expect(cva().isDisabled).toBe(false);
+  });
+});

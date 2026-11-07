@@ -72,6 +72,7 @@ export class ProjectDetailComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   project = signal<ProjectResponse>((this.route.snapshot.data['projectAccess'] as ProjectAccessData).project);
+  canCreateTask = computed(() => this.project().permissions.includes('createTask'));
   tasks = signal<TaskResponse[]>([]);
   tasksTotal = signal(0);
   tasksPage = signal(1);

@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Observable, of, throwError } from 'rxjs';
@@ -13,7 +13,7 @@ import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { vi } from 'vitest';
 import { SecretsComponent } from './secrets.component';
 import { ProjectSecretsService } from '@core/services/project-secrets.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { AccessState } from '@core/models/access.model';
 import { ProjectSecretSummary, SopsRecipientResponse } from '@core/models';
 import { docsUrl } from '@core/docs';
@@ -61,9 +61,8 @@ function setup(access: AccessState = admin) {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ project: 'acme' }) } } },
+      { provide: ActivatedRoute, useFactory: () => projectRouteStub('acme', access) },
       { provide: ProjectSecretsService, useValue: service },
-      { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
       { provide: ConfirmService, useValue: { confirm } },
     ],
   });
@@ -84,6 +83,16 @@ function typeInto(id: string, value: string) {
 }
 
 describe('SecretsComponent', () => {
+  it('explains the missing permission to a viewer without listing secrets', async () => {
+    const { fixture, service } = setup({ managed: false, canEdit: false, canTrigger: false });
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(service.list).not.toHaveBeenCalled();
+    expect(text).toContain('No access to Secrets');
+    expect(text).toContain('manage project settings permission');
+    expect(text).not.toContain('Set secret');
+  });
+
   it('shows a refused load as one error without the empty state', async () => {
     const { fixture, service } = setup();
     service.list.mockReturnValue(throwError(() => ({ status: 403, message: 'You do not have permission to perform this action.' })));

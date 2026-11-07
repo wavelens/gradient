@@ -4,23 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import type { CachePermission, Permission } from './api.generated';
+
 export interface AccessState {
-  /// True when the resource is managed by declarative state. Config edits are
-  /// blocked even when the caller has permission, but trigger-style actions
-  /// (start/abort evaluations) remain available.
   managed: boolean;
-  /// True when the caller may edit configuration (Permission::EditTask /
-  /// Write or Admin project role / etc.).
   canEdit: boolean;
-  /// True when the caller may run trigger-style actions on the resource. For
-  /// tasks this is Permission::TriggerEvaluation. For resources without a
-  /// distinct trigger permission (caches, projects) this mirrors `canEdit`.
   canTrigger: boolean;
 }
 
-/// Lifts a backend entity into an `AccessState`. `can_trigger` is optional on
-/// the wire - entities without their own trigger permission (caches, projects)
-/// fall back to `can_edit`, preserving the previous single-permission model.
+export interface WithPermissions<P extends Permission | CachePermission> {
+  managed: boolean;
+  permissions: readonly P[];
+}
+
 export function accessFromEntity(e: {
   managed: boolean;
   can_edit: boolean;
@@ -31,4 +27,13 @@ export function accessFromEntity(e: {
     canEdit: e.can_edit,
     canTrigger: e.can_trigger ?? e.can_edit,
   };
+}
+
+/// Grant access to a control only to a caller with every listed permission on the project, task, or cache.
+export function accessTo<P extends Permission | CachePermission>(
+  holder: WithPermissions<P> | null | undefined,
+  ...required: [P, ...P[]]
+): AccessState {
+  const granted = !!holder && required.every((permission) => holder.permissions.includes(permission));
+  return { managed: holder?.managed ?? false, canEdit: granted, canTrigger: granted };
 }

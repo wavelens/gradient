@@ -13,7 +13,9 @@
       (click)="openCreateDialog()"
       [appManagedDisable]="access()"
     ></button>
-  @if (loading() || loadError()) {
+  @if (!access().canEdit) {
+    <gr-load-state [error]="missingPermission" [retryable]="false" errorTitle="No access to Integrations" />
+  } @else if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading integrations..." errorTitle="Failed to load integrations" (retry)="loadIntegrations()" />
   } @else {
     @if (githubAppAvailable() && !githubAppInstalled()) {

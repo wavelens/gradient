@@ -137,6 +137,7 @@
       } @else {
         <p class="text-secondary">No SSH key generated yet.</p>
         <button
+          *appWritable="sshKeyAccess()"
           grButton
           label="Generate SSH Key"
           icon="key"
@@ -150,9 +151,9 @@
   </gr-settings-section>
 
   <!-- Danger Zone -->
-  @if (access().canEdit) {
+  @if ((sshKey() && sshKeyAccess().canEdit) || deleteAccess().canEdit) {
     <gr-settings-section title="Danger Zone" danger>
-      @if (sshKey()) {
+      @if (sshKey() && sshKeyAccess().canEdit) {
         <gr-row>
           Regenerate SSH Key
           <span slot="meta">Generate a new SSH key. The existing key will stop working immediately.</span>
@@ -164,23 +165,25 @@
             severity="danger"
             (click)="regenerateSSHKey()"
             [disabled]="generatingSSH()"
-            [appManagedDisable]="access()"
+            [appManagedDisable]="sshKeyAccess()"
           ></button>
         </gr-row>
       }
-      <gr-row>
-        Delete Project
-        <span slot="meta">Permanently delete this project and all its tasks.</span>
-        <button
-          slot="actions"
-          grButton
-          label="Delete Project"
-          icon="delete"
-          severity="danger"
-          (click)="deleteProject()"
-          [appManagedDisable]="access()"
-        ></button>
-      </gr-row>
+      @if (deleteAccess().canEdit) {
+        <gr-row>
+          Delete Project
+          <span slot="meta">Permanently delete this project and all its tasks.</span>
+          <button
+            slot="actions"
+            grButton
+            label="Delete Project"
+            icon="delete"
+            severity="danger"
+            (click)="deleteProject()"
+            [appManagedDisable]="deleteAccess()"
+          ></button>
+        </gr-row>
+      }
     </gr-settings-section>
   }
 </gr-page-layout>

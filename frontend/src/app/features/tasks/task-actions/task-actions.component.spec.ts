@@ -5,6 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { taskAccessData } from '@core/resolvers/access-route.testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
@@ -27,7 +28,7 @@ function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
     snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }) },
     data: of({}),
-    parent: { data: of({ taskAccess: { task: {}, access } }) },
+    parent: { data: of(taskAccessData(access)) },
   } as unknown as ActivatedRoute;
 }
 

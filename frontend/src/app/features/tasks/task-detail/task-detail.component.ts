@@ -93,6 +93,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
 
   private resolved = injectTaskAccessData();
+  canOpenSettings = computed(() =>
+    (['editTask', 'manageTriggers', 'manageActions'] as const).some((p) => this.resolved()?.task.permissions.includes(p)),
+  );
+  canIncludeInstance = computed(() => this.resolved()?.task.permissions.includes('manageWorkers') ?? false);
   task = signal<TaskDetailsResponse | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
   entryPointsTotal = signal(0);

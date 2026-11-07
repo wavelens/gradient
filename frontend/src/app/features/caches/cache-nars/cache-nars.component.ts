@@ -24,7 +24,7 @@ import {
   TableComponent,
 } from '@gradient/ui/ui';
 import { WritableDirective } from '@shared/access';
-import { injectCacheAccess } from '@core/resolvers/inject-access';
+import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
 import { formatBytes, formatCount, relativeTime } from '@shared/text';
 import { narSearchText, parseNarSearch } from './nar-search';
@@ -64,7 +64,7 @@ export class CacheNarsComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
-  access = injectCacheAccess();
+  access = injectCacheAccessTo('writeStore');
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cache(this.cacheName, { label: 'NARs' }));

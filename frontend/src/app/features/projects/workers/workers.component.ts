@@ -14,11 +14,12 @@ import { WorkersService } from '@core/services/workers.service';
 import { inBackground } from '@core/interceptors/request-context';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { injectProject } from '@core/resolvers/project-access.resolver';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import {
   AccessState,
+  accessTo,
   ALL_ALLOWED,
   AllowedCapabilities,
   changedCapabilities,
@@ -98,7 +99,7 @@ export class WorkersComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private workersService = inject(WorkersService);
   private projectsService = inject(ProjectsService);
-  private projectAccess = inject(ProjectAccessService);
+  private resolvedProject = injectProject();
   private crumbs = inject(BreadcrumbsService);
   private messageService = inject(MessageService);
   private notify = inject(NotifyService);
@@ -108,7 +109,7 @@ export class WorkersComponent implements OnInit {
   config = inject(ConfigService);
   private myTeams = signal<TeamSummary[]>([]);
 
-  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
+  access = computed(() => accessTo(this.resolvedProject(), 'manageWorkers'));
 
   // Activate/Deactivate and Fire Test stay available on state-managed workers:
   // state restores `active` on restart and a test changes nothing.
@@ -148,7 +149,7 @@ export class WorkersComponent implements OnInit {
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Workers' }));
   /** The project UUID - shown as peer_id in the register dialog. */
-  projectId = signal<string>('');
+  projectId = computed(() => this.resolvedProject()?.id ?? '');
   workers = signal<ProjectWorkerEntry[]>([]);
   newWorkerId = '';
   newWorkerName = '';
@@ -212,8 +213,6 @@ export class WorkersComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
-    this.projectAccess.forProject(this.projectName).then((s) => this.access.set(s));
-    this.loadProjectId();
     this.loadWorkers();
     this.loadCacheSubscriptions();
     this.teamsService.list().subscribe({ next: (mine) => this.myTeams.set(mine), error: () => {} });
@@ -221,16 +220,6 @@ export class WorkersComponent implements OnInit {
 
   canOpenTeam(team: string): boolean {
     return canOpenTeam(this.authService.user(), this.myTeams(), team);
-  }
-
-  private loadProjectId(): void {
-    this.projectsService.getProject(this.projectName).subscribe({
-      next: (project) => {
-        this.projectId.set(project.id);
-        this.crumbs.rememberProject(this.projectName, project.display_name);
-      },
-      error: () => {},
-    });
   }
 
   loadWorkers(): void {

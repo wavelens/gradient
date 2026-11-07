@@ -31,7 +31,7 @@ import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { injectCacheAccess } from '@core/resolvers/inject-access';
+import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import {
   MemberItem,
   RoleResponse_CacheRoleOwner,
@@ -81,7 +81,8 @@ export class CacheMembersRolesComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
-  access = injectCacheAccess();
+  access = injectCacheAccessTo('manageCacheMembers');
+  roleAccess = injectCacheAccessTo('manageCacheRoles');
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Members & Roles' }));
@@ -142,6 +143,7 @@ export class CacheMembersRolesComponent implements OnInit {
   }
 
   loadInvitations(): void {
+    if (!this.access().canEdit) return;
     this.invitationsLoadError.set(null);
     this.cachesService.getInvitations(this.cacheName).subscribe({
       next: (invitations) => this.invitations.set(invitations),

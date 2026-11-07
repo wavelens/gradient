@@ -5,6 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { cacheAccessData } from '@core/resolvers/access-route.testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
@@ -19,7 +20,7 @@ import { RoleResponse_CacheRoleOwner } from '@core/models';
 
 function activatedRouteStub(canEdit = false) {
   const data = canEdit
-    ? { cacheAccess: { access: { managed: false, canEdit: true, canTrigger: true } } }
+    ? cacheAccessData({ managed: false, canEdit: true, canTrigger: true })
     : {};
   return {
     snapshot: { paramMap: convertToParamMap({ cache: 'my-cache' }) },
@@ -129,7 +130,7 @@ describe('CacheMembersRolesComponent', () => {
 
 describe('CacheMembersRolesComponent - pending invitations', () => {
   it('lists a pending invitation separately from members', async () => {
-    const fixture = setup();
+    const fixture = setup(true);
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();

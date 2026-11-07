@@ -26,7 +26,7 @@ import {
   BadgeSeverity,
 } from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
-import { injectTaskAccess } from '@core/resolvers/inject-access';
+import { injectTaskAccessTo } from '@core/resolvers/inject-access';
 import {
   ACTION_TYPE_LABEL,
   ActionType,
@@ -78,7 +78,7 @@ export class TaskActionsComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
-  access = injectTaskAccess();
+  access = injectTaskAccessTo('manageActions');
 
   rowDisabled = computed(
     () =>

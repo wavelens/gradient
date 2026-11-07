@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
@@ -15,15 +15,12 @@ import { NotifyService } from '@core/services/notify.service';
 import { CacheSubscriptionsComponent } from './cache-subscriptions.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
 import { By } from '@angular/platform-browser';
 import { CreateCacheDialogComponent } from '@shared/forms';
 
-function activatedRouteStub() {
-  return { snapshot: { paramMap: convertToParamMap({ project: 'acme' }) } } as Partial<ActivatedRoute>;
-}
 
 function findByText(root: HTMLElement, text: string): HTMLElement | null {
   const target = text.toLowerCase();
@@ -49,7 +46,7 @@ function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponen
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub() },
+      { provide: ActivatedRoute, useFactory: () => projectRouteStub('acme', access) },
       {
         provide: ProjectsService,
         useValue: {
@@ -67,7 +64,6 @@ function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponen
       { provide: ConfirmService, useValue: { confirm } },
       { provide: CachesService, useValue: {} },
       { provide: ConfigService, useValue: { createCache: 'all', canCreate: () => true } },
-      { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
     ],
   });
   return TestBed.createComponent(CacheSubscriptionsComponent);

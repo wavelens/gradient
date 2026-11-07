@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Subject, of, throwError } from 'rxjs';
@@ -15,13 +15,11 @@ import { RoleResponse_ProjectRoleOwner } from '@core/models';
 import { MembersRolesComponent } from './members-roles.component';
 import { ProjectsService } from '@core/services/projects.service';
 import { UserService } from '@core/services/user.service';
-import { ProjectAccessService } from '@core/services/project-access.service';
+import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { AccessState } from '@core/models/access.model';
+import type { Permission } from '@core/models';
 import { NotifyService } from '@core/services/notify.service';
 
-function activatedRouteStub() {
-  return { snapshot: { paramMap: convertToParamMap({ project: 'acme' }) } } as Partial<ActivatedRoute>;
-}
 
 function findByText(root: HTMLElement, text: string): HTMLElement | null {
   const target = text.toLowerCase();
@@ -38,7 +36,7 @@ const deleteRole = vi.fn();
 const notify = { success: vi.fn(), failure: vi.fn() };
 const confirm = vi.fn();
 
-function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
+function setup(access: AccessState, permissions?: Permission[]): ComponentFixture<MembersRolesComponent> {
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   deleteRole.mockReset().mockReturnValue(of(true));
   revokeInvitation.mockReset().mockReturnValue(of('Invitation revoked'));
@@ -53,7 +51,7 @@ function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub() },
+      { provide: ActivatedRoute, useFactory: () => projectRouteStub('acme', access, permissions && { permissions }) },
       {
         provide: ProjectsService,
         useValue: {
@@ -82,7 +80,6 @@ function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
       },
       { provide: ConfirmService, useValue: { confirm } },
       { provide: UserService, useValue: { listUsers: () => of([]) } },
-      { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
       { provide: NotifyService, useValue: notify },
     ],
   });
@@ -112,6 +109,26 @@ describe('MembersRolesComponent - access gating', () => {
     expect(addBtn!.disabled).toBe(true);
     expect(newRoleBtn).not.toBeNull();
     expect(newRoleBtn!.disabled).toBe(true);
+  });
+});
+
+describe('MembersRolesComponent - permissions', () => {
+  const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
+
+  it('offers member writes but no role writes without the manage roles permission', async () => {
+    const fixture = setup(writable, ['viewProject', 'manageMembers']);
+    await settled(fixture);
+    expect(findByText(fixture.nativeElement, 'add member')).not.toBeNull();
+    expect(findByText(fixture.nativeElement, 'new role')).toBeNull();
+  });
+
+  it('offers role writes but neither member writes nor invitations without the manage members permission', async () => {
+    const fixture = setup(writable, ['viewProject', 'manageRoles']);
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(findByText(fixture.nativeElement, 'add member')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'new role')).not.toBeNull();
+    expect(text).not.toContain('Pending Invitations');
   });
 });
 

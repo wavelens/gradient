@@ -19,6 +19,7 @@ import { EventsService } from '@core/services/events.service';
 import { NotifyService } from '@core/services/notify.service';
 import type { WebhookResponse } from '@core/models';
 import { webhooksBase } from '@core/models/webhook.model';
+import { EVERY_CACHE_PERMISSION, EVERY_PERMISSION } from '@core/resolvers/access-route.testing';
 
 const hook: WebhookResponse = {
   id: 'w1',
@@ -58,7 +59,13 @@ function setup(
       { provide: CachesService, useValue: { getCache: () => of({ display_name: 'Main' }) } },
       { provide: TeamsService, useValue: { get: () => of({ display_name: 'Platform' }) } },
       { provide: EventsService, useValue: { catalog$: of([]) } },
-      { provide: ActivatedRoute, useValue: { snapshot: { data, paramMap: convertToParamMap(params) } } },
+      {
+        provide: ActivatedRoute,
+        useValue: {
+          snapshot: { data: { projectAccess: { project: { permissions: EVERY_PERMISSION } }, ...data }, paramMap: convertToParamMap(params) },
+          parent: { snapshot: { data: { cacheAccess: { cache: { permissions: EVERY_CACHE_PERMISSION } } } } },
+        },
+      },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
     ],
@@ -251,6 +258,18 @@ describe('WebhooksComponent', () => {
     expect(root.textContent).toContain('No permission');
     expect(root.textContent).not.toContain('No webhooks');
     expect(root.textContent).not.toContain('New Webhook');
+  });
+
+  it('explains the missing permission to a project viewer without asking the server', () => {
+    const { root, service } = setup(
+      { webhookScope: 'project', projectAccess: { project: { permissions: ['viewProject'] } } },
+      { project: 'p' },
+    );
+    expect(service.list).not.toHaveBeenCalled();
+    expect(root.textContent).toContain('No access to Webhooks');
+    expect(root.textContent).toContain('manage webhooks permission for this project');
+    expect(root.textContent).not.toContain('New Webhook');
+    expect(root.textContent).not.toContain('Try Again');
   });
 
   it('shows failed deliveries as an error, never as no deliveries', () => {

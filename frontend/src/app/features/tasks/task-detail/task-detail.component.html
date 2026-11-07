@@ -30,7 +30,7 @@
                 (click)="startEvaluation()" [loading]="starting()"
                 [disabled]="starting() || evaluationQueued()"
                 [grTooltip]="evaluationQueued() ? 'An evaluation is already queued' : ''"></button>
-        @if (proj.name !== 'build-request') {
+        @if (proj.name !== 'build-request' && canOpenSettings()) {
           <a grButton label="Settings" icon="settings" severity="secondary"
                   [routerLink]="['/project', projectName, 'task', taskName, 'settings']"></a>
         }
@@ -293,10 +293,12 @@
                    [ngModel]="reportOptions().include_logs"
                    (ngModelChange)="setReportOption('include_logs', $event)"
                    grTooltip="Off by default: full logs for failed and aborted attempts, carrying whatever the build printed."></gr-checkbox>
-      <gr-checkbox label="Include instance context"
-                   [ngModel]="reportOptions().include_instance"
-                   (ngModelChange)="setReportOption('include_instance', $event)"
-                   grTooltip="Off by default: worker fleet, upstream caches, resolved server settings. The &quot;Manage workers&quot; project permission is necessary."></gr-checkbox>
+      @if (canIncludeInstance()) {
+        <gr-checkbox label="Include instance context"
+                     [ngModel]="reportOptions().include_instance"
+                     (ngModelChange)="setReportOption('include_instance', $event)"
+                     grTooltip="Off by default: worker fleet, upstream caches, resolved server settings. The &quot;Manage workers&quot; project permission is necessary."></gr-checkbox>
+      }
       <gr-checkbox label="Include exec jobs"
                    [ngModel]="reportOptions().include_exec"
                    (ngModelChange)="setReportOption('include_exec', $event)"

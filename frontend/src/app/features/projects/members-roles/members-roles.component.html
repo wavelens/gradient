@@ -93,14 +93,14 @@
   <gr-settings-section title="Roles" [card]="false" maxWidth="none">
     <button
       slot="actions"
-        *appWritable="access()"
+        *appWritable="roleAccess()"
         grButton
         label="New Role"
         icon="add"
         severity="secondary"
         (click)="openCreateRoleDialog()"
         [disabled]="rolesLoading() || availablePermissions().length === 0"
-        [appManagedDisable]="access()"
+        [appManagedDisable]="roleAccess()"
       ></button>
     <gr-load-state
       [loading]="rolesLoading()"
@@ -124,22 +124,22 @@
               <div slot="actions">
                 @if (!role.builtin) {
                   <button
-                    *appWritable="access()"
+                    *appWritable="roleAccess()"
                     grButton
                     icon="edit"
                     severity="secondary"
                    
                     [disabled]="savingRole()"
-                    [appManagedDisable]="access()"
+                    [appManagedDisable]="roleAccess()"
                     (click)="openEditRoleDialog(role)"
                   ></button>
                   <button
-                    *appWritable="access()"
+                    *appWritable="roleAccess()"
                     grButton
                     icon="delete"
                     severity="danger"
                    
-                    [appManagedDisable]="access()"
+                    [appManagedDisable]="roleAccess()"
                     (click)="deleteRole(role)"
                   ></button>
                 }
