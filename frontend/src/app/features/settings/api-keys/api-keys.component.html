@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: 'Settings', link: ['/settings', 'profile'] }, { label: 'API Keys' }]" title="API Keys" subtitle="Manage API keys for programmatic access">
+<gr-page-layout [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'API Keys' }]" title="API Keys" subtitle="Manage API keys for programmatic access">
   <button slot="actions" grButton label="New API Key" icon="add" (click)="openCreateDialog()"></button>
   <gr-load-state
     [loading]="loading()"

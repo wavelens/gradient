@@ -31,6 +31,7 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
+import { links } from '@shared/routing';
 
 interface SettingsForm {
   display_name: string;
@@ -71,6 +72,7 @@ interface SettingsForm {
   `,
 })
 export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private teams = inject(TeamsService);
@@ -171,7 +173,7 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
       })
       .subscribe(() => {
         this.notify.success('Team deleted');
-        this.router.navigate(['/teams']);
+        this.router.navigateByUrl(links.teams());
       });
   }
 

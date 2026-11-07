@@ -6,6 +6,7 @@
 
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { RowComponent, RowListComponent } from '@gradient/ui/ui';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-dashboard-start',
@@ -17,7 +18,7 @@ import { RowComponent, RowListComponent } from '@gradient/ui/ui';
       <h2>Where do I start?</h2>
       <gr-row-list>
         @for (s of steps; track s.title) {
-          <gr-row [icon]="s.icon" [linkLabel]="s.title" [link]="[s.link]">
+          <gr-row [icon]="s.icon" [linkLabel]="s.title" [link]="s.link">
             {{ s.title }}
             <span slot="meta">{{ s.detail }}</span>
           </gr-row>
@@ -28,8 +29,8 @@ import { RowComponent, RowListComponent } from '@gradient/ui/ui';
 })
 export class DashboardStartComponent {
   readonly steps = [
-    { icon: 'folder', title: 'Create a project', detail: 'A project groups tasks and members', link: '/projects' },
-    { icon: 'group', title: 'Create a team', detail: 'A team shares its members and workers with projects and caches', link: '/teams' },
-    { icon: 'storage', title: 'Create or subscribe to a cache', detail: 'Serve build results to your machines', link: '/caches' },
+    { icon: 'folder', title: 'Create a project', detail: 'A project groups tasks and members', link: links.projects() },
+    { icon: 'group', title: 'Create a team', detail: 'A team shares its members and workers with projects and caches', link: links.teams() },
+    { icon: 'storage', title: 'Create or subscribe to a cache', detail: 'Serve build results to your machines', link: links.caches() },
   ];
 }

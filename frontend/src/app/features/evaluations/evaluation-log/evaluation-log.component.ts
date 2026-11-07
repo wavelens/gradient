@@ -33,6 +33,7 @@ import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { AccessService, WritableDirective } from '@shared/access';
+import { links } from '@shared/routing';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
   BuildProgress,
@@ -137,7 +138,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   projectName = '';
   projectAndTaskCrumbs = computed(() => {
     const task = this.evaluation()?.task_name;
-    const trail = task ? this.crumbs.task(this.projectName, task) : this.crumbs.project(this.projectName);
+    const trail = task ? this.crumbs.taskAt(this.projectName, task, this.evaluationId) : this.crumbs.project(this.projectName);
 
     return trail.slice(1);
   });
@@ -173,27 +174,25 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const build = this.contextBuild();
     if (!build) return [];
 
-    const inEvaluation = { evalId: this.evaluationId };
+    const from = { evaluation: this.evaluationId };
     const job = build.dispatched_job;
     return [
       {
         label: 'Graph',
         icon: 'account_tree',
-        routerLink: ['/project', this.projectName, 'graph', build.id],
-        queryParams: inEvaluation,
+        routerLink: links.dependencyGraph(this.projectName, build.id, from),
       },
       {
         label: 'Show Job',
         icon: 'work',
         disabled: !job,
-        routerLink: job ? ['/board', 'jobs', job] : undefined,
+        routerLink: job ? links.boardJob(job) : undefined,
       },
       {
         label: 'Artefacts',
         icon: 'inventory_2',
         disabled: !build.has_artefacts,
-        routerLink: build.has_artefacts ? ['/project', this.projectName, 'artefacts', build.id] : undefined,
-        queryParams: inEvaluation,
+        routerLink: build.has_artefacts ? links.artefacts(this.projectName, build.id, from) : undefined,
       },
       { separator: true },
       {
@@ -1224,6 +1223,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   readonly formatWaitingReason = formatWaitingReason;
   readonly waitingTitle = waitingTitle;
+  protected readonly links = links;
 
   isWorkersWaiting(reason: WaitingReason | undefined): boolean {
     return reason?.kind === 'workers';

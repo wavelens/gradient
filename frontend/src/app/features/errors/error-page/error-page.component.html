@@ -23,12 +23,12 @@
     }
     <div class="error-actions">
       @if (restricted() && !user()) {
-        <a grButton routerLink="/account/login" [queryParams]="from ? { next: from } : {}" label="Sign In"></a>
+        <a grButton [routerLink]="links.login(from)" label="Sign In"></a>
       }
       @if (denied(); as view) {
         <a grButton [routerLink]="view.backLink" [severity]="user() ? 'primary' : 'secondary'" [label]="view.backLabel"></a>
       } @else {
-        <a grButton routerLink="/" [severity]="restricted() && !user() ? 'secondary' : 'primary'" label="Go Home"></a>
+        <a grButton [routerLink]="links.dashboard()" [severity]="restricted() && !user() ? 'secondary' : 'primary'" label="Go Home"></a>
       }
       @if (restricted() && user()) {
         <button grButton type="button" severity="secondary" label="Switch Account" (click)="switchAccount()"></button>

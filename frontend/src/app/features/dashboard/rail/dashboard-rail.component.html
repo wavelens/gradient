@@ -7,14 +7,14 @@
 @if (rail(); as r) {
   <aside class="rail">
     <section>
-      <h3>Projects <a routerLink="/projects">+ New</a></h3>
+      <h3>Projects <a [routerLink]="links.projects()">+ New</a></h3>
       <ul>
         @for (p of r.projects; track p.name) {
           <li>
             <span class="row">
               <gr-star-button [target]="{ kind: 'project', project: p.name }" [(starred)]="p.starred" />
               <span [class]="'dot dot--' + (p.status ?? 'none')"></span>
-              <a class="n" [routerLink]="['/project', p.name]">{{ p.display_name }}</a>
+              <a class="n" [routerLink]="links.project(p.name)">{{ p.display_name }}</a>
               @if (!p.tasks) {
                 <span class="count">{{ p.task_count }} {{ p.task_count === 1 ? 'task' : 'tasks' }}</span>
               }
@@ -23,7 +23,7 @@
               <ul class="tasks">
                 @for (t of p.tasks; track t.name) {
                   <li>
-                    <a class="row" [routerLink]="['/project', p.name, 'task', t.name]">
+                    <a class="row" [routerLink]="links.task(p.name, t.name)">
                       <span [class]="'dot dot--' + (t.status ?? 'none')"></span>
                       <span class="n">{{ t.name }}</span>
                     </a>
@@ -34,23 +34,23 @@
           </li>
         }
       </ul>
-      <a class="all" routerLink="/projects">All projects -></a>
+      <a class="all" [routerLink]="links.projects()">All projects -></a>
     </section>
 
     <section>
-      <h3>Caches <a routerLink="/caches">+ New</a></h3>
+      <h3>Caches <a [routerLink]="links.caches()">+ New</a></h3>
       <ul>
         @for (c of r.caches; track c.name) {
           <li>
             <span class="row">
               <gr-star-button [target]="{ kind: 'cache', cache: c.name }" [(starred)]="c.starred" />
-              <a class="n" [routerLink]="['/caches', c.name]">{{ c.display_name }}</a>
+              <a class="n" [routerLink]="links.cache(c.name)">{{ c.display_name }}</a>
               <span class="count">{{ count(c.nar_count) }} NARs</span>
             </span>
           </li>
         }
       </ul>
-      <a class="all" routerLink="/caches">All caches -></a>
+      <a class="all" [routerLink]="links.caches()">All caches -></a>
     </section>
   </aside>
 } @else if (failed()) {

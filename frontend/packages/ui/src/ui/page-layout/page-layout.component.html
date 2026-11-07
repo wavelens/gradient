@@ -6,19 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 <div class="page-layout" [style.max-width]="maxWidth()">
   <header class="page-layout__header">
   @if (breadcrumb().length) {
-    <nav class="breadcrumb" aria-label="Breadcrumb">
-      @for (crumb of breadcrumb(); track $index; let last = $last) {
-        @if (last) {
-          <span class="breadcrumb-current" aria-current="page"><ng-container *ngTemplateOutlet="name; context: { $implicit: crumb.label }" /></span>
-        } @else {
-          <a class="breadcrumb-link" [routerLink]="crumb.link"><ng-container *ngTemplateOutlet="name; context: { $implicit: crumb.label }" /></a>
-          <span class="breadcrumb-separator" aria-hidden="true">/</span>
-        }
-      }
-      <ng-template #name let-label>
-        @if (label === null) { <gr-skeleton width="8ch" /> } @else { {{ label }} }
-      </ng-template>
-    </nav>
+    <gr-breadcrumb [trail]="breadcrumb()" />
   }
     <h1>{{ title() }}</h1>
     @if (subtitle()) {

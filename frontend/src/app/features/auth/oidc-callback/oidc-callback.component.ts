@@ -7,6 +7,7 @@
 import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-oidc-callback',
@@ -26,10 +27,10 @@ export class OidcCallbackComponent implements OnInit {
         if (next && next.startsWith('/')) {
           this.router.navigateByUrl(next);
         } else {
-          this.router.navigate(['/']);
+          this.router.navigateByUrl(links.dashboard());
         }
       },
-      error: () => this.router.navigate(['/account/login']),
+      error: () => this.router.navigateByUrl(links.login()),
     });
   }
 }

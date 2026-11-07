@@ -30,6 +30,7 @@ import { repositoryUrlError } from '@shared/text';
 import { NameFieldsComponent, fieldChecks, firstFieldError, nameAvailability } from '@shared/forms';
 import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
+import { links } from '@shared/routing';
 
 const RESERVED_TASK_NAMES = ['build-request'];
 
@@ -58,6 +59,7 @@ const RESERVED_TASK_NAMES = ['build-request'];
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class ProjectDetailComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   protected authService = inject(AuthService);
   private tasksService = inject(TasksService);

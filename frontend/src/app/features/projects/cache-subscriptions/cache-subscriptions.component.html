@@ -57,7 +57,7 @@
                 icon="arrow_forward"
                 severity="secondary"
                 size="small"
-                [routerLink]="['/caches', cache.name]"
+                [routerLink]="links.cache(cache.name)"
                 [attr.aria-label]="'Open cache ' + cache.name"
                 grTooltip="Open cache"
               ></a>

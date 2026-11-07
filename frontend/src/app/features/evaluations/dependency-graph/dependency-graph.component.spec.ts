@@ -5,6 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { Subject, of } from 'rxjs';
 import { EvaluationsService } from '@core/services/evaluations.service';
@@ -28,6 +29,7 @@ describe('DependencyGraphComponent live updates', () => {
       imports: [DependencyGraphComponent],
       providers: [
         provideRouter([]),
+      { provide: BreadcrumbsService, useValue: { buildPage: () => [] } },
         { provide: ActivatedRoute, useValue: {
           snapshot: {
             paramMap: convertToParamMap({ project: 'proj', buildId: 'b1' }),

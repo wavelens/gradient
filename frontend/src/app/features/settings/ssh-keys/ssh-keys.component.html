@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: 'Settings', link: ['/settings', 'profile'] }, { label: 'SSH Keys' }]" title="SSH Keys" subtitle="Keys for ssh-ng:// substituters, nix copy and build hosts">
+<gr-page-layout [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'SSH Keys' }]" title="SSH Keys" subtitle="Keys for ssh-ng:// substituters, nix copy and build hosts">
   <button slot="actions" grButton label="Add SSH Key" icon="add" (click)="openDialog()"></button>
 
   <gr-form-field label="Store address">

@@ -9,7 +9,7 @@
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading evaluation..."
                    errorTitle="Failed to load evaluation" emptyIcon="search_off" emptyTitle="Evaluation not found"
                    emptyMessage="The evaluation was deleted or never existed." (retry)="loadEvaluation()">
-      <button slot="empty-action" grButton label="Back to Project" icon="arrow_back" [routerLink]="['/project', projectName]"></button>
+      <button slot="empty-action" grButton label="Back to Project" icon="arrow_back" [routerLink]="links.project(projectName)"></button>
     </gr-load-state>
   </div>
 } @else if (evaluation(); as ev) {
@@ -29,12 +29,7 @@
           <a [routerLink]="crumb.link" class="breadcrumb-link">@if (crumb.label === null) {<gr-skeleton width="8ch" />} @else {{{ crumb.label }}}</a>
           <span class="breadcrumb-sep">/</span>
         }
-        @if (ev.task_name) {
-          <a [routerLink]="['/project', projectName, 'task', ev.task_name]" [queryParams]="{ eval: ev.id }"
-             class="breadcrumb-link breadcrumb-current">Evaluation</a>
-        } @else {
-          <span class="breadcrumb-current" aria-current="page">Evaluation</span>
-        }
+        <span class="breadcrumb-current" aria-current="page">Evaluation</span>
       </div>
 
       <div class="overview-block">

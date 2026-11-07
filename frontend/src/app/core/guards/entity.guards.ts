@@ -13,12 +13,13 @@ import { TasksService } from '@core/services/tasks.service';
 import { TeamsService } from '@core/services/teams.service';
 import { WorkersService } from '@core/services/workers.service';
 import { DeniedTarget, deniedPage, denyOnRefusal } from '@core/routing/access-denied';
+import { links } from '@shared/routing';
 
 export const visibleTeamGuard: CanActivateFn = (route, state) => {
   const name = route.paramMap.get('team') ?? '';
   return inject(TeamsService).get(name).pipe(
     map(() => true as const),
-    denyOnRefusal({ kind: 'team', name, back: '/teams' }, state.url),
+    denyOnRefusal({ kind: 'team', name, back: String(links.teams()) }, state.url),
   );
 };
 
@@ -27,7 +28,7 @@ export const evaluationInProjectGuard: CanActivateFn = (route, state) => {
   const tasks = inject(TasksService);
   const project = route.paramMap.get('project') ?? '';
   const id = route.paramMap.get('evaluationId') ?? '';
-  const target: DeniedTarget = { kind: 'evaluation', name: id, back: `/project/${project}` };
+  const target: DeniedTarget = { kind: 'evaluation', name: id, back: String(links.project(project)) };
   return inject(EvaluationsService).getEvaluation(id).pipe(
     switchMap((evaluation) => evaluation.task_name
       ? tasks.getTask(project, evaluation.task_name).pipe(map((task) => task.id === evaluation.task))
@@ -42,7 +43,7 @@ export const execJobInTaskGuard: CanActivateFn = (route, state) => {
   const project = route.paramMap.get('project') ?? '';
   const task = route.paramMap.get('task') ?? '';
   const id = route.paramMap.get('job') ?? '';
-  const target: DeniedTarget = { kind: 'execJob', name: id, back: `/project/${project}/task/${task}` };
+  const target: DeniedTarget = { kind: 'execJob', name: id, back: String(links.task(project, task)) };
   return inject(ExecJobsService).get(id).pipe(
     map((job) => (job.project === project && job.task === task) || deniedPage(router, target, state.url)),
     denyOnRefusal(target, state.url),
@@ -53,7 +54,7 @@ export const workerInProjectGuard: CanActivateFn = (route, state) => {
   const router = inject(Router);
   const project = route.paramMap.get('project') ?? '';
   const id = route.paramMap.get('workerId') ?? '';
-  const target: DeniedTarget = { kind: 'worker', name: id, back: `/project/${project}/workers` };
+  const target: DeniedTarget = { kind: 'worker', name: id, back: String(links.projectPage(project, 'workers')) };
   return inject(WorkersService).getWorkers(project).pipe(
     map((workers) => workers.some((worker) => worker.worker_id === id) || deniedPage(router, target, state.url)),
     denyOnRefusal(target, state.url),

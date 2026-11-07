@@ -27,6 +27,7 @@ import {
 } from '@gradient/ui/ui';
 import { NameFieldsComponent, nameAvailability } from '@shared/forms';
 import { ProjectSummary, PublicProjectSummary } from '@core/models';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-project-list',
@@ -52,6 +53,7 @@ import { ProjectSummary, PublicProjectSummary } from '@core/models';
   styleUrl: './project-list.component.scss',
 })
 export class ProjectListComponent implements OnInit {
+  protected readonly links = links;
   readonly visibilityOptions = [
     { label: 'Private', value: false },
     { label: 'Public', value: true },

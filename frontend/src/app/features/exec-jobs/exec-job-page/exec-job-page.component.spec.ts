@@ -341,7 +341,7 @@ describe('ExecJobPageComponent', () => {
     const { fixture } = setup('completed', SSH, {}, { ...job('completed'), dispatched_job: 'dj1' });
     const item = fixture.componentInstance.jobMenu().find((i) => i.label === 'Show job');
     expect(fixture.componentInstance.jobMenu().map((i) => i.label)).toEqual(['Show job']);
-    expect(item?.routerLink).toEqual(['/board', 'jobs', 'dj1']);
+    expect(String(item?.routerLink)).toBe('/board/jobs/dj1');
   });
 
   it('asks first, naming the entry point, then aborts', () => {

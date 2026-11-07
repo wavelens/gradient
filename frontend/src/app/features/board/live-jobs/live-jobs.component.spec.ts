@@ -150,9 +150,9 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     expect(rows.length).toBe(1);
     expect(Array.from(rows[0].querySelectorAll('td')).slice(1, 3).map((cell) => cell.textContent?.trim()))
       .toEqual(['2 sub jobs', 'nightly: apps.x86_64-linux.train (cluster, 2 sub jobs)']);
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     rows[0].click();
-    expect(navigate).toHaveBeenCalledWith(['/board', 'clusters', 'c1']);
+    expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/board/clusters/c1');
   });
 
   it('renders - when the subject is unknown', () => {

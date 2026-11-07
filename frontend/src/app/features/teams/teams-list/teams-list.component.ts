@@ -21,6 +21,7 @@ import {
   RowListComponent,
 } from '@gradient/ui/ui';
 import { NameFieldsComponent, nameAvailability } from '@shared/forms';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-teams-list',
@@ -40,6 +41,7 @@ import { NameFieldsComponent, nameAvailability } from '@shared/forms';
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class TeamsListComponent implements OnInit {
+  protected readonly links = links;
   private teams = inject(TeamsService);
   private router = inject(Router);
   private config = inject(ConfigService);
@@ -94,7 +96,7 @@ export class TeamsListComponent implements OnInit {
     this.creating.set(true);
     this.error.set(null);
     this.teams.create(this.form.name, this.form.displayName).subscribe({
-      next: () => this.router.navigate(['/team', this.form.name]),
+      next: () => this.router.navigateByUrl(links.team(this.form.name)),
       error: (err: unknown) => {
         this.error.set(apiErrorMessage(err, 'Failed to create the team.'));
         this.creating.set(false);

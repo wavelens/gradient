@@ -22,9 +22,9 @@
       </button>
       <gr-menu #userMenu [model]="userMenuItems" />
     } @else {
-      <a routerLink="/account/login" [queryParams]="router.url.startsWith('/account/') ? null : { next: router.url }" class="user-link">Login</a>
+      <a [routerLink]="links.login(router.url.startsWith('/account/') ? null : router.url)" class="user-link">Login</a>
       @if (!registrationDisabled) {
-        <a routerLink="/account/register" class="user-link">Register</a>
+        <a [routerLink]="links.register()" class="user-link">Register</a>
       }
     }
   </div>

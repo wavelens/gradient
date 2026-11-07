@@ -34,6 +34,7 @@ import { ConfirmService } from '@shared/confirm';
 import { relativeTime } from '@shared/text';
 import { fieldChecks } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-webhooks',
@@ -130,9 +131,9 @@ export class WebhooksComponent implements OnInit {
       case 'cache':
         return this.crumbs.cacheSettings(this.scope.name, page);
       case 'team':
-        return this.crumbs.team(this.scope.name, { label: 'Settings', link: ['/team', this.scope.name, 'settings'] }, page);
+        return this.crumbs.team(this.scope.name, { label: 'Settings', link: links.teamPage(this.scope.name, 'settings') }, page);
       case 'instance':
-        return [{ label: 'Job Board', link: ['/board', 'health'] }, page];
+        return [{ label: 'Job Board', link: links.board('health') }, page];
     }
   }
 

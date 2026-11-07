@@ -15,6 +15,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { formatBytes, formatDuration } from '@shared/text';
 import { BoardHealth, AdminTaskDto } from '@core/models';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-board-health',
@@ -76,9 +77,9 @@ import { BoardHealth, AdminTaskDto } from '@core/models';
       <h2>Admin</h2>
       <div class="admin-actions">
         @if (!config.githubAppEnabled) {
-          <a class="btn" routerLink="/admin/github-app">Set up GitHub App</a>
+          <a class="btn" [routerLink]="links.admin('github-app')">Set up GitHub App</a>
         }
-        <a class="btn" routerLink="/admin/webhooks">Instance Webhooks</a>
+        <a class="btn" [routerLink]="links.admin('webhooks')">Instance Webhooks</a>
         <button class="btn" (click)="runDeepGc()">Run Deep GC</button>
         @if (h.draining) {
           <button class="btn" (click)="disableDraining()" [disabled]="drainBusy()">Disable Draining</button>
@@ -111,6 +112,7 @@ import { BoardHealth, AdminTaskDto } from '@core/models';
   styleUrl: './health.component.scss',
 })
 export class BoardHealthComponent implements OnInit {
+  protected readonly links = links;
   private board = inject(BoardService);
   private admin = inject(AdminService);
   protected config = inject(ConfigService);

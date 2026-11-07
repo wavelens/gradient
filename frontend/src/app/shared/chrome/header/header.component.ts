@@ -12,13 +12,14 @@ import { AuthService } from '@core/services/auth.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
 import { ConfigService } from '@core/services/config.service';
 import { WhatsNewService } from '@core/whats-new/whats-new.service';
+import { links } from '@shared/routing';
 
-const BRAND: Brand = { label: 'Gradient', href: '/' };
+const BRAND: Brand = { label: 'Gradient', href: String(links.dashboard()) };
 const NAV: (NavLink & { signedIn?: true; publicList?: true })[] = [
-  { label: 'Dashboard', href: '/', exact: true, signedIn: true },
-  { label: 'Projects', href: '/projects', publicList: true },
-  { label: 'Caches', href: '/caches', publicList: true },
-  { label: 'Teams', href: '/teams', signedIn: true },
+  { label: 'Dashboard', href: String(links.dashboard()), exact: true, signedIn: true },
+  { label: 'Projects', href: String(links.projects()), publicList: true },
+  { label: 'Caches', href: String(links.caches()), publicList: true },
+  { label: 'Teams', href: String(links.teams()), signedIn: true },
   { label: 'Job Board', href: '/board', signedIn: true },
 ];
 
@@ -31,6 +32,7 @@ const NAV: (NavLink & { signedIn?: true; publicList?: true })[] = [
   styleUrl: './header.component.scss',
 })
 export class AppHeaderComponent {
+  protected readonly links = links;
   authService = inject(AuthService);
   protected palette = inject(CommandPaletteService);
   protected router = inject(Router);
@@ -45,8 +47,8 @@ export class AppHeaderComponent {
   });
 
   protected readonly userMenuItems: MenuItem[] = [
-    { label: 'Settings', icon: 'settings', routerLink: '/settings/profile' },
-    { label: 'My Invites', icon: 'mail', routerLink: '/settings/invites' },
+    { label: 'Settings', icon: 'settings', routerLink: links.settings('profile') },
+    { label: 'My Invites', icon: 'mail', routerLink: links.settings('invites') },
     ...(this.whatsNew.hasNotes ? [{ label: "What's New", icon: 'new_releases', command: () => this.whatsNew.showAll() }] : []),
     { separator: true },
     { label: 'Log out', icon: 'logout', command: () => this.logout() },

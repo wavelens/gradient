@@ -19,6 +19,7 @@ import {
 import { MetricChartComponent } from '@shared/ui';
 import { clockTime, serverTime, formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
 import { WorkerSamplePoint, WorkerConnectionEntry } from '@core/models';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-worker-metrics',
@@ -92,7 +93,7 @@ export class WorkerMetricsComponent implements OnInit {
   workerName = computed(() => this.displayName() || this.workerId);
   breadcrumb = computed(() => this.crumbs.projectSettings(
     this.project,
-    { label: 'Workers', link: ['/project', this.project, 'workers'] },
+    { label: 'Workers', link: links.projectPage(this.project, 'workers') },
     { label: this.workerName() },
   ));
 

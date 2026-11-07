@@ -21,6 +21,7 @@ import {
 } from '@gradient/ui/ui';
 import { CreateCacheButtonComponent, CreateCacheDialogComponent } from '@shared/forms';
 import { Cache } from '@core/models';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-cache-list',
@@ -43,6 +44,7 @@ import { Cache } from '@core/models';
   styleUrl: './cache-list.component.scss',
 })
 export class CacheListComponent implements OnInit {
+  protected readonly links = links;
   private cachesService = inject(CachesService);
   protected authService = inject(AuthService);
   private config = inject(ConfigService);

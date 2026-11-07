@@ -43,6 +43,7 @@ import { docsUrl } from '@core/docs';
 import { formatBytes, formatCount } from '@shared/text';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { FormsModule } from '@angular/forms';
+import { links } from '@shared/routing';
 
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';
 
@@ -80,6 +81,7 @@ const CHART_COLORS = {
   styleUrl: './cache-detail.component.scss',
 })
 export class CacheDetailComponent implements OnInit {
+  protected readonly links = links;
   protected readonly netrcDocsUrl = docsUrl('guides/share-a-cache/#1-use-the-cache-on-a-machine');
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);

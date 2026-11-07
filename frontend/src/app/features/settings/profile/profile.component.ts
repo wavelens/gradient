@@ -33,6 +33,7 @@ import { ManagedDisableDirective } from '@shared/access';
 import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { AccessState, ConnectedLoginProvider, PatchUserSettingsRequest } from '@core/models';
+import { links } from '@shared/routing';
 
 interface ProfileForm {
   username: string;
@@ -96,6 +97,7 @@ const CONNECT_ERRORS: Record<string, string> = {
   `,
 })
 export class ProfileComponent implements OnInit, CanComponentDeactivate {
+  protected readonly links = links;
   private userService = inject(UserService);
   private authService = inject(AuthService);
   protected config = inject(ConfigService);

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import type { UrlTree } from '@angular/router';
+
 export interface SelectOption {
   [key: string]: unknown;
 }
@@ -15,7 +17,7 @@ export interface MenuItem {
   danger?: boolean;
   separator?: boolean;
   command?: () => void;
-  routerLink?: string | unknown[];
+  routerLink?: string | unknown[] | UrlTree;
   queryParams?: Record<string, unknown>;
 }
 

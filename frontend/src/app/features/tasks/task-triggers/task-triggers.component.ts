@@ -40,6 +40,7 @@ import {
   UpdateTriggerRequest,
 } from '@core/models';
 import { relativeTime } from '@shared/text';
+import { links } from '@shared/routing';
 
 interface Option<T> {
   label: string;
@@ -104,6 +105,7 @@ const DEFAULT_FORM: TriggerFormState = {
   styleUrl: './task-triggers.component.scss',
 })
 export class TaskTriggersComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private triggersService = inject(TriggersService);
   private integrationsService = inject(IntegrationsService);

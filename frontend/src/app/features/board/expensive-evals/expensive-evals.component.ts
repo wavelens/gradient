@@ -13,6 +13,7 @@ import { firstLoad } from '../first-load';
 import { formatQuantity } from '@shared/text';
 import { BoardService } from '@core/services/board.service';
 import { ExpensiveEval } from '@core/models';
+import { links } from '@shared/routing';
 
 type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
 
@@ -46,9 +47,9 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
             <tr>
               <td>{{ i + 1 }}</td>
               <td>
-                <a [routerLink]="['/project', r.project_name]">{{ r.project_display_name || r.project_name }}</a>
+                <a [routerLink]="links.project(r.project_name)">{{ r.project_display_name || r.project_name }}</a>
                 /
-                <a [routerLink]="['/project', r.project_name, 'task', r.task_name]">{{ r.task_display_name || r.task_name }}</a>
+                <a [routerLink]="links.task(r.project_name, r.task_name)">{{ r.task_display_name || r.task_name }}</a>
               </td>
               <td class="mono">{{ r.name }}</td>
               <td>{{ quantity(r.value, r.unit) }}</td>
@@ -65,6 +66,7 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
   styleUrl: './expensive-evals.component.scss',
 })
 export class BoardExpensiveEvalsComponent implements OnInit {
+  protected readonly links = links;
   private board = inject(BoardService);
   protected first = firstLoad();
   rows = signal<ExpensiveEval[]>([]);

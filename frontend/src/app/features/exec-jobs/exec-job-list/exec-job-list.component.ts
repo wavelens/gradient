@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, SimpleChanges, inject, input, signal } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { RouterModule, type UrlTree } from '@angular/router';
 import { Subscription, catchError, interval, of, startWith, switchMap, takeWhile } from 'rxjs';
 import { BadgeComponent, IconComponent, MenuComponent, type MenuItem } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
@@ -15,6 +15,7 @@ import { inBackground } from '@core/interceptors/request-context';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
+import { links } from '@shared/routing';
 import { abortExecJobConfirm, deviceLabel, execJobMenu, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 
 const POLL_MS = 4000;
@@ -73,8 +74,8 @@ export class ExecJobListComponent implements OnChanges {
     });
   }
 
-  link(job: ExecJobSummary): unknown[] {
-    return ['/project', this.project(), 'task', this.task(), 'exec', job.id];
+  link(job: ExecJobSummary, terminal = false): UrlTree {
+    return links.execJob(this.project(), this.task(), job.id, { terminal });
   }
 
   openMenu(event: Event, job: ExecJobSummary, menu: { toggle: (e: Event) => void }): void {
@@ -90,7 +91,7 @@ export class ExecJobListComponent implements OnChanges {
 
   private jobMenu(job: ExecJobSummary): MenuItem[] {
     return execJobMenu(job, this.canTrigger(), {
-      terminal: { routerLink: this.link(job), queryParams: { view: 'terminal' } },
+      terminal: { routerLink: this.link(job, true) },
       abort: () => this.abort(job),
     });
   }

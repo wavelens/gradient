@@ -11,7 +11,7 @@
       <button grButton label="Create Task" icon="add" (click)="openCreateDialog()"></button>
     }
     @if (project.role) {
-      <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></a>
+      <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
     }
     @if (authService.isAuthenticated()) {
       <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />
@@ -39,7 +39,7 @@
             icon="folder"
             [title]="task.display_name || task.name"
             [description]="task.description || 'No description'"
-            [link]="['/project', projectName, 'task', task.name]"
+            [link]="links.task(projectName, task.name)"
           >
             <div slot="meta">
               @if (task.last_evaluation_status) {

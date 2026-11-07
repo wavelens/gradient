@@ -5,7 +5,7 @@
  */
 
 import { Component, booleanAttribute, input, ChangeDetectionStrategy } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { RouterLink, type UrlTree } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 
 /// An index-page card that navigates: icon, title, description and a meta line.
@@ -22,6 +22,6 @@ export class NavCardComponent {
   icon = input.required<string>();
   title = input.required<string>();
   description = input<string>();
-  link = input<unknown[]>();
+  link = input<unknown[] | UrlTree>();
   muted = input(false, { transform: booleanAttribute });
 }

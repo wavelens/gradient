@@ -23,7 +23,7 @@
         <span>{{ duration() }}</span>
       </div>
       <a slot="actions" grButton label="Full log" icon="article" severity="secondary"
-         [routerLink]="['/project', project, 'log', ev.id]"></a>
+         [routerLink]="links.evaluationLog(project, ev.id)"></a>
 
       <gr-card-grid min="150px">
         <gr-stat-card label="Built" [value]="s.packages.built" />
@@ -37,7 +37,7 @@
       @if (s.compared_with; as before) {
         <p class="compared">
           {{ newlyFailing() }} newly failing and {{ s.fixed_total }} fixed since
-          <a class="mono" [routerLink]="['/project', project, 'summary', before.id]">{{ commitLabel(before.commit) }}</a>
+          <a class="mono" [routerLink]="links.evaluationSummary(project, before.id)">{{ commitLabel(before.commit) }}</a>
         </p>
       }
 
@@ -45,7 +45,7 @@
         <h2>{{ group.title }} <span class="count">{{ group.failures.length }}</span></h2>
         <gr-row-list>
           @for (failure of group.failures; track failure.build_id) {
-            <gr-row [link]="['/project', project, 'log', ev.id]" [queryParams]="{ build: failure.build_id }"
+            <gr-row [link]="links.evaluationLog(project, ev.id, { build: failure.build_id })"
                     [linkLabel]="'Log of ' + failureTitle(failure)">
               <gr-status-icon slot="icon" phase="failure" size="sm" />
               <span class="mono">{{ failureTitle(failure) }}</span>
@@ -61,7 +61,7 @@
       @if (s.failures_total > s.failures.length) {
         <p class="compared">
           The {{ s.failures.length }} most blocking of {{ s.failures_total }} failed builds are listed.
-          The <a [routerLink]="['/project', project, 'log', ev.id]">full log</a> has every build.
+          The <a [routerLink]="links.evaluationLog(project, ev.id)">full log</a> has every build.
         </p>
       }
 
@@ -69,7 +69,7 @@
         <h2>Failed to evaluate <span class="count">{{ s.failed_attributes.length }}</span></h2>
         <gr-row-list>
           @for (failed of s.failed_attributes; track failed.attr) {
-            <gr-row [link]="['/project', project, 'log', ev.id]" [queryParams]="{ eval: 1 }"
+            <gr-row [link]="links.evaluationLog(project, ev.id, { messages: true })"
                     [linkLabel]="'Evaluation log of ' + failed.attr">
               <gr-status-icon slot="icon" phase="failure" size="sm" />
               <span class="mono">{{ failed.attr }}</span>

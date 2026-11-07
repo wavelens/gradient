@@ -36,11 +36,11 @@ describe('BreadcrumbsService', () => {
     const trail = crumbs.taskSettings('acme', 'build', { label: 'Triggers' });
 
     expect(labels(trail)).toEqual(['Projects', 'MyProject', 'MyTask', 'Settings', 'Triggers']);
-    expect(trail.map((crumb) => crumb.link)).toEqual([
-      ['/projects'],
-      ['/project', 'acme'],
-      ['/project', 'acme', 'task', 'build'],
-      ['/project', 'acme', 'task', 'build', 'settings'],
+    expect(trail.map((crumb) => crumb.link && String(crumb.link))).toEqual([
+      '/projects',
+      '/project/acme',
+      '/project/acme/task/build',
+      '/project/acme/task/build/settings',
       undefined,
     ]);
   });
@@ -86,5 +86,25 @@ describe('BreadcrumbsService', () => {
     expect(labels(crumbs.task('acme', 'build'))).toEqual(['Projects', 'Renamed', 'Nightly']);
     expect(getProject).not.toHaveBeenCalled();
     expect(getTaskInfo).not.toHaveBeenCalled();
+  });
+
+  it('leads back to the evaluation last selected on the task page', () => {
+    const { crumbs } = setup();
+
+    crumbs.rememberEvaluation('acme', 'build', 'e1');
+
+    expect(String(crumbs.task('acme', 'build', { label: 'Metrics' })[2].link)).toBe('/project/acme/task/build?eval=e1');
+    expect(String(crumbs.taskAt('acme', 'build', 'e2')[2].link)).toBe('/project/acme/task/build?eval=e2');
+  });
+
+  it('leads a build page back to the task at its evaluation, else to the log at the build', () => {
+    const { crumbs } = setup();
+
+    const fromTask = crumbs.buildPage('acme', { task: 'build', evaluation: 'e1' }, 'b1', 'Artefacts');
+    const fromLog = crumbs.buildPage('acme', { evaluation: 'e1' }, 'b1', 'Artefacts');
+
+    expect(String(fromTask[2].link)).toBe('/project/acme/task/build?eval=e1');
+    expect(labels(fromLog)).toEqual(['Projects', 'MyProject', 'Evaluation', 'Artefacts']);
+    expect(String(fromLog[2].link)).toBe('/project/acme/log/e1?build=b1');
   });
 });

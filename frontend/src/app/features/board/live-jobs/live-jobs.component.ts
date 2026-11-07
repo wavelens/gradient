@@ -14,8 +14,9 @@ import { BoardLiveService } from '@core/services/board-live.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
-import { BoardRow, JobKindName, boardJobLink, collapseClusters, jobKindName, jobSubjectLabel } from '../job-kind';
+import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel } from '../job-kind';
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
+import { links } from '@shared/routing';
 
 type KindFilter = 'all' | JobKindName;
 type StatusFilter = 'all' | 'pending' | 'assigned';
@@ -140,7 +141,7 @@ interface DecisionRow {
             @for (row of pendingRows(); track pendingKey(row.job)) {
               @let p = row.job;
               @let subject = rowSubject(row);
-              <tr class="clickable" [routerLink]="p.cluster_job ? ['/board/clusters', p.cluster_job] : ['/board/jobs', p.exec_job?.id ?? p.evaluation_id]">
+              <tr class="clickable" [routerLink]="links.boardPendingJob(p)">
                 <td>{{ jobKindName(p.kind) }}</td>
                 <td class="mono subject" [title]="subject">{{ subject }}</td>
                 <td>{{ p.dependency_count }}</td>
@@ -158,6 +159,7 @@ interface DecisionRow {
   styleUrl: './live-jobs.component.scss',
 })
 export class BoardLiveJobsComponent implements OnInit, OnDestroy {
+  protected readonly links = links;
   private static readonly STATE_KEY = 'board.live-jobs.filters';
   // Mirror the server's `board/jobs/dispatched` cap so optimistic live rows and
   // the refreshed API list converge instead of flipping the count.
@@ -382,10 +384,10 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   inspect(j: DispatchedJobSummary): void {
     if (this.isLive(j)) return;
-    this.router.navigate(boardJobLink(j.id, j.cluster_job) ?? ['/board/jobs', j.id]);
+    this.router.navigateByUrl(links.boardJobOrCluster(j.id, j.cluster_job) ?? links.boardJob(j.id));
   }
 
   inspectDecision(r: DecisionRow): void {
-    this.router.navigate(['/board/jobs', r.id]);
+    this.router.navigateByUrl(links.boardJob(r.id));
   }
 }

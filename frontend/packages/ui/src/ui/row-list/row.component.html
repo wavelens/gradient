@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <div class="row" [class.is-muted]="muted()" [class.is-link]="!!link()">
   @if (link(); as destination) {
-    <a class="row-link" [routerLink]="destination" [queryParams]="queryParams()" [attr.aria-label]="linkLabel()"></a>
+    <a class="row-link" [routerLink]="destination" [attr.aria-label]="linkLabel()"></a>
   }
   <div class="row-info">
     @if (icon()) {

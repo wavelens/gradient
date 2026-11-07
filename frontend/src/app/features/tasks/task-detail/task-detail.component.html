@@ -7,19 +7,7 @@
 @if (task(); as proj) {
   <div class="pp-head pad">
     <div>
-      <nav class="breadcrumb" aria-label="Breadcrumb">
-        @for (crumb of breadcrumb(); track $index; let last = $last) {
-          @if (last) {
-            <span class="breadcrumb-current" aria-current="page"><ng-container *ngTemplateOutlet="crumbLabel; context: { $implicit: crumb.label }" /></span>
-          } @else {
-            <a class="breadcrumb-link" [routerLink]="crumb.link"><ng-container *ngTemplateOutlet="crumbLabel; context: { $implicit: crumb.label }" /></a>
-            <span class="breadcrumb-separator" aria-hidden="true">/</span>
-          }
-        }
-        <ng-template #crumbLabel let-label>
-          @if (label === null) { <gr-skeleton width="8ch" /> } @else { {{ label }} }
-        </ng-template>
-      </nav>
+      <gr-breadcrumb [trail]="breadcrumb()" />
       <div class="title-row">
         <h1>{{ proj.display_name }}</h1>
       </div>
@@ -32,11 +20,11 @@
                 [grTooltip]="evaluationQueued() ? 'An evaluation is already queued' : ''"></button>
         @if (proj.name !== 'build-request' && canOpenSettings()) {
           <a grButton label="Settings" icon="settings" severity="secondary"
-                  [routerLink]="['/project', projectName, 'task', taskName, 'settings']"></a>
+                  [routerLink]="links.taskPage(projectName, taskName, 'settings')"></a>
         }
       }
       <a grButton label="Metrics" icon="show_chart" severity="secondary"
-              [routerLink]="['/project', projectName, 'task', taskName, 'metrics']"></a>
+              [routerLink]="links.taskPage(projectName, taskName, 'metrics')"></a>
       @if (authService.isAuthenticated()) {
         <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />
       }
@@ -117,12 +105,12 @@
               </span>
               <span class="dur"><gr-icon name="timer" size="sm" /> <b>{{ evalDuration(sel) }}</b></span>
               @if (sel.errors > 0) {
-                <a class="msg-chip error" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
+                <a class="msg-chip error" [routerLink]="links.evaluationLog(projectName, sel.id, { messages: true })">
                   {{ sel.errors }} {{ sel.errors === 1 ? 'error' : 'errors' }}
                 </a>
               }
               @if (sel.warnings > 0) {
-                <a class="msg-chip warn" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
+                <a class="msg-chip warn" [routerLink]="links.evaluationLog(projectName, sel.id, { messages: true })">
                   {{ sel.warnings }} {{ sel.warnings === 1 ? 'warning' : 'warnings' }}
                 </a>
               }
@@ -130,9 +118,9 @@
           </div>
           <div class="panel-actions phone-icon-buttons">
             <a grButton size="small" label="Logs" icon="article" severity="secondary"
-               [routerLink]="['/project', projectName, 'log', sel.id]"></a>
+               [routerLink]="links.evaluationLog(projectName, sel.id)"></a>
             <a grButton size="small" label="Summary" icon="summarize" severity="secondary"
-               [routerLink]="['/project', projectName, 'summary', sel.id]"></a>
+               [routerLink]="links.evaluationSummary(projectName, sel.id)"></a>
             @if (isRunning(sel.status)) {
               <button *appWritable="triggerAccess()" grButton size="small" label="Abort" icon="close"
                       severity="danger" [loading]="aborting()" [disabled]="aborting()"
@@ -166,7 +154,7 @@
                   @let counts = barCounts(ep);
                   <div class="entry-row pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="($index % staggeredRows) * 18"
                        (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
-                    <a class="entry-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }"
+                    <a class="entry-link" [routerLink]="links.evaluationLog(projectName, sel.id, { build: ep.build_id })"
                        [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="row.label"></a>
                     <gr-status-icon class="phase-swatch" [phase]="entryPointPhase(ep)" [prioritized]="ep.prioritized" size="sm" />
                     <span class="pkg-name entry-name">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>
@@ -184,7 +172,7 @@
                   </div>
                 } @else {
                   <div class="entry-row pkg" data-phase="failure" [style.animation-delay.ms]="($index % staggeredRows) * 18">
-                    <a class="entry-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }"
+                    <a class="entry-link" [routerLink]="links.evaluationLog(projectName, sel.id, { messages: true })"
                        [title]="row.failure.eval + ' - ' + row.failure.message" [attr.aria-label]="row.label + ', failed to evaluate'"></a>
                     <gr-status-icon class="phase-swatch" [phase]="'failure'" size="sm" />
                     <span class="pkg-name entry-name">{{ row.label }}</span>

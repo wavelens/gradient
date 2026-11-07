@@ -9,6 +9,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { ButtonComponent, IconComponent } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
 import { DeniedKind } from '@core/routing/access-denied';
+import { links } from '@shared/routing';
 
 interface ErrorMeta {
   title: string;
@@ -94,6 +95,7 @@ export interface DeniedView {
   styleUrl: './error-page.component.scss',
 })
 export class ErrorPageComponent {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private auth = inject(AuthService);

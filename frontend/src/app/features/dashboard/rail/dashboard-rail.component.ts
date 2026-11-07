@@ -14,6 +14,7 @@ import { Rail } from '@core/models';
 import { ButtonComponent, SkeletonComponent } from '@gradient/ui/ui';
 import { StarButtonComponent } from '@shared/ui';
 import { formatCount } from '@shared/text';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-dashboard-rail',
@@ -24,6 +25,7 @@ import { formatCount } from '@shared/text';
   styleUrl: './dashboard-rail.component.scss',
 })
 export class DashboardRailComponent implements OnInit {
+  protected readonly links = links;
   private dashboard = inject(DashboardService);
   rail = signal<Rail | null>(null);
   failed = signal(false);

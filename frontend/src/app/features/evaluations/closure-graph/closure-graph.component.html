@@ -13,15 +13,16 @@
     <div class="error-state">
       <gr-icon name="error" size="xl" />
       <p>{{ errorMsg() }}</p>
-      <button grButton label="Go Back" severity="secondary" (click)="goBack()"></button>
+      <a grButton label="Go Back" severity="secondary" [routerLink]="back()"></a>
     </div>
   } @else {
     <div class="closure-header">
       <div class="header-left">
-        <button class="icon-btn" (click)="goBack()" title="Back">
+        <a class="icon-btn" [routerLink]="back()" title="Back" aria-label="Back">
           <gr-icon name="arrow_back" />
-        </button>
+        </a>
         <div class="header-info">
+          <gr-breadcrumb [trail]="breadcrumb()" />
           <div class="header-title">
             <span class="header-name">{{ rootName() }}</span>
             <gr-badge severity="info">{{ typeLabel() }}</gr-badge>

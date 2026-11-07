@@ -23,15 +23,6 @@ export function jobSubjectLabel(subject?: string | null, exec?: BoardExecJob | n
   return `${exec.task}: ${exec.entry_point}${node}`;
 }
 
-export function execJobLink(exec: BoardExecJob): string[] {
-  return ['/project', exec.project, 'task', exec.task, 'exec-jobs', exec.id];
-}
-
-export function boardJobLink(dispatched?: string | null, cluster?: string | null): string[] | undefined {
-  if (cluster) return ['/board', 'clusters', cluster];
-  return dispatched ? ['/board', 'jobs', dispatched] : undefined;
-}
-
 export interface BoardRow<T> {
   job: T;
   subJobs: number;

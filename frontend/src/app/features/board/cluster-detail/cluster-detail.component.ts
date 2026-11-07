@@ -13,7 +13,8 @@ import { StatusBadgeComponent } from '@shared/ui';
 import type { StatusPhase } from '@shared/evaluation';
 import { BoardService } from '@core/services/board.service';
 import type { ClusterJobDetail, ClusterMemberView, ClusterSubJobView } from '@core/models';
-import { execJobLink, jobKindName } from '../job-kind';
+import { jobKindName } from '../job-kind';
+import { links } from '@shared/routing';
 
 export interface SubJobRow {
   key: string;
@@ -50,7 +51,7 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
   imports: [CommonModule, RouterModule, IconComponent, LoadingSpinnerComponent, TableComponent, StatusBadgeComponent],
   template: `
     <div class="top-row">
-      <a routerLink="/board/live" class="back" (click)="goBack($event)">
+      <a [routerLink]="links.board('live')" class="back" (click)="goBack($event)">
         <gr-icon name="arrow_back" size="sm" />{{ cameFromApp ? 'Back' : 'Live Jobs' }}
       </a>
     </div>
@@ -67,12 +68,12 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
       <section class="ids">
         <div>
           <span class="label">Project</span>
-          <a class="project-link" [routerLink]="['/project', c.project_name]">{{ c.project_display_name || c.project_name }}</a>
+          <a class="project-link" [routerLink]="links.project(c.project_name)">{{ c.project_display_name || c.project_name }}</a>
         </div>
         @if (execJob(); as ex) {
           <div>
             <span class="label">Exec job</span>
-            <a class="mono project-link" [routerLink]="execJobLink(ex)">{{ ex.task }}: {{ ex.entry_point }}</a>
+            <a class="mono project-link" [routerLink]="links.boardExecJob(ex)">{{ ex.task }}: {{ ex.entry_point }}</a>
           </div>
         } @else if (c.subject) {
           <div><span class="label">Subject</span><span class="mono">{{ c.subject }}</span></div>
@@ -80,7 +81,7 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
         @if (c.evaluation_id) {
           <div>
             <span class="label">Evaluation</span>
-            <a class="mono project-link" [routerLink]="['/project', c.project_name, 'log', c.evaluation_id]">{{ c.evaluation_id }}</a>
+            <a class="mono project-link" [routerLink]="links.evaluationLog(c.project_name, c.evaluation_id)">{{ c.evaluation_id }}</a>
           </div>
         }
       </section>
@@ -99,7 +100,7 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
         <tbody>
           @for (row of rows(); track row.key) {
             @if (row.job; as job) {
-              <tr class="clickable" [routerLink]="['/board/jobs', job.id]">
+              <tr class="clickable" [routerLink]="links.boardJob(job.id)">
                 <td>{{ row.member }}</td>
                 <td class="mono">{{ job.worker_name ?? job.worker_id }}</td>
                 <td>{{ job.attempt }}</td>
@@ -126,6 +127,7 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
   styleUrl: '../job-detail/job-detail.component.scss',
 })
 export class BoardClusterDetailComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private board = inject(BoardService);
   private destroyRef = inject(DestroyRef);
@@ -133,7 +135,6 @@ export class BoardClusterDetailComponent implements OnInit {
 
   protected readonly cameFromApp = !!inject(Router).currentNavigation()?.previousNavigation;
   protected readonly jobKindName = jobKindName;
-  protected readonly execJobLink = execJobLink;
 
   cluster = signal<ClusterJobDetail | null>(null);
   notFound = signal(false);

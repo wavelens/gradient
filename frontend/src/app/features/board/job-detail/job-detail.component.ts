@@ -23,7 +23,7 @@ import {
 import { formatBytes, formatDuration, formatMegabytes, serverTime } from '@shared/text';
 import { LabelHelpComponent } from '@shared/ui';
 import { JobTimelineComponent } from './job-timeline.component';
-import { BUILD_KIND, EXEC_KIND, execJobLink, jobKindName, jobSubjectLabel } from '../job-kind';
+import { BUILD_KIND, EXEC_KIND, jobKindName, jobSubjectLabel } from '../job-kind';
 import { abortExecJobConfirm } from '@features/exec-jobs/exec-job-status';
 import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget } from '@shared/evaluation';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
@@ -33,6 +33,7 @@ import {
   BuildWithOutputs,
   GradientCapabilities,
 } from '@core/models';
+import { links } from '@shared/routing';
 
 interface RuleRow {
   name: string;
@@ -48,7 +49,7 @@ interface RuleRow {
   imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent],
   template: `
     <div class="top-row phone-icon-buttons">
-      <a routerLink="/board/live" class="back" (click)="goBack($event)">
+      <a [routerLink]="links.board('live')" class="back" (click)="goBack($event)">
         <gr-icon name="arrow_back" size="sm" />{{ cameFromApp ? 'Back' : 'Live Jobs' }}
       </a>
       @if (canAbort()) {
@@ -74,20 +75,20 @@ interface RuleRow {
       <section class="ids">
         <div>
           <span class="label">Project</span>
-          <a class="project-link" [routerLink]="['/project', j.project_name]">{{ j.project_display_name || j.project_name }}</a>
+          <a class="project-link" [routerLink]="links.project(j.project_name)">{{ j.project_display_name || j.project_name }}</a>
         </div>
         <div>
           <span class="label">Worker</span>
-          <a class="mono worker-link" [routerLink]="['/project', j.project_name, 'workers', j.worker_id, 'metrics']">{{ j.worker_name ?? j.worker_id }}</a>
+          <a class="mono worker-link" [routerLink]="links.workerMetrics(j.project_name, j.worker_id)">{{ j.worker_name ?? j.worker_id }}</a>
         </div>
         <div>
           <span class="label">Evaluation</span>
-          <a class="mono" [routerLink]="['/project', j.project_name, 'log', j.evaluation_id]">{{ j.evaluation_id }}</a>
+          <a class="mono" [routerLink]="links.evaluationLog(j.project_name, j.evaluation_id, { build: j.build_id })">{{ j.evaluation_id }}</a>
         </div>
         @if (j.cluster_job) {
           <div>
             <span class="label">Cluster job</span>
-            <a class="mono cluster-link" [routerLink]="['/board/clusters', j.cluster_job]">{{ j.cluster_job }}</a>
+            <a class="mono cluster-link" [routerLink]="links.boardCluster(j.cluster_job)">{{ j.cluster_job }}</a>
           </div>
         }
       </section>
@@ -104,7 +105,10 @@ interface RuleRow {
               </tr>
               <tr><td class="label">Wildcard</td><td class="mono">{{ ev.wildcard }}</td></tr>
               @if (ev.task) {
-                <tr><td class="label">Task</td><td class="mono">{{ ev.task }}</td></tr>
+                <tr>
+                  <td class="label">Task</td>
+                  <td class="mono"><a class="task-link" [routerLink]="links.task(j.project_name, ev.task, j.evaluation_id)">{{ ev.task }}</a></td>
+                </tr>
               }
             </tbody>
           </gr-table>
@@ -119,7 +123,7 @@ interface RuleRow {
               <tr><td class="label">Task</td><td class="mono">{{ ex.task }}</td></tr>
               <tr>
                 <td class="label">Entry point</td>
-                <td class="mono"><a class="exec-link" [routerLink]="execJobLink(ex)">{{ ex.entry_point }}</a></td>
+                <td class="mono"><a class="exec-link" [routerLink]="links.boardExecJob(ex)">{{ ex.entry_point }}</a></td>
               </tr>
               @if (ex.nodes > 1) {
                 <tr><td class="label">Node</td><td class="mono">{{ ex.node_index }} of {{ ex.nodes }} nodes</td></tr>
@@ -312,7 +316,7 @@ interface RuleRow {
                 @let current = a.dispatched_job_id === j.id;
                 @let opens = !current && a.dispatched_job_id !== null;
                 <tr [class.clickable]="opens" [class.current]="current"
-                    [routerLink]="opens ? ['/board/jobs', a.dispatched_job_id] : null">
+                    [routerLink]="opens && a.dispatched_job_id ? links.boardJob(a.dispatched_job_id) : null">
                   <td>{{ i + 1 }}</td>
                   <td>{{ a.substitute ? 'substitute' : 'build' }}</td>
                   <td class="mono">{{ attemptOutcome(a.outcome) }}</td>
@@ -337,7 +341,7 @@ interface RuleRow {
         @if (p.exec_job; as ex) {
           <div>
             <span class="label">Exec job</span>
-            <a class="mono exec-link" [routerLink]="execJobLink(ex)">{{ jobSubjectLabel(p.subject, ex) }}</a>
+            <a class="mono exec-link" [routerLink]="links.boardExecJob(ex)">{{ jobSubjectLabel(p.subject, ex) }}</a>
           </div>
         } @else if (p.subject) {
           <div><span class="label">{{ p.kind === 1 ? 'Derivation' : 'Repository' }}</span><span class="mono">{{ p.subject }}</span></div>
@@ -395,6 +399,7 @@ interface RuleRow {
   styleUrl: './job-detail.component.scss',
 })
 export class BoardJobDetailComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private board = inject(BoardService);
   private evaluations = inject(EvaluationsService);
@@ -430,7 +435,6 @@ export class BoardJobDetailComponent implements OnInit {
 
   protected readonly jobKindName = jobKindName;
   protected readonly jobSubjectLabel = jobSubjectLabel;
-  protected readonly execJobLink = execJobLink;
   protected readonly serverTime = serverTime;
   protected readonly formatBytes = formatBytes;
   protected readonly formatMegabytes = formatMegabytes;

@@ -9,6 +9,7 @@ import { RouterLink } from '@angular/router';
 import { EvaluationStatus, HistoryBar } from '@core/models';
 import { formatDuration } from '@shared/text';
 import { TooltipDirective } from '@gradient/ui/ui';
+import { links } from '@shared/routing';
 
 const TONE: Partial<Record<EvaluationStatus, string>> = { Completed: 'ok', Failed: 'fail', Aborted: 'fail' };
 const MIN_HEIGHT_PCT = 15;
@@ -24,8 +25,7 @@ const MIN_HEIGHT_PCT = 15;
         <a
           [class]="'bar bar--' + b.tone"
           [style.height]="b.height"
-          [routerLink]="['/project', project(), 'task', task()]"
-          [queryParams]="{ eval: b.id }"
+          [routerLink]="links.task(project(), task(), b.id)"
           [grTooltip]="b.title"
           [attr.aria-label]="b.title"
         ></a>
@@ -35,6 +35,7 @@ const MIN_HEIGHT_PCT = 15;
   styleUrl: './evaluation-history.component.scss',
 })
 export class EvaluationHistoryComponent {
+  protected readonly links = links;
   bars = input.required<HistoryBar[]>();
   project = input.required<string>();
   task = input.required<string>();

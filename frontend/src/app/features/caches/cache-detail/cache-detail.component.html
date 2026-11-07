@@ -16,9 +16,9 @@
       </gr-badge>
     </div>
     <div slot="actions">
-      <a grButton label="NARs" icon="database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></a>
+      <a grButton label="NARs" icon="database" severity="secondary" [routerLink]="links.cachePage(cacheName, 'nars')"></a>
       @if (c.can_edit) {
-        <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></a>
+        <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.cachePage(cacheName, 'settings')"></a>
       }
       @if (authService.isAuthenticated()) {
         <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />

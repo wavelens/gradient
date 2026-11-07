@@ -189,12 +189,12 @@ describe('TeamSettingsComponent', () => {
 
   it('asks before deleting, naming the team, then leaves for the team list', () => {
     const { fixture, remove, notify, confirm } = setup(true);
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     buttonByText(fixture.nativeElement, 'Delete Team').click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete team', target: 'Platform' }));
     expect(remove).toHaveBeenCalledWith('platform');
     expect(notify.success).toHaveBeenCalledWith('Team deleted');
-    expect(navigate).toHaveBeenCalledWith(['/teams']);
+    expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/teams');
   });
 
   it('sends no delete when the confirmation is cancelled', () => {

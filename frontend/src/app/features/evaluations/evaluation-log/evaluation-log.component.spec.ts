@@ -394,10 +394,9 @@ describe('EvaluationLogComponent', () => {
       const { cmp } = setup();
       const items = open(cmp, target({ dispatched_job: 'job-1', has_artefacts: true }));
       expect([...items.keys()]).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log', 'SBOM']);
-      expect(items.get('Graph')!.routerLink).toEqual(['/project', 'proj', 'graph', 'b1']);
-      expect(items.get('Graph')!.queryParams).toEqual({ evalId: 'eval-1' });
-      expect(items.get('Show Job')!.routerLink).toEqual(['/board', 'jobs', 'job-1']);
-      expect(items.get('Artefacts')!.routerLink).toEqual(['/project', 'proj', 'artefacts', 'b1']);
+      expect(String(items.get('Graph')!.routerLink)).toBe('/project/proj/graph/b1?eval=eval-1');
+      expect(String(items.get('Show Job')!.routerLink)).toBe('/board/jobs/job-1');
+      expect(String(items.get('Artefacts')!.routerLink)).toBe('/project/proj/artefacts/b1?eval=eval-1');
       expect([...items.values()].some((i) => i.disabled)).toBe(false);
     });
 
@@ -1052,7 +1051,7 @@ describe('EvaluationLogComponent', () => {
   });
 
   describe('sidebar breadcrumb', () => {
-    it('leads from the project to the task by display name', () => {
+    it('leads from the project to the task by display name, back at this evaluation', () => {
       TestBed.configureTestingModule({
         imports: [EvaluationLogComponent],
         providers: [
@@ -1084,8 +1083,8 @@ describe('EvaluationLogComponent', () => {
       expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['MyProject', 'Nightly', 'Evaluation']);
       expect(crumbs.map((crumb) => crumb.getAttribute('href'))).toEqual([
         '/project/proj',
-        '/project/proj/task/nightly',
         '/project/proj/task/nightly?eval=eval-1',
+        null,
       ]);
       fixture.destroy();
     });

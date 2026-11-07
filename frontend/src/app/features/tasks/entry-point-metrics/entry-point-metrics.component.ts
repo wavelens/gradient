@@ -17,6 +17,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
 import { EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/models';
+import { links } from '@shared/routing';
 
 const CHART_COLORS = {
   buildTime: '--gr-chart-cyan',
@@ -35,6 +36,7 @@ const CHART_COLORS = {
   styleUrl: './entry-point-metrics.component.scss',
 })
 export class EntryPointMetricsComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private tasksService = inject(TasksService);
   private crumbs = inject(BreadcrumbsService);
@@ -49,7 +51,7 @@ export class EntryPointMetricsComponent implements OnInit {
   breadcrumb = computed(() => this.crumbs.task(
     this.projectName,
     this.taskName,
-    { label: 'Metrics', link: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
+    { label: 'Metrics', link: links.taskPage(this.projectName, this.taskName, 'metrics') },
     { label: 'Entry Point Metrics' },
   ));
 

@@ -12,6 +12,7 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectResponse } from '@core/models';
 import { denyOnRefusal } from '@core/routing/access-denied';
+import { links } from '@shared/routing';
 
 export interface ProjectAccessData {
   project: ProjectResponse;
@@ -24,7 +25,7 @@ export const projectAccessResolver: ResolveFn<ProjectAccessData> = (route, state
   return projects.getProject(name).pipe(
     tap((project) => crumbs.rememberProject(name, project.display_name)),
     map((project) => ({ project })),
-    denyOnRefusal({ kind: 'project', name, back: '/projects' }, state.url),
+    denyOnRefusal({ kind: 'project', name, back: String(links.projects()) }, state.url),
   );
 };
 

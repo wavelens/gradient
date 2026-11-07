@@ -97,7 +97,7 @@
             <span class="sidebar-group-count">{{ job.started_evaluations.length }}</span>
           </div>
           @for (started of job.started_evaluations; track started.evaluation) {
-            <a class="sidebar-item" [routerLink]="['/project', job.project, 'log', started.evaluation]">
+            <a class="sidebar-item" [routerLink]="links.evaluationLog(job.project, started.evaluation)">
               <gr-status-icon size="sm" [phase]="evaluationPhase(started.status)" [label]="started.status" />
               <span class="sidebar-item-label">{{ started.task }}</span>
               <span class="item-meta">{{ time(started.created_at) }}</span>

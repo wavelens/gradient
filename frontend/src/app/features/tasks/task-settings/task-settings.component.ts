@@ -40,6 +40,7 @@ import { fieldChecks, firstFieldError, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { TaskResponse, ConcurrencyPolicy, PatchTaskRequest } from '@core/models';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
+import { links } from '@shared/routing';
 
 interface TaskForm {
   display_name: string;
@@ -87,6 +88,7 @@ interface TaskForm {
   styleUrl: './task-settings.component.scss',
 })
 export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private tasksService = inject(TasksService);
@@ -180,7 +182,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     this.tasksService.getTaskInfo(this.projectName, this.taskName).subscribe({
       next: (task) => {
         if (task.name === 'build-request') {
-          this.router.navigate(['/project', this.projectName, 'task', task.name]);
+          this.router.navigateByUrl(links.task(this.projectName, task.name));
           return;
         }
         this.task.set(task);
@@ -322,7 +324,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
         this.transferring.set(false);
         this.showTransferDialog.set(false);
         this.notify.success(`Task transferred to ${targetProject}`);
-        this.router.navigate(['/project', targetProject, 'task', this.taskName]);
+        this.router.navigateByUrl(links.task(targetProject, this.taskName));
       },
       error: (error) => {
         this.transferError.set(apiErrorMessage(error, 'Failed to transfer ownership.'));
@@ -341,7 +343,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
       action: () => this.tasksService.deleteTask(this.projectName, this.taskName),
     }).subscribe(() => {
       this.notify.success('Task deleted');
-      this.router.navigate(['/project', this.projectName]);
+      this.router.navigateByUrl(links.project(this.projectName));
     });
   }
 }

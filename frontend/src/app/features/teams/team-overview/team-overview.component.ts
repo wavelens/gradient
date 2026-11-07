@@ -24,6 +24,7 @@ import {
 } from '@gradient/ui/ui';
 import { TeamMembersComponent } from '../team-members/team-members.component';
 import { TeamWorkersComponent } from '../team-workers/team-workers.component';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-team-overview',
@@ -44,6 +45,7 @@ import { TeamWorkersComponent } from '../team-workers/team-workers.component';
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class TeamOverviewComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private teams = inject(TeamsService);
   private crumbs = inject(BreadcrumbsService);

@@ -14,6 +14,7 @@ import type {
   EvaluationFailureSummary,
 } from '@core/models';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { links } from '@shared/routing';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import {
   BadgeComponent,
@@ -69,6 +70,7 @@ export class EvaluationSummaryComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private evaluations = inject(EvaluationsService);
   private crumbs = inject(BreadcrumbsService);
+  protected readonly links = links;
 
   project = '';
   evaluationId = '';
@@ -91,7 +93,7 @@ export class EvaluationSummaryComponent implements OnInit {
     const task = this.evaluation()?.task_name;
     const page = { label: 'Summary' };
 
-    return task ? this.crumbs.task(this.project, task, page) : this.crumbs.project(this.project, page);
+    return task ? this.crumbs.taskAt(this.project, task, this.evaluation()?.id, page) : this.crumbs.project(this.project, page);
   });
 
   failureGroups = computed<FailureGroup[]>(() => {

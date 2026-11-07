@@ -21,6 +21,7 @@ import {
   MessageBannerComponent,
   PasswordInputComponent,
 } from '@gradient/ui/ui';
+import { links } from '@shared/routing';
 
 const LOGIN_ERRORS: Record<string, string> = {
   deactivated: 'This account is deactivated.',
@@ -40,6 +41,7 @@ const LOGIN_ERRORS: Record<string, string> = {
   styleUrl: './login.component.scss',
 })
 export class LoginComponent {
+  protected readonly links = links;
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private router = inject(Router);
@@ -81,7 +83,7 @@ export class LoginComponent {
     if (next && next.startsWith('/')) {
       this.router.navigateByUrl(next);
     } else {
-      this.router.navigate(['/']);
+      this.router.navigateByUrl(links.dashboard());
     }
   }
 

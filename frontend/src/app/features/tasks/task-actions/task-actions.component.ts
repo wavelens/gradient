@@ -39,6 +39,7 @@ import {
 import { ActionFormComponent } from './action-form.component';
 import { ActionDeliveriesComponent } from './action-deliveries.component';
 import { relativeTime } from '@shared/text';
+import { links } from '@shared/routing';
 
 interface IntegrationOption {
   id: string;
@@ -68,6 +69,7 @@ interface IntegrationOption {
   styleUrl: './task-actions.component.scss',
 })
 export class TaskActionsComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private actionsService = inject(ActionsService);
   private integrationsService = inject(IntegrationsService);

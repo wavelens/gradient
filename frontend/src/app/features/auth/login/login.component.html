@@ -93,7 +93,7 @@
     @if (!registrationDisabled) {
       <div class="auth-footer">
         Don't have an account?
-        <a routerLink="/account/register">Sign up</a>
+        <a [routerLink]="links.register()">Sign up</a>
       </div>
     }
   </div>

@@ -94,29 +94,29 @@
 
   <gr-settings-section title="More Settings" [card]="false">
     <gr-row-list>
-      <gr-row icon="group" linkLabel="Members and roles" [link]="['/project', projectName, 'members']">
+      <gr-row icon="group" linkLabel="Members and roles" [link]="links.projectPage(projectName, 'members')">
         Members &amp; Roles
         <span slot="meta">Who is in this project and what they can do</span>
       </gr-row>
-      <gr-row icon="construction" linkLabel="Workers" [link]="['/project', projectName, 'workers']">
+      <gr-row icon="construction" linkLabel="Workers" [link]="links.projectPage(projectName, 'workers')">
         Workers
         <span slot="meta">Build workers registered to this project</span>
       </gr-row>
-      <gr-row icon="database" linkLabel="Cache subscriptions" [link]="['/project', projectName, 'caches']">
+      <gr-row icon="database" linkLabel="Cache subscriptions" [link]="links.projectPage(projectName, 'caches')">
         Cache Subscriptions
         <span slot="meta">Nix binary caches this project pushes builds to</span>
       </gr-row>
-      <gr-row icon="account_tree" linkLabel="Integrations" [link]="['/project', projectName, 'integrations']">
+      <gr-row icon="account_tree" linkLabel="Integrations" [link]="links.projectPage(projectName, 'integrations')">
         Integrations
         <span slot="meta">Inbound Git host webhooks and outbound status reporters</span>
       </gr-row>
       @if (config.execEnabled) {
-        <gr-row icon="key" linkLabel="Secrets" [link]="['/project', projectName, 'secrets']">
+        <gr-row icon="key" linkLabel="Secrets" [link]="links.projectPage(projectName, 'secrets')">
           Secrets
           <span slot="meta">Values for exec jobs, set here and never shown again</span>
         </gr-row>
       }
-      <gr-row icon="webhook" linkLabel="Webhooks" [link]="['/project', projectName, 'webhooks']">
+      <gr-row icon="webhook" linkLabel="Webhooks" [link]="links.projectPage(projectName, 'webhooks')">
         Webhooks
         <span slot="meta">Signed HTTP requests for this project's events</span>
       </gr-row>

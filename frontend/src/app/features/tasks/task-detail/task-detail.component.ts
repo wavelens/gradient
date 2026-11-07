@@ -5,7 +5,7 @@
  */
 
 import { Component, OnInit, OnDestroy, ElementRef, HostListener, Injector, afterNextRender, computed, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule, DOCUMENT } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { finalize, interval, Observable, Subject, Subscription } from 'rxjs';
@@ -22,6 +22,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
+  BreadcrumbComponent,
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
@@ -41,7 +42,7 @@ import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
-import { boardJobLink } from '@features/board/job-kind';
+import { links } from '@shared/routing';
 import {
   StarTarget,
   TaskDetailsResponse,
@@ -59,7 +60,7 @@ import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, build
   selector: 'app-task-detail',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, RouterModule, BadgeComponent, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
+    CommonModule, FormsModule, RouterModule, BadgeComponent, BreadcrumbComponent, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     SkeletonComponent, EmptyStateComponent, LoadStateComponent, WritableDirective,
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, StarButtonComponent,
@@ -86,7 +87,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private confirm = inject(ConfirmService);
   private accessService = inject(AccessService);
   private live = inject(LiveService);
-  private document = inject(DOCUMENT);
   private stars = inject(StarsService);
   private injector = inject(Injector);
 
@@ -114,7 +114,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private entryPointsAppending = false;
   selectedId = signal<string | null>(null);
   starting = signal(false);
-  private evaluationsBeforeStart: Set<string> | null = null;
   starred = signal(false);
   aborting = signal(false);
   tick = signal(Date.now());
@@ -190,7 +189,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.cancelNewEvaluationSelect();
     this.liveSub?.unsubscribe();
     this.querySub?.unsubscribe();
     this.tickSubscription?.unsubscribe();
@@ -231,14 +229,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       this.task.set(task);
       this.crumbs.rememberTask(this.projectName, this.taskName, task.display_name);
     }
-    if (this.starting() && task.last_evaluations.some(e => this.isRunning(e.status))) {
-      this.starting.set(false);
-    }
-    const started = task.last_evaluations.find(e => this.evaluationsBeforeStart && !this.evaluationsBeforeStart.has(e.id));
-    if (started) {
-      this.select(started);
-      return;
-    }
     if (!this.selectedId() && task.last_evaluations.length) {
       this.selectedId.set(task.last_evaluations[0].id);
     }
@@ -264,12 +254,14 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   select(evaluation: EvaluationSummary): void {
-    this.cancelNewEvaluationSelect();
-    this.showEvaluation(evaluation.id);
-    // Keep the selection in the URL so navigating away and back restores it.
+    this.selectEvaluation(evaluation.id);
+  }
+
+  private selectEvaluation(id: string): void {
+    this.showEvaluation(id);
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { eval: evaluation.id },
+      queryParams: { eval: id },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
@@ -286,6 +278,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       this.entryPointsSig = '';
     }
     this.selectedId.set(id);
+    this.crumbs.rememberEvaluation(this.projectName, this.taskName, id);
     this.loadEntryPoints(id);
   }
 
@@ -386,28 +379,32 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   startEvaluation(walk: WalkMode = 'pruned'): void {
     this.starting.set(true);
-    this.selectNextNewEvaluation();
     this.tasksService.startEvaluation(this.projectName, this.taskName, walk).subscribe({
-      next: () => this.loadTaskData(),
+      next: (evaluation) => {
+        this.starting.set(false);
+        this.openNewEvaluation(evaluation);
+      },
       error: (error: unknown) => {
-        this.cancelNewEvaluationSelect();
         this.notify.failure('Failed to start evaluation', error);
         this.starting.set(false);
       },
     });
   }
 
-  private selectNextNewEvaluation(): void {
-    this.evaluationsBeforeStart = new Set(this.evaluations().map(e => e.id));
-    this.document.addEventListener('pointerdown', this.cancelNewEvaluationSelect, true);
-    this.document.addEventListener('keydown', this.cancelNewEvaluationSelect, true);
+  private retryEvaluation(evaluation: EvaluationSummary): void {
+    this.evaluationsService.retryEvaluation(evaluation.id).subscribe({
+      next: (retried) => {
+        this.notify.success('Evaluation retried');
+        this.openNewEvaluation(retried);
+      },
+      error: (error: unknown) => this.notify.failure('Failed to retry evaluation', error),
+    });
   }
 
-  private cancelNewEvaluationSelect = (): void => {
-    this.evaluationsBeforeStart = null;
-    this.document.removeEventListener('pointerdown', this.cancelNewEvaluationSelect, true);
-    this.document.removeEventListener('keydown', this.cancelNewEvaluationSelect, true);
-  };
+  private openNewEvaluation(id: string): void {
+    this.selectEvaluation(id);
+    this.loadTaskData(true);
+  }
 
   requestAbort(event: MouseEvent, evaluation: EvaluationSummary): void {
     if (event.ctrlKey || event.metaKey) {
@@ -527,6 +524,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   readonly waitingTitle = waitingTitle;
   readonly formatWaitingReason = formatWaitingReason;
   readonly unmetRequirementLabel = unmetRequirementLabel;
+  protected readonly links = links;
 
   private runningActivity(all: Record<string, EvaluationProgress>): Record<string, EvaluationProgress> {
     const running = new Set(this.evaluations().filter(e => this.isRunning(e.status)).map(e => e.id));
@@ -598,8 +596,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return {
       label: 'Retry', icon: 'replay',
       disabled: this.starting() || this.evaluationInProgress(),
-      command: () => this.runAction(this.evaluationsService.retryEvaluation(selected.id),
-        'Evaluation retried', 'Failed to retry evaluation'),
+      command: () => this.retryEvaluation(selected),
     };
   });
 
@@ -607,19 +604,19 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const selected = this.selected();
     return [
       { label: 'Logs', icon: 'article', disabled: !selected,
-        routerLink: selected ? ['/project', this.projectName, 'log', selected.id] : undefined },
+        routerLink: selected ? links.evaluationLog(this.projectName, selected.id) : undefined },
       { label: 'Summary', icon: 'summarize', disabled: !selected,
-        routerLink: selected ? ['/project', this.projectName, 'summary', selected.id] : undefined },
+        routerLink: selected ? links.evaluationSummary(this.projectName, selected.id) : undefined },
     ];
   });
 
   private evaluationLinkItems = computed<MenuItem[]>(() => {
     const selected = this.selected();
-    const job = boardJobLink(selected?.dispatched_job, selected?.cluster_job);
+    const job = links.boardJobOrCluster(selected?.dispatched_job, selected?.cluster_job);
     return [
       { label: 'Show job', icon: 'work', disabled: !job, routerLink: job },
       { label: 'Metrics', icon: 'show_chart',
-        routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
+        routerLink: links.taskPage(this.projectName, this.taskName, 'metrics') },
     ];
   });
 
@@ -755,26 +752,24 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const evaluation = this.evaluations().find(e => e.id === evalId);
     const built = ep.build_status === 'Completed' || ep.build_status === 'Substituted';
     const canArtefacts = built && ep.has_artefacts;
+    const from = { task: this.taskName, evaluation: evalId };
     return [
       {
         label: 'Artefacts', icon: 'download', disabled: !canArtefacts,
-        routerLink: canArtefacts ? ['/project', this.projectName, 'artefacts', ep.build_id] : undefined,
-        queryParams: canArtefacts ? { task: this.taskName } : undefined,
+        routerLink: canArtefacts ? links.artefacts(this.projectName, ep.build_id, from) : undefined,
       },
       {
         label: 'Dependency graph', icon: 'account_tree',
-        routerLink: ['/project', this.projectName, 'graph', ep.build_id],
-        queryParams: { evalId: evalId, task: this.taskName },
+        routerLink: links.dependencyGraph(this.projectName, ep.build_id, from),
       },
       {
         label: 'View closure', icon: 'hub', disabled: !built,
-        routerLink: built ? ['/project', this.projectName, 'closure', 'build', ep.build_id] : undefined,
+        routerLink: built ? links.closure(this.projectName, 'build', ep.build_id, from) : undefined,
       },
       { label: 'SBOM', icon: 'inventory_2', disabled: !built, command: () => this.downloadSbom(ep) },
       {
         label: 'Entry-point metrics', icon: 'show_chart',
-        routerLink: ['/project', this.projectName, 'task', this.taskName, 'entry-point-metrics'],
-        queryParams: { eval: ep.eval },
+        routerLink: links.entryPointMetrics(this.projectName, this.taskName, ep.eval),
       },
       ...(this.canPrioritizeEntryPoint(ep)
         ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up',

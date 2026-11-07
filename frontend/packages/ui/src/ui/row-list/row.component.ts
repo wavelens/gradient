@@ -5,8 +5,7 @@
  */
 
 import { Component, input, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
-import type { Params } from '@angular/router';
-import { RouterLink } from '@angular/router';
+import { RouterLink, type UrlTree } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 
 /// One entity per row. Given a `link`, the row itself navigates and grows a
@@ -22,8 +21,7 @@ import { IconComponent } from '../icon/icon.component';
 export class RowComponent {
   icon = input<string>();
   muted = input(false, { transform: booleanAttribute });
-  link = input<unknown[]>();
-  queryParams = input<Params>();
+  link = input<unknown[] | UrlTree>();
   /// Names the destination for assistive tech, since the anchor covers the row.
   linkLabel = input<string>();
 }

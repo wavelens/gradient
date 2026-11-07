@@ -19,6 +19,7 @@ import {
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-sessions',
@@ -36,6 +37,7 @@ import {
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class SessionsComponent implements OnInit {
+  protected readonly links = links;
   private userService = inject(UserService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);

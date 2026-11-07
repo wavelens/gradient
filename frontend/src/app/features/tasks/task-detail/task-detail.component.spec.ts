@@ -404,52 +404,43 @@ describe('TaskDetailComponent evaluation menu', () => {
   });
 
   describe('selecting the started evaluation', () => {
-    function startThenArrive(between: (comp: TaskDetailComponent) => void, startEvaluation?: () => ReturnType<TasksService['startEvaluation']>) {
+    function startThenArrive(startEvaluation: () => ReturnType<TasksService['startEvaluation']>) {
       const extraEvals = [evalSummary('e0', 'Completed')];
       const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed', extraEvals, startEvaluation });
-      let evals = fixture.componentInstance.evaluations();
+      const evals = [evalSummary('e2', 'Queued'), ...fixture.componentInstance.evaluations()];
       vi.spyOn(tasksService, 'getTask').mockImplementation(() => of({ ...taskFor(trigger), last_evaluations: evals }));
+      const entryPoints = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0, failed_attributes: [] }));
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
       const comp = fixture.componentInstance;
       comp.startEvaluation();
-      between(comp);
-      evals = [evalSummary('e2', 'Queued'), ...evals];
-      comp.loadTaskData(true);
-      return comp;
+      return { comp, entryPoints, navigate };
     }
 
-    it('selects the new evaluation once it appears', () => {
-      expect(startThenArrive(() => {}).selectedId()).toBe('e2');
-    });
-
-    it('keeps a card the user picked after pressing start', () => {
-      const comp = startThenArrive(c => c.select(c.evaluations()[1]));
-      expect(comp.selectedId()).toBe('e0');
-    });
-
-    it('keeps the selection after a click or key press', () => {
-      expect(startThenArrive(() => document.dispatchEvent(new Event('pointerdown'))).selectedId()).toBe('e1');
-      TestBed.resetTestingModule();
-      expect(startThenArrive(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))).selectedId()).toBe('e1');
+    it('selects the evaluation the start answers with and keeps it in the URL', () => {
+      const { comp, navigate } = startThenArrive(() => of('e2'));
+      expect(comp.selected()?.id).toBe('e2');
+      expect(comp.starting()).toBe(false);
+      expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { eval: 'e2' } }));
     });
 
     it('fetches the packages of the new evaluation once', () => {
-      const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
-      let evals = fixture.componentInstance.evaluations();
-      vi.spyOn(tasksService, 'getTask').mockImplementation(() => of({ ...taskFor(trigger), last_evaluations: evals }));
-      const comp = fixture.componentInstance;
-      comp.startEvaluation();
-      const entryPoints = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0, failed_attributes: [] }));
-      evals = [evalSummary('e2', 'Queued'), ...evals];
-
-      comp.loadTaskData();
-
-      expect(comp.selectedId()).toBe('e2');
-      expect(entryPoints).toHaveBeenCalledTimes(1);
+      const { entryPoints } = startThenArrive(() => of('e2'));
+      expect(entryPoints.mock.calls.filter((call) => call[2] === 'e2')).toHaveLength(1);
     });
 
-    it('does not switch later when the start fails', () => {
-      const comp = startThenArrive(() => {}, () => throwError(() => new Error('nope')));
+    it('does not switch when the start fails', () => {
+      const { comp } = startThenArrive(() => throwError(() => new Error('nope')));
       expect(comp.selectedId()).toBe('e1');
+    });
+
+    it('selects the evaluation a retry answers with', () => {
+      const { fixture, tasksService, evaluationsService, notify } = setup(trigger, { primaryStatus: 'Failed', primary: failedBuilds });
+      const evals = [evalSummary('e3', 'Queued'), ...fixture.componentInstance.evaluations()];
+      vi.spyOn(tasksService, 'getTask').mockImplementation(() => of({ ...taskFor(trigger), last_evaluations: evals }));
+      vi.spyOn(evaluationsService, 'retryEvaluation').mockReturnValue(of('e3'));
+      fixture.componentInstance.retryEvaluationItem()?.command?.();
+      expect(notify.success).toHaveBeenCalledWith('Evaluation retried');
+      expect(fixture.componentInstance.selected()?.id).toBe('e3');
     });
   });
 
@@ -466,14 +457,14 @@ describe('TaskDetailComponent evaluation menu', () => {
   it('links Show job to the evaluation job on the Job Board', () => {
     const { fixture } = setup(trigger, { primary: { dispatched_job: 'job-1' } });
     const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job');
-    expect(item?.routerLink).toEqual(['/board', 'jobs', 'job-1']);
+    expect(String(item?.routerLink)).toBe('/board/jobs/job-1');
     expect(item?.disabled).toBe(false);
   });
 
   it('links Show job of a split evaluation to its cluster job', () => {
     const { fixture } = setup(trigger, { primary: { dispatched_job: 'job-1', cluster_job: 'cluster-1' } });
     const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job');
-    expect(item?.routerLink).toEqual(['/board', 'clusters', 'cluster-1']);
+    expect(String(item?.routerLink)).toBe('/board/clusters/cluster-1');
   });
 
   it('disables Show job until an eval worker picked the evaluation up', () => {
@@ -993,7 +984,7 @@ describe('TaskDetailComponent diagnostic report', () => {
 
   it('points the logs entry at the selected evaluation', () => {
     const item = component().evalMenuModel().find(i => i.label === 'Logs');
-    expect(item?.routerLink).toEqual(['/project', 'acme', 'log', 'e1']);
+    expect(String(item?.routerLink)).toBe('/project/acme/log/e1');
   });
 
   it('hands the bar the same counts for an unchanged package, so the bar is not redrawn', () => {
@@ -1004,7 +995,7 @@ describe('TaskDetailComponent diagnostic report', () => {
 
   it('points the summary entry at the selected evaluation', () => {
     const item = component().evalMenuModel().find(i => i.label === 'Summary');
-    expect(item?.routerLink).toEqual(['/project', 'acme', 'summary', 'e1']);
+    expect(String(item?.routerLink)).toBe('/project/acme/summary/e1');
   });
 
   /// Generating a report is an authenticated endpoint, so the entry point is
@@ -1200,7 +1191,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
     comp.openPkgContextMenu(new MouseEvent('contextmenu'), epSummary('hello'), 'e1', { openAt: () => {} });
     const closure = comp.pkgMenuModel().find(i => i.label === 'View closure');
     expect(closure?.disabled).toBe(false);
-    expect(closure?.routerLink).toEqual(['/project', 'acme', 'closure', 'build', 'b-hello']);
+    expect(String(closure?.routerLink)).toBe('/project/acme/closure/build/b-hello?task=demo&eval=e1');
   });
 
   it('links each package with a real href, so a middle click opens a new tab', () => {

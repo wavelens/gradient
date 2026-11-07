@@ -22,6 +22,7 @@ import { Observable, defaultIfEmpty, of } from 'rxjs';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { ManifestResult } from '@core/models';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-admin-github-app',
@@ -33,6 +34,7 @@ import { ManifestResult } from '@core/models';
   styleUrl: './github-app.component.scss',
 })
 export class GithubAppComponent implements OnInit {
+  protected readonly links = links;
   private admin = inject(AdminService);
   private route = inject(ActivatedRoute);
   private notify = inject(NotifyService);

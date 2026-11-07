@@ -7,6 +7,7 @@
 import { Injectable, Signal, WritableSignal, inject, signal, untracked } from '@angular/core';
 import type { Observable } from 'rxjs';
 import type { Crumb } from '@gradient/ui/ui';
+import { type BuildOrigin, links } from '@shared/routing';
 import { CachesService } from './caches.service';
 import { ProjectsService } from './projects.service';
 import { TasksService } from './tasks.service';
@@ -16,8 +17,7 @@ interface Named {
   display_name: string;
 }
 
-/// Every page builds its trail here, so all pages share the levels and show the
-/// display name of a project, task, cache or team. A name is `null` until known.
+/// All pages build the breadcrumb trail here. All pages then share the same hierarchy and show the display name of a project, task, cache, or team. Names stay null until known. The task link can lead back to the evaluation that was last selected on the task page.
 @Injectable({ providedIn: 'root' })
 export class BreadcrumbsService {
   private projects = inject(ProjectsService);
@@ -25,41 +25,54 @@ export class BreadcrumbsService {
   private caches = inject(CachesService);
   private teams = inject(TeamsService);
   private names = new Map<string, WritableSignal<string | null>>();
+  private evaluations = new Map<string, string>();
 
   project(project: string, ...tail: Crumb[]): Crumb[] {
     const name = this.name(`project/${project}`, project, () => this.projects.getProject(project));
 
-    return [{ label: 'Projects', link: ['/projects'] }, { label: name(), link: ['/project', project] }, ...tail];
+    return [{ label: 'Projects', link: links.projects() }, { label: name(), link: links.project(project) }, ...tail];
   }
 
   projectSettings(project: string, ...tail: Crumb[]): Crumb[] {
-    return this.project(project, { label: 'Settings', link: ['/project', project, 'settings'] }, ...tail);
+    return this.project(project, { label: 'Settings', link: links.projectPage(project, 'settings') }, ...tail);
   }
 
   task(project: string, task: string, ...tail: Crumb[]): Crumb[] {
+    return this.taskAt(project, task, this.evaluations.get(`${project}/${task}`), ...tail);
+  }
+
+  taskAt(project: string, task: string, evaluation: string | null | undefined, ...tail: Crumb[]): Crumb[] {
     const name = this.name(`task/${project}/${task}`, task, () => this.tasks.getTaskInfo(project, task));
 
-    return this.project(project, { label: name(), link: ['/project', project, 'task', task] }, ...tail);
+    return this.project(project, { label: name(), link: links.task(project, task, evaluation) }, ...tail);
   }
 
   taskSettings(project: string, task: string, ...tail: Crumb[]): Crumb[] {
-    return this.task(project, task, { label: 'Settings', link: ['/project', project, 'task', task, 'settings'] }, ...tail);
+    return this.task(project, task, { label: 'Settings', link: links.taskPage(project, task, 'settings') }, ...tail);
+  }
+
+  buildPage(project: string, from: BuildOrigin, build: string, label: string): Crumb[] {
+    if (from.task) return this.taskAt(project, from.task, from.evaluation, { label });
+    if (from.evaluation) {
+      return this.project(project, { label: 'Evaluation', link: links.evaluationLog(project, from.evaluation, { build }) }, { label });
+    }
+    return this.project(project, { label });
   }
 
   cache(cache: string, ...tail: Crumb[]): Crumb[] {
     const name = this.name(`cache/${cache}`, cache, () => this.caches.getCache(cache));
 
-    return [{ label: 'Caches', link: ['/caches'] }, { label: name(), link: ['/caches', cache] }, ...tail];
+    return [{ label: 'Caches', link: links.caches() }, { label: name(), link: links.cache(cache) }, ...tail];
   }
 
   cacheSettings(cache: string, ...tail: Crumb[]): Crumb[] {
-    return this.cache(cache, { label: 'Settings', link: ['/caches', cache, 'settings'] }, ...tail);
+    return this.cache(cache, { label: 'Settings', link: links.cachePage(cache, 'settings') }, ...tail);
   }
 
   team(team: string, ...tail: Crumb[]): Crumb[] {
     const name = this.name(`team/${team}`, team, () => this.teams.get(team));
 
-    return [{ label: 'Teams', link: ['/teams'] }, { label: name(), link: ['/team', team] }, ...tail];
+    return [{ label: 'Teams', link: links.teams() }, { label: name(), link: links.team(team) }, ...tail];
   }
 
   rememberProject(project: string, displayName: string): void {
@@ -68,6 +81,10 @@ export class BreadcrumbsService {
 
   rememberTask(project: string, task: string, displayName: string): void {
     this.remember(`task/${project}/${task}`, displayName);
+  }
+
+  rememberEvaluation(project: string, task: string, evaluation: string): void {
+    this.evaluations.set(`${project}/${task}`, evaluation);
   }
 
   rememberCache(cache: string, displayName: string): void {

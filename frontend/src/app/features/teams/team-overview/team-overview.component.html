@@ -6,7 +6,7 @@
 
 <gr-page-layout [breadcrumb]="breadcrumb()" [title]="team()?.display_name || teamName" subtitle="Team">
   @if (isAdmin()) {
-    <a slot="actions" grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/team', teamName, 'settings']"></a>
+    <a slot="actions" grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.teamPage(teamName, 'settings')"></a>
   }
   @if (error(); as message) {
     <gr-message-banner type="error">{{ message }}</gr-message-banner>
@@ -41,13 +41,13 @@
       <gr-settings-section title="Projects and Caches" [card]="false" maxWidth="none">
         <gr-row-list>
           @for (grant of grants().projects; track grant.project) {
-            <gr-row icon="corporate_fare" [link]="['/project', grant.project]" linkLabel="Open project">
+            <gr-row icon="corporate_fare" [link]="links.project(grant.project)" linkLabel="Open project">
               {{ grant.display_name }}
               <span slot="meta">{{ grantMeta(grant) }}</span>
             </gr-row>
           }
           @for (grant of grants().caches; track grant.cache) {
-            <gr-row icon="storage" [link]="['/caches', grant.cache]" linkLabel="Open cache">
+            <gr-row icon="storage" [link]="links.cache(grant.cache)" linkLabel="Open cache">
               {{ grant.display_name }}
               <span slot="meta">Users as {{ grant.role }}</span>
             </gr-row>

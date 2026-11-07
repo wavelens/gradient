@@ -124,12 +124,12 @@ describe('CacheSettingsComponent - write failures', () => {
     const fixture = setup(admin);
     const service = TestBed.inject(CachesService) as unknown as { deleteCache: () => unknown };
     service.deleteCache = vi.fn(() => of(undefined));
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     findByText(fixture.nativeElement, 'delete cache')!.click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete cache', target: 'Demo' }));
     expect(service.deleteCache).toHaveBeenCalledWith('demo');
     expect(notify.success).toHaveBeenCalledWith('Cache deleted');
-    expect(navigate).toHaveBeenCalledWith(['/caches']);
+    expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/caches');
   });
 
   it('sends no delete when the confirmation is cancelled', () => {

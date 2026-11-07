@@ -141,7 +141,7 @@
         <gr-row
           icon="cloud_download"
           linkLabel="Upstream caches"
-          [link]="['/caches', cacheName, 'upstream-caches']"
+          [link]="links.cachePage(cacheName, 'upstream-caches')"
         >
           Upstream Caches
           <span slot="meta">External and internal caches this cache pulls through from</span>
@@ -149,7 +149,7 @@
         <gr-row
           icon="group"
           linkLabel="Members and roles"
-          [link]="['/caches', cacheName, 'members-roles']"
+          [link]="links.cachePage(cacheName, 'members-roles')"
         >
           Members &amp; Roles
           <span slot="meta">Who has access to this cache, and what they can do</span>
@@ -157,12 +157,12 @@
         <gr-row
           icon="hub"
           linkLabel="Subscriptions"
-          [link]="['/caches', cacheName, 'subscriptions']"
+          [link]="links.cachePage(cacheName, 'subscriptions')"
         >
           Subscriptions
           <span slot="meta">Projects asking to use this cache</span>
         </gr-row>
-        <gr-row icon="webhook" linkLabel="Webhooks" [link]="['/caches', cacheName, 'webhooks']">
+        <gr-row icon="webhook" linkLabel="Webhooks" [link]="links.cachePage(cacheName, 'webhooks')">
           Webhooks
           <span slot="meta">Signed HTTP requests for this cache's events</span>
         </gr-row>

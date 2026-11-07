@@ -30,6 +30,7 @@ import {
   MessageBannerComponent,
   PasswordInputComponent,
 } from '@gradient/ui/ui';
+import { links } from '@shared/routing';
 
 const PASSWORD_SPECIAL_CHARACTERS = '!@#$%^&*()_+-=[]{}|;:,.<>?';
 
@@ -42,6 +43,7 @@ const PASSWORD_SPECIAL_CHARACTERS = '!@#$%^&*()_+-=[]{}|;:,.<>?';
   styleUrl: './register.component.scss',
 })
 export class RegisterComponent {
+  protected readonly links = links;
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private router = inject(Router);
@@ -169,7 +171,7 @@ export class RegisterComponent {
             'Registration successful! Please check your email to verify your account before signing in.'
           );
         } else {
-          this.router.navigate(['/account/login']);
+          this.router.navigateByUrl(links.login());
         }
       },
       error: (error) => {

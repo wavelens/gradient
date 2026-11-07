@@ -24,6 +24,7 @@ import {
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
+import { links } from '@shared/routing';
 
 const OPENSSH_PUBLIC_KEY =
   /^(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-nistp(?:256|384|521)|sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)\s+[A-Za-z0-9+/]+={0,3}(?:\s.*)?$/;
@@ -52,6 +53,7 @@ function sshKeyComment(publicKey: string): string {
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class SshKeysComponent implements OnInit {
+  protected readonly links = links;
   private userService = inject(UserService);
   private config = inject(ConfigService);
   private notify = inject(NotifyService);

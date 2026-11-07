@@ -16,6 +16,7 @@ import { BadgeComponent, LoadStateComponent, TabSwitchComponent, TableComponent 
 import { MetricChartComponent, SegmentedBarComponent, ratioSegments } from '@shared/ui';
 import { workerAxisLabel } from '../worker-label';
 import { BoardWorker, BoardFleetPoint, DeviceClass, WorkerLoad, WorkerLoadAverage } from '@core/models';
+import { links } from '@shared/routing';
 
 type LoadRange = 'now' | '24h' | '7d' | '30d';
 
@@ -113,7 +114,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
               <td class="mono">{{ w.name ?? w.id ?? '-' }}</td>
               <td class="projects">
                 @for (p of w.projects; track p.id; let last = $last) {
-                  <a [routerLink]="['/project', p.name]">{{ p.display_name || p.name }}</a>@if (!last) {, }
+                  <a [routerLink]="links.project(p.name)">{{ p.display_name || p.name }}</a>@if (!last) {, }
                 } @empty { - }
               </td>
               <td>{{ w.draining ? 'draining' : 'active' }}</td>
@@ -146,6 +147,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
   styleUrl: './workers.component.scss',
 })
 export class BoardWorkersComponent implements OnInit {
+  protected readonly links = links;
   private board = inject(BoardService);
   protected first = firstLoad();
   workers = signal<BoardWorker[]>([]);

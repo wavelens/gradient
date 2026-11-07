@@ -39,7 +39,7 @@
                 icon="storage"
                 [title]="cache.display_name"
                 [description]="cache.description || 'No description'"
-                [link]="['/caches', cache.name]"
+                [link]="links.cache(cache.name)"
               >
                 <div slot="meta">
                   <gr-badge severity="success">Active</gr-badge>
@@ -63,7 +63,7 @@
                 icon="cloud_off"
                 [title]="cache.display_name"
                 [description]="cache.description || 'No description'"
-                [link]="['/caches', cache.name]"
+                [link]="links.cache(cache.name)"
               >
                 <div slot="meta">
                   <gr-badge severity="danger">Inactive</gr-badge>
@@ -98,7 +98,7 @@
       </div>
       <div class="cache-grid">
         @for (cache of filteredPublicCaches; track cache.id) {
-          <a [routerLink]="['/caches', cache.name]" class="cache-card">
+          <a [routerLink]="links.cache(cache.name)" class="cache-card">
             <div class="cache-icon">
               <gr-icon name="public" size="xl" />
             </div>

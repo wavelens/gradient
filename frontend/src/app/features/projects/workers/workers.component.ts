@@ -61,6 +61,7 @@ import { WritableDirective, ManagedDisableDirective, canOpenTeam } from '@shared
 import { ConfirmService } from '@shared/confirm';
 import { fieldChecks } from '@shared/forms';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-workers',
@@ -96,6 +97,7 @@ import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.com
   styleUrls: ['./workers.component.scss', './workers.dialog.scss'],
 })
 export class WorkersComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private workersService = inject(WorkersService);
   private projectsService = inject(ProjectsService);
@@ -172,7 +174,7 @@ export class WorkersComponent implements OnInit {
     const rowLocked = this.access().managed;
     if (worker.team) {
       return [
-        ...(this.canOpenTeam(worker.team) ? [{ label: 'Manage on team', icon: 'groups', routerLink: ['/team', worker.team] }] : []),
+        ...(this.canOpenTeam(worker.team) ? [{ label: 'Manage on team', icon: 'groups', routerLink: links.team(worker.team) }] : []),
         ...(canEdit ? [{ label: 'Fire Test', icon: 'bolt', disabled: busy, command: () => this.fireTest(worker) }] : []),
       ];
     }

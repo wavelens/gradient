@@ -4,15 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Build Artefacts" [subtitle]="buildShortId()" maxWidth="780px">
-  <button
-    slot="actions"
-    grButton
-    label="Back"
-    icon="arrow_back"
-    severity="secondary"
-    (click)="goBack()"
-  ></button>
+<gr-page-layout title="Build Artefacts" [subtitle]="buildShortId()" [breadcrumb]="breadcrumb()" maxWidth="780px">
 
   <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="artefacts().length === 0"
                  loadingMessage="Loading artefacts..." errorTitle="Failed to load artefacts" (retry)="loadArtefacts()">

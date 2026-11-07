@@ -10,6 +10,7 @@ import { of, throwError } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { BuildArtefactsComponent } from './build-artefacts.component';
 
 function render(getBuildDownloads: () => unknown) {
@@ -21,6 +22,7 @@ function render(getBuildDownloads: () => unknown) {
       { provide: EvaluationsService, useValue: { getBuildDownloads } },
       { provide: AuthService, useValue: { isAuthenticated: () => false } },
       { provide: ProjectsService, useValue: {} },
+      { provide: BreadcrumbsService, useValue: { buildPage: () => [] } },
     ],
   });
   const fixture = TestBed.createComponent(BuildArtefactsComponent);

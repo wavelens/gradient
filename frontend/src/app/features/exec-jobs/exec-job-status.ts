@@ -9,7 +9,7 @@ import type { StatusPhase } from '@shared/evaluation';
 import type { MenuItem } from '@gradient/ui/ui';
 import type { ConfirmRequest } from '@shared/confirm';
 import type { Observable } from 'rxjs';
-import { boardJobLink } from '@features/board/job-kind';
+import { links } from '@shared/routing';
 
 export function abortExecJobConfirm<T>(target: string, action: () => Observable<T>): ConfirmRequest<T> {
   return {
@@ -44,7 +44,7 @@ export function hasExecTerminal(status: ExecJobStatus): boolean {
 }
 
 export interface ExecJobMenuActions {
-  terminal: Pick<MenuItem, 'routerLink' | 'queryParams' | 'command'>;
+  terminal: Pick<MenuItem, 'routerLink' | 'command'>;
   abort: () => void;
 }
 
@@ -53,7 +53,7 @@ export function execJobMenu(
   canTrigger: boolean,
   actions: ExecJobMenuActions,
 ): MenuItem[] {
-  const link = boardJobLink(job, cluster);
+  const link = links.boardJobOrCluster(job, cluster);
   return [
     { label: 'Show job', icon: 'work', disabled: !link, routerLink: link },
     ...(hasExecTerminal(status) ? [{ label: 'Terminal', icon: 'terminal', ...actions.terminal }] : []),

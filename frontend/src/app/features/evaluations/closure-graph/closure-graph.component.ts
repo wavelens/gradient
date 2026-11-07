@@ -9,11 +9,14 @@ import {
   ViewChild, ElementRef, NgZone, ChangeDetectorRef,
   ChangeDetectionStrategy
 } from '@angular/core';
-import { CommonModule, Location } from '@angular/common';
-import { ActivatedRoute, Router } from '@angular/router';
+import { CommonModule } from '@angular/common';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { EvaluationsService } from '@core/services/evaluations.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { type BuildOrigin, buildOriginLink, readBuildOrigin } from '@shared/routing';
 import {
   BadgeComponent,
+  BreadcrumbComponent,
   ButtonComponent,
   IconComponent,
   LoadingSpinnerComponent,
@@ -39,15 +42,14 @@ type LaidLink = { source: LaidNode; target: LaidNode; width?: number; value: num
 @Component({
   selector: 'app-closure-graph',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, LoadingSpinnerComponent, IconComponent, BadgeComponent],
+  imports: [CommonModule, RouterLink, ButtonComponent, LoadingSpinnerComponent, IconComponent, BadgeComponent, BreadcrumbComponent],
   templateUrl: './closure-graph.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './closure-graph.component.scss',
 })
 export class ClosureGraphComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
-  private router = inject(Router);
-  private location = inject(Location);
+  private crumbs = inject(BreadcrumbsService);
   private evalService = inject(EvaluationsService);
   private zone = inject(NgZone);
   private cdr = inject(ChangeDetectorRef);
@@ -68,6 +70,9 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   transform = computed(() => `translate(${this.tx()},${this.ty()}) scale(${this.scale()})`);
 
   projectName = '';
+  private from: BuildOrigin = {};
+  breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from, this.id, 'Closure'));
+  back = computed(() => buildOriginLink(this.projectName, this.from, this.kind === 'build' ? this.id : undefined));
   kind = '';
   id = '';
   closureType = 'runtime';
@@ -89,6 +94,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     this.kind = this.route.snapshot.paramMap.get('kind') || 'build';
     this.id = this.route.snapshot.paramMap.get('id') || '';
     this.closureType = this.route.snapshot.queryParamMap.get('type') === 'build' ? 'build' : 'runtime';
+    this.from = readBuildOrigin(this.route.snapshot.queryParamMap);
     this.typeLabel.set(this.closureType === 'build' ? 'Build closure' : 'Runtime closure');
     this.load();
   }
@@ -320,15 +326,5 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
 
   private shortName(name: string): string {
     return name.length > 28 ? name.slice(0, 27) + '…' : name;
-  }
-
-  goBack(): void {
-    // Return to wherever the user came from; fall back to the project overview when
-    // the closure page was opened directly (no in-app history to pop).
-    if (history.length > 1) {
-      this.location.back();
-    } else {
-      this.router.navigate(['/project', this.projectName]);
-    }
   }
 }

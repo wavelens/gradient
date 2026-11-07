@@ -11,12 +11,13 @@ import { map, switchMap } from 'rxjs/operators';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { denyOnRefusal } from '@core/routing/access-denied';
+import { links } from '@shared/routing';
 
 export const visibleProjectGuard: CanActivateFn = (route, state) => {
   const authService = inject(AuthService);
   const projects = inject(ProjectsService);
   const name = route.paramMap.get('project') ?? '';
-  const deny = denyOnRefusal<true>({ kind: 'project', name, back: '/projects' }, state.url);
+  const deny = denyOnRefusal<true>({ kind: 'project', name, back: String(links.projects()) }, state.url);
 
   return authService.initialized$.pipe(
     switchMap(() => authService.resolveSession()),

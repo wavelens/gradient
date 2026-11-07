@@ -5,7 +5,7 @@
  */
 
 import { BoardExecJob } from '@core/models';
-import { boardJobLink, collapseClusters, execJobLink, jobKindName, jobSubjectLabel } from './job-kind';
+import { collapseClusters, jobKindName, jobSubjectLabel } from './job-kind';
 
 const NODE: BoardExecJob = {
   id: 'x1',
@@ -31,18 +31,9 @@ describe('job kind labels', () => {
     expect(jobSubjectLabel(null, undefined)).toBe('-');
   });
 
-  it('links an exec job to its page under the task', () => {
-    expect(execJobLink(NODE)).toEqual(['/project', 'infra', 'task', 'nightly', 'exec-jobs', 'x1']);
-  });
 });
 
 describe('cluster jobs on the board', () => {
-  it('shows a job of a cluster as its cluster job', () => {
-    expect(boardJobLink('d1', 'c1')).toEqual(['/board', 'clusters', 'c1']);
-    expect(boardJobLink('d1', null)).toEqual(['/board', 'jobs', 'd1']);
-    expect(boardJobLink(null, undefined)).toBeUndefined();
-  });
-
   it('lists the sub jobs of a cluster as one row at the place of the first', () => {
     const jobs = [
       { id: 'a', cluster_job: 'c1' },

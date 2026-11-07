@@ -39,7 +39,7 @@
       }
       <div class="auth-footer">
         Already have an account?
-        <a routerLink="/account/login">Sign in</a>
+        <a [routerLink]="links.login()">Sign in</a>
       </div>
     } @else if (registrationDisabled) {
       <div class="auth-blocked">
@@ -48,7 +48,7 @@
       </div>
       <div class="auth-footer">
         Already have an account?
-        <a routerLink="/account/login">Sign in</a>
+        <a [routerLink]="links.login()">Sign in</a>
       </div>
     } @else {
       @if (errorMessage()) {
@@ -58,7 +58,7 @@
       @if (successMessage()) {
         <gr-message-banner type="success">{{ successMessage() }}</gr-message-banner>
         <div class="auth-footer">
-          <a routerLink="/account/login">Go to Sign In</a>
+          <a [routerLink]="links.login()">Go to Sign In</a>
         </div>
       }
 
@@ -189,7 +189,7 @@
 
         <div class="auth-footer">
           Already have an account?
-          <a routerLink="/account/login">Sign in</a>
+          <a [routerLink]="links.login()">Sign in</a>
         </div>
       }
     }

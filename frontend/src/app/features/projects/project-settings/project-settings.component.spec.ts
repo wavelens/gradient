@@ -273,11 +273,11 @@ describe('ProjectSettingsComponent - confirmed actions', () => {
     await settled(fixture);
     const deleteProject = vi.fn(() => of(undefined));
     Object.assign(TestBed.inject(ProjectsService), { deleteProject });
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     findByText(fixture.nativeElement, 'delete project')!.click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete project', target: projectFor(admin).display_name }));
     expect(deleteProject).toHaveBeenCalledWith('acme');
-    expect(navigate).toHaveBeenCalledWith(['/projects']);
+    expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/projects');
   });
 
   it('sends no delete when the confirmation is cancelled', async () => {

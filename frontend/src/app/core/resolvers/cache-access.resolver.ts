@@ -12,6 +12,7 @@ import { CachesService } from '@core/services/caches.service';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import { CacheResponse } from '@core/models';
 import { denyOnRefusal } from '@core/routing/access-denied';
+import { links } from '@shared/routing';
 
 export interface CacheAccessData {
   cache: CacheResponse;
@@ -25,6 +26,6 @@ export const cacheAccessResolver: ResolveFn<CacheAccessData> = (route, state) =>
   return caches.getCache(cache).pipe(
     tap((c) => crumbs.rememberCache(cache, c.display_name)),
     map((c) => ({ cache: c, access: accessFromEntity(c) })),
-    denyOnRefusal({ kind: 'cache', name: cache, back: '/caches' }, state.url),
+    denyOnRefusal({ kind: 'cache', name: cache, back: String(links.caches()) }, state.url),
   );
 };

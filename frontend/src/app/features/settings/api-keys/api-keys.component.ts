@@ -35,6 +35,7 @@ import { AccessState, ApiKeyInfo, PatchApiKeyRequest, PermissionEntry } from '@c
 import { permissionLabel } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
 import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
+import { links } from '@shared/routing';
 
 type ScopeType = 'none' | 'project' | 'cache';
 
@@ -91,6 +92,7 @@ interface SelectOption {
   styleUrl: './api-keys.component.scss',
 })
 export class ApiKeysComponent implements OnInit {
+  protected readonly links = links;
   private userService = inject(UserService);
   private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);

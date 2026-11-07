@@ -37,6 +37,7 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
+import { links } from '@shared/routing';
 import type { ExecJobPullRequestView, ExecJobResponse } from '@core/models';
 import { abortExecJobConfirm, deviceLabel, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
@@ -155,9 +156,10 @@ export class ExecJobPageComponent implements OnInit {
       abort: () => this.abort(),
     });
   });
-  crumbs = computed(() =>
-    this.breadcrumbs.task(this.projectName, this.taskName, { label: this.job()?.entry_point ?? 'Exec job' }).slice(1),
-  );
+  crumbs = computed(() => {
+    const job = this.job();
+    return this.breadcrumbs.taskAt(this.projectName, this.taskName, job?.evaluation, { label: job?.entry_point ?? 'Exec job' }).slice(1);
+  });
   duration = computed(() => {
     const job = this.job();
     if (!job) return '';
@@ -166,6 +168,7 @@ export class ExecJobPageComponent implements OnInit {
   });
 
   protected readonly phase = execJobPhase;
+  protected readonly links = links;
   protected readonly device = deviceLabel;
   protected readonly guestSize = guestSizeLabel;
   protected readonly time = clockTime;

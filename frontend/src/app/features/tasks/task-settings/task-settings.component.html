@@ -8,7 +8,7 @@
                errorTitle="Failed to load task settings" (retry)="loadTask()">
 @if (task(); as proj) {
   <gr-page-layout [breadcrumb]="breadcrumb()" title="Task Settings">
-  <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></a>
+  <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
   @if (errorMessage()) {
     <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
   }
@@ -153,23 +153,23 @@
 
   <gr-settings-section title="More Settings" [card]="false">
     <gr-row-list>
-      <gr-row icon="schedule" linkLabel="Triggers" [link]="['/project', projectName, 'task', taskName, 'triggers']">
+      <gr-row icon="schedule" linkLabel="Triggers" [link]="links.taskPage(projectName, taskName, 'triggers')">
         Triggers
         <span slot="meta">Polling intervals, Git host push and pull-request events, and cron schedules</span>
       </gr-row>
-      <gr-row icon="bolt" linkLabel="Actions" [link]="['/project', projectName, 'task', taskName, 'actions']">
+      <gr-row icon="bolt" linkLabel="Actions" [link]="links.taskPage(projectName, taskName, 'actions')">
         Actions
         <span slot="meta">Send mail, post webhooks, or report status back to the Git host</span>
       </gr-row>
-      <gr-row icon="share" linkLabel="Flake inputs" [link]="['/project', projectName, 'task', taskName, 'flake-inputs']">
+      <gr-row icon="share" linkLabel="Flake inputs" [link]="links.taskPage(projectName, taskName, 'flake-inputs')">
         Flake Inputs
         <span slot="meta">Override an input's git URL, or force an update keeping the original</span>
       </gr-row>
-      <gr-row icon="database" linkLabel="Project cache subscriptions" [link]="['/project', projectName, 'caches']">
+      <gr-row icon="database" linkLabel="Project cache subscriptions" [link]="links.projectPage(projectName, 'caches')">
         Cache Subscriptions
         <span slot="meta">Nix binary caches the project pushes builds to</span>
       </gr-row>
-      <gr-row icon="construction" linkLabel="Project workers" [link]="['/project', projectName, 'workers']">
+      <gr-row icon="construction" linkLabel="Project workers" [link]="links.projectPage(projectName, 'workers')">
         Workers
         <span slot="meta">Build workers registered to the project</span>
       </gr-row>

@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { ActivatedRoute, RouterModule } from '@angular/router';
 import { EvaluationsService, isHtmlArtefact } from '@core/services/evaluations.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { type BuildOrigin, readBuildOrigin } from '@shared/routing';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -32,7 +34,7 @@ import { BuildProduct } from '@core/models';
 })
 export class BuildArtefactsComponent implements OnInit {
   private route = inject(ActivatedRoute);
-  private router = inject(Router);
+  private crumbs = inject(BreadcrumbsService);
   private evalService = inject(EvaluationsService);
   private authService = inject(AuthService);
   private projectsService = inject(ProjectsService);
@@ -44,14 +46,13 @@ export class BuildArtefactsComponent implements OnInit {
 
   projectName = '';
   buildId = '';
-  private taskName = '';
-  private evalId = '';
+  private from: BuildOrigin = {};
+  breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from, this.buildId, 'Artefacts'));
 
   ngOnInit(): void {
     this.projectName     = this.route.snapshot.paramMap.get('project') || '';
     this.buildId     = this.route.snapshot.paramMap.get('buildId') || '';
-    this.taskName = this.route.snapshot.queryParamMap.get('task') || '';
-    this.evalId      = this.route.snapshot.queryParamMap.get('evalId') || '';
+    this.from = readBuildOrigin(this.route.snapshot.queryParamMap);
     this.loadArtefacts();
     if (this.authService.isAuthenticated()) {
       this.projectsService.getProject(this.projectName).subscribe({
@@ -85,12 +86,6 @@ export class BuildArtefactsComponent implements OnInit {
     const base = `${environment.apiUrl}/builds/${this.buildId}/download/${encodeURIComponent(artefact.name)}`;
     const token = this.downloadToken();
     return token ? `${base}?token=${encodeURIComponent(token)}` : base;
-  }
-
-  goBack(): void {
-    if (this.taskName) this.router.navigate(['/project', this.projectName, 'task', this.taskName]);
-    else if (this.evalId) this.router.navigate(['/project', this.projectName, 'log', this.evalId]);
-    else this.router.navigate(['/project', this.projectName]);
   }
 
   readonly formatBytes = formatBytes;

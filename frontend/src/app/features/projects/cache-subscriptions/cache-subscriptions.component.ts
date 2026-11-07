@@ -34,6 +34,7 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { CreateCacheButtonComponent, CreateCacheDialogComponent } from '@shared/forms';
 import { accessTo, CacheSubscriptionItem } from '@core/models';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-cache-subscriptions',
@@ -64,6 +65,7 @@ import { accessTo, CacheSubscriptionItem } from '@core/models';
   styleUrl: './cache-subscriptions.component.scss',
 })
 export class CacheSubscriptionsComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);

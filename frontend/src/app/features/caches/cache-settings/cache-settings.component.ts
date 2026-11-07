@@ -34,6 +34,7 @@ import { CacheResponse, PatchCacheRequest } from '@core/models';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { unsavedChanges } from '@shared/forms';
+import { links } from '@shared/routing';
 
 interface CacheForm {
   display_name: string;
@@ -91,6 +92,7 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
   `,
 })
 export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private accessService = inject(AccessService);
   private router = inject(Router);
@@ -270,7 +272,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
       })
       .subscribe(() => {
         this.notify.success('Cache deleted');
-        this.router.navigate(['/caches']);
+        this.router.navigateByUrl(links.caches());
       });
   }
 

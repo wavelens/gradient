@@ -8,6 +8,7 @@
 // Kept complete by `pnpm barrel:check`.
 export * from './autocomplete/autocomplete.component';
 export * from './badge/badge.component';
+export * from './breadcrumb/breadcrumb.component';
 export * from './button/button.component';
 export * from './card-grid/card-grid.component';
 export * from './checkbox/checkbox.component';

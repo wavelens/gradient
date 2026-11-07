@@ -36,6 +36,7 @@ import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { ProjectResponse, accessTo } from '@core/models';
 import { injectProject } from '@core/resolvers/project-access.resolver';
+import { links } from '@shared/routing';
 
 interface ProjectForm {
   display_name: string;
@@ -74,6 +75,7 @@ interface ProjectForm {
   styleUrl: './project-settings.component.scss',
 })
 export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate {
+  protected readonly links = links;
   readonly visibilityOptions = [
     { label: 'Private', value: false },
     { label: 'Public', value: true },
@@ -230,7 +232,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
       })
       .subscribe(() => {
         this.notify.success('Project deleted');
-        this.router.navigate(['/projects']);
+        this.router.navigateByUrl(links.projects());
       });
   }
 

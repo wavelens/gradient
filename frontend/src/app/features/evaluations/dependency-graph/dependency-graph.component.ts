@@ -23,9 +23,12 @@ import { Subscription } from 'rxjs';
 import { auditTime, filter } from 'rxjs/operators';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { type BuildOrigin, buildOriginLink, links, readBuildOrigin } from '@shared/routing';
 import {
   BadgeComponent,
   BadgeSeverity,
+  BreadcrumbComponent,
   ButtonComponent,
   IconComponent,
   LoadingSpinnerComponent,
@@ -50,7 +53,7 @@ interface LayoutNode extends DependencyGraphNode {
 @Component({
   selector: 'app-dependency-graph',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent, BreadcrumbComponent],
   templateUrl: './dependency-graph.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './dependency-graph.component.scss',
@@ -60,6 +63,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private evalService = inject(EvaluationsService);
   private live = inject(LiveService);
+  private crumbs = inject(BreadcrumbsService);
   private zone = inject(NgZone);
   private cdr = inject(ChangeDetectorRef);
 
@@ -71,6 +75,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
   projectName = '';
   buildId = '';
+  private from: BuildOrigin = {};
+  breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from, this.buildId, 'Dependency graph'));
+  back = computed(() => buildOriginLink(this.projectName, this.from, this.buildId));
   rootId = signal('');
   nodeCount = signal(0);
   edgeCount = signal(0);
@@ -114,6 +121,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     document.body.style.overflow = 'hidden';
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.buildId = this.route.snapshot.paramMap.get('buildId') || '';
+    this.from = readBuildOrigin(this.route.snapshot.queryParamMap);
     this.loadGraph();
   }
 
@@ -347,13 +355,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     });
     // Click navigates to build log
     g.addEventListener('click', () => {
-      const evalId = this.route.snapshot.queryParamMap.get('evalId');
-      if (evalId && node.build) {
-        this.zone.run(() =>
-          this.router.navigate(['/project', this.projectName, 'log', evalId], {
-            queryParams: { build: node.build },
-          })
-        );
+      const evaluation = this.from.evaluation;
+      if (evaluation && node.build) {
+        this.zone.run(() => this.router.navigateByUrl(links.evaluationLog(this.projectName, evaluation, { build: node.build })));
       }
     });
 
@@ -594,13 +598,5 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
   statusSeverity(status?: string | null): BadgeSeverity {
     return PHASE_SEVERITY[this.phase(status)];
-  }
-
-  goBack(): void {
-    const task = this.route.snapshot.queryParamMap.get('task');
-    const evalId  = this.route.snapshot.queryParamMap.get('evalId');
-    if (task) this.router.navigate(['/project', this.projectName, 'task', task]);
-    else if (evalId) this.router.navigate(['/project', this.projectName, 'log', evalId]);
-    else this.router.navigate(['/project', this.projectName]);
   }
 }

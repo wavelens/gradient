@@ -35,6 +35,7 @@ import { StatusIconComponent } from '@shared/ui';
 import { formatDuration, relativeTime } from '@shared/text';
 import { EvaluationHistoryComponent } from '../evaluation-history/evaluation-history.component';
 import { barsThatFit } from '../format';
+import { links } from '@shared/routing';
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'starred', label: 'Starred' },
@@ -69,6 +70,7 @@ function parseFilter(value: string | null): Filter | null {
   styleUrl: './dashboard-task-table.component.scss',
 })
 export class DashboardTaskTableComponent implements OnInit {
+  protected readonly links = links;
   private dashboard = inject(DashboardService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);

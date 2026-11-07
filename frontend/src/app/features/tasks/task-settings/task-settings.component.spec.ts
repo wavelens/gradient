@@ -411,11 +411,11 @@ describe('TaskSettingsComponent - write failures', () => {
     const fixture = setup(admin);
     const deleteTask = vi.fn(() => of('ok'));
     tasks()['deleteTask'] = deleteTask;
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     findByText(fixture.nativeElement, 'delete task')!.click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete Task', target: 'Demo' }));
     expect(deleteTask).toHaveBeenCalledWith('acme', 'demo');
-    expect(navigate).toHaveBeenCalledWith(['/project', 'acme']);
+    expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/project/acme');
   });
 
   it('sends nothing when the delete is cancelled', () => {

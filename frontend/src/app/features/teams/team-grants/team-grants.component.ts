@@ -15,7 +15,7 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterModule } from '@angular/router';
+import { RouterModule, type UrlTree } from '@angular/router';
 import { Observable } from 'rxjs';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -36,6 +36,7 @@ import {
   SelectComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
+import { links } from '@shared/routing';
 
 export type GrantedPart = 'users' | 'workers';
 
@@ -94,8 +95,8 @@ export class TeamGrantsComponent implements OnInit {
     this.teams.list().subscribe({ next: (mine) => this.myTeams.set(mine) });
   }
 
-  teamLink(team: string): string[] | undefined {
-    return canOpenTeam(this.authService.user(), this.myTeams(), team) ? ['/team', team] : undefined;
+  teamLink(team: string): UrlTree | undefined {
+    return canOpenTeam(this.authService.user(), this.myTeams(), team) ? links.team(team) : undefined;
   }
 
   load(): void {

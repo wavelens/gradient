@@ -5,6 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { ClosureGraphComponent } from './closure-graph.component';
@@ -37,6 +38,7 @@ function setup(kind: string, type?: string) {
     imports: [ClosureGraphComponent],
     providers: [
       provideRouter([]),
+      { provide: BreadcrumbsService, useValue: { buildPage: () => [] } },
       { provide: ActivatedRoute, useValue: route },
       { provide: EvaluationsService, useValue: svc },
     ],

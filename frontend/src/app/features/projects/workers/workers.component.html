@@ -17,7 +17,7 @@
     <gr-message-banner type="warning" data-testid="no-cache-banner">
       <strong>No cache subscribed</strong>
       Workers cannot connect to this project until you subscribe a cache.
-      <a [routerLink]="['/project', projectName, 'caches']">Manage cache subscriptions</a>
+      <a [routerLink]="links.projectPage(projectName, 'caches')">Manage cache subscriptions</a>
     </gr-message-banner>
   }
 
@@ -152,7 +152,7 @@
                 severity="secondary"
                 size="small"
                 class="worker-action-btn"
-                [routerLink]="['/project', projectName, 'workers', worker.worker_id, 'metrics']"
+                [routerLink]="links.workerMetrics(projectName, worker.worker_id)"
               ></a>
               @if (workerMenus().get(worker.worker_id); as items) {
                 @if (items.length) {

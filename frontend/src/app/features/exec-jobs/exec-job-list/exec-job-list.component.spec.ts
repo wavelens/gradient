@@ -200,7 +200,7 @@ describe('ExecJobListComponent', () => {
       const { fixture } = renderJob('completed', true, 'dj1');
       expect(labels(openMenu(fixture, 'kebab'))).toEqual(['Show job']);
       const item = fixture.componentInstance.menuModel().find((i) => i.label === 'Show job');
-      expect(item?.routerLink).toEqual(['/board', 'jobs', 'dj1']);
+      expect(String(item?.routerLink)).toBe('/board/jobs/dj1');
       expect(item?.disabled).toBe(false);
     });
 

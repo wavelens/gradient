@@ -28,7 +28,7 @@
             icon="corporate_fare"
             [title]="project.display_name || project.name"
             [description]="project.description || 'No description'"
-            [link]="['/project', project.name]"
+            [link]="links.project(project.name)"
           >
             <div slot="meta">
               @if (project.role) {
@@ -65,7 +65,7 @@
           icon="public"
           [title]="project.display_name || project.name"
           [description]="project.description || 'No description'"
-          [link]="['/project', project.name]"
+          [link]="links.project(project.name)"
         >
           <gr-badge slot="meta" severity="info">Public</gr-badge>
         </gr-nav-card>

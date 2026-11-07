@@ -454,7 +454,7 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     expect(section.textContent).toContain('1 of 2 nodes');
     expect(section.textContent).toContain('completed');
     const link = fixture.debugElement.query(By.css('section.exec a.exec-link'));
-    expect(link.injector.get(RouterLink).urlTree?.toString()).toBe('/project/project-one/task/nightly/exec-jobs/x1');
+    expect(link.injector.get(RouterLink).urlTree?.toString()).toBe('/project/project-one/task/nightly/exec/x1?node=1');
   });
 
   it('shows when the attempt started next to the assignment and the finish', () => {

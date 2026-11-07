@@ -26,6 +26,7 @@ import {
   LogoComponent,
   MessageBannerComponent,
 } from '@gradient/ui/ui';
+import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-cli-authorize',
@@ -66,9 +67,7 @@ export class CliAuthorizeComponent implements OnInit {
     this.auth.initialized$.pipe(take(1)).subscribe(() => {
       if (!this.auth.isAuthenticated()) {
         const next = this.router.url;
-        this.router.navigate(['/account/login'], {
-          queryParams: { next },
-        });
+        this.router.navigateByUrl(links.login(next));
         return;
       }
       if (code) {

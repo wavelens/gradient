@@ -7,7 +7,7 @@
 <gr-page-layout [breadcrumb]="breadcrumb()" [title]="evalAttr()" [subtitle]="'Build history over the last ' + (keepEvaluations()) + ' completed evaluations.'">
   @if (latestBuildId()) {
     <a slot="actions" grButton label="View Closure" icon="account_tree" severity="secondary"
-      [routerLink]="['/project', projectName, 'closure', 'build', latestBuildId()]"></a>
+      [routerLink]="links.closure(projectName, 'build', latestBuildId(), { task: taskName })"></a>
   }
   <gr-load-state
     [loading]="loading()"
