@@ -191,7 +191,7 @@ describe('MembersRolesComponent - writes', () => {
     await settled(fixture);
     (findByText(fixture.nativeElement, 'add member') as HTMLButtonElement).click();
     fixture.detectChanges();
-    fixture.componentInstance.newMember.user = 'carol';
+    fixture.componentInstance.newMember = { user: 'carol', role: 'Admin' };
     fixture.componentInstance.addMember();
     fixture.detectChanges();
     const dialog = document.body.querySelector('.gr-dialog')!;
@@ -205,7 +205,7 @@ describe('MembersRolesComponent - writes', () => {
     await settled(fixture);
     (findByText(fixture.nativeElement, 'add member') as HTMLButtonElement).click();
     fixture.detectChanges();
-    fixture.componentInstance.newMember.user = 'carol';
+    fixture.componentInstance.newMember = { user: 'carol', role: 'Admin' };
     fixture.componentInstance.addMember();
     fixture.detectChanges();
     fixture.componentInstance.addMember();
@@ -226,6 +226,18 @@ describe('MembersRolesComponent - writes', () => {
     fixture.componentInstance.addMember();
     expect(notify.success).toHaveBeenCalledWith('Invitation sent');
     expect(loadInvitations).toHaveBeenCalled();
+  });
+
+  it('preselects no role, so adding a member needs a deliberate role choice', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    fixture.componentInstance.openAddMemberDialog();
+    fixture.componentInstance.newMember.user = 'dave';
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.newMember.role).toBe('');
+    const add = Array.from(document.querySelectorAll<HTMLButtonElement>('.gr-dialog button')).find((b) => b.textContent?.trim() === 'Add');
+    expect(add?.disabled).toBe(true);
   });
 });
 

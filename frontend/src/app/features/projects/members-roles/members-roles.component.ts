@@ -181,9 +181,6 @@ export class MembersRolesComponent implements OnInit {
       next: (response) => {
         this.roles.set(response.roles);
         this.availablePermissions.set(response.available_permissions);
-        if (!this.newMember.role && response.roles.length > 0) {
-          this.newMember.role = response.roles[0].name;
-        }
         this.rolesLoading.set(false);
       },
       error: (error: unknown) => {
@@ -207,10 +204,7 @@ export class MembersRolesComponent implements OnInit {
   }
 
   openAddMemberDialog(): void {
-    this.newMember = {
-      user: '',
-      role: this.roles()[0]?.name ?? '',
-    };
+    this.newMember = { user: '', role: '' };
     this.memberError.set(null);
     this.showAddMemberDialog.set(true);
   }
