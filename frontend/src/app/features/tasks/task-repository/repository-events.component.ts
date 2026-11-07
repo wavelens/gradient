@@ -187,7 +187,7 @@ export class RepositoryEventsComponent {
   openConnect(): void {
     const host = this.host();
     this.connectForm = {
-      git_host_type: host ? guessGitHost(host, false) : 'forgejo',
+      git_host_type: host ? guessGitHost(host) : 'forgejo',
       endpoint_url: host ? `https://${host}` : '',
       access_token: '',
     };

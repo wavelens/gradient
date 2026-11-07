@@ -114,7 +114,7 @@ async fn store_installation_id(db: &WebDb, payload: &GitHubInstallationPayload) 
     }
 }
 
-fn github_full_name(repo_url: &str) -> Option<String> {
+pub(crate) fn github_full_name(repo_url: &str) -> Option<String> {
     let lower = repo_url.to_ascii_lowercase();
     let is_github = lower.contains("github.com")
         || lower.starts_with("github:")

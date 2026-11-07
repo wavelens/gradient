@@ -22,10 +22,9 @@ describe('git host helpers', () => {
   });
 
   it('guesses the Git host type from the host name', () => {
-    expect(guessGitHost('github.com', true)).toBe('github');
-    expect(guessGitHost('github.com', false)).toBe('forgejo');
-    expect(guessGitHost('gitlab.example.com', false)).toBe('gitlab');
-    expect(guessGitHost('git.example.com', false)).toBe('forgejo');
+    expect(guessGitHost('github.com')).toBe('forgejo');
+    expect(guessGitHost('gitlab.example.com')).toBe('gitlab');
+    expect(guessGitHost('git.example.com')).toBe('forgejo');
   });
 
   it('links to the deploy key and webhook settings of the repository', () => {

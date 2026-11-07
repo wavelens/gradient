@@ -13,7 +13,6 @@ import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { injectProject } from '@core/resolvers/project-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
-import { AuthService } from '@core/services/auth.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
   accessTo,
@@ -89,7 +88,6 @@ export class IntegrationsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
-  private auth = inject(AuthService);
 
   access = computed(() => accessTo(this.resolvedProject(), 'manageIntegrations'));
 
@@ -120,11 +118,6 @@ export class IntegrationsComponent implements OnInit {
 
   get displayNameError(): string | null {
     return this.formData.display_name.trim() ? null : 'Enter a display name.';
-  }
-
-  get installationIdError(): string | null {
-    const id = this.formData.installation_id.trim();
-    return id ? fieldChecks.positiveInteger(id) : 'Enter the Installation ID.';
   }
 
   get endpointUrlError(): string | null {
@@ -162,7 +155,6 @@ export class IntegrationsComponent implements OnInit {
     secret: string;
     access_token: string;
     allowed_ips: string;
-    installation_id: string;
   } = {
     name: '',
     display_name: '',
@@ -172,7 +164,6 @@ export class IntegrationsComponent implements OnInit {
     secret: '',
     access_token: '',
     allowed_ips: '',
-    installation_id: '',
   };
 
   githubAppAvailable = computed(() => this.resolvedProject()?.github_app_available === true);
@@ -182,19 +173,12 @@ export class IntegrationsComponent implements OnInit {
   githubAppInstalled = computed(() => this.githubInstallations().length > 0);
   githubAppInstallUrl = computed(() => this.resolvedProject()?.github_app_install_url ?? null);
 
-  isSuperuser = computed(() => this.auth.user()?.superuser === true);
 
   readonly selfHostedGitHostOptions: Option<GitHostType>[] = [
     { label: 'Gitea', value: 'gitea' },
     { label: 'Forgejo', value: 'forgejo' },
     { label: 'GitLab', value: 'gitlab' },
   ];
-
-  gitHostOptions = computed<Option<GitHostType>[]>(() =>
-    this.githubAppAvailable()
-      ? [...this.selfHostedGitHostOptions, { label: 'GitHub', value: 'github' }]
-      : this.selfHostedGitHostOptions,
-  );
 
   repositoryHost = signal<string | null>(null);
 
@@ -232,12 +216,11 @@ export class IntegrationsComponent implements OnInit {
       name: host ? slugify(host) : '',
       display_name: '',
       kind: 'inbound',
-      git_host_type: host ? guessGitHost(host, this.githubAppAvailable()) : 'forgejo',
+      git_host_type: host ? guessGitHost(host) : 'forgejo',
       endpoint_url: host ? `https://${host}` : '',
       secret: '',
       access_token: '',
       allowed_ips: '',
-      installation_id: '',
     };
     this.editingIntegration.set(null);
     this.errorMessage.set(null);
@@ -256,34 +239,7 @@ export class IntegrationsComponent implements OnInit {
   createIntegration(): void {
     if (this.saving()) return;
     this.submitAttempted.set(true);
-    const github = this.formData.git_host_type === 'github';
-    if (this.nameError || (github ? this.installationIdError : this.kindFieldsError(this.formData.kind))) return;
-
-    if (github) {
-      const installationId = Number(this.formData.installation_id.trim());
-      this.saving.set(true);
-      this.errorMessage.set(null);
-      const body: CreateIntegrationRequest = {
-        name: this.formData.name.trim(),
-        kind: this.formData.kind,
-        git_host_type: 'github',
-        installation_id: installationId,
-        ...(this.formData.display_name.trim() ? { display_name: this.formData.display_name.trim() } : {}),
-      };
-      this.integrationsService.createProjectIntegration(this.projectName, body).subscribe({
-        next: (created) => {
-          this.saving.set(false);
-          this.showCreateDialog.set(false);
-          this.notifyCreated(created);
-          this.loadIntegrations();
-        },
-        error: (error: unknown) => {
-          this.errorMessage.set(apiErrorMessage(error, 'Failed to create integration.'));
-          this.saving.set(false);
-        },
-      });
-      return;
-    }
+    if (this.nameError || this.kindFieldsError(this.formData.kind)) return;
 
     this.saving.set(true);
     this.errorMessage.set(null);
@@ -335,7 +291,6 @@ export class IntegrationsComponent implements OnInit {
       secret: '',
       access_token: '',
       allowed_ips: (integration.allowed_ips ?? []).join('\n'),
-      installation_id: '',
     };
     this.errorMessage.set(null);
     this.submitAttempted.set(false);

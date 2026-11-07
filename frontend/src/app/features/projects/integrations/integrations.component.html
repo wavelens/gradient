@@ -21,8 +21,7 @@
     @if (githubAppAvailable() && !githubAppInstalled()) {
       <gr-message-banner type="warning" data-testid="no-github-app-banner">
         <strong>GitHub App not installed</strong>
-        GitHub repositories get no status checks until the App is installed on their account and added here
-        as a GitHub integration with its installation ID.
+        GitHub repositories connect automatically after installation of the GitHub App on that account. Gradient can link the installation after task creation for the repository, or after a change to its URL.
         @if (githubAppInstallUrl(); as installUrl) {
           <a [href]="installUrl" target="_blank" rel="noopener noreferrer">Install the GitHub App</a>
         }
@@ -184,30 +183,13 @@
     <gr-select
       inputId="int-git-host"
       [(ngModel)]="formData.git_host_type"
-      [options]="gitHostOptions()"
+      [options]="selfHostedGitHostOptions"
       optionLabel="label"
       optionValue="value"
     />
-    @if (!githubAppAvailable()) {
-      <small slot="hint" class="text-secondary" data-testid="github-unavailable">
-        @if (isSuperuser()) {
-          This server must have a GitHub App for GitHub integration.
-          <a routerLink="/admin/github-app">Set up GitHub App</a>
-        } @else {
-          GitHub isn't available before GitHub App setup by an instance admin.
-        }
-      </small>
-    }
   </gr-form-field>
 
-  @if (formData.git_host_type === 'github') {
-    <gr-form-field label="App Installation ID" for="int-installation-id" required hint="The numeric installation ID of the GitHub App installation."
-      [invalid]="(submitAttempted() || installationModel.touched) && !!installationIdError" [error]="installationIdError ?? ''">
-      <gr-label-help slot="label" doc="guides/github/#3-install-the-app" title="Install the GitHub App" />
-      <input grInput id="int-installation-id" [(ngModel)]="formData.installation_id" #installationModel="ngModel"
-        placeholder="e.g. 12345678" (keyup.enter)="createIntegration()" />
-    </gr-form-field>
-  } @else if (formData.kind === 'inbound') {
+  @if (formData.kind === 'inbound') {
     <gr-message-banner type="info">Gradient can create a webhook secret and show it only once after integration creation.</gr-message-banner>
     <gr-form-field label="Allowed source IPs / CIDRs" for="int-allowed-ips" hint="One CIDR per line. Leave blank to accept webhooks from any source."
       [invalid]="(submitAttempted() || createIpsModel.touched) && !!allowedIpsError" [error]="allowedIpsError ?? ''">

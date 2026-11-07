@@ -94,6 +94,28 @@ pub async fn get_installation(
     Ok(installation.account.login)
 }
 
+#[derive(Deserialize)]
+struct RepositoryInstallation {
+    id: i64,
+    account: InstallationAccount,
+}
+
+/// The installation id and account login of the App on `owner/repo`, or `None` when the App has no access to it.
+pub async fn get_repository_installation(
+    client: &reqwest::Client,
+    app_id: u64,
+    private_key_pem: &str,
+    full_name: &str,
+) -> Result<Option<(i64, String)>> {
+    let jwt = generate_jwt(app_id, private_key_pem)?;
+    let installation: Option<RepositoryInstallation> =
+        HostClient::github(client.clone(), GITHUB_API_URL, jwt)
+            .with_user_agent("gradient")
+            .get_json_optional(&format!("/repos/{full_name}/installation"))
+            .await?;
+    Ok(installation.map(|i| (i.id, i.account.login)))
+}
+
 pub async fn get_install_url(
     client: &reqwest::Client,
     app_id: u64,

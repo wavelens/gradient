@@ -29,8 +29,7 @@ export function firstRepositoryHost(repositories: string[]): string | null {
   return null;
 }
 
-export function guessGitHost(host: string, githubAvailable: boolean): GitHostType {
-  if (host === 'github.com') return githubAvailable ? 'github' : 'forgejo';
+export function guessGitHost(host: string): GitHostType {
   if (host === 'gitlab.com' || host.includes('gitlab')) return 'gitlab';
   if (host === 'codeberg.org' || host.includes('forgejo')) return 'forgejo';
   if (host.includes('gitea')) return 'gitea';

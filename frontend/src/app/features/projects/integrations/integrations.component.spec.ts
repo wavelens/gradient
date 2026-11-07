@@ -256,88 +256,6 @@ describe('IntegrationsComponent - GitHub App install banner', () => {
   });
 });
 
-describe('IntegrationsComponent - create github integration', () => {
-  it('createIntegration sends git_host_type=github with installation_id', () => {
-    const createSpy = vi.fn().mockReturnValue(of({}));
-    TestBed.configureTestingModule({
-      imports: [IntegrationsComponent],
-      providers: [
-        provideRouter([]),
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        {
-          provide: ActivatedRoute,
-          useFactory: () => projectRouteStub('acme', { managed: false, canEdit: true, canTrigger: true }, { github_app_available: true }),
-        },
-        {
-          provide: IntegrationsService,
-          useValue: {
-            listProjectIntegrations: () => of([]),
-            listIntegrationDeliveries: () => of([]),
-            createProjectIntegration: createSpy,
-          },
-        },
-      ],
-    });
-    const fixture = TestBed.createComponent(IntegrationsComponent);
-    fixture.detectChanges();
-
-    const comp = fixture.componentInstance;
-    comp.formData.name = 'github-app';
-    comp.formData.git_host_type = 'github';
-    comp.formData.installation_id = '12345';
-    comp.formData.kind = 'outbound';
-    comp.createIntegration();
-
-    expect(createSpy).toHaveBeenCalledOnce();
-    expect(createSpy).toHaveBeenCalledWith('acme', expect.objectContaining({
-      name: 'github-app',
-      git_host_type: 'github',
-      installation_id: 12345,
-    }));
-  });
-
-  it('createIntegration rejects a non-integer installation_id', () => {
-    const createSpy = vi.fn().mockReturnValue(of({}));
-    TestBed.configureTestingModule({
-      imports: [IntegrationsComponent],
-      providers: [
-        provideRouter([]),
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        {
-          provide: ActivatedRoute,
-          useFactory: () => projectRouteStub('acme', { managed: false, canEdit: true, canTrigger: true }, { github_app_available: true }),
-        },
-        {
-          provide: IntegrationsService,
-          useValue: {
-            listProjectIntegrations: () => of([]),
-            listIntegrationDeliveries: () => of([]),
-            createProjectIntegration: createSpy,
-          },
-        },
-      ],
-    });
-    const fixture = TestBed.createComponent(IntegrationsComponent);
-    fixture.detectChanges();
-
-    const comp = fixture.componentInstance;
-    comp.formData.name = 'github-app';
-    comp.formData.git_host_type = 'github';
-    comp.openCreateDialog();
-    comp.formData.name = 'github-app';
-    comp.formData.git_host_type = 'github';
-    comp.formData.installation_id = 'not-a-number';
-    comp.createIntegration();
-    fixture.detectChanges();
-
-    expect(createSpy).not.toHaveBeenCalled();
-    expect(document.querySelector('.gr-dialog .field-error')?.textContent).toContain('1 or higher');
-    expect(comp.errorMessage()).toBeNull();
-  });
-});
-
 describe('IntegrationsComponent - load errors', () => {
   it('shows a failed load as an error, never as the empty state and loads again on Try Again', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
@@ -401,19 +319,10 @@ describe('IntegrationsComponent - write failures', () => {
     expect(component.editingIntegration()).toBeNull();
   });
 
-  it('offers GitHub only when the server has a GitHub App', async () => {
-    const fixture = setup(writable, [], false);
-    await settled(fixture);
-    expect(fixture.componentInstance.gitHostOptions().map((o) => o.value)).not.toContain('github');
-    fixture.componentInstance.openCreateDialog();
-    fixture.detectChanges();
-    expect(document.querySelector('[data-testid="github-unavailable"]')?.textContent).toContain('instance admin');
-  });
-
-  it('offers GitHub when the server has a GitHub App', async () => {
+  it('leaves GitHub out of manual integrations, since the GitHub App connects them', async () => {
     const fixture = setup(writable, [], true);
     await settled(fixture);
-    expect(fixture.componentInstance.gitHostOptions().map((o) => o.value)).toContain('github');
+    expect(fixture.componentInstance.selfHostedGitHostOptions.map((o) => o.value)).not.toContain('github');
   });
 
   it('names the tasks a new integration connected to', async () => {

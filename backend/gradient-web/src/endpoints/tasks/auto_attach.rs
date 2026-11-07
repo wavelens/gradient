@@ -10,7 +10,9 @@ use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::{
     GitHostType, MIntegration, MTask, MTaskAction, MTaskTrigger, TaskActionId, TaskTriggerId,
 };
-use sea_orm::ConnectionTrait;
+use crate::endpoints::git_host_hooks::installation::github_full_name;
+use gradient_core::ServerState;
+use sea_orm::{ConnectionTrait, TransactionTrait};
 
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct AutoAttach {
@@ -192,6 +194,61 @@ pub(crate) async fn apply<C: ConnectionTrait>(
     }
 
     Ok(attached)
+}
+
+async fn bind_github_app(state: &ServerState, task: &MTask) -> anyhow::Result<()> {
+    let Some(app) = state.config.github_app.as_ref() else {
+        return Ok(());
+    };
+    let Some(full_name) = github_full_name(&task.repository) else {
+        return Ok(());
+    };
+    let pem = tokio::fs::read_to_string(&app.private_key_file).await?;
+    let Some((installation_id, account)) = gradient_git_host::github_app::get_repository_installation(
+        &state.http,
+        app.app_id,
+        &pem,
+        &full_name,
+    )
+    .await?
+    else {
+        return Ok(());
+    };
+
+    let txn = state.web_db.inner().begin().await?;
+    let installation = gradient_ci::upsert_github_installation(
+        &txn,
+        task.project,
+        installation_id,
+        Some(&account),
+        task.created_by,
+    )
+    .await?;
+    let name = gradient_ci::github_integration_name(Some(&account), installation_id);
+    gradient_ci::ensure_github_app_integrations(
+        &txn,
+        task.project,
+        installation,
+        &name,
+        "GitHub",
+        task.created_by,
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(())
+}
+
+pub(crate) async fn connect_repository(state: &ServerState, task: &MTask) {
+    if let Err(e) = bind_github_app(state, task).await {
+        tracing::warn!(task = %task.id, error = %e, "Failed to link the repository to the GitHub App's installation");
+    }
+    let attached = match gradient_db::integrations::of_project(&state.web_db, task.project).await {
+        Ok(integrations) => apply(&state.web_db, task, &integrations).await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = attached {
+        tracing::warn!(task = %task.id, error = %e, "Could not connect the integration to the repository");
+    }
 }
 
 #[cfg(test)]

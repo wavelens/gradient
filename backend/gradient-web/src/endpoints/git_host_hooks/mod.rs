@@ -12,7 +12,7 @@ mod commands;
 mod delivery_log;
 mod fanout;
 mod flake_input_push;
-mod installation;
+pub(crate) mod installation;
 mod payloads;
 mod refusal;
 mod response;

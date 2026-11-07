@@ -270,15 +270,7 @@ pub async fn put(
     };
     gradient_db::triggers::insert(&state.web_db, default_trigger).await?;
 
-    let integrations = gradient_db::integrations::of_project(&state.web_db, project.id)
-        .await
-        .unwrap_or_default();
-    if let Err(e) = auto_attach::apply(&state.web_db, &task, &integrations).await {
-        tracing::warn!(
-            "auto-attaching integrations to task {} failed: {e}",
-            task.id
-        );
-    }
+    auto_attach::connect_repository(&state, &task).await;
 
     audit
         .write(
@@ -427,10 +419,7 @@ pub async fn patch_task(
         .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
 
     if repository_changed {
-        let integrations = gradient_db::integrations::of_project(&state.web_db, project.id).await?;
-        if let Err(e) = auto_attach::apply(&state.web_db, &updated, &integrations).await {
-            tracing::warn!(task = %updated.id, error = %e, "Could not connect the integration to the new repository");
-        }
+        auto_attach::connect_repository(&state, &updated).await;
     }
 
     audit.write(Action::TaskUpdate, owner, fields).await;
