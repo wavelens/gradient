@@ -6,7 +6,7 @@
 
 import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { IconComponent } from '@gradient/ui/ui';
+import { ButtonComponent, IconComponent } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
 import { DeniedKind } from '@core/routing/access-denied';
 
@@ -88,7 +88,7 @@ export interface DeniedView {
 @Component({
   selector: 'app-error-page',
   standalone: true,
-  imports: [RouterModule, IconComponent],
+  imports: [RouterModule, ButtonComponent, IconComponent],
   templateUrl: './error-page.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './error-page.component.scss',

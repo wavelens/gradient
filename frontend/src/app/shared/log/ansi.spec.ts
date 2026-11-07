@@ -12,11 +12,11 @@ describe('ansiToHtml', () => {
   });
 
   it('closes a colour at its reset', () => {
-    expect(ansiToHtml('\x1b[31mred\x1b[0m plain')).toBe('<span style="color:#ef4444">red</span> plain');
+    expect(ansiToHtml('\x1b[31mred\x1b[0m plain')).toBe('<span style="color:var(--gr-status-danger)">red</span> plain');
   });
 
   it('closes colours a line leaves open', () => {
-    expect(ansiToHtml('\x1b[1m\x1b[32mok')).toBe('<span style="font-weight:bold"><span style="color:#22c55e">ok</span></span>');
+    expect(ansiToHtml('\x1b[1m\x1b[32mok')).toBe('<span style="font-weight:bold"><span style="color:var(--gr-status-success)">ok</span></span>');
   });
 
   it('drops cursor movements and unknown styles', () => {

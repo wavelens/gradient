@@ -4,34 +4,36 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+// ANSI colors map to color roles of the theme. Log lines remain readable in light and dark themes. Bright variants share the same role as normal colors.
+const COLOUR_ROLES: Record<string, string> = {
+  '30': 'text-primary',
+  '31': 'status-danger',
+  '32': 'status-success',
+  '33': 'status-warning',
+  '34': 'status-info',
+  '35': 'log-magenta',
+  '36': 'log-cyan',
+  '37': 'text-secondary',
+};
+const BRIGHT_ROLES: Record<string, string> = { '90': 'text-muted', '97': 'text-primary' };
+
 const SGR_SPANS: Record<string, string> = {
   '1': '<span style="font-weight:bold">',
   '2': '<span style="opacity:0.6">',
   '3': '<span style="font-style:italic">',
-  '30': '<span style="color:#374151">',
-  '31': '<span style="color:#ef4444">',
-  '32': '<span style="color:#22c55e">',
-  '33': '<span style="color:#eab308">',
-  '34': '<span style="color:#3b82f6">',
-  '35': '<span style="color:#a855f7">',
-  '36': '<span style="color:#06b6d4">',
-  '37': '<span style="color:#d1d5db">',
-  '90': '<span style="color:#6b7280">',
-  '91': '<span style="color:#f87171">',
-  '92': '<span style="color:#4ade80">',
-  '93': '<span style="color:#fbbf24">',
-  '94': '<span style="color:#60a5fa">',
-  '95': '<span style="color:#c084fc">',
-  '96': '<span style="color:#22d3ee">',
-  '97': '<span style="color:#f9fafb">',
-  '1;31': '<span style="color:#ef4444;font-weight:bold">',
-  '1;32': '<span style="color:#22c55e;font-weight:bold">',
-  '1;33': '<span style="color:#eab308;font-weight:bold">',
-  '1;34': '<span style="color:#3b82f6;font-weight:bold">',
-  '1;35': '<span style="color:#a855f7;font-weight:bold">',
-  '1;36': '<span style="color:#06b6d4;font-weight:bold">',
-  '31;1': '<span style="color:#ef4444;font-weight:bold">',
-  '35;1': '<span style="color:#a855f7;font-weight:bold">',
+  ...Object.fromEntries(
+    Object.entries(COLOUR_ROLES).flatMap(([code, role]) => {
+      const colour = `color:var(--gr-${role})`;
+      const bold = `<span style="${colour};font-weight:bold">`;
+      return [
+        [code, `<span style="${colour}">`],
+        [String(Number(code) + 60), `<span style="${colour}">`],
+        [`1;${code}`, bold],
+        [`${code};1`, bold],
+      ];
+    }),
+  ),
+  ...Object.fromEntries(Object.entries(BRIGHT_ROLES).map(([code, role]) => [code, `<span style="color:var(--gr-${role})">`])),
 };
 
 const SGR_RESETS = new Set(['0', '', '39', '49', '22', '23', '24']);

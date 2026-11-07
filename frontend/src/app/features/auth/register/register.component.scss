@@ -116,10 +116,10 @@
     color: var(--gr-text-primary);
     padding: 0;
     margin-left: $spacing-xs;
+    text-decoration: underline;
 
     &:hover {
       background-color: transparent;
-      text-decoration: underline;
     }
   }
 }

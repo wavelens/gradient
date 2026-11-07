@@ -120,13 +120,12 @@
   width: 56px;
   padding-right: 12px;
   text-align: right;
-  color: var(--gr-text-secondary);
+  color: var(--gr-text-muted);
   user-select: none;
   -webkit-user-select: none;
   cursor: pointer;
-  opacity: 0.55;
 
-  &:hover { opacity: 1; }
+  &:hover { color: var(--gr-text-primary); }
 }
 
 .log-line-content {

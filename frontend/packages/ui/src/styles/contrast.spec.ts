@@ -25,23 +25,27 @@ const PAIRS: Array<[string, string, number]> = [
   ['--gr-text-primary', '--gr-surface-control', 4.5],
   ['--gr-text-secondary', '--gr-surface-base', 4.5],
   ['--gr-text-secondary', '--gr-surface-raised', 4.5],
-  ['--gr-status-success', '--gr-surface-base', 3],
-  ['--gr-status-danger', '--gr-surface-base', 3],
-  ['--gr-status-warning', '--gr-surface-base', 3],
-  ['--gr-status-info', '--gr-surface-base', 3],
-  ['--gr-accent', '--gr-surface-base', 3],
   ['--gr-accent-fg', '--gr-accent-fill', 4.5],
   ['--gr-accent-fg', '--gr-accent-fill-hover', 4.5],
   ['--gr-status-danger-fg', '--gr-status-danger', 4.5],
   ['--gr-status-warning-fg', '--gr-status-warning', 4.5],
-  // Muted is real text, and every status colour is also used on a raised surface.
   ['--gr-text-muted', '--gr-surface-base', 4.5],
   ['--gr-text-muted', '--gr-surface-raised', 4.5],
-  ['--gr-status-success', '--gr-surface-raised', 3],
-  ['--gr-status-danger', '--gr-surface-raised', 3],
-  ['--gr-status-warning', '--gr-surface-raised', 3],
-  ['--gr-status-info', '--gr-surface-raised', 3],
-  ['--gr-accent', '--gr-surface-raised', 3],
+  ['--gr-text-muted', '--gr-surface-hover', 4.5],
+  ['--gr-text-muted', '--gr-surface-active', 4.5],
+  // Build logs appear on the sunken surface in any color that an escape code from ANSI can select.
+  ...[
+    '--gr-text-primary', '--gr-text-secondary', '--gr-text-muted', '--gr-status-danger', '--gr-status-success',
+    '--gr-status-warning', '--gr-status-info', '--gr-log-magenta', '--gr-log-cyan',
+  ].map((role): [string, string, number] => [role, '--gr-surface-sunken', 4.5]),
+  // Components use status colours and accent for text. Hover rows do the same. Each one must meet the contrast ratio for text on every surface.
+  ...['--gr-status-success', '--gr-status-danger', '--gr-status-warning', '--gr-status-info', '--gr-accent'].flatMap(
+    (role): Array<[string, string, number]> => [
+      [role, '--gr-surface-base', 4.5],
+      [role, '--gr-surface-raised', 4.5],
+      [role, '--gr-surface-hover', 4.5],
+    ],
+  ),
 ];
 
 /// Elevation is only readable if adjacent surfaces actually differ.
@@ -63,10 +67,15 @@ const TINTED: Array<[string, number]> = [
   ['--gr-status-info', 18],
 ];
 
+// Badges and banners sit on the page, card and hover surfaces. Check the tint on each surface.
+const TINT_SURFACES = ['--gr-surface-base', '--gr-surface-raised', '--gr-surface-hover'];
+
 describe.each(['dark', 'light'] as Theme[])('%s theme tinted badges', (theme) => {
   it.each(TINTED)('%s label reads on its own %s%% tint', (role, pct) => {
-    const tint = mix(resolveRole(role, theme), resolveRole('--gr-surface-base', theme), pct);
-    expect(ratio(resolveRole(`${role}-text`, theme), tint)).toBeGreaterThanOrEqual(4.5);
+    for (const surface of TINT_SURFACES) {
+      const tint = mix(resolveRole(role, theme), resolveRole(surface, theme), pct);
+      expect(ratio(resolveRole(`${role}-text`, theme), tint), surface).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
 

@@ -23,18 +23,18 @@
     }
     <div class="error-actions">
       @if (restricted() && !user()) {
-        <a routerLink="/account/login" [queryParams]="from ? { next: from } : {}" class="btn btn-primary">Sign In</a>
+        <a grButton routerLink="/account/login" [queryParams]="from ? { next: from } : {}" label="Sign In"></a>
       }
       @if (denied(); as view) {
-        <a [routerLink]="view.backLink" class="btn" [class.btn-primary]="!!user()" [class.btn-secondary]="!user()">{{ view.backLabel }}</a>
+        <a grButton [routerLink]="view.backLink" [severity]="user() ? 'primary' : 'secondary'" [label]="view.backLabel"></a>
       } @else {
-        <a routerLink="/" class="btn" [class.btn-primary]="!restricted() || !!user()" [class.btn-secondary]="restricted() && !user()">Go Home</a>
+        <a grButton routerLink="/" [severity]="restricted() && !user() ? 'secondary' : 'primary'" label="Go Home"></a>
       }
       @if (restricted() && user()) {
-        <button class="btn btn-secondary" (click)="switchAccount()">Switch Account</button>
+        <button grButton type="button" severity="secondary" label="Switch Account" (click)="switchAccount()"></button>
       }
       @if (meta().retryable) {
-        <button class="btn btn-secondary" (click)="retry()">Try Again</button>
+        <button grButton type="button" severity="secondary" label="Try Again" (click)="retry()"></button>
       }
     </div>
   </div>

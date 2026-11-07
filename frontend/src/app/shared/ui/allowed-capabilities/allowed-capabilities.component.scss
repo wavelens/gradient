@@ -33,7 +33,7 @@
   &--on {
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
     border-color: var(--gr-status-success);
-    color: var(--gr-status-success);
+    color: var(--gr-status-success-text);
   }
 }
 
@@ -54,10 +54,10 @@
   white-space: nowrap;
   overflow-wrap: normal;
   background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-  color: var(--gr-status-danger);
+  color: var(--gr-status-danger-text);
 
   &--on {
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: var(--gr-status-success);
+    color: var(--gr-status-success-text);
   }
 }
