@@ -9,6 +9,20 @@ import { repositoryWebUrl, splitRepository } from '@shared/evaluation';
 
 const SCP_HOST = /^[^@/\s]+@([^:/\s]+):/;
 
+const GIT_HOST_LABELS: Record<GitHostType, string> = {
+  forgejo: 'Forgejo',
+  gitea: 'Gitea',
+  gitlab: 'GitLab',
+  github: 'GitHub',
+};
+
+export const SELF_HOSTED_GIT_HOSTS: readonly { label: string; value: GitHostType }[] = (['forgejo', 'gitea', 'gitlab'] as const)
+  .map((value) => ({ label: GIT_HOST_LABELS[value], value }));
+
+export function gitHostLabel(gitHost: string): string {
+  return GIT_HOST_LABELS[gitHost as GitHostType] ?? gitHost;
+}
+
 export function repositoryHost(repository: string): string | null {
   const { cloneUrl } = splitRepository(repository.trim());
   const scp = SCP_HOST.exec(cloneUrl);

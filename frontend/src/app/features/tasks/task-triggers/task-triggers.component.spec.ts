@@ -114,6 +114,14 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(text).not.toContain('019e16b2-e958-7652-ad97-67cd7b0fea61');
   });
 
+  it('names the Git host of each integration in the picker instead of its raw type', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, []);
+    fixture.componentInstance.inboundIntegrations.set([
+      { id: 'i1', name: 'forge', display_name: 'Our Forge', kind: 'inbound', git_host_type: 'forgejo' },
+    ] as never);
+    expect(fixture.componentInstance.integrationOptions().map((o) => o.label)).toContain('Our Forge (Forgejo)');
+  });
+
   it('falls back gracefully when reporter trigger references a deleted integration', () => {
     const orphan = {
       id: 't3',

@@ -43,6 +43,7 @@ import {
 import { relativeTime } from '@shared/text';
 import { links } from '@shared/routing';
 import { splitList } from '@shared/forms';
+import { gitHostLabel } from '@shared/git';
 
 interface Option<T> {
   label: string;
@@ -178,7 +179,7 @@ export class TaskTriggersComponent implements OnInit {
   integrationOptions = computed<Option<string>[]>(() => {
     const opts: Option<string>[] = [{ label: '- select integration -', value: '' }];
     for (const i of this.inboundIntegrations()) {
-      opts.push({ label: `${i.display_name || i.name} (${i.git_host_type})`, value: i.id });
+      opts.push({ label: `${i.display_name || i.name} (${gitHostLabel(i.git_host_type)})`, value: i.id });
     }
     return opts;
   });

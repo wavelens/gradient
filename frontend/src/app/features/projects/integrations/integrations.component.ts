@@ -41,7 +41,7 @@ import {
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, missingPermissionText } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { IncomingDeliveriesComponent, firstRepositoryHost, guessGitHost, webhookEvents } from '@shared/git';
+import { IncomingDeliveriesComponent, SELF_HOSTED_GIT_HOSTS, firstRepositoryHost, gitHostLabel, guessGitHost, webhookEvents } from '@shared/git';
 import { slugify } from '@shared/text';
 import { links } from '@shared/routing';
 import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
@@ -178,11 +178,7 @@ export class IntegrationsComponent implements OnInit {
   githubAppInstallUrl = computed(() => this.resolvedProject()?.github_app_install_url ?? null);
 
 
-  readonly selfHostedGitHostOptions: Option<GitHostType>[] = [
-    { label: 'Gitea', value: 'gitea' },
-    { label: 'Forgejo', value: 'forgejo' },
-    { label: 'GitLab', value: 'gitlab' },
-  ];
+  readonly selfHostedGitHostOptions = SELF_HOSTED_GIT_HOSTS;
 
   repositoryHost = signal<string | null>(null);
 
@@ -415,15 +411,7 @@ export class IntegrationsComponent implements OnInit {
     return webhookEvents(integration.git_host_type);
   }
 
-  gitHostLabel(gitHost: string): string {
-    switch (gitHost) {
-      case 'gitea': return 'Gitea';
-      case 'forgejo': return 'Forgejo';
-      case 'gitlab': return 'GitLab';
-      case 'github': return 'GitHub';
-      default: return gitHost;
-    }
-  }
+  protected readonly gitHostLabel = gitHostLabel;
 
   formatDate(s: string): string {
     try {

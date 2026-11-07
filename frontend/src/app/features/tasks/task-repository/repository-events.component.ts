@@ -23,7 +23,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
-import { IncomingDeliveriesComponent, deliverySummary, gitHostSettingsLinks, guessGitHost, repositoryHost, webhookEvents } from '@shared/git';
+import { IncomingDeliveriesComponent, SELF_HOSTED_GIT_HOSTS, deliverySummary, gitHostSettingsLinks, guessGitHost, repositoryHost, webhookEvents } from '@shared/git';
 import { relativeTime, slugify } from '@shared/text';
 import { fieldChecks, splitList, unsavedChanges } from '@shared/forms';
 import { provisioningIntegration } from './provisioning';
@@ -44,12 +44,6 @@ interface Option<T> {
   label: string;
   value: T;
 }
-
-const SELF_HOSTED: Option<GitHostType>[] = [
-  { label: 'Forgejo', value: 'forgejo' },
-  { label: 'Gitea', value: 'gitea' },
-  { label: 'GitLab', value: 'gitlab' },
-];
 
 function formOf(state: TaskRepositoryResponse): EventsForm {
   const push = state.build_on_push;
@@ -150,7 +144,7 @@ export class RepositoryEventsComponent {
   connecting = signal(false);
   connectError = signal<string | null>(null);
   connectForm = { git_host_type: 'forgejo' as GitHostType, endpoint_url: '', access_token: '' };
-  readonly gitHostOptions = SELF_HOSTED;
+  readonly gitHostOptions = SELF_HOSTED_GIT_HOSTS;
   createdSecret = signal<{ url: string; secret: string } | null>(null);
   showSecret = signal(false);
 
