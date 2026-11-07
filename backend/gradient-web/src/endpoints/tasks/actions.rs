@@ -9,7 +9,7 @@ use super::refusal::TaskRefusal;
 use crate::api_spec::TaskPath;
 use crate::audit::Audit;
 use crate::endpoints::webhooks::{ActionDeliveryItem, DeliveryDetail, DeliveryListItem};
-use crate::error::{WebError, WebResult};
+use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::resource::Resource;
 use crate::scope::{Member, Requires, TaskScope, can};
@@ -511,7 +511,7 @@ pub async fn delete_action(
     operation_id = "testTaskAction",
     tag = "actions",
     summary = "Fire action now (synthetic test)",
-    description = "Fires the action immediately with a synthetic test event, bypassing event matching. Git host integration actions (`git_host_status_report`, `open_pr`) instead perform a non-mutating connectivity check against the task's repository, since a synthetic status/PR posted against a placeholder commit is always rejected by the Git host. All tests enter the action's delivery history. Connectivity checks enter that history as event `test.connectivity`.",
+    description = "Fires the action immediately with a synthetic test event, bypassing event matching. Git host integration actions (`git_host_status_report`, `open_pr`) instead perform a non-mutating connectivity check against the task's repository, since a synthetic status/PR posted against a placeholder commit is always rejected by the Git host. All tests enter the action's delivery history. Connectivity checks enter that history as event `test.connectivity`. Return 400 for an invalid action config on test failure. Return 502 for an unreachable receiver or a rejected request. The message can include the reason.",
     params(TaskPath, ("id" = TaskActionId, Path)),
     responses((status = OK, description = "Action fired", body = serde_json::Value), WebError)
 )]
@@ -540,7 +540,7 @@ pub async fn test_action(
     ) {
         gradient_ci::actions::test_git_host_action(&ci, &action, &proj.repository)
             .await
-            .context("run the test fire")?;
+            .map_err(test_failure)?;
 
         return Ok(ok_json(serde_json::Value::Null));
     }
@@ -574,11 +574,32 @@ pub async fn test_action(
         "at": now.to_rfc3339(),
         "content": content,
     });
-    gradient_ci::actions::execute_action(&ci, action, &event, envelope)
+    let status = gradient_ci::actions::execute_action(&ci, action, &event, envelope)
         .await
-        .context("run the test fire")?;
+        .map_err(test_failure)?;
+    if let Some(status) = status.filter(|s| !(200..300).contains(s)) {
+        return Err(WebError::BadGateway(
+            ErrorCode::BAD_GATEWAY,
+            format!("The receiving server responded with HTTP status {status}."),
+        ));
+    }
 
     Ok(ok_json(serde_json::Value::Null))
+}
+
+fn test_failure(error: anyhow::Error) -> WebError {
+    match error.downcast_ref::<gradient_ci::ActionError>() {
+        Some(
+            gradient_ci::ActionError::UrlRejected { .. }
+            | gradient_ci::ActionError::RepositoryUnparsable { .. },
+        ) => WebError::BadRequest(ErrorCode::VALIDATION, format!("{error:#}")),
+        Some(
+            gradient_ci::ActionError::CryptKeyUnreadable { .. }
+            | gradient_ci::ActionError::TaskNotFound { .. }
+            | gradient_ci::ActionError::InvalidEvaluationId,
+        ) => WebError::Internal(error),
+        None => WebError::BadGateway(ErrorCode::BAD_GATEWAY, format!("{error:#}")),
+    }
 }
 
 async fn test_fire_link(

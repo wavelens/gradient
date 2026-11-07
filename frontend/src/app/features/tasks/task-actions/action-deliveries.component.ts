@@ -8,7 +8,7 @@ import { BadgeComponent, ButtonComponent, DialogComponent, LoadStateComponent, T
 import { Component, inject, input, output, signal, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActionsService } from '../../../core/services/actions.service';
-import { formatDuration } from '@shared/text';
+import { formatDuration, relativeTime, serverTime } from '@shared/text';
 import {
   DeliveryListItem_TaskActionDeliveryId,
   DeliveryDetail_TaskActionDeliveryId,
@@ -31,6 +31,8 @@ export class ActionDeliveriesComponent implements OnInit {
   closed = output<void>();
 
   readonly duration = formatDuration;
+  readonly relativeTime = relativeTime;
+  readonly serverTime = serverTime;
   visible = signal(true);
   deliveries = signal<DeliveryListItem_TaskActionDeliveryId[]>([]);
   loading = signal(true);

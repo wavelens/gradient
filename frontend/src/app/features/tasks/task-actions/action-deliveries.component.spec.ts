@@ -44,6 +44,18 @@ describe('ActionDeliveriesComponent', () => {
     expect(fixture.componentInstance.expanded().get('d1')).toBeTruthy();
   });
 
+  it('shows the delivery time as a relative time with the full date on hover, not the raw timestamp', () => {
+    const deliveredAt = new Date(Date.now() - 5 * 60_000).toISOString().replace('Z', '').replace('T', ' ');
+    const delivery = { id: 'd1', event: 'test', success: false, response_status: null, error_message: 'x', duration_ms: 100, delivered_at: deliveredAt };
+    httpMock.expectOne((r) => r.url.includes('/actions/a-id/deliveries')).flush({ error: false, message: [delivery] });
+    fixture.detectChanges();
+
+    const cell = document.querySelector<HTMLTableCellElement>('.gr-dialog tbody td')!;
+    expect(cell.textContent?.trim()).toBe('5m ago');
+    expect(cell.title).not.toContain(deliveredAt);
+    expect(cell.title.length).toBeGreaterThan(0);
+  });
+
   it('shows a failed load as an error with Try Again, never as no deliveries', () => {
     httpMock
       .expectOne((r) => r.url.includes('/actions/a-id/deliveries'))

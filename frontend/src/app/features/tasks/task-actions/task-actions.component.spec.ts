@@ -237,7 +237,7 @@ describe('TaskActionsComponent - write failures', () => {
     (TestBed.inject(ActionsService) as unknown as Record<string, unknown>)['test'] = () => throwError(() => refused);
     const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
     fixture.componentInstance.testAction('a-1');
-    expect(failure).toHaveBeenCalledWith('Action test failed', refused);
+    expect(failure).toHaveBeenCalledWith("Couldn't test action", refused);
   });
 
   it('shows a rejected create inside the open dialog and nowhere on the page', () => {

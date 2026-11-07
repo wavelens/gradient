@@ -248,7 +248,7 @@ export class TaskActionsComponent implements OnInit {
       },
       error: (error: unknown) => {
         this.testingId.set(null);
-        this.notify.failure('Action test failed', error);
+        this.notify.failure("Couldn't test action", error);
         this.testFailureId.set(id);
         setTimeout(() => {
           if (this.testFailureId() === id) this.testFailureId.set(null);

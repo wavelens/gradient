@@ -245,7 +245,9 @@ async fn deliver_action(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
         return Ok(());
     }
 
-    execute_action(&ci, action, &event, envelope).await
+    execute_action(&ci, action, &event, envelope)
+        .await
+        .map(|_| ())
 }
 
 #[cfg(test)]

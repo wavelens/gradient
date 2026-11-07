@@ -588,6 +588,53 @@ async fn test_fire_links_to_the_latest_evaluation_on_the_frontend() {
     );
 }
 
+async fn test_fire_web_request(url: &str) -> Value {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let action = task_action::Model {
+        config: json!({ "type": "send_web_request", "url": url }),
+        ..web_request_action_row()
+    };
+    let web_db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![action]])
+        .append_query_results([Vec::<evaluation::Model>::new()]);
+
+    let server = TestState::new()
+        .web_db(web_db.into_connection())
+        .worker_db(mock_db().into_connection())
+        .server();
+    let res = server
+        .post(&format!("{}/{}/test", BASE_URL, action_id()))
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    json!({ "status": res.status_code().as_u16(), "body": res.json::<Value>() })
+}
+
+#[tokio::test]
+async fn a_test_fire_to_a_rejected_url_names_the_reason_as_a_bad_request() {
+    let res = test_fire_web_request("http://localhost/hook").await;
+
+    assert_eq!(res["status"], 400);
+    assert!(
+        res["body"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("URL rejected"),
+        "{res}"
+    );
+}
+
+#[tokio::test]
+async fn a_test_fire_to_an_unreachable_host_names_the_reason_as_a_bad_gateway() {
+    let res = test_fire_web_request("https://gradient-test.invalid/hook").await;
+
+    assert_eq!(res["status"], 502);
+    let message = res["body"]["message"].as_str().unwrap();
+    assert!(message.contains("send HTTP request"), "{res}");
+    assert_ne!(message, "Internal server error");
+}
+
 fn delivery_id() -> TaskActionDeliveryId {
     TaskActionDeliveryId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000d1").unwrap())
 }

@@ -32,7 +32,7 @@ pub async fn execute_action(
     action: MTaskAction,
     event: &str,
     envelope: JsonValue,
-) -> Result<()> {
+) -> Result<Option<i32>> {
     let cfg: ActionConfig =
         serde_json::from_value(action.config.clone()).context("decode action config")?;
     let action_id = action.id;
@@ -168,7 +168,7 @@ pub async fn execute_action(
         warn!(error = %e, %action_id, "Failed to update action last_fired_at");
     }
 
-    result.map(|_| ())
+    result.map(|ok| ok.status_code)
 }
 
 const CONNECTIVITY_TEST_EVENT: &str = "test.connectivity";
