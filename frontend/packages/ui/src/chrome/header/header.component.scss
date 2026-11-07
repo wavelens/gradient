@@ -128,10 +128,12 @@
     position: absolute;
     top: 100%;
     inset-inline: 0;
+    height: $below-header-height;
+    border-top: 1px solid var(--gr-border);
     flex-direction: column;
     gap: $spacing-sm;
-    padding: $spacing-sm $spacing-lg $spacing-md;
-    border-bottom: 1px solid var(--gr-border);
+    padding: $spacing-md $spacing-lg;
+    overflow-y: auto;
     background-color: var(--gr-surface-sunken);
   }
 
@@ -140,11 +142,17 @@
   }
 
   .header-nav {
+    flex: none;
     flex-direction: column;
+    gap: $spacing-xs;
+
+    a {
+      font-size: $font-size-md;
+    }
   }
 
   .header-account {
-    padding: $spacing-sm $spacing-md 0;
+    padding: $spacing-sm $spacing-sm 0;
     border-top: 1px solid var(--gr-border);
   }
 

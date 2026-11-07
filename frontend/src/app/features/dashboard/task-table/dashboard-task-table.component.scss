@@ -21,6 +21,13 @@ gr-row-list {
   color: var(--gr-text-muted);
 }
 
+.meta {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 code {
   font-family: $font-family-mono;
 }

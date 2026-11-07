@@ -28,7 +28,7 @@
               <gr-status-icon slot="icon" size="sm" [phase]="phase(l.status)" [label]="l.status" />
             }
             <span class="name" [title]="t.project + ' / ' + t.task"><span class="project">{{ t.project }} /</span> {{ t.task }}</span>
-            <span slot="meta">
+            <span slot="meta" class="meta">
               @if (t.latest; as l) {
                 <code>{{ l.commit.slice(0, 7) }}</code> · {{ age(l.created_at) }}
               } @else {
