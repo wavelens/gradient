@@ -23,6 +23,7 @@
         @for (key of keys(); track key.id) {
           <gr-row icon="key" [muted]="!!key.revoked_at">
             {{ key.name }}
+            <gr-badge>{{ scopeBadge(key) }}</gr-badge>
             @if (key.managed) {
               <gr-badge severity="info">Managed</gr-badge>
             }
@@ -33,9 +34,8 @@
               <span [grTooltip]="permissionTooltip(key)" tooltipPosition="top">
                 {{ key.permissions.length }} permission{{ key.permissions.length === 1 ? '' : 's' }}
               </span>
-              <gr-badge>{{ scopeBadge(key) }}</gr-badge>
               <span>
-                Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
+                · Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
               </span>
               @if (key.expires_at) {
                 <span>· Expires: {{ key.expires_at | date: 'medium' }}</span>

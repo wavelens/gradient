@@ -15,8 +15,9 @@
 .webhook-row {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
+  gap: $spacing-md;
+  padding: $spacing-md $spacing-lg;
+  background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   flex-wrap: wrap;
@@ -30,10 +31,14 @@
 .events-chips,
 .webhook-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: $spacing-sm;
   align-items: center;
   flex-wrap: wrap;
-  margin-top: 0.25rem;
+  margin-top: $spacing-xs;
+}
+
+.webhook-meta {
+  font-size: $font-size-sm;
 }
 
 .secret-reveal {

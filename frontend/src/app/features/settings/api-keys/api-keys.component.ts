@@ -92,7 +92,6 @@ interface SelectOption {
   ],
   templateUrl: './api-keys.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './api-keys.component.scss',
 })
 export class ApiKeysComponent implements OnInit {
   protected readonly links = links;

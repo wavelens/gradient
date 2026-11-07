@@ -11,35 +11,39 @@
   max-width: $content-width-detail;
   margin: 0 auto;
 }
+
 h1 {
   color: var(--gr-text-primary);
-  font-size: $font-size-xl;
-  margin: 0 0 1rem;
+  font-size: $font-size-xxl;
+  margin: 0 0 $spacing-lg;
 }
+
 .board-nav {
   display: flex;
-  gap: 0.25rem;
-  margin-bottom: 1.5rem;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-lg;
   border-bottom: 1px solid var(--gr-border-subtle);
   overflow-x: auto;
   scrollbar-width: none;
 }
+
 .board-nav a {
   flex-shrink: 0;
   white-space: nowrap;
   color: var(--gr-text-secondary);
-  padding: 0.5rem 0.75rem;
+  padding: $spacing-sm $spacing-md;
   text-decoration: none;
   border-bottom: 2px solid transparent;
-  border-radius: $border-radius-sm 6px 0 0;
-  transition: color 0.15s, background 0.15s;
+  border-radius: $border-radius-sm $border-radius-sm 0 0;
+  transition: color $transition-fast, background $transition-fast;
 }
+
 .board-nav a:hover {
   color: var(--gr-text-primary);
   background: var(--gr-surface-raised);
 }
+
 .board-nav a.active {
   color: var(--gr-text-primary);
-  border-bottom-color: var(--gr-status-info);
+  border-bottom-color: var(--gr-accent);
 }
-    

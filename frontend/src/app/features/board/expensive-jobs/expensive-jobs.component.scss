@@ -8,7 +8,7 @@
 
 .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .tabs button { background: var(--gr-surface-raised); color: var(--gr-text-secondary); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.35rem 0.8rem; cursor: pointer; }
-.tabs button.active { color: var(--gr-text-primary); border-color: var(--gr-status-info); }
+.tabs button.active { color: var(--gr-text-primary); border-color: var(--gr-accent); }
 .controls { display: flex; gap: 1.5rem; margin-bottom: 1rem; color: var(--gr-text-secondary); align-items: center; }
 .controls label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
 select { background: var(--gr-surface-raised); color: var(--gr-text-primary); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.25rem; }

@@ -55,7 +55,6 @@ import { pagedList } from '@shared/paging';
   ],
   templateUrl: './project-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './project-list.component.scss',
 })
 export class ProjectListComponent implements OnInit {
   protected readonly links = links;

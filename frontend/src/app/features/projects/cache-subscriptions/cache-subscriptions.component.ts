@@ -62,7 +62,6 @@ import { links } from '@shared/routing';
   ],
   templateUrl: './cache-subscriptions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './cache-subscriptions.component.scss',
 })
 export class CacheSubscriptionsComponent implements OnInit {
   protected readonly links = links;

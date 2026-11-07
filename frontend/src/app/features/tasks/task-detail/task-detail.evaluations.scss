@@ -257,6 +257,11 @@ h1 { font-size: $font-size-xxl; margin: 0; }
     padding: $spacing-md;
   }
 
+  .panel-head {
+    flex-wrap: wrap;
+    gap: $spacing-sm;
+  }
+
   .pp-head {
     gap: $spacing-md;
 

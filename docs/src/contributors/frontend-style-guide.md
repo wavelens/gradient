@@ -64,6 +64,7 @@ flowchart LR
 - Place the page on `--gr-surface-base`. Place each content group on `--gr-surface-raised` cards with `--gr-border-subtle` edges inside the page width. Don't draw a raised band across the full page width. Tabs show item status through `gr-status-icon`, not a colored border.
 - The header menu can fill the full height below the header on narrow screens and use the font size of body text. A one-line row meta, such as a commit and its elapsed time, can cut off with an ellipsis and not wrap to a second line.
 - Fit the graph canvas to the content on load. Small graphs fill the view rather than a small patch in blank space. Set legend text to 14px and color swatches to 12px.
+- Mark the active tab of `gr-link-tabs` and every other tab row with a `--gr-accent` underline. Put badges on the name line of a row and separate the parts of the meta line with " · ". Don't nest a `gr-row-list` inside a card. Each row is already its own card, so set `[card]="false"` on the section around it.
 
 ## Shared UI Package
 
