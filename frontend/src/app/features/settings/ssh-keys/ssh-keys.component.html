@@ -5,6 +5,7 @@
 -->
 
 <gr-page-layout [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'SSH Keys' }]" title="SSH Keys" subtitle="Keys for ssh-ng:// substituters, nix copy and build hosts">
+  <app-settings-nav slot="banner" />
   <button slot="actions" grButton label="Add SSH Key" icon="add" (click)="openDialog()"></button>
 
   <gr-form-field label="Store address">

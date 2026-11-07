@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { inject } from '@angular/core';
 import { Routes } from '@angular/router';
+import { ConfigService } from '@core/services/config.service';
+import { links } from '@shared/routing';
 import { authGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
 import { publicListingGuard } from '@core/guards/public-listing.guard';
@@ -567,6 +570,7 @@ export const routes: Routes = [
       {
         path: 'settings/ssh-keys',
         title: 'SSH Keys',
+        canActivate: [() => inject(ConfigService).sshEnabled || links.settings()],
         loadComponent: () =>
           import('./features/settings/ssh-keys/ssh-keys.component').then(
             (m) => m.SshKeysComponent

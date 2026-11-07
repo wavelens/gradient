@@ -21,11 +21,13 @@ import {
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
+import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
 @Component({
   selector: 'app-invites',
   standalone: true,
   imports: [
+    SettingsNavComponent,
     CommonModule,
     RouterLink,
     BadgeComponent,
@@ -40,6 +42,7 @@ import {
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class InvitesComponent implements OnInit {
+  protected readonly links = links;
   private userService = inject(UserService);
   private route = inject(ActivatedRoute);
   private notify = inject(NotifyService);

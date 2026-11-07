@@ -82,7 +82,7 @@ function setup(opts: SetupOptions): ComponentFixture<ProfileComponent> {
         provide: ActivatedRoute,
         useValue: { snapshot: { queryParamMap: convertToParamMap(opts.query ?? {}) } },
       },
-      { provide: AuthService, useValue: { reloadUser: () => undefined } },
+      { provide: AuthService, useValue: { reloadUser: () => undefined, isAuthenticated: () => false } },
       { provide: ConfigService, useValue: { sshEnabled: opts.ssh ?? false } },
     ],
   });

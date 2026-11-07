@@ -25,6 +25,7 @@ import {
   RowListComponent,
 } from '@gradient/ui/ui';
 import { links } from '@shared/routing';
+import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
 const OPENSSH_PUBLIC_KEY =
   /^(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-nistp(?:256|384|521)|sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)\s+[A-Za-z0-9+/]+={0,3}(?:\s.*)?$/;
@@ -37,6 +38,7 @@ function sshKeyComment(publicKey: string): string {
   selector: 'app-ssh-keys',
   standalone: true,
   imports: [
+    SettingsNavComponent,
     CommonModule,
     FormsModule,
     ButtonComponent,

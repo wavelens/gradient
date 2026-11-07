@@ -23,6 +23,7 @@ export * from './form-field/form-field.component';
 export * from './form-field/submit.directive';
 export * from './icon/icon.component';
 export * from './in-view/in-view.directive';
+export * from './link-tabs/link-tabs.component';
 export * from './on-screen/on-screen';
 export * from './input/input.directive';
 export * from './load-state/load-state.component';

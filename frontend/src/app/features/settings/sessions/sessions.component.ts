@@ -20,11 +20,13 @@ import {
   RowListComponent,
 } from '@gradient/ui/ui';
 import { links } from '@shared/routing';
+import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
 @Component({
   selector: 'app-sessions',
   standalone: true,
   imports: [
+    SettingsNavComponent,
     CommonModule,
     BadgeComponent,
     ButtonComponent,

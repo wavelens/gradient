@@ -34,6 +34,7 @@ import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { AccessState, ConnectedLoginProvider, PatchUserSettingsRequest } from '@core/models';
 import { links } from '@shared/routing';
+import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
 interface ProfileForm {
   username: string;
@@ -71,6 +72,7 @@ const CONNECT_ERRORS: Record<string, string> = {
   selector: 'app-profile',
   standalone: true,
   imports: [
+    SettingsNavComponent,
     CommonModule,
     RouterModule,
     FormsModule,

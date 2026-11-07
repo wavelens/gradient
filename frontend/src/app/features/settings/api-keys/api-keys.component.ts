@@ -36,6 +36,7 @@ import { permissionLabel } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
 import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
 import { links } from '@shared/routing';
+import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
 type ScopeType = 'none' | 'project' | 'cache';
 
@@ -67,6 +68,7 @@ interface SelectOption {
   selector: 'app-api-keys',
   standalone: true,
   imports: [
+    SettingsNavComponent,
     PermissionPickerComponent,
     CommonModule,
     RouterModule,
