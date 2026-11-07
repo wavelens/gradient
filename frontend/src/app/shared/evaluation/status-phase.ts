@@ -63,6 +63,24 @@ export function buildPhase(status: BuildStatus): StatusPhase {
   }
 }
 
+const BUILD_STATUS_LABEL: Record<BuildStatus, string> = {
+  Created: 'Created',
+  Queued: 'Queued',
+  Building: 'Building',
+  Completed: 'Completed',
+  Substituted: 'Substituted',
+  FailedPermanent: 'Failed',
+  FailedTransient: 'Worker fault',
+  FailedTimeout: 'Timed out',
+  Aborted: 'Aborted',
+  DependencyFailed: 'Dependency failed',
+  Skipped: 'Skipped',
+};
+
+export function buildStatusLabel(status: BuildStatus): string {
+  return BUILD_STATUS_LABEL[status] ?? status;
+}
+
 export function inputFetchPhase(state: InputFetchState): StatusPhase {
   switch (state) {
     case 'Queued': return 'queued';

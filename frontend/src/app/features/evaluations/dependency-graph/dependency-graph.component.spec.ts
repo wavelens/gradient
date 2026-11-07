@@ -73,4 +73,22 @@ describe('DependencyGraphComponent live updates', () => {
     expect(fixture.nativeElement.textContent).toContain('No build');
     fixture.destroy();
   });
+
+  it('counts in the singular and names statuses with readable labels', () => {
+    const { fixture } = setup({
+      root: 'root',
+      nodes: [node('root', 'FailedPermanent'), node('lib', 'DependencyFailed')],
+      edges: [{ source: 'lib', target: 'root' }],
+    });
+    fixture.detectChanges();
+    const header = (fixture.nativeElement as HTMLElement).querySelector('.header-meta')?.textContent ?? '';
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+
+    expect(header).toContain('2 packages');
+    expect(header).toContain('1 dependency');
+    expect(header).not.toContain('dependencies');
+    expect(text).toContain('Dependency failed');
+    expect(text).not.toContain('FailedPermanent');
+    fixture.destroy();
+  });
 });

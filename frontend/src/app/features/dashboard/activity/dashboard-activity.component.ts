@@ -16,12 +16,11 @@ import {
   TabSwitchComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
+import { plural } from '@shared/text';
 
 type Mode = 'evaluations' | 'failed';
 const STEP = 13;
 const LEVELS = 4;
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 @Component({
   selector: 'app-dashboard-activity',

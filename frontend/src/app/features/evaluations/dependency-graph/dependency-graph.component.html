@@ -27,12 +27,12 @@
           <gr-breadcrumb [trail]="breadcrumb()" />
           <div class="header-title">
             <h1 class="header-name">{{ rootName() }}</h1>
-            <gr-badge [severity]="statusSeverity(rootStatus())">{{ rootStatus() }}</gr-badge>
+            <gr-badge [severity]="statusSeverity(rootStatus())">{{ statusLabel(rootStatus()) }}</gr-badge>
           </div>
           <div class="header-meta">
-            <span>{{ nodeCount() }} packages</span>
+            <span>{{ plural(nodeCount(), 'package') }}</span>
             <span class="sep">·</span>
-            <span>{{ edgeCount() }} dependencies</span>
+            <span>{{ plural(edgeCount(), 'dependency', 'dependencies') }}</span>
             @if (!showLabels()) {
               <span class="sep">·</span>
               <span class="zoom-hint-inline">Zoom in for names</span>

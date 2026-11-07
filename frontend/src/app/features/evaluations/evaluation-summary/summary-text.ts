@@ -6,21 +6,18 @@
 
 import type { BuildStatus, EvaluationFailureSummary, FailedBuildSummary } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
+import { plural } from '@shared/text';
 
 const BLOCKED_NAMED = 5;
-
-function counted(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
-}
 
 export function headline(summary: EvaluationFailureSummary, running: boolean): string {
   const { total, built, failed, blocked, unfinished } = summary.packages;
   const broken = failed + blocked + summary.failed_attributes.length;
-  if (running) return `Still running, ${built} of ${counted(total, 'package')} built so far`;
-  if (broken > 0) return `${counted(broken, 'package')} did not build`;
-  if (unfinished > 0) return `${counted(unfinished, 'package')} not built`;
+  if (running) return `Still running, ${built} of ${plural(total, 'package')} built so far`;
+  if (broken > 0) return `${plural(broken, 'package')} did not build`;
+  if (unfinished > 0) return `${plural(unfinished, 'package')} not built`;
 
-  return `All ${counted(total, 'package')} built`;
+  return `All ${plural(total, 'package')} built`;
 }
 
 // A timeout or a lost worker is a fault of the CI, not of the package.
@@ -41,7 +38,7 @@ export function blockedLine(failure: FailedBuildSummary): string {
   const unnamed = failure.blocked_total - named.length;
   const names = named.join(', ') + (unnamed > 0 ? ` and ${unnamed} more` : '');
 
-  return `Blocks ${counted(failure.blocked_total, 'package')}: ${names}`;
+  return `Blocks ${plural(failure.blocked_total, 'package')}: ${names}`;
 }
 
 export function firstLine(message: string): string {

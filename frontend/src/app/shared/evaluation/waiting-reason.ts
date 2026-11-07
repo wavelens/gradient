@@ -8,6 +8,7 @@ import type { UrlTree } from '@angular/router';
 import { Permission, UnmetRequirement, WaitingReason } from '@core/models';
 import { unmetParts } from '@features/exec-jobs/exec-job-status';
 import { links } from '@shared/routing';
+import { plural } from '@shared/text';
 
 export interface WaitingAccess {
   manageWorkers: boolean;
@@ -45,10 +46,6 @@ function workerAction(project: string): WaitingAction {
 
 function cachesAction(project: string, label: string): WaitingAction {
   return { kind: 'link', label, icon: 'database', link: links.projectPage(project, 'caches') };
-}
-
-function plural(count: number, word: string): string {
-  return `${count} ${word}${count === 1 ? '' : 's'}`;
 }
 
 export function unmetRequirementLabel(req: UnmetRequirement): string {

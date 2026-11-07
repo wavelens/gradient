@@ -7,6 +7,7 @@
 export * from './clock-time';
 export * from './device-name';
 export * from './permission-label';
+export * from './plural';
 export * from './relative-time';
 export * from './repository-url';
 export * from './slug';

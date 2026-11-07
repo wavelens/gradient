@@ -50,7 +50,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 $spacing-lg;
-  height: 48px;
+  min-height: 48px;
   background: var(--gr-surface-raised);
   border-bottom: 1px solid var(--gr-border-subtle);
   flex-shrink: 0;
@@ -59,10 +59,11 @@
 
 .info-bar-left {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0;
-  overflow: hidden;
   min-width: 0;
+  margin-left: -$spacing-md;
 }
 
 .info-bar-right {
@@ -80,8 +81,6 @@
   height: 48px;
   border-right: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
   flex-shrink: 0;
-
-  &:first-child { padding-left: 0; }
 
   &:last-child { border-right: none; }
 }
@@ -186,9 +185,13 @@
   }
 
   .info-bar-left {
+    flex-wrap: nowrap;
+    margin-left: 0;
     overflow-x: auto;
     scrollbar-width: none;
   }
+
+  .info-metric:first-child { padding-left: 0; }
 
   .log-sidebar {
     position: absolute;

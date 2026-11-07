@@ -33,8 +33,8 @@ import {
   IconComponent,
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
-import { formatDuration } from '@shared/text';
-import { PHASE_COLOR, PHASE_SEVERITY, buildPhase, type StatusPhase } from '@shared/evaluation';
+import { formatDuration, plural } from '@shared/text';
+import { PHASE_COLOR, PHASE_SEVERITY, buildPhase, buildStatusLabel, type StatusPhase } from '@shared/evaluation';
 import { longestPathDepths } from './dependency-depths';
 import { BuildGraph, BuildStatus, DependencyEdge, DependencyGraphNode } from '@core/models';
 
@@ -560,8 +560,10 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     return status != null && ACTIVE_STATUSES.includes(status);
   }
 
+  protected readonly plural = plural;
+
   statusLabel(status?: string | null): string {
-    return status ?? 'No build';
+    return status ? buildStatusLabel(status as BuildStatus) : 'No build';
   }
 
   private calcDuration(node: LayoutNode): string {
@@ -585,16 +587,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   }
 
   /// The legend restates the node colours, so it reads them from the same tokens.
-  readonly legend: { label: string; phase: StatusPhase }[] = [
-    { label: 'Created', phase: 'queued' },
-    { label: 'Queued', phase: 'queued' },
-    { label: 'Building', phase: 'running' },
-    { label: 'Completed', phase: 'success' },
-    { label: 'Failed', phase: 'failure' },
-    { label: 'Aborted', phase: 'aborted' },
-    { label: 'Dependency Failed', phase: 'aborted' },
-    { label: 'Skipped', phase: 'aborted' },
-  ];
+  readonly legend: { label: string; phase: StatusPhase }[] = (
+    ['Created', 'Queued', 'Building', 'Completed', 'FailedPermanent', 'Aborted', 'DependencyFailed', 'Skipped'] as const
+  ).map((status) => ({ label: buildStatusLabel(status), phase: buildPhase(status) }));
 
   statusSeverity(status?: string | null): BadgeSeverity {
     return PHASE_SEVERITY[this.phase(status)];
