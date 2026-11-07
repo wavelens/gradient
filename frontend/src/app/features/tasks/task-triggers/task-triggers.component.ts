@@ -116,6 +116,7 @@ export class TaskTriggersComponent implements OnInit {
 
   private taskAccess = injectTaskAccess();
   access = injectTaskAccessTo('manageTriggers');
+  integrationAccess = injectTaskAccessTo('manageIntegrations');
 
   rowDisabled = computed(
     () =>

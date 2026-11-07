@@ -91,8 +91,10 @@ describe('TeamOverviewComponent', () => {
     expect(headings(render())).toEqual(expect.arrayContaining(['Members', 'Workers']));
   });
 
-  it('hides the projects and caches section when the team has no grants', () => {
-    expect(headings(render())).not.toContain('Projects and Caches');
+  it('explains how a team without grants gets access to a project or cache', () => {
+    const root = render();
+    expect(headings(root)).toContain('Projects and Caches');
+    expect(root.textContent).toContain('Settings, Members and roles');
   });
 
   it('reports a failed approval as a toast and keeps the page usable', () => {

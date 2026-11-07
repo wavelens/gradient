@@ -24,6 +24,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { TeamGrantEntry, TeamSummary } from '@core/models';
 import { canOpenTeam } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
+import { CreateTeamDialogComponent, injectCanCreateTeam } from '@shared/forms';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -61,6 +62,7 @@ interface GrantForm {
     RowListComponent,
     SelectComponent,
     SettingsSectionComponent,
+    CreateTeamDialogComponent,
   ],
   templateUrl: './team-grants.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -89,6 +91,9 @@ export class TeamGrantsComponent implements OnInit {
   showGrant = signal(false);
   grantAttempted = signal(false);
   form: GrantForm = { team: '', role: '' };
+  showCreateTeam = signal(false);
+  private createForGrant = false;
+  canCreateTeam = injectCanCreateTeam();
 
   ngOnInit(): void {
     this.load();
@@ -120,6 +125,25 @@ export class TeamGrantsComponent implements OnInit {
     this.form = { team: '', role: this.roles()[0] ?? '' };
     this.grantError.set(null);
     this.grantAttempted.set(false);
+    this.showGrant.set(true);
+  }
+
+  createInsteadOfPick(): void {
+    this.createForGrant = true;
+    this.showGrant.set(false);
+    this.showCreateTeam.set(true);
+  }
+
+  teamCreated(team: string): void {
+    this.createForGrant = false;
+    this.teams.list().subscribe({ next: (mine) => this.myTeams.set(mine) });
+    this.form = { ...this.form, team };
+    this.showGrant.set(true);
+  }
+
+  createTeamClosed(visible: boolean): void {
+    if (visible || !this.createForGrant) return;
+    this.createForGrant = false;
     this.showGrant.set(true);
   }
 

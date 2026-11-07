@@ -11,3 +11,5 @@ export * from './name-availability';
 export * from './name-fields.component';
 export * from './unsaved-changes';
 export * from './validators';
+export * from './create-team-dialog.component';
+export * from './create-permissions';

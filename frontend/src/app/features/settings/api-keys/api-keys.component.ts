@@ -34,7 +34,7 @@ import { ConfirmService } from '@shared/confirm';
 import { AccessState, ApiKeyInfo, PatchApiKeyRequest, PermissionEntry } from '@core/models';
 import { permissionLabel } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
-import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
+import { CreateCacheDialogComponent, fieldChecks, injectCanCreateCache, isIpNetwork, splitLines } from '@shared/forms';
 import { links } from '@shared/routing';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
@@ -69,6 +69,7 @@ interface SelectOption {
   standalone: true,
   imports: [
     SettingsNavComponent,
+    CreateCacheDialogComponent,
     PermissionPickerComponent,
     CommonModule,
     RouterModule,
@@ -98,6 +99,9 @@ export class ApiKeysComponent implements OnInit {
   private userService = inject(UserService);
   private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);
+  showCreateCache = signal(false);
+  private createForKey = false;
+  canCreateCache = injectCanCreateCache();
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
@@ -152,12 +156,35 @@ export class ApiKeysComponent implements OnInit {
       },
       error: () => {},
     });
+    this.loadCacheOptions();
+  }
+
+  private loadCacheOptions(): void {
     this.cachesService.getCaches(1, 100).subscribe({
       next: (caches) => {
         this.cacheOptions.set(caches.items.map((c) => ({ label: c.display_name || c.name, value: c.name })));
       },
       error: () => {},
     });
+  }
+
+  createCacheInsteadOfPick(): void {
+    this.createForKey = true;
+    this.showDialog.set(false);
+    this.showCreateCache.set(true);
+  }
+
+  cacheCreated(cache: string): void {
+    this.createForKey = false;
+    this.loadCacheOptions();
+    this.formCache = cache;
+    this.showDialog.set(true);
+  }
+
+  createCacheClosed(visible: boolean): void {
+    if (visible || !this.createForKey) return;
+    this.createForKey = false;
+    this.showDialog.set(true);
   }
 
   loadKeys(): void {

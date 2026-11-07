@@ -5,8 +5,10 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
-import { Observable, Subject, of, throwError } from 'rxjs';
+import { Router, provideRouter } from '@angular/router';
+import { By } from '@angular/platform-browser';
+import { CreateTeamDialogComponent } from '@shared/forms';
+import { Observable, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { TeamSummary } from '@core/models';
 import { TeamsListComponent } from './teams-list.component';
@@ -56,35 +58,13 @@ describe('TeamsListComponent', () => {
     expect(element.textContent).toContain('Platform');
   });
 
-  it('keeps a refused team creation inside the New Team dialog', () => {
-    const { fixture, create } = setup(true);
-    create.mockReturnValue(throwError(() => new ApiError('Team name already taken', 409)));
-    const component = fixture.componentInstance;
-    component.openCreate();
-    component.form = { name: 'platform', displayName: 'Platform' };
-    component.create();
+  it('opens the created team', () => {
+    const { fixture } = setup(true);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    fixture.componentInstance.openCreate();
     fixture.detectChanges();
-    expect(component.showCreate()).toBe(true);
-    expect(component.creating()).toBe(false);
-    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Team name already taken');
-  });
-
-  it('keeps the New Team dialog open and sends one request while the creation runs', () => {
-    const { fixture, create } = setup(true);
-    create.mockReturnValue(new Subject());
-    const component = fixture.componentInstance;
-    component.openCreate();
-    component.form = { name: 'ops', displayName: 'Ops' };
-    component.create();
-    fixture.detectChanges();
-    component.create();
-    const dialog = document.querySelector('.gr-dialog')!;
-    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
-    fixture.detectChanges();
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(component.showCreate()).toBe(true);
-    expect(dialog.getAttribute('aria-busy')).toBe('true');
+    fixture.debugElement.query(By.directive(CreateTeamDialogComponent)).componentInstance.created.emit('ops');
+    expect(String(navigate.mock.calls[0][0])).toBe('/team/ops');
   });
 
   it('hides New Team when the server does not allow creating teams', () => {

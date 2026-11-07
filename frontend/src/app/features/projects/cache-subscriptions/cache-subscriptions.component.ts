@@ -32,7 +32,7 @@ import {
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { CreateCacheButtonComponent, CreateCacheDialogComponent } from '@shared/forms';
+import { CreateCacheButtonComponent, CreateCacheDialogComponent, injectCanCreateCache } from '@shared/forms';
 import { accessTo, CacheSubscriptionItem } from '@core/models';
 import { links } from '@shared/routing';
 
@@ -78,6 +78,8 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   access = computed(() => accessTo(this.resolvedProject(), 'manageSubscriptions'));
   canCreateCache = computed(() => this.config.canCreate(this.config.createCache, this.auth.user()?.superuser === true));
+  private userCanCreateCache = injectCanCreateCache();
+  canCreateAndSubscribe = computed(() => this.userCanCreateCache() && this.access().canEdit && !this.access().managed);
   showCreateDialog = signal(false);
   createForSubscribe = signal(false);
 

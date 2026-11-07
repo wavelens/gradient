@@ -145,6 +145,12 @@
         placeholder="Select a cache"
       />
     </gr-form-field>
+    @if (canCreateCache()) {
+      <p class="gr-form-aside">
+        Can't find a cache?
+        <button grButton label="Create new cache" icon="add" severity="secondary" size="small" (click)="createCacheInsteadOfPick()"></button>
+      </p>
+    }
   }
 
   <gr-form-field label="Allowed source IPs / CIDRs" for="key-allowed-ips" hint="One per line. Blank allows any source."
@@ -195,3 +201,5 @@
     <button grButton label="Done" (click)="showKeyDialog.set(false)"></button>
   </div>
 </gr-dialog>
+
+<app-create-cache-dialog [(visible)]="showCreateCache" (visibleChange)="createCacheClosed($event)" (created)="cacheCreated($event)" />

@@ -120,6 +120,8 @@
 
 <app-action-form
   mode="create"
+  [project]="projectName"
+  [canGrantTeams]="memberAccess().canEdit"
   [open]="showCreateDialog()"
   [error]="error()"
   [busy]="saving()"
@@ -132,6 +134,8 @@
 
 <app-action-form
   mode="edit"
+  [project]="projectName"
+  [canGrantTeams]="memberAccess().canEdit"
   [open]="showEditDialog()"
   [error]="error()"
   [busy]="saving()"

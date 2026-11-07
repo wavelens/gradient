@@ -34,7 +34,7 @@ import { WritableDirective, ManagedDisableDirective, AccessService } from '@shar
 import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
 import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, ProtocolProbe } from '@core/models';
-import { fieldChecks } from '@shared/forms';
+import { CreateCacheDialogComponent, fieldChecks, injectCanCreateCache } from '@shared/forms';
 import { links } from '@shared/routing';
 import { SUBSCRIPTION_MODES, subscriptionModeLabel } from '@shared/text';
 
@@ -63,6 +63,7 @@ const hasError = (errors: UpstreamErrors): boolean => Object.values(errors).some
   selector: 'app-upstream-caches',
   standalone: true,
   imports: [
+    CreateCacheDialogComponent,
     LabelHelpComponent,
     CommonModule,
     RouterModule,
@@ -94,6 +95,9 @@ export class UpstreamCachesComponent implements OnInit {
   private messageService = inject(MessageService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  showCreateCache = signal(false);
+  private createForUpstream = false;
+  canCreateCache = injectCanCreateCache();
 
   access = injectCacheAccessTo('manageUpstreamCaches');
 
@@ -201,6 +205,24 @@ export class UpstreamCachesComponent implements OnInit {
       default:
         return 'Gradient Proto';
     }
+  }
+
+  createCacheInsteadOfName(): void {
+    this.createForUpstream = true;
+    this.showAddDialog.set(false);
+    this.showCreateCache.set(true);
+  }
+
+  cacheCreated(cache: string): void {
+    this.createForUpstream = false;
+    this.upstreamForm.cache_name = cache;
+    this.showAddDialog.set(true);
+  }
+
+  createCacheClosed(visible: boolean): void {
+    if (visible || !this.createForUpstream) return;
+    this.createForUpstream = false;
+    this.showAddDialog.set(true);
   }
 
   openAddDialog(): void {

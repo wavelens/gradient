@@ -50,6 +50,11 @@
         <gr-select [options]="teamOptions()" optionLabel="label" optionValue="value" placeholder="Team granted on this project"
           [ngModel]="null" (ngModelChange)="addTeamRecipient($event)" />
       </gr-form-field>
+    } @else if (project() && canGrantTeams()) {
+      <p class="gr-form-aside">
+        No team has access to this project yet.
+        <a [routerLink]="links.projectPage(project(), 'members')">Grant permissions to a team</a>
+      </p>
     }
     <gr-form-field label="Subject Template (optional)" for="action-subject">
       <input

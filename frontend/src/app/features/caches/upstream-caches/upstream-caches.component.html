@@ -162,6 +162,12 @@
       <gr-form-field label="Cache Name" for="up-cache-name" [invalid]="!!addErrors().cache_name" [error]="addErrors().cache_name ?? ''">
         <input grInput id="up-cache-name" [(ngModel)]="upstreamForm.cache_name" placeholder="my-cache" (keyup.enter)="addUpstream()" />
       </gr-form-field>
+      @if (canCreateCache()) {
+        <p class="gr-form-aside">
+          Can't find a cache?
+          <button grButton label="Create new cache" icon="add" severity="secondary" size="small" (click)="createCacheInsteadOfName()"></button>
+        </p>
+      }
       <gr-form-field label="Display Name" for="up-display-name-int">
         <span slot="label" class="text-secondary">(optional)</span>
         <input grInput id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" (keyup.enter)="addUpstream()" />
@@ -229,3 +235,5 @@
     <button grButton label="Add" icon="add" (click)="addUpstream()" [loading]="addingUpstream()"></button>
   </div>
 </gr-dialog>
+
+<app-create-cache-dialog [(visible)]="showCreateCache" (visibleChange)="createCacheClosed($event)" (created)="cacheCreated($event)" />

@@ -107,8 +107,8 @@
       (enter)="subscribeCache()"
     />
   </gr-form-field>
-  @if (canCreateCache()) {
-    <p class="create-instead">
+  @if (canCreateAndSubscribe()) {
+    <p class="gr-form-aside">
       Can't find a cache?
       <button grButton label="Create new cache" icon="add" severity="secondary" size="small" (click)="createInsteadOfPick()"></button>
     </p>

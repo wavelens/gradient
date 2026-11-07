@@ -11,6 +11,8 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { ApiKeysComponent } from './api-keys.component';
+import { By } from '@angular/platform-browser';
+import { CreateCacheDialogComponent } from '@shared/forms';
 import { UserService } from '@core/services/user.service';
 import { ApiError } from '@core/services/api.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -59,7 +61,7 @@ function setup(keys: ApiKeyInfo[], user: object = {}): ComponentFixture<ApiKeysC
         provide: UserService,
         useValue: {
           getApiKeys: () => of(keys),
-          getApiKeyPermissions: () => of({ available_permissions: [] }),
+          getApiKeyPermissions: () => of({ available_permissions: [], availableCache: [] }),
           ...user,
         },
       },
@@ -315,5 +317,22 @@ describe('ApiKeysComponent - row actions', () => {
     buttonsByText(fixture.nativeElement, action)[0].click();
     expect(revokeApiKey).not.toHaveBeenCalled();
     expect(deleteApiKey).not.toHaveBeenCalled();
+  });
+});
+
+describe('ApiKeysComponent - cache scope', () => {
+  it('creates a missing cache from the key dialog and returns with it selected', () => {
+    const fixture = setup([]);
+    const component = fixture.componentInstance;
+    component.openCreateDialog();
+    component.formName = 'deploy';
+    component.formScope = 'cache';
+    component.createCacheInsteadOfPick();
+    fixture.detectChanges();
+    expect(component.showDialog()).toBe(false);
+    fixture.debugElement.query(By.directive(CreateCacheDialogComponent)).componentInstance.created.emit('fresh');
+    expect(component.showDialog()).toBe(true);
+    expect(component.formCache).toBe('fresh');
+    expect(component.formName).toBe('deploy');
   });
 });

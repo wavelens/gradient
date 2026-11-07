@@ -7,6 +7,7 @@
 import { Component, OnChanges, SimpleChanges, computed, inject, input, output, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { ConfigService } from '@core/services/config.service';
 import {
   ACTION_TYPE_LABEL,
@@ -32,6 +33,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { fieldChecks } from '@shared/forms';
+import { links } from '@shared/routing';
 
 type FormMode = 'create' | 'edit';
 
@@ -84,6 +86,7 @@ const requiredUrl = (value: string, message: string): string | null =>
   selector: 'app-action-form',
   standalone: true,
   imports: [
+    RouterLink,
     LabelHelpComponent,
     CommonModule,
     FormsModule,
@@ -102,6 +105,7 @@ const requiredUrl = (value: string, message: string): string | null =>
   styleUrl: './action-form.component.scss',
 })
 export class ActionFormComponent implements OnChanges {
+  protected readonly links = links;
   private config = inject(ConfigService);
 
   mode = input<FormMode>('create');
@@ -123,6 +127,8 @@ export class ActionFormComponent implements OnChanges {
   readonly taskFamilies = ['build', 'evaluation', 'exec_job', 'task'];
   recipientsRaw = signal('');
   teams = input<string[]>([]);
+  project = input<string>('');
+  canGrantTeams = input(false);
   teamOptions = computed(() => this.teams().map((team) => ({ label: team, value: team })));
 
   addTeamRecipient(team: string | null): void {

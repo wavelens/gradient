@@ -15,6 +15,8 @@ import { AuthService } from '@core/services/auth.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
 import { TeamGrantEntry, TeamSummary } from '@core/models';
+import { By } from '@angular/platform-browser';
+import { CreateTeamDialogComponent } from '@shared/forms';
 
 const grants: TeamGrantEntry[] = [
   { team: 'platform', display_name: 'Platform', role: 'Write', users: true, workers: true, pending: false },
@@ -47,7 +49,7 @@ function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false)
     providers: [
       provideRouter([]),
       { provide: TeamsService, useValue: service },
-      { provide: AuthService, useValue: { user: signal({ superuser }) } },
+      { provide: AuthService, useValue: { isAuthenticated: () => true, user: signal({ superuser }) } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
     ],
@@ -268,5 +270,18 @@ describe('TeamGrantsComponent', () => {
     component.form = { team: 'platform', role: 'View' };
     component.grant();
     expect(service.grantCache).toHaveBeenCalledWith('acme', 'platform', 'View');
+  });
+
+  it('creates a missing team from the grant dialog and returns with it selected', () => {
+    const { fixture, component } = setup('project', 'users');
+    component.openGrant();
+    fixture.detectChanges();
+    component.createInsteadOfPick();
+    fixture.detectChanges();
+    expect(component.showGrant()).toBe(false);
+    expect(component.showCreateTeam()).toBe(true);
+    fixture.debugElement.query(By.directive(CreateTeamDialogComponent)).componentInstance.created.emit('newteam');
+    expect(component.showGrant()).toBe(true);
+    expect(component.form.team).toBe('newteam');
   });
 });

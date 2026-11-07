@@ -7,20 +7,16 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { Router, RouterModule } from '@angular/router';
 import { TeamsService } from '@core/services/teams.service';
-import { ConfigService } from '@core/services/config.service';
-import { AuthService } from '@core/services/auth.service';
-import { apiErrorMessage } from '@core/services/api.service';
 import { TeamSummary } from '@core/models';
 import {
   BadgeComponent,
   ButtonComponent,
-  DialogComponent,
   LoadStateComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
-import { NameFieldsComponent, nameAvailability } from '@shared/forms';
+import { CreateTeamDialogComponent, injectCanCreateTeam } from '@shared/forms';
 import { links } from '@shared/routing';
 
 @Component({
@@ -30,12 +26,11 @@ import { links } from '@shared/routing';
     RouterModule,
     BadgeComponent,
     ButtonComponent,
-    DialogComponent,
     LoadStateComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
-    NameFieldsComponent,
+    CreateTeamDialogComponent,
   ],
   templateUrl: './teams-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -44,32 +39,15 @@ export class TeamsListComponent implements OnInit {
   protected readonly links = links;
   private teams = inject(TeamsService);
   private router = inject(Router);
-  private config = inject(ConfigService);
-  private authService = inject(AuthService);
-
-  get canCreateTeam(): boolean {
-    if (!this.authService.isAuthenticated()) return false;
-    return this.config.canCreate(this.config.createTeam, this.authService.user()?.superuser === true);
-  }
+  protected canCreateTeam = injectCanCreateTeam();
 
   loading = signal(true);
   loadError = signal<unknown>(null);
   items = signal<TeamSummary[]>([]);
   showCreate = signal(false);
-  creating = signal(false);
-  error = signal<string | null>(null);
-  form = { name: '', displayName: '' };
-  protected names = nameAvailability((name) => this.teams.checkTeamNameAvailable(name));
 
   openCreate(): void {
-    this.form = { name: '', displayName: '' };
-    this.names.reset();
-    this.error.set(null);
     this.showCreate.set(true);
-  }
-
-  canSubmit(): boolean {
-    return !!this.form.displayName && !!this.form.name && !this.names.blocksSubmit();
   }
 
   ngOnInit(): void {
@@ -91,16 +69,7 @@ export class TeamsListComponent implements OnInit {
     });
   }
 
-  create(): void {
-    if (!this.canSubmit() || this.creating()) return;
-    this.creating.set(true);
-    this.error.set(null);
-    this.teams.create(this.form.name, this.form.displayName).subscribe({
-      next: () => this.router.navigateByUrl(links.team(this.form.name)),
-      error: (err: unknown) => {
-        this.error.set(apiErrorMessage(err, 'Failed to create the team.'));
-        this.creating.set(false);
-      },
-    });
+  openTeam(name: string): void {
+    this.router.navigateByUrl(links.team(name));
   }
 }

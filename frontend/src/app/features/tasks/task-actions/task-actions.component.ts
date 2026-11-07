@@ -81,6 +81,7 @@ export class TaskActionsComponent implements OnInit {
   private confirm = inject(ConfirmService);
 
   access = injectTaskAccessTo('manageActions');
+  memberAccess = injectTaskAccessTo('manageMembers');
 
   rowDisabled = computed(
     () =>

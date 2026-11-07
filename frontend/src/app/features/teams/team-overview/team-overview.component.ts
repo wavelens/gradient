@@ -15,6 +15,7 @@ import { TeamResponse, TeamGrants, TeamRequestItem } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
 import {
   ButtonComponent,
+  EmptyStateComponent,
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
@@ -32,6 +33,7 @@ import { links } from '@shared/routing';
   imports: [
     RouterModule,
     ButtonComponent,
+    EmptyStateComponent,
     LoadingSpinnerComponent,
     TeamMembersComponent,
     TeamWorkersComponent,

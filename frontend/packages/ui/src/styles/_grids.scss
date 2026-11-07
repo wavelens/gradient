@@ -57,3 +57,13 @@
     justify-content: flex-end;
   }
 }
+
+.gr-form-aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-sm;
+  margin: $spacing-sm 0 0;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+}

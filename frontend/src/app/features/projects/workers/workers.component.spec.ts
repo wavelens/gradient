@@ -102,13 +102,13 @@ function setup(opts: {
           projectGrants: () => of([]),
         },
       },
-      { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
+      { provide: AuthService, useValue: { isAuthenticated: () => true, user: signal({ superuser: false }) } },
       { provide: ActivatedRoute, useFactory: () => projectRouteStub('demo', opts.access, opts.permissions && { permissions: opts.permissions }) },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
       {
         provide: ConfigService,
-        useValue: { gradientCiEnabled: opts.gradientCi ?? true, gradientCiUrl: 'https://servers.gradient.ci' },
+        useValue: { gradientCiEnabled: opts.gradientCi ?? true, gradientCiUrl: 'https://servers.gradient.ci', createTeam: 'everyone', canCreate: () => true },
       },
     ],
   });

@@ -54,6 +54,11 @@
           }
         </gr-row-list>
       </gr-settings-section>
+    } @else {
+      <gr-settings-section title="Projects and Caches" [card]="false" maxWidth="none">
+        <gr-empty-state flat icon="corporate_fare" title="No projects or caches"
+          message='This team can&apos;t access projects or caches yet. Admins of a project or cache grant access in "Settings, Members and roles".' />
+      </gr-settings-section>
     }
   }
 </gr-page-layout>
