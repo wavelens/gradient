@@ -30,6 +30,9 @@ export class ApiError extends Error {
   }
 }
 
+const NO_CONTENT = 204;
+const EMPTY_RESPONSE = 'The server returned an empty response. Try again later.';
+
 const STATUS_MESSAGES: Record<number, string> = {
   0: 'Connection to the server failed. Check the connection and try again.',
   403: 'No permission for this action.',
@@ -89,16 +92,19 @@ export class ApiService {
       .request<ApiResponse<T>>(method, url, {
         body,
         ...options,
+        observe: 'response',
       })
       .pipe(
         map((response) => {
-          if (response === null || response === undefined) {
-            return undefined as T;
+          if (response.status === NO_CONTENT) return undefined as T;
+          const envelope = response.body;
+          if (envelope === null || envelope === undefined) {
+            throw new ApiError(EMPTY_RESPONSE, response.status);
           }
-          if (response.error) {
-            throw new ApiError(serverMessage(response) ?? statusMessage(200), 200);
+          if (envelope.error) {
+            throw new ApiError(serverMessage(envelope) ?? statusMessage(response.status), response.status);
           }
-          return response.message as T;
+          return envelope.message as T;
         }),
         catchError((error: unknown) => {
           if (error instanceof HttpErrorResponse) {

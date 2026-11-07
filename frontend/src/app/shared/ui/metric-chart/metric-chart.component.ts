@@ -9,7 +9,7 @@ import * as echarts from 'echarts/core';
 import { BarChart, HeatmapChart, LineChart, RadarChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, RadarComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
-import { ChartTheme, MetricChartConfig, MetricChartType, MetricSeries, buildMetricChartOption } from './metric-chart.options';
+import { ChartTheme, MetricChartConfig, MetricChartType, MetricPointXY, MetricSeries, buildMetricChartOption } from './metric-chart.options';
 import { ThemeService } from '@core/services/theme.service';
 import { DocLink } from '@core/docs';
 import { LabelHelpComponent } from '../label-help/label-help.component';
@@ -82,6 +82,8 @@ echarts.use([
         <div #host class="metric-chart__plot" [class.metric-chart__plot--waiting]="loading()" [style.height.px]="height()"></div>
         @if (loading()) {
           <gr-skeleton class="metric-chart__placeholder" />
+        } @else if (empty()) {
+          <p class="metric-chart__placeholder metric-chart__empty">No data</p>
         }
       </div>
     </div>
@@ -112,6 +114,9 @@ export class MetricChartComponent implements OnDestroy {
   private resize?: ResizeObserver;
   private width = signal(Infinity);
   protected compact = computed(() => this.width() < COMPACT_BELOW_PX);
+  protected empty = computed(() =>
+    this.series().every((s) => (s.data as readonly (number | MetricPointXY | null)[]).every((point) => point === null)),
+  );
   private theme = inject(ThemeService);
 
   constructor() {

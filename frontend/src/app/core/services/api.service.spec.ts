@@ -44,6 +44,22 @@ describe('ApiService errors', () => {
     expect(error.message).toBe('The server failed to process the request. Try again later.');
   });
 
+  it('fails a request whose answer has no body, so the page shows an error instead of crashing', async () => {
+    const { api, http } = setup();
+    const result = failure(firstValueFrom(api.get('projects')));
+    http.expectOne(() => true).flush(null, { status: 200, statusText: 'OK' });
+    const error = await result;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.message).toBe('The server returned an empty response. Try again later.');
+  });
+
+  it('accepts a No Content answer without a body', async () => {
+    const { api, http } = setup();
+    const result = firstValueFrom(api.delete('caches/c/nars/h'));
+    http.expectOne(() => true).flush(null, { status: 204, statusText: 'No Content' });
+    expect(await result).toBeUndefined();
+  });
+
   it('reads the reason of a failed download from its JSON body', async () => {
     const { api, http } = setup();
     const result = failure(firstValueFrom(api.getBlob('evals/e1/report')));

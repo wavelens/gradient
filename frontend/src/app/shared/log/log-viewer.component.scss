@@ -107,6 +107,7 @@
   font-family: $font-family-mono;
   font-size: $font-size-xs;
   line-height: 1.6;
+  min-height: 1.6em;
 
   &--hl {
     background: rgba(234, 179, 8, 0.18);

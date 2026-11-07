@@ -63,6 +63,14 @@ describe('MetricChartComponent', () => {
     expect(fixture.nativeElement.querySelector('.metric-chart__plot').innerHTML).not.toBe(before);
   });
 
+  it('says No data over a plot whose series hold no points', async () => {
+    const fixture = await render();
+    expect(fixture.nativeElement.querySelector('.metric-chart__empty')).toBeNull();
+    fixture.componentInstance.series.set([{ name: 'avg', data: [] }, { name: 'max', data: [null, null] }]);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.metric-chart__empty')?.textContent).toContain('No data');
+  });
+
   it('disposes the chart instance on destroy', async () => {
     const fixture = await render();
     fixture.destroy();

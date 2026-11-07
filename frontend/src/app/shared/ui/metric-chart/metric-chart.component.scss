@@ -37,6 +37,15 @@
   width: auto;
   height: auto;
 }
+.metric-chart__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--gr-text-muted);
+  font-size: $font-size-sm;
+  pointer-events: none;
+}
 .metric-chart__header {
   display: flex;
   align-items: flex-start;
