@@ -5506,11 +5506,7 @@ paths:
       - evals
       summary: List evaluation builds
       description: |-
-        Returns `.drv` builds associated with the evaluation, sorted by status
-        (Building, then Queued, then FailedTransient/FailedPermanent/FailedTimeout, then Aborted/DependencyFailed, then Completed/Substituted, then Skipped),
-        then by display name. Supports optional `limit` and `offset` query parameters
-        for pagination, and an optional `scope` to restrict the list to one
-        package's build-time dependency closure.
+        Return the `.drv` builds for an evaluation, sorted by status (Building, then FailedTransient/FailedPermanent/FailedTimeout, then DependencyFailed, then Aborted, then Created/Queued, then Completed/Substituted, then Skipped) and then by display name. Support pagination through optional `limit` and `offset` query parameters. Use an optional `scope` to limit the list to the build-time dependency closure of one package.
 
         Each item is a per-evaluation `build_job`; its `id` is used for log,
         downloads, and dependency-graph endpoints. The build *state* (status,
@@ -5543,11 +5539,7 @@ paths:
           $ref: '#/components/schemas/BuildJobId'
       responses:
         '200':
-          description: |-
-            Paginated build list, ordered by build status (running, then failed,
-            aborted, queued, finished), then by dependency layer (`depth`), then
-            by derivation name within a layer - so within one status the entry
-            point heads the list and every build precedes the builds it needs.
+          description: Sort the paginated build list by build status (running -> failed -> dependency failed -> cancelled -> queued -> completed). Use dependency layer (`depth`) as the next sort key. Use derivation name within the layer as the last sort key. Put the entry point first in the list within one status. Put each build before its dependencies.
           content:
             application/json:
               schema:

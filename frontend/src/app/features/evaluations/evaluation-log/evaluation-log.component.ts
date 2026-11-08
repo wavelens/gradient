@@ -68,7 +68,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_SEVERITY } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildStatusLabel,buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_SEVERITY } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -371,22 +371,23 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private readonly buildStatusOrder: Record<string, number> = {
     building: 0,
     failed: 1,
-    aborted: 2,
-    queued: 3,
-    completed: 4,
-    substituted: 4,
-    dependencyfailed: 5,
+    dependencyfailed: 2,
+    aborted: 3,
+    queued: 4,
+    completed: 5,
+    substituted: 5,
     skipped: 6,
   };
 
-  /// Sidebar sections in display order. Failures appear above queued and always show. `Completed` can include `Substituted`. `Skipped` can include `DependencyFailed`. `Other` can take every status that this list doesn't recognize. The list shows every build.
+  /// The sidebar sections appear in display order. Failed and Dependency failed builds come right after Building. These sections always appear. `Substituted` also belong to `Completed`. `Other` is for every status that this list doesn't know. All builds appear in the list.
   private readonly buildGroups: { key: string; label: string; members: string[] }[] = [
     { key: 'building', label: 'Building', members: ['building'] },
     { key: 'failed', label: 'Failed', members: ['failed'] },
+    { key: 'dependencyfailed', label: buildStatusLabel('DependencyFailed'), members: ['dependencyfailed'] },
     { key: 'aborted', label: 'Aborted', members: ['aborted'] },
     { key: 'queued', label: 'Queued', members: ['queued'] },
     { key: 'completed', label: 'Completed', members: ['completed', 'substituted'] },
-    { key: 'skipped', label: 'Skipped', members: ['dependencyfailed', 'skipped'] },
+    { key: 'skipped', label: 'Skipped', members: ['skipped'] },
     { key: 'other', label: 'Other', members: [] },
   ];
 
@@ -426,6 +427,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   /// The badge severity a build status reads as.
   statusSeverity(status: string | null | undefined): BadgeSeverity {
     return (status && PHASE_SEVERITY[buildPhase(status as BuildStatus)]) || 'neutral';
+  }
+
+  statusLabel(status: string): string {
+    return buildStatusLabel(status as BuildStatus);
   }
 
   statusClass(status: string | null | undefined): string {
@@ -474,7 +479,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   loadBuilds(): void {
     // Initial load uses PAGE_SIZE for speed. Subsequent polls fetch ALL builds so that
-    // builds which changed sort rank (e.g. Building -> Completed moves from rank 0 to rank 4)
+    // builds which changed sort rank (e.g. Building -> Completed moves from rank 0 to rank 5)
     // are never left in `beyondFirstPage` with a stale status.
     const limit = this.isInitialBuildsLoad
       ? this.PAGE_SIZE

@@ -189,10 +189,10 @@ fn status_rank(status: BuildStatus) -> u32 {
     match status {
         Building => 0,
         FailedPermanent | FailedTimeout | FailedTransient => 1,
-        Aborted => 2,
-        Created | Queued => 3,
-        Completed | Substituted => 4,
-        DependencyFailed => 5,
+        DependencyFailed => 2,
+        Aborted => 3,
+        Created | Queued => 4,
+        Completed | Substituted => 5,
         Skipped => 6,
     }
 }
@@ -203,9 +203,9 @@ fn status_rank(status: BuildStatus) -> u32 {
     operation_id = "listEvaluationBuilds",
     tag = "evals",
     summary = "List evaluation builds",
-    description = "Returns `.drv` builds associated with the evaluation, sorted by status\n(Building, then Queued, then FailedTransient/FailedPermanent/FailedTimeout, then Aborted/DependencyFailed, then Completed/Substituted, then Skipped),\nthen by display name. Supports optional `limit` and `offset` query parameters\nfor pagination, and an optional `scope` to restrict the list to one\npackage's build-time dependency closure.\n\nEach item is a per-evaluation `build_job`; its `id` is used for log,\ndownloads, and dependency-graph endpoints. The build *state* (status,\ntiming, log) comes from the global `derivation_build` row, a shared build for\nevery evaluation that needs the same derivation, so a derivation is\nbuilt once and the outcome is reused across evaluations and projects.",
+    description = "Return the `.drv` builds for an evaluation, sorted by status (Building, then FailedTransient/FailedPermanent/FailedTimeout, then DependencyFailed, then Aborted, then Created/Queued, then Completed/Substituted, then Skipped) and then by display name. Support pagination through optional `limit` and `offset` query parameters. Use an optional `scope` to limit the list to the build-time dependency closure of one package.\n\nEach item is a per-evaluation `build_job`; its `id` is used for log,\ndownloads, and dependency-graph endpoints. The build *state* (status,\ntiming, log) comes from the global `derivation_build` row, a shared build for\nevery evaluation that needs the same derivation, so a derivation is\nbuilt once and the outcome is reused across evaluations and projects.",
     params(("evaluation" = EvaluationId, Path), BuildsQuery),
-    responses((status = OK, description = "Paginated build list, ordered by build status (running, then failed,\naborted, queued, finished), then by dependency layer (`depth`), then\nby derivation name within a layer - so within one status the entry\npoint heads the list and every build precedes the builds it needs.", body = PaginatedBuilds), WebError)
+    responses((status = OK, description = "Sort the paginated build list by build status (running -> failed -> dependency failed -> cancelled -> queued -> completed). Use dependency layer (`depth`) as the next sort key. Use derivation name within the layer as the last sort key. Put the entry point first in the list within one status. Put each build before its dependencies.", body = PaginatedBuilds), WebError)
 )]
 pub async fn get_evaluation_builds(
     state: State<Arc<ServerState>>,

@@ -274,9 +274,9 @@
               @if (logLineCount() > 0) {
                 <span class="log-line-count">{{ logLineCount() }} {{ logLineCount() === 1 ? 'line' : 'lines' }}</span>
               }
-              <gr-badge [severity]="statusSeverity(selectedBuild()?.status)">
-                {{ selectedBuild()?.status }}
-              </gr-badge>
+              @if (selectedBuild(); as build) {
+                <gr-badge [severity]="statusSeverity(build.status)">{{ statusLabel(build.status) }}</gr-badge>
+              }
             </div>
             @if (transferProgress(); as p) {
               <gr-build-progress [progress]="p" [compact]="true" />

@@ -101,7 +101,7 @@ describe('EvaluationLogComponent', () => {
       expect(sorted.map(b => b.id)).toEqual(['dep', 'top']);
     });
 
-    it('sorts a build whose dependency failed after completed builds and before skipped ones', () => {
+    it('Sort the builds with status DependencyFailed directly after failed builds.', () => {
       const { cmp } = setup();
       const sorted = (cmp as unknown as Internals).sortBuilds([
         build('skipped', 'hash-docs.drv', 'Skipped', 0),
@@ -109,7 +109,7 @@ describe('EvaluationLogComponent', () => {
         build('done', 'hash-zlib.drv', 'Completed', 1),
         build('failed', 'hash-openssl.drv', 'FailedPermanent', 1),
       ]);
-      expect(sorted.map(b => b.id)).toEqual(['failed', 'done', 'dependent', 'skipped']);
+      expect(sorted.map(b => b.id)).toEqual(['failed', 'dependent', 'done', 'skipped']);
     });
 
     it('dedups the same derivation arriving under two ids', () => {
