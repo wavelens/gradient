@@ -28,7 +28,6 @@ import {
   DialogComponent,
   FormFieldComponent,
   InputDirective,
-  SelectButtonComponent,
   SelectComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
@@ -94,7 +93,6 @@ const requiredUrl = (value: string, message: string): string | null =>
     ButtonComponent,
     InputDirective,
     SelectComponent,
-    SelectButtonComponent,
     CheckboxComponent,
     InputDirective,
     ActionEventsComponent,

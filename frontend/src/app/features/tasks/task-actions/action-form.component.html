@@ -16,15 +16,15 @@
     <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" (blur)="touch('name')" (keyup.enter)="onSubmit()" />
   </gr-form-field>
 
-  <gr-form-field label="Type">
+  <gr-form-field label="Type" for="action-type">
     <gr-label-help slot="label" doc="guides/actions/" title="Notify with actions" />
-    <gr-select-button
+    <gr-select
+      inputId="action-type"
       [options]="typeOptions()"
       [ngModel]="type()"
       (ngModelChange)="onTypeChange($event)"
       optionLabel="label"
       optionValue="value"
-      [allowEmpty]="false"
       [disabled]="typeRadioDisabled()"
     />
     @if (typeRadioDisabled()) {

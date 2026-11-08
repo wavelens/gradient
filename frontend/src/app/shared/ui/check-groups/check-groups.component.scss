@@ -7,8 +7,9 @@
 @use '@gradient/ui/styles/variables' as *;
 
 .groups {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  align-items: start;
   gap: $spacing-md;
 }
 
@@ -17,7 +18,7 @@ fieldset {
   border-radius: $border-radius-sm;
   padding: $spacing-sm $spacing-md $spacing-md;
   background: var(--gr-surface-sunken);
-  min-width: 160px;
+  min-width: 0;
 
   legend {
     padding: 0 $spacing-xs;
