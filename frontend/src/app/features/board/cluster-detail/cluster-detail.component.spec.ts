@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import type { ClusterJobDetail } from '@core/models';
 import { BoardService } from '@core/services/board.service';
 import { BoardClusterDetailComponent, subJobRows } from './cluster-detail.component';
@@ -78,5 +78,22 @@ describe('BoardClusterDetailComponent', () => {
     expect(rows.length).toBe(3);
     expect(root.querySelectorAll('tbody tr.clickable').length).toBe(2);
     expect(rows[2].textContent).toContain('Waiting for a worker');
+  });
+
+  it('tells a server failure apart from a missing cluster job', () => {
+    TestBed.configureTestingModule({
+      imports: [BoardClusterDetailComponent],
+      providers: [
+        provideRouter([]),
+        { provide: ActivatedRoute, useValue: { paramMap: of(convertToParamMap({ id: 'c1' })) } },
+        { provide: BoardService, useValue: { getClusterJob: () => throwError(() => ({ status: 500 })) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(BoardClusterDetailComponent);
+    fixture.detectChanges();
+
+    const text = (fixture.nativeElement as HTMLElement).textContent;
+    expect(text).toContain("Couldn't load cluster job");
+    expect(text).toContain('Try Again');
   });
 });

@@ -347,12 +347,26 @@ describe('BoardJobDetailComponent - pending route', () => {
     expect(el.querySelector('section.timeline')?.textContent).not.toContain('Dependencies');
   });
 
-  it('shows "Job not found" for an assigned job id the server does not know', () => {
+  it('reports an assigned job id the server does not know as missing, without a retry', () => {
     const getPendingJobs = vi.fn(() => of({ jobs: [PENDING], other_pending: 0 }));
-    const el = setup({ getJob: () => throwError(() => new Error('not found')), getPendingJobs }, 'e1')
+    const el = setup({ getJob: () => throwError(() => ({ status: 404 })), getPendingJobs }, 'e1')
       .nativeElement as HTMLElement;
     expect(getPendingJobs).not.toHaveBeenCalled();
-    expect(el.textContent).toContain('Job not found');
+    expect(el.textContent).toContain('Not found or access denied');
+    expect(el.textContent).not.toContain('Try Again');
+  });
+
+  it('reports a server failure as an error with a retry instead of a missing job', () => {
+    const getJob = vi.fn((): Observable<AssignedJobDetail> => throwError(() => ({ status: 500, message: 'database unavailable' })));
+    const fixture = setup({ getJob });
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.textContent).toContain("Couldn't load job");
+    expect(el.textContent).toContain('database unavailable');
+
+    getJob.mockReturnValue(of(DETAIL));
+    (el.querySelector('gr-load-state button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(el.querySelector('section.ids')).toBeTruthy();
   });
 
   it('explains why a pending evaluation waits and links its project, task and evaluation', () => {
@@ -378,10 +392,10 @@ describe('BoardJobDetailComponent - pending route', () => {
     ]));
   });
 
-  it('shows "Job not found" when the job left the pending list', () => {
+  it('says the job left the queue when it is no longer pending', () => {
     const el = setup({ getPendingJobs: () => of({ jobs: [], other_pending: 0 }) }, 'missing', true)
       .nativeElement as HTMLElement;
-    expect(el.textContent).toContain('Job not found');
+    expect(el.textContent).toContain('Job not in queue');
   });
 });
 

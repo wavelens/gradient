@@ -9,7 +9,7 @@ import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, Location } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { IconComponent, LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
+import { IconComponent, LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { StatusBadgeComponent } from '@shared/ui';
 import type { StatusPhase } from '@shared/evaluation';
 import { BoardService } from '@core/services/board.service';
@@ -49,7 +49,7 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
 @Component({
   selector: 'app-board-cluster-detail',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, IconComponent, LoadingSpinnerComponent, TableComponent, StatusBadgeComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, IconComponent, LoadStateComponent, TableComponent, StatusBadgeComponent],
   template: `
     <div class="top-row">
       <a [routerLink]="links.board('live')" class="back" (click)="goBack($event)">
@@ -118,10 +118,9 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
           }
         </tbody>
       </gr-table>
-    } @else if (notFound()) {
-      <p class="muted">Cluster job not found.</p>
     } @else {
-      <gr-loading-spinner message="Loading cluster job..." />
+      <gr-load-state [loading]="loadError() === null" [error]="loadError()" empty
+                     loadingMessage="Loading cluster job..." errorTitle="Couldn't load cluster job" (retry)="reload()" />
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -138,7 +137,8 @@ export class BoardClusterDetailComponent implements OnInit {
   protected readonly jobKindName = jobKindName;
 
   cluster = signal<ClusterJobDetail | null>(null);
-  notFound = signal(false);
+  loadError = signal<unknown>(null);
+  private clusterId: string | null = null;
   rows = computed(() => {
     const cluster = this.cluster();
     return cluster ? subJobRows(cluster) : [];
@@ -162,12 +162,17 @@ export class BoardClusterDetailComponent implements OnInit {
     this.location.back();
   }
 
+  reload(): void {
+    if (this.clusterId) this.load(this.clusterId);
+  }
+
   private load(id: string): void {
+    this.clusterId = id;
     this.cluster.set(null);
-    this.notFound.set(false);
+    this.loadError.set(null);
     this.board.getClusterJob(id).subscribe({
       next: (cluster) => this.cluster.set(cluster),
-      error: () => this.notFound.set(true),
+      error: (error: unknown) => this.loadError.set(error),
     });
   }
 }

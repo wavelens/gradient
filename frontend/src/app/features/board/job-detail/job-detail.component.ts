@@ -17,6 +17,7 @@ import {
   DialogComponent,
   IconComponent,
   LoadingSpinnerComponent,
+  LoadStateComponent,
   PopoverComponent,
   TableComponent,
 } from '@gradient/ui/ui';
@@ -47,7 +48,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent, WaitingNoticeComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LoadStateComponent, LabelHelpComponent, WaitingNoticeComponent],
   template: `
     <div class="top-row phone-icon-buttons">
       <a [routerLink]="links.board('live')" class="back" (click)="goBack($event)">
@@ -393,10 +394,9 @@ interface RuleRow {
           <div class="step"><span class="label">Dependencies</span><span class="hl">{{ p.dependency_count }}</span></div>
         }
       </section>
-    } @else if (notFound()) {
-      <p class="muted">Job not found.</p>
     } @else {
-      <gr-loading-spinner message="Loading job..." />
+      <gr-load-state [loading]="loadError() === null" [error]="loadError()" empty
+                     loadingMessage="Loading job..." errorTitle="Couldn't load job" (retry)="reload()" />
     }
 
     <gr-dialog
@@ -451,7 +451,8 @@ export class BoardJobDetailComponent implements OnInit {
 
   job = signal<AssignedJobDetail | null>(null);
   pending = signal<PendingJobSummary | null>(null);
-  notFound = signal(false);
+  loadError = signal<unknown>(null);
+  private jobId: string | null = null;
   private descriptions = signal<Map<string, string>>(new Map());
   activeRule = signal<RuleDescription | null>(null);
   build = signal<BuildWithOutputs | null>(null);
@@ -548,10 +549,15 @@ export class BoardJobDetailComponent implements OnInit {
     });
   }
 
+  reload(): void {
+    if (this.jobId) this.loadJob(this.jobId);
+  }
+
   private loadJob(id: string): void {
+    this.jobId = id;
     this.job.set(null);
     this.pending.set(null);
-    this.notFound.set(false);
+    this.loadError.set(null);
     this.build.set(null);
     this.buildDialog.set(false);
     if (this.route.snapshot.data['pending'] === true) {
@@ -565,7 +571,7 @@ export class BoardJobDetailComponent implements OnInit {
           this.loadBuild(d.build_id);
         }
       },
-      error: () => this.notFound.set(true),
+      error: (error: unknown) => this.loadError.set(error),
     });
   }
 
@@ -574,9 +580,9 @@ export class BoardJobDetailComponent implements OnInit {
       next: (r) => {
         const match = r.jobs.find((p) => p.exec_job?.id === id || (!p.exec_job && (p.evaluation_id === id || p.build_id === id)));
         if (match) this.pending.set(match);
-        else this.notFound.set(true);
+        else this.loadError.set({ status: 404, message: 'Job not in queue' });
       },
-      error: () => this.notFound.set(true),
+      error: (error: unknown) => this.loadError.set(error),
     });
   }
 
