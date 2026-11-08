@@ -112,10 +112,16 @@ describe('TeamOverviewComponent', () => {
     }
   });
 
-  it('explains how a team without grants gets access to a project or cache', () => {
-    const root = render();
+  it('explains to team admins how a team without grants gets access to a project or cache', () => {
+    const root = setup('admin').root;
     expect(headings(root)).toContain('Projects and Caches');
     expect(root.textContent).toContain('Settings, Members and roles');
+  });
+
+  it('leaves out the empty projects and caches section and the "Team" subtitle for members', () => {
+    const root = render();
+    expect(headings(root)).not.toContain('Projects and Caches');
+    expect(root.querySelector('gr-page-layout')?.textContent).not.toMatch(/^\s*Team\s*$/m);
   });
 
   it('drops admin controls after an admin demotes themselves', () => {

@@ -23,9 +23,11 @@
       @for (member of members(); track member.user) {
         <gr-row icon="person">
           <span class="mono">{{ member.user }}</span>
-          <span slot="meta">{{ member.name }}</span>
+          @if (member.name !== member.user) {
+            <span slot="meta">{{ member.name }}</span>
+          }
           <div slot="actions">
-            @if (sourceLabels[member.source]; as label) {
+            @if (!memberSourceSharedByAllMembers() && sourceLabels[member.source]; as label) {
               <gr-badge>{{ label }}</gr-badge>
             }
             @if (canEdit() && member.source !== 'state') {

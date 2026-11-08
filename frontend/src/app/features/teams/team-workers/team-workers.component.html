@@ -34,7 +34,6 @@
         <gr-row [icon]="worker.gradient_ci ? 'cloud' : 'construction'">
           {{ worker.display_name }}
           <div slot="meta">
-            <div class="mono">{{ worker.worker_id }}</div>
             @if (worker.url) {
               <div class="text-secondary">{{ worker.url }}</div>
             }

@@ -123,6 +123,18 @@ describe('TeamMembersComponent', () => {
     expect(text).toContain('State');
   });
 
+  it('names a source all members share once and skips a name equal to the username', () => {
+    const declared: TeamMemberItem[] = [
+      { user: 'admin', name: 'admin', role: 'admin', source: 'state' },
+      { user: 'dave', name: 'Dave', role: 'member', source: 'state' },
+    ];
+    const { fixture } = setup(undefined, true, vi.fn().mockReturnValue(of(declared)));
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.textContent).toContain('2 members · all declared in the state file');
+    expect(Array.from(element.querySelectorAll('gr-row gr-badge')).map((b) => b.textContent?.trim())).toEqual(['admin', 'member']);
+    expect(element.textContent?.match(/admin/g)).toHaveLength(2);
+  });
+
   it('lets an admin of a state-managed team change every member except the declared ones', () => {
     const { fixture } = setup(undefined, true);
     const element = fixture.nativeElement as HTMLElement;

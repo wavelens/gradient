@@ -86,7 +86,21 @@ export class TeamMembersComponent implements OnInit {
   readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'State', group: 'Group' };
 
   canEdit = computed(() => canManageTeam(this.team(), this.auth.user()));
-  countLabel = computed(() => `${this.members().length} ${this.members().length === 1 ? 'member' : 'members'}`);
+  readonly allMembersPhraseByMemberSource: Record<TeamMemberSource, string | null> = {
+    api: null,
+    state: 'all declared in the state file',
+    group: 'all added through a group',
+  };
+  memberSourceSharedByAllMembers = computed<TeamMemberSource | null>(() => {
+    const sources = new Set(this.members().map((member) => member.source));
+    const [only] = sources;
+    return sources.size === 1 && this.sourceLabels[only] ? only : null;
+  });
+  countLabel = computed(() => {
+    const count = `${this.members().length} ${this.members().length === 1 ? 'member' : 'members'}`;
+    const shared = this.memberSourceSharedByAllMembers();
+    return shared ? `${count} · ${this.allMembersPhraseByMemberSource[shared]}` : count;
+  });
 
   private get teamName(): string {
     return this.team().name;
