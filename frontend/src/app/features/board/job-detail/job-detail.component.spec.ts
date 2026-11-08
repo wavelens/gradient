@@ -619,6 +619,28 @@ describe('BoardJobDetailComponent - exec jobs', () => {
   });
 });
 
+describe('BoardJobDetailComponent - live state', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('follows a running job until it ends and then drops Abort and stops asking', () => {
+    vi.useFakeTimers();
+    const finished = { ...DETAIL, finished_at: '2026-06-08T00:05:00Z', outcome: 'aborted' };
+    const getJob = vi.fn(() => of(DETAIL));
+    const fixture = setup({ getJob });
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('.top-row button')?.textContent).toContain('Abort');
+
+    getJob.mockReturnValue(of(finished));
+    vi.advanceTimersByTime(5_000);
+    fixture.detectChanges();
+    expect(el.querySelector('.top-row button')).toBeNull();
+    expect(el.querySelector('section.timeline')?.textContent).toContain('aborted');
+
+    vi.advanceTimersByTime(15_000);
+    expect(getJob).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('BoardJobDetailComponent - #636', () => {
   it('shows an eval job the evaluation it ran, not an empty derivation list', () => {
     const el = setup({ getJob: () => of(EVAL_DETAIL) }).nativeElement as HTMLElement;

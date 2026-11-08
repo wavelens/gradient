@@ -36,6 +36,8 @@ import {
   GradientCapabilities,
 } from '@core/models';
 import { links } from '@shared/routing';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
+import { EMPTY, Observable, tap } from 'rxjs';
 
 interface RuleRow {
   name: string;
@@ -536,6 +538,22 @@ export class BoardJobDetailComponent implements OnInit {
     const ms = serverTime(j.dispatched_at).getTime() - serverTime(j.queued_at).getTime();
     return ms < 0 ? '-' : formatDuration(ms);
   });
+
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => this.refetchJobWhileUnfinished(), 5_000);
+  }
+
+  private refetchJobWhileUnfinished(): Observable<unknown> {
+    const current = this.job();
+    if (!current || current.finished_at || current.passed_over) return EMPTY;
+    return this.board.getJob(current.id).pipe(
+      tap((d) => {
+        if (this.job()?.id !== d.id) return;
+        this.job.set(d);
+        if (d.finished_at && d.build_id && (this.build()?.id ?? d.build_id) === d.build_id) this.loadBuild(d.build_id);
+      }),
+    );
+  }
 
   ngOnInit(): void {
     this.board
