@@ -16,7 +16,7 @@ The **Job Board** in the header shows scheduler and worker activity, both live a
 | Scheduler | Queue wait versus dependency wait, score distribution, mean contribution per scoring rule | **?** next to a rule explains that rule |
 | Throughput | Builds created, completed and failed, evaluations per hour, active jobs per worker | |
 | Durations | Average and maximum build time, plus the wait split over time | |
-| Workers | Fleet size, load by capability, system and feature, slot use per worker | Reveal a missing worker kind. Capability and system load: **Now** or the average over **24h**, **7d**, **30d** |
+| Workers | A worker table for slots, CPU load, and free RAM, then fleet size and load by capability, system, and feature. | Reveal a missing worker kind. Capability and system load: **Now** or the average over **24h**, **7d**, **30d** |
 | Cache | Stored size, traffic, growth, latency per upstream cache. The 10 busiest caches by bytes sent in the last 24 h, limited to public caches and caches visible to the viewer | Switch traffic between **Total** and **External**. **External**: only NARs sent over the HTTP binary cache and the `/proto` cache session |
 | Storage | NAR storage latency and errors per operation (file or S3), writer lane fill and send stalls, NAR delivery queue and failures. All charts share one time axis across the whole window, minute resolution up to 6 h. Superusers only | Choose the time window |
 | Network | NAR egress, worker upload, download and disk speed, HTTP latency per route (top 10 busiest routes first, **Load more** for the rest) | |

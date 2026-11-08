@@ -8,7 +8,7 @@
 
 gr-metric-chart { margin-bottom: 1rem; }
 .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 1rem; }
-gr-table.workers { display: block; margin-top: 1rem; }
+gr-table.workers { display: block; margin-bottom: 1rem; }
 
 .muted { color: var(--gr-text-muted); }
 

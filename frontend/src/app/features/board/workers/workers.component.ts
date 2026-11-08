@@ -14,7 +14,6 @@ import { clockTime, formatMegabytes, formatPercent } from '@shared/text';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { BadgeComponent, LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent, SegmentedBarComponent, ratioSegments } from '@shared/ui';
-import { workerAxisLabel } from '../worker-label';
 import { BoardWorker, BoardFleetPoint, DeviceClass, WorkerLoad, WorkerLoadAverage } from '@core/models';
 import { links } from '@shared/routing';
 
@@ -34,6 +33,44 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading workers..." errorTitle="Failed to load workers" (retry)="retry()">
+      <gr-table class="workers">
+        <thead>
+          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Jobs</th><th>CPU load</th><th>Free RAM</th><th>Arch</th><th>Exec</th></tr>
+        </thead>
+        <tbody>
+          @for (w of workers(); track $index) {
+            <tr>
+              <td class="mono">{{ w.name ?? w.id ?? '-' }}</td>
+              <td class="projects">
+                @for (p of w.projects; track p.id; let last = $last) {
+                  <a [routerLink]="links.project(p.name)">{{ p.display_name || p.name }}</a>@if (!last) {, }
+                } @empty { - }
+              </td>
+              <td>{{ w.draining ? 'draining' : 'active' }}</td>
+              <td>{{ w.assigned_jobs }}/{{ w.max_concurrent_builds }}</td>
+              <td>{{ w.cpu_usage_pct != null ? percent(w.cpu_usage_pct) : '-' }}</td>
+              <td>{{ megabytes(w.ram_free_mb) }}</td>
+              <td class="mono">{{ w.architectures.join(', ') || '-' }}</td>
+              <td class="exec">
+                @if (w.exec; as exec) {
+                  <span class="labels">
+                    @for (label of exec.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
+                  </span>
+                  @for (d of exec.devices; track d.name) {
+                    <span class="device">
+                      <gr-segmented-bar [segments]="heldSegments(d)" />
+                      <span class="mono">{{ d.name }} {{ d.free }}/{{ d.total }} free</span>
+                    </span>
+                  }
+                } @else { - }
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="8" class="muted">No connected workers.</td></tr>
+          }
+        </tbody>
+      </gr-table>
+
       <gr-metric-chart
         title="Fleet over time (connected vs draining)"
         doc="ui/job-board/#workers"
@@ -92,55 +129,6 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         [colors]="['--gr-chart-pink']"
         [valueFormatter]="percent"
       ></gr-metric-chart>
-
-      <gr-metric-chart
-        title="Slot utilisation per worker (%)"
-        doc="ui/job-board/#workers"
-        type="bar"
-        [height]="300"
-        [series]="utilSeries()"
-        [categories]="workerCats()"
-        [colors]="['--gr-chart-purple']"
-        [valueFormatter]="percent"
-      ></gr-metric-chart>
-
-      <gr-table class="workers">
-        <thead>
-          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Jobs</th><th>CPU load</th><th>Free RAM</th><th>Arch</th><th>Exec</th></tr>
-        </thead>
-        <tbody>
-          @for (w of workers(); track $index) {
-            <tr>
-              <td class="mono">{{ w.name ?? w.id ?? '-' }}</td>
-              <td class="projects">
-                @for (p of w.projects; track p.id; let last = $last) {
-                  <a [routerLink]="links.project(p.name)">{{ p.display_name || p.name }}</a>@if (!last) {, }
-                } @empty { - }
-              </td>
-              <td>{{ w.draining ? 'draining' : 'active' }}</td>
-              <td>{{ w.assigned_jobs }}/{{ w.max_concurrent_builds }}</td>
-              <td>{{ w.cpu_usage_pct != null ? percent(w.cpu_usage_pct) : '-' }}</td>
-              <td>{{ megabytes(w.ram_free_mb) }}</td>
-              <td class="mono">{{ w.architectures.join(', ') || '-' }}</td>
-              <td class="exec">
-                @if (w.exec; as exec) {
-                  <span class="labels">
-                    @for (label of exec.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
-                  </span>
-                  @for (d of exec.devices; track d.name) {
-                    <span class="device">
-                      <gr-segmented-bar [segments]="heldSegments(d)" />
-                      <span class="mono">{{ d.name }} {{ d.free }}/{{ d.total }} free</span>
-                    </span>
-                  }
-                } @else { - }
-              </td>
-            </tr>
-          } @empty {
-            <tr><td colspan="8" class="muted">No connected workers.</td></tr>
-          }
-        </tbody>
-      </gr-table>
     </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -196,22 +184,6 @@ export class BoardWorkersComponent implements OnInit {
   capLoad = computed(() => this.radar(this.rangedLoad()?.by_capability ?? []));
   archLoad = computed(() => this.radar(this.rangedLoad()?.by_architecture ?? []));
   featLoad = computed(() => this.radar(this.load()?.by_feature ?? []));
-
-  workerCats = computed(() =>
-    this.workers().filter((w) => w.id !== null).map((w) => workerAxisLabel(w.name, w.id))
-  );
-  utilSeries = computed(() => [
-    {
-      name: 'utilisation',
-      data: this.workers()
-        .filter((w) => w.id !== null)
-        .map((w) =>
-          w.max_concurrent_builds > 0
-            ? busyPercent(w.assigned_jobs, w.max_concurrent_builds)
-            : 0
-        ),
-    },
-  ]);
 
   ngOnInit(): void {
     this.loadAll();
