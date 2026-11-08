@@ -10,6 +10,7 @@ import { EMPTY, Observable, of, throwError } from 'rxjs';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { SessionsComponent } from './sessions.component';
 import { UserService } from '@core/services/user.service';
+import { AuthService } from '@core/services/auth.service';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { SessionInfo } from '@core/models';
@@ -20,6 +21,7 @@ const OTHER = { ...CURRENT, id: 's2', current: false };
 function setup(getSessions: ReturnType<typeof vi.fn>, revokeSession = vi.fn().mockReturnValue(of('ok'))) {
   const notify = { success: vi.fn(), failure: vi.fn() };
   const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
+  const logout = vi.fn().mockReturnValue(of(undefined));
   TestBed.configureTestingModule({
     imports: [SessionsComponent],
     providers: [
@@ -27,11 +29,12 @@ function setup(getSessions: ReturnType<typeof vi.fn>, revokeSession = vi.fn().mo
       { provide: UserService, useValue: { getSessions, revokeSession } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
+      { provide: AuthService, useValue: { logout, isAuthenticated: () => false } },
     ],
   });
   const fixture = TestBed.createComponent(SessionsComponent);
   fixture.detectChanges();
-  return { fixture, notify, confirm, root: fixture.nativeElement as HTMLElement };
+  return { fixture, notify, confirm, logout, root: fixture.nativeElement as HTMLElement };
 }
 
 describe('SessionsComponent', () => {
@@ -65,9 +68,14 @@ describe('SessionsComponent', () => {
     expect(revokeSession).not.toHaveBeenCalled();
   });
 
-  it('never offers to revoke the session of this device', () => {
-    const { root, confirm } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])));
-    expect(revokeButtons(root)[0].disabled).toBe(true);
+  it('offers Log out instead of Revoke for the session of this device', () => {
+    const { root, confirm, logout } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])));
+    const [current, other] = revokeButtons(root);
+    expect(current.textContent).toContain('Log out');
+    expect(current.disabled).toBe(false);
+    expect(other.textContent).toContain('Revoke');
+    current.click();
+    expect(logout).toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
   });
 });

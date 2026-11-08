@@ -7,6 +7,7 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { UserService } from '@core/services/user.service';
+import { AuthService } from '@core/services/auth.service';
 import { NotifyService } from '@core/services/notify.service';
 import { SessionInfo } from '@core/models';
 import { deviceName, ServerTimestampToLocalDateTimePipe } from '@shared/text';
@@ -42,6 +43,7 @@ import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 export class SessionsComponent implements OnInit {
   protected readonly links = links;
   private userService = inject(UserService);
+  private auth = inject(AuthService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
   protected readonly deviceName = deviceName;
@@ -69,10 +71,11 @@ export class SessionsComponent implements OnInit {
     });
   }
 
+  signOutCurrentDevice(): void {
+    this.auth.logout().subscribe();
+  }
+
   revoke(s: SessionInfo): void {
-    if (s.current) {
-      return;
-    }
     this.confirm
       .confirm({
         title: 'Revoke session',

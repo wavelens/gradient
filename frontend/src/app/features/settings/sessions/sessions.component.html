@@ -29,15 +29,11 @@
             Last used {{ s.last_used_at | serverDate }} ·
             Expires {{ s.expires_at | serverDate }}
           </span>
-          <button
-            slot="actions"
-            grButton
-            label="Revoke"
-            icon="logout"
-            severity="danger"
-            [disabled]="s.current"
-            (click)="revoke(s)"
-          ></button>
+          @if (s.current) {
+            <button slot="actions" grButton label="Log out" icon="logout" severity="secondary" (click)="signOutCurrentDevice()"></button>
+          } @else {
+            <button slot="actions" grButton label="Revoke" icon="logout" severity="danger" (click)="revoke(s)"></button>
+          }
         </gr-row>
       }
     </gr-row-list>
