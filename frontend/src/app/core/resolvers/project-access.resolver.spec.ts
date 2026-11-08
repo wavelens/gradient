@@ -9,6 +9,7 @@ import { ActivatedRouteSnapshot, RedirectCommand, Router, convertToParamMap, pro
 import { Observable, firstValueFrom, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { AuthService } from '@core/services/auth.service';
 import { projectAccessResolver, ProjectAccessData } from './project-access.resolver';
 import { ProjectResponse } from '@core/models';
 
@@ -44,7 +45,11 @@ describe('projectAccessResolver', () => {
   beforeEach(() => {
     getProject = vi.fn(() => of(baseProject));
     TestBed.configureTestingModule({
-      providers: [provideRouter([]), { provide: ProjectsService, useValue: { getProject } }],
+      providers: [
+        provideRouter([]),
+        { provide: ProjectsService, useValue: { getProject } },
+        { provide: AuthService, useValue: { initialized$: of(true), isAuthenticated: () => true } },
+      ],
     });
   });
 

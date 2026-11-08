@@ -32,6 +32,7 @@ async function run(session: { authenticated: boolean; unreachable?: boolean }, p
           initialized$: of(true),
           resolveSession: () => of(session.authenticated),
           serverUnreachable: () => !!session.unreachable,
+          isAuthenticated: () => session.authenticated,
         },
       },
       { provide: ProjectsService, useValue: { getProject } },

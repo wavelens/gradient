@@ -6,8 +6,10 @@
 
 import { inject } from '@angular/core';
 import { RedirectCommand, Router } from '@angular/router';
-import { EMPTY, Observable, OperatorFunction, catchError, of } from 'rxjs';
+import { EMPTY, Observable, OperatorFunction, catchError, map, of } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
+import { AuthService } from '@core/services/auth.service';
+import { links } from '@shared/routing';
 
 export type DeniedKind = 'project' | 'task' | 'cache' | 'team' | 'evaluation' | 'build' | 'execJob' | 'job' | 'clusterJob' | 'worker';
 
@@ -29,8 +31,13 @@ export function adminOnlyPage(router: Router, from: string): RedirectCommand {
 
 export function denyOnRefusal<T>(target: DeniedTarget, from: string): OperatorFunction<T, T | RedirectCommand> {
   const router = inject(Router);
+  const auth = inject(AuthService);
   return catchError((error: unknown): Observable<RedirectCommand> => {
-    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) return of(deniedPage(router, target, from));
+    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+      return auth.initialized$.pipe(
+        map(() => (auth.isAuthenticated() ? deniedPage(router, target, from) : new RedirectCommand(links.login(from)))),
+      );
+    }
     if (error instanceof ApiError && error.unreachable) return EMPTY;
     const failed = router.createUrlTree(['/error/500'], { queryParams: { from } });
     return of(new RedirectCommand(failed, { skipLocationChange: true }));

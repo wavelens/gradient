@@ -67,7 +67,7 @@ function configure(services: Record<string, unknown>, user: { superuser: boolean
       { provide: BoardService, useValue: fakes.board },
       {
         provide: AuthService,
-        useValue: { initialized$: of(true), resolveSession: () => of(!!user), serverUnreachable: () => false, user: () => user },
+        useValue: { initialized$: of(true), resolveSession: () => of(!!user), serverUnreachable: () => false, user: () => user, isAuthenticated: () => !!user },
       },
     ],
   });
@@ -88,11 +88,23 @@ function page(result: unknown): string {
 }
 
 describe('not-found or no-access page', () => {
-  it('replaces a project a visitor cannot see, whether signed in or not', async () => {
-    configure({ projects: { getProject: () => refused(404) } }, null);
+  it('replaces a project a signed-in visitor cannot see', async () => {
+    configure({ projects: { getProject: () => refused(404) } });
     expect(page(await outcome(visibleProjectGuard, { project: 'acme' }))).toBe(
       `/error/404?kind=project&name=acme&back=%2Fprojects&from=${encodeURIComponent(URL)}`,
     );
+  });
+
+  it('sends an anonymous visitor of a hidden project, task or cache to sign-in and back', async () => {
+    const login = `/account/login?next=${encodeURIComponent(URL)}`;
+    const redirect = (result: unknown) => {
+      expect(result).toBeInstanceOf(RedirectCommand);
+      return TestBed.inject(Router).serializeUrl((result as RedirectCommand).redirectTo);
+    };
+    configure({ projects: { getProject: () => refused(404) }, tasks: { getTask: () => refused(403) }, caches: { getCache: () => refused(404) } }, null);
+    expect(redirect(await outcome(visibleProjectGuard, { project: 'acme' }))).toBe(login);
+    expect(redirect(await outcome(taskAccessResolver as unknown as CanActivateFn, { project: 'acme', task: 'demo' }))).toBe(login);
+    expect(redirect(await outcome(cacheAccessResolver as unknown as CanActivateFn, { cache: 'store' }))).toBe(login);
   });
 
   it('lets a visible project through', async () => {
