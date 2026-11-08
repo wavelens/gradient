@@ -170,18 +170,14 @@ describe('ProfileComponent - access gating', () => {
     expect(save!.disabled).toBe(false);
   });
 
-  it('renders Save Changes present-but-disabled for a state-managed account', () => {
-    const fixture = setup({ managed: true, oidc: false });
-    const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
-    expect(save).not.toBeNull();
-    expect(save!.disabled).toBe(true);
-  });
-
-  it('renders Save Changes present-but-disabled for an OIDC account', () => {
-    const fixture = setup({ managed: false, oidc: true });
-    const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
-    expect(save).not.toBeNull();
-    expect(save!.disabled).toBe(true);
+  it.each([
+    { name: 'hide Save changes and Delete account for state-managed accounts', managed: true, oidc: false },
+    { name: 'hide "Save changes" and "Delete account" for OIDC accounts', managed: false, oidc: true },
+  ])('$name', ({ managed, oidc }) => {
+    const fixture = setup({ managed, oidc });
+    expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'delete account')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('cannot be edited here');
   });
 
   it('sends one profile write for two Save Changes clicks', () => {
@@ -194,13 +190,6 @@ describe('ProfileComponent - access gating', () => {
     fixture.detectChanges();
     save().click();
     expect(updateUserSettings).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables Delete Account when managed', () => {
-    const fixture = setup({ managed: true, oidc: false });
-    const del = findByText(fixture.nativeElement, 'delete account') as HTMLButtonElement | null;
-    expect(del).not.toBeNull();
-    expect(del!.disabled).toBe(true);
   });
 });
 

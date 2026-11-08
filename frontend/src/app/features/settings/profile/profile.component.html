@@ -37,19 +37,21 @@
         <input grInput id="email" type="email" [(ngModel)]="formData.email" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
       </gr-form-field>
 
-      <div class="gr-form-actions">
-        <button
-          grButton
-          label="Save Changes"
-          icon="check"
-          (grSubmit)="saveSettings()"
-          [loading]="saving()"
-          [disabled]="access().managed || !unsaved.changed()"
-        ></button>
-        @if (!access().managed && !unsaved.changed()) {
-          <small class="text-secondary save-hint">No changes to save.</small>
-        }
-      </div>
+      @if (!access().managed) {
+        <div class="gr-form-actions">
+          <button
+            grButton
+            label="Save Changes"
+            icon="check"
+            (grSubmit)="saveSettings()"
+            [loading]="saving()"
+            [disabled]="!unsaved.changed()"
+          ></button>
+          @if (!unsaved.changed()) {
+            <small class="text-secondary save-hint">No changes to save.</small>
+          }
+        </div>
+      }
     </gr-settings-section>
 
     <gr-settings-section title="Appearance" [card]="false">
@@ -113,21 +115,22 @@
       </gr-settings-section>
     }
 
-    <gr-settings-section title="Danger Zone" danger>
-      <gr-row>
-        Delete Account
-        <span slot="meta">Permanently delete your account and all associated data.</span>
-        <button
-          slot="actions"
-          grButton
-          label="Delete Account"
-          icon="delete"
-          severity="danger"
-          (click)="openDeleteDialog()"
-          [appManagedDisable]="access()"
-        ></button>
-      </gr-row>
-    </gr-settings-section>
+    @if (!access().managed) {
+      <gr-settings-section title="Danger Zone" danger>
+        <gr-row>
+          Delete Account
+          <span slot="meta">Permanently delete your account and all associated data.</span>
+          <button
+            slot="actions"
+            grButton
+            label="Delete Account"
+            icon="delete"
+            severity="danger"
+            (click)="openDeleteDialog()"
+          ></button>
+        </gr-row>
+      </gr-settings-section>
+    }
   }
 </gr-page-layout>
 
