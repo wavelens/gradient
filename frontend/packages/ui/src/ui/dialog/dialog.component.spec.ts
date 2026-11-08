@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { InteractivityChecker } from '@angular/cdk/a11y';
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { DialogComponent } from './dialog.component';
@@ -12,6 +13,7 @@ import { DialogComponent } from './dialog.component';
   standalone: true,
   imports: [DialogComponent],
   template: `
+    <button class="opener">Open</button>
     <gr-dialog
       [(visible)]="open"
       [header]="header()"
@@ -22,6 +24,9 @@ import { DialogComponent } from './dialog.component';
       (hide)="hidden.set(hidden() + 1)"
     >
       <p class="body">Are you sure?</p>
+      @if (withField()) {
+        <input class="field" />
+      }
       <div grDialogFooter>
         <button class="gr-button--secondary cancel" (click)="clicks.push('cancel')">Cancel</button>
         <button class="confirm" [disabled]="confirmDisabled()" (click)="clicks.push('confirm')">Delete</button>
@@ -37,7 +42,14 @@ class HostComponent {
   busy = signal(false);
   hidden = signal(0);
   confirmDisabled = signal(false);
+  withField = signal(false);
   clicks: string[] = [];
+}
+
+class LayoutFreeInteractivityChecker extends InteractivityChecker {
+  override isVisible(): boolean {
+    return true;
+  }
 }
 
 const ctrlEnter = () =>
@@ -47,7 +59,10 @@ const escape = () =>
   panel()!.querySelector('.body')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
 
 function render() {
-  TestBed.configureTestingModule({ imports: [HostComponent] });
+  TestBed.configureTestingModule({
+    imports: [HostComponent],
+    providers: [{ provide: InteractivityChecker, useClass: LayoutFreeInteractivityChecker }],
+  });
   const fixture = TestBed.createComponent(HostComponent);
   fixture.detectChanges();
   return fixture;
@@ -204,5 +219,31 @@ describe('DialogComponent', () => {
     (document.querySelector('.gr-dialog-backdrop') as HTMLElement | null)?.click();
     fixture.detectChanges();
     expect(fixture.componentInstance.hidden()).toBe(1);
+  });
+
+  it('focuses the safe footer action of a dialog without fields, not the close button', async () => {
+    const fixture = render();
+    fixture.componentInstance.open.set(true);
+    await fixture.whenStable();
+    expect(document.activeElement?.classList).toContain('cancel');
+  });
+
+  it('focuses the first field of a form dialog', async () => {
+    const fixture = render();
+    fixture.componentInstance.withField.set(true);
+    fixture.componentInstance.open.set(true);
+    await fixture.whenStable();
+    expect(document.activeElement?.classList).toContain('field');
+  });
+
+  it('returns focus to the element that opened it', async () => {
+    const fixture = render();
+    const opener = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.opener')!;
+    opener.focus();
+    fixture.componentInstance.open.set(true);
+    await fixture.whenStable();
+    escape();
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(opener);
   });
 });

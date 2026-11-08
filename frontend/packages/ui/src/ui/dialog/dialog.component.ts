@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { CdkTrapFocus } from '@angular/cdk/a11y';
+import { CdkTrapFocus, InteractivityChecker } from '@angular/cdk/a11y';
 import { IconComponent } from '../icon/icon.component';
 import { MessageBannerComponent } from '../message-banner/message-banner.component';
 import { ESCAPE } from '@angular/cdk/keycodes';
@@ -14,8 +14,10 @@ import { detachAnimated } from '../overlay/overlay-animation';
 import { FormErrors } from '../form-field/form-errors';
 import {
   Component,
+  Injector,
   OnDestroy,
   ViewContainerRef,
+  afterNextRender,
   booleanAttribute,
   effect,
   inject,
@@ -45,7 +47,6 @@ let dialogSeq = 0;
         [attr.aria-busy]="busy() || null"
         [style.width]="width()"
         cdkTrapFocus
-        [cdkTrapFocusAutoCapture]="true"
       >
         <div class="gr-dialog__header">
           <h2 class="gr-dialog__title" [id]="titleId">{{ header() }}</h2>
@@ -79,8 +80,11 @@ export class DialogComponent implements OnDestroy {
   protected titleId = `gr-dialog-title-${dialogSeq++}`;
   private overlay = inject(Overlay);
   private vcr = inject(ViewContainerRef);
+  private injector = inject(Injector);
+  private checker = inject(InteractivityChecker);
   private ref?: OverlayRef;
   private leaving = false;
+  private elementFocusedBeforeDialogOpened: HTMLElement | null = null;
 
   constructor() {
     effect(() => (this.visible() ? this.open() : this.detach()));
@@ -96,8 +100,23 @@ export class DialogComponent implements OnDestroy {
 
   private open(): void {
     if (this.ref?.hasAttached()) return;
+    this.elementFocusedBeforeDialogOpened = document.activeElement as HTMLElement | null;
     this.ref ??= this.createOverlay();
     this.ref.attach(new TemplatePortal(this.panel(), this.vcr));
+    afterNextRender(() => this.focusInitialElementThenFirstFormFieldThenFooterButton(), { injector: this.injector });
+  }
+
+  private focusInitialElementThenFirstFormFieldThenFooterButton(): void {
+    const panel = this.ref?.overlayElement;
+    if (!panel) return;
+    const firstTabbable = (selector: string) =>
+      Array.from(panel.querySelectorAll<HTMLElement>(selector)).find((el) => this.checker.isFocusable(el) && this.checker.isTabbable(el));
+    const target =
+      panel.querySelector<HTMLElement>('[cdkFocusInitial]') ??
+      firstTabbable('.gr-dialog__content :is(input, select, textarea)') ??
+      firstTabbable('.gr-dialog__footer :is(button, a[href])') ??
+      firstTabbable('button, a[href], input, select, textarea, [tabindex]');
+    target?.focus();
   }
 
   private createOverlay(): OverlayRef {
@@ -135,6 +154,8 @@ export class DialogComponent implements OnDestroy {
     this.leaving = true;
     detachAnimated(this.ref, () => {
       this.leaving = false;
+      if (this.elementFocusedBeforeDialogOpened?.isConnected) this.elementFocusedBeforeDialogOpened.focus();
+      this.elementFocusedBeforeDialogOpened = null;
       this.hide.emit();
     });
   }
