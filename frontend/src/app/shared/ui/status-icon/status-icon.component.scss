@@ -16,10 +16,10 @@
 }
 
 :host([data-phase='queued']),
-:host([data-phase='running']) { --phase-color: var(--gr-indicator-info); }
+:host([data-phase='running']) { --phase-color: var(--gr-graph-running); }
 :host([data-phase='waiting']) { --phase-color: var(--gr-status-warning); }
-:host([data-phase='success']) { --phase-color: var(--gr-indicator-success); }
-:host([data-phase='failure']) { --phase-color: var(--gr-indicator-danger); }
+:host([data-phase='success']) { --phase-color: var(--gr-graph-success); }
+:host([data-phase='failure']) { --phase-color: var(--gr-graph-danger); }
 :host([data-phase='aborted']) { --phase-color: var(--gr-text-secondary); }
 
 svg { overflow: visible; }

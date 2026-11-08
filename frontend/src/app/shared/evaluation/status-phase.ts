@@ -16,11 +16,11 @@ export type StatusPhase = 'queued' | 'waiting' | 'running' | 'success' | 'failur
 
 /// All pages render each status phase with one color and one badge severity. Failure, running and waiting jobs look the same everywhere as a result.
 export const PHASE_COLOR: Record<StatusPhase, string> = {
-  queued: 'var(--gr-indicator-info)',
-  running: 'var(--gr-indicator-info)',
+  queued: 'var(--gr-graph-running)',
+  running: 'var(--gr-graph-running)',
   waiting: 'var(--gr-status-warning)',
-  success: 'var(--gr-indicator-success)',
-  failure: 'var(--gr-indicator-danger)',
+  success: 'var(--gr-graph-success)',
+  failure: 'var(--gr-graph-danger)',
   aborted: 'var(--gr-text-secondary)',
 };
 

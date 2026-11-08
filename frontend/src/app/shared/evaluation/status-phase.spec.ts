@@ -77,11 +77,11 @@ describe('entryPointPhase', () => {
 
 describe('phase colours', () => {
   it.each<[StatusPhase, string, string]>([
-    ['queued', 'info', '--gr-indicator-info'],
-    ['running', 'info', '--gr-indicator-info'],
+    ['queued', 'info', '--gr-graph-running'],
+    ['running', 'info', '--gr-graph-running'],
     ['waiting', 'warning', '--gr-status-warning'],
-    ['success', 'success', '--gr-indicator-success'],
-    ['failure', 'danger', '--gr-indicator-danger'],
+    ['success', 'success', '--gr-graph-success'],
+    ['failure', 'danger', '--gr-graph-danger'],
     ['aborted', 'neutral', '--gr-text-secondary'],
   ])('display %s in the color of the %s badge', (phase, severity, role) => {
     expect(PHASE_SEVERITY[phase]).toBe(severity);

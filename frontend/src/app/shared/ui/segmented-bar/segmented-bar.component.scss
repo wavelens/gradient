@@ -28,10 +28,10 @@
 .segbar--hover .seg:hover { filter: brightness(1.25); }
 
 .seg-empty { width: 100%; background: var(--gr-surface-hover); }
-.seg-completed { background: var(--gr-indicator-success); }
-.seg-failed { background: var(--gr-indicator-danger); }
+.seg-completed { background: var(--gr-graph-success); }
+.seg-failed { background: var(--gr-graph-danger); }
 .seg-aborted { background: var(--gr-text-secondary); }
-.seg-building { background: var(--gr-indicator-info); }
+.seg-building { background: var(--gr-graph-running); }
 .seg-pulsing { animation: seg-pulse 1.8s ease-in-out infinite; }
 .seg-queued { background: var(--idle, var(--gr-border-subtle)); }
 
