@@ -166,12 +166,12 @@ describe('CacheDetailComponent header', () => {
     expect(render(false).root.querySelector('gr-star-button')).toBeNull();
   });
 
-  it('names the projects using the cache with a link and counts the private ones', () => {
+  it('show projects that use the cache as links and omit private projects', () => {
     const { root } = render(false);
     const section = root.querySelector('.used-by')!;
     expect(section.querySelector('.row-link')?.getAttribute('href')).toBe('/project/acme');
     expect(section.textContent).toContain('Read & Write');
-    expect(section.textContent).toContain('and 2 private projects');
+    expect(section.textContent).not.toContain('private');
     expect(section.textContent).not.toContain('Use with project');
   });
 });

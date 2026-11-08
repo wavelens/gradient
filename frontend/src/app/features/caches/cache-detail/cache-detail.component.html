@@ -39,11 +39,8 @@
               </gr-row>
             }
           </gr-row-list>
-        } @else if (!used.hidden) {
-          <p class="used-by-empty">No projects use this cache yet.</p>
-        }
-        @if (used.hidden) {
-          <p class="used-by-empty">{{ used.projects.length ? 'and ' : '' }}{{ used.hidden }} private {{ used.hidden === 1 ? 'project' : 'projects' }} that can't be shown</p>
+        } @else {
+          <p class="used-by-empty">{{ used.hidden ? 'No projects that you can view use this cache.' : 'No projects use this cache yet.' }}</p>
         }
       }
     </gr-load-state>
