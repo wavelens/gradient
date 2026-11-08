@@ -25,6 +25,7 @@ const DETAIL: AssignedJobDetail = {
   project_display_name: 'Project One',
   worker_id: 'w1',
   worker_name: 'Builder One',
+  can_open_worker_metrics_page: true,
   dispatched_at: '2026-06-08T00:01:00Z',
   build_id: null,
   evaluation_id: 'e1',
@@ -261,6 +262,12 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     const link = el.querySelector('.ids .worker-link') as HTMLAnchorElement;
     expect(link).toBeTruthy();
     expect(link.getAttribute('href')).toBe('/project/project-one/workers/w1/metrics');
+  });
+
+  it('names the worker without a link for a viewer outside the project', () => {
+    const el = setup({ getJob: () => of({ ...DETAIL, can_open_worker_metrics_page: false }) }).nativeElement as HTMLElement;
+    expect(el.querySelector('.ids .worker-link')).toBeNull();
+    expect(el.querySelector('.ids .worker-name')?.textContent?.trim()).toBe('Builder One');
   });
 
   it('names the worker and the project by their display names', () => {

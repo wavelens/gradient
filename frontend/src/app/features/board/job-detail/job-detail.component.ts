@@ -74,10 +74,10 @@ interface RuleRow {
         </div>
         <div>
           <span class="label">Worker</span>
-          @if (j.worker_name) {
+          @if (j.worker_name && j.can_open_worker_metrics_page) {
             <a class="mono worker-link" [routerLink]="links.workerMetrics(j.project_name, j.worker_id)">{{ j.worker_name }}</a>
           } @else {
-            <span class="mono">{{ workerDisplayNameOrNotSharedLabel(null) }}</span>
+            <span class="mono worker-name">{{ workerDisplayNameOrNotSharedLabel(j.worker_name) }}</span>
           }
         </div>
         <div>

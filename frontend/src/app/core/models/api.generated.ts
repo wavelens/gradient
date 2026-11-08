@@ -828,6 +828,7 @@ export type DispatchedJobDetail = ReportGap & {
   project_display_name: string;
   worker_id: string;
   worker_name?: string | null;
+  can_open_worker_metrics_page: boolean;
   queued_at: string;
   dispatched_at: string;
   finished_at?: string | null;

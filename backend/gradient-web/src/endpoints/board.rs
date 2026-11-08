@@ -535,6 +535,7 @@ pub struct DispatchedJobDetail {
     pub project_display_name: String,
     pub worker_id: String,
     pub worker_name: Option<String>,
+    pub can_open_worker_metrics_page: bool,
     pub queued_at: String,
     pub dispatched_at: String,
     pub finished_at: Option<String>,
@@ -573,7 +574,7 @@ pub struct AssignedJobSchedulerReasoning {
     operation_id = "getBoardJob",
     tag = "board",
     summary = "Assigned job detail",
-    description = "An allocation record for one job and its timeline. The `phases` of an exec job also stores the reported phases as spans. The `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is superuser-only and null for other users.",
+    description = "An allocation record for one job and its timeline. The `phases` of an exec job also stores the reported phases as spans. The `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is superuser-only and null for other users. ``can_open_worker_metrics_page`` is true when the caller is a member of the job's project. Only members can open the statistics page for a worker.",
     params(("id" = Uuid, Path)),
     responses((status = OK, description = "Job detail", body = DispatchedJobDetail), WebError)
 )]
@@ -622,6 +623,12 @@ pub async fn get_dispatched_job(
             project_display_name: project.display_name,
             worker_id: c.worker_id,
             worker_name,
+            can_open_worker_metrics_page: can_open_worker_metrics_page(
+                &state.web_db,
+                &maybe_user,
+                c.project,
+            )
+            .await?,
             queued_at: c.queued_at.and_utc().to_rfc3339(),
             dispatched_at: c.scored_at.and_utc().to_rfc3339(),
             finished_at: None,
@@ -752,6 +759,12 @@ pub async fn get_dispatched_job(
         project_display_name: project.display_name,
         worker_id: j.worker_id,
         worker_name,
+        can_open_worker_metrics_page: can_open_worker_metrics_page(
+            &state.web_db,
+            &maybe_user,
+            j.project,
+        )
+        .await?,
         queued_at: j.queued_at.and_utc().to_rfc3339(),
         dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
         finished_at: j.finished_at.map(|t| t.and_utc().to_rfc3339()),
@@ -819,6 +832,17 @@ async fn job_names<C: ConnectionTrait>(
         .name(worker);
 
     Ok((project, worker_name))
+}
+
+async fn can_open_worker_metrics_page<C: ConnectionTrait>(
+    db: &C,
+    viewer: &Option<MUser>,
+    project: ProjectId,
+) -> Result<bool, sea_orm::DbErr> {
+    match viewer {
+        Some(user) => gradient_db::access::reaches_project(db, project, user.id).await,
+        None => Ok(false),
+    }
 }
 
 async fn eval_job_evaluation<C: ConnectionTrait>(
