@@ -202,7 +202,7 @@ fn first_line_truncated(s: &str, max: usize) -> Option<String> {
     operation_id = "triggerEvaluation",
     tag = "tasks",
     summary = "Trigger evaluation",
-    description = "Fires the task's default trigger and returns the UUID of the evaluation it\nstarted in `message`, so a caller can follow the run (`GET /evals/{id}`, or the\n`GET /evals/{id}/live` stream). The default trigger decides the branch and the\ntask's concurrency policy decides what happens to a running evaluation.\nA `commit` instead evaluates that commit alongside the task's own runs.\n`POST /evals/{evaluation}/retry` re-runs the failed builds of a finished\nevaluation.\n\nReturns `400` with `code: \"repository_unreachable\"` when the repository\ncannot be fetched (DNS failure, authentication failure, unreachable host,\nbad URL, …) - the message includes the underlying git error.",
+    description = "Start an evaluation on the branch of the default trigger for the task. Return the evaluation UUID in `message`. The caller can track the run through `GET /evals/{id}` or the `GET /evals/{id}/live` stream. This run counts as manual. It does not record the default trigger and does not change the `last_fired_at` of that trigger. Outcomes for running evaluations follow the concurrency policy of the task.\nA `commit` instead evaluates that commit alongside the task's own runs.\n`POST /evals/{evaluation}/retry` re-runs the failed builds of a finished\nevaluation.\n\nReturns `400` with `code: \"repository_unreachable\"` when the repository\ncannot be fetched (DNS failure, authentication failure, unreachable host,\nbad URL, …) - the message includes the underlying git error.",
     params(TaskPath),
     request_body = Option<EvaluateRequest>,
     responses((status = OK, description = "Evaluation UUID", body = String, content_type = "application/json"), WebError)
@@ -223,6 +223,7 @@ pub async fn post_task_evaluate(
                 started_by: Some(user.id),
                 walk_mode,
                 wildcard_override: attr,
+                counts_as_trigger_run: false,
             };
             evaluate_default_trigger(&db, &scheduler, &task, request).await?
         }

@@ -65,7 +65,7 @@ pub fn make_commit(id: CommitId, hash: Vec<u8>) -> gradient_entity::commit::Mode
 
 pub fn input(trig: TaskTriggerId, ttype: TriggerType, hash: Vec<u8>, manual: bool) -> ApplyInput {
     ApplyInput {
-        trigger_id: trig,
+        trigger_id: Some(trig),
         trigger_type: ttype,
         branch: String::new(),
         commit_hash: hash,

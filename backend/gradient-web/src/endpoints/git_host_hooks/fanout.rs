@@ -389,7 +389,7 @@ where
         };
 
         let input = ApplyInput {
-            trigger_id: trig.id,
+            trigger_id: Some(trig.id),
             trigger_type,
             branch: branch.clone(),
             commit_hash,

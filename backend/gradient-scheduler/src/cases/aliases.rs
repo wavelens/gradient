@@ -70,7 +70,7 @@ pub(super) fn trigger_input(
     commit: &[u8],
 ) -> ApplyInput {
     ApplyInput {
-        trigger_id: trigger,
+        trigger_id: Some(trigger),
         trigger_type,
         branch: branch.to_owned(),
         commit_hash: commit.to_vec(),

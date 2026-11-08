@@ -45,7 +45,7 @@ pub enum ApplyError {
 }
 
 pub struct ApplyInput {
-    pub trigger_id: TaskTriggerId,
+    pub trigger_id: Option<TaskTriggerId>,
     pub trigger_type: TriggerType,
     pub branch: String,
     pub commit_hash: Vec<u8>,
@@ -93,7 +93,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         input.commit_hash,
         input.commit_message,
         input.author_name,
-        Some(input.trigger_id),
+        input.trigger_id,
         decision.concurrent_flag,
         input.branch,
         input.repository_override,

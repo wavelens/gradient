@@ -268,7 +268,7 @@ async fn apply_to_task(
         &scheduler.db.worker_db,
         task,
         ApplyInput {
-            trigger_id: trig.id,
+            trigger_id: Some(trig.id),
             trigger_type: cfg.trigger_type(),
             branch: head.branch,
             commit_hash: head.commit,

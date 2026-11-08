@@ -354,6 +354,7 @@ pub(super) struct FireRequest {
     pub started_by: Option<UserId>,
     pub walk_mode: WalkMode,
     pub wildcard_override: Option<String>,
+    pub counts_as_trigger_run: bool,
 }
 
 #[utoipa::path(
@@ -390,6 +391,7 @@ pub async fn fire_now(
         started_by: Some(user.id),
         walk_mode: WalkMode::Pruned,
         wildcard_override: None,
+        counts_as_trigger_run: true,
     };
     Ok(ok_json(fire(&db, &scheduler, &proj, &row, request).await?))
 }
@@ -411,11 +413,12 @@ pub(super) async fn fire(
             reason: e.to_string(),
         })?;
 
+    let trigger_id = request.counts_as_trigger_run.then_some(trigger.id);
     let input_update = gradient_ci::trigger::maybe_trigger_input_update(
         &db.web_db,
         task,
         head.hash.clone(),
-        Some(trigger.id),
+        trigger_id,
     )
     .await
     .unwrap_or_else(|e| {
@@ -426,7 +429,7 @@ pub(super) async fn fire(
     let outcome = match input_update {
         InputUpdateOutcome::NotConfigured => {
             let input = ApplyInput {
-                trigger_id: trigger.id,
+                trigger_id,
                 trigger_type: trigger.trigger_type,
                 branch,
                 commit_hash: head.hash,
@@ -449,7 +452,9 @@ pub(super) async fn fire(
         }
     };
 
-    stamp_last_fired(&db.web_db, trigger).await;
+    if request.counts_as_trigger_run {
+        stamp_last_fired(&db.web_db, trigger).await;
+    }
 
     Ok(outcome)
 }

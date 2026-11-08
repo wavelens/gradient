@@ -406,7 +406,7 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
         .into_connection();
 
     let applied = ApplyInput {
-        trigger_id: trig,
+        trigger_id: Some(trig),
         trigger_type: TriggerType::ReporterPullRequest,
         branch: gradient_types::branch_key::pull_request(42),
         commit_hash: new_hash,
