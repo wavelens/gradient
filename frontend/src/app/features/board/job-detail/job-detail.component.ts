@@ -82,7 +82,7 @@ interface RuleRow {
         </div>
         <div>
           <span class="label">Evaluation</span>
-          <a class="mono" [routerLink]="links.evaluationLog(j.project_name, j.evaluation_id, { build: j.build_id })">{{ j.evaluation_id }}</a>
+          <a [routerLink]="links.evaluationLog(j.project_name, j.evaluation_id, { build: j.build_id })" [title]="j.evaluation_id">Open log</a>
         </div>
         @if (j.cluster_job) {
           <div>
@@ -376,7 +376,7 @@ interface RuleRow {
         <div>
           <span class="label">Evaluation</span>
           @if (p.project_name; as project) {
-            <a class="mono" [routerLink]="links.evaluationLog(project, p.evaluation_id)">{{ p.evaluation_id }}</a>
+            <a [routerLink]="links.evaluationLog(project, p.evaluation_id)" [title]="p.evaluation_id">Open log</a>
           } @else {
             <span class="mono">{{ p.evaluation_id }}</span>
           }
