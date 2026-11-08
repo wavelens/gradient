@@ -6,7 +6,7 @@
 
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { MetricChartComponent } from './metric-chart.component';
+import { MetricChartComponent, resolveChartTheme } from './metric-chart.component';
 import { MetricSeries } from './metric-chart.options';
 
 @Component({
@@ -114,6 +114,19 @@ describe('MetricChartComponent', () => {
     expect(root.querySelector('h2')).toBeNull();
     expect(root.querySelector('.metric-chart__subtitle')).toBeNull();
   });
+  it('gives up to nine series distinct palette colours', () => {
+    const roles = ['--gr-graph-running', '--gr-graph-danger', '--gr-graph-success', '--gr-graph-warning', '--gr-chart-purple', '--gr-chart-cyan', '--gr-chart-pink', '--gr-chart-orange', '--gr-chart-teal'];
+    const root = document.documentElement.style;
+    roles.forEach((role, i) => root.setProperty(role, `#00000${i}`));
+    try {
+      const palette = resolveChartTheme().palette;
+      expect(palette.length).toBe(9);
+      expect(new Set(palette).size).toBe(9);
+    } finally {
+      roles.forEach((role) => root.removeProperty(role));
+    }
+  });
+
   it('projects a control into the chart header', async () => {
     TestBed.configureTestingModule({ imports: [ActionHost] });
     const fixture = TestBed.createComponent(ActionHost);

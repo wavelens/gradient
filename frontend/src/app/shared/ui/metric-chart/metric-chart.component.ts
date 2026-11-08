@@ -33,6 +33,11 @@ export function resolveChartTheme(): ChartTheme {
       read('--gr-graph-danger'),
       read('--gr-graph-success'),
       read('--gr-graph-warning'),
+      read('--gr-chart-purple'),
+      read('--gr-chart-cyan'),
+      read('--gr-chart-pink'),
+      read('--gr-chart-orange'),
+      read('--gr-chart-teal'),
     ],
   };
 }
