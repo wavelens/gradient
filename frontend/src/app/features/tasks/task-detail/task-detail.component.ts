@@ -235,9 +235,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       this.task.set(task);
       this.crumbs.rememberTask(this.projectName, this.taskName, task.display_name);
     }
-    if (!this.selectedId() && task.last_evaluations.length) {
-      this.selectedId.set(task.last_evaluations[0].id);
-    }
+    const shown = this.selected();
+    if (shown && shown.id !== this.selectedId()) this.selectedId.set(shown.id);
     // The entry-point page walks the graph for stale histograms; on live pings
     // throttle it so a running evaluation's rapid status stream doesn't
     // hammer the backend. The cheap summary above keeps headline counts live.

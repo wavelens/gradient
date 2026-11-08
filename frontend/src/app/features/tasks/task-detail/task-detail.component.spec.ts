@@ -154,6 +154,7 @@ function setup(
   access: AccessState,
   serviceOverrides: Parameters<typeof makeTasksService>[1] = {},
   visitor: 'anonymous' | 'member' | 'superuser' = 'member',
+  initialQuery: Record<string, string> = {},
 ): {
   fixture: ComponentFixture<TaskDetailComponent>;
   tasksService: TasksService;
@@ -163,7 +164,7 @@ function setup(
   notify: { success: ReturnType<typeof vi.fn>; failure: ReturnType<typeof vi.fn> };
   confirm: ReturnType<typeof vi.fn>;
 } {
-  const query = new BehaviorSubject(convertToParamMap({}));
+  const query = new BehaviorSubject(convertToParamMap(initialQuery));
   const frames = new Subject<LiveEvent>();
   const notify = { success: vi.fn(), failure: vi.fn() };
   const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
@@ -1484,6 +1485,19 @@ describe('TaskDetailComponent - eval query param', () => {
 
     expect(fixture.componentInstance.selected()?.id).toBe('e2');
     expect(spy).toHaveBeenCalledWith('acme', 'demo', 'e2', 25, 0, '');
+  });
+
+  it('shows the packages of the evaluation in the header when ?eval= names one not in this task', () => {
+    const getEntryPoints = vi.fn(() => of({ entry_points: [epSummary('pkg')], total: 1, failed_attributes: [] }));
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { primaryStatus: 'Completed', getEntryPoints } as SetupOverrides,
+      'member',
+      { eval: 'gone' },
+    );
+    expect(fixture.componentInstance.selected()?.id).toBe('e1');
+    expect(fixture.componentInstance.selectedId()).toBe('e1');
+    expect(fixture.componentInstance.entryPoints().map((e) => e.id)).toEqual(['pkg']);
   });
 });
 
