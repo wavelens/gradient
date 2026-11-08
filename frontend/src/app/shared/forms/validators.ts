@@ -9,6 +9,9 @@ export type FieldCheck = (value: unknown) => string | null;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const LOCAL_REPOSITORY = /^(?:file:|\/|\.{1,2}\/|~)/i;
+const REMOTE_FLAKE_URL_PREFIXES = [
+  'github:', 'gitlab:', 'sourcehut:', 'git+ssh://', 'git+https://', 'git+http://', 'git://', 'https://', 'http://', 'flake:', 'path:/nix/store/',
+];
 
 const text = (value: unknown): string => (value === null || value === undefined ? '' : String(value).trim());
 
@@ -41,6 +44,12 @@ export const fieldChecks = {
     return raw === '' || !LOCAL_REPOSITORY.test(raw)
       ? null
       : "Enter the URL of a remote repository. The server can't fetch local paths and file:// URLs.";
+  }) as FieldCheck,
+  remoteFetchableFlakeUrl: ((value) => {
+    const raw = text(value);
+    return raw === '' || (!/\s/.test(raw) && REMOTE_FLAKE_URL_PREFIXES.some((prefix) => raw.startsWith(prefix)))
+      ? null
+      : `Start the flake URL with one of ${REMOTE_FLAKE_URL_PREFIXES.join(', ')}. Don't include spaces.`;
   }) as FieldCheck,
 };
 

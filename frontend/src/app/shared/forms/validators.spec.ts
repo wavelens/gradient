@@ -20,6 +20,7 @@ describe('fieldChecks', () => {
     ['base64', ['aGVsbG8=', 'aGVsbG8h'], ['not base64!', 'abc']],
     ['httpUrl', ['https://example.com/hook', 'http://10.0.0.1:8080'], ['not-a-url', 'ftp://example.com', 'example.com']],
     ['remoteRepository', ['https://github.com/acme/repo', 'git@github.com:acme/repo.git'], ['file:///srv/repo', '/srv/repo', './repo', '~/repo']],
+    ['remoteFetchableFlakeUrl', ['github:NixOS/nixpkgs/abc', 'git+https://host/repo?rev=abc', 'path:/nix/store/x'], ['not a flake url', 'nixpkgs', 'github:a b', '/srv/flake']],
   ] as const)('%s accepts good values and names the problem for bad ones', (name, good, bad) => {
     const check = fieldChecks[name];
     for (const value of good) expect(check(value)).toBeNull();

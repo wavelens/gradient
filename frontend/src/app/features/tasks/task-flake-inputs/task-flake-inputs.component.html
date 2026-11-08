@@ -142,14 +142,14 @@
   />
 
   @if (!form.keepUrl) {
-    <gr-form-field label="URL" for="fi-url" required hint="Nix flake URL to substitute for this input."
+    <gr-form-field label="URL" for="fi-url" required hint="Nix flake URL for this input. Pin the URL to a commit (for example, github:NixOS/nixpkgs/<commit> or ?rev=<commit>). Unpinned URLs cause evaluation to fail."
       [invalid]="(submitAttempted() || urlModel.touched) && !!urlError" [error]="urlError ?? ''">
       <input
         grInput
         id="fi-url"
         [(ngModel)]="form.url"
         #urlModel="ngModel"
-        placeholder="github:NixOS/nixpkgs/nixos-24.05"
+        placeholder="github:NixOS/nixpkgs/<commit>"
         (keyup.enter)="submitForm()"
       />
     </gr-form-field>

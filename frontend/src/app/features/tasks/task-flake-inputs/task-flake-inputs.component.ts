@@ -26,6 +26,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
+import { fieldChecks } from '@shared/forms';
 import { WritableDirective, ManagedDisableDirective, AccessService, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { FlakeInputOverrideOut, CreateFlakeInputOverrideRequest } from '@core/models';
@@ -112,9 +113,9 @@ export class TaskFlakeInputsComponent implements OnInit {
   }
 
   get urlError(): string | null {
-    return this.form.keepUrl || this.form.url.trim()
-      ? null
-      : 'Enter a flake URL, or turn on the option above to use the URL from flake.nix.';
+    if (this.form.keepUrl) return null;
+    if (!this.form.url.trim()) return 'Enter a flake URL, or turn on the option above to use the URL from flake.nix.';
+    return fieldChecks.remoteFetchableFlakeUrl(this.form.url);
   }
 
   submitForm(): void {

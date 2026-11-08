@@ -283,6 +283,16 @@ describe('TaskFlakeInputsComponent - validation', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('refuses a URL the server cannot fetch', () => {
+    const { fixture, component, create } = withWrites();
+    component.startCreate();
+    component.form = { input_name: 'nixpkgs', url: 'not a flake url !!', keepUrl: false };
+    component.saveCreate();
+    fixture.detectChanges();
+    expect(fieldErrors()).toEqual([expect.stringContaining('Start the flake URL with one of github:')]);
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it('creates on Enter in the input name field', () => {
     const { fixture, component, create } = withWrites();
     component.startCreate();
