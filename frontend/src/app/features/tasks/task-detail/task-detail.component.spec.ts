@@ -1224,6 +1224,26 @@ describe('TaskDetailComponent - #636 eval page', () => {
     raf.mockRestore();
   });
 
+  it('offers the evaluations as keyboard tabs and moves focus with the arrows', () => {
+    const { fixture } = setup(access, { extraEvals: [evalSummary('e2', 'Completed')] });
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => frames.push(callback));
+    HTMLElement.prototype.scrollIntoView ??= () => {};
+    const root = fixture.nativeElement as HTMLElement;
+    const tabs = () => Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tablist"] button[role="tab"]'));
+    expect(tabs().map((tab) => [tab.getAttribute('aria-selected'), tab.tabIndex])).toEqual([['true', 0], ['false', -1]]);
+    expect(root.querySelector('[role="tabpanel"]')?.getAttribute('aria-labelledby')).toBe(tabs()[0].id);
+
+    tabs()[0].focus();
+    tabs()[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    fixture.detectChanges();
+    frames.forEach((frame) => frame(0));
+    expect(fixture.componentInstance.selected()?.id).toBe('e2');
+    expect(document.activeElement).toBe(tabs()[1]);
+    expect(tabs()[1].tabIndex).toBe(0);
+    raf.mockRestore();
+  });
+
   it('shows a waiting state instead of "No packages" while the evaluation is in progress', () => {
     const { fixture } = setup(access, { primaryStatus: 'EvaluatingDerivation' });
     expect(fixture.nativeElement.textContent).not.toContain('No packages');

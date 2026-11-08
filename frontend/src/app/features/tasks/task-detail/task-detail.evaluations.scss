@@ -87,6 +87,10 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 .strip-more { flex: none; width: 1px; align-self: stretch; }
 
 .eval-card {
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  background: none;
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   // Status rail as a thick left border: it tapers cleanly around the corner

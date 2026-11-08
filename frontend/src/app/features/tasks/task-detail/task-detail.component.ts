@@ -33,7 +33,6 @@ import {
   LoadStateComponent,
   MenuComponent,
   MenuItem,
-  ScrollRegionDirective,
   SkeletonComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
@@ -67,7 +66,7 @@ import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, build
     SkeletonComponent, EmptyStateComponent, LoadStateComponent, WritableDirective,
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, StarButtonComponent,
-    ExecJobListComponent, WaitingNoticeComponent, ScrollRegionDirective,
+    ExecJobListComponent, WaitingNoticeComponent,
     RepositoryFetchBannerComponent, LiveStatusComponent,
   ],
   templateUrl: './task-detail.component.html',
@@ -529,10 +528,13 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const next = e.key === 'ArrowLeft' ? idx - 1 : idx + 1;
     if (next < 0 || next >= list.length) return;
     e.preventDefault();
+    const focusOnEvaluationTab = target?.getAttribute('role') === 'tab' && target.classList.contains('eval-card');
     this.select(list[next]);
-    requestAnimationFrame(() =>
-      this.host.nativeElement.querySelector('.eval-card.selected')
-        ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' }));
+    requestAnimationFrame(() => {
+      const card = this.host.nativeElement.querySelector('.eval-card.selected') as HTMLElement | null;
+      if (focusOnEvaluationTab) card?.focus({ preventScroll: true });
+      card?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+    });
   }
 
   isRunning(status: EvaluationStatus): boolean { return isRunningEvaluationStatus(status); }
