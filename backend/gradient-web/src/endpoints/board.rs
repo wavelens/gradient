@@ -640,7 +640,7 @@ pub async fn get_dispatched_job(
             derivation_build_id: c.derivation_build.map(Into::into),
             derivations,
             evaluation_id: c.evaluation_id.into(),
-            evaluation: eval_job_evaluation(
+            evaluation: load_evaluation_context_for_board_job(
                 &state.web_db,
                 &state.project_mapper(c.project).await?,
                 c.kind,
@@ -780,8 +780,13 @@ pub async fn get_dispatched_job(
         derivation_build_id: shared_build_id.map(Into::into),
         derivations,
         evaluation_id: j.evaluation_id.into(),
-        evaluation: eval_job_evaluation(&state.web_db, &mapper, i16::from(j.kind), j.evaluation_id)
-            .await?,
+        evaluation: load_evaluation_context_for_board_job(
+            &state.web_db,
+            &mapper,
+            i16::from(j.kind),
+            j.evaluation_id,
+        )
+        .await?,
         exec_job,
         exec_attempt,
         cluster_job: clusters_of_assignments(&state.web_db, &[j.id])
@@ -845,13 +850,13 @@ async fn can_open_worker_metrics_page<C: ConnectionTrait>(
     }
 }
 
-async fn eval_job_evaluation<C: ConnectionTrait>(
+async fn load_evaluation_context_for_board_job<C: ConnectionTrait>(
     db: &C,
     mapper: &StorePathMapper,
     kind: i16,
     evaluation: EvaluationId,
 ) -> Result<Option<JobEvaluationView>, sea_orm::DbErr> {
-    if kind != i16::from(DispatchedJobKind::Eval) {
+    if kind == i16::from(DispatchedJobKind::Exec) {
         return Ok(None);
     }
 

@@ -63,7 +63,7 @@ interface RuleRow {
       <header class="head">
         <div>
           <span class="kind" [class.build]="j.kind === 1">{{ jobKindName(j.kind) }}</span>
-          <h1>{{ j.passed_over ? 'Passed over' : 'Assigned job' }}</h1>
+          <h1>{{ j.passed_over ? 'Passed over' : j.finished_at ? 'Finished job' : 'Assigned job' }}</h1>
         </div>
       </header>
 

@@ -616,6 +616,17 @@ describe('BoardJobDetailComponent - #636', () => {
     expect(el.textContent).not.toContain('Derivations');
   });
 
+  it('titles a finished build job as finished and names its task', () => {
+    const job: AssignedJobDetail = {
+      ...DETAIL,
+      finished_at: '2026-06-08T00:05:00Z',
+      evaluation: { repository: 'https://example.com/r.git', commit: 'abc1234', wildcard: 'packages.**', task: 'nightly' },
+    };
+    const el = setup({ getJob: () => of(job) }).nativeElement as HTMLElement;
+    expect(el.querySelector('h1')?.textContent?.trim()).toBe('Finished job');
+    expect(el.querySelector('a.task-link')?.textContent?.trim()).toBe('nightly');
+  });
+
   it('links the evaluation to its log page', () => {
     const fixture = setup({ getJob: () => of(EVAL_DETAIL) });
     const link = fixture.debugElement.query(By.css('section.ids a[href*="/log/"]'));
