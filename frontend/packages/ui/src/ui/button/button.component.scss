@@ -37,7 +37,7 @@
   transition: background-color $transition-fast, border-color $transition-fast, color $transition-fast;
 }
 
-:host(:hover:not(:disabled, .gr-button--blocked)) {
+:host(:hover:not(:disabled)) {
   background: var(--gr-btn-bg-hover);
   border-color: var(--gr-btn-border-hover);
   color: var(--gr-btn-fg-hover);
@@ -68,8 +68,7 @@
 }
 
 // Disabled buttons drop the severity color completely. They don't look like muted enabled buttons.
-:host(:disabled:not(.gr-button--loading)),
-:host(.gr-button--blocked) {
+:host(:disabled:not(.gr-button--loading)) {
   --gr-btn-bg: transparent;
   --gr-btn-fg: var(--gr-text-muted);
   --gr-btn-border: var(--gr-border-subtle);

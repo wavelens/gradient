@@ -52,7 +52,7 @@ describe('grSubmit', () => {
     fixture.detectChanges();
     button.click();
     expect(host.saved).toBe(0);
-    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.getAttribute('aria-disabled')).toBeNull();
 
     host.urlBad.set(false);
     fixture.detectChanges();

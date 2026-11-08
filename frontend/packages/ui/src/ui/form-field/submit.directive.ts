@@ -19,7 +19,7 @@ export class SubmitDirective {
   private formErrors = inject(FormErrors, { optional: true });
   private injector = inject(Injector);
 
-  readonly blocked = computed(() => this.formErrors?.shown() ?? false);
+  private readonly blocked = computed(() => this.formErrors?.shown() ?? false);
 
   protected submitUnlessBlocked(): void {
     if (!this.blocked()) this.grSubmit.emit();
