@@ -77,7 +77,7 @@
   cursor: not-allowed;
 }
 
-:host(:disabled),
+// Disabled buttons keep hover so grTooltip can explain the reason. Browsers already drop clicks.
 :host(.gr-button--loading) {
   pointer-events: none;
 }
