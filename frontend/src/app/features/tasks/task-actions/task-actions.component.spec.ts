@@ -21,14 +21,14 @@ import { TasksService } from '@core/services/tasks.service';
 import { TeamsService } from '@core/services/teams.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
-import { ActionResponse } from '@core/models';
+import type { ActionResponse, TaskDetailsResponse } from '@core/models';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 
-function activatedRouteStub(access: AccessState): ActivatedRoute {
+function activatedRouteStub(access: AccessState, task: Partial<TaskDetailsResponse>): ActivatedRoute {
   return {
     snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }) },
     data: of({}),
-    parent: { data: of(taskAccessData(access)) },
+    parent: { data: of(taskAccessData(access, task)) },
   } as unknown as ActivatedRoute;
 }
 
@@ -52,28 +52,34 @@ const action: ActionResponse = {
   updated_at: '2026-05-01T00:00:00Z',
 };
 
+const list = vi.fn();
+const listProjectIntegrationSummaries = vi.fn();
+
 function setup(
   access: AccessState,
   actions: ActionResponse[] = [action],
+  task: Partial<TaskDetailsResponse> = {},
 ): ComponentFixture<TaskActionsComponent> {
+  list.mockReset().mockReturnValue(of(actions));
+  listProjectIntegrationSummaries.mockReset().mockReturnValue(of([]));
   TestBed.configureTestingModule({
     imports: [TaskActionsComponent],
     providers: [
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
+      { provide: ActivatedRoute, useValue: activatedRouteStub(access, task) },
       {
         provide: ActionsService,
         useValue: {
-          list: () => of(actions),
+          list,
           create: () => of({ action, token: undefined }),
           update: () => of(action),
           delete: () => of({ deleted: true }),
           test: () => of(undefined),
         },
       },
-      { provide: IntegrationsService, useValue: { listProjectIntegrations: () => of([]) } },
+      { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       {
         provide: TasksService,
@@ -92,6 +98,20 @@ function setup(
 }
 
 describe('TaskActionsComponent', () => {
+  it('shows a visitor outside the project no access, asks the server nothing and offers no Repository page', () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [action], { permissions: [] });
+    const el = fixture.nativeElement as HTMLElement;
+    expect(list).not.toHaveBeenCalled();
+    expect(listProjectIntegrationSummaries).not.toHaveBeenCalled();
+    expect(el.textContent).toContain('Only the members of this project can view this.');
+    expect(Array.from(el.querySelectorAll('a')).some((a) => a.textContent?.includes('Repository'))).toBe(false);
+  });
+
+  it('lists the outbound integrations from the summary every project member can read', () => {
+    setup({ managed: false, canEdit: false, canTrigger: false });
+    expect(listProjectIntegrationSummaries).toHaveBeenCalledWith('acme');
+  });
+
   it('hides New Action / Edit / Delete / Test buttons under read-only', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'new action')).toBeNull();

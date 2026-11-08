@@ -16,14 +16,15 @@ import { FlakeInputOverridesService } from '@core/services/flake-input-overrides
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessState } from '@core/models/access.model';
-import { FlakeInputOverrideOut } from '@core/models';
+import { taskAccessData } from '@core/resolvers/access-route.testing';
+import type { FlakeInputOverrideOut, TaskDetailsResponse } from '@core/models';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 
-function activatedRouteStub(access: AccessState): ActivatedRoute {
+function activatedRouteStub(access: AccessState, task: Partial<TaskDetailsResponse>): ActivatedRoute {
   return {
     snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }) },
     data: of({}),
-    parent: { data: of({ taskAccess: { task: {}, access } }) },
+    parent: { data: of(taskAccessData(access, task)) },
   } as unknown as ActivatedRoute;
 }
 
@@ -58,6 +59,7 @@ function setup(
   access: AccessState,
   overrides: FlakeInputOverrideOut[] = [override],
   overridesServicePartial: Partial<FlakeInputOverridesService> = {},
+  task: Partial<TaskDetailsResponse> = {},
 ): ComponentFixture<TaskFlakeInputsComponent> {
   const defaultService: Partial<FlakeInputOverridesService> = {
     list: () => of(overrides),
@@ -73,7 +75,7 @@ function setup(
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
+      { provide: ActivatedRoute, useValue: activatedRouteStub(access, task) },
       { provide: FlakeInputOverridesService, useValue: defaultService },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
@@ -85,6 +87,15 @@ function setup(
 }
 
 describe('TaskFlakeInputsComponent', () => {
+  it('shows a visitor outside the project no access and asks the server nothing', () => {
+    const list = vi.fn(() => of([override]));
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [override], { list }, { permissions: [] });
+    const el = fixture.nativeElement as HTMLElement;
+    expect(list).not.toHaveBeenCalled();
+    expect(el.textContent).toContain('Only the members of this project can view this.');
+    expect(el.textContent).not.toContain('Try Again');
+  });
+
   it('lists overrides on init', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [override]);
     const text = fixture.nativeElement.textContent ?? '';

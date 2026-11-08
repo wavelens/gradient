@@ -19,13 +19,14 @@ import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
 import { AccessState } from '@core/models/access.model';
+import type { TaskDetailsResponse } from '@core/models';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 
-function activatedRouteStub(access: AccessState, query: Record<string, string> = {}): ActivatedRoute {
+function activatedRouteStub(access: AccessState, query: Record<string, string> = {}, task: Partial<TaskDetailsResponse> = {}): ActivatedRoute {
   return {
     snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }), queryParamMap: convertToParamMap(query) },
     data: of({}),
-    parent: { data: of(taskAccessData(access)) },
+    parent: { data: of(taskAccessData(access, task)) },
   } as unknown as ActivatedRoute;
 }
 
@@ -45,22 +46,28 @@ const trigger = {
   integration: null,
 };
 
+const list = vi.fn();
+const listProjectIntegrationSummaries = vi.fn();
+
 function setup(
   access: AccessState,
   triggers: any[] = [trigger],
   update: (...args: any[]) => unknown = () => of({}),
   query: Record<string, string> = {},
   integrations: unknown[] = [],
+  task: Partial<TaskDetailsResponse> = {},
 ): ComponentFixture<TaskTriggersComponent> {
+  list.mockReset().mockReturnValue(of(triggers));
+  listProjectIntegrationSummaries.mockReset().mockReturnValue(of(integrations));
   TestBed.configureTestingModule({
     imports: [TaskTriggersComponent],
     providers: [
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub(access, query) },
-      { provide: TriggersService, useValue: { list: () => of(triggers), update } },
-      { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries: () => of(integrations) } },
+      { provide: ActivatedRoute, useValue: activatedRouteStub(access, query, task) },
+      { provide: TriggersService, useValue: { list, update } },
+      { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
     ],
@@ -83,6 +90,16 @@ describe('TaskTriggersComponent - access gating', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     const link = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Repository'));
     expect(link?.getAttribute('href')).toMatch(/\/project\/acme\/task\/[^/]+\/repository$/);
+  });
+
+  it('shows a visitor outside the project no access, asks the server nothing and offers no Repository page', () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [trigger], undefined, {}, [], { permissions: [] });
+    const el = fixture.nativeElement as HTMLElement;
+    expect(list).not.toHaveBeenCalled();
+    expect(listProjectIntegrationSummaries).not.toHaveBeenCalled();
+    expect(el.textContent).toContain('Only the members of this project can view this.');
+    expect(el.textContent).not.toContain('Try Again');
+    expect(Array.from(el.querySelectorAll('a')).some((a) => a.textContent?.includes('Repository'))).toBe(false);
   });
 
   it('offers only polling and cron when creating a trigger', () => {

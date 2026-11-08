@@ -28,8 +28,8 @@ import {
   TooltipDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
-import { injectTaskAccess, injectTaskAccessTo } from '@core/resolvers/inject-access';
+import { WritableDirective, ManagedDisableDirective, AccessService, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
+import { injectTaskAccess, injectTaskAccessData, injectTaskAccessTo } from '@core/resolvers/inject-access';
 import {
   TriggerType,
   TriggerOut,
@@ -116,6 +116,8 @@ export class TaskTriggersComponent implements OnInit {
   private confirm = inject(ConfirmService);
 
   private taskAccess = injectTaskAccess();
+  private taskAccessData = injectTaskAccessData();
+  viewerIsProjectMember = computed(() => isViewerProjectMember(this.taskAccessData()?.task));
   access = injectTaskAccessTo('manageTriggers');
   integrationAccess = injectTaskAccessTo('manageIntegrations');
 
@@ -191,7 +193,7 @@ export class TaskTriggersComponent implements OnInit {
   loadTriggers(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    this.triggersService.list(this.projectName, this.taskName).subscribe({
+    requestIfProjectMember(this.taskAccessData()?.task, () => this.triggersService.list(this.projectName, this.taskName)).subscribe({
       next: (list) => {
         this.triggers.set(list);
         this.loading.set(false);
@@ -215,6 +217,7 @@ export class TaskTriggersComponent implements OnInit {
   }
 
   private loadIntegrations(): void {
+    if (!this.viewerIsProjectMember()) return;
     this.integrationsService.listProjectIntegrationSummaries(this.projectName).subscribe({
       next: (list) => this.inboundIntegrations.set(list.filter((i) => i.kind === 'inbound')),
       error: () => {},

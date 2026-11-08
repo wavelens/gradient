@@ -25,13 +25,12 @@ import {
   LoadStateComponent,
   PageLayoutComponent,
 } from '@gradient/ui/ui';
-import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
-import { injectTaskAccessTo } from '@core/resolvers/inject-access';
+import { WritableDirective, ManagedDisableDirective, AccessService, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
+import { injectTaskAccessData, injectTaskAccessTo } from '@core/resolvers/inject-access';
 import {
   ACTION_TYPE_LABEL,
   ActionType,
   ActionResponse,
-  IntegrationResponse,
   CreateActionRequest,
   UpdateActionRequest,
   ActionConfig,
@@ -82,6 +81,8 @@ export class TaskActionsComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
+  private taskAccessData = injectTaskAccessData();
+  viewerIsProjectMember = computed(() => isViewerProjectMember(this.taskAccessData()?.task));
   access = injectTaskAccessTo('manageActions');
   memberAccess = injectTaskAccessTo('manageMembers');
 
@@ -140,7 +141,7 @@ export class TaskActionsComponent implements OnInit {
   loadActions(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    this.actionsService.list(this.projectName, this.taskName).subscribe({
+    requestIfProjectMember(this.taskAccessData()?.task, () => this.actionsService.list(this.projectName, this.taskName)).subscribe({
       next: (list) => {
         this.actions.set(list);
         this.loading.set(false);
@@ -153,8 +154,9 @@ export class TaskActionsComponent implements OnInit {
   }
 
   private loadIntegrations(): void {
-    this.integrationsService.listProjectIntegrations(this.projectName).subscribe({
-      next: (list: IntegrationResponse[]) =>
+    if (!this.viewerIsProjectMember()) return;
+    this.integrationsService.listProjectIntegrationSummaries(this.projectName).subscribe({
+      next: (list) =>
         this.outboundIntegrations.set(
           list
             .filter((i) => i.kind === 'outbound')

@@ -5,8 +5,10 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that start an evaluation. Start Evaluation uses the default trigger.">
-  <a slot="actions" grButton label="Open the Repository page" icon="hub" severity="secondary"
-     [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
+  @if (viewerIsProjectMember()) {
+    <a slot="actions" grButton label="Open the Repository page" icon="hub" severity="secondary"
+       [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
+  }
   @if (triggers().length) {
     <button slot="actions"
         *appWritable="access()"

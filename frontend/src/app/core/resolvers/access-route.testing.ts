@@ -58,7 +58,7 @@ export function taskAccessData(access: AccessState, task: Partial<TaskDetailsRes
     ...(access.canEdit ? EVERY_PERMISSION.filter((p) => p !== 'triggerEvaluation') : ['viewProject' as const]),
     ...(access.canTrigger ? ['triggerEvaluation' as const] : []),
   ];
-  return { taskAccess: { task: { ...task, managed: access.managed, permissions } as TaskDetailsResponse, access } };
+  return { taskAccess: { task: { managed: access.managed, permissions, ...task } as TaskDetailsResponse, access } };
 }
 
 export function cacheAccessData(access: AccessState, cache: Partial<CacheResponse> = {}) {

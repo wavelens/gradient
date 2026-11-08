@@ -8,12 +8,14 @@ import { Observable, throwError } from 'rxjs';
 import type { CachePermission, CacheResponse, ProjectResponse } from '@core/models';
 import { createMissingPermissionLoadStateError, createNoAccessLoadStateError } from './missing-permission';
 
-export function requestIfProjectMember<T>(
-  projectOrTask: Partial<Pick<ProjectResponse, 'role'>> & Pick<ProjectResponse, 'permissions'> | null | undefined,
-  request: () => Observable<T>,
-): Observable<T> {
-  const member = projectOrTask?.role != null || (projectOrTask?.permissions.length ?? 0) > 0;
-  return member ? request() : throwError(() => createNoAccessLoadStateError('project', 'members'));
+type ProjectMemberRoleAndPermissions = Partial<Pick<ProjectResponse, 'role'>> & Pick<ProjectResponse, 'permissions'> | null | undefined;
+
+export function isViewerProjectMember(projectOrTask: ProjectMemberRoleAndPermissions): boolean {
+  return projectOrTask?.role != null || (projectOrTask?.permissions.length ?? 0) > 0;
+}
+
+export function requestIfProjectMember<T>(projectOrTask: ProjectMemberRoleAndPermissions, request: () => Observable<T>): Observable<T> {
+  return isViewerProjectMember(projectOrTask) ? request() : throwError(() => createNoAccessLoadStateError('project', 'members'));
 }
 
 export function requestIfCacheMember<T>(

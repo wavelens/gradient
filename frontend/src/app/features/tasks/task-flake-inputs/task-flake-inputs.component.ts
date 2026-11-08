@@ -25,8 +25,8 @@ import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
-import { injectTaskAccess } from '@core/resolvers/inject-access';
+import { WritableDirective, ManagedDisableDirective, AccessService, requestIfProjectMember } from '@shared/access';
+import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { FlakeInputOverrideOut, CreateFlakeInputOverrideRequest } from '@core/models';
 
 interface FlakeInputFormState {
@@ -78,6 +78,7 @@ export class TaskFlakeInputsComponent implements OnInit {
   private confirm = inject(ConfirmService);
 
   access = injectTaskAccess();
+  private taskAccessData = injectTaskAccessData();
 
   rowDisabled = computed(() => this.accessSvc.shouldDisableInput(this.access()));
 
@@ -135,7 +136,7 @@ export class TaskFlakeInputsComponent implements OnInit {
   loadOverrides(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    this.overridesService.list(this.projectName, this.taskName).subscribe({
+    requestIfProjectMember(this.taskAccessData()?.task, () => this.overridesService.list(this.projectName, this.taskName)).subscribe({
       next: (list) => {
         this.overrides.set(list);
         this.loading.set(false);
