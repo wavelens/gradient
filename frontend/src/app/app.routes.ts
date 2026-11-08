@@ -348,7 +348,16 @@ export const routes: Routes = [
       // Job Board
       {
         path: 'board/jobs/:id',
-        title: 'Assigned Job',
+        title: 'Assigned job',
+        loadComponent: () =>
+          import('./features/board/job-detail/job-detail.component').then(
+            (m) => m.BoardJobDetailComponent
+          ),
+      },
+      {
+        path: 'board/pending/:id',
+        title: 'Pending job',
+        data: { pending: true },
         loadComponent: () =>
           import('./features/board/job-detail/job-detail.component').then(
             (m) => m.BoardJobDetailComponent

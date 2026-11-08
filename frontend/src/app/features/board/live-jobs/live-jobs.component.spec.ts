@@ -287,7 +287,7 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     const row = (fixture.nativeElement as HTMLElement).querySelector('tbody tr') as HTMLElement;
     const cells = Array.from(row.querySelectorAll('td'));
     expect([cells[0], cells[2]].map((c) => c.textContent?.trim())).toEqual(['exec', 'nightly: apps.x86_64-linux.train']);
-    expect(cells[2].querySelector('a')?.getAttribute('href')).toBe('/board/jobs/x1');
+    expect(cells[2].querySelector('a')?.getAttribute('href')).toBe('/board/pending/x1');
   });
 
   function pendingRow(job: PendingJobSummary, superuser = false): HTMLElement {
@@ -327,7 +327,7 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     expect(hrefs).toEqual([
       '/project/sandbox',
       '/project/sandbox/task/oktask?eval=e1abc123',
-      '/board/jobs/e1abc123',
+      '/board/pending/e1abc123',
       '/project/sandbox/caches',
     ]);
     expect(row.querySelector('td.waiting')?.textContent).toContain('Cache not configured');

@@ -143,7 +143,7 @@ const PENDING: PendingJobSummary = {
   permissions: [],
 };
 
-function setup(board: Partial<BoardService> = {}, id = 'job-1'): ComponentFixture<BoardJobDetailComponent> {
+function setup(board: Partial<BoardService> = {}, id = 'job-1', pending = false): ComponentFixture<BoardJobDetailComponent> {
   TestBed.configureTestingModule({
     imports: [BoardJobDetailComponent],
     providers: [
@@ -151,7 +151,7 @@ function setup(board: Partial<BoardService> = {}, id = 'job-1'): ComponentFixtur
       {
         provide: ActivatedRoute,
         useValue: {
-          snapshot: { paramMap: convertToParamMap({ id }) },
+          snapshot: { paramMap: convertToParamMap({ id }), data: { pending } },
           paramMap: of(convertToParamMap({ id })),
         },
       },
@@ -296,17 +296,29 @@ describe('BoardJobDetailComponent - structured context panels', () => {
   });
 });
 
-describe('BoardJobDetailComponent - pending fallback', () => {
-  it('renders a limited pending view when the job is not yet assigned', () => {
-    const el = setup(
-      {
-        getJob: () => throwError(() => new Error('not found')),
-        getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }),
-      },
-      'e1',
-    ).nativeElement as HTMLElement;
+describe('BoardJobDetailComponent - pending route', () => {
+  it('renders a limited pending view from the pending list without asking for an assigned job', () => {
+    const getJob = vi.fn(() => of(DETAIL));
+    const el = setup({ getJob, getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1', true)
+      .nativeElement as HTMLElement;
+    expect(getJob).not.toHaveBeenCalled();
     expect(el.textContent).toContain('Pending job');
     expect(el.textContent).not.toContain('Score breakdown');
+    expect(el.querySelector('section.timeline')?.textContent).toContain('Dependencies');
+  });
+
+  it('leaves out the dependency step when nothing has to build first', () => {
+    const el = setup({ getPendingJobs: () => of({ jobs: [{ ...PENDING, dependency_count: 0 }], other_pending: 0 }) }, 'e1', true)
+      .nativeElement as HTMLElement;
+    expect(el.querySelector('section.timeline')?.textContent).not.toContain('Dependencies');
+  });
+
+  it('shows "Job not found" for an assigned job id the server does not know', () => {
+    const getPendingJobs = vi.fn(() => of({ jobs: [PENDING], other_pending: 0 }));
+    const el = setup({ getJob: () => throwError(() => new Error('not found')), getPendingJobs }, 'e1')
+      .nativeElement as HTMLElement;
+    expect(getPendingJobs).not.toHaveBeenCalled();
+    expect(el.textContent).toContain('Job not found');
   });
 
   it('explains why a pending evaluation waits and links its project, task and evaluation', () => {
@@ -319,10 +331,8 @@ describe('BoardJobDetailComponent - pending fallback', () => {
       waiting_reason: { kind: 'no_cache' },
       permissions: ['manageSubscriptions'],
     };
-    const el = setup(
-      { getJob: () => throwError(() => new Error('not found')), getPendingJobs: () => of({ jobs: [pending], other_pending: 0 }) },
-      'e1',
-    ).nativeElement as HTMLElement;
+    const el = setup({ getPendingJobs: () => of({ jobs: [pending], other_pending: 0 }) }, 'e1', true)
+      .nativeElement as HTMLElement;
 
     expect(el.querySelector('gr-waiting-notice')?.textContent).toContain('Cache not configured');
     const hrefs = Array.from(el.querySelectorAll('section.ids a, gr-waiting-notice a')).map((a) => a.getAttribute('href'));
@@ -334,14 +344,9 @@ describe('BoardJobDetailComponent - pending fallback', () => {
     ]));
   });
 
-  it('shows "Job not found" when neither assigned nor pending', () => {
-    const el = setup(
-      {
-        getJob: () => throwError(() => new Error('not found')),
-        getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
-      },
-      'missing',
-    ).nativeElement as HTMLElement;
+  it('shows "Job not found" when the job left the pending list', () => {
+    const el = setup({ getPendingJobs: () => of({ jobs: [], other_pending: 0 }) }, 'missing', true)
+      .nativeElement as HTMLElement;
     expect(el.textContent).toContain('Job not found');
   });
 });
@@ -543,10 +548,8 @@ describe('BoardJobDetailComponent - exec jobs', () => {
 
   it('finds a pending exec job by its exec job id', () => {
     const pending: PendingJobSummary = { ...PENDING, kind: 2, build_id: null, subject: EXEC_JOB.entry_point, exec_job: EXEC_JOB };
-    const el = setup(
-      { getJob: () => throwError(() => new Error('404')), getPendingJobs: () => of({ jobs: [PENDING, pending], other_pending: 0 }) },
-      'x1',
-    ).nativeElement as HTMLElement;
+    const el = setup({ getPendingJobs: () => of({ jobs: [PENDING, pending], other_pending: 0 }) }, 'x1', true)
+      .nativeElement as HTMLElement;
     expect(el.querySelector('.head .kind')?.textContent?.trim()).toBe('exec');
     expect(el.textContent).toContain('nightly: apps.x86_64-linux.train (node 1)');
   });
@@ -594,7 +597,7 @@ describe('BoardJobDetailComponent - #636', () => {
   });
 
   it('names the pending job by what it works on', () => {
-    const el = setup({ getJob: () => throwError(() => new Error('404')), getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1').nativeElement as HTMLElement;
+    const el = setup({ getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1', true).nativeElement as HTMLElement;
     expect(el.textContent).toContain('hello-2.12.1');
   });
 });

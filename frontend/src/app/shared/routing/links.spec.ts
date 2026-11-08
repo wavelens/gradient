@@ -84,7 +84,7 @@ describe('links', () => {
   });
 
   it('opens a pending build on its own page, not on the first build of its evaluation', () => {
-    expect(String(links.boardPendingJob({ evaluation_id: 'e1', build_id: 'b2' }))).toBe('/board/jobs/b2');
+    expect(String(links.boardPendingJob({ evaluation_id: 'e1', build_id: 'b2' }))).toBe('/board/pending/b2');
     expect(String(links.boardPendingJob({ evaluation_id: 'e1', cluster_job: 'c1' }))).toBe('/board/clusters/c1');
   });
 

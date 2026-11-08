@@ -92,7 +92,7 @@ export const links = {
   boardPendingJob: (pending: { cluster_job?: string | null; exec_job?: { id: string } | null; build_id?: string | null; evaluation_id: string }) =>
     pending.cluster_job
       ? url(['board', 'clusters', pending.cluster_job])
-      : url(['board', 'jobs', pending.exec_job?.id ?? pending.build_id ?? pending.evaluation_id]),
+      : url(['board', 'pending', pending.exec_job?.id ?? pending.build_id ?? pending.evaluation_id]),
   boardExecJob: (exec: { project: string; task: string; id: string; node_index: number }) =>
     url(['project', exec.project, 'task', exec.task, 'exec', exec.id], { node: exec.node_index || null }),
 

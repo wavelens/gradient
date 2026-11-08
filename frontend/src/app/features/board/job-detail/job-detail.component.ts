@@ -376,7 +376,9 @@ interface RuleRow {
       </section>
       <section class="timeline">
         <div class="step"><span class="label">Queued</span><span>{{ p.queued_at | serverDate: 'medium' }}</span></div>
-        <div class="step"><span class="label">Dependencies</span><span class="hl">{{ p.dependency_count }}</span></div>
+        @if (p.dependency_count > 0) {
+          <div class="step"><span class="label">Dependencies</span><span class="hl">{{ p.dependency_count }}</span></div>
+        }
       </section>
     } @else if (notFound()) {
       <p class="muted">Job not found.</p>
@@ -535,6 +537,10 @@ export class BoardJobDetailComponent implements OnInit {
     this.notFound.set(false);
     this.build.set(null);
     this.buildDialog.set(false);
+    if (this.route.snapshot.data['pending'] === true) {
+      this.loadPending(id);
+      return;
+    }
     this.board.getJob(id).subscribe({
       next: (d) => {
         this.job.set(d);
@@ -542,7 +548,7 @@ export class BoardJobDetailComponent implements OnInit {
           this.loadBuild(d.build_id);
         }
       },
-      error: () => this.loadPending(id),
+      error: () => this.notFound.set(true),
     });
   }
 
