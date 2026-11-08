@@ -21,8 +21,8 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { EMPTY, Observable, Subject, catchError, debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
-import { Filter, TasksPage } from '@core/models';
-import { evaluationPhase } from '@shared/evaluation';
+import { Filter, Latest, TasksPage } from '@core/models';
+import { evaluationPhase, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
 import {
   ButtonComponent,
   MessageBannerComponent,
@@ -146,6 +146,10 @@ export class DashboardTaskTableComponent implements OnInit {
   pages(): number {
     const d = this.data();
     return d ? Math.max(1, Math.ceil(d.total / PAGE_SIZE)) : 1;
+  }
+
+  newestEvaluationWaitingReasonTitle(project: string, latest: Latest): string {
+    return explainWaiting(latest.waiting_reason, project, waitingAccessFrom([], false, false)).title;
   }
 
   delta(d?: number | null): string {

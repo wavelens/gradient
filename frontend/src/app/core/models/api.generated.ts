@@ -1512,6 +1512,7 @@ export interface Latest {
   status: EvaluationStatus;
   commit: string;
   created_at: string;
+  waiting_reason?: WaitingReason | null;
 }
 
 export interface ListResponse_GroupResource {

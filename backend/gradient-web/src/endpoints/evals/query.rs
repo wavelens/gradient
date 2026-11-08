@@ -27,16 +27,6 @@ use super::{EvalAccessContext, live_progress, live_progress_status};
 use crate::endpoints::tasks::EvaluationTriggerSummary;
 use gradient_entity::build::BuildStatus;
 
-pub fn current_waiting_reason(evaluation: &MEvaluation) -> Option<WaitingReason> {
-    if evaluation.status != gradient_entity::evaluation::EvaluationStatus::Waiting {
-        return None;
-    }
-    evaluation
-        .waiting_reason
-        .as_ref()
-        .and_then(WaitingReason::from_json)
-}
-
 #[utoipa::path(
     get,
     path = "/evals/{evaluation}",
@@ -110,7 +100,10 @@ pub async fn get_evaluation(
             .collect()
     };
 
-    let waiting_reason = current_waiting_reason(&evaluation);
+    let waiting_reason = WaitingReason::from_status_and_json_if_waiting(
+        evaluation.status,
+        evaluation.waiting_reason.as_ref(),
+    );
 
     let triggered_by = match evaluation.started_by {
         Some(uid) => by_id::<EUser, _>(&state.web_db, uid).await?.map(|u| u.name),

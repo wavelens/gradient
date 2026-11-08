@@ -7,7 +7,7 @@
 use chrono::NaiveDateTime;
 use gradient_db::dashboard::{HistoryRow, TaskFactsRow};
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_types::EvaluationId;
+use gradient_types::{EvaluationId, WaitingReason};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -55,6 +55,8 @@ pub struct Latest {
     pub status: EvaluationStatus,
     pub commit: String,
     pub created_at: NaiveDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_reason: Option<WaitingReason>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -72,11 +74,12 @@ pub struct TaskFacts {
 impl From<TaskFactsRow> for TaskFacts {
     fn from(r: TaskFactsRow) -> Self {
         Self {
-            latest: r.latest.map(|(id, status, commit, created_at)| Latest {
-                id,
-                status,
-                commit,
-                created_at,
+            latest: r.latest.map(|l| Latest {
+                id: l.id,
+                status: l.status,
+                commit: l.commit,
+                created_at: l.created_at,
+                waiting_reason: l.waiting_reason,
             }),
             project: r.project,
             task: r.task,
@@ -248,6 +251,7 @@ mod tests {
                 status,
                 commit: "a1b2c3d".into(),
                 created_at: at(day),
+                waiting_reason: None,
             }),
             previous: Some(EvaluationId::now_v7()),
             recent_14d: recent,

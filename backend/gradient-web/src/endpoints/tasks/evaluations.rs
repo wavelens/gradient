@@ -13,7 +13,7 @@ use super::{
 use crate::access::{Caller, caller_project_mask, is_project_member};
 use crate::api_spec::{Binary, TaskPath};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::endpoints::evals::{current_waiting_reason, live_progress, live_progress_status};
+use crate::endpoints::evals::{live_progress, live_progress_status};
 use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -182,7 +182,10 @@ pub(super) async fn evaluations_to_summaries(
                 Instant::now(),
             ),
             expected_thunks: expected_thunks.filter(|_| live_progress_status(evaluation.status)),
-            waiting_reason: current_waiting_reason(&evaluation),
+            waiting_reason: WaitingReason::from_status_and_json_if_waiting(
+                evaluation.status,
+                evaluation.waiting_reason.as_ref(),
+            ),
         });
     }
     Ok(out)

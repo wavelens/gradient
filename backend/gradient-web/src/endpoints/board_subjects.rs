@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::endpoints::evals::current_waiting_reason;
 use crate::metrics_scope::MetricsScope;
 use gradient_db::exec_jobs::labels::ExecJobLabel;
 use gradient_db::lookup::{by_id, by_ids};
@@ -240,7 +239,10 @@ pub async fn pending_evaluations<C: ConnectionTrait>(
                 .task
                 .and_then(|task| tasks.get(&task))
                 .map(|t| t.name.clone());
-            let waiting_reason = current_waiting_reason(&evaluation);
+            let waiting_reason = WaitingReason::from_status_and_json_if_waiting(
+                evaluation.status,
+                evaluation.waiting_reason.as_ref(),
+            );
             (
                 id,
                 PendingEvaluation {

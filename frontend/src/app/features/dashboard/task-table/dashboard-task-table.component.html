@@ -31,6 +31,9 @@
             <span slot="meta" class="meta">
               @if (t.latest; as l) {
                 <code>{{ l.commit.slice(0, 7) }}</code> · {{ age(l.created_at) }}
+                @if (l.status === 'Waiting') {
+                  · {{ newestEvaluationWaitingReasonTitle(t.project, l) }}
+                }
               } @else {
                 No evaluations yet
               }

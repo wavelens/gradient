@@ -28,10 +28,10 @@ fn task_facts_sql() -> String {
             EXISTS (SELECT 1 FROM user_task_star s WHERE s.\"user\" = $1 AND s.task = t.id) AS starred, \
             EXISTS (SELECT 1 FROM project_access ta WHERE ta.project = t.project AND ta.\"user\" = $1 AND ta.via_team) AS team, \
             l.id AS latest_id, l.status AS latest_status, encode(c.hash, 'hex') AS latest_commit, \
-            l.created_at AS latest_created_at, pv.id AS previous_id, \
+            l.created_at AS latest_created_at, l.waiting_reason AS latest_waiting_reason, pv.id AS previous_id, \
             coalesce(a.recent_14d, 0) AS recent_14d, sp.speed_ms \
         FROM viewer_tasks v JOIN task t ON t.id = v.id JOIN project p ON p.id = t.project \
-        LEFT JOIN LATERAL (SELECT e.id, e.status, e.commit, e.created_at FROM evaluation e \
+        LEFT JOIN LATERAL (SELECT e.id, e.status, e.commit, e.created_at, e.waiting_reason FROM evaluation e \
             LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" WHERE e.task = t.id AND {NON_PR} \
             ORDER BY e.created_at DESC LIMIT 1) l ON true \
         LEFT JOIN commit c ON c.id = l.commit \
@@ -101,11 +101,20 @@ pub struct TaskFactsRow {
     pub project: String,
     pub task: String,
     pub starred: bool,
-    pub latest: Option<(EvaluationId, EvaluationStatus, String, NaiveDateTime)>,
+    pub latest: Option<LatestTaskEvaluationRow>,
     pub previous: Option<EvaluationId>,
     pub recent_14d: i64,
     pub team: bool,
     pub speed_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LatestTaskEvaluationRow {
+    pub id: EvaluationId,
+    pub status: EvaluationStatus,
+    pub commit: String,
+    pub created_at: NaiveDateTime,
+    pub waiting_reason: Option<WaitingReason>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -127,19 +136,24 @@ fn uuids(ids: &[EvaluationId]) -> Value {
         .into()
 }
 
-fn latest(
-    r: &QueryResult,
-) -> Result<Option<(EvaluationId, EvaluationStatus, String, NaiveDateTime)>, DbErr> {
+fn latest(r: &QueryResult) -> Result<Option<LatestTaskEvaluationRow>, DbErr> {
     let Some(id) = r.try_get::<Option<Uuid>>("", "latest_id")? else {
         return Ok(None);
     };
-    Ok(Some((
-        EvaluationId::new(id),
-        eval_status(r.try_get("", "latest_status")?)?,
-        r.try_get::<Option<String>>("", "latest_commit")?
+    let status = eval_status(r.try_get("", "latest_status")?)?;
+    let waiting_reason = r.try_get::<Option<serde_json::Value>>("", "latest_waiting_reason")?;
+    Ok(Some(LatestTaskEvaluationRow {
+        id: EvaluationId::new(id),
+        status,
+        commit: r
+            .try_get::<Option<String>>("", "latest_commit")?
             .unwrap_or_default(),
-        r.try_get("", "latest_created_at")?,
-    )))
+        created_at: r.try_get("", "latest_created_at")?,
+        waiting_reason: WaitingReason::from_status_and_json_if_waiting(
+            status,
+            waiting_reason.as_ref(),
+        ),
+    }))
 }
 
 fn task_facts_row(r: &QueryResult) -> Result<TaskFactsRow, DbErr> {

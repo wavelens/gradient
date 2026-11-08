@@ -152,6 +152,16 @@ impl WaitingReason {
         serde_json::from_value::<Self>(value.clone()).ok()
     }
 
+    pub fn from_status_and_json_if_waiting(
+        status: gradient_entity::evaluation::EvaluationStatus,
+        value: Option<&serde_json::Value>,
+    ) -> Option<Self> {
+        if status != gradient_entity::evaluation::EvaluationStatus::Waiting {
+            return None;
+        }
+        value.and_then(Self::from_json)
+    }
+
     pub fn workers(
         unmet: Vec<UnmetRequirement>,
         connected_workers: u32,

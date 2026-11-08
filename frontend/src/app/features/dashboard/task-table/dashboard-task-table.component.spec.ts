@@ -66,6 +66,14 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelector('gr-tab-switch button.is-selected')?.textContent).toContain('Failing');
   });
 
+  it('Make the waiting reason visible for the latest evaluation of a waiting task.', async () => {
+    const waiting = row('hosts');
+    waiting.latest = { ...waiting.latest!, status: 'Waiting', waiting_reason: { kind: 'no_cache' } };
+    const { f, root } = render(null, () => of({ ...PAGE, tasks: [waiting] }));
+    await settle(f);
+    expect(root.querySelector('.meta')?.textContent).toContain('Cache not configured');
+  });
+
   it('leaves the filter to the server when the url has no filter and puts Starred first for a user with starred tasks', async () => {
     const { f, tasks, root } = render(null, () => of(STARRED));
     await settle(f);

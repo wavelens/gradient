@@ -49,7 +49,9 @@ pub use search::{
     search_commits, search_names, search_nars,
 };
 pub use stars::{StarKind, StarredNames, StarredTask, star, starred, starred_names, unstar};
-pub use tasks::{HistoryRow, TaskFactsRow, entry_point_outcomes, histories, task_facts};
+pub use tasks::{
+    HistoryRow, LatestTaskEvaluationRow, TaskFactsRow, entry_point_outcomes, histories, task_facts,
+};
 pub use totals::{
     ActivityDay, Totals, activity, activity_sql, cache_size, scoped_totals, totals_sql,
 };

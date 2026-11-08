@@ -18524,6 +18524,10 @@ components:
         created_at:
           type: string
           format: date-time
+        waiting_reason:
+          oneOf:
+          - $ref: '#/components/schemas/WaitingReason'
+          - type: 'null'
     ListResponse_GroupResource:
       type: object
       required:
