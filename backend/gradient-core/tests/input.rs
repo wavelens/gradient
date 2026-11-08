@@ -156,12 +156,14 @@ fn message_of(actual: String, expected: &str, label: &str) {
 
 #[test]
 fn index_name_rejects_each_invalid_shape() {
+    let too_long = "a".repeat(65);
     let cases = [
         ("", "cannot be empty"),
         ("Test", "must be lowercase"),
         ("test-", "start and end with letters or numbers"),
         ("test_", "can only contain letters, numbers"),
         ("test name", "can only contain letters, numbers"),
+        (too_long.as_str(), "cannot exceed 64 characters"),
     ];
     for (name, expected) in cases {
         message_of(
@@ -170,6 +172,7 @@ fn index_name_rejects_each_invalid_shape() {
             name,
         );
     }
+    check_index_name(&"a".repeat(64)).unwrap();
 }
 
 #[test]

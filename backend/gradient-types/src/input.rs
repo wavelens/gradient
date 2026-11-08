@@ -57,6 +57,8 @@ pub enum InputError {
     EvaluationWildcardHashRemoved,
     #[error("Name cannot be empty")]
     NameEmpty,
+    #[error("Name cannot exceed {max} characters", max = MAX_SLUG_NAME_CHARACTER_COUNT)]
+    SlugNameTooLong,
     #[error("Name must be lowercase")]
     NameNotLowercase,
     #[error("Name can only contain letters, numbers, and dashes")]
@@ -205,9 +207,15 @@ pub fn check_repository_url_is_ssh(url: &str) -> bool {
     false
 }
 
+pub const MAX_SLUG_NAME_CHARACTER_COUNT: usize = 64;
+
 pub fn check_index_name(s: &str) -> Result<(), InputError> {
     if s.is_empty() {
         return Err(InputError::NameEmpty);
+    }
+
+    if s.chars().count() > MAX_SLUG_NAME_CHARACTER_COUNT {
+        return Err(InputError::SlugNameTooLong);
     }
 
     if s != s.to_lowercase() {
