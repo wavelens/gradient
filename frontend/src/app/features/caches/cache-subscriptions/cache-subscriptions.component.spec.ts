@@ -15,6 +15,7 @@ import { CacheSubscriptionRequestsComponent } from './cache-subscriptions.compon
 import { CachesService } from '@core/services/caches.service';
 import { SubscriptionRequestItem } from '@core/models';
 import { MessageService } from '@gradient/ui/ui';
+import { cacheAccessData } from '@core/resolvers/access-route.testing';
 
 const request: SubscriptionRequestItem = {
   project: 'wavelens',
@@ -30,7 +31,7 @@ function buttonByText(root: HTMLElement, text: string): HTMLButtonElement | unde
   ) as HTMLButtonElement | undefined;
 }
 
-function setup(requests: SubscriptionRequestItem[], load?: () => Observable<SubscriptionRequestItem[]>) {
+function setup(requests: SubscriptionRequestItem[], load?: () => Observable<SubscriptionRequestItem[]>, canManage = true) {
   const approve = vi.fn().mockReturnValue(of('Subscription approved'));
   const deny = vi.fn().mockReturnValue(of('Subscription request denied'));
   const confirm = vi.fn((confirmRequest: ConfirmRequest) => confirmRequest.action());
@@ -43,7 +44,10 @@ function setup(requests: SubscriptionRequestItem[], load?: () => Observable<Subs
       provideHttpClientTesting(),
       {
         provide: ActivatedRoute,
-        useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'prod' }) } },
+        useValue: {
+          snapshot: { paramMap: convertToParamMap({ cache: 'prod' }) },
+          parent: { data: of(cacheAccessData({ managed: false, canEdit: canManage, canTrigger: canManage })) },
+        },
       },
       {
         provide: CachesService,
@@ -89,6 +93,16 @@ describe('CacheSubscriptionRequestsComponent', () => {
     fixture.detectChanges();
     expect(element.textContent).toContain('Wavelens');
     expect(element.textContent).not.toContain('Failed to load');
+  });
+
+  it('names the missing permission to a cache viewer and asks the server nothing', () => {
+    const load = vi.fn(() => of([request]));
+    const { fixture } = setup([], load, false);
+    const element = fixture.nativeElement as HTMLElement;
+    expect(load).not.toHaveBeenCalled();
+    expect(element.textContent).toContain('No access');
+    expect(element.textContent).toContain('manage cache subscriptions permission for this cache');
+    expect(element.textContent).not.toContain('Try Again');
   });
 
   it('approves a request by project name', () => {

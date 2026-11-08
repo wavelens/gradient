@@ -16,12 +16,11 @@ import { CacheMembersRolesComponent } from './cache-members-roles.component';
 import { CachesService } from '@core/services/caches.service';
 import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
-import { RoleResponse_CacheRoleOwner } from '@core/models';
+import { CachePermission, RoleResponse_CacheRoleOwner } from '@core/models';
 
-function activatedRouteStub(canEdit = false) {
-  const data = canEdit
-    ? cacheAccessData({ managed: false, canEdit: true, canTrigger: true })
-    : {};
+function activatedRouteStub(canEdit = false, permissions?: CachePermission[]) {
+  const data = cacheAccessData({ managed: false, canEdit, canTrigger: canEdit });
+  if (permissions) data.cacheAccess.cache.permissions = permissions;
   return {
     snapshot: { paramMap: convertToParamMap({ cache: 'my-cache' }) },
     parent: { data: of(data) },
@@ -42,7 +41,7 @@ const deleteRole = vi.fn();
 const notify = { success: vi.fn(), failure: vi.fn() };
 const confirm = vi.fn();
 
-function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
+function setup(canEdit = false, permissions?: CachePermission[]): ComponentFixture<CacheMembersRolesComponent> {
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   revokeInvitation.mockReset().mockReturnValue(of('Invitation revoked'));
   getMembers.mockReset().mockReturnValue(of([{ id: 'alice', name: 'Admin' }]));
@@ -56,7 +55,7 @@ function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub(canEdit) },
+      { provide: ActivatedRoute, useValue: activatedRouteStub(canEdit, permissions) },
       {
         provide: CachesService,
         useValue: {
@@ -125,6 +124,16 @@ describe('CacheMembersRolesComponent', () => {
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'add member')).toBeNull();
     expect(findByText(fixture.nativeElement, 'new role')).toBeNull();
+  });
+
+  it('shows members and roles as no access to a visitor without a cache role and asks the server nothing', async () => {
+    const fixture = setup(false, []);
+    await settled(fixture);
+    const element = fixture.nativeElement as HTMLElement;
+    expect(getMembers).not.toHaveBeenCalled();
+    expect(element.textContent).toContain('Only the members of this cache can view this.');
+    expect(element.textContent).not.toContain('Failed to load');
+    expect(element.textContent).not.toContain('Try Again');
   });
 });
 

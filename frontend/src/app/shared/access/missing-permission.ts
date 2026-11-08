@@ -17,6 +17,6 @@ export function createMissingPermissionLoadStateError(
   );
 }
 
-export function createNoAccessLoadStateError(owner: 'project' | 'team', group: 'members' | 'admins'): MissingPermissionLoadStateError {
+export function createNoAccessLoadStateError(owner: 'project' | 'cache' | 'team', group: 'members' | 'admins'): MissingPermissionLoadStateError {
   return new MissingPermissionLoadStateError(`Only the ${group} of this ${owner} can view this. Ask an admin of this ${owner} for access.`);
 }

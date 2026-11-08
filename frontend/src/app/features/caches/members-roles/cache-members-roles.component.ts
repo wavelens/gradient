@@ -30,11 +30,11 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
-import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, requestIfCacheMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, merge, tap } from 'rxjs';
-import { injectCacheAccessTo } from '@core/resolvers/inject-access';
+import { injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
 import {
   MemberItem,
   RoleResponse_CacheRoleOwner,
@@ -85,6 +85,8 @@ export class CacheMembersRolesComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
+  private cacheAccess = injectCacheAccessData();
+  private cache = computed(() => this.cacheAccess()?.cache);
   access = injectCacheAccessTo('manageCacheMembers');
   roleAccess = injectCacheAccessTo('manageCacheRoles');
 
@@ -126,7 +128,7 @@ export class CacheMembersRolesComponent implements OnInit {
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => merge(
-      this.cachesService.getMembers(this.cacheName, inBackground()).pipe(tap((members) => {
+      requestIfCacheMember(this.cache(), () => this.cachesService.getMembers(this.cacheName, inBackground()), 'viewCache').pipe(tap((members) => {
         this.members.set(members);
         this.membersLoadError.set(null);
       })),
@@ -149,7 +151,7 @@ export class CacheMembersRolesComponent implements OnInit {
   loadMembers(): void {
     this.membersLoading.set(true);
     this.membersLoadError.set(null);
-    this.cachesService.getMembers(this.cacheName).subscribe({
+    requestIfCacheMember(this.cache(), () => this.cachesService.getMembers(this.cacheName), 'viewCache').subscribe({
       next: (members) => {
         this.members.set(members);
         this.membersLoading.set(false);
@@ -189,7 +191,7 @@ export class CacheMembersRolesComponent implements OnInit {
   loadRoles(): void {
     this.rolesLoading.set(true);
     this.rolesLoadError.set(null);
-    this.cachesService.getRoles(this.cacheName).subscribe({
+    requestIfCacheMember(this.cache(), () => this.cachesService.getRoles(this.cacheName)).subscribe({
       next: (response) => {
         this.roles.set(response.roles);
         this.availablePermissions.set(response.available_permissions);

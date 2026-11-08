@@ -16,6 +16,8 @@ import { SubscriptionRequestItem } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { tap } from 'rxjs';
+import { requestIfCacheMember } from '@shared/access';
+import { injectCacheAccessData } from '@core/resolvers/inject-access';
 import {
   ButtonComponent,
   LoadStateComponent,
@@ -46,6 +48,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private cacheAccess = injectCacheAccessData();
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Subscriptions' }));
@@ -56,7 +59,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
 
   constructor() {
     runReloadIntervalWhileTabVisible(() =>
-      this.cachesService.getSubscriptionRequests(this.cacheName, inBackground()).pipe(tap((requests) => {
+      requestIfCacheMember(this.cacheAccess()?.cache, () => this.cachesService.getSubscriptionRequests(this.cacheName, inBackground()), 'manageCacheSubscriptions').pipe(tap((requests) => {
         this.requests.set(requests);
         this.loadError.set(null);
       })));
@@ -70,7 +73,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   load(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    this.cachesService.getSubscriptionRequests(this.cacheName).subscribe({
+    requestIfCacheMember(this.cacheAccess()?.cache, () => this.cachesService.getSubscriptionRequests(this.cacheName), 'manageCacheSubscriptions').subscribe({
       next: (requests) => {
         this.requests.set(requests);
         this.loading.set(false);
