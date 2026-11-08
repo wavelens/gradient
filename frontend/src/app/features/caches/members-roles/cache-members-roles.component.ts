@@ -101,7 +101,7 @@ export class CacheMembersRolesComponent implements OnInit {
   membersLoading = signal(true);
   rolesLoading = signal(true);
   addingMember = signal(false);
-  updatingRole = signal<string | null>(null);
+  pendingMemberRoleSelection = signal<{ user: string; role: string } | null>(null);
   savingRole = signal(false);
 
   members = signal<MemberItem[]>([]);
@@ -248,17 +248,16 @@ export class CacheMembersRolesComponent implements OnInit {
   }
 
   updateMemberRole(username: string, role: string): void {
-    this.updatingRole.set(username);
+    this.pendingMemberRoleSelection.set({ user: username, role });
     this.cachesService.updateMember(this.cacheName, username, role).subscribe({
       next: () => {
-        this.updatingRole.set(null);
+        this.members.update((members) => members.map((member) => (member.id === username ? { ...member, name: role } : member)));
+        this.pendingMemberRoleSelection.set(null);
         if (this.isSignedInUser(username)) this.navigateToCacheOrReloadCache(false);
-        this.loadMembers();
       },
       error: (error: unknown) => {
-        this.updatingRole.set(null);
+        this.pendingMemberRoleSelection.set(null);
         this.notify.failure('Failed to change member role', error);
-        this.loadMembers();
       },
     });
   }

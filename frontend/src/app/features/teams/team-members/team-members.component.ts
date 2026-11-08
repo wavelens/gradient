@@ -75,6 +75,7 @@ export class TeamMembersComponent implements OnInit {
   suggestions = signal<string[]>([]);
   addError = signal<string | null>(null);
   busy = signal<string | null>(null);
+  pendingMemberRoleSelection = signal<{ user: string; role: TeamRole } | null>(null);
   showAdd = signal(false);
   addAttempted = signal(false);
   newMember: { user: string; role: TeamRole } = { user: '', role: 'member' };
@@ -159,17 +160,16 @@ export class TeamMembersComponent implements OnInit {
   }
 
   updateRole(user: string, role: TeamRole): void {
-    this.busy.set(user);
+    this.pendingMemberRoleSelection.set({ user, role });
     this.teams.updateMember(this.teamName, user, role).subscribe({
       next: () => {
-        this.busy.set(null);
+        this.members.update((members) => members.map((member) => (member.user === user ? { ...member, role } : member)));
+        this.pendingMemberRoleSelection.set(null);
         if (this.isSignedInUser(user)) this.currentUserTeamAccessChanged.emit(false);
-        this.load();
       },
       error: (err: unknown) => {
-        this.busy.set(null);
+        this.pendingMemberRoleSelection.set(null);
         this.notify.failure('Role change failed', err);
-        this.load();
       },
     });
   }

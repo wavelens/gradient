@@ -30,16 +30,17 @@
       (retry)="loadMembers()"
     >
         <gr-row-list>
+          @let pending = pendingMemberRoleSelection();
           @for (member of members(); track member.id) {
             <gr-row icon="person">
               <span class="mono">{{ member.id }}</span>
               <div slot="actions">
                 <gr-select
-                  [ngModel]="member.name"
+                  [ngModel]="pending?.user === member.id ? pending.role : member.name"
                   [options]="roles()"
                   optionLabel="name"
                   optionValue="name"
-                  [disabled]="updatingRole() === member.id || rolesLoading()"
+                  [disabled]="pending?.user === member.id || rolesLoading()"
                   [appManagedDisable]="access()"
                   [ariaLabel]="'Role: ' + member.id"
                   (ngModelChange)="updateMemberRole(member.id, $event)"
@@ -51,7 +52,7 @@
                   icon="close"
                   severity="danger"
                   [attr.aria-label]="'Remove ' + member.id"
-                  [disabled]="updatingRole() !== null"
+                  [disabled]="pending !== null"
                   [appManagedDisable]="access()"
                   (click)="removeMember(member.id)"
                 ></button>

@@ -105,7 +105,7 @@ export class MembersRolesComponent implements OnInit {
   rolesLoadError = signal<unknown>(null);
   invitationsLoadError = signal<unknown>(null);
   addingMember = signal(false);
-  updatingRole = signal<string | null>(null);
+  pendingMemberRoleSelection = signal<{ user: string; role: string } | null>(null);
   savingRole = signal(false);
   roleAttempted = signal(false);
 
@@ -237,19 +237,18 @@ export class MembersRolesComponent implements OnInit {
   }
 
   updateMemberRole(username: string, role: string): void {
-    this.updatingRole.set(username);
+    this.pendingMemberRoleSelection.set({ user: username, role });
     this.projectsService
       .updateMemberRole(this.projectName, username, role)
       .subscribe({
         next: () => {
-          this.updatingRole.set(null);
+          this.members.update((members) => members.map((member) => (member.id === username ? { ...member, name: role } : member)));
+          this.pendingMemberRoleSelection.set(null);
           if (this.isSignedInUser(username)) this.navigateToProjectOrReloadProject(false);
-          this.loadMembers();
         },
         error: (error: unknown) => {
-          this.updatingRole.set(null);
+          this.pendingMemberRoleSelection.set(null);
           this.notify.failure('Failed to change member role', error);
-          this.loadMembers();
         },
       });
   }

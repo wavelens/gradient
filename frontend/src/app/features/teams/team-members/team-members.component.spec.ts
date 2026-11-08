@@ -7,6 +7,8 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { NgModel } from '@angular/forms';
+import { By } from '@angular/platform-browser';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
@@ -212,6 +214,19 @@ describe('TeamMembersComponent', () => {
     updateMember.mockReturnValue(throwError(() => failure));
     fixture.componentInstance.updateRole('bob', 'admin');
     expect(notify.failure).toHaveBeenCalledWith('Role change failed', failure);
+  });
+
+  it('shows the picked role while saving and the saved role again after a failure', () => {
+    const { fixture, updateMember } = setup();
+    const response = new Subject<string>();
+    updateMember.mockReturnValue(response);
+    const bobRole = () => fixture.debugElement.queryAll(By.css('gr-row gr-select'))[1].injector.get(NgModel).model;
+    fixture.componentInstance.updateRole('bob', 'admin');
+    fixture.detectChanges();
+    expect(bobRole()).toBe('admin');
+    response.error(new ApiError('Forbidden', 403));
+    fixture.detectChanges();
+    expect(bobRole()).toBe('member');
   });
 
   it('asks before removing a member, naming the member, then confirms the removal', () => {
