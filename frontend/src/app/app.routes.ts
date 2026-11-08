@@ -13,7 +13,10 @@ import { adminGuard } from '@core/guards/admin.guard';
 import { publicListingGuard } from '@core/guards/public-listing.guard';
 import { visibleProjectGuard } from '@core/guards/visible-project.guard';
 import {
+  buildOrEvaluationAccessGuard,
+  clusterJobBoardGuard,
   execJobInTaskGuard,
+  jobAssignedOrPendingGuard,
   workerInProjectGuard,
 } from '@core/guards/entity.guards';
 import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
@@ -182,6 +185,7 @@ export const routes: Routes = [
       // Build / evaluation utility routes (no layout)
       {
         path: 'artefacts/:buildId',
+        canActivate: [buildOrEvaluationAccessGuard],
         title: 'Build Artefacts',
         data: { hideFooter: true },
         loadComponent: () =>
@@ -191,6 +195,7 @@ export const routes: Routes = [
       },
       {
         path: 'graph/:buildId',
+        canActivate: [buildOrEvaluationAccessGuard],
         title: 'Dependency Graph',
         data: { hideFooter: true },
         loadComponent: () =>
@@ -200,6 +205,7 @@ export const routes: Routes = [
       },
       {
         path: 'closure/:kind/:id',
+        canActivate: [buildOrEvaluationAccessGuard],
         title: 'Closure',
         data: { hideFooter: true },
         loadComponent: () =>
@@ -348,6 +354,7 @@ export const routes: Routes = [
       // Job Board
       {
         path: 'board/jobs/:id',
+        canActivate: [jobAssignedOrPendingGuard],
         title: 'Assigned job',
         loadComponent: () =>
           import('./features/board/job-detail/job-detail.component').then(
@@ -356,6 +363,7 @@ export const routes: Routes = [
       },
       {
         path: 'board/pending/:id',
+        canActivate: [jobAssignedOrPendingGuard],
         title: 'Pending job',
         data: { pending: true },
         loadComponent: () =>
@@ -365,6 +373,7 @@ export const routes: Routes = [
       },
       {
         path: 'board/clusters/:id',
+        canActivate: [clusterJobBoardGuard],
         title: 'Cluster Job',
         loadComponent: () =>
           import('./features/board/cluster-detail/cluster-detail.component').then(

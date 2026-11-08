@@ -29,7 +29,14 @@ import { evaluationAccessResolver } from '@core/resolvers/evaluation-access.reso
 import { teamAccessResolver } from '@core/resolvers/team-access.resolver';
 import { CachesService } from '@core/services/caches.service';
 import { adminGuard } from './admin.guard';
-import { execJobInTaskGuard, workerInProjectGuard } from './entity.guards';
+import {
+  buildOrEvaluationAccessGuard,
+  clusterJobBoardGuard,
+  execJobInTaskGuard,
+  jobAssignedOrPendingGuard,
+  workerInProjectGuard,
+} from './entity.guards';
+import { BoardService } from '@core/services/board.service';
 import { visibleProjectGuard } from './visible-project.guard';
 
 const URL = '/project/acme/somewhere';
@@ -41,7 +48,8 @@ function configure(services: Record<string, unknown>, user: { superuser: boolean
     tasks: { getTask: () => of({ id: 't1' }) },
     caches: { getCache: () => of({}) },
     teams: { get: () => of({}) },
-    evaluations: { getEvaluation: () => of({ task: 't1', task_name: 'demo' }) },
+    evaluations: { getEvaluation: () => of({ task: 't1', task_name: 'demo' }), getBuild: () => of({ id: 'b1' }) },
+    board: { getJob: () => of({}), getPendingJobs: () => of({ jobs: [] }), getClusterJob: () => of({}) },
     execJobs: { get: () => of({ project: 'acme', task: 'demo' }) },
     workers: { getWorkers: () => of([{ worker_id: 'w1' }]) },
     ...services,
@@ -56,6 +64,7 @@ function configure(services: Record<string, unknown>, user: { superuser: boolean
       { provide: EvaluationsService, useValue: fakes.evaluations },
       { provide: ExecJobsService, useValue: fakes.execJobs },
       { provide: WorkersService, useValue: fakes.workers },
+      { provide: BoardService, useValue: fakes.board },
       {
         provide: AuthService,
         useValue: { initialized$: of(true), resolveSession: () => of(!!user), serverUnreachable: () => false, user: () => user },
@@ -64,9 +73,9 @@ function configure(services: Record<string, unknown>, user: { superuser: boolean
   });
 }
 
-async function outcome(guard: CanActivateFn, params: Record<string, string>): Promise<unknown> {
+async function outcome(guard: CanActivateFn, params: Record<string, string>, data: Record<string, unknown> = {}): Promise<unknown> {
   const result = TestBed.runInInjectionContext(() =>
-    guard({ paramMap: convertToParamMap(params) } as ActivatedRouteSnapshot, { url: URL } as RouterStateSnapshot),
+    guard({ paramMap: convertToParamMap(params), data } as ActivatedRouteSnapshot, { url: URL } as RouterStateSnapshot),
   );
   return isObservable(result) ? firstValueFrom(result as Observable<unknown>, { defaultValue: 'cancelled' }) : result;
 }
@@ -126,6 +135,35 @@ describe('not-found or no-access page', () => {
     expect(page(await outcome(execJobInTaskGuard, { project: 'acme', task: 'demo', job: 'j1' }))).toContain(
       'kind=execJob&name=j1&back=%2Fproject%2Facme%2Ftask%2Fdemo',
     );
+  });
+
+  it.each<{ path: string; params: Record<string, string>; kind: string }>([
+    { path: 'artefacts', params: { project: 'acme', buildId: 'b9' }, kind: 'build' },
+    { path: 'build closure', params: { project: 'acme', kind: 'build', id: 'b9' }, kind: 'build' },
+    { path: 'evaluation closure', params: { project: 'acme', kind: 'eval', id: 'b9' }, kind: 'evaluation' },
+  ])('replaces a missing id on the $path page', async ({ params, kind }) => {
+    configure({ evaluations: { getEvaluation: () => refused(404), getBuild: () => refused(404) } });
+    expect(page(await outcome(buildOrEvaluationAccessGuard, params))).toContain(`kind=${kind}&name=b9&back=%2Fproject%2Facme`);
+  });
+
+  it('Route a waiting job to the pending job page', async () => {
+    configure({ board: { getPendingJobs: () => of({ jobs: [{ evaluation_id: 'e1', build_id: 'b1' }] }) } });
+    expect(await outcome(jobAssignedOrPendingGuard, { id: 'b1' }, { pending: true })).toBe(true);
+  });
+
+  it('Replace a job no longer waiting on the pending jobs page', async () => {
+    configure({ board: { getPendingJobs: () => of({ jobs: [] }) } });
+    expect(page(await outcome(jobAssignedOrPendingGuard, { id: 'gone' }, { pending: true }))).toContain('kind=job&name=gone&back=%2Fboard%2Foverview');
+  });
+
+  it('Replace a nonexistent job on the assigned job page', async () => {
+    configure({ board: { getJob: () => refused(404) } });
+    expect(page(await outcome(jobAssignedOrPendingGuard, { id: 'gone' }))).toContain('kind=job&name=gone&back=%2Fboard%2Foverview');
+  });
+
+  it('replaces a missing cluster job', async () => {
+    configure({ board: { getClusterJob: () => refused(404) } });
+    expect(page(await outcome(clusterJobBoardGuard, { id: 'c1' }))).toContain('kind=clusterJob&name=c1');
   });
 
   it('replaces an unknown worker', async () => {

@@ -9,7 +9,7 @@ import { RedirectCommand, Router } from '@angular/router';
 import { EMPTY, Observable, OperatorFunction, catchError, of } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 
-export type DeniedKind = 'project' | 'task' | 'cache' | 'team' | 'evaluation' | 'execJob' | 'worker';
+export type DeniedKind = 'project' | 'task' | 'cache' | 'team' | 'evaluation' | 'build' | 'execJob' | 'job' | 'clusterJob' | 'worker';
 
 export interface DeniedTarget {
   kind: DeniedKind;

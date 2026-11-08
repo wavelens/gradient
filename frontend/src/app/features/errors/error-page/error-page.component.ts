@@ -76,7 +76,10 @@ const DENIED_KINDS: Record<DeniedKind, { label: string; back: string }> = {
   cache: { label: 'Cache', back: 'Back to Caches' },
   team: { label: 'Team', back: 'Back to Teams' },
   evaluation: { label: 'Evaluation', back: 'Back to Project' },
+  build: { label: 'Build', back: 'Back to Project' },
   execJob: { label: 'Exec job', back: 'Back to Task' },
+  job: { label: 'Job', back: 'Back to Job Board' },
+  clusterJob: { label: 'Cluster job', back: 'Back to Job Board' },
   worker: { label: 'Worker', back: 'Back to Workers' },
 };
 
