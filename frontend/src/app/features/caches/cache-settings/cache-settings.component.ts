@@ -8,7 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { of } from 'rxjs';
+import { catchError, map, of, switchMap } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -30,11 +30,21 @@ import {
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess, injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
-import { CacheResponse, PatchCacheRequest } from '@core/models';
+import { CacheResponse, CacheSubscribersResponse, PatchCacheRequest } from '@core/models';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { unsavedChanges } from '@shared/forms';
 import { links } from '@shared/routing';
+import { plural } from '@shared/text';
+
+const NO_UNDO = 'Nothing can undo this action.';
+
+export function buildCacheDeleteConsequenceText({ projects, hidden }: CacheSubscribersResponse): string {
+  const users = projects.map((project) => project.project_display_name);
+  if (hidden) users.push(plural(hidden, 'other project', 'other projects'));
+  if (!users.length) return NO_UNDO;
+  return `Used by ${users.join(', ')}. Builds for these projects wait until they subscribe to another cache. ${NO_UNDO}`;
+}
 
 interface CacheForm {
   display_name: string;
@@ -268,15 +278,22 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   }
 
   deleteCache(): void {
-    this.confirm
-      .confirm({
-        title: 'Delete cache',
-        target: this.cache()?.display_name ?? this.cacheName,
-        consequence: "This action can't be undone.",
-        confirmLabel: 'Delete',
-        failure: 'Cache deletion failed.',
-        action: () => this.cachesService.deleteCache(this.cacheName),
-      })
+    this.cachesService
+      .getSubscribers(this.cacheName)
+      .pipe(
+        map(buildCacheDeleteConsequenceText),
+        catchError(() => of(NO_UNDO)),
+        switchMap((consequence) =>
+          this.confirm.confirm({
+            title: 'Delete cache',
+            target: this.cache()?.display_name ?? this.cacheName,
+            consequence,
+            confirmLabel: 'Delete',
+            failure: 'Cache deletion failed.',
+            action: () => this.cachesService.deleteCache(this.cacheName),
+          }),
+        ),
+      )
       .subscribe(() => {
         this.notify.success('Cache deleted');
         this.router.navigateByUrl(links.caches());

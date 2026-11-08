@@ -11,7 +11,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
-import { CacheSettingsComponent } from './cache-settings.component';
+import { CacheSettingsComponent, buildCacheDeleteConsequenceText } from './cache-settings.component';
 import { CachesService } from '@core/services/caches.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { AccessState } from '@core/models/access.model';
@@ -63,7 +63,7 @@ function setup(access: AccessState): ComponentFixture<CacheSettingsComponent> {
       provideHttpClient(),
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
-      { provide: CachesService, useValue: { getCache: vi.fn(() => of(cacheFor(access))) } },
+      { provide: CachesService, useValue: { getCache: vi.fn(() => of(cacheFor(access))), getSubscribers: () => of({ projects: [], hidden: 0 }) } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
     ],
@@ -143,6 +143,13 @@ describe('CacheSettingsComponent - write failures', () => {
     expect(service.deleteCache).toHaveBeenCalledWith('demo');
     expect(notify.success).toHaveBeenCalledWith('Cache deleted');
     expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/caches');
+  });
+
+  it('names the subscribed projects in the delete confirmation', () => {
+    const projects = [{ project_display_name: 'App' }, { project_display_name: 'Docs' }];
+    const text = buildCacheDeleteConsequenceText({ projects, hidden: 1 } as never);
+    expect(text).toContain('Used by App, Docs, 1 other project.');
+    expect(buildCacheDeleteConsequenceText({ projects: [], hidden: 0 })).toBe('Nothing can undo this action.');
   });
 
   it('sends no delete when the confirmation is cancelled', () => {
