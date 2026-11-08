@@ -11,7 +11,8 @@ import { AuthService } from '@core/services/auth.service';
 import { LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
 import { FormsModule } from '@angular/forms';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
-import { oneOf, queryParamSignal } from '@shared/routing';
+import { RouterModule } from '@angular/router';
+import { links, oneOf, queryParamSignal } from '@shared/routing';
 import { firstLoad } from '../first-load';
 import { formatDuration, formatQuantity } from '@shared/text';
 import { ExpensiveBuild, ExpensiveResource, TopProjectBuildTime } from '@core/models';
@@ -21,7 +22,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 @Component({
   selector: 'app-board-expensive-jobs',
   standalone: true,
-  imports: [CommonModule, FormsModule, MetricChartComponent, LabelHelpComponent, TableComponent, TabSwitchComponent, LoadStateComponent],
+  imports: [CommonModule, FormsModule, RouterModule, MetricChartComponent, LabelHelpComponent, TableComponent, TabSwitchComponent, LoadStateComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
@@ -42,7 +43,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
           <thead><tr><th>#</th><th>Derivation</th><th>Build time</th><th>Worker</th></tr></thead>
           <tbody>
             @for (b of builds(); track b.build_id; let i = $index) {
-              <tr><td>{{ i + 1 }}</td><td class="mono">{{ b.name }}</td><td>{{ duration(b.build_time_ms) }}</td><td class="mono">{{ b.worker_name ?? b.worker ?? '-' }}</td></tr>
+              <tr><td>{{ i + 1 }}</td><td class="mono"><a class="build-link" [routerLink]="links.evaluationLog(b.project_slug, b.evaluation, { build: b.build_id })">{{ b.name }}</a></td><td>{{ duration(b.build_time_ms) }}</td><td class="mono">{{ b.worker_name ?? b.worker ?? '-' }}</td></tr>
             } @empty {
               <tr><td colspan="4" class="muted">No builds in this window.</td></tr>
             }
@@ -53,7 +54,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
           <thead><tr><th>#</th><th>Derivation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
           <tbody>
             @for (r of resources(); track r.derivation; let i = $index) {
-              <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ quantity(r.value, r.unit) }}</td><td class="mono">{{ r.worker_name ?? (r.worker || '-') }}</td></tr>
+              <tr><td>{{ i + 1 }}</td><td class="mono"><a class="build-link" [routerLink]="links.evaluationLog(r.project_slug, r.evaluation)">{{ r.name }}</a></td><td>{{ quantity(r.value, r.unit) }}</td><td class="mono">{{ r.worker_name ?? (r.worker || '-') }}</td></tr>
             } @empty {
               <tr><td colspan="4" class="muted">No per-build metrics recorded in this window (needs build metrics enabled on workers).</td></tr>
             }
@@ -79,6 +80,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
   styleUrl: './expensive-jobs.component.scss',
 })
 export class BoardExpensiveJobsComponent implements OnInit {
+  protected readonly links = links;
   private board = inject(BoardService);
   private auth = inject(AuthService);
   protected first = firstLoad();

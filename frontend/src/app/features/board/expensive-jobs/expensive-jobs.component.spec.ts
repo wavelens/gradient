@@ -71,6 +71,20 @@ describe('BoardExpensiveJobsComponent', () => {
     expect(workerCells(fixture)).toEqual(['builder-1', 'uuid-2']);
   });
 
+  it('links each build to its place in the evaluation log', () => {
+    const fixture = setup();
+    const link = fixture.nativeElement.querySelector('a.build-link') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/project/nixpkgs/log/e1?build=b1');
+  });
+
+  it('links each resource row to the evaluation log that built it', () => {
+    const fixture = setup();
+    fixture.componentInstance.setTab('ram');
+    fixture.detectChanges();
+    const link = fixture.nativeElement.querySelector('a.build-link') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/project/nixpkgs/log/e1');
+  });
+
   it('labels the top projects chart with display names, falling back to the project name', () => {
     const fixture = setup(true);
     expect(fixture.componentInstance.topProjectCategories()).toEqual(['Nixpkgs', 'infra']);
