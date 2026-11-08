@@ -229,7 +229,7 @@ export class ExecJobPageComponent implements OnInit {
       this.errorMessage.set(null);
       this.now.set(Date.now());
       this.job.set(job);
-      this.showLog(log);
+      this.showLog(execJobPhase(job.status) === 'queued' ? '' : log);
       this.pullRequests.set(pullRequests);
       if (this.terminalReachable()) {
         if (this.wantsTerminal) this.showView('terminal');

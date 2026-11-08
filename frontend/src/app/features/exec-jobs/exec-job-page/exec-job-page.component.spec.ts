@@ -268,6 +268,11 @@ describe('ExecJobPageComponent', () => {
     }));
   });
 
+  it('drops the log of the previous run while the job waits in the queue again', () => {
+    const { fixture } = setup('queued');
+    expect(fixture.componentInstance.logLines()).toEqual([]);
+  });
+
   it('names the worker and keeps its id on hover', () => {
     const { fixture } = setup('running', SSH, {}, { ...job('running'), worker_name: 'gpu-box' });
     const worker = (fixture.nativeElement as HTMLElement).querySelector('.info-bar .worker');
