@@ -191,6 +191,17 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelectorAll('gr-row').length).toBe(1);
   });
 
+  it('hides the whole block when the user sees no task at all', () => {
+    const { root } = render(null, () => of({ ...PAGE, counts: { all: 0, failing: 0, starred: 0 }, total: 0, tasks: [] }));
+    expect(root.textContent!.trim()).toBe('');
+  });
+
+  it('drops the column captions over a filter without tasks', () => {
+    const { root } = render('failing', () => of({ ...PAGE, counts: { all: 12, failing: 0, starred: 0 }, total: 0, tasks: [] }));
+    expect(chipLabels(root)).toEqual(['All 12', 'Failing 0']);
+    expect(root.querySelector('.columns')).toBeNull();
+  });
+
   it('hides the whole block on 403', () => {
     const { root } = render(null, () => throwError(() => ({ status: 403 })));
     expect(root.textContent!.trim()).toBe('');

@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-@if (!hidden()) {
+@if (!hidden() && data()?.counts?.all !== 0) {
   <section class="section">
     <h2>Tasks</h2>
     <gr-tab-switch
@@ -22,12 +22,14 @@
       </gr-message-banner>
     } @else if (data(); as d) {
       <gr-row-list>
-        <div class="columns" aria-hidden="true">
-          <span></span>
-          <span>entry points</span>
-          <span>change</span>
-          <span>average time</span>
-        </div>
+        @if (d.tasks.length) {
+          <div class="columns" aria-hidden="true">
+            <span></span>
+            <span>entry points</span>
+            <span>change</span>
+            <span>average time</span>
+          </div>
+        }
         @for (t of d.tasks; track t.project + '/' + t.task) {
           @let waitingReason = t.latest?.status === 'Waiting' ? newestEvaluationWaitingReasonTitle(t.project, t.latest!) : null;
           <gr-row [link]="links.task(t.project, t.task)" [linkLabel]="t.project + ' / ' + t.task">
