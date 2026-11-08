@@ -121,6 +121,16 @@ describe('EvaluationLogComponent', () => {
       ]);
       expect(sorted.length).toBe(1);
     });
+
+    it('sorts numbers in names by value', () => {
+      const { cmp } = setup();
+      const sorted = (cmp as unknown as Internals).sortBuilds([
+        build('10', 'hash-pkg-10.drv'),
+        build('2', 'hash-pkg-2.drv'),
+        build('106', 'hash-pkg-106.drv'),
+      ]);
+      expect(sorted.map(b => b.id)).toEqual(['2', '10', '106']);
+    });
   });
 
   describe('builds drawer', () => {

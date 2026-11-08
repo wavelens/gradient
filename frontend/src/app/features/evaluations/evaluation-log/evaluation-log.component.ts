@@ -483,7 +483,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       const ob = this.buildStatusOrder[this.statusClass(b.status)] ?? 99;
       if (oa !== ob) return oa - ob;
       if (a.depth !== b.depth) return a.depth - b.depth;
-      return this.buildDisplayName(a.name).localeCompare(this.buildDisplayName(b.name));
+      return this.buildDisplayName(a.name).localeCompare(this.buildDisplayName(b.name), undefined, { numeric: true });
     });
   }
 
