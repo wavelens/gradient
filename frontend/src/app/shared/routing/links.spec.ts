@@ -80,6 +80,7 @@ describe('links', () => {
     expect(String(links.task('p', 't', 'e1'))).toBe('/project/p/task/t?eval=e1');
     expect(String(links.task('p', 't', null))).toBe('/project/p/task/t');
     expect(String(links.evaluationLog('p', 'e1', { build: 'b1' }))).toBe('/project/p/log/e1?build=b1');
+    expect(String(links.evaluationLog('p', 'e1', { package: 'b1' }))).toBe('/project/p/log/e1?package=b1');
     expect(String(links.evaluationLog('p', 'e1', { messages: true }))).toBe('/project/p/log/e1?eval=1');
   });
 

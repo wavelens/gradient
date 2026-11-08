@@ -171,6 +171,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.builds().find(b => b.id === this.selectedBuildId()) ?? null
   );
 
+  limitingBuildDisplayName = computed(() => {
+    const id = this.scopeBuildId();
+    const build = id ? this.builds().find(b => b.id === id) : undefined;
+    return build ? this.buildDisplayName(build.name) : null;
+  });
+
   visibleBuilds = signal<BuildItem[]>([]);
   failedDependencies = signal<DependencyGraphNode[]>([]);
 
@@ -273,9 +279,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
     const query = this.route.snapshot.queryParamMap;
-    this.scopeBuildId.set(query.get('build'));
+    this.scopeBuildId.set(query.get('package'));
     this.initialShowEval = query.get('eval') !== null;
-    this.initialBuildId = this.initialShowEval ? null : query.get('selected') ?? query.get('build');
+    this.initialBuildId = this.initialShowEval ? null : query.get('build') ?? query.get('package');
     if (!this.evaluationId) {
       this.loading.set(false);
       return;
@@ -681,10 +687,23 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.resetLogState();
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { selected: null, eval: 1 },
+      queryParams: { build: null, eval: 1 },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
+  }
+
+  removeBuildLimit(): void {
+    this.scopeBuildId.set(null);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { package: null },
+      queryParamsHandling: 'merge',
+      preserveFragment: true,
+      replaceUrl: true,
+    });
+    this.isInitialBuildsLoad = true;
+    this.loadBuilds();
   }
 
   /// Resolves a deep-linked `?build=<id>`. If the build is already loaded we
@@ -717,8 +736,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           dispatched_job: b.dispatched_job,
           prioritized: b.prioritized,
           ifd: b.ifd,
-          // `?build=` also scopes the list to this build's closure, so it is the
-          // root of everything the API returns.
           depth: 0,
         };
         this.initialBuildId = null;
@@ -746,10 +763,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.resetLogState();
     this.selectedBuildId.set(build.id);
 
-    const scope = this.scopeBuildId();
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { build: scope ?? build.id, selected: scope && scope !== build.id ? build.id : null, eval: null },
+      queryParams: { build: build.id, eval: null },
       queryParamsHandling: 'merge',
       preserveFragment: keepLineLinkUntilBuildLogShown,
       replaceUrl: true,

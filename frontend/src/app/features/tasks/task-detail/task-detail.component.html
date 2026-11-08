@@ -164,7 +164,7 @@
                   @let phase = packagePhase(sel, ep);
                   <div class="entry-row pkg" [attr.data-phase]="phase" [style.animation-delay.ms]="($index % staggeredRows) * 18"
                        (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
-                    <a class="entry-link" [routerLink]="links.evaluationLog(projectName, sel.id, { build: ep.build_id })"
+                    <a class="entry-link" [routerLink]="links.evaluationLog(projectName, sel.id, { package: ep.build_id })"
                        [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="row.label"></a>
                     <gr-status-icon class="phase-swatch" [phase]="phase" [prioritized]="ep.prioritized" size="sm" />
                     <span class="pkg-name entry-name">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>

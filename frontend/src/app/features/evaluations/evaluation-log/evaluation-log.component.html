@@ -58,6 +58,13 @@
 
       <gr-menu #buildMenu [model]="buildMenuModel()" />
 
+      @if (scopeBuildId()) {
+        <div class="build-limit">
+          <span class="build-limit-label">Builds for {{ limitingBuildDisplayName() ?? 'this package' }}</span>
+          <button grButton severity="secondary" size="small" label="Show All Builds" (click)="removeBuildLimit()"></button>
+        </div>
+      }
+
       @if (sidebarSearchOpen()) {
         <div class="sidebar-search">
           <input

@@ -1216,7 +1216,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
     });
     fixture.detectChanges();
     const link = fixture.nativeElement.querySelector('.pkg a.entry-link') as HTMLAnchorElement;
-    expect(link.getAttribute('href')).toBe('/project/acme/log/e1?build=b-hello');
+    expect(link.getAttribute('href')).toBe('/project/acme/log/e1?package=b-hello');
   });
 
   it('loads the next page when the end of the list scrolls into view', () => {

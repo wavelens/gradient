@@ -65,8 +65,8 @@ export const links = {
       view: options.terminal ? 'terminal' : null,
     }),
 
-  evaluationLog: (project: string, evaluation: string, options: { build?: string | null; messages?: boolean } = {}) =>
-    url(['project', project, 'log', evaluation], { build: options.build, eval: options.messages ? 1 : null }),
+  evaluationLog: (project: string, evaluation: string, options: { build?: string | null; package?: string | null; messages?: boolean } = {}) =>
+    url(['project', project, 'log', evaluation], { build: options.build, package: options.package, eval: options.messages ? 1 : null }),
   evaluationSummary: (project: string, evaluation: string) => url(['project', project, 'summary', evaluation]),
   artefacts: (project: string, build: string, from: BuildOrigin = {}) =>
     url(['project', project, 'artefacts', build], origin(from)),

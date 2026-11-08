@@ -709,8 +709,16 @@ describe('EvaluationLogComponent', () => {
       return { cmp: fixture.componentInstance, fixture, getBuild, getBuilds, navigate };
     }
 
+    it('selects the linked build without narrowing the list', () => {
+      const { cmp, fixture, getBuilds } = setupScoped({ build: 'b1' });
+      expect(getBuilds.mock.calls[0][3]).toBeUndefined();
+      expect(cmp.scopeBuildId()).toBeNull();
+      expect(cmp.selectedBuildId()).toBe('b1');
+      fixture.destroy();
+    });
+
     it('restores the picked dependency inside the package scope', () => {
-      const { cmp, fixture, getBuild, getBuilds } = setupScoped({ build: 'pkg', selected: 'dep' });
+      const { cmp, fixture, getBuild, getBuilds } = setupScoped({ package: 'pkg', build: 'dep' });
       expect(getBuild).toHaveBeenCalledWith('dep');
       expect(getBuilds.mock.calls[0][3]).toBe('pkg');
       expect(cmp.selectedBuildId()).toBe('dep');
@@ -718,12 +726,27 @@ describe('EvaluationLogComponent', () => {
     });
 
     it('keeps the package in the URL when a dependency is picked', () => {
-      const { cmp, fixture, navigate } = setupScoped({ build: 'pkg' });
+      const { cmp, fixture, navigate } = setupScoped({ package: 'pkg' });
+      expect(cmp.selectedBuildId()).toBe('pkg');
       const dep = { ...cmp.builds()[0], id: 'dep' };
       cmp.selectBuild(dep, true);
       expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({
-        queryParams: { build: 'pkg', selected: 'dep', eval: null },
+        queryParams: { build: 'dep', eval: null },
+        queryParamsHandling: 'merge',
       }));
+      fixture.destroy();
+    });
+
+    it('names the package and lists every build after Show All Builds', () => {
+      const { fixture, getBuilds, navigate } = setupScoped({ package: 'pkg' });
+      fixture.detectChanges();
+      const host = fixture.nativeElement as HTMLElement;
+      expect(host.querySelector('.build-limit-label')?.textContent).toContain('Builds for pkg');
+      host.querySelector<HTMLButtonElement>('.build-limit button')!.click();
+      fixture.detectChanges();
+      expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { package: null } }));
+      expect(getBuilds.mock.lastCall?.[3]).toBeUndefined();
+      expect(host.querySelector('.build-limit')).toBeNull();
       fixture.destroy();
     });
   });
