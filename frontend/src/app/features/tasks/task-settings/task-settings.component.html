@@ -24,10 +24,6 @@
       <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
     </gr-form-field>
 
-    <gr-form-field label="Repository URL">
-      <gr-copy-field [value]="proj.repository" />
-    </gr-form-field>
-
     <gr-form-field label="Evaluation Wildcard" for="proj-wildcard">
       <gr-label-help slot="label" doc="reference/wildcards/" title="Pattern for selecting which outputs to evaluate" />
       <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
