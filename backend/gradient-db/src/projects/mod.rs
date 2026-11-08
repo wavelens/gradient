@@ -65,7 +65,7 @@ pub async fn running_evaluations_per_project<C: ConnectionTrait>(
     if !task_ids.is_empty() {
         let running = EEvaluation::find()
             .filter(CEvaluation::Task.is_in(task_ids))
-            .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
+            .filter(CEvaluation::Status.is_in(EvaluationStatus::DOING_WORK_STATUSES))
             .all(db)
             .await?;
         for eval in running {

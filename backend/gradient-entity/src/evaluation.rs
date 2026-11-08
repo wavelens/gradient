@@ -80,6 +80,13 @@ impl EvaluationStatus {
         Self::Waiting,
     ];
 
+    pub const DOING_WORK_STATUSES: [Self; 4] = [
+        Self::Fetching,
+        Self::EvaluatingFlake,
+        Self::EvaluatingDerivation,
+        Self::Building,
+    ];
+
     pub const TERMINAL: [Self; 3] = [Self::Completed, Self::Failed, Self::Aborted];
 
     pub const fn is_terminal(self) -> bool {
@@ -203,6 +210,17 @@ mod status_tests {
                 .iter()
                 .all(EvaluationStatus::is_active)
         );
+    }
+
+    #[test]
+    fn doing_work_is_active_without_queued_or_waiting() {
+        assert!(
+            EvaluationStatus::DOING_WORK_STATUSES
+                .iter()
+                .all(EvaluationStatus::is_active)
+        );
+        assert!(!EvaluationStatus::DOING_WORK_STATUSES.contains(&EvaluationStatus::Queued));
+        assert!(!EvaluationStatus::DOING_WORK_STATUSES.contains(&EvaluationStatus::Waiting));
     }
 
     #[test]
