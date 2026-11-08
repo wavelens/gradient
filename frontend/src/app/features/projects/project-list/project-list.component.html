@@ -43,7 +43,7 @@
                 <gr-badge severity="info">Public</gr-badge>
               }
               @if (project.running_evaluations && project.running_evaluations > 0) {
-                <gr-badge severity="warning">{{ project.running_evaluations }} running</gr-badge>
+                <gr-badge [severity]="phaseSeverity.running">{{ project.running_evaluations }} running</gr-badge>
               }
             </div>
           </gr-nav-card>

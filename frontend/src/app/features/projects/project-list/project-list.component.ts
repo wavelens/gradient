@@ -31,6 +31,7 @@ import { NameFieldsComponent, nameAvailability } from '@shared/forms';
 import { ProjectSummary, PublicProjectSummary } from '@core/models';
 import { links } from '@shared/routing';
 import { pagedList } from '@shared/paging';
+import { PHASE_SEVERITY } from '@shared/evaluation';
 
 @Component({
   selector: 'app-project-list',
@@ -58,6 +59,7 @@ import { pagedList } from '@shared/paging';
 })
 export class ProjectListComponent implements OnInit {
   protected readonly links = links;
+  protected readonly phaseSeverity = PHASE_SEVERITY;
   readonly visibilityOptions = [
     { label: 'Private', value: false },
     { label: 'Public', value: true },
