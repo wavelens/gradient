@@ -15,8 +15,6 @@ h2 { color: var(--gr-text-primary); font-size: $font-size-lg; margin: 1.75rem 0 
 .kind.build { color: var(--gr-status-warning-text); background: color-mix(in srgb, var(--gr-status-warning) 13%, transparent); }
 .top-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; min-height: 2rem; }
 .top-row > button { translate: 0 0.5rem; }
-.total { text-align: right; }
-.total .value { display: block; color: var(--gr-text-primary); font-size: $font-size-xxl; font-weight: 600; }
 .label { color: var(--gr-text-muted); font-size: $font-size-xs; display: block; }
 .ids { display: flex; gap: 2rem; flex-wrap: wrap; background: var(--gr-surface-raised); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-md; padding: 1rem; }
 .timeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-top: 1rem; }
@@ -36,7 +34,10 @@ td.num.neg { color: var(--gr-status-danger); }
 .bar.neg { background: var(--gr-status-danger); }
 pre { background: var(--gr-surface-base); padding: 0.75rem; border-radius: $border-radius-sm; overflow: auto; color: var(--gr-text-secondary); font-size: $font-size-xs; }
 .muted { color: var(--gr-text-muted); }
-.ctx h3 { color: var(--gr-text-primary); font-size: $font-size-md; margin: 1.25rem 0 0.5rem; }
+.scheduler { margin-top: 1.75rem; border-top: 1px solid var(--gr-border-subtle); padding-top: 0.75rem; }
+.scheduler > summary { cursor: pointer; color: var(--gr-text-primary); font-size: $font-size-lg; font-weight: 600; }
+.scheduler tr.total td { color: var(--gr-text-primary); font-weight: 600; }
+.scheduler h3 { color: var(--gr-text-primary); font-size: $font-size-md; margin: 1.25rem 0 0.5rem; }
 gr-table.kv td.label { width: 40%; display: table-cell; }
 gr-table.kv.counts { display: block; margin-top: 1rem; }
 .drv-list { display: flex; flex-direction: column; gap: 0.5rem; }

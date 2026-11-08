@@ -224,7 +224,7 @@ describe('BoardJobDetailComponent - structured context panels', () => {
 
   it('renders a derivations row with the pname / drv_path', () => {
     const el = setup().nativeElement as HTMLElement;
-    const drv = el.querySelector('.ctx.job .drv-row') as HTMLElement;
+    const drv = el.querySelector('.drv-row') as HTMLElement;
     expect(drv).toBeTruthy();
     expect(drv.textContent).toContain('foo');
     expect(drv.textContent).toContain('/nix/store/xxx-foo');
@@ -236,7 +236,7 @@ describe('BoardJobDetailComponent - structured context panels', () => {
       useValue: { getBuild: (id: string) => { ids.push(id); return EMPTY; } },
     });
     const fixture = setup();
-    const drv = fixture.nativeElement.querySelector('.ctx.job .drv-row') as HTMLElement;
+    const drv = fixture.nativeElement.querySelector('.drv-row') as HTMLElement;
     drv.click();
     expect(ids).toEqual(['bj1']);
   });
@@ -286,6 +286,17 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(text).toContain('Like python3.14-torchaudio');
     expect(text).toContain('75% same inputs');
     expect(text).toContain('40% same inputs');
+  });
+
+  it('keeps the scheduler internals in one closed section, without repeating the timeline dates', () => {
+    const el = setup().nativeElement as HTMLElement;
+    const details = el.querySelector('details.scheduler') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.querySelectorAll('section.ctx').length).toBe(3);
+    const jobLabels = Array.from(details.querySelectorAll('section.ctx.job td.label')).map((td) => td.textContent?.trim());
+    expect(jobLabels).not.toContain('Queued');
+    expect(jobLabels).not.toContain('Ready');
+    expect(el.querySelector('.head')?.textContent).not.toContain('score');
   });
 
   it('hides the architecture for eval jobs', () => {
@@ -479,7 +490,7 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     const fixture = setup({ getJob: () => of(EXEC_DETAIL) });
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('.head .kind')?.textContent?.trim()).toBe('exec');
-    expect(el.querySelector('.head .total .value')?.textContent?.trim()).toBe('3.75');
+    expect(el.querySelector('details.scheduler tr.total .num')?.textContent?.trim()).toBe('3.75');
     const section = el.querySelector('section.exec') as HTMLElement;
     expect(section.textContent).toContain('nightly');
     expect(section.textContent).toContain('1 of 2 nodes');
