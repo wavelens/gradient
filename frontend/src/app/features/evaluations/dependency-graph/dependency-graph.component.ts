@@ -356,7 +356,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     // Click navigates to build log
     g.addEventListener('click', () => {
       const evaluation = this.from.evaluation;
-      if (evaluation && node.build) {
+      if (evaluation && node.build && !this.didDrag) {
         this.zone.run(() => this.router.navigateByUrl(links.evaluationLog(this.projectName, evaluation, { build: node.build })));
       }
     });

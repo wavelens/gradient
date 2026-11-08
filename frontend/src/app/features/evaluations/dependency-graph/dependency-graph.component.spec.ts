@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { Subject, of } from 'rxjs';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
@@ -21,7 +21,7 @@ const node = (id: string, status: string | null) => ({
 describe('DependencyGraphComponent live updates', () => {
   afterEach(() => vi.useRealTimers());
 
-  function setup(graph: BuildGraph) {
+  function setup(graph: BuildGraph, query: Record<string, string> = {}) {
     vi.useFakeTimers();
     const frames = new Subject<LiveEvent>();
     const getBuildGraph = vi.fn(() => of(graph));
@@ -33,7 +33,7 @@ describe('DependencyGraphComponent live updates', () => {
         { provide: ActivatedRoute, useValue: {
           snapshot: {
             paramMap: convertToParamMap({ project: 'proj', buildId: 'b1' }),
-            queryParamMap: convertToParamMap({}),
+            queryParamMap: convertToParamMap(query),
           },
         } },
         { provide: EvaluationsService, useValue: { getBuildGraph } },
@@ -89,6 +89,26 @@ describe('DependencyGraphComponent live updates', () => {
     expect(header).not.toContain('dependencies');
     expect(text).toContain('Dependency failed');
     expect(text).not.toContain('FailedPermanent');
+    fixture.destroy();
+  });
+
+  it('A click on a node can open the build log. A drag of the graph does not open the build log.', () => {
+    const { fixture } = setup({ root: 'root', nodes: [node('root', 'Completed')], edges: [] }, { eval: 'e1' });
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const cmp = fixture.componentInstance;
+    const card = (fixture.nativeElement as HTMLElement).querySelector('svg g g') as SVGGElement;
+    const at = (x: number) => ({ button: 0, clientX: x, clientY: 0 }) as MouseEvent;
+
+    cmp.onSvgMousedown(at(0));
+    cmp.onMousemove(at(40));
+    cmp.onMouseup();
+    card.dispatchEvent(new MouseEvent('click'));
+    expect(navigate).not.toHaveBeenCalled();
+
+    cmp.onSvgMousedown(at(0));
+    cmp.onMouseup();
+    card.dispatchEvent(new MouseEvent('click'));
+    expect(navigate).toHaveBeenCalledTimes(1);
     fixture.destroy();
   });
 });
