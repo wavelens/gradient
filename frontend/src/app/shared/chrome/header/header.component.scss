@@ -20,8 +20,13 @@
 .header-user {
   min-width: 0;
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: $spacing-md;
+
+  app-user-menu {
+    display: none;
+  }
 
   .user-link {
     color: var(--gr-text-secondary);
