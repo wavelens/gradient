@@ -24,7 +24,6 @@ import {
   IconComponent,
   LoadStateComponent,
   PageLayoutComponent,
-  BadgeSeverity,
   MessageBannerComponent,
 } from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
@@ -278,18 +277,6 @@ export class TaskActionsComponent implements OnInit {
 
   typeLabel(type: ActionType): string {
     return ACTION_TYPE_LABEL[type];
-  }
-
-  typeSeverity(type: ActionType): BadgeSeverity {
-    switch (type) {
-      case 'send_mail': return 'info';
-      case 'send_web_request': return 'success';
-      case 'git_host_status_report': return 'warning';
-      case 'open_pr': return 'neutral';
-      case 'send_matrix_message': return 'info';
-      case 'send_slack_message': return 'info';
-      case 'start_evaluation': return 'success';
-    }
   }
 
   typeIcon(type: ActionType): string {

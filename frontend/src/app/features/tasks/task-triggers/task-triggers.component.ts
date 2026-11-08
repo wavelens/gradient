@@ -16,7 +16,6 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
-  BadgeSeverity,
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
@@ -437,15 +436,6 @@ export class TaskTriggersComponent implements OnInit {
       case 'reporter_push': return 'Push';
       case 'reporter_pull_request': return 'Pull Request';
       case 'time': return 'Cron';
-    }
-  }
-
-  typeSeverity(type: TriggerType): BadgeSeverity {
-    switch (type) {
-      case 'polling': return 'info';
-      case 'reporter_push': return 'success';
-      case 'reporter_pull_request': return 'warning';
-      case 'time': return 'neutral';
     }
   }
 
