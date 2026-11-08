@@ -24,7 +24,6 @@ import {
   IconComponent,
   LoadStateComponent,
   PageLayoutComponent,
-  MessageBannerComponent,
 } from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccessTo } from '@core/resolvers/inject-access';
@@ -53,7 +52,6 @@ interface IntegrationOption {
   standalone: true,
   imports: [
     CopyFieldComponent,
-    MessageBannerComponent,
     CommonModule,
     RouterModule,
     FormsModule,
