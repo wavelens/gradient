@@ -44,7 +44,7 @@ import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-a
 import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { links } from '@shared/routing';
-import { formatDuration } from '@shared/text';
+import { formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import {
   StarTarget,
   TaskDetailsResponse,
@@ -62,7 +62,7 @@ import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, build
   selector: 'app-task-detail',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, RouterModule, BadgeComponent, BreadcrumbComponent, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
+    CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, BadgeComponent, BreadcrumbComponent, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     SkeletonComponent, EmptyStateComponent, LoadStateComponent, WritableDirective,
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, StarButtonComponent,

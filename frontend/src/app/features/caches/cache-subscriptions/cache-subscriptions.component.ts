@@ -5,6 +5,7 @@
  */
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -25,6 +26,7 @@ import {
   standalone: true,
   imports: [
     CommonModule,
+    ServerTimestampToLocalDateTimePipe,
     ButtonComponent,
     LoadStateComponent,
     PageLayoutComponent,

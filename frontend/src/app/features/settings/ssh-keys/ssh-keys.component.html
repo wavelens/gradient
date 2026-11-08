@@ -37,7 +37,7 @@
             <div slot="meta">
               <span>{{ key.fingerprint }}</span>
               <span>
-                · Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
+                · Last used: {{ key.last_used_at ? (key.last_used_at | serverDate: 'medium') : 'never' }}
               </span>
             </div>
             <div slot="actions">

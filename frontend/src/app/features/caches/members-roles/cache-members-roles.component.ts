@@ -38,7 +38,7 @@ import {
   PermissionEntry,
   PendingInvitationItem,
 } from '@core/models';
-import { permissionLabel } from '@shared/text';
+import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 
 interface RoleFormState {
   name: string;
@@ -53,6 +53,7 @@ interface RoleFormState {
     TeamGrantsComponent,
     LabelHelpComponent,
     CommonModule,
+    ServerTimestampToLocalDateTimePipe,
     RouterModule,
     FormsModule,
     DialogComponent,

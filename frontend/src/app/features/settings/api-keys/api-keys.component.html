@@ -35,10 +35,10 @@
                 {{ key.permissions.length }} permission{{ key.permissions.length === 1 ? '' : 's' }}
               </span>
               <span>
-                · Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
+                · Last used: {{ key.last_used_at ? (key.last_used_at | serverDate: 'medium') : 'never' }}
               </span>
               @if (key.expires_at) {
-                <span>· Expires: {{ key.expires_at | date: 'medium' }}</span>
+                <span>· Expires: {{ key.expires_at | serverDate: 'medium' }}</span>
               }
             </div>
             <div slot="actions">

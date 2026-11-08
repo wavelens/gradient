@@ -13,14 +13,14 @@ import { AdminService } from '@core/services/admin.service';
 import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
-import { formatBytes, formatDuration } from '@shared/text';
+import { formatBytes, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { BoardHealth, AdminTaskDto } from '@core/models';
 import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-board-health',
   standalone: true,
-  imports: [CommonModule, CardGridComponent, StatCardComponent, RouterModule, TableComponent, LoadStateComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, CardGridComponent, StatCardComponent, RouterModule, TableComponent, LoadStateComponent],
   template: `
     <gr-load-state [loading]="healthLoading()" [error]="healthError()" [empty]="!health()"
                    loadingMessage="Loading system health..." errorTitle="Failed to load health" (retry)="refreshHealth()">
@@ -48,7 +48,7 @@ import { links } from '@shared/routing';
       <h2>Pipeline</h2>
       <div class="grid">
         <div class="cell"><span class="label">Rollup lag</span><span [class.bad]="(h.rollup_lag_seconds ?? 0) > 300">{{ h.rollup_lag_seconds != null ? seconds(h.rollup_lag_seconds) : 'no data' }}</span></div>
-        <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | date: 'short') : '-' }}</span></div>
+        <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | serverDate: 'short') : '-' }}</span></div>
         <div class="cell"><span class="label">Cache size</span><span>{{ bytes(h.cache_bytes) }}</span></div>
         <div class="cell"><span class="label">Packages</span><span>{{ h.cache_packages }}</span></div>
         <div class="cell"><span class="label">Pending deliveries</span><span>{{ h.pending_deliveries }}</span></div>
@@ -96,8 +96,8 @@ import { links } from '@shared/routing';
               <td>{{ t.kind }}</td>
               <td>{{ t.status }}</td>
               <td class="muted">{{ t.checkpoint ?? '-' }}</td>
-              <td>{{ t.created_at | date: 'short' }}</td>
-              <td>{{ t.finished_at ? (t.finished_at | date: 'short') : '-' }}</td>
+              <td>{{ t.created_at | serverDate: 'short' }}</td>
+              <td>{{ t.finished_at ? (t.finished_at | serverDate: 'short') : '-' }}</td>
               <td [class.bad]="!!t.error">{{ t.error ?? '' }}</td>
             </tr>
           } @empty {

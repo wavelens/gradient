@@ -40,7 +40,7 @@ import {
   PendingInvitationItem,
   PatchRoleRequest,
 } from '@core/models';
-import { permissionLabel } from '@shared/text';
+import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { Observable } from 'rxjs';
 
 const ROLE_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -58,6 +58,7 @@ interface RoleFormState {
     TeamGrantsComponent,
     LabelHelpComponent,
     CommonModule,
+    ServerTimestampToLocalDateTimePipe,
     RouterModule,
     FormsModule,
     DialogComponent,

@@ -38,7 +38,7 @@
           <span slot="meta">
             Role {{ invite.role }} ·
             Invited by {{ invite.invited_by }} ·
-            Expires {{ invite.expires_at | date: 'medium' }}
+            Expires {{ invite.expires_at | serverDate: 'medium' }}
           </span>
           <button
             slot="actions"

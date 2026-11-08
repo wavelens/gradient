@@ -31,7 +31,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
-import { relativeTime, serverTime } from '@shared/text';
+import { relativeTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { fieldChecks } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 import { links } from '@shared/routing';
@@ -42,6 +42,7 @@ import { links } from '@shared/routing';
   imports: [
     LabelHelpComponent,
     CommonModule,
+    ServerTimestampToLocalDateTimePipe,
     FormsModule,
     ActionEventsComponent,
     BadgeComponent,
@@ -99,7 +100,6 @@ export class WebhooksComponent implements OnInit {
   deliveriesError = signal<unknown>(null);
 
   relativeTime = relativeTime;
-  serverTime = serverTime;
 
   ngOnInit(): void {
     const { data, paramMap } = this.route.snapshot;

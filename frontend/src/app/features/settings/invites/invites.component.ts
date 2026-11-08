@@ -5,6 +5,7 @@
  */
 
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink, type UrlTree } from '@angular/router';
 import { UserService } from '@core/services/user.service';
@@ -29,6 +30,7 @@ import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
   imports: [
     SettingsNavComponent,
     CommonModule,
+    ServerTimestampToLocalDateTimePipe,
     RouterLink,
     BadgeComponent,
     ButtonComponent,

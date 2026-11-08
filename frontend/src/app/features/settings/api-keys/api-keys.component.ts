@@ -32,7 +32,7 @@ import {
 import { ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { AccessState, ApiKeyInfo, PatchApiKeyRequest, PermissionEntry } from '@core/models';
-import { permissionLabel } from '@shared/text';
+import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
 import { CreateCacheDialogComponent, fieldChecks, injectCanCreateCache, injectRevealFirstInvalid, isIpNetwork, splitLines } from '@shared/forms';
 import { links } from '@shared/routing';
@@ -72,6 +72,7 @@ interface SelectOption {
     CreateCacheDialogComponent,
     PermissionPickerComponent,
     CommonModule,
+    ServerTimestampToLocalDateTimePipe,
     RouterModule,
     FormsModule,
     DialogComponent,

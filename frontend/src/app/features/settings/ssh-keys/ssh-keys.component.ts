@@ -5,6 +5,7 @@
  */
 
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
@@ -40,6 +41,7 @@ function sshKeyComment(publicKey: string): string {
   imports: [
     SettingsNavComponent,
     CommonModule,
+    ServerTimestampToLocalDateTimePipe,
     FormsModule,
     ButtonComponent,
     CopyFieldComponent,

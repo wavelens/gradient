@@ -50,7 +50,7 @@
       }
       <span class="chip mono" [title]="proj.wildcard">{{ truncate(proj.wildcard) }}</span>
       @if (proj.last_check_at) {
-        <span class="chip">checked {{ proj.last_check_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
+        <span class="chip">checked {{ proj.last_check_at | serverDate: 'MMM d, HH:mm' }}</span>
       }
       @if (proj.queue.building + proj.queue.queued > 0) {
         <span class="chip queue">{{ proj.queue.building }} building · {{ proj.queue.queued }} queued</span>
@@ -95,7 +95,7 @@
                   } @else {
                     <span class="mono" [title]="sel.commit">{{ commitLabel(sel.commit) }}</span> ·
                   }
-                  {{ triggerLabel(sel) }} · started {{ sel.created_at + 'Z' | date: 'MMM d, HH:mm' }}
+                  {{ triggerLabel(sel) }} · started {{ sel.created_at | serverDate: 'MMM d, HH:mm' }}
                 </div>
               </div>
             </div>

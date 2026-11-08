@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { FormsModule } from '@angular/forms';
 import { TeamsService } from '@core/services/teams.service';
 import { UserService } from '@core/services/user.service';
@@ -37,7 +37,7 @@ import {
   selector: 'app-team-members',
   standalone: true,
   imports: [
-    DatePipe,
+    ServerTimestampToLocalDateTimePipe,
     FormsModule,
     AutoCompleteComponent,
     BadgeComponent,

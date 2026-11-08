@@ -10,6 +10,7 @@ export * from './permission-label';
 export * from './plural';
 export * from './relative-time';
 export * from './repository-url';
+export * from './server-date.pipe';
 export * from './slug';
 export * from './subscription-mode';
 export * from './units';

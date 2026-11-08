@@ -34,7 +34,7 @@ import {
   isRunningEvaluationStatus,
   repositoryWebUrl,
 } from '@shared/evaluation';
-import { formatDuration, serverTime } from '@shared/text';
+import { formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { EvalStatusBadgeComponent, StatusIconComponent } from '@shared/ui';
 import { blockedLine, failureKind, failureTitle, firstLine, headline } from './summary-text';
 
@@ -48,6 +48,7 @@ interface FailureGroup {
   standalone: true,
   imports: [
     CommonModule,
+    ServerTimestampToLocalDateTimePipe,
     RouterModule,
     BadgeComponent,
     ButtonComponent,
@@ -124,7 +125,6 @@ export class EvaluationSummaryComponent implements OnInit {
   protected readonly commitLabel = commitLabel;
   protected readonly commitWebUrl = commitWebUrl;
   protected readonly repositoryWebUrl = repositoryWebUrl;
-  protected readonly serverTime = serverTime;
   protected readonly failureKind = failureKind;
   protected readonly failureTitle = failureTitle;
   protected readonly firstLine = firstLine;

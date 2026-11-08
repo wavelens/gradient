@@ -20,7 +20,7 @@ import {
   PopoverComponent,
   TableComponent,
 } from '@gradient/ui/ui';
-import { formatBytes, formatDuration, formatMegabytes, serverTime } from '@shared/text';
+import { formatBytes, formatDuration, formatMegabytes, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { LabelHelpComponent, WaitingNoticeComponent } from '@shared/ui';
 import { JobTimelineComponent } from './job-timeline.component';
 import { BUILD_KIND, EXEC_KIND, jobKindName, jobSubjectLabel } from '../job-kind';
@@ -46,7 +46,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent, WaitingNoticeComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LabelHelpComponent, WaitingNoticeComponent],
   template: `
     <div class="top-row phone-icon-buttons">
       <a [routerLink]="links.board('live')" class="back" (click)="goBack($event)">
@@ -130,7 +130,7 @@ interface RuleRow {
               }
               @if (j.exec_attempt; as a) {
                 <tr><td class="label">Attempt</td><td class="mono">{{ a.number }}</td></tr>
-                <tr><td class="label">Ended</td><td class="mono">{{ a.ended_at ? (serverTime(a.ended_at) | date: 'medium') : '-' }}</td></tr>
+                <tr><td class="label">Ended</td><td class="mono">{{ a.ended_at ? (a.ended_at | serverDate: 'medium') : '-' }}</td></tr>
                 @if (a.end_reason) {
                   <tr><td class="label">End reason</td><td class="mono" [title]="a.message ?? ''">{{ a.end_reason }}</td></tr>
                 }
@@ -141,14 +141,14 @@ interface RuleRow {
       }
 
       <section class="timeline">
-        <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | date: 'medium' }}</span></div>
-        <div class="step"><span class="label">Ready</span><span>{{ j.ready_at ? (j.ready_at | date: 'medium') : '-' }}</span></div>
+        <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | serverDate: 'medium' }}</span></div>
+        <div class="step"><span class="label">Ready</span><span>{{ j.ready_at ? (j.ready_at | serverDate: 'medium') : '-' }}</span></div>
         <div class="step"><span class="label">Wait</span><span class="hl">{{ waitLabel() }}</span></div>
-        <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Assigned' }}</span><span>{{ j.dispatched_at | date: 'medium' }}</span></div>
+        <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Assigned' }}</span><span>{{ j.dispatched_at | serverDate: 'medium' }}</span></div>
         @if (j.exec_attempt; as a) {
-          <div class="step"><span class="label">Started</span><span>{{ serverTime(a.started_at) | date: 'medium' }}</span></div>
+          <div class="step"><span class="label">Started</span><span>{{ a.started_at | serverDate: 'medium' }}</span></div>
         }
-        <div class="step"><span class="label">Finished</span><span>{{ j.finished_at ? (j.finished_at | date: 'medium') : '-' }}</span></div>
+        <div class="step"><span class="label">Finished</span><span>{{ j.finished_at ? (j.finished_at | serverDate: 'medium') : '-' }}</span></div>
         @if (j.worker_tail_ms !== null) {
           <div class="step"><span class="label">Worker tail</span><span>{{ formatDuration(j.worker_tail_ms) }}</span></div>
         }
@@ -235,8 +235,8 @@ interface RuleRow {
             }
             <tr><td class="label">Project work share</td><td class="mono">{{ j.job_context.project_work_share != null ? (j.job_context.project_work_share | number: '1.0-3') : '-' }}</td></tr>
             <tr><td class="label">Rescore count</td><td class="mono">{{ j.job_context.rescore_count }}</td></tr>
-            <tr><td class="label">Queued</td><td class="mono">{{ j.job_context.queued_at | date: 'medium' }}</td></tr>
-            <tr><td class="label">Ready</td><td class="mono">{{ j.job_context.ready_at | date: 'medium' }}</td></tr>
+            <tr><td class="label">Queued</td><td class="mono">{{ j.job_context.queued_at | serverDate: 'medium' }}</td></tr>
+            <tr><td class="label">Ready</td><td class="mono">{{ j.job_context.ready_at | serverDate: 'medium' }}</td></tr>
             @if (j.job_context.kind === 'Build') {
               <tr><td class="label">Dependency count</td><td class="mono">{{ j.job_context.dependency_count ?? '-' }}</td></tr>
               <tr><td class="label">Package name</td><td class="mono">{{ j.job_context.pname ?? '-' }}</td></tr>
@@ -321,7 +321,7 @@ interface RuleRow {
                   <td>{{ a.substitute ? 'substitute' : 'build' }}</td>
                   <td class="mono">{{ attemptOutcome(a.outcome) }}</td>
                   <td class="mono reason" [title]="a.failure_message ?? ''">{{ a.failure_message ?? '-' }}</td>
-                  <td>{{ a.created_at | date: 'medium' }}</td>
+                  <td>{{ a.created_at | serverDate: 'medium' }}</td>
                   <td>{{ opens ? '\u203a' : '' }}</td>
                 </tr>
               }
@@ -375,7 +375,7 @@ interface RuleRow {
         }
       </section>
       <section class="timeline">
-        <div class="step"><span class="label">Queued</span><span>{{ p.queued_at | date: 'medium' }}</span></div>
+        <div class="step"><span class="label">Queued</span><span>{{ p.queued_at | serverDate: 'medium' }}</span></div>
         <div class="step"><span class="label">Dependencies</span><span class="hl">{{ p.dependency_count }}</span></div>
       </section>
     } @else if (notFound()) {
@@ -401,8 +401,8 @@ interface RuleRow {
           <div><span class="label">Architecture</span><span class="mono">{{ b.architecture }}</span></div>
           <div><span class="label">Worker</span><span class="mono">{{ buildWorker() }}</span></div>
           <div class="span2"><span class="label">Derivation</span><span class="mono">{{ b.derivation_path }}</span></div>
-          <div><span class="label">Created</span><span>{{ b.created_at | date: 'medium' }}</span></div>
-          <div><span class="label">Updated</span><span>{{ b.updated_at | date: 'medium' }}</span></div>
+          <div><span class="label">Created</span><span>{{ b.created_at | serverDate: 'medium' }}</span></div>
+          <div><span class="label">Updated</span><span>{{ b.updated_at | serverDate: 'medium' }}</span></div>
           @if (outputs(b).length) {
             <div class="span2">
               <span class="label">Outputs</span>
@@ -461,7 +461,6 @@ export class BoardJobDetailComponent implements OnInit {
 
   protected readonly jobKindName = jobKindName;
   protected readonly jobSubjectLabel = jobSubjectLabel;
-  protected readonly serverTime = serverTime;
   protected readonly formatBytes = formatBytes;
   protected readonly formatMegabytes = formatMegabytes;
   protected readonly formatDuration = formatDuration;
@@ -514,7 +513,7 @@ export class BoardJobDetailComponent implements OnInit {
   waitLabel = computed(() => {
     const j = this.job();
     if (!j) return '-';
-    const ms = new Date(j.dispatched_at).getTime() - new Date(j.queued_at).getTime();
+    const ms = serverTime(j.dispatched_at).getTime() - serverTime(j.queued_at).getTime();
     return ms < 0 ? '-' : formatDuration(ms);
   });
 

@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
 import { SessionInfo } from '@core/models';
-import { deviceName } from '@shared/text';
+import { deviceName, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
@@ -28,6 +28,7 @@ import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
   imports: [
     SettingsNavComponent,
     CommonModule,
+    ServerTimestampToLocalDateTimePipe,
     BadgeComponent,
     ButtonComponent,
     LoadStateComponent,

@@ -17,7 +17,7 @@ import {
   TableComponent,
 } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
-import { clockTime, serverTime, formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
+import { clockTime, formatMegabytes, formatPercent, formatQuantity, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { WorkerSamplePoint, WorkerConnectionEntry } from '@core/models';
 import { links } from '@shared/routing';
 
@@ -26,6 +26,7 @@ import { links } from '@shared/routing';
   standalone: true,
   imports: [
     CommonModule,
+    ServerTimestampToLocalDateTimePipe,
     RouterModule,
     MetricChartComponent,
     PageLayoutComponent,
@@ -62,7 +63,7 @@ import { links } from '@shared/routing';
         <thead><tr><th>Connected</th><th>Disconnected</th></tr></thead>
         <tbody>
           @for (c of connections(); track $index) {
-            <tr><td>{{ serverTime(c.connected_at) | date: 'short' }}</td><td>{{ c.disconnected_at ? (serverTime(c.disconnected_at) | date: 'short') : 'connected' }}</td></tr>
+            <tr><td>{{ c.connected_at | serverDate: 'short' }}</td><td>{{ c.disconnected_at ? (c.disconnected_at | serverDate: 'short') : 'connected' }}</td></tr>
           } @empty {
             <tr><td colspan="2" class="muted">No sessions recorded.</td></tr>
           }
@@ -99,7 +100,6 @@ export class WorkerMetricsComponent implements OnInit {
 
   readonly percent = (value: number) => formatPercent(value / 100);
   readonly megabytes = formatMegabytes;
-  readonly serverTime = serverTime;
   readonly mbps = (value: number) => formatQuantity(value, 'Mbps');
 
   times = computed(() => this.samples().map((s) => clockTime(s.at)));

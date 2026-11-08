@@ -159,7 +159,7 @@
           }
           <div class="info-metric">
             <span class="metric-label">Triggered</span>
-            <span class="metric-value">{{ ev.created_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
+            <span class="metric-value">{{ ev.created_at | serverDate: 'MMM d, HH:mm' }}</span>
           </div>
           <div class="info-metric">
             <span class="metric-label">Via</span>

@@ -18,7 +18,7 @@ import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel }
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 import { links } from '@shared/routing';
 import { type WaitingExplanation, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
-import { relativeTime } from '@shared/text';
+import { relativeTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 
 type KindFilter = 'all' | JobKindName;
 type StatusFilter = 'all' | 'pending' | 'assigned';
@@ -37,7 +37,7 @@ interface DecisionRow {
 @Component({
   selector: 'app-board-live-jobs',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, ButtonComponent, TableComponent, LoadStateComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, LoadStateComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
@@ -100,7 +100,7 @@ interface DecisionRow {
                   <td class="mono">{{ j.cluster_job ? subJobLabel(row.subJobs) : (j.worker_name ?? j.worker_id) }}</td>
                   <td class="mono subject" [title]="subject">{{ subject }}</td>
                   <td>{{ j.score | number: '1.1-1' }}</td>
-                  <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
+                  <td>{{ j.dispatched_at | serverDate: 'HH:mm:ss' }}</td>
                   <td>{{ canInspect(j) ? '›' : '' }}</td>
                 </tr>
               } @empty {
@@ -121,7 +121,7 @@ interface DecisionRow {
                   <td class="mono">{{ r.worker }}</td>
                   <td class="mono subject" [title]="r.subject">{{ r.subject }}</td>
                   <td>{{ r.score | number: '1.1-1' }}</td>
-                  <td>{{ r.at | date: 'HH:mm:ss' }}</td>
+                  <td>{{ r.at | serverDate: 'HH:mm:ss' }}</td>
                   <td>›</td>
                 </tr>
               } @empty {
@@ -173,7 +173,7 @@ interface DecisionRow {
                   }
                 </td>
                 <td>{{ p.dependency_count }}</td>
-                <td class="age" [title]="p.queued_at | date: 'medium'">{{ relativeTime(p.queued_at) }}</td>
+                <td class="age" [title]="p.queued_at | serverDate: 'medium'">{{ relativeTime(p.queued_at) }}</td>
               </tr>
             } @empty {
               <tr><td colspan="6" class="muted">No pending jobs.</td></tr>

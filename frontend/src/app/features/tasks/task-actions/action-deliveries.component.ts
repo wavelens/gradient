@@ -8,7 +8,7 @@ import { BadgeComponent, ButtonComponent, DialogComponent, LoadStateComponent, T
 import { Component, inject, input, output, signal, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActionsService } from '../../../core/services/actions.service';
-import { formatDuration, relativeTime, serverTime } from '@shared/text';
+import { formatDuration, relativeTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import {
   DeliveryListItem_TaskActionDeliveryId,
   DeliveryDetail_TaskActionDeliveryId,
@@ -17,7 +17,7 @@ import {
 @Component({
   selector: 'app-action-deliveries',
   standalone: true,
-  imports: [CommonModule, BadgeComponent, TableComponent, ButtonComponent, DialogComponent, LoadStateComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, BadgeComponent, TableComponent, ButtonComponent, DialogComponent, LoadStateComponent],
   templateUrl: './action-deliveries.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './action-deliveries.component.scss',
@@ -32,7 +32,6 @@ export class ActionDeliveriesComponent implements OnInit {
 
   readonly duration = formatDuration;
   readonly relativeTime = relativeTime;
-  readonly serverTime = serverTime;
   visible = signal(true);
   deliveries = signal<DeliveryListItem_TaskActionDeliveryId[]>([]);
   loading = signal(true);
