@@ -139,7 +139,7 @@ pub struct PendingJobsResponse {
     operation_id = "getBoardPendingJobs",
     tag = "board",
     summary = "Pending (unassigned) jobs",
-    description = "Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job. `project_name`, `task` and `waiting_reason` come from the evaluation of the job; `permissions` are the caller's permissions in its project.",
+    description = "Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job. `project_name` and `task` come from the evaluation of the job. `waiting_reason` comes from the exec job for exec jobs and from the evaluation otherwise. `permissions` are the caller's permissions in its project.",
     responses((status = OK, description = "Pending jobs plus other_pending count", body = PendingJobsResponse), WebError)
 )]
 pub async fn get_pending_jobs(
@@ -178,7 +178,8 @@ pub async fn get_pending_jobs(
     let jobs = snapshot
         .into_iter()
         .map(|j| {
-            let subject = Some(pending_subject(&j));
+            let pending = pending_subject(&j);
+            let subject = Some(pending);
             let evaluation = evaluations
                 .get(&j.evaluation_id)
                 .cloned()
@@ -189,7 +190,8 @@ pub async fn get_pending_jobs(
             PendingJobSummary {
                 project_name: projects.get(&Uuid::from(j.project)).map(|p| p.name.clone()),
                 task: evaluation.task,
-                waiting_reason: evaluation.waiting_reason,
+                waiting_reason: subjects
+                    .waiting_reason_for_pending_job(pending, evaluation.waiting_reason),
                 permissions: mask_to_vec(permissions),
                 kind: i16::from(j.kind),
                 project: j.project.into(),

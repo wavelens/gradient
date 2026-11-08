@@ -24,11 +24,20 @@ pub mod upcoming;
 pub use closure::program_closure;
 
 use gradient_entity::exec_job::ExecJobStatus;
-use gradient_types::{BuildAttemptId, EvaluationId, ExecJobAttemptId};
+use gradient_types::{BuildAttemptId, EvaluationId, ExecJobAttemptId, MExecJob, WaitingReason};
 use sea_orm::{ConnectionTrait, DbErr};
 use std::sync::LazyLock;
 
 use crate::sql::status::exec_in;
+
+pub fn exec_job_waiting_reason(job: &MExecJob) -> Option<WaitingReason> {
+    if job.waits_for_manual_start && job.status == ExecJobStatus::Created {
+        return Some(WaitingReason::ManualStart);
+    }
+    job.waiting_reason
+        .as_ref()
+        .and_then(WaitingReason::from_json)
+}
 
 pub fn log_key(attempt: ExecJobAttemptId) -> BuildAttemptId {
     BuildAttemptId::new(attempt.into_inner())

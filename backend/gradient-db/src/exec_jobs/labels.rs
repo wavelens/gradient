@@ -9,7 +9,7 @@ use gradient_types::exec::ExecSpec;
 use gradient_types::{
     CEntryPoint, CExecJob, CExecJobAttempt, CProject, CTask, DispatchedJobId, EEntryPoint,
     EExecJob, EExecJobAttempt, EProject, ETask, EntryPointId, ExecJobId, MExecJob, MExecJobAttempt,
-    ProjectId, TaskId,
+    ProjectId, TaskId, WaitingReason,
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
 use std::collections::{BTreeSet, HashMap};
@@ -22,6 +22,7 @@ pub struct ExecJobLabel {
     pub task: String,
     pub node_index: u32,
     pub nodes: u32,
+    pub waiting_reason: Option<WaitingReason>,
 }
 
 pub async fn labels<C: ConnectionTrait>(
@@ -51,6 +52,7 @@ pub async fn labels<C: ConnectionTrait>(
                 task,
                 node_index: u32::try_from(job.node_index).unwrap_or_default(),
                 nodes: node_count(&job),
+                waiting_reason: super::exec_job_waiting_reason(&job),
             })
         })
         .collect())

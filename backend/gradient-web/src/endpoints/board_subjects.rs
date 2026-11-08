@@ -78,6 +78,7 @@ pub struct JobSubjects {
     derivations: HashMap<DerivationBuildId, String>,
     repositories: HashMap<EvaluationId, String>,
     exec_jobs: HashMap<ExecJobId, BoardExecJob>,
+    exec_waiting_reasons: HashMap<ExecJobId, WaitingReason>,
 }
 
 impl JobSubjects {
@@ -95,11 +96,32 @@ impl JobSubjects {
             }
         }
 
+        let labels = gradient_db::exec_jobs::labels::labels(db, &exec_jobs).await?;
+        let exec_waiting_reasons = labels
+            .iter()
+            .filter_map(|label| Some((label.id, label.waiting_reason.clone()?)))
+            .collect();
+
         Ok(Self {
             derivations: derivation_names(db, &shared_builds).await?,
             repositories: repositories(db, &evaluations).await?,
-            exec_jobs: exec_job_labels(db, &exec_jobs).await?,
+            exec_jobs: labels
+                .into_iter()
+                .map(|label| (label.id, BoardExecJob::from(label)))
+                .collect(),
+            exec_waiting_reasons,
         })
+    }
+
+    pub fn waiting_reason_for_pending_job(
+        &self,
+        subject: JobSubject,
+        evaluation: Option<WaitingReason>,
+    ) -> Option<WaitingReason> {
+        match subject {
+            JobSubject::Exec(job) => self.exec_waiting_reasons.get(&job).cloned(),
+            JobSubject::Build(_) | JobSubject::Evaluation(_) => evaluation,
+        }
     }
 
     pub fn subject(&self, subject: Option<JobSubject>) -> Option<String> {
@@ -113,17 +135,6 @@ impl JobSubjects {
     pub fn exec_job(&self, subject: Option<JobSubject>) -> Option<BoardExecJob> {
         self.exec_jobs.get(&subject?.exec_job()?).cloned()
     }
-}
-
-async fn exec_job_labels<C: ConnectionTrait>(
-    db: &C,
-    jobs: &[ExecJobId],
-) -> Result<HashMap<ExecJobId, BoardExecJob>, DbErr> {
-    Ok(gradient_db::exec_jobs::labels::labels(db, jobs)
-        .await?
-        .into_iter()
-        .map(|label| (label.id, BoardExecJob::from(label)))
-        .collect())
 }
 
 async fn derivation_names<C: ConnectionTrait>(
@@ -362,6 +373,8 @@ mod tests {
                 ..Default::default()
             })
             .unwrap(),
+            status: gradient_entity::exec_job::ExecJobStatus::Created,
+            waits_for_manual_start: true,
             ..Default::default()
         };
         let db = mock_db()
@@ -403,6 +416,10 @@ mod tests {
                 node_index: 1,
                 nodes: 2,
             })
+        );
+        assert_eq!(
+            subjects.waiting_reason_for_pending_job(subject.unwrap(), Some(WaitingReason::NoCache)),
+            Some(WaitingReason::ManualStart)
         );
     }
 

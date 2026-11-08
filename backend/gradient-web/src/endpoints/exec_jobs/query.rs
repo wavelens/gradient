@@ -11,11 +11,11 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
-use gradient_db::exec_jobs::outputs;
 use gradient_db::exec_jobs::reads::{
     self, ExecJobDetail, ExecJobRow, ExecNodeDetail, StartedEvaluation,
 };
 use gradient_db::exec_jobs::tokens::JobTokenRow;
+use gradient_db::exec_jobs::{exec_job_waiting_reason, outputs};
 use gradient_db::scheduling::cluster::clusters_of_assignments;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
@@ -146,15 +146,6 @@ pub struct ExecJobSummary {
 
 fn spec_of(job: &MExecJob) -> ExecSpec {
     serde_json::from_value(job.spec.clone()).unwrap_or_default()
-}
-
-fn waiting_reason_of(job: &MExecJob) -> Option<WaitingReason> {
-    if job.waits_for_manual_start && job.status == ExecJobStatus::Created {
-        return Some(WaitingReason::ManualStart);
-    }
-    job.waiting_reason
-        .as_ref()
-        .and_then(WaitingReason::from_json)
 }
 
 fn ssh_access(
@@ -295,7 +286,7 @@ fn response(
         timeout_secs: spec.timeout_secs,
         max_silent_secs: spec.max_silent_secs,
         retries: spec.retries,
-        waiting_reason: waiting_reason_of(&job),
+        waiting_reason: exec_job_waiting_reason(&job),
         message: job.message,
         retries_left: job.retries_left,
         autostart: !spec.manual_start,
@@ -333,7 +324,7 @@ fn summary(row: ExecJobRow, clusters: &HashMap<DispatchedJobId, ClusterJobId>) -
         id: row.job.id,
         entry_point: row.entry_point,
         status: row.status,
-        waiting_reason: waiting_reason_of(&row.job),
+        waiting_reason: exec_job_waiting_reason(&row.job),
         message: row.job.message,
         nodes: spec.nodes,
         labels: spec.labels,
