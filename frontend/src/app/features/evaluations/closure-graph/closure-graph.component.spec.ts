@@ -66,6 +66,10 @@ describe('ClosureGraphComponent - view selection', () => {
     const svc = setup('eval');
     expect(svc.getEvalRuntimeClosure).toHaveBeenCalledWith('x1');
   });
+
+  it('heads the page with one h1', () => {
+    expect((setup('build').fixture.nativeElement as HTMLElement).querySelectorAll('h1').length).toBe(1);
+  });
 });
 
 describe('ClosureGraphComponent - diagram', () => {
