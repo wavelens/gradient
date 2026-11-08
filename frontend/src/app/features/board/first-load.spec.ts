@@ -26,6 +26,21 @@ describe('firstLoad', () => {
     expect(load.loading()).toBe(false);
   });
 
+  it('holds back the first answer until the slower requests settle, so no half-filled page shows', () => {
+    const load = firstLoad();
+    const wait = new Subject<number>();
+    const summary = new Subject<number>();
+    wait.pipe(load.track()).subscribe();
+    summary.pipe(load.track()).subscribe();
+    wait.next(1);
+    wait.complete();
+    expect(load.received()).toBe(false);
+
+    summary.next(2);
+    summary.complete();
+    expect(load.received()).toBe(true);
+  });
+
   it('clears on a failed request too, so an error is not hidden by a spinner', () => {
     const load = firstLoad();
     throwError(() => new Error('down'))

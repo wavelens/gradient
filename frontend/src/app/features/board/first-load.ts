@@ -27,6 +27,7 @@ export function firstLoad(): FirstLoad {
   const error = signal<unknown>(null);
   let pending = 0;
   let reporting = true;
+  let hasReceivedDataInCurrentLoadRound = false;
 
   return {
     loading: loading.asReadonly(),
@@ -39,6 +40,7 @@ export function firstLoad(): FirstLoad {
     restart(): void {
       loading.set(true);
       received.set(false);
+      hasReceivedDataInCurrentLoadRound = false;
       this.refresh();
     },
     track<T>(): MonoTypeOperatorFunction<T> {
@@ -48,7 +50,8 @@ export function firstLoad(): FirstLoad {
           return source;
         }).pipe(
           tap(() => {
-            received.set(true);
+            hasReceivedDataInCurrentLoadRound = true;
+            if (!loading()) received.set(true);
             if (!reporting) error.set(null);
           }),
           catchError((failure: unknown) => {
@@ -58,6 +61,7 @@ export function firstLoad(): FirstLoad {
           finalize(() => {
             pending -= 1;
             if (pending === 0) {
+              received.set(hasReceivedDataInCurrentLoadRound);
               loading.set(false);
               reporting = false;
             }
