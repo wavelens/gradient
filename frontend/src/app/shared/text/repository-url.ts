@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-const ACCEPTED_FORMS = 'ssh://git@host/path, git@host:path or https://host/path';
+const ACCEPTED_FORMS = 'ssh://git@host/path, git@host:path, https://host/path or git://host/path';
 const INVALID = `Invalid repository URL; use ${ACCEPTED_FORMS}`;
 
 // Mirrors `RepositoryUrl::from_str` in gradient-types so the form shows the server's message before saving.

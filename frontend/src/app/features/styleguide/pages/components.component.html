@@ -43,7 +43,7 @@ SPDX-License-Identifier: AGPL-3.0-only
   <gr-form-field
     label="Repository URL"
     for="sg-repo"
-    error="Invalid repository URL; use ssh://git@host/path, git@host:path or https://host/path"
+    error="Invalid repository URL; use ssh://git@host/path, git@host:path, https://host/path or git://host/path"
     [invalid]="urlInvalid()"
   >
     <input grInput id="sg-repo" value="ssh://git@host:user/repo.git" />

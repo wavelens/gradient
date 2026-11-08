@@ -54,6 +54,7 @@ export class RepositoryAccessComponent {
   saving = signal(false);
   testing = signal(false);
   testError = signal<string | null>(null);
+  unsavedRepositoryUrlAccessTestPassed = signal(false);
   installingKey = signal(false);
 
   urlError = computed(() => {
@@ -72,6 +73,8 @@ export class RepositoryAccessComponent {
   startEdit(): void {
     this.draftUrl.set(this.state().repository);
     this.editing.set(true);
+    this.testError.set(null);
+    this.unsavedRepositoryUrlAccessTestPassed.set(false);
   }
 
   saveUrl(): void {
@@ -92,17 +95,22 @@ export class RepositoryAccessComponent {
   }
 
   testAccess(): void {
+    const draft = this.editing();
+    if (draft && this.urlError()) return;
     this.testing.set(true);
     this.testError.set(null);
-    this.tasks.checkRepository(this.project(), this.task(), this.state().repository).subscribe({
+    this.unsavedRepositoryUrlAccessTestPassed.set(false);
+    const url = draft ? this.draftUrl().trim() : this.state().repository;
+    this.tasks.checkRepository(this.project(), this.task(), url).subscribe({
       next: () => {
         this.testing.set(false);
-        this.changed.emit();
+        if (draft) this.unsavedRepositoryUrlAccessTestPassed.set(true);
+        else this.changed.emit();
       },
       error: (error: unknown) => {
         this.testing.set(false);
         this.testError.set(apiErrorMessage(error, 'Failed to test access'));
-        this.changed.emit();
+        if (!draft) this.changed.emit();
       },
     });
   }

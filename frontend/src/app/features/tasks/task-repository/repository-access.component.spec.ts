@@ -58,6 +58,23 @@ describe('RepositoryAccessComponent', () => {
     expect(changed).toHaveBeenCalled();
   });
 
+  it('tests the unsaved URL while editing without touching the saved state', () => {
+    const checkRepository = vi.fn(() => of('1a2b'));
+    const fixture = render({}, { checkRepository });
+    const component = fixture.componentInstance;
+    const changed = vi.fn();
+    component.changed.subscribe(changed);
+    component.startEdit();
+    component.draftUrl.set('not a url');
+    component.testAccess();
+    expect(checkRepository).not.toHaveBeenCalled();
+    component.draftUrl.set('git://gradient.local/states');
+    component.testAccess();
+    expect(checkRepository).toHaveBeenCalledWith('acme', 'app', 'git://gradient.local/states');
+    expect(component.unsavedRepositoryUrlAccessTestPassed()).toBe(true);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
   it('refuses a local path as repository URL without saving', () => {
     const updateTask = vi.fn(() => of('ok'));
     const fixture = render({}, { updateTask });
