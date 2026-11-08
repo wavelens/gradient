@@ -88,6 +88,12 @@ describe('BoardWorkersComponent - exec column', () => {
     exec: { labels: ['w1'], devices: [{ name: 'gpu', total: 0, free: 0 }, { name: 'fpga', total: 2, free: 1 }] },
   };
 
+  it('leaves out the label every worker carries for its own id', () => {
+    const { fixture } = setup(undefined, [{ ...WORKER, exec: { ...WORKER.exec!, labels: ['w1', 'lab-a'] } }]);
+    const labels = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('td.exec gr-badge')).map((b) => b.textContent?.trim());
+    expect(labels).toEqual(['lab-a']);
+  });
+
   it('draws a usage bar only for a device class the worker has', () => {
     const { fixture } = setup(undefined, [WORKER]);
     const devices = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('td.exec .device'));

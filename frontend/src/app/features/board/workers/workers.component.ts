@@ -54,7 +54,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
               <td class="exec">
                 @if (w.exec; as exec) {
                   <span class="labels">
-                    @for (label of exec.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
+                    @for (label of getExecLabelsWithoutWorkerId(w); track label) { <gr-badge>{{ label }}</gr-badge> }
                   </span>
                   @for (d of exec.devices; track d.name) {
                     <span class="device">
@@ -154,6 +154,7 @@ export class BoardWorkersComponent implements OnInit {
 
   readonly megabytes = formatMegabytes;
   readonly heldSegments = (d: DeviceClass) => ratioSegments(d.total - d.free, d.total);
+  readonly getExecLabelsWithoutWorkerId = (w: BoardWorker) => (w.exec?.labels ?? []).filter((label) => label !== w.id);
   readonly percent = (value: number) => formatPercent(value / 100);
 
   fleetCats = computed(() => this.fleet().map((p) => clockTime(p.bucket_start)));
