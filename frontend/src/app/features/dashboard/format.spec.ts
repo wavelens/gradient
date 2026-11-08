@@ -7,9 +7,10 @@
 import { barsThatFit, formatCpuTime } from './format';
 
 describe('dashboard format', () => {
-  it('CPU time values below 1 hour show a duration, then hours, then years.', () => {
+  it('CPU time values below 1 day show hours and minutes, then whole hours, then years.', () => {
     expect(formatCpuTime(0)).toBe('0 ms');
     expect(formatCpuTime(20 * 60_000)).toBe('20m 00s');
+    expect(formatCpuTime(2.5 * 3_600_000)).toBe('2h 30m');
     expect(formatCpuTime(3_600_000 * 312)).toBe('312 h');
     expect(formatCpuTime(18.4 * 365 * 24 * 3_600_000)).toBe('18.4 y');
   });
