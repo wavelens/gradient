@@ -187,16 +187,16 @@ export class TeamGrantsComponent implements OnInit {
   remove(grant: TeamGrantEntry): void {
     this.confirm
       .confirm({
-        title: 'Remove Team',
+        title: 'Remove team access',
         target: grant.display_name,
         consequence: this.removalConsequence(grant),
         confirmLabel: 'Remove',
-        failure: 'Could not remove the team.',
+        failure: "Couldn't remove team access",
         action: () =>
           this.kind() === 'project' ? this.removeFromProject(grant) : this.teams.removeCacheGrant(this.name(), grant.team),
       })
       .subscribe(() => {
-        this.notify.success('Removed team');
+        this.notify.success('Team access removed');
         this.refresh();
       });
   }

@@ -242,7 +242,7 @@ describe('TeamGrantsComponent', () => {
         expect.objectContaining({ target: 'Platform', consequence: 'Members of Platform lose their role on this cache.' }),
       );
       expect(service.removeCacheGrant).toHaveBeenCalledWith('acme', 'platform');
-      expect(notify.success).toHaveBeenCalledWith('Removed team');
+      expect(notify.success).toHaveBeenCalledWith('Team access removed');
       expect(changed).toHaveBeenCalled();
     });
 
