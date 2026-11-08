@@ -30,7 +30,7 @@
             <span>average time</span>
           </div>
         }
-        @for (t of d.tasks; track t.project + '/' + t.task) {
+        @for (t of taskRowsWithNewestHistoryBarsThatFit(); track t.project + '/' + t.task) {
           @let waitingReason = t.latest?.status === 'Waiting' ? newestEvaluationWaitingReasonTitle(t.project, t.latest!) : null;
           <gr-row [link]="links.task(t.project, t.task)" [linkLabel]="t.project + ' / ' + t.task">
             @if (t.latest; as l) {

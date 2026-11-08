@@ -10,7 +10,7 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const YEAR = 365 * DAY;
 const BAR_PITCH_PX = 7;
-const MAX_BARS = 60;
+export const MAX_BARS = 60;
 
 export function formatCpuTime(ms: number | null | undefined): string {
   if (ms == null || ms < DAY) return formatDuration(ms);

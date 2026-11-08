@@ -34,7 +34,7 @@ import {
 import { StatusIconComponent } from '@shared/ui';
 import { formatDuration, RelativeTimePipe } from '@shared/text';
 import { EvaluationHistoryComponent } from '../evaluation-history/evaluation-history.component';
-import { barsThatFit } from '../format';
+import { MAX_BARS, barsThatFit } from '../format';
 import { links } from '@shared/routing';
 
 const FILTERS: { key: Filter; label: string }[] = [
@@ -89,6 +89,9 @@ export class DashboardTaskTableComponent implements OnInit {
   failed = signal(false);
   hidden = signal(false);
   selected = computed(() => this.filter() ?? this.data()?.filter ?? null);
+  taskRowsWithNewestHistoryBarsThatFit = computed(() =>
+    (this.data()?.tasks ?? []).map((t) => ({ ...t, history: t.history.slice(-this.history()) })),
+  );
   chips = computed(() => {
     const counts = this.data()?.counts;
     return FILTERS.filter((f) => f.key !== 'starred' || counts?.starred).map((f) => ({
@@ -174,7 +177,7 @@ export class DashboardTaskTableComponent implements OnInit {
   private fetch(): Observable<TasksPage> {
     this.failed.set(false);
     const perPage = this.expanded() ? PAGE_SIZE : TOP;
-    return this.dashboard.tasks(this.filter(), this.page(), perPage, this.history()).pipe(
+    return this.dashboard.tasks(this.filter(), this.page(), perPage, MAX_BARS).pipe(
       catchError((e: { status?: number }) => {
         this.hidden.set(e?.status === 403);
         this.failed.set(e?.status !== 403);
@@ -195,10 +198,6 @@ export class DashboardTaskTableComponent implements OnInit {
   // The bar strip ignores its content width, so measuring it after render or a resize settles in one step.
   private fitHistory(): void {
     const width = this.host.nativeElement.querySelector<HTMLElement>('.history')?.clientWidth;
-    if (!width) return;
-    const fit = barsThatFit(width);
-    if (fit === this.history()) return;
-    this.history.set(fit);
-    this.load();
+    if (width) this.history.set(barsThatFit(width));
   }
 }

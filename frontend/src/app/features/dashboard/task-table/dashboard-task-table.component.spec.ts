@@ -61,7 +61,7 @@ describe('DashboardTaskTableComponent', () => {
   it('reads the chip from the url and shows every count', async () => {
     const { f, tasks, root } = render('failing', () => of(PAGE));
     await settle(f);
-    expect(tasks).toHaveBeenCalledWith('failing', 1, 10, 21);
+    expect(tasks).toHaveBeenCalledWith('failing', 1, 10, 60);
     expect(chipLabels(root)).toEqual(['All 12', 'Failing 3']);
     expect(root.querySelector('gr-tab-switch button.is-selected')?.textContent).toContain('Failing');
   });
@@ -87,7 +87,7 @@ describe('DashboardTaskTableComponent', () => {
   it('leaves the filter to the server when the url has no filter and puts Starred first for a user with starred tasks', async () => {
     const { f, tasks, root } = render(null, () => of(STARRED));
     await settle(f);
-    expect(tasks).toHaveBeenCalledWith(null, 1, 10, 21);
+    expect(tasks).toHaveBeenCalledWith(null, 1, 10, 60);
     expect(chipLabels(root)).toEqual(['Starred 2', 'All 12', 'Failing 3']);
     expect(root.querySelector('gr-tab-switch button.is-selected')?.textContent).toContain('Starred');
   });
@@ -111,7 +111,7 @@ describe('DashboardTaskTableComponent', () => {
     const { f, tasks, params, root } = render(null, () => of(STARRED));
     params.next(convertToParamMap({ filter: 'starred' }));
     await settle(f);
-    expect(tasks).toHaveBeenLastCalledWith('starred', 1, 10, 21);
+    expect(tasks).toHaveBeenLastCalledWith('starred', 1, 10, 60);
     expect(root.querySelector('gr-tab-switch button.is-selected')?.textContent).toContain('Starred');
     params.next(convertToParamMap({ filter: 'starred', other: 'x' }));
     expect(tasks).toHaveBeenCalledTimes(2);
@@ -157,18 +157,21 @@ describe('DashboardTaskTableComponent', () => {
     const { f, tasks, root } = render(null, () => of(PAGE));
     (root.querySelector('.show-all') as HTMLElement).click();
     f.detectChanges();
-    expect(tasks).toHaveBeenLastCalledWith(null, 1, 25, 21);
+    expect(tasks).toHaveBeenLastCalledWith(null, 1, 25, 60);
     TestBed.resetTestingModule();
     expect(render(null, () => of({ ...PAGE, total: 1 })).root.querySelector('.show-all')).toBeNull();
   });
 
-  it('shrinks the history to what a narrow column fits and settles there', () => {
+  it('loads the tasks once and shows the newest bars that fit a narrow column', () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(140);
-    const { f, tasks } = render(null, () => of(PAGE));
+    const history = Array.from({ length: 60 }, (_, i) => ({ id: `e${i}`, status: 'Completed' as const, created_at: '2026-09-23T10:00:00' }));
+    const { f, tasks, root } = render(null, () => of({ ...PAGE, tasks: [{ ...row('hosts'), history }] }));
     f.detectChanges();
     f.detectChanges();
-    expect(tasks).toHaveBeenCalledTimes(2);
-    expect(tasks).toHaveBeenLastCalledWith(null, 1, 10, 20);
+    expect(tasks).toHaveBeenCalledTimes(1);
+    const bars = root.querySelectorAll<HTMLAnchorElement>('.history .bar');
+    expect(bars.length).toBe(20);
+    expect(bars[19].getAttribute('href')).toContain('e59');
   });
 
   it('holds the list with placeholder rows until the tasks arrive', async () => {
