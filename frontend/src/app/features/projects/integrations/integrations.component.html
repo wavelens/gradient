@@ -5,14 +5,16 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Integrations" subtitle="Git host webhooks and status reporters for this project">
-  <button slot="actions"
-      *appWritable="access()"
-      grButton
-      label="New Integration"
-      icon="add"
-      (click)="openCreateDialog()"
-      [appManagedDisable]="access()"
-    ></button>
+  @if (integrations().length) {
+    <button slot="actions"
+        *appWritable="access()"
+        grButton
+        label="New Integration"
+        icon="add"
+        (click)="openCreateDialog()"
+        [appManagedDisable]="access()"
+      ></button>
+  }
   @if (backToTrigger(); as triggerLink) {
     <gr-message-banner slot="banner" type="success" data-testid="back-to-trigger-banner">
       The edited trigger can now use the new integration.

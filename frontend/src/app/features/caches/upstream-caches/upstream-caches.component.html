@@ -5,14 +5,16 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Upstream Caches" subtitle="External and internal caches this cache pulls through from">
-  <button slot="actions"
-      *appWritable="access()"
-      grButton
-      label="Add Upstream Cache"
-      icon="add"
-      (click)="openAddDialog()"
-      [appManagedDisable]="access()"
-    ></button>
+  @if (upstreamCaches().length) {
+    <button slot="actions"
+        *appWritable="access()"
+        grButton
+        label="Add Upstream Cache"
+        icon="add"
+        (click)="openAddDialog()"
+        [appManagedDisable]="access()"
+      ></button>
+  }
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

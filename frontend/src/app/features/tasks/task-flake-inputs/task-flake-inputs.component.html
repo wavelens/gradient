@@ -5,14 +5,16 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Flake Input Overrides" subtitle="Override flake inputs to pin or redirect dependencies for the next evaluation">
-  <button slot="actions"
-      *appWritable="access()"
-      grButton
-      label="New Override"
-      icon="add"
-      (click)="startCreate()"
-      [appManagedDisable]="access()"
-    ></button>
+  @if (overrides().length) {
+    <button slot="actions"
+        *appWritable="access()"
+        grButton
+        label="New Override"
+        icon="add"
+        (click)="startCreate()"
+        [appManagedDisable]="access()"
+      ></button>
+  }
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

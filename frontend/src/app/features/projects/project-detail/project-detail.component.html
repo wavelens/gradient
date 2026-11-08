@@ -7,7 +7,7 @@
 @if (project(); as project) {
   <gr-page-layout [breadcrumb]="breadcrumb()" [title]="project.display_name" [subtitle]="project.description || 'No description'">
   <div slot="actions">
-    @if (canCreateTask()) {
+    @if (canCreateTask() && tasks.items().length) {
       <a grButton label="Connect repository" icon="add" [routerLink]="links.projectPage(projectName, 'connect')"></a>
     }
     @if (canOpenSettings()) {

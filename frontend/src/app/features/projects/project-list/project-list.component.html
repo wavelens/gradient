@@ -5,7 +5,7 @@
 -->
 
 <gr-page-layout title="Projects" [subtitle]="authService.isAuthenticated() ? 'Manage your projects' : 'Public projects on this server. Sign in to see your own.'">
-  @if (canCreateProject) {
+  @if (canCreateProject && projects.items().length) {
     <button slot="actions" grButton label="Create Project" icon="add" (click)="openCreateDialog()"></button>
   } @else if (!authService.isAuthenticated()) {
     <a slot="actions" grButton label="Sign in" icon="login" [routerLink]="links.login(links.projects().toString())"></a>

@@ -6,7 +6,9 @@
 
 <gr-page-layout width="settings" [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'API Keys' }]" title="API Keys" subtitle="Manage API keys for programmatic access">
   <app-settings-nav slot="banner" />
-  <button slot="actions" grButton label="New API Key" icon="add" (click)="openCreateDialog()"></button>
+  @if (keys().length) {
+    <button slot="actions" grButton label="New API Key" icon="add" (click)="openCreateDialog()"></button>
+  }
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

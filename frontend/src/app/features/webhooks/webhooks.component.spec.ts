@@ -257,6 +257,16 @@ describe('WebhooksComponent', () => {
     expect(service[method]).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { hooks: [], inEmptyState: 1 },
+    { hooks: [hook], inEmptyState: 0 },
+  ])('only offer the create action once, in the empty state while no event notifications exist', ({ hooks, inEmptyState }) => {
+    const { root } = setup({ webhookScope: 'team' }, { team: 'research' }, () => of(hooks));
+    const create = Array.from(root.querySelectorAll('button')).filter((b) => b.textContent?.includes('New event notification'));
+    expect(create).toHaveLength(1);
+    expect(root.querySelectorAll('gr-empty-state button')).toHaveLength(inEmptyState);
+  });
+
   it('explains a refused list instead of offering to create webhooks', () => {
     const { root } = setup({ webhookScope: 'cache' }, { cache: 'main' }, () => throwError(() => new ApiError('Forbidden', 403)));
     expect(root.textContent).toContain('No access');

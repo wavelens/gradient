@@ -8,14 +8,16 @@
   <a slot="actions" grButton label="Open the Repository page" icon="hub" severity="secondary"
      [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
   <gr-message-banner slot="banner" type="info">Set up build triggers for push and pull requests on the Repository page.</gr-message-banner>
-  <button slot="actions"
-      *appWritable="access()"
-      grButton
-      label="New Trigger"
-      icon="add"
-      (click)="startCreate()"
-      [appManagedDisable]="access()"
-    ></button>
+  @if (triggers().length) {
+    <button slot="actions"
+        *appWritable="access()"
+        grButton
+        label="New Trigger"
+        icon="add"
+        (click)="startCreate()"
+        [appManagedDisable]="access()"
+      ></button>
+  }
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

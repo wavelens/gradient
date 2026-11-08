@@ -5,22 +5,24 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
-  @if (canCreateCache()) {
-    <app-create-cache-button slot="actions"
+  @if (caches().length) {
+    @if (canCreateCache()) {
+      <app-create-cache-button slot="actions"
+          *appWritable="access()"
+          severity="secondary"
+          [access]="access()"
+          (create)="showCreateDialog.set(true)"
+        />
+    }
+    <button slot="actions"
         *appWritable="access()"
-        severity="secondary"
-        [access]="access()"
-        (create)="showCreateDialog.set(true)"
-      />
+        grButton
+        label="Subscribe to Cache"
+        icon="add"
+        [appManagedDisable]="access()"
+        (click)="openSubscribeDialog()"
+      ></button>
   }
-  <button slot="actions"
-      *appWritable="access()"
-      grButton
-      label="Subscribe to Cache"
-      icon="add"
-      [appManagedDisable]="access()"
-      (click)="openSubscribeDialog()"
-    ></button>
   @if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading cache subscriptions..." errorTitle="Failed to load caches" (retry)="loadCaches()" />
   } @else {

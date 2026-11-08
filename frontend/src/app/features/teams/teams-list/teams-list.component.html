@@ -5,7 +5,7 @@
 -->
 
 <gr-page-layout title="Teams" subtitle="Manage teams">
-  @if (canCreateTeam()) {
+  @if (canCreateTeam() && items().length) {
     <button slot="actions" grButton label="New Team" icon="add" (click)="openCreate()"></button>
   }
   <gr-load-state
