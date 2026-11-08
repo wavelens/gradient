@@ -513,7 +513,7 @@ export const routes: Routes = [
       },
       {
         path: 'project/:project/workers/:workerId/metrics',
-        title: 'Worker Statistics',
+        title: 'Worker Metrics',
         canActivate: [workerInProjectGuard],
         resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
