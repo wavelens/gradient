@@ -47,15 +47,30 @@ enum Denial {
     UndecodableToken,
     #[error("User not found")]
     UnknownUser,
+    #[error("Access this endpoint with a signed-in session. API keys don't work.")]
+    ApiKeyOnSessionOnlyRoute,
 }
 
 impl Refusal for Denial {
     fn status(&self) -> RefusalStatus {
         match self {
             Self::UndecodableToken | Self::UnknownUser => RefusalStatus::Unauthorized,
-            Self::MalformedAuthorizationHeader | Self::NoCredentials => RefusalStatus::Forbidden,
+            Self::MalformedAuthorizationHeader
+            | Self::NoCredentials
+            | Self::ApiKeyOnSessionOnlyRoute => RefusalStatus::Forbidden,
         }
     }
+}
+
+pub async fn require_session_authentication(req: Request, next: Next) -> WebResult<Response<Body>> {
+    let via_api_key = req
+        .extensions()
+        .get::<MaybeApiKey>()
+        .is_none_or(|api_key| api_key.as_ref().is_some());
+    if via_api_key {
+        return Err(Denial::ApiKeyOnSessionOnlyRoute.into());
+    }
+    Ok(next.run(req).await)
 }
 
 fn presented_token(headers: &HeaderMap) -> Result<&str, Denial> {

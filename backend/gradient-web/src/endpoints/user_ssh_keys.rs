@@ -5,8 +5,6 @@
  */
 
 use crate::audit::Audit;
-use crate::authorization::MaybeApiKey;
-use crate::endpoints::user::forbid_via_api_key;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
@@ -112,10 +110,8 @@ pub async fn post_ssh_key(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Json(body): Json<CreateSshKeyRequest>,
 ) -> WebResult<Json<BaseResponse<SshKeyInfo>>> {
-    forbid_via_api_key(&api_key)?;
     require_ssh(&state.config)?;
     let name = body.name.trim();
     if name.is_empty() {
@@ -165,10 +161,8 @@ pub async fn delete_ssh_key(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
     Path(ssh_key_id): Path<UserSshKeyId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    forbid_via_api_key(&api_key)?;
     require_ssh(&state.config)?;
     let key = by_id::<EUserSshKey, _>(&state.web_db, ssh_key_id)
         .await?

@@ -394,3 +394,54 @@ async fn api_key_cannot_add_ssh_keys() {
         .await;
     res.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn project_pinned_view_key_cannot_reach_account_routes() {
+    use axum::http::Method;
+    use gradient_types::permissions::{Permission, mask_from};
+    let raw = "p".repeat(64);
+    let now = Utc::now().naive_utc();
+    let key = api::Model {
+        id: ApiId::now_v7(),
+        owned_by: user_id(),
+        name: "sandbox-view".into(),
+        key: hash_api_key(&raw),
+        last_used_at: now,
+        created_at: now,
+        permission: mask_from(&[Permission::ViewProject]),
+        project: Some(gradient_entity::ids::ProjectId::now_v7()),
+        ..Default::default()
+    };
+    let routes = [
+        (Method::GET, "/api/v1/user/keys"),
+        (Method::GET, "/api/v1/user/sessions"),
+        (Method::GET, "/api/v1/user/audit-log"),
+        (Method::GET, "/api/v1/user/settings"),
+        (Method::PATCH, "/api/v1/user/settings"),
+        (Method::GET, "/api/v1/user/invites"),
+        (Method::DELETE, "/api/v1/user"),
+        (Method::POST, "/api/v1/auth/cli/authorize"),
+    ];
+
+    for (method, path) in routes {
+        let s = server_with(|db| {
+            db.append_query_results([vec![key.clone()]])
+                .append_exec_results([MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                }])
+                .append_query_results([vec![key.clone()]])
+                .append_query_results([vec![user()]])
+        });
+        let res = s
+            .method(method.clone(), path)
+            .add_header("authorization", format!("Bearer GRAD{}", raw))
+            .json(&serde_json::json!({}))
+            .await;
+        assert_eq!(
+            res.status_code(),
+            axum::http::StatusCode::FORBIDDEN,
+            "{method} {path}"
+        );
+    }
+}

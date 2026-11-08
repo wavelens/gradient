@@ -245,6 +245,17 @@ pub fn create_router_with_scheduler(
             authorization::authorize,
         ));
 
+    let (account_api, _) = routes::account_api().split_for_parts();
+    let account_api = account_api
+        .route_layer(middleware::from_fn(
+            authorization::require_session_authentication,
+        ))
+        .route_layer(GovernorLayer::new(Arc::clone(&caller_limit)))
+        .route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authorization::authorize,
+        ));
+
     let (optional_api, _) = routes::optional_api().split_for_parts();
     let optional_api = optional_api
         .route_layer(GovernorLayer::new(Arc::clone(&caller_limit)))
@@ -266,6 +277,7 @@ pub fn create_router_with_scheduler(
 
     let mut api = Router::new()
         .merge(auth_api)
+        .merge(account_api)
         .merge(optional_api)
         .merge(auth_sensitive)
         .merge(webhook_routes)

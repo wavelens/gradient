@@ -275,7 +275,7 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     caches::subscriptions::post_approve_subscription_request,
                     caches::subscriptions::delete_subscription_request
                 ))
-                .routes(routes!(user::get, user::delete))
+                .routes(routes!(user::get))
                 .routes(routes!(user::get_search))
                 .routes(routes!(dashboard::tasks::get_tasks))
                 .routes(routes!(dashboard::stats::get_stats))
@@ -286,28 +286,8 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(stars::put_project_star, stars::delete_project_star))
                 .routes(routes!(stars::put_task_star, stars::delete_task_star))
                 .routes(routes!(stars::put_cache_star, stars::delete_cache_star))
-                .routes(routes!(user::get_keys, user::post_keys, user::delete_keys))
                 .routes(routes!(user::get_key_permissions))
-                .routes(routes!(
-                    user_ssh_keys::get_ssh_keys,
-                    user_ssh_keys::post_ssh_key
-                ))
-                .routes(routes!(user_ssh_keys::delete_ssh_key))
-                .routes(routes!(user::patch_key))
-                .routes(routes!(user::post_key_revoke))
-                .routes(routes!(invites::get_user_invites))
-                .routes(routes!(invites::post_accept_invite))
-                .routes(routes!(invites::post_decline_invite))
-                .routes(routes!(user::get_sessions))
-                .routes(routes!(user::delete_session))
-                .routes(routes!(user::get_audit_log))
-                .routes(routes!(user::get_settings, user::patch_settings))
-                .routes(routes!(login_providers::get_provider_connect))
-                .routes(routes!(login_providers::delete_provider_identity))
                 .routes(routes!(user::put_seen_version))
-                .routes(routes!(auth::get_cli_device_info))
-                .routes(routes!(auth::post_cli_device_authorize))
-                .routes(routes!(auth::post_cli_device_deny))
                 .routes(routes!(events::firehose_ws))
                 .routes(routes!(events::get_catalog))
                 .nest(
@@ -332,6 +312,36 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     webhooks::router(WebhookMount::Team),
                 )
                 .nest("/admin", admin::admin_router()),
+        ),
+        BEARER,
+    )
+}
+
+pub(crate) fn account_api() -> OpenApiRouter<Arc<ServerState>> {
+    secured(
+        enveloped(
+            OpenApiRouter::new()
+                .routes(routes!(user::delete))
+                .routes(routes!(user::get_keys, user::post_keys, user::delete_keys))
+                .routes(routes!(user::patch_key))
+                .routes(routes!(user::post_key_revoke))
+                .routes(routes!(
+                    user_ssh_keys::get_ssh_keys,
+                    user_ssh_keys::post_ssh_key
+                ))
+                .routes(routes!(user_ssh_keys::delete_ssh_key))
+                .routes(routes!(invites::get_user_invites))
+                .routes(routes!(invites::post_accept_invite))
+                .routes(routes!(invites::post_decline_invite))
+                .routes(routes!(user::get_sessions))
+                .routes(routes!(user::delete_session))
+                .routes(routes!(user::get_audit_log))
+                .routes(routes!(user::get_settings, user::patch_settings))
+                .routes(routes!(login_providers::get_provider_connect))
+                .routes(routes!(login_providers::delete_provider_identity))
+                .routes(routes!(auth::get_cli_device_info))
+                .routes(routes!(auth::post_cli_device_authorize))
+                .routes(routes!(auth::post_cli_device_deny)),
         ),
         BEARER,
     )

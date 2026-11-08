@@ -307,6 +307,7 @@ pub fn api_spec() -> Result<Spec, SpecError> {
     let limits = BodyLimits::for_spec();
     let api = OpenApiRouter::new()
         .merge(routes::auth_api(&limits))
+        .merge(routes::account_api())
         .merge(routes::optional_api())
         .merge(routes::auth_sensitive())
         .merge(routes::webhook_routes())

@@ -5,10 +5,9 @@
  */
 
 use super::auth::{csrf_clear_cookie, csrf_set_cookie, jwt_cookie};
-use super::user::forbid_via_api_key;
 use crate::audit::Audit;
 use crate::authorization::{
-    ConnectRefusal, MaybeApiKey, PasswordLogin, ProviderCallback, ProviderPurpose, can_disconnect,
+    ConnectRefusal, PasswordLogin, ProviderCallback, ProviderPurpose, can_disconnect,
     connect_identity, cookie_value, create_session_and_token, provider_authorize,
     provider_callback, session_claims, sign_in_external,
 };
@@ -298,11 +297,9 @@ async fn connect(
 pub async fn get_provider_connect(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Extension(api_key_caller): Extension<MaybeApiKey>,
     headers: HeaderMap,
     Path(provider): Path<String>,
 ) -> WebResult<Response> {
-    forbid_via_api_key(&api_key_caller)?;
     let provider = find_provider(&state.login_methods(), &provider)?;
     let session = session_claims(&state.jwt_secret, &headers)
         .filter(|claims| claims.id == user.id)
@@ -332,10 +329,8 @@ pub async fn delete_provider_identity(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Extension(api_key_caller): Extension<MaybeApiKey>,
     Path(provider): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    forbid_via_api_key(&api_key_caller)?;
     let provider = find_provider(&state.login_methods(), &provider)?;
     let identities = gradient_db::user_identities::of_user(&state.web_db, user.id).await?;
     if !identities.iter().any(|i| i.issuer == provider.issuer()) {

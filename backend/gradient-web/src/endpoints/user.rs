@@ -6,9 +6,7 @@
 
 use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
 use crate::audit::Audit;
-use crate::authorization::{
-    MaybeApiKey, can_disconnect, generate_api_key, hash_api_key, session_claims,
-};
+use crate::authorization::{can_disconnect, generate_api_key, hash_api_key, session_claims};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::json_body::JsonBody;
@@ -53,8 +51,6 @@ enum UserRefusal {
     UsernameConfirmationMismatch,
     #[error("Unknown project or not a member: '{project}'.")]
     UnknownProjectOrNotMember { project: String },
-    #[error("API keys cannot manage API keys. Use a session token.")]
-    ApiKeyCannotManageApiKeys,
     #[error("API key cannot pin to both a project and a cache.")]
     PinToProjectAndCache,
     #[error("At least one permission is required for an API key.")]
@@ -76,7 +72,6 @@ impl Refusal for UserRefusal {
             | Self::PasswordConfirmationInvalid
             | Self::UsernameConfirmationRequired
             | Self::UsernameConfirmationMismatch
-            | Self::ApiKeyCannotManageApiKeys
             | Self::GrantUnheldCachePermissions
             | Self::ModifyOidcUserProfile => RefusalStatus::Forbidden,
             Self::UnknownProjectOrNotMember { .. }
@@ -508,13 +503,6 @@ async fn resolve_project_pin(
     Ok(Some(project.id))
 }
 
-pub(crate) fn forbid_via_api_key(api_key: &MaybeApiKey) -> WebResult<()> {
-    if api_key.as_ref().is_some() {
-        return Err(UserRefusal::ApiKeyCannotManageApiKeys.into());
-    }
-    Ok(())
-}
-
 struct PinNames {
     projects: HashMap<ProjectId, String>,
     caches: HashMap<CacheId, String>,
@@ -631,12 +619,9 @@ pub async fn post_keys(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Extension(api_key_caller): Extension<MaybeApiKey>,
     Json(body): Json<CreateApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let db = state.db();
-    forbid_via_api_key(&api_key_caller)?;
-
     if body.cache.is_some() && body.project.is_some() {
         return Err(UserRefusal::PinToProjectAndCache.into());
     }
@@ -716,13 +701,10 @@ pub async fn patch_key(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Extension(api_key_caller): Extension<MaybeApiKey>,
     Path(api_id): Path<ApiId>,
     Json(body): Json<PatchApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<ApiKeyInfo>>> {
     let db = state.db();
-    forbid_via_api_key(&api_key_caller)?;
-
     let api_key = require::<EApi>(&state.web_db, api_id).await?;
     if api_key.owned_by != user.id {
         return Err(WebError::not_found(Resource::ApiKey));
@@ -797,10 +779,8 @@ pub async fn delete_keys(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Extension(api_key_caller): Extension<MaybeApiKey>,
     Json(body): Json<ApiKeyRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    forbid_via_api_key(&api_key_caller)?;
     let api_key = gradient_db::api_keys::by_owner_and_name(&state.web_db, user.id, &body.name)
         .await?
         .or_not_found(Resource::ApiKey)?;
@@ -842,10 +822,8 @@ pub async fn post_key_revoke(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
-    Extension(api_key_caller): Extension<MaybeApiKey>,
     Path(api_id): Path<ApiId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    forbid_via_api_key(&api_key_caller)?;
     let api_key = require::<EApi>(&state.web_db, api_id).await?;
 
     if api_key.owned_by != user.id {
