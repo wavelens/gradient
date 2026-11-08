@@ -38,8 +38,11 @@
 
 .stat-content {
   flex: 1;
+  min-width: 0;
+  container-type: inline-size;
 }
 
+// The value and its unit stay on one line. The text can shrink to match the width of a narrow card.
 .stat-value {
   font-family: $font-family-mono;
   font-variant-numeric: tabular-nums;
@@ -47,8 +50,10 @@
   color: var(--gr-text-primary);
   line-height: $line-height-tight;
   margin-bottom: $spacing-xs;
-  font-size: $font-size-xxl;
-  overflow-wrap: anywhere;
+  font-size: min($font-size-xxl, 19cqi);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stat-label {
@@ -59,10 +64,8 @@
 @mixin compact {
   padding: $spacing-md;
 
-  .stat-content { min-width: 0; }
-
   .stat-value {
-    font-size: $font-size-xl;
+    font-size: min($font-size-xl, 19cqi);
   }
 }
 
