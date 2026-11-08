@@ -90,4 +90,11 @@ describe('ClosureGraphComponent - diagram', () => {
     expect(root.querySelector('.header-meta')?.textContent).toContain('1 package in closure');
     fixture.destroy();
   });
+
+  it('explains an empty closure instead of drawing an empty canvas', () => {
+    const root = setup('build').fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('svg.sankey-svg')).toBeNull();
+    expect(root.querySelector('gr-empty-state')?.textContent).toContain('No outputs to measure');
+    expect(root.textContent).not.toContain('0 packages in closure');
+  });
 });

@@ -23,46 +23,59 @@
         </a>
         <div class="header-info">
           <gr-breadcrumb [trail]="breadcrumb()" />
-          <div class="header-title">
-            <h1 class="header-name">{{ rootName() }}</h1>
-            <gr-badge severity="info">{{ typeLabel() }}</gr-badge>
-            <gr-badge>{{ totalLabel() }}</gr-badge>
-          </div>
-          <div class="header-meta">
-            <span>{{ plural(nodeCount(), 'package') }} in closure</span>
-            @if (truncated()) {
-              <span class="sep">·</span>
-              <span class="warn">large closure - node list truncated</span>
-            }
-            @if (hovered(); as h) {
-              <span class="sep">·</span>
-              <span>{{ h.name }} contributes to {{ plural(h.consumers, 'package') }}</span>
-            }
-          </div>
+          @if (nodeCount() > 0) {
+            <div class="header-title">
+              <h1 class="header-name">{{ rootName() }}</h1>
+              <gr-badge severity="info">{{ typeLabel() }}</gr-badge>
+              <gr-badge>{{ totalLabel() }}</gr-badge>
+            </div>
+            <div class="header-meta">
+              <span>{{ plural(nodeCount(), 'package') }} in closure</span>
+              @if (truncated()) {
+                <span class="sep">·</span>
+                <span class="warn">large closure - node list truncated</span>
+              }
+              @if (hovered(); as h) {
+                <span class="sep">·</span>
+                <span>{{ h.name }} contributes to {{ plural(h.consumers, 'package') }}</span>
+              }
+            </div>
+          } @else {
+            <div class="header-title">
+              <h1 class="header-name">{{ typeLabel() }}</h1>
+            </div>
+          }
         </div>
       </div>
 
-      <div class="header-controls">
-        <button class="ctrl-btn" (click)="zoomIn()" title="Zoom in">
-          <gr-icon name="add" size="sm" />
-        </button>
-        <button class="ctrl-btn" (click)="zoomOut()" title="Zoom out">
-          <gr-icon name="remove" size="sm" />
-        </button>
-        <button class="ctrl-btn" (click)="fitToScreen()" title="Fit to screen">
-          <gr-icon name="fit_screen" size="sm" />
-        </button>
-      </div>
+      @if (nodeCount() > 0) {
+        <div class="header-controls">
+          <button class="ctrl-btn" (click)="zoomIn()" title="Zoom in">
+            <gr-icon name="add" size="sm" />
+          </button>
+          <button class="ctrl-btn" (click)="zoomOut()" title="Zoom out">
+            <gr-icon name="remove" size="sm" />
+          </button>
+          <button class="ctrl-btn" (click)="fitToScreen()" title="Fit to screen">
+            <gr-icon name="fit_screen" size="sm" />
+          </button>
+        </div>
+      }
     </div>
 
-    <svg #svgEl class="sankey-svg"
-      (wheel)="onWheel($event)"
-      (mousedown)="onSvgMousedown($event)"
-      (mousemove)="onMousemove($event)"
-      (mouseup)="onMouseup()"
-      (mouseleave)="onMouseup()"
-    >
-      <g #graphEl [attr.transform]="transform()"></g>
-    </svg>
+    @if (nodeCount() > 0) {
+      <svg #svgEl class="sankey-svg"
+        (wheel)="onWheel($event)"
+        (mousedown)="onSvgMousedown($event)"
+        (mousemove)="onMousemove($event)"
+        (mouseup)="onMouseup()"
+        (mouseleave)="onMouseup()"
+      >
+        <g #graphEl [attr.transform]="transform()"></g>
+      </svg>
+    } @else {
+      <gr-empty-state icon="inventory_2" title="No outputs to measure"
+        message="Closures list the packages that build outputs depend on. Failed, aborted, and skipped builds produce no outputs, so their closures are empty." />
+    }
   }
 </div>

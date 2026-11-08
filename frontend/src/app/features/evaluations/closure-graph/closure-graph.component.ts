@@ -18,6 +18,7 @@ import {
   BadgeComponent,
   BreadcrumbComponent,
   ButtonComponent,
+  EmptyStateComponent,
   IconComponent,
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
@@ -43,7 +44,7 @@ type LaidLink = { source: LaidNode; target: LaidNode; width?: number; value: num
 @Component({
   selector: 'app-closure-graph',
   standalone: true,
-  imports: [CommonModule, RouterLink, ButtonComponent, LoadingSpinnerComponent, IconComponent, BadgeComponent, BreadcrumbComponent],
+  imports: [CommonModule, RouterLink, ButtonComponent, EmptyStateComponent, LoadingSpinnerComponent, IconComponent, BadgeComponent, BreadcrumbComponent],
   templateUrl: './closure-graph.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './closure-graph.component.scss',
