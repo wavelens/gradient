@@ -11,6 +11,8 @@ import { ApiError } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 import { links } from '@shared/routing';
 
+const entityLookupNotFoundOrForbiddenStatusCodes = new Set([400, 403, 404]);
+
 export type DeniedKind = 'project' | 'task' | 'cache' | 'team' | 'evaluation' | 'build' | 'execJob' | 'job' | 'clusterJob' | 'worker';
 
 export interface DeniedTarget {
@@ -33,7 +35,7 @@ export function denyOnRefusal<T>(target: DeniedTarget, from: string): OperatorFu
   const router = inject(Router);
   const auth = inject(AuthService);
   return catchError((error: unknown): Observable<RedirectCommand> => {
-    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+    if (error instanceof ApiError && entityLookupNotFoundOrForbiddenStatusCodes.has(error.status)) {
       return auth.initialized$.pipe(
         map(() => (auth.isAuthenticated() ? deniedPage(router, target, from) : new RedirectCommand(links.login(from)))),
       );
