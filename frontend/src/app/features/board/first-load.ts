@@ -28,6 +28,7 @@ export function firstLoad(): FirstLoad {
   let pending = 0;
   let reporting = true;
   let hasReceivedDataInCurrentLoadRound = false;
+  let hasTrackedRequestFailedInCurrentLoadRound = false;
 
   return {
     loading: loading.asReadonly(),
@@ -52,15 +53,17 @@ export function firstLoad(): FirstLoad {
           tap(() => {
             hasReceivedDataInCurrentLoadRound = true;
             if (!loading()) received.set(true);
-            if (!reporting) error.set(null);
           }),
           catchError((failure: unknown) => {
+            hasTrackedRequestFailedInCurrentLoadRound = true;
             if (reporting) error.set(failure);
             return EMPTY;
           }),
           finalize(() => {
             pending -= 1;
             if (pending === 0) {
+              if (!reporting && !hasTrackedRequestFailedInCurrentLoadRound) error.set(null);
+              hasTrackedRequestFailedInCurrentLoadRound = false;
               received.set(hasReceivedDataInCurrentLoadRound);
               loading.set(false);
               reporting = false;

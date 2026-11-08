@@ -61,15 +61,27 @@ describe('firstLoad', () => {
     expect((load.error() as Error).message).toBe('down');
   });
 
-  it('ignores a failed poll once the page is on screen, and a later answer clears an old failure', () => {
+  it('ignores a failed poll once the page is on screen, and a later poll that fully answers clears an old failure', () => {
     const load = firstLoad();
     throwError(() => new Error('down')).pipe(load.track()).subscribe();
     const poll = new Subject<number>();
     poll.pipe(load.track()).subscribe();
     poll.next(1);
+    poll.complete();
     expect(load.error()).toBeNull();
     throwError(() => new Error('again')).pipe(load.track()).subscribe();
     expect(load.error()).toBeNull();
+  });
+
+  it('keeps the failure when one request of a poll answers and another fails again', () => {
+    const load = firstLoad();
+    throwError(() => new Error('workers down')).pipe(load.track()).subscribe();
+    const pending = new Subject<number>();
+    pending.pipe(load.track()).subscribe();
+    throwError(() => new Error('workers down')).pipe(load.track()).subscribe();
+    pending.next(1);
+    pending.complete();
+    expect((load.error() as Error).message).toBe('workers down');
   });
 
   it('reports a failed reload the user asked for, without a spinner', () => {
