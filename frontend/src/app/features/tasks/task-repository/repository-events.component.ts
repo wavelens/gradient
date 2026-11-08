@@ -22,6 +22,8 @@ import { GitHostType, RepositoryIntegration, TaskRepositoryResponse, UpdateTaskR
 import { TasksService } from '@core/services/tasks.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { NotifyService } from '@core/services/notify.service';
+import { ConfigService } from '@core/services/config.service';
+import { AuthService } from '@core/services/auth.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { IncomingDeliveriesComponent, SELF_HOSTED_GIT_HOSTS, deliverySummary, gitHostSettingsLinks, guessGitHost, repositoryHost, webhookEvents } from '@shared/git';
 import { relativeTime, slugify } from '@shared/text';
@@ -93,6 +95,8 @@ export class RepositoryEventsComponent {
   private tasks = inject(TasksService);
   private integrationsService = inject(IntegrationsService);
   private notify = inject(NotifyService);
+  private config = inject(ConfigService);
+  private auth = inject(AuthService);
 
   project = input.required<string>();
   task = input.required<string>();
@@ -118,6 +122,10 @@ export class RepositoryEventsComponent {
 
   host = computed(() => repositoryHost(this.state().repository));
   isGitHub = computed(() => this.host() === 'github.com');
+  githubRepositoryConnectionNextStep = computed(() => {
+    if (this.config.githubAppEnabled) return 'integrations';
+    return this.auth.user()?.superuser ? 'admin' : 'ask';
+  });
   inboundOptions = computed(() => this.optionsOf('inbound'));
   outboundOptions = computed(() => this.optionsOf('outbound'));
   selectedInbound = computed(() => this.state().integrations.find((i) => i.id === this.form().inbound) ?? null);

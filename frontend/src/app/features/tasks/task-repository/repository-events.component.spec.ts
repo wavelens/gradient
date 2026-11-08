@@ -12,6 +12,8 @@ import { RepositoryIntegration, TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { IntegrationsService } from '@core/services/integrations.service';
+import { ConfigService } from '@core/services/config.service';
+import { AuthService } from '@core/services/auth.service';
 import { RepositoryEventsComponent } from './repository-events.component';
 
 const inbound: RepositoryIntegration = {
@@ -45,7 +47,7 @@ function repo(overrides: Partial<TaskRepositoryResponse> = {}): TaskRepositoryRe
   };
 }
 
-function render(state: TaskRepositoryResponse, services: { tasks?: object; integrations?: object } = {}, managed = false) {
+function render(state: TaskRepositoryResponse, services: { tasks?: object; integrations?: object; githubApp?: boolean; superuser?: boolean } = {}, managed = false) {
   TestBed.configureTestingModule({
     imports: [RepositoryEventsComponent],
     providers: [
@@ -53,6 +55,8 @@ function render(state: TaskRepositoryResponse, services: { tasks?: object; integ
       { provide: ActivatedRoute, useValue: { parent: { data: of(taskAccessData({ managed, canEdit: !managed, canTrigger: !managed })) } } },
       { provide: TasksService, useValue: services.tasks ?? {} },
       { provide: IntegrationsService, useValue: services.integrations ?? { listIntegrationDeliveries: () => of([]) } },
+      { provide: ConfigService, useValue: { githubAppEnabled: services.githubApp ?? false } },
+      { provide: AuthService, useValue: { user: () => ({ superuser: services.superuser ?? false }) } },
     ],
   });
   const fixture = TestBed.createComponent(RepositoryEventsComponent);
@@ -67,6 +71,20 @@ describe('RepositoryEventsComponent', () => {
   it('offers to connect the host when no connection serves the repository', () => {
     const el = render(repo()).nativeElement as HTMLElement;
     expect(el.querySelector('[data-testid="connect-git-host"]')?.textContent).toContain('forgejo.example.com');
+  });
+
+  it('points a GitHub repository to the next step for the GitHub App', () => {
+    const github = repo({ repository: 'https://github.com/acme/app' });
+    const hint = (options: { githubApp?: boolean; superuser?: boolean }) => {
+      TestBed.resetTestingModule();
+      const el = render(github, options).nativeElement as HTMLElement;
+      return el.querySelector('[data-testid="github-hint"]');
+    };
+    expect(hint({ githubApp: true })?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/integrations');
+    expect(hint({ superuser: true })?.querySelector('a')?.getAttribute('href')).toBe('/admin/github-app');
+    const asked = hint({});
+    expect(asked?.querySelector('a')).toBeNull();
+    expect(asked?.textContent).toContain('Ask an instance admin');
   });
 
   it('tells members without integration rights whom to ask', () => {

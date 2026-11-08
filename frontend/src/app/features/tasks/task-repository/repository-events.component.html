@@ -12,7 +12,19 @@
   @if (!hasServingInbound()) {
     <p class="gr-form-aside">
       @if (isGitHub()) {
-        <span data-testid="github-hint">Connect GitHub repositories through a GitHub App.</span>
+        <span data-testid="github-hint">
+          @switch (githubRepositoryConnectionNextStep()) {
+            @case ('integrations') {
+              <a [routerLink]="links.projectPage(project(), 'integrations')">Install the GitHub App on the Integrations page</a> to connect GitHub repositories.
+            }
+            @case ('admin') {
+              <a [routerLink]="links.admin('github-app')">Set up the GitHub App for this instance</a> to connect GitHub repositories.
+            }
+            @default {
+              A GitHub repository needs a GitHub App, but this instance has no App configured. Ask an instance admin to set it up.
+            }
+          }
+        </span>
       } @else if (state().can_manage_integrations) {
         <button grButton severity="secondary" size="small" [label]="'Connect ' + (host() ?? 'Git host')" icon="hub" (click)="openConnect()" data-testid="connect-git-host"></button>
       } @else {
