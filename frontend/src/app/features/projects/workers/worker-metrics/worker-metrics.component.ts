@@ -18,7 +18,9 @@ import {
 } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { clockTime, formatMegabytes, formatPercent, formatQuantity, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { WorkerSamplePoint, WorkerConnectionEntry } from '@core/models';
+import { WorkerSamplePoint, WorkerConnectionEntry, WorkerMetricsResponse } from '@core/models';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
+import { tap } from 'rxjs';
 import { links } from '@shared/routing';
 
 @Component({
@@ -112,6 +114,12 @@ export class WorkerMetricsComponent implements OnInit {
   diskSeries = computed(() => [{ name: 'disk', data: this.samples().map((s) => s.disk_speed_mbps ?? 0) }]);
   loadSeries = computed(() => [{ name: 'assigned', data: this.samples().map((s) => s.assigned_jobs) }]);
 
+  constructor() {
+    runReloadIntervalWhileTabVisible(() =>
+      this.workers.getWorkerMetrics(this.project, this.workerId).pipe(
+        tap((stats) => this.copyWorkerMetricsResponseToSignalsAndMarkLoaded(stats))));
+  }
+
   ngOnInit(): void {
     this.project = this.route.snapshot.paramMap.get('project') ?? '';
     this.workerId = this.route.snapshot.paramMap.get('workerId') ?? '';
@@ -123,11 +131,7 @@ export class WorkerMetricsComponent implements OnInit {
     this.loadError.set(null);
     this.workers.getWorkerMetrics(this.project, this.workerId).subscribe({
       next: (stats) => {
-        this.displayName.set(stats.display_name);
-        this.samples.set(stats.samples);
-        this.connections.set(stats.connections);
-        this.jobsAssigned.set(stats.jobs_dispatched);
-        this.loaded.set(true);
+        this.copyWorkerMetricsResponseToSignalsAndMarkLoaded(stats);
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -135,5 +139,14 @@ export class WorkerMetricsComponent implements OnInit {
         this.loading.set(false);
       },
     });
+  }
+
+  private copyWorkerMetricsResponseToSignalsAndMarkLoaded(stats: WorkerMetricsResponse): void {
+    this.displayName.set(stats.display_name);
+    this.samples.set(stats.samples);
+    this.connections.set(stats.connections);
+    this.jobsAssigned.set(stats.jobs_dispatched);
+    this.loaded.set(true);
+    this.loadError.set(null);
   }
 }

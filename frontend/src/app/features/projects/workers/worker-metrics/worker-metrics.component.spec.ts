@@ -92,4 +92,15 @@ describe('WorkerMetricsComponent', () => {
     expect(calls).toBe(2);
     expect(fixture.nativeElement.querySelector('gr-stat-card')).not.toBeNull();
   });
+
+  it('keeps the metrics live by reloading them while the page is open', () => {
+    vi.useFakeTimers();
+    let jobs = 4;
+    const fixture = setup('builder-1', () => of({ worker_id: WORKER_ID, display_name: 'builder-1', samples: [], connections: [], jobs_dispatched: jobs }));
+    fixture.detectChanges();
+    jobs = 5;
+    vi.advanceTimersByTime(15_000);
+    expect(fixture.componentInstance.jobsAssigned()).toBe(5);
+    vi.useRealTimers();
+  });
 });
