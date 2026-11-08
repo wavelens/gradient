@@ -21,7 +21,7 @@ import {
   IconComponent,
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
-import { formatBytes } from '@shared/text';
+import { formatBytes, plural } from '@shared/text';
 import { buildClosureSankey, contributesTo, SankeyNode, SankeyLink } from './closure-aggregate';
 import { ClosureGraph } from '@core/models';
 
@@ -78,6 +78,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   closureType = 'runtime';
   typeLabel = signal('');
   hovered = signal<{ name: string; consumers: number } | null>(null);
+  protected readonly plural = plural;
 
   private graph: ClosureGraph | null = null;
   private nodeEls = new Map<string, SVGElement[]>();
@@ -147,7 +148,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
             .nodePadding(NODE_PADDING)
             .nodeAlign(sankeyJustify)
             .extent([[1, 6], [width - 1, height - 6]])({
-            nodes: model.nodes.map((n) => ({ ...n })),
+            nodes: model.nodes.map((n) => ({ ...n, fixedValue: Math.max(1, n.subtreeSizeBytes) })),
             links: model.links.map((l) => ({ ...l, value: Math.max(1, l.value) })),
           });
 
@@ -222,7 +223,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       text.setAttribute('text-anchor', leftHalf ? 'start' : 'end');
       text.style.setProperty('fill', 'var(--gr-text-primary)');
       text.setAttribute('font-size', '11');
-      text.textContent = `${this.shortName(n.name)} · ${formatBytes(n.value)}`;
+      text.textContent = `${this.shortName(n.name)} · ${formatBytes(n.subtreeSizeBytes)}`;
       nodeLayer.appendChild(text);
       this.nodeEls.get(n.id)!.push(text);
     }
@@ -255,8 +256,8 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   }
 
   private nodeTooltip(n: SankeyNode): string {
-    if (n.bucketedCount) return `${n.name}\nclosure ${formatBytes(n.value)}`;
-    return `${n.name}\nclosure ${formatBytes(n.value)} · own ${formatBytes(n.ownSize)}`;
+    if (n.bucketedCount) return `${n.name}\nclosure ${formatBytes(n.subtreeSizeBytes)}`;
+    return `${n.name}\nclosure ${formatBytes(n.subtreeSizeBytes)} · own ${formatBytes(n.ownSize)}`;
   }
 
   private titleEl(text: string): SVGTitleElement {

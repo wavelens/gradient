@@ -10,23 +10,24 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { of } from 'rxjs';
 import { ClosureGraphComponent } from './closure-graph.component';
 import { EvaluationsService } from '@core/services/evaluations.service';
+import { ClosureGraph } from '@core/models';
 
-const emptyGraph = {
+const emptyGraph: ClosureGraph = {
   roots: [], total_size_bytes: 0, node_count: 0, edge_count: 0,
   truncated: false, nodes: [], edges: [],
 };
 
-function service() {
+function service(graph: ClosureGraph) {
   return {
-    getBuildClosure: vi.fn(() => of(emptyGraph)),
-    getEvalClosure: vi.fn(() => of(emptyGraph)),
-    getBuildRuntimeClosure: vi.fn(() => of(emptyGraph)),
-    getEvalRuntimeClosure: vi.fn(() => of(emptyGraph)),
+    getBuildClosure: vi.fn(() => of(graph)),
+    getEvalClosure: vi.fn(() => of(graph)),
+    getBuildRuntimeClosure: vi.fn(() => of(graph)),
+    getEvalRuntimeClosure: vi.fn(() => of(graph)),
   };
 }
 
-function setup(kind: string, type?: string) {
-  const svc = service();
+function setup(kind: string, type?: string, graph: ClosureGraph = emptyGraph) {
+  const svc = service(graph);
   const route = {
     snapshot: {
       paramMap: convertToParamMap({ project: 'acme', kind, id: 'x1' }),
@@ -45,7 +46,7 @@ function setup(kind: string, type?: string) {
   });
   const fixture = TestBed.createComponent(ClosureGraphComponent);
   fixture.detectChanges();
-  return svc;
+  return Object.assign(svc, { fixture });
 }
 
 describe('ClosureGraphComponent - view selection', () => {
@@ -64,5 +65,20 @@ describe('ClosureGraphComponent - view selection', () => {
   it('uses the eval runtime closure for the eval scope by default', () => {
     const svc = setup('eval');
     expect(svc.getEvalRuntimeClosure).toHaveBeenCalledWith('x1');
+  });
+});
+
+describe('ClosureGraphComponent - diagram', () => {
+  it('Draw the closure of one package at its own size and count it in singular form.', async () => {
+    const { fixture } = setup('build', undefined, {
+      ...emptyGraph, roots: ['ok'], total_size_bytes: 120, node_count: 1,
+      nodes: [{ id: 'ok', name: 'ok', path: '/nix/store/hash-ok', nar_size: 120 }],
+    });
+    const root = fixture.nativeElement as HTMLElement;
+
+    await vi.waitFor(() => expect(root.querySelector('svg text')?.textContent).toBe('ok · 120 B'), { timeout: 5000 });
+    expect(root.querySelector('svg rect')?.getAttribute('height')).not.toContain('NaN');
+    expect(root.querySelector('.header-meta')?.textContent).toContain('1 package in closure');
+    fixture.destroy();
   });
 });

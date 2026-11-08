@@ -34,10 +34,10 @@ describe('buildClosureSankey', () => {
     );
     const s = buildClosureSankey(g, 30);
     const byId = new Map(s.nodes.map((n) => [n.id, n]));
-    expect(byId.get('d')!.value).toBe(5);
-    expect(byId.get('b')!.value).toBe(55); // 50 + 5
-    expect(byId.get('c')!.value).toBe(10);
-    expect(byId.get('a')!.value).toBe(165); // 100 + 55 + 10 == total
+    expect(byId.get('d')!.subtreeSizeBytes).toBe(5);
+    expect(byId.get('b')!.subtreeSizeBytes).toBe(55); // 50 + 5
+    expect(byId.get('c')!.subtreeSizeBytes).toBe(10);
+    expect(byId.get('a')!.subtreeSizeBytes).toBe(165); // 100 + 55 + 10 == total
     expect(byId.get('a')!.ownSize).toBe(100);
   });
 
@@ -63,7 +63,7 @@ describe('buildClosureSankey', () => {
     const sLinks = s.links.filter((l) => l.source === 's');
     expect(sLinks.length).toBe(1);
     expect(sLinks[0].target).toBe('a');
-    expect(s.nodes.find((n) => n.id === 's')!.value).toBe(5);
+    expect(s.nodes.find((n) => n.id === 's')!.subtreeSizeBytes).toBe(5);
   });
 
   it('buckets dropped nodes into their nearest kept ancestor', () => {
@@ -78,11 +78,11 @@ describe('buildClosureSankey', () => {
     expect(ids).not.toContain('d');
 
     const othersA = s.nodes.find((n) => n.id === othersIdFor('a'))!;
-    expect(othersA.value).toBe(10); // c
+    expect(othersA.subtreeSizeBytes).toBe(10); // c
     expect(othersA.bucketedCount).toBe(1);
 
     const othersB = s.nodes.find((n) => n.id === othersIdFor('b'))!;
-    expect(othersB.value).toBe(5); // d
+    expect(othersB.subtreeSizeBytes).toBe(5); // d
     expect(othersB.bucketedCount).toBe(1);
 
     expect(s.links.find((l) => l.source === othersIdFor('a') && l.target === 'a')).toBeTruthy();
@@ -100,7 +100,7 @@ describe('buildClosureSankey', () => {
     // orphan o has no edge to the root (e.g. its consumer was truncated server-side).
     const g = graph([['a', 100], ['o', 7]], [], ['a']);
     const s = buildClosureSankey(g, 30);
-    expect(s.nodes.find((n) => n.id === 'o')!.value).toBe(7);
+    expect(s.nodes.find((n) => n.id === 'o')!.subtreeSizeBytes).toBe(7);
     expect(s.links.length).toBe(0);
   });
 });

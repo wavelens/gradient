@@ -15,7 +15,7 @@ export type SankeyNode = {
   id: string;
   name: string;
   /** Accumulated closure size of the node's subtree, in bytes. */
-  value: number;
+  subtreeSizeBytes: number;
   /** The node's own NAR size, in bytes. */
   ownSize: number;
   /** For bucket nodes: how many packages were collapsed here. */
@@ -104,7 +104,7 @@ export function buildClosureSankey(graph: ClosureGraph, topN: number): ClosureSa
   const links: SankeyLink[] = [];
 
   for (const id of kept) {
-    nodes.push({ id, name: name.get(id) ?? id, value: value.get(id)!, ownSize: own.get(id) ?? 0 });
+    nodes.push({ id, name: name.get(id) ?? id, subtreeSizeBytes: value.get(id)!, ownSize: own.get(id) ?? 0 });
     const p = parent.get(id);
     if (p !== undefined) links.push({ source: id, target: p, value: value.get(id)! });
 
@@ -120,7 +120,7 @@ export function buildClosureSankey(graph: ClosureGraph, topN: number): ClosureSa
       nodes.push({
         id: bucketId,
         name: `others (${bucketCount} packages)`,
-        value: bucketValue,
+        subtreeSizeBytes: bucketValue,
         ownSize: bucketValue,
         bucketedCount: bucketCount,
       });
