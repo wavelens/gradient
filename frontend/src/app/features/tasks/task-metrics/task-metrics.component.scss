@@ -8,20 +8,8 @@
 
 .charts-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: $spacing-lg;
-}
-
-.chart-header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: $spacing-sm;
-}
-
-.chart-sub {
-  font-size: $font-size-xs;
-  color: var(--gr-text-muted);
 }
 
 // One chart spanning the whole grid rather than sharing a row.
