@@ -149,9 +149,9 @@
           </div>
           @if (ev.status === 'Building' && (buildingCount() > 0 || queuedCount() > 0)) {
             <div class="info-metric">
-              <span class="metric-label">Queue</span>
+              <span class="metric-label">Build count</span>
               @if (buildingCount() > 0) {
-                <span class="metric-value">{{ buildingCount() }} building</span>
+                <span class="metric-value">{{ buildingCount() }} running</span>
               }
               @if (queuedCount() > 0) {
                 @if (buildingCount() > 0) {
@@ -164,9 +164,7 @@
           <div class="info-metric">
             <span class="metric-label">Triggered</span>
             <span class="metric-value">{{ ev.created_at | serverDate }}</span>
-          </div>
-          <div class="info-metric">
-            <span class="metric-label">Via</span>
+            <span class="metric-sep">via</span>
             <gr-badge>{{ getTriggerLabel(ev.trigger?.type ?? null) }}</gr-badge>
           </div>
           <div class="info-metric">
