@@ -995,7 +995,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'superuser');
     const labels = fixture.componentInstance.evalMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics', 'Prioritize', 'Full rewalk', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Prioritize', 'Full rewalk', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {
@@ -1019,7 +1019,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('hides the diagnostic report from anonymous visitors', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'anonymous');
     const labels = fixture.componentInstance.evalMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Metrics']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job']);
   });
 
   it('opens the dialog from the menu command', () => {

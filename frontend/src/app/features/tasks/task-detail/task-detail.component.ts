@@ -612,8 +612,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const job = links.boardJobOrCluster(selected?.dispatched_job, selected?.cluster_job);
     return [
       { label: 'Show job', icon: 'work', disabled: !job, routerLink: job },
-      { label: 'Metrics', icon: 'show_chart',
-        routerLink: links.taskPage(this.projectName, this.taskName, 'metrics') },
     ];
   });
 
