@@ -9,6 +9,7 @@ import { Router, RouterStateSnapshot, ActivatedRouteSnapshot, provideRouter } fr
 import { Subject, firstValueFrom, isObservable, of } from 'rxjs';
 import { publicListingGuard } from './public-listing.guard';
 import { AuthService } from '@core/services/auth.service';
+import { links } from '@shared/routing';
 import { ConfigService } from '@core/services/config.service';
 
 async function run(publicListing: boolean) {
@@ -22,11 +23,12 @@ async function run(publicListing: boolean) {
           initialized$: of(true),
           resolveSession: () => of(false),
           serverUnreachable: () => false,
+          getSignInPageUrl: (next: string) => links.login(next),
         },
       },
     ],
   });
-  const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+  const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
   const result = TestBed.runInInjectionContext(() =>
     publicListingGuard({} as ActivatedRouteSnapshot, { url: '/projects' } as RouterStateSnapshot)
   );
@@ -63,8 +65,6 @@ describe('publicListingGuard', () => {
   it('sends a logged-out visitor to login while public listing is off', async () => {
     const { allowed, navigate } = await run(false);
     expect(allowed).toBe(false);
-    expect(navigate).toHaveBeenCalledWith(['/account/login'], {
-      queryParams: { next: '/projects' },
-    });
+    expect(navigate).toHaveBeenCalledWith(links.login('/projects'));
   });
 });

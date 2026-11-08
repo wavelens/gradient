@@ -107,6 +107,16 @@ describe('AuthService session probe', () => {
     expect(navigate).toHaveBeenCalledWith(['/account/login'], { queryParams: { next: '/settings/keys' } });
   });
 
+  it('marks the sign-in link as expired only when the server rejected a token on page load', () => {
+    const signInFor = (status: number) => {
+      TestBed.resetTestingModule();
+      boot(() => httpMock.expectOne(userUrl).flush({ error: true, message: 'no' }, { status, statusText: 'No' }));
+      return TestBed.inject(Router).serializeUrl(service.getSignInPageUrl('/teams'));
+    };
+    expect(signInFor(401)).toBe('/account/login?next=%2Fteams&reason=expired');
+    expect(signInFor(403)).toBe('/account/login?next=%2Fteams');
+  });
+
   it('redirects once while the sign-in page is already on its way', () => {
     boot(() => httpMock.expectOne(userUrl).flush({ error: false, message: user }));
     const router = TestBed.inject(Router);

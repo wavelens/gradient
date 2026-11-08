@@ -5,16 +5,18 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { Router, RouterStateSnapshot, ActivatedRouteSnapshot } from '@angular/router';
+import { Router, RouterStateSnapshot, ActivatedRouteSnapshot, UrlTree } from '@angular/router';
 import { provideRouter } from '@angular/router';
 import { Observable, firstValueFrom, isObservable, of } from 'rxjs';
 import { authGuard, redirectSignedInUserToDashboardGuard } from './auth.guard';
 import { AuthService } from '@core/services/auth.service';
+import { links } from '@shared/routing';
 
 interface StubAuth {
   initialized$: Observable<boolean>;
   resolveSession: () => Observable<boolean>;
   serverUnreachable: () => boolean;
+  getSignInPageUrl?: (next: string) => UrlTree;
 }
 
 async function run(auth: StubAuth) {
@@ -22,7 +24,7 @@ async function run(auth: StubAuth) {
     providers: [provideRouter([]), { provide: AuthService, useValue: auth }],
   });
   const router = TestBed.inject(Router);
-  const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+  const navigate = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
   const result = TestBed.runInInjectionContext(() =>
     authGuard({} as ActivatedRouteSnapshot, { url: '/dashboard' } as RouterStateSnapshot)
   );
@@ -46,11 +48,10 @@ describe('authGuard', () => {
       initialized$: of(true),
       resolveSession: () => of(false),
       serverUnreachable: () => false,
+      getSignInPageUrl: (next) => links.login(next, 'expired'),
     });
     expect(allowed).toBe(false);
-    expect(navigate).toHaveBeenCalledWith(['/account/login'], {
-      queryParams: { next: '/dashboard' },
-    });
+    expect(navigate).toHaveBeenCalledWith(links.login('/dashboard', 'expired'));
   });
 
   // The outage page is already up: sending the caller to login instead would

@@ -17,6 +17,7 @@ import {
 import { Observable, firstValueFrom, isObservable, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
+import { links } from '@shared/routing';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -67,7 +68,7 @@ function configure(services: Record<string, unknown>, user: { superuser: boolean
       { provide: BoardService, useValue: fakes.board },
       {
         provide: AuthService,
-        useValue: { initialized$: of(true), resolveSession: () => of(!!user), serverUnreachable: () => false, user: () => user, isAuthenticated: () => !!user },
+        useValue: { initialized$: of(true), resolveSession: () => of(!!user), serverUnreachable: () => false, user: () => user, isAuthenticated: () => !!user, getSignInPageUrl: (next: string) => links.login(next) },
       },
     ],
   });

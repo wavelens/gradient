@@ -40,7 +40,7 @@ function origin(from: BuildOrigin): Query {
 // All navigation targets in the app originate in this file. The tests in links.spec.ts check each one against app.routes.ts.
 export const links = {
   dashboard: () => url([]),
-  login: (next?: string | null) => url(['account', 'login'], { next }),
+  login: (next?: string | null, reason?: 'expired') => url(['account', 'login'], { next, reason }),
   loginAfterRegister: (username: string) => url(['account', 'login'], { registered: username }),
   register: () => url(['account', 'register']),
 

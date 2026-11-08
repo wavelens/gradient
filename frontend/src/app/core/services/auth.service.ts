@@ -5,12 +5,13 @@
  */
 
 import { Injectable, signal, computed, inject } from '@angular/core';
-import { Router } from '@angular/router';
+import { Router, UrlTree } from '@angular/router';
 import { BehaviorSubject, Observable, filter, of, take } from 'rxjs';
 import { tap, switchMap, finalize, catchError, map, shareReplay } from 'rxjs/operators';
 import { ApiError, ApiService } from './api.service';
 import { MakeUserRequest, UserInfoResponse } from '@core/models';
 import { asSessionProbe } from '@core/interceptors/request-context';
+import { links } from '@shared/routing';
 
 const SIGNED_OUT_KEY = 'gradient-signed-out';
 
@@ -23,6 +24,7 @@ export class AuthService {
   private userSignal = signal<UserInfoResponse | null>(null);
   private tokenSignal = signal<string | null>(null);
   private loadingSignal = signal(false);
+  private tokenRejectedOnStartup = false;
 
   // Emits true once the initial auth check is done (regardless of outcome)
   private initializedSubject = new BehaviorSubject(false);
@@ -126,7 +128,12 @@ export class AuthService {
     return this.sessionCheck;
   }
 
+  getSignInPageUrl(next: string): UrlTree {
+    return links.login(next, this.tokenRejectedOnStartup ? 'expired' : undefined);
+  }
+
   private forget(): void {
+    this.tokenRejectedOnStartup = false;
     this.userSignal.set(null);
     this.tokenSignal.set(null);
   }
@@ -156,11 +163,13 @@ export class AuthService {
       tap((user) => {
         this.userSignal.set(user);
         this.unreachableSignal.set(false);
+        this.tokenRejectedOnStartup = false;
       }),
       map(() => true),
       catchError((error: unknown) => {
         const unreachable = error instanceof ApiError && error.unreachable;
         this.unreachableSignal.set(unreachable);
+        this.tokenRejectedOnStartup = error instanceof ApiError && error.status === 401;
         if (!unreachable) {
           this.userSignal.set(null);
           this.tokenSignal.set(null);

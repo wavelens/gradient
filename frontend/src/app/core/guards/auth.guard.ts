@@ -31,7 +31,7 @@ export const authGuard: CanActivateFn = (_route, state) => {
       if (authService.serverUnreachable()) {
         return false;
       }
-      router.navigate(['/account/login'], { queryParams: { next: state.url } });
+      router.navigateByUrl(authService.getSignInPageUrl(state.url));
       return false;
     })
   );
