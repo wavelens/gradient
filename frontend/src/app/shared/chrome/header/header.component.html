@@ -27,7 +27,7 @@
         <app-user-menu #userMenu />
       }
     } @else if (!authService.serverUnreachable()) {
-      <a [routerLink]="links.login(router.url.startsWith('/account/') ? null : router.url)" class="user-link">Login</a>
+      <a [routerLink]="links.login(router.url.startsWith('/account/') ? null : router.url)" class="user-link">Sign In</a>
       @if (!registrationDisabled) {
         <a [routerLink]="links.register()" class="user-link">Register</a>
       }
