@@ -64,7 +64,7 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   }
 
   &.queue {
-    color: var(--run);
+    color: var(--gr-status-info-text);
     border-color: color-mix(in srgb, var(--run) 32%, transparent);
   }
 }
