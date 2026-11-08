@@ -131,7 +131,7 @@ interface DecisionRow {
           @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
         </div>
         <gr-table class="jobs">
-          <thead><tr><th>Kind</th><th>Project / task</th><th>Derivation / Evaluation / Exec</th><th>Waiting for</th><th>Deps</th><th>Age</th></tr></thead>
+          <thead><tr><th>Kind</th><th>Project / task</th><th>Derivation / Evaluation / Exec</th><th>Waiting for</th><th>Age</th></tr></thead>
           <tbody>
             @for (row of pendingRows(); track pendingKey(row.job)) {
               @let p = row.job;
@@ -165,11 +165,10 @@ interface DecisionRow {
                     <span class="muted">Waiting</span>
                   }
                 </td>
-                <td>{{ p.dependency_count }}</td>
                 <td class="age" [title]="p.queued_at | serverDate: 'medium'">{{ relativeTime(p.queued_at) }}</td>
               </tr>
             } @empty {
-              <tr><td colspan="6" class="muted">No pending jobs.</td></tr>
+              <tr><td colspan="5" class="muted">No pending jobs.</td></tr>
             }
           </tbody>
         </gr-table>
