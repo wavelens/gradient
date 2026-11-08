@@ -135,6 +135,25 @@ describe('buildMetricChartOption presentation', () => {
     expect(right.max).toBeUndefined();
   });
 
+  it('ticks whole-number data in whole steps so rounded labels never repeat', () => {
+    const counts = buildMetricChartOption({ type: 'line', series: [{ name: 'deps', data: [0, 1, null] }], categories: cats }, THEME);
+    const fractions = buildMetricChartOption({ type: 'line', series: [{ name: 'cpu', data: [0.5, 1] }], categories: ['a', 'b'] }, THEME);
+    expect((counts.yAxis as any).minInterval).toBe(1);
+    expect((fractions.yAxis as any).minInterval).toBeUndefined();
+  });
+
+  it('decides whole steps per axis on a dual-axis chart', () => {
+    const opt = buildMetricChartOption({
+      type: 'line',
+      series: [{ name: 'speed', data: [0.4] }, { name: 'jobs', data: [2], axis: 'right' }],
+      categories: ['x'],
+      secondary: { title: 'jobs' },
+    }, THEME);
+    const [left, right] = opt.yAxis as any[];
+    expect(left.minInterval).toBeUndefined();
+    expect(right.minInterval).toBe(1);
+  });
+
   it('lets the value axis scale with the data by default', () => {
     const opt = buildMetricChartOption({ type: 'line', series: one, categories: cats }, THEME);
     expect((opt.yAxis as any).max).toBeUndefined();

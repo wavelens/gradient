@@ -62,6 +62,12 @@ const tooltipChrome = (t: ChartTheme) => ({
   },
 });
 
+const valuesOf = (s: MetricSeries) => (isXY(s.data) ? s.data.map((p) => p.y) : s.data) as (number | null)[];
+
+/// Whole-number data gets whole-number ticks; otherwise a formatter that rounds prints "0 B 0 B 1 B".
+const areAllSeriesValuesWholeNumbers = (series: MetricSeries[]) =>
+  series.every((s) => valuesOf(s).every((v) => v === null || Number.isInteger(v)));
+
 const axisLabel = (t: ChartTheme) => ({ color: t.text, fontSize: 12, fontFamily: t.mono });
 const axisLine = (t: ChartTheme) => ({ lineStyle: { color: t.border } });
 const AXIS_TICKS = 4;
@@ -109,6 +115,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
     name: (!cfg.compact && title) || undefined,
     min: (extent: { min: number }) => Math.min(0, extent.min),
     max,
+    ...(areAllSeriesValuesWholeNumbers(cfg.series.filter((s) => (s.axis === 'right') === opposite)) ? { minInterval: 1 } : {}),
     nameTextStyle: { color: theme.text },
     axisLabel: { ...axisLabel(theme), show: !cfg.compact, formatter: (v: number) => fmt(v) },
     axisLine: axisLine(theme),
@@ -129,7 +136,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
     yAxis: cfg.horizontal ? categoryAxis : values,
     ...(secondary ? { tooltip: dualAxisTooltip(cfg, format, secondaryFormat, theme) } : {}),
     series: cfg.series.map((s) => {
-      const data = (isXY(s.data) ? s.data.map((p) => p.y) : s.data) as (number | null)[];
+      const data = valuesOf(s);
       const kind = kindOf(s);
       const showSymbol = s.type === 'line' && data.includes(null);
       return {
@@ -187,7 +194,7 @@ function radarOption(cfg: MetricChartConfig, theme: ChartTheme): EChartsOption {
         type: 'radar',
         data: series.map((s) => ({
           name: s.name,
-          value: (isXY(s.data) ? s.data.map((p) => p.y) : s.data) as number[],
+          value: valuesOf(s) as number[],
           areaStyle: { opacity: 0.2 },
         })),
       },
