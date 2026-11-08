@@ -8,7 +8,7 @@
   <gr-page-layout
     [breadcrumb]="breadcrumb()"
     [title]="c.display_name"
-    [subtitle]="c.description || 'No description'"
+    [subtitle]="c.description"
   >
     @if (!c.active) {
       <gr-badge slot="meta" severity="danger">Inactive</gr-badge>

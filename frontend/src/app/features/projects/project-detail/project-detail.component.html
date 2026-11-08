@@ -5,7 +5,7 @@
 -->
 
 @if (project(); as project) {
-  <gr-page-layout [breadcrumb]="breadcrumb()" [title]="project.display_name" [subtitle]="project.description || 'No description'">
+  <gr-page-layout [breadcrumb]="breadcrumb()" [title]="project.display_name" [subtitle]="project.description">
   <div slot="actions">
     @if (canCreateTask() && tasks.items().length) {
       <a grButton label="Connect repository" icon="add" [routerLink]="links.projectPage(projectName, 'connect')"></a>
@@ -38,7 +38,7 @@
           <gr-nav-card
             icon="folder"
             [title]="task.display_name || task.name"
-            [description]="task.description || 'No description'"
+            [description]="task.description"
             [link]="links.task(projectName, task.name)"
           >
             <div slot="meta">

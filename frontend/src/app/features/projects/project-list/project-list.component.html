@@ -30,7 +30,7 @@
           <gr-nav-card
             icon="corporate_fare"
             [title]="project.display_name || project.name"
-            [description]="project.description || 'No description'"
+            [description]="project.description"
             [link]="links.project(project.name)"
           >
             <div slot="meta">
@@ -72,7 +72,7 @@
         <gr-nav-card
           icon="public"
           [title]="project.display_name || project.name"
-          [description]="project.description || 'No description'"
+          [description]="project.description"
           [link]="links.project(project.name)"
         >
           <gr-badge slot="meta" severity="info">Public</gr-badge>

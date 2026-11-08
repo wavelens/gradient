@@ -38,7 +38,7 @@
               <gr-nav-card
                 icon="storage"
                 [title]="cache.display_name"
-                [description]="cache.description || 'No description'"
+                [description]="cache.description"
                 [link]="links.cache(cache.name)"
               >
                 <div slot="meta">
@@ -61,7 +61,7 @@
                 muted
                 icon="cloud_off"
                 [title]="cache.display_name"
-                [description]="cache.description || 'No description'"
+                [description]="cache.description"
                 [link]="links.cache(cache.name)"
               >
                 <div slot="meta">
@@ -104,7 +104,9 @@
             </div>
             <div class="cache-content">
               <h3>{{ cache.display_name }}</h3>
-              <p class="text-secondary">{{ cache.description || 'No description' }}</p>
+              @if (cache.description) {
+                <p class="text-secondary">{{ cache.description }}</p>
+              }
               <div class="cache-meta">
                 <span class="meta-item">
                   <gr-icon name="sort" size="sm" />

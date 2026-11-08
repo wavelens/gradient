@@ -35,7 +35,9 @@
     [fixLink]="links.taskPage(projectName, taskName, 'repository')" />
 
   <div class="pad task-info">
-    <p class="desc">{{ proj.description || 'No description' }}</p>
+    @if (proj.description) {
+      <p class="desc">{{ proj.description }}</p>
+    }
     <div class="meta-chips">
       @let repo = splitRepository(proj.repository);
       @if (repositoryWebUrl(repo.cloneUrl); as repoUrl) {
