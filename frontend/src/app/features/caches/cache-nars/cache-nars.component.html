@@ -37,7 +37,7 @@
     errorTitle="Failed to load NARs"
     emptyIcon="inbox"
     emptyTitle="No NARs found"
-    emptyMessage="No archives match the current filters."
+    [emptyMessage]="hasSearchFilterFromUrl() ? 'No archives match the current filters.' : 'This cache has no archives yet.'"
     (retry)="refresh()"
   >
     <gr-table [attr.aria-busy]="loading() || null">

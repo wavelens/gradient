@@ -103,6 +103,16 @@ describe('CacheNarsComponent loading', () => {
     expect(root.querySelector('tbody')?.textContent).toContain('abc123');
   });
 
+  it('mentions filters in the empty state only when a search filter is set', () => {
+    const empty = { ...PAGE, items: [], total: 0 };
+    const { fixture, query, root } = render(() => of(empty));
+    expect(root.textContent).toContain('This cache has no archives yet.');
+    expect(root.textContent).not.toContain('current filters');
+    query.next(convertToParamMap({ package: 'hello' }));
+    fixture.detectChanges();
+    expect(root.textContent).toContain('No archives match the current filters.');
+  });
+
   it('drops the stat cards when the stats fail', () => {
     const { root } = render(() => of(PAGE), () => throwError(() => ({ status: 500 })));
     expect(root.querySelector('gr-stat-card')).toBeNull();

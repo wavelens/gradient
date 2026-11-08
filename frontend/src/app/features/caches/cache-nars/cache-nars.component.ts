@@ -71,6 +71,7 @@ export class CacheNarsComponent implements OnInit {
   breadcrumb = computed(() => this.crumbs.cache(this.cacheName, { label: 'NARs' }));
 
   search = signal('');
+  hasSearchFilterFromUrl = signal(false);
   private filter = computed(() => parseNarSearch(this.search()));
   sort = signal<SortKey>('created_at');
   order = signal<SortOrder>('desc');
@@ -95,7 +96,10 @@ export class CacheNarsComponent implements OnInit {
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
     this.route.queryParamMap.subscribe((q) => {
-      this.search.set(narSearchText({ hash: q.get('hash') ?? undefined, package: q.get('package') ?? undefined }));
+      const hash = q.get('hash') || undefined;
+      const pkg = q.get('package') || undefined;
+      this.search.set(narSearchText({ hash, package: pkg }));
+      this.hasSearchFilterFromUrl.set(!!(hash || pkg));
       this.sort.set((q.get('sort') as SortKey) ?? 'created_at');
       this.order.set((q.get('order') as SortOrder) ?? 'desc');
       const p = Number(q.get('page') ?? 1);
