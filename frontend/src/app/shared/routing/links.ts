@@ -108,5 +108,5 @@ export function buildOriginLink(project: string, from: BuildOrigin, build?: stri
 }
 
 export function readBuildOrigin(query: { get(name: string): string | null }): BuildOrigin {
-  return { task: query.get('task'), evaluation: query.get('eval') };
+  return { task: query.get('task'), evaluation: query.get('eval') ?? query.get('evalId') };
 }

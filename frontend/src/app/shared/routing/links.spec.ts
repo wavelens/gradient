@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Route, UrlTree } from '@angular/router';
+import { Route, UrlTree, convertToParamMap } from '@angular/router';
 import { routes } from '../../app.routes';
-import { buildOriginLink, links } from './links';
+import { buildOriginLink, links, readBuildOrigin } from './links';
 
 function matches(config: readonly Route[], segments: readonly string[]): boolean {
   return config.some((route) => {
@@ -98,5 +98,10 @@ describe('links', () => {
     expect(String(buildOriginLink('p', { task: 't', evaluation: 'e1' }, 'b1'))).toBe('/project/p/task/t?eval=e1');
     expect(String(buildOriginLink('p', { evaluation: 'e1' }, 'b1'))).toBe('/project/p/log/e1?build=b1');
     expect(String(buildOriginLink('p', {}))).toBe('/project/p');
+  });
+
+  it('Read evaluation from old `evalId` query parameter of bookmarked links', () => {
+    expect(readBuildOrigin(convertToParamMap({ evalId: 'e1' }))).toEqual({ task: null, evaluation: 'e1' });
+    expect(readBuildOrigin(convertToParamMap({ eval: 'e2', evalId: 'e1' })).evaluation).toBe('e2');
   });
 });
