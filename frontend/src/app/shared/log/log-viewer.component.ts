@@ -98,6 +98,7 @@ export class LogViewerComponent implements OnDestroy {
   private searchDebounceTimer?: ReturnType<typeof setTimeout>;
   private searchSeq = 0;
   private highlightedQuery = '';
+  private inFlightServerLogSearchRequest: { query: string; seq: number } | null = null;
   private readonly MIN_SEARCH_LEN = 3;
   private readonly SEARCH_DEBOUNCE_MS = 300;
   private readonly LINE_PX = 18;
@@ -334,11 +335,14 @@ export class LogViewerComponent implements OnDestroy {
   }
 
   async runSearch(): Promise<void> {
+    if (this.searchDebounceTimer !== undefined) clearTimeout(this.searchDebounceTimer);
+    this.searchDebounceTimer = undefined;
     const query = this.searchQuery().trim();
     if (query.length < this.MIN_SEARCH_LEN) {
       this.searchLoading.set(false);
       return;
     }
+    if (this.inFlightServerLogSearchRequest?.query === query && this.inFlightServerLogSearchRequest.seq === this.searchSeq) return;
     const seq = ++this.searchSeq;
     const server = this.server;
     this.setHighlightedQuery(query);
@@ -353,6 +357,7 @@ export class LogViewerComponent implements OnDestroy {
     this.currentHit.set(-1);
     this.searchLoading.set(true);
     const isStale = () => seq !== this.searchSeq;
+    this.inFlightServerLogSearchRequest = { query, seq };
     try {
       const total = await server.search(query, (hits) => this.searchHits.set(hits), isStale);
       if (isStale()) return;
@@ -360,6 +365,7 @@ export class LogViewerComponent implements OnDestroy {
     } catch {
       return;
     } finally {
+      if (this.inFlightServerLogSearchRequest?.seq === seq) this.inFlightServerLogSearchRequest = null;
       if (!isStale()) this.searchLoading.set(false);
     }
   }

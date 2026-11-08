@@ -213,6 +213,23 @@ describe('LogViewerComponent', () => {
       expect(viewer.highlightLine()).toBe(40);
     });
 
+    it('sends one search request when Enter follows the typing', async () => {
+      vi.useFakeTimers();
+      try {
+        const log = serverLog(5000, [hit(40)]);
+        const search = vi.spyOn(log, 'search');
+        const { fixture, viewer } = setup({ serverLog: log });
+        fixture.detectChanges();
+        viewer.onSearchInput({ target: { value: 'error' } } as unknown as Event);
+        void viewer.runSearch();
+        void viewer.runSearch();
+        await vi.advanceTimersByTimeAsync(400);
+        expect(search).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('waits for three characters before searching', async () => {
       vi.useFakeTimers();
       try {
