@@ -54,7 +54,7 @@ import { links } from '@shared/routing';
       } @else {
         <gr-card-grid min="160px">
           <gr-stat-card label="Samples" [value]="samples().length" />
-          <gr-stat-card label="Jobs assigned" [value]="jobsAssigned()" />
+          <gr-stat-card label="Jobs for this project" [value]="jobsAssigned()" />
           <gr-stat-card label="Sessions" [value]="connections().length" />
         </gr-card-grid>
 
