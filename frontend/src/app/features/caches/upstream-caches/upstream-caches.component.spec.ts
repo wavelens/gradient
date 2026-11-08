@@ -175,11 +175,12 @@ describe('UpstreamCachesComponent - access gating', () => {
     expect(findIconButton(fixture.nativeElement, 'delete')).toBeNull();
   });
 
-  it('shows but disables Add / Edit / Delete under state-managed access', () => {
+  it('shows but disables Add / Edit / Delete under state-managed access and says why', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const addBtn = findByText(fixture.nativeElement, 'add upstream cache') as HTMLButtonElement | null;
     const editBtn = findIconButton(fixture.nativeElement, 'edit');
     const delBtn = findIconButton(fixture.nativeElement, 'delete');
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')?.textContent).toContain('managed by the server configuration');
     expect(addBtn).not.toBeNull();
     expect(addBtn!.disabled).toBe(true);
     expect(editBtn).not.toBeNull();

@@ -5,6 +5,7 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
+  <app-server-configuration-managed-banner [access]="access()" kind="project" />
   @if (caches().length) {
     @if (canCreateCache()) {
       <app-create-cache-button slot="actions"

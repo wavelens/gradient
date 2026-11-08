@@ -5,6 +5,7 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Upstream Caches" subtitle="External and internal caches this cache pulls through from">
+  <app-server-configuration-managed-banner [access]="access()" kind="cache" />
   @if (upstreamCaches().length) {
     <button slot="actions"
         *appWritable="access()"

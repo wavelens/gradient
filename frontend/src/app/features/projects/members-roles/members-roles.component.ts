@@ -31,7 +31,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
-import { WritableDirective, ManagedDisableDirective, requestIfProjectMember } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import {
   accessTo,
@@ -69,7 +69,7 @@ interface RoleFormState {
     AutoCompleteComponent,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
+    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
     PageLayoutComponent,
     FormFieldComponent,
     SettingsSectionComponent,

@@ -5,6 +5,7 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Members & Roles">
+  <app-server-configuration-managed-banner [access]="access()" kind="cache" />
   <!-- Members -->
   <gr-settings-section title="Members" [card]="false">
     <button

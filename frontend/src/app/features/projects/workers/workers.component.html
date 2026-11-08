@@ -5,6 +5,7 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Workers" subtitle="Registered build workers for this project">
+  <app-server-configuration-managed-banner [access]="access()" kind="project" />
   <button slot="actions"
       *appWritable="access()"
       grButton

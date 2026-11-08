@@ -30,7 +30,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
-import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService } from '@shared/access';
 import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
 import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, ProtocolProbe } from '@core/models';
@@ -74,7 +74,7 @@ const hasError = (errors: UpstreamErrors): boolean => Object.values(errors).some
     InputDirective,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
+    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,

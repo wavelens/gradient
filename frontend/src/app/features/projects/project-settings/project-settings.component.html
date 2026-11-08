@@ -8,6 +8,7 @@
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!project()" loadingMessage="Loading project settings..."
                errorTitle="Failed to load project settings" (retry)="loadProject()">
 @if (project(); as project) {
+  <app-server-configuration-managed-banner [access]="access()" kind="project" />
   <gr-settings-section title="General">
     <gr-form-field label="Name" for="project-name">
       <input

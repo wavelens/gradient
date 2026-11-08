@@ -13,7 +13,7 @@ import { AuthService } from '@core/services/auth.service';
 import { injectTeam } from '@core/resolvers/team-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
 import { AccessState, TeamResponse, PatchTeamRequest } from '@core/models';
-import { ManagedDisableDirective, WritableDirective, canManageTeam } from '@shared/access';
+import { ManagedDisableDirective, ServerConfigurationManagedBannerComponent, WritableDirective, canManageTeam } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -47,7 +47,7 @@ interface SettingsForm {
   imports: [
     FormsModule,
     RouterModule,
-    ManagedDisableDirective,
+    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
     WritableDirective,
     ButtonComponent,
     CheckboxComponent,

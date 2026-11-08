@@ -31,7 +31,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
-import { WritableDirective, ManagedDisableDirective, requestIfCacheMember } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfCacheMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, finalize, merge, tap } from 'rxjs';
@@ -68,7 +68,7 @@ interface RoleFormState {
     AutoCompleteComponent,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
+    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
     PageLayoutComponent,
     FormFieldComponent,
     SettingsSectionComponent,

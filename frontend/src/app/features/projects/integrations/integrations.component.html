@@ -5,6 +5,7 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Integrations" subtitle="Git host webhooks and status reporters for this project">
+  <app-server-configuration-managed-banner [access]="access()" kind="project" />
   @if (integrations().length) {
     <button slot="actions"
         *appWritable="access()"

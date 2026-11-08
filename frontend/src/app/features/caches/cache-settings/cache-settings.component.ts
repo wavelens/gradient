@@ -27,7 +27,7 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { WritableDirective, ManagedDisableDirective, AccessService, isViewerCacheMember } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService, isViewerCacheMember } from '@shared/access';
 import { injectCacheAccess, injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { CacheResponse, CacheSubscribersResponse, PatchCacheRequest } from '@core/models';
@@ -81,7 +81,7 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
     InputDirective,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
+    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
     PageLayoutComponent,
     FormFieldComponent,
     SettingsSectionComponent,

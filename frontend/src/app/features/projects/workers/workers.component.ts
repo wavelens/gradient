@@ -56,7 +56,7 @@ import {
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, canOpenTeam, requestIfProjectMember } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canOpenTeam, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { fieldChecks } from '@shared/forms';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
@@ -76,7 +76,7 @@ import { links } from '@shared/routing';
     InputDirective,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
+    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
     IconComponent, MessageBannerComponent,
     PageLayoutComponent,
     FormFieldComponent,

@@ -39,7 +39,7 @@ import {
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, createMissingPermissionLoadStateError } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, createMissingPermissionLoadStateError } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { IncomingDeliveriesComponent, SELF_HOSTED_GIT_HOSTS, firstRepositoryHost, gitHostLabel, guessGitHost, webhookEvents } from '@shared/git';
 import { ServerTimestampToLocalDateTimePipe, slugify } from '@shared/text';
@@ -67,7 +67,7 @@ interface Option<T> {
     LoadStateComponent,
     LabelHelpComponent,
     WritableDirective,
-    ManagedDisableDirective,
+    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,

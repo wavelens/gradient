@@ -8,6 +8,7 @@
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!cache()" loadingMessage="Loading cache settings..."
                errorTitle="Failed to load cache settings" (retry)="loadCache()">
 @if (cache(); as c) {
+    <app-server-configuration-managed-banner [access]="access()" kind="cache" />
     <gr-settings-section title="General">
       <gr-form-field label="Name" for="cache-name">
         <input grInput id="cache-name" [value]="c.name" disabled />

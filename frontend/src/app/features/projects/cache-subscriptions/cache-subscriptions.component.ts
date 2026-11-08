@@ -30,7 +30,7 @@ import {
   TooltipDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, requestIfProjectMember } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { CreateCacheButtonComponent, CreateCacheDialogComponent, injectCanCreateCache } from '@shared/forms';
 import { accessTo, Cache, CacheSubscriptionItem } from '@core/models';
@@ -51,7 +51,7 @@ import { catchError, forkJoin, map, of } from 'rxjs';
     AutoCompleteComponent,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
+    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
     PageLayoutComponent,
     FormFieldComponent,
     EmptyStateComponent,

@@ -7,6 +7,7 @@
 export * from './access.service';
 export * from './writable.directive';
 export * from './managed-disable.directive';
+export * from './server-configuration-managed-banner.component';
 export * from './team-access';
 export * from './missing-permission';
 export * from './request-if-member';

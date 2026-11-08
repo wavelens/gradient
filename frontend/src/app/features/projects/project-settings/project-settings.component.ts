@@ -30,7 +30,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, accessDisabledReason, requestIfProjectMember } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, accessDisabledReason, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -60,7 +60,7 @@ interface ProjectForm {
     CheckboxComponent,
     LoadStateComponent,
     WritableDirective,
-    ManagedDisableDirective,
+    ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
     PageLayoutComponent,
     FormFieldComponent,
     SettingsSectionComponent,

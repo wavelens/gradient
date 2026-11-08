@@ -6,9 +6,7 @@
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Settings">
   @if (team(); as team) {
-    @if (team.managed) {
-      <gr-message-banner type="info">This team is managed by the server configuration and cannot be changed here.</gr-message-banner>
-    }
+    <app-server-configuration-managed-banner [access]="access()" kind="team" />
 
     <gr-settings-section title="General">
       <gr-form-field label="Display Name" for="team-display-name" [invalid]="!!displayNameError" [error]="displayNameError ?? ''">
