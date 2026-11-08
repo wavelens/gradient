@@ -35,6 +35,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { AccessService, WritableDirective } from '@shared/access';
 import { links } from '@shared/routing';
+import { formatDuration } from '@shared/text';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
   BuildProgress,
@@ -67,7 +68,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_SEVERITY } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_SEVERITY } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -1081,7 +1082,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private updateDuration(evaluation: EvaluationResponse): void {
-    this.duration.set(formatEvaluationDuration(evaluationDuration(evaluation, Date.now())));
+    this.duration.set(formatDuration(evaluationDuration(evaluation, Date.now())));
   }
 
   isRunningStatus(status: EvaluationStatus): boolean {
@@ -1240,17 +1241,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     if (build.status !== 'Completed' && build.status !== 'Building') return '';
     this.tick(); // reactive dependency - re-evaluated every second
     const ms = buildDuration(build, Date.now());
-    return ms == null ? '' : this.formatMs(ms);
-  }
-
-  private formatMs(ms: number): string {
-    const totalSecs = Math.floor(ms / 1000);
-    const h = Math.floor(totalSecs / 3600);
-    const m = Math.floor((totalSecs % 3600) / 60);
-    const s = totalSecs % 60;
-    return h > 0
-      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-      : `${m}:${String(s).padStart(2, '0')}`;
+    return ms == null ? '' : formatDuration(ms);
   }
 
   isRunning(): boolean {

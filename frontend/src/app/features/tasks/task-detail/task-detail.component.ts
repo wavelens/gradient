@@ -44,6 +44,7 @@ import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-a
 import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { links } from '@shared/routing';
+import { formatDuration } from '@shared/text';
 import {
   StarTarget,
   TaskDetailsResponse,
@@ -55,7 +56,7 @@ import {
   WalkMode,
   EvaluationStatus,
 } from '@core/models';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -534,12 +535,12 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   evalDuration(evaluation: EvaluationSummary): string {
-    return formatEvaluationDuration(evaluationDuration(evaluation, isRunningEvaluationStatus(evaluation.status) ? this.tick() : 0));
+    return formatDuration(evaluationDuration(evaluation, isRunningEvaluationStatus(evaluation.status) ? this.tick() : 0));
   }
 
   pkgDuration(ep: EntryPointSummary): string {
     const ms = buildDuration({ status: ep.build_status, ...ep }, ep.build_status === 'Building' ? this.tick() : 0);
-    return ms == null ? '' : formatEvaluationDuration(ms);
+    return ms == null ? '' : formatDuration(ms);
   }
 
   readonly commitLabel = commitLabel;

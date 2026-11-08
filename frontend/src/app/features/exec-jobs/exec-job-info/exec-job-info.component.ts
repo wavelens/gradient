@@ -7,7 +7,7 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { BadgeComponent, TableComponent } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
-import { formatEvaluationDuration } from '@shared/evaluation';
+import { formatDuration } from '@shared/text';
 import type { ExecJobResponse } from '@core/models';
 import { deviceLabel, execJobPhase, guestSizeLabel, unmetParts, waitingReasonText } from '../exec-job-status';
 
@@ -22,7 +22,7 @@ function field(label: string, values: (string | null | undefined)[], unset = 'No
 }
 
 function seconds(secs: number | null | undefined): string | null {
-  return secs == null ? null : formatEvaluationDuration(secs * 1000);
+  return secs == null ? null : formatDuration(secs * 1000);
 }
 
 function yesNo(value: boolean): string {

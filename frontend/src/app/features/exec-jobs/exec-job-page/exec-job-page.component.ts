@@ -30,8 +30,8 @@ import { JobTimelineComponent } from '@features/board/job-detail/job-timeline.co
 import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
 import { LogViewerComponent, parseLineFragment, splitLogLines } from '@shared/log';
 import { WritableDirective, AccessService } from '@shared/access';
-import { clockTime, monthDay } from '@shared/text';
-import { evaluationPhase, formatEvaluationDuration, parseUtcTimestamp, waitingAccessFrom } from '@shared/evaluation';
+import { clockTime, formatDuration, monthDay, serverTime } from '@shared/text';
+import { evaluationPhase, waitingAccessFrom } from '@shared/evaluation';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
@@ -165,9 +165,9 @@ export class ExecJobPageComponent implements OnInit {
   });
   duration = computed(() => {
     const job = this.job();
-    if (!job) return '';
-    const end = job.finished_at ? parseUtcTimestamp(job.finished_at) : this.now();
-    return formatEvaluationDuration(end - parseUtcTimestamp(job.started_at ?? job.created_at));
+    if (!job?.started_at) return formatDuration(null);
+    const end = job.finished_at ? serverTime(job.finished_at).getTime() : this.now();
+    return formatDuration(Math.max(0, end - serverTime(job.started_at).getTime()));
   });
 
   protected readonly phase = execJobPhase;

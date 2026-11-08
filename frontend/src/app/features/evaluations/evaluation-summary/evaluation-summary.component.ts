@@ -31,11 +31,10 @@ import {
   commitLabel,
   commitWebUrl,
   evaluationDuration,
-  formatEvaluationDuration,
   isRunningEvaluationStatus,
   repositoryWebUrl,
 } from '@shared/evaluation';
-import { serverTime } from '@shared/text';
+import { formatDuration, serverTime } from '@shared/text';
 import { EvalStatusBadgeComponent, StatusIconComponent } from '@shared/ui';
 import { blockedLine, failureKind, failureTitle, firstLine, headline } from './summary-text';
 
@@ -119,7 +118,7 @@ export class EvaluationSummaryComponent implements OnInit {
 
   duration = computed(() => {
     const evaluation = this.evaluation();
-    return evaluation ? formatEvaluationDuration(evaluationDuration(evaluation, Date.now())) : '';
+    return evaluation ? formatDuration(evaluationDuration(evaluation, Date.now())) : '';
   });
 
   protected readonly commitLabel = commitLabel;

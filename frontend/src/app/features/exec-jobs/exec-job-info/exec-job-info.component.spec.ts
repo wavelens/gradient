@@ -61,7 +61,7 @@ describe('ExecJobInfoComponent', () => {
       SSH: 'Yes',
       Ports: '6006, 8080',
       Image: 'Default',
-      Timeout: '1h 30m 0s',
+      Timeout: '1h 30m',
       'Time without output': 'Worker limit',
       Retries: '1',
     });

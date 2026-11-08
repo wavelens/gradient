@@ -65,6 +65,7 @@ flowchart LR
 - Fit the graph canvas to the content on load. Small graphs fill the view rather than a small patch in blank space. Set legend text to 14px and color swatches to 12px.
 - Mark the active tab of `gr-link-tabs` and every other tab row with a `--gr-accent` underline. Put badges on the name line of a row and separate the parts of the meta line with " · ". Don't nest a `gr-row-list` inside a card. Each row is already its own card, so set `[card]="false"` on the section around it.
 - Use `gr-link-tabs` for every tab row on a page, including the job board. Put a fade on an overflowing tab row only on the side where more tabs are hidden. Keep the active tab in view. Use `gr-row` on narrow screens to move labeled buttons and selects to a separate line below the name, so the name can keep full width. The info bar on the log page can wrap to multiple lines instead of a horizontal scroll. Stat cards align values to the top. Values on the same row line up even with a label on multiple lines.
+- Treat `duration` as runtime. Format `duration` with ``formatDuration()`` from ``@shared/text``. Measure an evaluation from the first fetch (``evaluationDuration()``). Measure a build from the start of an attempt (``buildDuration()``). Both are ``@shared/evaluation``. Never count queue time as duration. Display "-" for a job or evaluation that didn't start.
 
 ## Shared UI Package
 
