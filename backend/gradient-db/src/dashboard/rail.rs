@@ -11,7 +11,29 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr, QueryResult};
 
+const EVALUATION_STATUS_BY_SEVERITY: [EvaluationStatus; 9] = [
+    EvaluationStatus::Failed,
+    EvaluationStatus::Aborted,
+    EvaluationStatus::Building,
+    EvaluationStatus::EvaluatingDerivation,
+    EvaluationStatus::EvaluatingFlake,
+    EvaluationStatus::Fetching,
+    EvaluationStatus::Waiting,
+    EvaluationStatus::Queued,
+    EvaluationStatus::Completed,
+];
+
+fn severity_rank_sql(column: &str) -> String {
+    let ranks: String = EVALUATION_STATUS_BY_SEVERITY
+        .iter()
+        .enumerate()
+        .map(|(rank, status)| format!("WHEN {} THEN {rank} ", *status as i32))
+        .collect();
+    format!("CASE {column} {ranks}END")
+}
+
 fn rail_projects_sql() -> String {
+    let severity = severity_rank_sql("latest.status");
     format!(
         "WITH viewer AS (SELECT project FROM project_access WHERE \"user\" = $1 \
             UNION SELECT s.project FROM user_project_star s JOIN project sp ON sp.id = s.project \
@@ -22,8 +44,10 @@ fn rail_projects_sql() -> String {
             EXISTS (SELECT 1 FROM project_access ta WHERE ta.project = p.id AND ta.\"user\" = $1 AND ta.via_team) AS team, \
             (SELECT count(*) FROM evaluation e JOIN task t ON t.id = e.task LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
                 WHERE t.project = p.id AND {NON_PR} AND e.created_at > now() - interval '14 days')::bigint AS recent_14d, \
-            (SELECT e.status FROM evaluation e JOIN task t ON t.id = e.task LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
-                WHERE t.project = p.id AND {NON_PR} ORDER BY e.created_at DESC LIMIT 1) AS status, \
+            (SELECT latest.status FROM (SELECT DISTINCT ON (e.task) e.status FROM evaluation e \
+                JOIN task t ON t.id = e.task LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
+                WHERE t.project = p.id AND {NON_PR} ORDER BY e.task, e.created_at DESC) latest \
+                ORDER BY {severity} LIMIT 1) AS status, \
             (SELECT count(*) FROM task t WHERE t.project = p.id)::bigint AS task_count \
         FROM viewer v JOIN project p ON p.id = v.project ORDER BY p.name"
     )
@@ -159,4 +183,36 @@ pub async fn rail_caches<C: ConnectionTrait>(
         .iter()
         .map(rail_cache_row)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn severity_ranks_failed_first_and_completed_last() {
+        assert_eq!(
+            severity_rank_sql("s"),
+            "CASE s WHEN 6 THEN 0 WHEN 7 THEN 1 WHEN 3 THEN 2 WHEN 2 THEN 3 WHEN 1 THEN 4 \
+             WHEN 8 THEN 5 WHEN 4 THEN 6 WHEN 0 THEN 7 WHEN 5 THEN 8 END"
+        );
+    }
+
+    #[test]
+    fn severity_covers_every_status() {
+        use sea_orm::Iterable;
+        for status in EvaluationStatus::iter() {
+            assert!(
+                EVALUATION_STATUS_BY_SEVERITY.contains(&status),
+                "{status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn project_status_reads_the_latest_evaluation_of_each_task() {
+        let sql = rail_projects_sql();
+        assert!(sql.contains("DISTINCT ON (e.task)"), "{sql}");
+        assert!(sql.contains("ORDER BY e.task, e.created_at DESC"), "{sql}");
+    }
 }
