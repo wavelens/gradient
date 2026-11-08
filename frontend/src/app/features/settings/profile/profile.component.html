@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'Profile' }]" title="Profile Settings" subtitle="Manage your personal information">
+<gr-page-layout width="settings" [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'Profile' }]" title="Profile" subtitle="Manage your personal information">
   <app-settings-nav slot="banner" />
   @if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading profile..."
@@ -18,26 +18,29 @@
       <gr-message-banner type="success">{{ successMessage() }}</gr-message-banner>
     }
 
-    <!-- Profile Form -->
-    <gr-settings-section title="Personal Information">
-      @if (isManaged()) {
-        <gr-message-banner type="info">This account is managed declaratively and cannot be edited here.</gr-message-banner>
-      } @else if (isOidc()) {
-        <gr-message-banner type="info">Your profile is managed by your identity provider and cannot be edited here.</gr-message-banner>
-      }
-      <gr-form-field label="Username" for="username" [invalid]="!!fieldError('username')" [error]="fieldError('username') ?? ''">
-        <input grInput id="username" [(ngModel)]="formData.username" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
-      </gr-form-field>
+    @if (isProfileReadOnly()) {
+      <gr-settings-section
+        title="Personal Information"
+        [description]="isManaged() ? 'These details come from the declarative configuration of the server. Edit them there, not here.' : 'These details come from the identity provider. They\'re read-only here.'"
+      >
+        <gr-field-row label="Username" [value]="formData.username" />
+        <gr-field-row label="Full Name" [value]="formData.name" />
+        <gr-field-row label="Email" [value]="formData.email" />
+      </gr-settings-section>
+    } @else {
+      <gr-settings-section title="Personal Information">
+        <gr-form-field label="Username" for="username" [invalid]="!!fieldError('username')" [error]="fieldError('username') ?? ''">
+          <input grInput id="username" [(ngModel)]="formData.username" (keyup.enter)="saveSettings()" />
+        </gr-form-field>
 
-      <gr-form-field label="Full Name" for="name" [invalid]="!!fieldError('name')" [error]="fieldError('name') ?? ''">
-        <input grInput id="name" [(ngModel)]="formData.name" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
-      </gr-form-field>
+        <gr-form-field label="Full Name" for="name" [invalid]="!!fieldError('name')" [error]="fieldError('name') ?? ''">
+          <input grInput id="name" [(ngModel)]="formData.name" (keyup.enter)="saveSettings()" />
+        </gr-form-field>
 
-      <gr-form-field label="Email" for="email" [invalid]="!!fieldError('email')" [error]="fieldError('email') ?? ''">
-        <input grInput id="email" type="email" [(ngModel)]="formData.email" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
-      </gr-form-field>
+        <gr-form-field label="Email" for="email" [invalid]="!!fieldError('email')" [error]="fieldError('email') ?? ''">
+          <input grInput id="email" type="email" [(ngModel)]="formData.email" (keyup.enter)="saveSettings()" />
+        </gr-form-field>
 
-      @if (!access().managed) {
         <div class="gr-form-actions">
           <button
             grButton
@@ -51,8 +54,8 @@
             <small class="text-secondary save-hint">No changes to save.</small>
           }
         </div>
-      }
-    </gr-settings-section>
+      </gr-settings-section>
+    }
 
     <gr-settings-section title="Appearance" [card]="false">
       <gr-row-list>
@@ -115,7 +118,7 @@
       </gr-settings-section>
     }
 
-    @if (!access().managed) {
+    @if (!isProfileReadOnly()) {
       <gr-settings-section title="Danger Zone" danger>
         <gr-row>
           Delete Account

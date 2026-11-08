@@ -177,7 +177,9 @@ describe('ProfileComponent - access gating', () => {
     const fixture = setup({ managed, oidc });
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete account')).toBeNull();
-    expect(fixture.nativeElement.textContent).toContain('cannot be edited here');
+    expect(fixture.nativeElement.querySelector('input#username')).toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('gr-field-row').length).toBe(3);
+    expect(fixture.nativeElement.querySelector('gr-message-banner')).toBeNull();
   });
 
   it('sends one profile write for two Save Changes clicks', () => {

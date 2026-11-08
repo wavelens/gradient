@@ -17,6 +17,7 @@ import { environment } from '@environments/environment';
 import {
   ButtonComponent,
   DialogComponent,
+  FieldRowComponent,
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
@@ -28,10 +29,9 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { ManagedDisableDirective } from '@shared/access';
 import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
-import { AccessState, ConnectedLoginProvider, PatchUserSettingsRequest } from '@core/models';
+import { ConnectedLoginProvider, PatchUserSettingsRequest } from '@core/models';
 import { links } from '@shared/routing';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
@@ -79,8 +79,8 @@ const CONNECT_ERRORS: Record<string, string> = {
     ButtonComponent,
     InputDirective,
     LoadStateComponent,
-    ManagedDisableDirective,
     PageLayoutComponent,
+    FieldRowComponent,
     FormFieldComponent,
     SettingsSectionComponent,
     MessageBannerComponent,
@@ -116,14 +116,7 @@ export class ProfileComponent implements OnInit, CanComponentDeactivate {
   loginProviders = signal<ConnectedLoginProvider[]>([]);
   disconnecting = signal<string | null>(null);
 
-  /** OIDC and Nix-managed both freeze the profile fields; the user always
-   * retains the right to edit their own account in principle, so canEdit
-   * stays true and the banner / disable behavior comes from `managed`. */
-  access = computed<AccessState>(() => ({
-    managed: this.isManaged() || this.isOidc(),
-    canEdit: true,
-    canTrigger: true,
-  }));
+  isProfileReadOnly = computed(() => this.isManaged() || this.isOidc());
 
   showDeleteDialog = signal(false);
   savedUsername = signal('');
@@ -216,7 +209,7 @@ export class ProfileComponent implements OnInit, CanComponentDeactivate {
   }
 
   canSave(): boolean {
-    return !this.saving() && !this.access().managed && this.unsaved.changed() && FIELDS.every((field) => !this.fieldError(field));
+    return !this.saving() && !this.isProfileReadOnly() && this.unsaved.changed() && FIELDS.every((field) => !this.fieldError(field));
   }
 
   saveSettings(): void {
