@@ -11,7 +11,7 @@ import { EntryPointMetricsComponent } from './entry-point-metrics.component';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 
-const EMPTY_TITLE = 'No completed evaluations found for this entry point.';
+const EMPTY_TITLE = 'No completed or failed evaluations found for this entry point.';
 
 function render(getEntryPointMetrics: () => Observable<unknown>) {
   const metrics = vi.fn(getEntryPointMetrics);

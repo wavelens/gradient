@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" title="Task Metrics" [subtitle]="'Build and evaluation statistics over the last ' + (keepEvaluations()) + ' completed evaluations.'">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Task Metrics" [subtitle]="'Build and evaluation statistics for the last ' + (keepEvaluations()) + ' evaluations that completed or failed.'">
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"
@@ -12,7 +12,7 @@
     loadingMessage="Loading metrics..."
     errorTitle="Failed to load task metrics"
     emptyIcon="bar_chart"
-    emptyTitle="No completed evaluations yet."
+    emptyTitle="No completed or failed evaluations yet."
     (retry)="load()"
   >
     <div class="charts-grid">

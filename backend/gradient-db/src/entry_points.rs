@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::sea_query::extension::postgres::PgExpr;
 use sea_orm::sea_query::{Expr, Query};
@@ -87,16 +88,27 @@ pub async fn by_attribute<C: ConnectionTrait>(
         .await
 }
 
-pub async fn latest_of_attribute<C: ConnectionTrait>(
+fn self_finished_for_path(task: TaskId, attribute: &str) -> Select<EEntryPoint> {
+    let self_finished = Query::select()
+        .column(CEvaluation::Id)
+        .from(gradient_entity::evaluation::Entity)
+        .and_where(CEvaluation::Task.eq(task))
+        .and_where(CEvaluation::Status.is_in(EvaluationStatus::RUN_TIME_AVERAGE_STATUSES))
+        .to_owned();
+    EEntryPoint::find()
+        .filter(CEntryPoint::Task.eq(task))
+        .filter(CEntryPoint::Eval.eq(attribute))
+        .filter(CEntryPoint::Evaluation.in_subquery(self_finished))
+        .order_by_desc(CEntryPoint::CreatedAt)
+}
+
+pub async fn latest_self_finished_for_path<C: ConnectionTrait>(
     db: &C,
     task: TaskId,
     attribute: &str,
     limit: u64,
 ) -> Result<Vec<MEntryPoint>, DbErr> {
-    EEntryPoint::find()
-        .filter(CEntryPoint::Task.eq(task))
-        .filter(CEntryPoint::Eval.eq(attribute))
-        .order_by_desc(CEntryPoint::CreatedAt)
+    self_finished_for_path(task, attribute)
         .limit(limit)
         .all(db)
         .await
@@ -127,6 +139,14 @@ mod tests {
     fn a_search_term_narrows_entry_points_to_matching_attributes() {
         let sql = entry_point_sql(Some(" Hello "));
         assert!(str::contains(&sql, r#""eval" ILIKE '%Hello%'"#), "{sql}");
+    }
+
+    #[test]
+    fn metrics_read_entry_points_of_completed_and_failed_evaluations_only() {
+        let sql = self_finished_for_path(TaskId::now_v7(), "packages.hello")
+            .build(DatabaseBackend::Postgres)
+            .to_string();
+        assert!(str::contains(&sql, r#""status" IN (5, 6)"#), "{sql}");
     }
 
     #[test]

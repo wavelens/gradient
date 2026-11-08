@@ -29,13 +29,13 @@ function render(getTaskMetrics: () => Observable<unknown>) {
 
 describe('TaskMetricsComponent', () => {
   it('says so when no evaluation has completed yet', () => {
-    expect(render(() => of({ points: [], keep_evaluations: 30 })).root.textContent).toContain('No completed evaluations yet.');
+    expect(render(() => of({ points: [], keep_evaluations: 30 })).root.textContent).toContain('No completed or failed evaluations yet.');
   });
 
   it('shows a failed load as an error, never as "no completed evaluations"', () => {
     const { root } = render(() => throwError(() => new Error('database is down')));
     expect(root.textContent).toContain('Failed to load task metrics');
-    expect(root.textContent).not.toContain('No completed evaluations yet.');
+    expect(root.textContent).not.toContain('No completed or failed evaluations yet.');
   });
 
   it('loads the metrics again on Try Again', () => {
@@ -44,6 +44,6 @@ describe('TaskMetricsComponent', () => {
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     fixture.detectChanges();
     expect(metrics).toHaveBeenCalledTimes(2);
-    expect(root.textContent).toContain('No completed evaluations yet.');
+    expect(root.textContent).toContain('No completed or failed evaluations yet.');
   });
 });

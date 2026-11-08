@@ -48,7 +48,7 @@ pub struct TaskMetricsResponse {
     operation_id = "getTaskMetrics",
     tag = "tasks",
     summary = "Get task metrics",
-    description = "Returns per-evaluation metric points for the last `keep_evaluations` completed evaluations.",
+    description = "Return the metrics points for each evaluation in the latest `keep_evaluations` evaluations that completed or failed.",
     params(("project" = String, Path), ("task" = String, Path)),
     responses((status = OK, description = "Task metrics", body = TaskMetricsResponse), WebError)
 )]
@@ -73,7 +73,7 @@ pub async fn get_task_metrics(
         .await?
         .or_not_found(Resource::Task)?;
 
-    let evaluations = gradient_db::evaluations::latest_completed_of_task(
+    let evaluations = gradient_db::evaluations::latest_self_finished_evaluations_of_task(
         &state.web_db,
         task.id,
         task.keep_evaluations as u64,
@@ -214,7 +214,7 @@ pub struct EntryPointMetricsResponse {
     operation_id = "getEntryPointMetrics",
     tag = "tasks",
     summary = "Get entry point metrics",
-    description = "Returns per-evaluation build metrics for a single entry point identified by its\nNix attribute path (`eval`), covering the last `keep_evaluations` completed evaluations.\n\nThe `eval` value is the full Nix attribute path as stored in the database, which may\ncontain double-quoted segments for attribute names with special characters\n(e.g. `packages.\"x86_64-linux\".hello`). URL-encode `\"` as `%22` in query strings.",
+    description = "Returns per-evaluation build metrics for a single entry point identified by its\nNix attribute path (`eval`), for the most recent `keep_evaluations` completed or failed evaluations.\n\nThe `eval` value is the full Nix attribute path as stored in the database, which may\ncontain double-quoted segments for attribute names with special characters\n(e.g. `packages.\"x86_64-linux\".hello`). URL-encode `\"` as `%22` in query strings.",
     params(("project" = String, Path), ("task" = String, Path), EntryPointMetricsQuery),
     responses((status = OK, description = "Entry point metrics", body = EntryPointMetricsResponse), WebError)
 )]
@@ -240,7 +240,7 @@ pub async fn get_entry_point_metrics(
         .await?
         .or_not_found(Resource::Task)?;
 
-    let entry_points = gradient_db::entry_points::latest_of_attribute(
+    let entry_points = gradient_db::entry_points::latest_self_finished_for_path(
         &state.web_db,
         task.id,
         &params.eval,
@@ -409,7 +409,7 @@ mod tests {
     operation_id = "getTaskEvaluationMetrics",
     tag = "board",
     summary = "Per-evaluation task metrics",
-    description = "Per-evaluation series (build time, eval time, output/closure sizes, dependencies) for the task's recent completed evaluations.",
+    description = "A per-evaluation series for recent completed or failed evaluations of a task (build time, evaluation time, output/closure size, dependencies).",
     params(("project" = String, Path), ("task" = String, Path)),
     responses((status = OK, description = "Per-evaluation metric points", body = TaskMetricsResponse), WebError)
 )]

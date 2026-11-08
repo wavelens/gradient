@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" [title]="evalAttr()" [subtitle]="'Build history over the last ' + (keepEvaluations()) + ' completed evaluations.'">
+<gr-page-layout [breadcrumb]="breadcrumb()" [title]="evalAttr()" [subtitle]="'Build history for the last ' + (keepEvaluations()) + ' evaluations that completed or failed.'">
   @if (latestBuildId()) {
     <a slot="actions" grButton label="View Closure" icon="account_tree" severity="secondary"
       [routerLink]="links.closure(projectName, 'build', latestBuildId(), { task: taskName })"></a>
@@ -16,7 +16,7 @@
     loadingMessage="Loading metrics..."
     errorTitle="Failed to load metrics for entry points"
     emptyIcon="monitoring"
-    emptyTitle="No completed evaluations found for this entry point."
+    emptyTitle="No completed or failed evaluations found for this entry point."
     (retry)="load()"
   >
     <div class="summary-row">

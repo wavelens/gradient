@@ -102,6 +102,20 @@ pub async fn latest_completed_of_task<C: ConnectionTrait>(
         .await
 }
 
+pub async fn latest_self_finished_evaluations_of_task<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+    limit: u64,
+) -> Result<Vec<MEvaluation>, DbErr> {
+    EEvaluation::find()
+        .filter(CEvaluation::Task.eq(task))
+        .filter(CEvaluation::Status.is_in(EvaluationStatus::RUN_TIME_AVERAGE_STATUSES))
+        .order_by_desc(CEvaluation::CreatedAt)
+        .limit(limit)
+        .all(db)
+        .await
+}
+
 pub async fn with_ids<C: ConnectionTrait>(
     db: &C,
     ids: &[EvaluationId],
