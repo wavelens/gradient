@@ -75,6 +75,31 @@ describe('gr-tab-switch', () => {
     expect(tabs()[0].getAttribute('role')).toBe('tab');
   });
 
+  it('moves between tabs with the arrow, Home and End keys and keeps one tab stop', async () => {
+    const { fixture, root, tabs } = await render();
+    const press = async (key: string) => {
+      root().querySelector('[role=tablist]')!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      fixture.detectChanges();
+      await fixture.whenStable();
+    };
+    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, 0, -1]);
+
+    await press('ArrowRight');
+    expect(fixture.componentInstance.window()).toBe('days');
+    expect(document.activeElement).toBe(tabs()[2]);
+
+    await press('ArrowRight');
+    expect(fixture.componentInstance.window()).toBe('minutes');
+
+    await press('End');
+    expect(fixture.componentInstance.window()).toBe('days');
+    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, -1, 0]);
+
+    await press('Home');
+    await press('ArrowLeft');
+    expect(fixture.componentInstance.window()).toBe('days');
+  });
+
   it('honours a disabled state pushed in through the form API', async () => {
     const fixture = TestBed.createComponent(TabSwitchComponent);
     fixture.componentRef.setInput('options', [{ label: 'A', value: 'a' }]);

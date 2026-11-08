@@ -62,6 +62,22 @@ export class TabSwitchComponent implements ControlValueAccessor {
     return this.valueOf(option) === this.value();
   }
 
+  protected getFocusableTabIndex(): number {
+    return Math.max(0, this.options().findIndex((option) => this.isSelected(option)));
+  }
+
+  protected selectAndFocusTabOnTabListKeydown(event: KeyboardEvent): void {
+    const count = this.options().length;
+    const current = this.getFocusableTabIndex();
+    const target = { ArrowLeft: current - 1, ArrowRight: current + 1, Home: 0, End: count - 1 }[event.key];
+    if (target === undefined || count === 0 || this.isDisabled()) return;
+    event.preventDefault();
+    const next = (target + count) % count;
+    this.pick(this.options()[next]);
+    const tabs = (event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role=tab]');
+    tabs[next]?.focus();
+  }
+
   protected pick(option: unknown): void {
     const next = this.valueOf(option);
     this.value.set(next);

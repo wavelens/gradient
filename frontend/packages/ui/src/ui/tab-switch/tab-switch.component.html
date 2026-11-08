@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="tab-switch" role="tablist" [attr.aria-label]="ariaLabel() || null">
+<div class="tab-switch" role="tablist" [attr.aria-label]="ariaLabel() || null" (keydown)="selectAndFocusTabOnTabListKeydown($event)">
   @for (option of options(); track $index) {
     <button
       type="button"
@@ -11,6 +11,7 @@ SPDX-License-Identifier: AGPL-3.0-only
       class="tab-switch__tab"
       [class.is-selected]="isSelected(option)"
       [attr.aria-selected]="isSelected(option)"
+      [tabIndex]="$index === getFocusableTabIndex() ? 0 : -1"
       [disabled]="isDisabled()"
       (click)="pick(option)"
     >
