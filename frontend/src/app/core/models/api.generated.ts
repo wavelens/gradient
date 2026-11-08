@@ -1859,6 +1859,13 @@ export interface Paginated_PublicProjectSummary {
   per_page: number;
 }
 
+export interface Paginated_SessionInfo {
+  items: SessionInfo[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
 export interface Paginated_TaskResponse {
   items: TaskResponse[];
   total: number;

@@ -849,32 +849,38 @@ pub async fn post_key_revoke(
     Ok(ok_json("API-Key revoked".to_string()))
 }
 
+type PaginatedSessionInfo = Paginated<SessionInfo>;
+
 #[utoipa::path(
     get,
     path = "/user/sessions",
     operation_id = "getUserSessions",
     tag = "user",
     summary = "List active sessions",
-    description = "Returns the caller's non-revoked, non-expired sessions. Each entry\ncarries the user-agent and IP captured at login plus a `current` flag\nidentifying the session backing this request.",
-    responses((status = OK, description = "Active sessions", body = Vec<SessionInfo>), WebError)
+    description = "Return one page of sessions for the caller that are not revoked and not expired. List the session that this request came from first. List other sessions by last used time, newest first. Entries include the user agent and IP from sign-in, plus a ``current`` flag for the session that this request came from.",
+    params(PaginationParams),
+    responses((status = OK, description = "Active sessions", body = PaginatedSessionInfo), WebError)
 )]
 pub async fn get_sessions(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,
     Extension(user): Extension<MUser>,
-) -> WebResult<Json<BaseResponse<Vec<SessionInfo>>>> {
+    Query(params): Query<PaginationParams>,
+) -> WebResult<Json<BaseResponse<Paginated<SessionInfo>>>> {
     let current_session_id = session_claims(&state.jwt_secret, &headers).map(|claims| claims.jti);
+    let listing = paginate(
+        gradient_db::sessions::active_sessions_of_user(
+            user.id,
+            current_session_id,
+            gradient_types::now(),
+        ),
+        &state.web_db,
+        &params,
+    )
+    .await?
+    .map(|session| SessionInfo::new(session, current_session_id));
 
-    let sessions = gradient_db::sessions::unrevoked_of_user(&state.web_db, user.id).await?;
-
-    let now = gradient_types::now();
-    let sessions: Vec<SessionInfo> = sessions
-        .into_iter()
-        .filter(|s| s.expires_at >= now)
-        .map(|s| SessionInfo::new(s, current_session_id))
-        .collect();
-
-    Ok(ok_json(sessions))
+    Ok(ok_json(listing))
 }
 
 #[utoipa::path(

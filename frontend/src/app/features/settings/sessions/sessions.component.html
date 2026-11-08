@@ -7,18 +7,18 @@
 <gr-page-layout width="settings" [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'Sessions' }]" title="Active Sessions" subtitle="Devices currently signed in to your account">
   <app-settings-nav slot="banner" />
   <gr-load-state
-    [loading]="loading()"
-    [error]="loadError()"
-    [empty]="sessions().length === 0"
+    [loading]="sessions.loading()"
+    [error]="sessions.error()"
+    [empty]="sessions.items().length === 0"
     loadingMessage="Loading sessions..."
     errorTitle="Failed to load sessions"
     emptyIcon="devices"
     emptyTitle="No active sessions"
     emptyMessage="Sessions appear here once you sign in on a device."
-    (retry)="load()"
+    (retry)="sessions.reload()"
   >
     <gr-row-list>
-      @for (s of sessions(); track s.id) {
+      @for (s of sessions.items(); track s.id) {
         <gr-row icon="computer">
           <span [title]="s.user_agent ?? ''">{{ deviceName(s.user_agent) }}</span>
           @if (s.current) {
@@ -37,5 +37,6 @@
         </gr-row>
       }
     </gr-row-list>
+    <gr-load-more [shown]="sessions.items().length" [total]="sessions.total()" [loading]="sessions.loadingMore()" (more)="sessions.loadMore()" />
   </gr-load-state>
 </gr-page-layout>

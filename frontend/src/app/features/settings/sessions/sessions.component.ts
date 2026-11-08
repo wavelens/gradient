@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
@@ -15,12 +15,14 @@ import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
   ButtonComponent,
+  LoadMoreComponent,
   LoadStateComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
 import { links } from '@shared/routing';
+import { pagedList } from '@shared/paging';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
 @Component({
@@ -32,6 +34,7 @@ import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
     ServerTimestampToLocalDateTimePipe,
     BadgeComponent,
     ButtonComponent,
+    LoadMoreComponent,
     LoadStateComponent,
     PageLayoutComponent,
     RowComponent,
@@ -48,27 +51,10 @@ export class SessionsComponent implements OnInit {
   private confirm = inject(ConfirmService);
   protected readonly deviceName = deviceName;
 
-  loading = signal(true);
-  sessions = signal<SessionInfo[]>([]);
-  loadError = signal<unknown>(null);
+  sessions = pagedList<SessionInfo>('sessions', (page, options) => this.userService.getSessions(page, 25, options));
 
   ngOnInit(): void {
-    this.load();
-  }
-
-  load(): void {
-    this.loading.set(true);
-    this.loadError.set(null);
-    this.userService.getSessions().subscribe({
-      next: (sessions) => {
-        this.sessions.set(sessions);
-        this.loading.set(false);
-      },
-      error: (error: unknown) => {
-        this.loadError.set(error);
-        this.loading.set(false);
-      },
-    });
+    this.sessions.reload();
   }
 
   signOutCurrentDevice(): void {
@@ -87,7 +73,7 @@ export class SessionsComponent implements OnInit {
       })
       .subscribe(() => {
         this.notify.success('Session revoked');
-        this.load();
+        this.sessions.reload();
       });
   }
 }

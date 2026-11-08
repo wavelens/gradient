@@ -12661,11 +12661,23 @@ paths:
       tags:
       - user
       summary: List active sessions
-      description: |-
-        Returns the caller's non-revoked, non-expired sessions. Each entry
-        carries the user-agent and IP captured at login plus a `current` flag
-        identifying the session backing this request.
+      description: Return one page of sessions for the caller that are not revoked and not expired. List the session that this request came from first. List other sessions by last used time, newest first. Entries include the user agent and IP from sign-in, plus a ``current`` flag for the session that this request came from.
       operationId: getUserSessions
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
       responses:
         '200':
           description: Active sessions
@@ -12680,9 +12692,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/SessionInfo'
+                    $ref: '#/components/schemas/Paginated_SessionInfo'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -19507,6 +19517,30 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PublicProjectSummary'
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        page:
+          type: integer
+          format: int64
+          minimum: 0
+        per_page:
+          type: integer
+          format: int64
+          minimum: 0
+    Paginated_SessionInfo:
+      type: object
+      required:
+      - items
+      - total
+      - page
+      - per_page
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionInfo'
         total:
           type: integer
           format: int64

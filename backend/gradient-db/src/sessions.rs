@@ -8,20 +8,26 @@ use chrono::NaiveDateTime;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter, QueryOrder,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel, Order,
+    QueryFilter, QueryOrder, Select,
 };
 
-pub async fn unrevoked_of_user<C: ConnectionTrait>(
-    db: &C,
+pub fn active_sessions_of_user(
     user: UserId,
-) -> Result<Vec<MSession>, DbErr> {
-    ESession::find()
+    current_session: Option<SessionId>,
+    now: NaiveDateTime,
+) -> Select<ESession> {
+    let query = ESession::find()
         .filter(CSession::UserId.eq(user))
         .filter(CSession::RevokedAt.is_null())
+        .filter(CSession::ExpiresAt.gte(now));
+    let query = match current_session {
+        Some(current) => query.order_by(CSession::Id.eq(current), Order::Desc),
+        None => query,
+    };
+    query
         .order_by_desc(CSession::LastUsedAt)
-        .all(db)
-        .await
+        .order_by_asc(CSession::Id)
 }
 
 pub async fn revoke<C: ConnectionTrait>(
@@ -42,4 +48,27 @@ pub async fn stamp_last_used<C: ConnectionTrait>(
     let mut active = session.into_active_model();
     active.last_used_at = Set(at);
     active.update(db).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{DatabaseBackend, QueryTrait};
+
+    #[test]
+    fn active_sessions_query_excludes_revoked_and_expired_and_orders_own_session_then_last_use() {
+        let sql = active_sessions_of_user(
+            UserId::now_v7(),
+            Some(SessionId::now_v7()),
+            gradient_types::now(),
+        )
+        .build(DatabaseBackend::Postgres)
+        .to_string();
+        assert!(sql.contains(r#""revoked_at" IS NULL"#), "sql = {sql}");
+        assert!(sql.contains(r#""expires_at" >="#), "sql = {sql}");
+        let (_, order) = sql.split_once("ORDER BY").expect("an ORDER BY clause");
+        let own = order.find(r#""id" = "#).expect("own session ordered first");
+        let last_used = order.find("last_used_at").expect("ordered by last use");
+        assert!(own < last_used, "order = {order}");
+    }
 }

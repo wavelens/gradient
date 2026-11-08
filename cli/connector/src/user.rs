@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    ApiKeyInfo, AuditLogEntry, CreateApiKeyRequest, PatchUserSettingsRequest, SessionInfo,
+    ApiKeyInfo, AuditLogEntry, CreateApiKeyRequest, PaginatedSessionInfo, PatchUserSettingsRequest,
     UserInfoResponse, UserSearchResult,
 };
 use crate::{Client, ConnectorError, http};
@@ -123,7 +123,7 @@ impl UserApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn sessions(&self) -> Result<Vec<SessionInfo>, ConnectorError> {
+    pub async fn sessions(&self) -> Result<PaginatedSessionInfo, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

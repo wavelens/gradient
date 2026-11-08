@@ -105,8 +105,8 @@ export class UserService {
     return this.api.post<string>('user/invites/decline', { token });
   }
 
-  getSessions(): Observable<SessionInfo[]> {
-    return this.api.get<SessionInfo[]>('user/sessions');
+  getSessions(page = 1, perPage = 50, options?: RequestOptions): Observable<Paginated<SessionInfo[]>> {
+    return this.api.get<Paginated<SessionInfo[]>>(`user/sessions?page=${page}&per_page=${perPage}`, options);
   }
 
   revokeSession(id: string): Observable<string> {

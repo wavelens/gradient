@@ -18,6 +18,10 @@ import { SessionInfo } from '@core/models';
 const CURRENT = { id: 's1', current: true, user_agent: 'Firefox', ip: '10.0.0.1', last_used_at: '2026-10-01T10:00:00', expires_at: '2026-11-01T10:00:00' } as SessionInfo;
 const OTHER = { ...CURRENT, id: 's2', current: false };
 
+function createOnePageSessionsResponse(items: SessionInfo[], total = items.length, page = 1) {
+  return of({ items, total, page, per_page: 25 });
+}
+
 function setup(getSessions: ReturnType<typeof vi.fn>, revokeSession = vi.fn().mockReturnValue(of('ok'))) {
   const notify = { success: vi.fn(), failure: vi.fn() };
   const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
@@ -41,7 +45,7 @@ describe('SessionsComponent', () => {
   it('shows a failed load with Try Again instead of No active sessions', () => {
     const getSessions = vi.fn()
       .mockReturnValueOnce(throwError(() => new ApiError('database is down', 500)))
-      .mockReturnValue(of([CURRENT]));
+      .mockReturnValue(createOnePageSessionsResponse([CURRENT]));
     const { fixture, root } = setup(getSessions);
     expect(root.textContent).toContain('Failed to load sessions');
     expect(root.textContent).not.toContain('No active sessions');
@@ -53,7 +57,7 @@ describe('SessionsComponent', () => {
 
   it('asks before revoking a session, naming its device and address', () => {
     const revokeSession = vi.fn().mockReturnValue(of('ok'));
-    const { notify, root, confirm } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])), revokeSession);
+    const { notify, root, confirm } = setup(vi.fn().mockReturnValue(createOnePageSessionsResponse([CURRENT, OTHER])), revokeSession);
     revokeButtons(root)[1].click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Revoke session', target: 'Firefox (10.0.0.1)' }));
     expect(revokeSession).toHaveBeenCalledWith('s2');
@@ -62,14 +66,29 @@ describe('SessionsComponent', () => {
 
   it('sends no revoke when the confirmation is cancelled', () => {
     const revokeSession = vi.fn().mockReturnValue(of('ok'));
-    const { root, confirm } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])), revokeSession);
+    const { root, confirm } = setup(vi.fn().mockReturnValue(createOnePageSessionsResponse([CURRENT, OTHER])), revokeSession);
     confirm.mockImplementation(() => EMPTY);
     revokeButtons(root)[1].click();
     expect(revokeSession).not.toHaveBeenCalled();
   });
 
+  it('requests the first page and appends the next page’s sessions when Load more is clicked', () => {
+    const third = { ...OTHER, id: 's3' };
+    const getSessions = vi.fn()
+      .mockReturnValueOnce(createOnePageSessionsResponse([CURRENT, OTHER], 3))
+      .mockReturnValueOnce(createOnePageSessionsResponse([third], 3, 2));
+    const { fixture, root } = setup(getSessions);
+    expect(getSessions).toHaveBeenCalledWith(1, 25, undefined);
+    expect(root.textContent).toContain('Showing 2 of 3');
+    Array.from(root.querySelectorAll<HTMLButtonElement>('gr-load-more button')).find((b) => b.textContent?.includes('Load more'))!.click();
+    fixture.detectChanges();
+    expect(getSessions).toHaveBeenLastCalledWith(2, 25, undefined);
+    expect(revokeButtons(root)).toHaveLength(3);
+    expect(root.textContent).not.toContain('Load more');
+  });
+
   it('offers Log out instead of Revoke for the session of this device', () => {
-    const { root, confirm, logout } = setup(vi.fn().mockReturnValue(of([CURRENT, OTHER])));
+    const { root, confirm, logout } = setup(vi.fn().mockReturnValue(createOnePageSessionsResponse([CURRENT, OTHER])));
     const [current, other] = revokeButtons(root);
     expect(current.textContent).toContain('Log out');
     expect(current.disabled).toBe(false);
