@@ -256,9 +256,7 @@
   } @else {
     <div class="pad">
       <gr-empty-state icon="assessment" title="No evaluations yet"
-        [message]="access().canTrigger ? 'Start your first evaluation to begin building' : 'No evaluations have been run yet'"
-        [actionLabel]="access().canTrigger ? 'Start Evaluation' : ''"
-        (actionClick)="access().canTrigger && startEvaluation()" />
+        [message]="access().canTrigger ? 'Start your first evaluation to begin building' : 'No evaluations have been run yet'" />
     </div>
   }
 
