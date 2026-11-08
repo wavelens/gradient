@@ -55,9 +55,11 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 use uuid::Uuid;
 
+use authorization::MaybeUser;
 use endpoints::{handle_404, metrics};
 use gradient_core::{InitError, ServerState};
 use gradient_scheduler::Scheduler;
+use gradient_types::{MUser, UserId};
 use gradient_util::supervision::ChildSpec;
 use gradient_wire::{PerIpLimiter, ProtoLimiter};
 use std::sync::Arc;
@@ -95,11 +97,37 @@ impl MakeRequestId for MakeRequestUuid {
     }
 }
 
-fn rate_limit(
-    key: &ClientIpKey,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum RateLimitCallerKey {
+    User(UserId),
+    Ip(IpAddr),
+}
+
+#[derive(Debug, Clone)]
+struct SignedInUserIdOrClientIpKey {
+    client_ip: ClientIpKey,
+}
+
+impl KeyExtractor for SignedInUserIdOrClientIpKey {
+    type Key = RateLimitCallerKey;
+
+    fn extract<T>(&self, req: &Request<T>) -> Result<Self::Key, GovernorError> {
+        let extensions = req.extensions();
+        let user = extensions
+            .get::<MUser>()
+            .or_else(|| extensions.get::<MaybeUser>().and_then(|m| m.0.as_ref()));
+        match user {
+            Some(user) => Ok(RateLimitCallerKey::User(user.id)),
+            None => self.client_ip.extract(req).map(RateLimitCallerKey::Ip),
+        }
+    }
+}
+
+fn rate_limit<K: KeyExtractor>(
+    key: &K,
     refill: Duration,
     burst: u32,
-) -> Result<Arc<GovernorConfig<ClientIpKey, NoOpMiddleware>>, InitError> {
+) -> Result<Arc<GovernorConfig<K, NoOpMiddleware>>, InitError> {
     let config = GovernorConfigBuilder::default()
         .period(refill)
         .burst_size(burst)
@@ -199,20 +227,31 @@ pub fn create_router_with_scheduler(
     let key = ClientIpKey {
         trusted_proxies: state.config.network.trusted_proxies.clone().into(),
     };
+    let caller_limit = rate_limit(
+        &SignedInUserIdOrClientIpKey {
+            client_ip: key.clone(),
+        },
+        Duration::from_millis(200),
+        150,
+    )?;
     let rate_limit = |refill, burst| rate_limit(&key, refill, burst);
 
     let limits = routes::BodyLimits::from_config(&state.config);
     let (auth_api, _) = routes::auth_api(&limits).split_for_parts();
-    let auth_api = auth_api.route_layer(middleware::from_fn_with_state(
-        Arc::clone(&state),
-        authorization::authorize,
-    ));
+    let auth_api = auth_api
+        .route_layer(GovernorLayer::new(Arc::clone(&caller_limit)))
+        .route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authorization::authorize,
+        ));
 
     let (optional_api, _) = routes::optional_api().split_for_parts();
-    let optional_api = optional_api.route_layer(middleware::from_fn_with_state(
-        Arc::clone(&state),
-        authorization::authorize_optional,
-    ));
+    let optional_api = optional_api
+        .route_layer(GovernorLayer::new(Arc::clone(&caller_limit)))
+        .route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authorization::authorize_optional,
+        ));
 
     let (auth_sensitive, _) = routes::auth_sensitive().split_for_parts();
     let auth_sensitive =
@@ -223,6 +262,7 @@ pub fn create_router_with_scheduler(
         webhook_routes.route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(1), 30)?));
 
     let (open_api, _) = routes::open_api().split_for_parts();
+    let open_api = open_api.route_layer(GovernorLayer::new(Arc::clone(&caller_limit)));
 
     let mut api = Router::new()
         .merge(auth_api)
@@ -231,7 +271,9 @@ pub fn create_router_with_scheduler(
         .merge(webhook_routes)
         .merge(open_api);
     if state.config.server.public_listing {
-        api = api.merge(routes::public_listing_api().split_for_parts().0);
+        let (public_listing_api, _) = routes::public_listing_api().split_for_parts();
+        api = api
+            .merge(public_listing_api.route_layer(GovernorLayer::new(Arc::clone(&caller_limit))));
     }
 
     scheduler.start();
@@ -283,8 +325,8 @@ pub fn create_router_with_scheduler(
 
     let api = api
         .route_layer(GovernorLayer::new(rate_limit(
-            Duration::from_millis(200),
-            150,
+            Duration::from_millis(20),
+            1500,
         )?))
         .merge(cache_upload_api);
     let api = api.route_layer(axum::middleware::from_fn(metrics::track_http_metrics));

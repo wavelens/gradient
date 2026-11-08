@@ -6,6 +6,7 @@
 
 use axum::extract::connect_info::MockConnectInfo;
 use gradient_test_support::state::TestState;
+use gradient_test_support::web::signed_in;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 
@@ -131,6 +132,29 @@ async fn clients_behind_a_trusted_proxy_have_their_own_cache_budget() {
     assert_ne!(cache_status(&server, "203.0.113.1").await, 429);
     assert_ne!(cache_status(&server, "203.0.113.2").await, 429);
     assert_eq!(cache_status(&server, "203.0.113.1").await, 429);
+}
+
+#[tokio::test]
+async fn signed_in_users_do_not_share_the_budget_of_their_ip() {
+    let (web_db, bearer) = signed_in();
+    let state = TestState::new().web_db(web_db.into_connection()).build();
+    let peer: SocketAddr = "198.51.100.7:0".parse().expect("a peer address");
+    let router = gradient_web::create_router(state)
+        .expect("router")
+        .layer(MockConnectInfo(peer));
+    let server = axum_test::TestServer::new(router);
+
+    for i in 1..=150 {
+        let status = server.get("/api/v1/health").await.status_code();
+        assert_ne!(status, 429, "anonymous request {i}");
+    }
+    assert_eq!(server.get("/api/v1/health").await.status_code(), 429);
+
+    let signed_in = server
+        .get("/api/v1/user")
+        .add_header("authorization", bearer)
+        .await;
+    assert_ne!(signed_in.status_code(), 429);
 }
 
 #[tokio::test]
