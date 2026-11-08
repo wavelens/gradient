@@ -46,6 +46,7 @@ import {
   ratioSegments,
 } from '@shared/ui';
 import type { AllowedCapabilities, BuildStatusCounts } from '@core/models';
+import { createMissingPermissionLoadStateError } from '@shared/access';
 import { type StatusPhase, type ThunkProgress, thunkProgress } from '@shared/evaluation';
 
 function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
@@ -73,6 +74,7 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
   styleUrls: ['./demo.scss', './elements.component.scss'],
 })
 export class ElementsComponent {
+  readonly refusedExample = createMissingPermissionLoadStateError('manageIntegrations', 'project');
   readonly demoPermissions = [
     { id: 'viewProject', mutating: false },
     { id: 'createTask', mutating: true },

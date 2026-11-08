@@ -89,6 +89,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <p>Lists that load their own data go inside <code>gr-load-state</code>. A failed load can show the reason and a "Try Again" button in place of the empty state.</p>
 <gr-load-state errorTitle="Couldn't load integrations" error="Database connection failed." />
+<p>Denied loads (403 or 404) show one inaccessible state with a lock and no retry option. A retry can't change the result. Pages can check beforehand that the role can't read the content. Those pages pass <code>createMissingPermissionLoadStateError</code> instead of sending a request.</p>
+<gr-load-state [error]="refusedExample" />
 
 <p>Server-paginated lists end with <code>gr-load-more</code>. The component can show how many items sit on screen. A click can add the next page.</p>
 <gr-load-more [shown]="50" [total]="75" />

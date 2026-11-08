@@ -298,11 +298,11 @@ describe('MembersRolesComponent - role form', () => {
 describe('MembersRolesComponent - load errors', () => {
   it('shows a failed member load with Try Again instead of No members', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    getMembers.mockReturnValueOnce(throwError(() => new ApiError('Forbidden', 403)));
+    getMembers.mockReturnValueOnce(throwError(() => new ApiError('Database is down', 500)));
     await settled(fixture);
     const element = fixture.nativeElement as HTMLElement;
     expect(element.textContent).toContain('Failed to load members');
-    expect(element.textContent).toContain('No permission');
+    expect(element.textContent).toContain('Database is down');
     expect(element.textContent).not.toContain('No members');
     element.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
     await settled(fixture);

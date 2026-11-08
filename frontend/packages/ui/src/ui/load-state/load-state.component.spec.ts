@@ -6,7 +6,7 @@
 
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { LoadStateComponent, loadErrorText } from './load-state.component';
+import { LoadStateComponent, MissingPermissionLoadStateError, loadErrorText } from './load-state.component';
 
 @Component({
   imports: [LoadStateComponent],
@@ -77,7 +77,26 @@ describe('LoadStateComponent', () => {
 
   it('explains a refused load instead of repeating the server code', () => {
     expect(loadErrorText({ status: 403, message: 'Forbidden' })).toContain('No permission');
+    expect(loadErrorText({ status: 404, message: 'Build not found' })).toBe(
+      "Build not found. The resource doesn't exist or permissions deny access.",
+    );
+    expect(loadErrorText(new MissingPermissionLoadStateError('Ask a project admin.'))).toBe('Ask a project admin.');
     expect(loadErrorText({ status: 500 })).toBe('The server gave no reason. Try again.');
     expect(loadErrorText('plain')).toBe('plain');
   });
+
+  for (const [error, title] of [
+    [{ status: 403, message: 'Forbidden' }, 'No access'],
+    [{ status: 404, message: 'Cache not found' }, 'Not found or access denied'],
+    [new MissingPermissionLoadStateError('Ask a cache admin.'), 'No access'],
+  ] as const) {
+    it(`shows "${title}" without Try Again for a refusal`, () => {
+      const { host, fixture, text } = render();
+      host.loading.set(false);
+      host.error.set(error);
+      expect(text()).toContain(title);
+      expect(text()).not.toContain("Couldn't load things");
+      expect((fixture.nativeElement as HTMLElement).querySelector('.gr-load-state__error button')).toBeNull();
+    });
+  }
 });

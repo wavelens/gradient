@@ -254,7 +254,7 @@ describe('WebhooksComponent', () => {
 
   it('explains a refused list instead of offering to create webhooks', () => {
     const { root } = setup({ webhookScope: 'cache' }, { cache: 'main' }, () => throwError(() => new ApiError('Forbidden', 403)));
-    expect(root.textContent).toContain('Failed to load event notifications');
+    expect(root.textContent).toContain('No access');
     expect(root.textContent).toContain('No permission');
     expect(root.textContent).not.toContain('No event notifications');
     expect(root.textContent).not.toContain('New event notification');
@@ -266,7 +266,7 @@ describe('WebhooksComponent', () => {
       { project: 'p' },
     );
     expect(service.list).not.toHaveBeenCalled();
-    expect(root.textContent).toContain('No access to event notifications');
+    expect(root.textContent).toContain('No access');
     expect(root.textContent).toContain('manage webhooks permission for this project');
     expect(root.textContent).not.toContain('New Webhook');
     expect(root.textContent).not.toContain('Try Again');

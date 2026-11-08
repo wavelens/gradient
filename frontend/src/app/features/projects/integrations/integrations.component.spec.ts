@@ -134,7 +134,7 @@ describe('IntegrationsComponent - access gating', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [baseIntegration]);
     await settled(fixture);
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('No access to Integrations');
+    expect(text).toContain('No access');
     expect(text).toContain('manage integrations permission');
     expect(text).not.toContain(baseIntegration.name);
   });

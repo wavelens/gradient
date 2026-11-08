@@ -76,14 +76,14 @@ describe('CacheSubscriptionRequestsComponent', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('No pending requests');
   });
 
-  it('shows a refused load as an error, never next to the empty state', () => {
+  it('shows a failed load as an error, never next to the empty state', () => {
     const load = vi.fn()
-      .mockReturnValueOnce(throwError(() => new ApiError('Forbidden', 403)))
+      .mockReturnValueOnce(throwError(() => new ApiError('Database is down', 500)))
       .mockReturnValue(of([request]));
     const { fixture } = setup([], load);
     const element = fixture.nativeElement as HTMLElement;
     expect(element.textContent).toContain('Failed to load subscription requests');
-    expect(element.textContent).toContain('No permission');
+    expect(element.textContent).toContain('Database is down');
     expect(element.textContent).not.toContain('No pending requests');
     element.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
     fixture.detectChanges();

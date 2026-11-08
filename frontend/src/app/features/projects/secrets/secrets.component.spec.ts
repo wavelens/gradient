@@ -88,7 +88,7 @@ describe('SecretsComponent', () => {
     await settled(fixture);
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(service.list).not.toHaveBeenCalled();
-    expect(text).toContain('No access to Secrets');
+    expect(text).toContain('No access');
     expect(text).toContain('manage project settings permission');
     expect(text).not.toContain('Set secret');
   });
@@ -98,7 +98,7 @@ describe('SecretsComponent', () => {
     service.list.mockReturnValue(throwError(() => ({ status: 403, message: 'You do not have permission to perform this action.' })));
     await settled(fixture);
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('Failed to load secrets');
+    expect(text).toContain('No access');
     expect(text).not.toContain('No secrets');
   });
 

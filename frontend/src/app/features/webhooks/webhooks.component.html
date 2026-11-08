@@ -12,10 +12,9 @@
   <gr-load-state
     [loading]="loading()"
     [error]="denied() ?? loadError()"
-    [retryable]="!denied()"
     [empty]="webhooks().length === 0"
     loadingMessage="Loading event notifications..."
-    [errorTitle]="denied() ? 'No access to event notifications' : 'Failed to load event notifications'"
+    errorTitle="Failed to load event notifications"
     emptyIcon="webhook"
     emptyTitle="No event notifications"
     emptyMessage="Create an event notification to receive events as signed HTTP requests."

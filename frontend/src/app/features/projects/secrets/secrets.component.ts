@@ -27,7 +27,7 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { WritableDirective, missingPermissionText } from '@shared/access';
+import { WritableDirective, createMissingPermissionLoadStateError } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { relativeTime } from '@shared/text';
@@ -69,7 +69,7 @@ export class SecretsComponent implements OnInit {
   protected readonly docsUrl = docsUrl('exec/secrets/');
 
   access = computed(() => accessTo(this.resolvedProject(), 'manageProjectSettings'));
-  missingPermission = missingPermissionText('manageProjectSettings', 'project');
+  missingPermission = createMissingPermissionLoadStateError('manageProjectSettings', 'project');
   loading = signal(true);
   loadError = signal<unknown>(null);
   secrets = signal<ProjectSecretSummary[]>([]);
