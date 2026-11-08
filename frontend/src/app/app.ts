@@ -5,11 +5,12 @@
  */
 
 import { Component, DestroyRef, ElementRef, inject, computed, viewChild, ChangeDetectionStrategy } from '@angular/core';
-import { Router, RouterOutlet, NavigationEnd } from '@angular/router';
+import { Router, RouterOutlet, NavigationCancel, NavigationEnd, NavigationError, NavigationSkipped, NavigationStart } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { filter, map } from 'rxjs/operators';
+import { of, timer } from 'rxjs';
+import { filter, map, switchMap } from 'rxjs/operators';
 import { FooterComponent, FooterLink } from '@gradient/ui/chrome';
-import { ToastComponent } from '@gradient/ui/ui';
+import { LoadingSpinnerComponent, ToastComponent } from '@gradient/ui/ui';
 import { AppHeaderComponent } from '@shared/chrome/header/header.component';
 import { CommandPaletteComponent } from '@shared/chrome/command-palette/command-palette.component';
 import { AuthService } from '@core/services/auth.service';
@@ -18,6 +19,8 @@ import { ThemeService } from '@core/services/theme.service';
 import { followOverscroll } from '@core/overscroll/overscroll';
 import { WhatsNewDialogComponent } from '@core/whats-new/whats-new-dialog.component';
 import { ConfirmDialogComponent } from '@shared/confirm/confirm-dialog.component';
+
+const navigationLoadingDelayMs = 300;
 
 const FOOTER_LINKS: FooterLink[] = [
   {
@@ -31,7 +34,7 @@ const FOOTER_LINKS: FooterLink[] = [
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent, WhatsNewDialogComponent, ConfirmDialogComponent, ToastComponent],
+  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent, WhatsNewDialogComponent, ConfirmDialogComponent, ToastComponent, LoadingSpinnerComponent],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './app.scss'
@@ -59,7 +62,16 @@ export class App {
     this.main().nativeElement.focus();
   }
 
-  private routeData = toSignal(
+  protected readonly isRouteNavigationTakingLong = toSignal(
+    this.router.events.pipe(
+      filter((e) => e instanceof NavigationStart || e instanceof NavigationEnd || e instanceof NavigationCancel
+        || e instanceof NavigationError || e instanceof NavigationSkipped),
+      switchMap((e) => (e instanceof NavigationStart ? timer(navigationLoadingDelayMs).pipe(map(() => true)) : of(false))),
+    ),
+    { initialValue: false },
+  );
+
+  protected readonly routeData = toSignal(
     this.router.events.pipe(
       filter((e) => e instanceof NavigationEnd),
       map(() => {

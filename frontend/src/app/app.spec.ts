@@ -9,11 +9,14 @@ import { Component } from '@angular/core';
 import { Router, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { Subject } from 'rxjs';
 import { App } from './app';
 import { ConfigService } from '@core/services/config.service';
 
 @Component({ template: 'page' })
 class PageStub {}
+
+let slowGuard = new Subject<boolean>();
 
 describe('App', () => {
   beforeEach(async () => {
@@ -23,6 +26,7 @@ describe('App', () => {
         provideRouter([
           { path: '', component: PageStub },
           { path: 'bare', component: PageStub, data: { hideFooter: true } },
+          { path: 'slow', component: PageStub, canActivate: [() => slowGuard] },
         ]),
         provideHttpClient(),
         provideHttpClientTesting(),
@@ -63,6 +67,31 @@ describe('App', () => {
     skip.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(mains[0]);
+  });
+
+  it('marks the main area busy and shows a spinner while the first page waits for its data', async () => {
+    vi.useFakeTimers();
+    slowGuard = new Subject<boolean>();
+    const fixture = TestBed.createComponent(App);
+    const main = () => fixture.nativeElement.querySelector('main') as HTMLElement;
+    const navigation = TestBed.inject(Router).navigateByUrl('/slow');
+    await vi.advanceTimersByTimeAsync(100);
+    fixture.detectChanges();
+    expect(main().querySelector('gr-loading-spinner')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(300);
+    fixture.detectChanges();
+    expect(main().getAttribute('aria-busy')).toBe('true');
+    expect(main().textContent).toContain('Loading page...');
+
+    slowGuard.next(true);
+    slowGuard.complete();
+    await navigation;
+    fixture.detectChanges();
+    expect(main().getAttribute('aria-busy')).toBeNull();
+    expect(main().querySelector('gr-loading-spinner')).toBeNull();
+    expect(main().textContent).toContain('page');
+    vi.useRealTimers();
   });
 
   it('names the deployed commit next to the version in the footer', async () => {

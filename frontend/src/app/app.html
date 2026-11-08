@@ -14,7 +14,10 @@
   }
 }
 
-<main #main id="main-content" class="app-main" tabindex="-1">
+<main #main id="main-content" class="app-main" tabindex="-1" [attr.aria-busy]="isRouteNavigationTakingLong() || null">
+  @if (isRouteNavigationTakingLong() && routeData() === null) {
+    <gr-loading-spinner message="Loading page..." />
+  }
   <router-outlet />
 </main>
 @defer (on idle) {
