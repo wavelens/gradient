@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { blockedLine, failureKind, failureTitle, firstLine, headline } from './summary-text';
+import { blockedLine, failureKind, failureTitle, firstLine, getEvaluationSummaryCountTiles, headline } from './summary-text';
 import { EvaluationFailureSummary, FailedBuildSummary } from '@core/models';
 
 const summary = (packages: Partial<EvaluationFailureSummary['packages']>, evalErrors = 0): EvaluationFailureSummary => ({
@@ -31,8 +31,17 @@ const failure = (over: Partial<FailedBuildSummary>): FailedBuildSummary => ({
 });
 
 describe('evaluation summary text', () => {
-  it('counts failed, blocked and unevaluated packages as not built', () => {
-    expect(headline(summary({ built: 15, failed: 2, blocked: 3 }, 1), false)).toBe('6 packages did not build');
+  it('counts failed and dependency failed packages, and attributes that failed to evaluate on their own', () => {
+    expect(headline(summary({ built: 15, failed: 2, blocked: 3 }, 1), false)).toBe('5 packages did not build, 1 attribute failed to evaluate');
+    expect(headline(summary({ built: 20 }, 2), false)).toBe('2 attributes failed to evaluate');
+  });
+
+  it('shows a tile for every count the headline adds up', () => {
+    const tiles = (s: EvaluationFailureSummary, running = false) =>
+      getEvaluationSummaryCountTiles(s, running).map((t) => `${t.label} ${t.value}`);
+    expect(tiles(summary({ built: 1, failed: 1, blocked: 1 }))).toEqual(['Built 1', 'Failed 1', 'Dependency failed 1', 'Failed to evaluate 0']);
+    expect(tiles(summary({ built: 5, unfinished: 15 }))).toEqual(['Built 5', 'Failed 0', 'Not built 15', 'Failed to evaluate 0']);
+    expect(tiles(summary({ built: 5, unfinished: 15 }), true)).toEqual(['Built 5', 'Failed 0', 'Failed to evaluate 0']);
   });
 
   it('reports a clean evaluation', () => {

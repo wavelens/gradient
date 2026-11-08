@@ -91,7 +91,7 @@ describe('EvaluationSummaryComponent', () => {
   it('opens with the verdict and splits the failures by the compared evaluation', () => {
     const fixture = setup(SUMMARY);
 
-    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('4 packages did not build');
+    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('3 packages did not build, 1 attribute failed to evaluate');
     expect(sections(fixture)).toEqual(['Newly failing 1', 'Still failing 1', 'Failed to evaluate 1', 'Fixed 1']);
     expect(text(fixture)).toContain('2 newly failing and 1 fixed since aaaaaaaa');
   });

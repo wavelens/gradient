@@ -26,9 +26,9 @@
          [routerLink]="links.evaluationLog(project, ev.id)"></a>
 
       <gr-card-grid min="150px">
-        <gr-stat-card label="Built" [value]="s.packages.built" />
-        <gr-stat-card label="Failed" [value]="s.packages.failed" />
-        <gr-stat-card label="Failed to evaluate" [value]="s.failed_attributes.length" />
+        @for (tile of countTiles(); track tile.label) {
+          <gr-stat-card [label]="tile.label" [value]="tile.value" />
+        }
         @if (s.compared_with) {
           <gr-stat-card label="Fixed" [value]="s.fixed_total" />
         }

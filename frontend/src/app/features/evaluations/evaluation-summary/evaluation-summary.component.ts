@@ -37,7 +37,7 @@ import {
 } from '@shared/evaluation';
 import { formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { EvalStatusBadgeComponent, StatusIconComponent } from '@shared/ui';
-import { blockedLine, failureKind, failureTitle, firstLine, headline } from './summary-text';
+import { blockedLine, failureKind, failureTitle, firstLine, getEvaluationSummaryCountTiles, headline } from './summary-text';
 
 interface FailureGroup {
   title: string;
@@ -88,6 +88,11 @@ export class EvaluationSummaryComponent implements OnInit {
   headline = computed(() => {
     const summary = this.summary();
     return summary ? headline(summary, this.running()) : 'Summary';
+  });
+
+  countTiles = computed(() => {
+    const summary = this.summary();
+    return summary ? getEvaluationSummaryCountTiles(summary, this.running()) : [];
   });
 
   breadcrumb = computed(() => {

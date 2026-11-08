@@ -6,15 +6,36 @@
 
 import type { BuildStatus, EvaluationFailureSummary, FailedBuildSummary } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
+import { buildStatusLabel } from '@shared/evaluation';
 import { plural } from '@shared/text';
 
 const BLOCKED_NAMED = 5;
 
+export interface SummaryCountTile {
+  label: string;
+  value: number;
+}
+
+export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary, running: boolean): SummaryCountTile[] {
+  const { built, failed, blocked, unfinished } = summary.packages;
+  return [
+    { label: 'Built', value: built },
+    { label: 'Failed', value: failed },
+    ...(blocked > 0 ? [{ label: buildStatusLabel('DependencyFailed'), value: blocked }] : []),
+    ...(unfinished > 0 && !running ? [{ label: 'Not built', value: unfinished }] : []),
+    { label: 'Failed to evaluate', value: summary.failed_attributes.length },
+  ];
+}
+
 export function headline(summary: EvaluationFailureSummary, running: boolean): string {
   const { total, built, failed, blocked, unfinished } = summary.packages;
-  const broken = failed + blocked + summary.failed_attributes.length;
   if (running) return `Still running, ${built} of ${plural(total, 'package')} built so far`;
-  if (broken > 0) return `${plural(broken, 'package')} did not build`;
+  const failedAttributes = summary.failed_attributes.length;
+  const problems = [
+    ...(failed + blocked > 0 ? [`${plural(failed + blocked, 'package')} did not build`] : []),
+    ...(failedAttributes > 0 ? [`${plural(failedAttributes, 'attribute')} failed to evaluate`] : []),
+  ];
+  if (problems.length) return problems.join(', ');
   if (unfinished > 0) return `${plural(unfinished, 'package')} not built`;
 
   return `All ${plural(total, 'package')} built`;
