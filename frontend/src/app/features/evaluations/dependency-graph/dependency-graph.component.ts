@@ -572,8 +572,6 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     return ms == null ? '' : formatDuration(ms);
   }
 
-  protected readonly phaseColor = PHASE_COLOR;
-
   private phase(status?: string | null): StatusPhase {
     return (status && buildPhase(status as BuildStatus)) || 'aborted';
   }
@@ -582,10 +580,15 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     return PHASE_COLOR[this.phase(status)];
   }
 
-  /// The legend restates the node colours, so it reads them from the same tokens.
-  readonly legend: { label: string; phase: StatusPhase }[] = (
-    ['Created', 'Queued', 'Building', 'Completed', 'FailedPermanent', 'Aborted', 'DependencyFailed', 'Skipped'] as const
-  ).map((status) => ({ label: buildStatusLabel(status), phase: buildPhase(status) }));
+  /// The legend shows one entry per node colour and lists every status drawn in that colour, so two entries never share a colour.
+  readonly legend: { label: string; color: string }[] = (() => {
+    const labelsByColor = new Map<string, string[]>();
+    for (const status of ['Created', 'Queued', 'Building', 'Completed', 'FailedPermanent', 'Aborted', 'DependencyFailed', 'Skipped'] as const) {
+      const color = PHASE_COLOR[buildPhase(status)];
+      labelsByColor.set(color, [...(labelsByColor.get(color) ?? []), buildStatusLabel(status)]);
+    }
+    return [...labelsByColor].map(([color, labels]) => ({ color, label: labels.join(', ') }));
+  })();
 
   statusSeverity(status?: string | null): BadgeSeverity {
     return PHASE_SEVERITY[this.phase(status)];

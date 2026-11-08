@@ -70,7 +70,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildStatusLabel,buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_SEVERITY } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, PHASE_SEVERITY, type StatusPhase } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -389,15 +389,15 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   };
 
   /// The sidebar sections appear in display order. Failed and Dependency failed builds come right after Building. These sections always appear. `Substituted` also belong to `Completed`. `Other` is for every status that this list doesn't know. All builds appear in the list.
-  private readonly buildGroups: { key: string; label: string; members: string[] }[] = [
-    { key: 'building', label: 'Building', members: ['building'] },
-    { key: 'failed', label: 'Failed', members: ['failed'] },
-    { key: 'dependencyfailed', label: buildStatusLabel('DependencyFailed'), members: ['dependencyfailed'] },
-    { key: 'aborted', label: 'Aborted', members: ['aborted'] },
-    { key: 'queued', label: 'Queued', members: ['queued'] },
-    { key: 'completed', label: 'Completed', members: ['completed', 'substituted'] },
-    { key: 'skipped', label: 'Skipped', members: ['skipped'] },
-    { key: 'other', label: 'Other', members: [] },
+  private readonly buildGroups: { key: string; label: string; members: string[]; phase: StatusPhase }[] = [
+    { key: 'building', label: 'Building', members: ['building'], phase: 'running' },
+    { key: 'failed', label: 'Failed', members: ['failed'], phase: 'failure' },
+    { key: 'dependencyfailed', label: buildStatusLabel('DependencyFailed'), members: ['dependencyfailed'], phase: 'aborted' },
+    { key: 'aborted', label: 'Aborted', members: ['aborted'], phase: 'aborted' },
+    { key: 'queued', label: 'Queued', members: ['queued'], phase: 'queued' },
+    { key: 'completed', label: 'Completed', members: ['completed', 'substituted'], phase: 'success' },
+    { key: 'skipped', label: 'Skipped', members: ['skipped'], phase: 'aborted' },
+    { key: 'other', label: 'Other', members: [], phase: 'aborted' },
   ];
 
   collapsedGroups = signal<ReadonlySet<string>>(new Set());
@@ -414,7 +414,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
     const collapsed = this.collapsedGroups();
     return this.buildGroups
-      .map((g, i) => ({ key: g.key, label: g.label, builds: buckets[i], collapsed: collapsed.has(g.key) }))
+      .map((g, i) => ({ key: g.key, label: g.label, color: PHASE_COLOR[g.phase], builds: buckets[i], collapsed: collapsed.has(g.key) }))
       .filter((g) => g.builds.length > 0);
   });
 
@@ -430,12 +430,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     });
   }
 
-  /// Maps every BuildStatus variant onto the canonical token used by the SCSS
-  /// status classes (status-failed, status-completed, …). The three failed
-  /// reasons collapse onto `failed` so the red dot/badge renders for all of them.
-  /// The badge severity a build status reads as.
   statusSeverity(status: string | null | undefined): BadgeSeverity {
     return (status && PHASE_SEVERITY[buildPhase(status as BuildStatus)]) || 'neutral';
+  }
+
+  buildStatusColor(status: string | null | undefined): string {
+    return PHASE_COLOR[(status && buildPhase(status as BuildStatus)) || 'aborted'];
   }
 
   statusLabel(status: string): string {

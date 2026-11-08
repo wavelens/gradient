@@ -81,17 +81,19 @@
                 type="button"
                 class="sidebar-group-header"
                 [class.collapsed]="group.collapsed"
+                [style.--build-status-color]="group.color"
                 [attr.aria-expanded]="!group.collapsed"
                 (click)="toggleGroup(group.key)"
               >
                 <gr-icon name="expand_more" size="sm" class="sidebar-group-chevron" />
-                <span class="build-dot status-{{ group.key }}"></span>
+                <span class="build-dot"></span>
                 {{ group.label }}
                 <span class="sidebar-group-count">{{ group.builds.length }}</span>
               </button>
               @for (build of group.collapsed ? [] : group.builds; track build.id) {
                 <div
-                  class="build-item status-{{ statusClass(build.status) }}"
+                  class="build-item"
+                  [style.--build-status-color]="buildStatusColor(build.status)"
                   [class.selected]="selectedBuildId() === build.id"
                   [attr.data-build-id]="build.id"
                   (click)="selectBuild(build, true)"
@@ -105,7 +107,7 @@
                   role="button"
                   [attr.aria-pressed]="selectedBuildId() === build.id"
                 >
-                  <span class="build-dot status-{{ statusClass(build.status) }}"></span>
+                  <span class="build-dot"></span>
                   <span class="build-name">{{ buildDisplayName(build.name) }}</span>
                   @if (build.ifd) { <gr-badge severity="info">IFD</gr-badge> }
                   @if (getBuildElapsed(build)) {

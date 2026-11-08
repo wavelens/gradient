@@ -54,16 +54,9 @@
     border-left-color: var(--gr-border);
   }
 
-  // Status-colored accent when selected
   &.selected {
     background: var(--gr-surface-active);
-
-    &.status-completed,
-    &.status-substituted            { border-left-color: var(--gr-indicator-success); }
-    &.status-building,
-    &.status-queued                 { border-left-color: var(--gr-indicator-info); }
-    &.status-failed  { border-left-color: var(--gr-indicator-danger); }
-    &.status-aborted, &.status-dependencyfailed { border-left-color: var(--gr-text-secondary); }
+    border-left-color: var(--build-status-color);
   }
 }
 
@@ -72,13 +65,7 @@
   height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
-
-  &.status-queued,
-  &.status-building               { background: var(--gr-indicator-info); }
-  &.status-completed,
-  &.status-substituted            { background: var(--gr-indicator-success); }
-  &.status-failed  { background: var(--gr-indicator-danger); }
-  &.status-aborted, &.status-dependencyfailed { background: var(--gr-text-secondary); }
+  background: var(--build-status-color);
 }
 
 .build-name {

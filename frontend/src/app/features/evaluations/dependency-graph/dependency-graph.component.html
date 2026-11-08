@@ -72,9 +72,9 @@
 
     <!-- Legend -->
     <div class="legend">
-      @for (entry of legend; track entry.label) {
+      @for (entry of legend; track entry.color) {
         <div class="legend-item">
-          <span class="dot" [style.background]="phaseColor[entry.phase]"></span>{{ entry.label }}
+          <span class="dot" [style.background]="entry.color"></span>{{ entry.label }}
         </div>
       }
     </div>
