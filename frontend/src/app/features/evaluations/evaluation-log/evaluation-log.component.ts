@@ -509,13 +509,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             this.initialShowEval = false;
             this.selectEvaluationSection();
           } else if (!this.initialBuildId && !this.selectedBuildId()) {
-            // Auto-select first Building build when no explicit build was requested
             const firstBuilding = this.builds().find(b => b.status === 'Building');
-            if (firstBuilding) {
-              this.selectBuild(firstBuilding); // isUserAction=false -> auto-follow mode
-            } else {
-              this.autoFollowBuilding = true; // wait for first build to start
-            }
+            const firstFailed = this.builds().find(b => this.statusClass(b.status) === 'failed');
+            const first = firstBuilding ?? firstFailed;
+            if (first) this.selectBuild(first);
+            if (!firstBuilding) this.autoFollowBuilding = true;
           }
         } else if (!isEvaluating) {
           // Evaluation is no longer Evaluating: flush all builds immediately

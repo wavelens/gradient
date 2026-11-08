@@ -727,6 +727,39 @@ describe('EvaluationLogComponent', () => {
     });
   });
 
+  describe('first selected build', () => {
+    it('Open the first failed build when no build is in progress.', () => {
+      TestBed.configureTestingModule({
+        imports: [EvaluationLogComponent],
+        providers: [
+          provideRouter([]), provideHttpClient(), provideHttpClientTesting(),
+          { provide: ActivatedRoute, useValue: {
+            snapshot: {
+              paramMap: convertToParamMap({ project: 'proj', evaluationId: 'eval-1' }),
+              queryParamMap: convertToParamMap({}),
+              fragment: null,
+            },
+          } },
+          { provide: EvaluationsService, useValue: {
+            getEvaluation: () => of({ id: 'eval-1', status: 'Failed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null }),
+            getBuilds: () => of({
+              builds: [build('ok', 'hash-zlib.drv'), build('dep', 'hash-app.drv', 'DependencyFailed'), build('bad', 'hash-openssl.drv', 'FailedPermanent', 1)],
+              total: 3,
+              active_count: 0,
+            }),
+            getEvaluationMessages: () => of([]),
+          } },
+        ],
+      });
+      vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
+      const fixture = TestBed.createComponent(EvaluationLogComponent);
+      fixture.componentInstance.ngOnInit();
+      expect(fixture.componentInstance.selectedBuildId()).toBe('bad');
+      fixture.destroy();
+    });
+  });
+
   describe('evaluation progress', () => {
     const rows = (name: string) => [{ name, state: 'Fetching' as const, downloaded_bytes: 1, expected_bytes: 0 }];
 
