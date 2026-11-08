@@ -721,6 +721,21 @@ describe('BoardJobDetailComponent - #636', () => {
     expect(instance.textContent).not.toContain('Disk usage');
   });
 
+  it('names each rule help button after its rule', () => {
+    const reasoning = DETAIL.assigned_scheduler_reasoning!;
+    const job = { ...DETAIL, assigned_scheduler_reasoning: { ...reasoning, score_breakdown: { rules: { WaitTimeRule: 2, QosRule: 1 }, total: 3 } } };
+    TestBed.overrideProvider(BoardService, {
+      useValue: {
+        getJob: () => of(job),
+        getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
+        getScoringRules: () => of([{ rule: 'WaitTimeRule', description: 'w' }, { rule: 'QosRule', description: 'q' }]),
+      },
+    });
+    const el = setup().nativeElement as HTMLElement;
+    const names = Array.from(el.querySelectorAll('button.help')).map((b) => b.getAttribute('aria-label'));
+    expect(names).toEqual(['Explain Wait time', 'Explain Service quality']);
+  });
+
   it('names the pending job by what it works on', () => {
     const el = setup({ getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1', true).nativeElement as HTMLElement;
     expect(el.textContent).toContain('hello-2.12.1');

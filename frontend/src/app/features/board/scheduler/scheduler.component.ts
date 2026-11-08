@@ -55,7 +55,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
               <td>
                 {{ r.label }}
                 @if (r.description) {
-                  <button type="button" class="help" aria-label="Explain rule" (click)="showHelp($event, r, rulePop)">?</button>
+                  <button type="button" class="help" [attr.aria-label]="'Explain ' + r.label" (click)="showHelp($event, r, rulePop)">?</button>
                 }
               </td>
               <td class="num" [class.neg]="r.avg < 0">{{ r.avg | number: '1.2-2' }}</td>

@@ -256,7 +256,7 @@ interface RuleRow {
                   <td>
                     {{ r.label }}
                     @if (r.description) {
-                      <button type="button" class="help" aria-label="Explain rule" (click)="showHelp($event, r, rulePop)">?</button>
+                      <button type="button" class="help" [attr.aria-label]="'Explain ' + r.label" (click)="showHelp($event, r, rulePop)">?</button>
                     }
                   </td>
                   <td class="num" [class.neg]="!r.positive">{{ r.value | number: '1.2-2' }}</td>
