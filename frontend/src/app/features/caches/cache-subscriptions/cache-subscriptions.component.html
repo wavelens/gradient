@@ -24,6 +24,7 @@
       @for (request of requests(); track request.project) {
         <gr-row icon="folder">
           {{ request.project_display_name }}
+          <gr-badge severity="neutral">{{ modeLabel(request.mode) }}</gr-badge>
           <span slot="meta">
             Requested by {{ request.requested_by }} ·
             {{ request.created_at | serverDate }}

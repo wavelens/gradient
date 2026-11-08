@@ -5,7 +5,7 @@
  */
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
-import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { ServerTimestampToLocalDateTimePipe, subscriptionModeLabel } from '@shared/text';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -19,6 +19,7 @@ import { tap } from 'rxjs';
 import { requestIfCacheMember } from '@shared/access';
 import { injectCacheAccessData } from '@core/resolvers/inject-access';
 import {
+  BadgeComponent,
   ButtonComponent,
   LoadStateComponent,
   PageLayoutComponent,
@@ -32,6 +33,7 @@ import {
   imports: [
     CommonModule,
     ServerTimestampToLocalDateTimePipe,
+    BadgeComponent,
     ButtonComponent,
     LoadStateComponent,
     PageLayoutComponent,
@@ -56,6 +58,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   deciding = signal<string | null>(null);
   requests = signal<SubscriptionRequestItem[]>([]);
   loadError = signal<unknown>(null);
+  protected readonly modeLabel = subscriptionModeLabel;
 
   constructor() {
     runReloadIntervalWhileTabVisible(() =>
