@@ -4,13 +4,10 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache Settings">
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!cache()" loadingMessage="Loading cache settings..."
                errorTitle="Failed to load cache settings" (retry)="loadCache()">
 @if (cache(); as c) {
-  <gr-page-layout width="settings"
-    [breadcrumb]="breadcrumb()"
-    title="Cache Settings"
-  >
     <gr-settings-section title="General">
       <gr-form-field label="Name" for="cache-name">
         <input grInput id="cache-name" [value]="c.name" disabled />
@@ -205,6 +202,6 @@
         }
       </gr-settings-section>
     }
-  </gr-page-layout>
 }
 </gr-load-state>
+</gr-page-layout>

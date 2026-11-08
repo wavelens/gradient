@@ -4,12 +4,11 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Task Settings">
+<a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!task()" loadingMessage="Loading task settings..."
                errorTitle="Failed to load task settings" (retry)="loadTask()">
 @if (task(); as proj) {
-  <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Task Settings">
-  <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
-  <!-- General Settings -->
   <gr-settings-section title="General">
     <gr-form-field label="Name" for="proj-name">
       <input grInput id="proj-name" [value]="proj.name" disabled />
@@ -214,9 +213,9 @@
       </gr-row>
     </gr-settings-section>
   }
-</gr-page-layout>
 }
 </gr-load-state>
+</gr-page-layout>
 
 <!-- Transfer Ownership Dialog -->
 <gr-dialog
