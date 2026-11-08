@@ -453,11 +453,18 @@ pub fn check_flake_input_override(input_name: &str, flake_ref: &str) -> Result<(
         return Err(InputError::FlakeInputNameInvalid);
     }
 
+    validate_flake_input_override_flake_ref(input_name, flake_ref)
+}
+
+pub fn validate_flake_input_override_flake_ref(
+    input_name: &str,
+    flake_ref: &str,
+) -> Result<(), InputError> {
     let is_remote = REMOTE_FLAKE_REF_PREFIXES
         .iter()
         .any(|prefix| flake_ref.starts_with(prefix));
 
-    if !is_remote {
+    if !is_remote || flake_ref.contains(char::is_whitespace) {
         return Err(InputError::FlakeRefNotRemote {
             input_name: input_name.to_string(),
             flake_ref: flake_ref.to_string(),
@@ -528,7 +535,15 @@ mod tests {
 
     #[test]
     fn rejects_local_and_non_remote_refs() {
-        for url in ["/abs", "./rel", "~/x", "name", "path:/home/u/x"] {
+        for url in [
+            "/abs",
+            "./rel",
+            "~/x",
+            "name",
+            "path:/home/u/x",
+            "not a flake url !!",
+            "github:a/b c",
+        ] {
             assert!(check_flake_input_override("nixpkgs", url).is_err(), "{url}");
         }
     }

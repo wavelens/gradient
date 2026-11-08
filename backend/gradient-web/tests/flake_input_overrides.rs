@@ -226,6 +226,48 @@ async fn create_invalid_input_name_rejects_400() {
 }
 
 #[tokio::test]
+async fn create_rejects_a_url_that_is_not_a_remote_flake_ref() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let db = with_task_edit(with_auth(mock_db(), session_id));
+
+    let res = make_test_server(db.into_connection())
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"input_name": "nixpkgs", "url": "not a flake url !!"}))
+        .await;
+
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("not a remote flake ref"),
+        "unexpected message: {}",
+        body["message"]
+    );
+}
+
+#[tokio::test]
+async fn patch_rejects_a_url_that_is_not_a_remote_flake_ref() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![nixpkgs_override_row()]]);
+
+    let res = make_test_server(db.into_connection())
+        .patch(&format!("{BASE_URL}/{}", override_id()))
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({"url": "/home/user/nixpkgs"}))
+        .await;
+
+    res.assert_status_bad_request();
+}
+
+#[tokio::test]
 async fn patch_updates_url_and_returns_new_row() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);

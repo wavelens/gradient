@@ -15,6 +15,7 @@ use crate::scope::{Member, RequiresUnmanaged, TaskScope, can};
 use axum::Json;
 use chrono::Utc;
 use gradient_core::ServerState;
+use gradient_types::input::validate_flake_input_override_flake_ref;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
@@ -91,12 +92,14 @@ fn validate_input_name(name: &str) -> WebResult<()> {
     Ok(())
 }
 
-fn validate_url(url: &Option<String>) -> WebResult<()> {
-    if let Some(u) = url
-        && u.trim().is_empty()
-    {
+fn validate_url(input_name: &str, url: Option<&str>) -> WebResult<()> {
+    let Some(url) = url else {
+        return Ok(());
+    };
+    if url.trim().is_empty() {
         return Err(SharedRefusal::EmptyField("url").into());
     }
+    validate_flake_input_override_flake_ref(input_name, url)?;
     Ok(())
 }
 
@@ -132,7 +135,7 @@ pub async fn create(
     Json(body): Json<CreateFlakeInputOverrideRequest>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
     validate_input_name(&body.input_name)?;
-    validate_url(&body.url)?;
+    validate_url(&body.input_name, body.url.as_deref())?;
 
     let existing =
         gradient_db::flake_input_overrides::by_input_name(&db.web_db, proj.id, &body.input_name)
@@ -213,13 +216,15 @@ pub async fn update(
     if let Some(n) = &body.input_name {
         validate_input_name(n)?;
     }
-    if let Some(Some(u)) = &body.url {
-        validate_url(&Some(u.clone()))?;
-    }
 
     let row = gradient_db::flake_input_overrides::by_id_in_task(&db.web_db, proj.id, id)
         .await?
         .or_not_found(Resource::FlakeInputOverride)?;
+
+    if let Some(url) = &body.url {
+        let input_name = body.input_name.as_deref().unwrap_or(&row.input_name);
+        validate_url(input_name, url.as_deref())?;
+    }
 
     if let Some(new_name) = &body.input_name
         && new_name != &row.input_name
