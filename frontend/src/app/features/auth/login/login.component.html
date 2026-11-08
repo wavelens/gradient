@@ -16,6 +16,8 @@
       <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
     } @else if (sessionExpired) {
       <gr-message-banner type="info">Session expired. Sign in again to continue.</gr-message-banner>
+    } @else if (usernameFromRegistration) {
+      <gr-message-banner type="success">Account created. Sign in to continue.</gr-message-banner>
     }
 
     @if (passwordLoginEnabled) {

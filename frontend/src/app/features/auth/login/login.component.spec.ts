@@ -55,6 +55,12 @@ describe('LoginComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Session expired');
   });
 
+  it('confirms a new account and fills in its username', () => {
+    const fixture = setup({ loginProviders: [], passwordLoginEnabled: true }, { registered: 'dora' });
+    expect(fixture.nativeElement.textContent).toContain('Account created');
+    expect(fixture.componentInstance.loginForm.value.username).toBe('dora');
+  });
+
   it('falls back to a generic message for unknown errors', () => {
     const fixture = setup({ loginProviders: [EXAMPLE], passwordLoginEnabled: true }, { login_error: 'whatever' });
     expect(fixture.nativeElement.textContent).toContain('Sign-in failed');

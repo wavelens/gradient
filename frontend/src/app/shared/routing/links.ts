@@ -41,6 +41,7 @@ function origin(from: BuildOrigin): Query {
 export const links = {
   dashboard: () => url([]),
   login: (next?: string | null) => url(['account', 'login'], { next }),
+  loginAfterRegister: (username: string) => url(['account', 'login'], { registered: username }),
   register: () => url(['account', 'register']),
 
   projects: () => url(['projects']),

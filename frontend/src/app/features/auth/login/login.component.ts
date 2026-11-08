@@ -51,6 +51,7 @@ export class LoginComponent {
   loginForm: FormGroup;
   errorMessage = signal<string | null>(null);
   readonly sessionExpired = this.route.snapshot.queryParamMap.get('reason') === 'expired';
+  readonly usernameFromRegistration = this.route.snapshot.queryParamMap.get('registered');
   loading = signal(false);
   showPassword = signal(false);
   get oidcEnabled() { return this.config.oidcEnabled; }
@@ -61,7 +62,7 @@ export class LoginComponent {
 
   constructor() {
     this.loginForm = this.fb.group({
-      username: ['', [Validators.required]],
+      username: [this.usernameFromRegistration ?? '', [Validators.required]],
       password: ['', [Validators.required]],
       rememberMe: [false],
     });

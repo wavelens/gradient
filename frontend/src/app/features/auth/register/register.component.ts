@@ -185,7 +185,7 @@ export class RegisterComponent {
             'Registration successful! Please check your email to verify your account before signing in.'
           );
         } else {
-          this.router.navigateByUrl(links.login());
+          this.router.navigateByUrl(links.loginAfterRegister(username));
         }
       },
       error: (error) => {
