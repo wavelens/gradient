@@ -7,7 +7,7 @@
 @if (rail(); as r) {
   <aside class="rail">
     <section>
-      <h3>Projects <a [routerLink]="links.projects()">+ New</a></h3>
+      <h3>Projects</h3>
       <ul>
         @for (p of r.projects; track p.name) {
           <li>
@@ -38,7 +38,7 @@
     </section>
 
     <section>
-      <h3>Caches <a [routerLink]="links.caches()">+ New</a></h3>
+      <h3>Caches</h3>
       <ul>
         @for (c of r.caches; track c.name) {
           <li>

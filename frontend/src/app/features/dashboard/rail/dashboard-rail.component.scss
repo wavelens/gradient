@@ -29,8 +29,6 @@ a {
 }
 
 h3 {
-  display: flex;
-  justify-content: space-between;
   margin: 0 0 10px;
   padding-bottom: $spacing-sm;
   border-bottom: 1px solid var(--gr-border-subtle);
@@ -39,12 +37,6 @@ h3 {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-
-  a {
-    color: var(--gr-accent);
-    letter-spacing: 0;
-    text-transform: none;
-  }
 }
 
 ul {
