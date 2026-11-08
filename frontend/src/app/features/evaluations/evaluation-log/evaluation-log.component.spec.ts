@@ -810,6 +810,13 @@ describe('EvaluationLogComponent', () => {
       expect(link?.getAttribute('href')).toBe('/project/proj/summary/eval-1');
       fixture.destroy();
     });
+
+    it('says "No builds" without "yet" for a finished evaluation', () => {
+      const fixture = setupEvaluationLogPageFixture([]);
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).querySelector('.no-builds')?.textContent?.trim()).toBe('No builds');
+      fixture.destroy();
+    });
   });
 
   describe('evaluation progress', () => {
