@@ -727,8 +727,8 @@ describe('EvaluationLogComponent', () => {
     });
   });
 
-  describe('first selected build', () => {
-    it('Open the first failed build when no build is in progress.', () => {
+  describe('opened without a build', () => {
+    function setupEvaluationLogPageFixture(builds: BuildItem[]) {
       TestBed.configureTestingModule({
         imports: [EvaluationLogComponent],
         providers: [
@@ -742,11 +742,7 @@ describe('EvaluationLogComponent', () => {
           } },
           { provide: EvaluationsService, useValue: {
             getEvaluation: () => of({ id: 'eval-1', status: 'Failed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null }),
-            getBuilds: () => of({
-              builds: [build('ok', 'hash-zlib.drv'), build('dep', 'hash-app.drv', 'DependencyFailed'), build('bad', 'hash-openssl.drv', 'FailedPermanent', 1)],
-              total: 3,
-              active_count: 0,
-            }),
+            getBuilds: () => of({ builds, total: builds.length, active_count: 0 }),
             getEvaluationMessages: () => of([]),
           } },
         ],
@@ -755,7 +751,22 @@ describe('EvaluationLogComponent', () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
       const fixture = TestBed.createComponent(EvaluationLogComponent);
       fixture.componentInstance.ngOnInit();
+      return fixture;
+    }
+
+    it('Open the first failed build when no build is in progress.', () => {
+      const fixture = setupEvaluationLogPageFixture([
+        build('ok', 'hash-zlib.drv'), build('dep', 'hash-app.drv', 'DependencyFailed'), build('bad', 'hash-openssl.drv', 'FailedPermanent', 1),
+      ]);
       expect(fixture.componentInstance.selectedBuildId()).toBe('bad');
+      fixture.destroy();
+    });
+
+    it('Link from the info bar to the evaluation summary', () => {
+      const fixture = setupEvaluationLogPageFixture([]);
+      fixture.detectChanges();
+      const link = (fixture.nativeElement as HTMLElement).querySelector('.info-bar-right a[href]');
+      expect(link?.getAttribute('href')).toBe('/project/proj/summary/eval-1');
       fixture.destroy();
     });
   });

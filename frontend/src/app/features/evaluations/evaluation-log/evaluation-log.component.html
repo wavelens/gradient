@@ -171,6 +171,8 @@
           </div>
         </div>
         <div class="info-bar-right">
+          <a grButton size="small" label="Summary" icon="summarize" severity="secondary"
+             [routerLink]="links.evaluationSummary(projectName, evaluationId)"></a>
           @if (isRunning()) {
             <button *appWritable="triggerAccess()" grButton label="Abort" icon="close"
               severity="danger" size="small"
