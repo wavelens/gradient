@@ -54,10 +54,12 @@
   background: var(--gr-surface-raised);
   border-bottom: 1px solid var(--gr-border-subtle);
   flex-shrink: 0;
+  flex-wrap: wrap;
   gap: $spacing-md;
 }
 
 .info-bar-left {
+  flex: 1 1 16rem;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -68,9 +70,11 @@
 
 .info-bar-right {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: $spacing-sm;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .info-metric {
@@ -79,6 +83,7 @@
   gap: $spacing-xs;
   padding: 0 $spacing-md;
   height: 48px;
+  max-width: 100%;
   border-right: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
   flex-shrink: 0;
 
@@ -95,9 +100,12 @@
 }
 
 .metric-value {
+  min-width: 0;
+  overflow: hidden;
   font-size: $font-size-sm;
   color: var(--gr-text-primary);
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .sidebar-toggle {
