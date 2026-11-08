@@ -269,7 +269,13 @@
   @if (form.type === 'time') {
     <gr-form-field label="Cron Expression" for="trig-cron" required
       [invalid]="(submitAttempted() || cronModel.touched) && !!cronError" [error]="cronError ?? ''">
-      <span slot="hint">Six fields: sec min hour dom mon dow (UTC). Example: <code>0 0 2 * * *</code> = 02:00 UTC daily.</span>
+      <span slot="hint">
+        @if (cronScheduleDescription; as schedule) {
+          {{ schedule }}
+        } @else {
+          Six fields: sec min hour dom mon dow (UTC). Example: <code>0 0 2 * * *</code> = 02:00 UTC daily.
+        }
+      </span>
       <input
         grInput
         id="trig-cron"

@@ -398,6 +398,19 @@ describe('TaskTriggersComponent - validation', () => {
     expect(create).toHaveBeenCalledWith('acme', 'demo', { config: { type: 'time', cron: '0 0 2 * * *' }, active: true });
   });
 
+  it('describes the schedule in plain words under the cron field and in the list', () => {
+    const cronTrigger = { ...trigger, id: 't2', type: 'time' as const, config: { type: 'time', cron: '0 0 9 * * Mon-Fri' } };
+    const fixture = setup(writer, [cronTrigger]);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Every week on Monday to Friday at 09:00 UTC (0 0 9 * * Mon-Fri)');
+
+    const component = fixture.componentInstance;
+    component.startCreate();
+    component.form.type = 'time';
+    component.form.cron = '0 0 2 * * *';
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Every day at 02:00 UTC');
+  });
+
   it('creates on Enter in a single-line field', () => {
     const { fixture, component, create } = withCreate();
     component.startCreate();

@@ -43,6 +43,7 @@ import { RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 import { splitList } from '@shared/forms';
 import { gitHostLabel } from '@shared/git';
+import { cronExpressionToPlainEnglish } from './cron-expression-description';
 
 interface Option<T> {
   label: string;
@@ -245,6 +246,10 @@ export class TaskTriggersComponent implements OnInit {
     return fields === 6 || fields === 7
       ? null
       : 'Enter 6 or 7 fields separated by spaces. The fields are sec, min, hour, dom, mon and dow, plus an optional year.';
+  }
+
+  get cronScheduleDescription(): string | null {
+    return cronExpressionToPlainEnglish(this.form.cron);
   }
 
   private get formError(): string | null {
@@ -467,8 +472,11 @@ export class TaskTriggersComponent implements OnInit {
         if (cfg.require_approval === false) parts.push('approval gate off');
         return parts.join(' / ');
       }
-      case 'time':
-        return cfg.cron ?? '';
+      case 'time': {
+        const cron = cfg.cron ?? '';
+        const description = cronExpressionToPlainEnglish(cron);
+        return description ? `${description} (${cron})` : cron;
+      }
     }
   }
 
