@@ -23,27 +23,37 @@
       }
     </div>
 
-  <gr-settings-section class="used-by" title="Projects using this cache" description="Projects that push builds to this cache or read from this cache." [card]="false">
-    @if (authService.isAuthenticated()) {
-      <button slot="actions" grButton label="Use with project" icon="add_link" severity="secondary" (click)="useDialogOpen.set(true)"></button>
+  <gr-settings-section
+    title="How to Use This Cache"
+    description="Add the following to your /etc/nix/nix.conf or NixOS configuration."
+  >
+    <gr-form-field label="Substituter URL" for="cache-url">
+      <gr-label-help slot="label" doc="concepts/caches/#using-a-cache" title="Using a cache" />
+      <gr-copy-field inputId="cache-url" [value]="cacheUrl" />
+    </gr-form-field>
+
+    <gr-form-field label="Trusted Public Keys" for="cache-keys">
+      <gr-copy-field inputId="cache-keys" [value]="trustedPublicKeys().join(' ') || 'Not available'" />
+    </gr-form-field>
+
+    <gr-form-field label="nix.conf snippet" for="cache-conf">
+      <gr-copy-field inputId="cache-conf" multiline [rows]="2" [value]="nixConfSnippet()" />
+    </gr-form-field>
+
+    @if (!c.public) {
+      <gr-divider />
+      <gr-form-field label="Install netrc" for="cache-netrc">
+        <gr-label-help slot="label" doc="guides/share-a-cache/#1-use-the-cache-on-a-machine" title="Cache authentication docs" />
+        <gr-copy-field inputId="cache-netrc" multiline [rows]="2" [value]="installNetrcCommand" />
+        <span slot="hint">
+          This cache is private. Run the command as root, replacing <code>&lt;YOUR_TOKEN&gt;</code> with your
+          API key or login token. It writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon
+          can authenticate. Prefer a declarative NixOS setup? See the
+          <a [href]="netrcDocsUrl" target="_blank" rel="noopener noreferrer">declarative netrc example</a>
+          in the docs.
+        </span>
+      </gr-form-field>
     }
-    <gr-load-state [loading]="!subscribers() && !subscribersError()" [error]="subscribersError()" flat
-                   errorTitle="Failed to load the projects using this cache" (retry)="loadSubscribers()">
-      @if (subscribers(); as used) {
-        @if (used.projects.length) {
-          <gr-row-list>
-            @for (project of used.projects; track project.project) {
-              <gr-row icon="folder" [link]="links.project(project.project)" [linkLabel]="project.project_display_name">
-                {{ project.project_display_name }}
-                <gr-badge severity="neutral">{{ modeLabel(project.mode) }}</gr-badge>
-              </gr-row>
-            }
-          </gr-row-list>
-        } @else {
-          <p class="used-by-empty">{{ used.hidden ? 'No projects that you can view use this cache.' : 'No projects use this cache yet.' }}</p>
-        }
-      }
-    </gr-load-state>
   </gr-settings-section>
 
   <gr-load-state [error]="statsError()" errorTitle="Failed to load cache stats" (retry)="loadStats()">
@@ -116,37 +126,27 @@
   </div>
   </gr-load-state>
 
-  <gr-settings-section
-    title="How to Use This Cache"
-    description="Add the following to your /etc/nix/nix.conf or NixOS configuration."
-  >
-    <gr-form-field label="Substituter URL" for="cache-url">
-      <gr-label-help slot="label" doc="concepts/caches/#using-a-cache" title="Using a cache" />
-      <gr-copy-field inputId="cache-url" [value]="cacheUrl" />
-    </gr-form-field>
-
-    <gr-form-field label="Trusted Public Keys" for="cache-keys">
-      <gr-copy-field inputId="cache-keys" [value]="trustedPublicKeys().join(' ') || 'Not available'" />
-    </gr-form-field>
-
-    <gr-form-field label="nix.conf snippet" for="cache-conf">
-      <gr-copy-field inputId="cache-conf" multiline [rows]="2" [value]="nixConfSnippet()" />
-    </gr-form-field>
-
-    @if (!c.public) {
-      <gr-divider />
-      <gr-form-field label="Install netrc" for="cache-netrc">
-        <gr-label-help slot="label" doc="guides/share-a-cache/#1-use-the-cache-on-a-machine" title="Cache authentication docs" />
-        <gr-copy-field inputId="cache-netrc" multiline [rows]="2" [value]="installNetrcCommand" />
-        <span slot="hint">
-          This cache is private. Run the command as root, replacing <code>&lt;YOUR_TOKEN&gt;</code> with your
-          API key or login token. It writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon
-          can authenticate. Prefer a declarative NixOS setup? See the
-          <a [href]="netrcDocsUrl" target="_blank" rel="noopener noreferrer">declarative netrc example</a>
-          in the docs.
-        </span>
-      </gr-form-field>
+  <gr-settings-section class="used-by" title="Projects using this cache" description="Projects that push builds to this cache or read from this cache." [card]="false">
+    @if (authService.isAuthenticated()) {
+      <button slot="actions" grButton label="Use with project" icon="add_link" severity="secondary" (click)="useDialogOpen.set(true)"></button>
     }
+    <gr-load-state [loading]="!subscribers() && !subscribersError()" [error]="subscribersError()" flat
+                   errorTitle="Failed to load the projects using this cache" (retry)="loadSubscribers()">
+      @if (subscribers(); as used) {
+        @if (used.projects.length) {
+          <gr-row-list>
+            @for (project of used.projects; track project.project) {
+              <gr-row icon="folder" [link]="links.project(project.project)" [linkLabel]="project.project_display_name">
+                {{ project.project_display_name }}
+                <gr-badge severity="neutral">{{ modeLabel(project.mode) }}</gr-badge>
+              </gr-row>
+            }
+          </gr-row-list>
+        } @else {
+          <p class="used-by-empty">{{ used.hidden ? 'No projects that you can view use this cache.' : 'No projects use this cache yet.' }}</p>
+        }
+      }
+    </gr-load-state>
   </gr-settings-section>
 
   </gr-page-layout>
