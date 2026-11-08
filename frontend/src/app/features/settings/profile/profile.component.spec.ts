@@ -26,7 +26,6 @@ let confirm = vi.fn(() => EMPTY);
 interface SetupOptions {
   managed: boolean;
   oidc: boolean;
-  ssh?: boolean;
   password?: boolean;
   provider?: { connected: boolean; canDisconnect: boolean };
   query?: Record<string, string>;
@@ -83,7 +82,7 @@ function setup(opts: SetupOptions): ComponentFixture<ProfileComponent> {
         useValue: { snapshot: { queryParamMap: convertToParamMap(opts.query ?? {}) } },
       },
       { provide: AuthService, useValue: { reloadUser: () => undefined, isAuthenticated: () => false } },
-      { provide: ConfigService, useValue: { sshEnabled: opts.ssh ?? false } },
+      { provide: ConfigService, useValue: { sshEnabled: false } },
     ],
   });
   const fixture = TestBed.createComponent(ProfileComponent);
@@ -290,18 +289,6 @@ describe('ProfileComponent - appearance', () => {
     themeButton(fixture, 'System').click();
     fixture.detectChanges();
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
-  });
-});
-
-describe('ProfileComponent - SSH keys row', () => {
-  it('is hidden while SSH is disabled', () => {
-    const fixture = setup({ managed: false, oidc: false });
-    expect(fixture.nativeElement.textContent).not.toContain('SSH Keys');
-  });
-
-  it('is shown when SSH is enabled', () => {
-    const fixture = setup({ managed: false, oidc: false, ssh: true });
-    expect(fixture.nativeElement.textContent).toContain('SSH Keys');
   });
 });
 

@@ -10,7 +10,6 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
-import { ConfigService } from '@core/services/config.service';
 import { ThemeService, ThemePreference } from '@core/services/theme.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -102,7 +101,6 @@ export class ProfileComponent implements OnInit, CanComponentDeactivate {
   protected readonly links = links;
   private userService = inject(UserService);
   private authService = inject(AuthService);
-  protected config = inject(ConfigService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private notify = inject(NotifyService);
