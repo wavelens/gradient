@@ -166,10 +166,17 @@ interface RuleRow {
         <h2>Derivations</h2>
         <div class="drv-list">
           @for (d of j.derivations; track d.derivation_build) {
-            <div class="drv-row" [class.clickable]="!!d.build" (click)="d.build && openBuild(d.build)">
-              <span class="mono pname">{{ d.pname ?? '-' }}</span>
-              <span class="mono path">{{ d.drv_path }}</span>
-            </div>
+            @if (d.build; as build) {
+              <button type="button" class="drv-row clickable" (click)="openBuild(build)">
+                <span class="mono pname">{{ d.pname ?? '-' }}</span>
+                <span class="mono path">{{ d.drv_path }}</span>
+              </button>
+            } @else {
+              <div class="drv-row">
+                <span class="mono pname">{{ d.pname ?? '-' }}</span>
+                <span class="mono path">{{ d.drv_path }}</span>
+              </div>
+            }
           }
         </div>
       }

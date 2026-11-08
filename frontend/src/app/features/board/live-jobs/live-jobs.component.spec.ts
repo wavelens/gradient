@@ -131,6 +131,13 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     expect(fixture.componentInstance.filteredJobs().length).toBe(1);
   });
 
+  it('links the subject of an assigned row to its job page so the keyboard reaches it', () => {
+    const fixture = setupWithAssigned([ASSIGNED]);
+    fixture.detectChanges();
+    const cells = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('tbody td.subject'));
+    expect(cells[0].querySelector('a')?.getAttribute('href')).toBe(`/board/jobs/${ASSIGNED.id}`);
+  });
+
   it('keeps exec jobs under the exec type filter only', () => {
     const fixture = setupWithAssigned([ASSIGNED, { ...ASSIGNED, id: 'x', kind: 2, build_id: null }]);
     const cmp = fixture.componentInstance;

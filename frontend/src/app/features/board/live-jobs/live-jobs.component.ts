@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, computed, effect, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterModule } from '@angular/router';
+import { Router, RouterModule, UrlTree } from '@angular/router';
 import { BoardService } from '@core/services/board.service';
 import { LiveStatusComponent } from '@shared/ui';
 import { AuthService } from '@core/services/auth.service';
@@ -90,11 +90,14 @@ interface DecisionRow {
             <tbody>
               @for (row of assignedRows(); track row.job.id) {
                 @let j = row.job;
-                <tr class="clickable" (click)="inspect(j)">
+                @let detail = assignedJobDetailPageUrl(j);
+                <tr class="clickable" (click)="router.navigateByUrl(detail)">
                   @let subject = rowSubject(row);
                   <td>{{ jobKindName(j.kind) }}</td>
                   <td class="mono">{{ j.cluster_job ? subJobLabel(row.subJobs) : workerDisplayNameOrNotSharedLabel(j.worker_name) }}</td>
-                  <td class="mono subject" [title]="subject">{{ subject }}</td>
+                  <td class="mono subject" [title]="subject">
+                    <a [routerLink]="detail" (click)="$event.stopPropagation()">{{ subject }}</a>
+                  </td>
                   @if (superuser()) {
                     <td>{{ j.score | number: '1.1-1' }}</td>
                   }
@@ -113,11 +116,13 @@ interface DecisionRow {
             </thead>
             <tbody>
               @for (r of decisionRows(); track r.id) {
-                <tr [class.negative]="r.score < 0" class="clickable" (click)="inspectDecision(r)">
+                <tr [class.negative]="r.score < 0" class="clickable" (click)="router.navigateByUrl(links.boardJob(r.id))">
                   <td>{{ r.won ? 'assigned' : 'passed over' }}</td>
                   <td>{{ jobKindName(r.kind) }}</td>
                   <td class="mono">{{ r.worker }}</td>
-                  <td class="mono subject" [title]="r.subject">{{ r.subject }}</td>
+                  <td class="mono subject" [title]="r.subject">
+                    <a [routerLink]="links.boardJob(r.id)" (click)="$event.stopPropagation()">{{ r.subject }}</a>
+                  </td>
                   <td>{{ r.score | number: '1.1-1' }}</td>
                   <td>{{ r.at | serverDate: 'HH:mm:ss' }}</td>
                   <td>›</td>
@@ -188,7 +193,7 @@ export class BoardLiveJobsComponent implements OnInit {
   private static readonly STATE_KEY = 'board.live-jobs.filters';
 
   private board = inject(BoardService);
-  private router = inject(Router);
+  protected router = inject(Router);
   private auth = inject(AuthService);
   protected first = firstLoad();
   protected connected = subscribeToBoardSocketWithReload(() => this.load());
@@ -354,11 +359,7 @@ export class BoardLiveJobsComponent implements OnInit {
     });
   }
 
-  inspect(j: DispatchedJobSummary): void {
-    this.router.navigateByUrl(links.boardJobOrCluster(j.id, j.cluster_job) ?? links.boardJob(j.id));
-  }
-
-  inspectDecision(r: DecisionRow): void {
-    this.router.navigateByUrl(links.boardJob(r.id));
+  assignedJobDetailPageUrl(j: DispatchedJobSummary): UrlTree {
+    return links.boardJobOrCluster(j.id, j.cluster_job) ?? links.boardJob(j.id);
   }
 }

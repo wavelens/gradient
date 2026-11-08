@@ -42,7 +42,7 @@ gr-table.kv td.label { width: 40%; display: table-cell; }
 gr-table.kv.counts { display: block; margin-top: 1rem; }
 .drv-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .drv-row { display: flex; flex-direction: column; gap: 0.15rem; background: var(--gr-surface-raised); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.5rem 0.75rem; }
-.drv-row.clickable { cursor: pointer; transition: background 0.1s, border-color 0.1s; }
+.drv-row.clickable { width: 100%; font: inherit; text-align: left; color: inherit; cursor: pointer; transition: background 0.1s, border-color 0.1s; }
 .drv-row.clickable:hover { background: var(--gr-surface-hover); border-color: var(--gr-border-subtle); }
 .drv-row .pname { color: var(--gr-text-primary); }
 .drv-row .path { color: var(--gr-text-muted); font-size: $font-size-xs; word-break: break-all; }
