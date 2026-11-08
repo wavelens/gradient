@@ -47,20 +47,20 @@ code {
   b {
     color: var(--gr-text-primary);
     font-weight: 600;
+
+    &.up {
+      color: var(--gr-status-danger-text);
+    }
+
+    &.down {
+      color: var(--gr-status-success-text);
+    }
   }
 
   small {
     color: var(--gr-text-muted);
     font-size: $font-size-xs;
   }
-}
-
-.up {
-  color: var(--gr-status-danger-text);
-}
-
-.down {
-  color: var(--gr-status-success-text);
 }
 
 .show-all {
