@@ -51,7 +51,7 @@ interface DecisionRow {
         <div class="banner">
           Showing {{ assignedRows().length }} of {{ collapseClusters(jobs()).length }} assigned job(s) visible to this account.
           @if (otherRunning() > 0) {
-            <span class="muted">+ {{ otherRunning() }} other running (hidden).</span>
+            <span class="muted">Running on projects that this account can't view: {{ otherRunning() }}.</span>
           }
         </div>
 
@@ -138,7 +138,7 @@ interface DecisionRow {
       @if (view() === 'pending') {
         <div class="banner">
           {{ pendingRows().length }} pending job(s) visible to this account.
-          @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
+          @if (otherPending() > 0) { <span class="muted">Pending in projects this account can't view: {{ otherPending() }}.</span> }
         </div>
         <gr-table class="jobs">
           <thead><tr><th>Kind</th><th>Project / task</th><th>Derivation / Evaluation / Exec</th><th>Waiting for</th><th>Age</th></tr></thead>
