@@ -181,7 +181,7 @@ interface RuleRow {
       <section class="timeline">
         <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | serverDate }}</span></div>
         <div class="step"><span class="label">Ready</span><span>{{ j.ready_at ? (j.ready_at | serverDate) : '-' }}</span></div>
-        <div class="step"><span class="label">Wait</span><span class="hl">{{ waitLabel() }}</span></div>
+        <div class="step"><span class="label">Wait</span><span>{{ waitLabel() }}</span></div>
         <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Assigned' }}</span><span>{{ j.dispatched_at | serverDate }}</span></div>
         @if (j.exec_attempt; as a) {
           <div class="step"><span class="label">Started</span><span>{{ a.started_at | serverDate }}</span></div>
@@ -259,7 +259,7 @@ interface RuleRow {
                       <button type="button" class="help" [attr.aria-label]="'Explain ' + r.label" (click)="showHelp($event, r, rulePop)">?</button>
                     }
                   </td>
-                  <td class="num" [class.neg]="!r.positive">{{ r.value | number: '1.2-2' }}</td>
+                  <td class="num">{{ r.value | number: '1.2-2' }}</td>
                   <td class="bar-cell">
                     <div class="bar" [class.neg]="!r.positive" [style.width.%]="r.share"></div>
                   </td>
@@ -426,7 +426,7 @@ interface RuleRow {
       <section class="timeline">
         <div class="step"><span class="label">Queued</span><span>{{ p.queued_at | serverDate }}</span></div>
         @if (p.dependency_count > 0) {
-          <div class="step"><span class="label">Dependencies</span><span class="hl">{{ p.dependency_count }}</span></div>
+          <div class="step"><span class="label">Dependencies</span><span>{{ p.dependency_count }}</span></div>
         }
       </section>
     } @else {

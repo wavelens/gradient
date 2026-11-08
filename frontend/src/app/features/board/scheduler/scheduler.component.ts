@@ -58,7 +58,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
                   <button type="button" class="help" [attr.aria-label]="'Explain ' + r.label" (click)="showHelp($event, r, rulePop)">?</button>
                 }
               </td>
-              <td class="num" [class.neg]="r.avg < 0">{{ r.avg | number: '1.2-2' }}</td>
+              <td class="num">{{ r.avg | number: '1.2-2' }}</td>
               <td class="num">{{ r.min | number: '1.2-2' }}</td>
               <td class="num">{{ r.max | number: '1.2-2' }}</td>
               <td class="bar-cell"><div class="bar" [class.neg]="r.avg < 0" [style.width.%]="r.share"></div></td>

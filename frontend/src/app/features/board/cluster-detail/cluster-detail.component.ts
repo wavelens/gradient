@@ -90,7 +90,7 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
       <section class="timeline">
         <div class="step"><span class="label">Created</span><span>{{ c.created_at | serverDate }}</span></div>
         <div class="step"><span class="label">Updated</span><span>{{ c.updated_at | serverDate }}</span></div>
-        <div class="step"><span class="label">Attempts</span><span class="hl">{{ c.attempts }}</span></div>
+        <div class="step"><span class="label">Attempts</span><span>{{ c.attempts }}</span></div>
         <div class="step"><span class="label">Retry budget</span><span>{{ c.retry_budget }}</span></div>
         <div class="step"><span class="label">Same zone</span><span>{{ c.same_zone ? 'yes' : 'no' }}</span></div>
       </section>
