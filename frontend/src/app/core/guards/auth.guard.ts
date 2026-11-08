@@ -8,6 +8,7 @@ import { inject } from '@angular/core';
 import { Router, CanActivateFn } from '@angular/router';
 import { switchMap, map } from 'rxjs/operators';
 import { AuthService } from '@core/services/auth.service';
+import { links } from '@shared/routing';
 
 /**
  * Route guard that redirects unauthenticated users to the login page.
@@ -34,4 +35,9 @@ export const authGuard: CanActivateFn = (_route, state) => {
       return false;
     })
   );
+};
+
+export const redirectSignedInUserToDashboardGuard: CanActivateFn = () => {
+  const authService = inject(AuthService);
+  return authService.initialized$.pipe(map(() => (authService.isAuthenticated() ? links.dashboard() : true)));
 };

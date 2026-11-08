@@ -8,7 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router, RouterStateSnapshot, ActivatedRouteSnapshot } from '@angular/router';
 import { provideRouter } from '@angular/router';
 import { Observable, firstValueFrom, isObservable, of } from 'rxjs';
-import { authGuard } from './auth.guard';
+import { authGuard, redirectSignedInUserToDashboardGuard } from './auth.guard';
 import { AuthService } from '@core/services/auth.service';
 
 interface StubAuth {
@@ -63,5 +63,22 @@ describe('authGuard', () => {
     });
     expect(allowed).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe('redirectSignedInUserToDashboardGuard', () => {
+  it('sends a signed-in user from the register form to the dashboard', async () => {
+    const check = async (signedIn: boolean) => {
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [provideRouter([]), { provide: AuthService, useValue: { initialized$: of(true), isAuthenticated: () => signedIn } }],
+      });
+      const result = TestBed.runInInjectionContext(() =>
+        redirectSignedInUserToDashboardGuard({} as ActivatedRouteSnapshot, { url: '/account/register' } as RouterStateSnapshot),
+      );
+      return isObservable(result) ? firstValueFrom(result) : result;
+    };
+    expect(String(await check(true))).toBe('/');
+    expect(await check(false)).toBe(true);
   });
 });

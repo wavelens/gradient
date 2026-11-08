@@ -8,7 +8,7 @@ import { inject } from '@angular/core';
 import { Routes } from '@angular/router';
 import { ConfigService } from '@core/services/config.service';
 import { links } from '@shared/routing';
-import { authGuard } from '@core/guards/auth.guard';
+import { authGuard, redirectSignedInUserToDashboardGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
 import { publicListingGuard } from '@core/guards/public-listing.guard';
 import { visibleProjectGuard } from '@core/guards/visible-project.guard';
@@ -41,6 +41,7 @@ export const routes: Routes = [
       {
         path: 'register',
         title: 'Register',
+        canActivate: [redirectSignedInUserToDashboardGuard],
         loadComponent: () =>
           import('./features/auth/register/register.component').then((m) => m.RegisterComponent),
       },
