@@ -94,6 +94,14 @@ describe('ProjectListComponent', () => {
     expect(root.textContent).toContain('Sign in');
   });
 
+  it('drops the own empty list for a signed-in non-member while public projects are listed', () => {
+    const publicPage = { items: [{ id: 'p1', name: 'nixpkgs', display_name: 'Nixpkgs', description: null }], total: 1, page: 1 };
+    const { root } = render(() => of(EMPTY_PAGE), () => of(publicPage));
+    expect(root.textContent).not.toContain('No projects yet');
+    expect(root.textContent).toContain('Nixpkgs');
+    expect(Array.from(root.querySelectorAll('button')).filter((b) => b.textContent?.includes('Create Project'))).toHaveLength(1);
+  });
+
   it('tells anonymous visitors when nothing is public', () => {
     const { root } = render(() => of(EMPTY_PAGE), () => of(EMPTY_PAGE), false);
     expect(root.textContent).toContain('No public projects');
