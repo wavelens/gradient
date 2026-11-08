@@ -226,13 +226,21 @@ describe('BoardHealthComponent', () => {
     });
   });
 
-  it('lists every supervised loop and flags restarts', () => {
+  it('lists only the supervised loops that restarted or failed', () => {
     const fixture = setup(true);
     const rows = fixture.nativeElement.querySelectorAll('gr-table.supervision tbody tr');
-    expect(rows.length).toBe(2);
+    expect(rows.length).toBe(1);
     expect(rows[0].textContent).toContain('build-dispatch');
     expect(rows[0].querySelector('td.bad')?.textContent?.trim()).toBe('1');
-    expect(rows[1].textContent).toContain('never');
+    TestBed.resetTestingModule();
+  });
+
+  it('sums up healthy loops in one line', () => {
+    const healthy = { ...HEALTH, supervised: [HEALTH.supervised[1], { ...HEALTH.supervised[1], name: 'rollup' }] };
+    const fixture = setup(true, healthy);
+    const rows = fixture.nativeElement.querySelectorAll('gr-table.supervision tbody tr');
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent).toContain('All 2 supervised loops run with no restarts');
     TestBed.resetTestingModule();
   });
 });

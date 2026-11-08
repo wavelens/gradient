@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { CardGridComponent, LoadStateComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
@@ -31,8 +31,6 @@ import { links } from '@shared/routing';
       <gr-card-grid class="kpis" min="180px">
         <gr-stat-card compact label="Version" [value]="h.version" />
         <gr-stat-card compact label="Uptime" [value]="seconds(h.uptime_seconds)" />
-        <gr-stat-card compact label="Workers" [value]="h.workers_connected" />
-        <gr-stat-card compact label="Jobs pending / active" [value]="h.jobs_pending + ' / ' + h.jobs_active" />
         <gr-stat-card compact label="Sessions" [value]="h.proto_sessions" />
       </gr-card-grid>
 
@@ -59,7 +57,7 @@ import { links } from '@shared/routing';
       <gr-table class="http supervision">
         <thead><tr><th>Loop</th><th>Restarts</th><th>Errors</th><th>Timeouts</th><th>Last ok</th><th>Last error</th></tr></thead>
         <tbody>
-          @for (l of h.supervised; track l.name) {
+          @for (l of supervisedLoopsThatHaveRestartsErrorsOrTimeouts(); track l.name) {
             <tr>
               <td>{{ l.name }}</td>
               <td [class.bad]="l.restarts > 0">{{ l.restarts }}</td>
@@ -69,7 +67,13 @@ import { links } from '@shared/routing';
               <td [class.bad]="!!l.last_error">{{ l.last_error ?? '' }}</td>
             </tr>
           } @empty {
-            <tr><td colspan="6" class="muted">No supervised loops reported.</td></tr>
+            <tr><td colspan="6" class="muted">
+              @if (h.supervised.length) {
+                All {{ h.supervised.length }} supervised loops run with no restarts, errors or timeouts.
+              } @else {
+                No supervised loops reported.
+              }
+            </td></tr>
           }
         </tbody>
       </gr-table>
@@ -124,6 +128,8 @@ export class BoardHealthComponent implements OnInit {
   healthError = signal<unknown>(null);
   tasks = signal<AdminTaskDto[]>([]);
   drainBusy = signal(false);
+  readonly supervisedLoopsThatHaveRestartsErrorsOrTimeouts = computed(() =>
+    (this.health()?.supervised ?? []).filter((l) => l.restarts > 0 || l.pass_errors > 0 || l.pass_timeouts > 0 || !!l.last_error));
 
   readonly bytes = formatBytes;
 

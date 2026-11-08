@@ -22,7 +22,7 @@ The **Job Board** in the header shows scheduler and worker activity, both live a
 | Network | NAR egress, worker upload, download and disk speed, HTTP latency per route | |
 | Jobs | Costliest builds by wall time, peak RAM, CPU time and disk I/O | Choose the time window |
 | Evals | Costliest evaluations by time, peak memory, thunks, function calls and allocations | Choose the time window |
-| System Health | Server runtime, metric pipeline lag, route stats. Superusers only | **Run Deep GC**, **Enable Draining** |
+| System Health | Server runtime, metric pipeline lag, route stats, and supervised background loops that restarted or failed. Superusers only | **Run Deep GC**, **Enable Draining** |
 
 The chosen sub-tab, time window and traffic view stay in the URL. A copied link opens the same view.
 
