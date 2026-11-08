@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, DestroyRef, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, DestroyRef, inject, signal, computed, effect, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, Location } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -22,12 +22,22 @@ import {
   TableComponent,
 } from '@gradient/ui/ui';
 import { formatBytes, formatDuration, formatMegabytes, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { LabelHelpComponent, WaitingNoticeComponent } from '@shared/ui';
+import { LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent } from '@shared/ui';
+import { Title } from '@angular/platform-browser';
+import { composeTitle } from '@core/title/gradient-title-strategy';
 import { JobTimelineComponent } from './job-timeline.component';
 import { BUILD_KIND, EXEC_KIND, jobKindName, jobSubjectLabel } from '../job-kind';
 import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
 import { abortExecJobConfirm } from '@features/exec-jobs/exec-job-status';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, waitingAccessFrom } from '@shared/evaluation';
+import {
+  abortBuildConfirm,
+  abortEvaluationConfirm,
+  buildPhase,
+  buildStatusLabel,
+  evaluationAbortTarget,
+  waitingAccessFrom,
+  type StatusPhase,
+} from '@shared/evaluation';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import {
   PendingJobSummary,
@@ -38,6 +48,18 @@ import {
 import { links } from '@shared/routing';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, Observable, tap } from 'rxjs';
+
+const JOB_OUTCOME_BADGES: Record<string, { phase: StatusPhase; label: string }> = {
+  completed: { phase: 'success', label: 'Completed' },
+  failed: { phase: 'failure', label: 'Failed' },
+  abandoned: { phase: 'aborted', label: 'Aborted' },
+};
+
+export function getAssignedJobName(j: AssignedJobDetail): string {
+  if (j.kind === EXEC_KIND && j.exec_job) return jobSubjectLabel(null, j.exec_job);
+  if (j.kind === BUILD_KIND) return j.pname ?? j.derivations[0]?.pname ?? j.derivations[0]?.drv_path ?? j.id;
+  return j.evaluation?.task ?? (j.project_display_name || j.project_name);
+}
 
 interface RuleRow {
   name: string;
@@ -50,7 +72,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LoadStateComponent, LabelHelpComponent, WaitingNoticeComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LoadStateComponent, LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent],
   template: `
     <div class="top-row phone-icon-buttons">
       <a [routerLink]="links.board('live')" class="back" (click)="goBack($event)">
@@ -66,8 +88,9 @@ interface RuleRow {
       <header class="head">
         <div>
           <span class="kind" [class.build]="j.kind === 1">{{ jobKindName(j.kind) }}</span>
-          <h1>{{ j.passed_over ? 'Passed over' : j.finished_at ? 'Finished job' : 'Assigned job' }}</h1>
+          <h1>{{ getAssignedJobName(j) }}</h1>
         </div>
+        <gr-status-badge [phase]="jobStatusBadge().phase" [label]="jobStatusBadge().label" />
       </header>
 
       <section class="ids">
@@ -159,7 +182,6 @@ interface RuleRow {
         @if (j.transit_ms !== null) {
           <div class="step"><span class="label">Transit</span><span>{{ formatDuration(j.transit_ms) }}</span></div>
         }
-        <div class="step"><span class="label">Current State</span><span class="hl">{{ currentState() }}</span></div>
       </section>
 
       @if (j.phases.length) {
@@ -495,13 +517,15 @@ export class BoardJobDetailComponent implements OnInit {
     'build',
   ];
 
-  currentState = computed(() => {
-    const j = this.job();
-    if (!j) return '-';
-    const b = this.build();
-    if (b && b.id === j.build_id) return b.status;
+  protected readonly getAssignedJobName = getAssignedJobName;
 
-    return j.finished_at ? (j.outcome ?? 'finished') : 'running';
+  jobStatusBadge = computed<{ phase: StatusPhase; label: string }>(() => {
+    const j = this.job();
+    const b = this.build();
+    if (j && b && b.id === j.build_id) return { phase: buildPhase(b.status), label: buildStatusLabel(b.status) };
+    if (j?.passed_over) return { phase: 'aborted', label: 'Passed over' };
+    if (!j?.finished_at) return { phase: 'running', label: 'Running' };
+    return JOB_OUTCOME_BADGES[j.outcome ?? ''] ?? { phase: 'success', label: 'Finished' };
   });
 
   rules = computed<RuleRow[]>(() => {
@@ -541,6 +565,11 @@ export class BoardJobDetailComponent implements OnInit {
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => this.refetchJobWhileUnfinished(), 5_000);
+    const title = inject(Title);
+    effect(() => {
+      const j = this.job();
+      if (j) title.setTitle(composeTitle(getAssignedJobName(j), 'Job board'));
+    });
   }
 
   private refetchJobWhileUnfinished(): Observable<unknown> {
@@ -607,12 +636,11 @@ export class BoardJobDetailComponent implements OnInit {
   private abortConfirm(j: AssignedJobDetail): ConfirmRequest<unknown> {
     if (j.kind === EXEC_KIND && j.exec_job) {
       const exec = j.exec_job;
-      return abortExecJobConfirm(jobSubjectLabel(null, exec), () => this.execJobs.abort(exec.id));
+      return abortExecJobConfirm(getAssignedJobName(j), () => this.execJobs.abort(exec.id));
     }
     const action = () => this.board.abortJob(j.id);
-    if (j.kind === BUILD_KIND) return abortBuildConfirm(j.pname ?? j.derivations[0]?.pname ?? j.id, action);
-    const task = j.evaluation?.task ?? (j.project_display_name || j.project_name);
-    return abortEvaluationConfirm(evaluationAbortTarget(task, j.evaluation?.commit), action);
+    if (j.kind === BUILD_KIND) return abortBuildConfirm(getAssignedJobName(j), action);
+    return abortEvaluationConfirm(evaluationAbortTarget(getAssignedJobName(j), j.evaluation?.commit), action);
   }
 
   abort(): void {

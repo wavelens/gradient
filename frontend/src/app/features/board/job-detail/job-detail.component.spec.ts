@@ -6,7 +6,7 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter, RouterLink } from '@angular/router';
-import { By } from '@angular/platform-browser';
+import { By, Title } from '@angular/platform-browser';
 import { EMPTY, type Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
@@ -422,20 +422,19 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
 
   // An assignment the worker never reported back on used to read as 'running'
   // forever, on a worker that had long since left the fleet.
-  it('reports an abandoned assignment as abandoned, not running', () => {
+  it('reports an abandoned assignment as aborted, not running', () => {
     const abandoned: AssignedJobDetail = {
       ...DETAIL,
       finished_at: '2026-06-08T00:31:00Z',
       outcome: 'abandoned',
     };
     const el = setup({ getJob: () => of(abandoned) }).nativeElement as HTMLElement;
-    expect(el.textContent).toContain('abandoned');
-    expect(el.textContent).not.toContain('running');
+    expect(el.querySelector('.head gr-status-badge')?.textContent?.trim()).toBe('Aborted');
   });
 
   it('still reports an unfinished assignment as running', () => {
     const el = setup({ getJob: () => of(DETAIL) }).nativeElement as HTMLElement;
-    expect(el.textContent).toContain('running');
+    expect(el.querySelector('.head gr-status-badge')?.textContent?.trim()).toBe('Running');
   });
 
   it('shows mode and outcome labels for each attempt', () => {
@@ -544,7 +543,7 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     const labels = Array.from(el.querySelectorAll('section.timeline .step .label')).map((s) => s.textContent?.trim());
     expect(labels).toEqual(expect.arrayContaining(['Queued', 'Assigned', 'Started', 'Finished']));
     expect(labels.indexOf('Started')).toBe(labels.indexOf('Assigned') + 1);
-    expect(el.querySelector('section.timeline')?.textContent).toContain('completed');
+    expect(el.querySelector('.head gr-status-badge')?.textContent?.trim()).toBe('Completed');
   });
 
   it('names the finish once and leaves out an empty worker timeline', () => {
@@ -624,7 +623,7 @@ describe('BoardJobDetailComponent - live state', () => {
 
   it('follows a running job until it ends and then drops Abort and stops asking', () => {
     vi.useFakeTimers();
-    const finished = { ...DETAIL, finished_at: '2026-06-08T00:05:00Z', outcome: 'aborted' };
+    const finished = { ...DETAIL, finished_at: '2026-06-08T00:05:00Z', outcome: 'abandoned' };
     const getJob = vi.fn(() => of(DETAIL));
     const fixture = setup({ getJob });
     const el = fixture.nativeElement as HTMLElement;
@@ -634,7 +633,7 @@ describe('BoardJobDetailComponent - live state', () => {
     vi.advanceTimersByTime(5_000);
     fixture.detectChanges();
     expect(el.querySelector('.top-row button')).toBeNull();
-    expect(el.querySelector('section.timeline')?.textContent).toContain('aborted');
+    expect(el.querySelector('.head gr-status-badge')?.textContent?.trim()).toBe('Aborted');
 
     vi.advanceTimersByTime(15_000);
     expect(getJob).toHaveBeenCalledTimes(2);
@@ -652,15 +651,24 @@ describe('BoardJobDetailComponent - #636', () => {
     expect(el.textContent).not.toContain('Derivations');
   });
 
-  it('titles a finished build job as finished and names its task', () => {
+  it('titles a build job by its package with the outcome next to it, and names its task', () => {
     const job: AssignedJobDetail = {
       ...DETAIL,
       finished_at: '2026-06-08T00:05:00Z',
+      outcome: 'failed',
       evaluation: { repository: 'https://example.com/r.git', commit: 'abc1234', wildcard: 'packages.**', task: 'nightly' },
     };
     const el = setup({ getJob: () => of(job) }).nativeElement as HTMLElement;
-    expect(el.querySelector('h1')?.textContent?.trim()).toBe('Finished job');
+    expect(el.querySelector('h1')?.textContent?.trim()).toBe('foo');
+    expect(el.querySelector('.head gr-status-badge')?.textContent?.trim()).toBe('Failed');
     expect(el.querySelector('a.task-link')?.textContent?.trim()).toBe('nightly');
+    expect(TestBed.inject(Title).getTitle()).toBe('foo · Job board · Gradient');
+  });
+
+  it('titles an evaluation job by its task', () => {
+    const el = setup({ getJob: () => of(EVAL_DETAIL) }).nativeElement as HTMLElement;
+    expect(el.querySelector('h1')?.textContent?.trim()).toBe('ci');
+    expect(el.querySelector('.head gr-status-badge')?.textContent?.trim()).toBe('Running');
   });
 
   it('links the evaluation to its log page', () => {
