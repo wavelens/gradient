@@ -28,6 +28,11 @@ import {
 } from '@gradient/ui/ui';
 import { links } from '@shared/routing';
 
+export function formatCliConfirmationCode(raw: string): string {
+  const characters = raw.toUpperCase().replace(/[\s-]/g, '');
+  return characters.length === 8 ? `${characters.slice(0, 4)}-${characters.slice(4)}` : characters;
+}
+
 @Component({
   selector: 'app-cli-authorize',
   standalone: true,
@@ -59,7 +64,8 @@ export class CliAuthorizeComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    const code = this.route.snapshot.queryParamMap.get('code');
+    const query = this.route.snapshot.queryParamMap.get('code');
+    const code = query ? formatCliConfirmationCode(query) : null;
     if (code) {
       this.form.patchValue({ userCode: code });
     }
@@ -96,11 +102,18 @@ export class CliAuthorizeComponent implements OnInit {
   }
 
   onLookup(): void {
-    const code = this.form.value.userCode?.trim().toUpperCase();
+    const code = formatCliConfirmationCode(this.form.value.userCode ?? '');
     if (code) {
       this.form.patchValue({ userCode: code });
       this.lookup(code);
     }
+  }
+
+  clearCodeLookupAndShowCodeForm(): void {
+    this.info.set(null);
+    this.status.set('pending');
+    this.errorMessage.set(null);
+    this.form.reset({ userCode: '' });
   }
 
   authorize(): void {

@@ -91,5 +91,12 @@
         ></button>
       </form>
     }
+
+    @if (!loading() && (info() || status() !== 'pending')) {
+      <div class="gr-form-actions">
+        <button grButton type="button" severity="secondary" label="Enter another code" icon="refresh"
+          (click)="clearCodeLookupAndShowCodeForm()"></button>
+      </div>
+    }
   </div>
 </div>
