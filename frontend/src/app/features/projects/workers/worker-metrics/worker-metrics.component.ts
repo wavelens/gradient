@@ -12,6 +12,7 @@ import { inBackground } from '@core/interceptors/request-context';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   CardGridComponent,
+  EmptyStateComponent,
   LoadStateComponent,
   PageLayoutComponent,
   StatCardComponent,
@@ -34,6 +35,7 @@ import { links } from '@shared/routing';
     MetricChartComponent,
     PageLayoutComponent,
     CardGridComponent,
+    EmptyStateComponent,
     LoadStateComponent,
     StatCardComponent,
     TableComponent,
@@ -47,19 +49,23 @@ import { links } from '@shared/routing';
       <span slot="meta" class="mono">{{ workerId }}</span>
 
       <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!loaded()" errorTitle="Failed to load worker stats" (retry)="load()">
-      <gr-card-grid min="160px">
-        <gr-stat-card label="Samples" [value]="samples().length" />
-        <gr-stat-card label="Jobs assigned" [value]="jobsAssigned()" />
-        <gr-stat-card label="Sessions" [value]="connections().length" />
-      </gr-card-grid>
+      @if (samples().length === 0) {
+        <gr-empty-state icon="monitoring" title="No metrics yet" message="Connected workers send CPU, memory, network, and disk samples. Graphs appear with the first sample." />
+      } @else {
+        <gr-card-grid min="160px">
+          <gr-stat-card label="Samples" [value]="samples().length" />
+          <gr-stat-card label="Jobs assigned" [value]="jobsAssigned()" />
+          <gr-stat-card label="Sessions" [value]="connections().length" />
+        </gr-card-grid>
 
-      <gr-card-grid min="380px">
-        <gr-metric-chart title="CPU usage" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['--gr-chart-cyan']" [valueFormatter]="percent" [yAxisMax]="100"></gr-metric-chart>
-        <gr-metric-chart title="RAM free" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['--gr-chart-green']" [valueFormatter]="megabytes"></gr-metric-chart>
-        <gr-metric-chart title="Upload and download speed" type="line" [series]="transferSeries()" [categories]="times()" [colors]="['--gr-chart-purple', '--gr-chart-teal']" [valueFormatter]="mbps"></gr-metric-chart>
-        <gr-metric-chart title="Disk speed" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['--gr-chart-orange']" [valueFormatter]="mbps"></gr-metric-chart>
-        <gr-metric-chart title="Assigned jobs" type="area" [series]="loadSeries()" [categories]="times()" [colors]="['--gr-chart-pink']"></gr-metric-chart>
-      </gr-card-grid>
+        <gr-card-grid min="380px">
+          <gr-metric-chart title="CPU usage" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['--gr-chart-cyan']" [valueFormatter]="percent" [yAxisMax]="100"></gr-metric-chart>
+          <gr-metric-chart title="RAM free" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['--gr-chart-green']" [valueFormatter]="megabytes"></gr-metric-chart>
+          <gr-metric-chart title="Upload and download speed" type="line" [series]="transferSeries()" [categories]="times()" [colors]="['--gr-chart-purple', '--gr-chart-teal']" [valueFormatter]="mbps"></gr-metric-chart>
+          <gr-metric-chart title="Disk speed" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['--gr-chart-orange']" [valueFormatter]="mbps"></gr-metric-chart>
+          <gr-metric-chart title="Assigned jobs" type="area" [series]="loadSeries()" [categories]="times()" [colors]="['--gr-chart-pink']"></gr-metric-chart>
+        </gr-card-grid>
+      }
 
       <h2>Connection history</h2>
       <gr-table>

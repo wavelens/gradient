@@ -90,7 +90,16 @@ describe('WorkerMetricsComponent', () => {
     (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     await settled(fixture);
     expect(calls).toBe(2);
-    expect(fixture.nativeElement.querySelector('gr-stat-card')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('gr-empty-state')).not.toBeNull();
+  });
+
+  it('shows one empty state instead of empty charts and zero tiles when no samples exist', async () => {
+    const fixture = setup('builder-1');
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelectorAll('gr-empty-state').length).toBe(1);
+    expect(root.querySelector('gr-metric-chart')).toBeNull();
+    expect(root.querySelector('gr-stat-card')).toBeNull();
   });
 
   it('keeps the metrics live by reloading them while the page is open', () => {
