@@ -6,10 +6,9 @@
 
 import { Component, computed, effect, inject, signal, untracked, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { BadgeComponent, IconComponent } from '@gradient/ui/ui';
+import { IconComponent } from '@gradient/ui/ui';
 import { Brand, HeaderComponent, NavLink } from '@gradient/ui/chrome';
 import { AuthService } from '@core/services/auth.service';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
 import { ConfigService } from '@core/services/config.service';
 import { UserMenuComponent } from './user-menu.component';
@@ -27,7 +26,7 @@ const NAV: (NavLink & { signedIn?: true; publicList?: true })[] = [
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [HeaderComponent, BadgeComponent, IconComponent, UserMenuComponent, RouterLink],
+  imports: [HeaderComponent, IconComponent, UserMenuComponent, RouterLink],
   templateUrl: './header.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './header.component.scss',
@@ -38,7 +37,6 @@ export class AppHeaderComponent {
   protected palette = inject(CommandPaletteService);
   protected router = inject(Router);
   private config = inject(ConfigService);
-  protected invites = inject(PendingInvitesService);
 
   protected readonly brand: Brand = { ...BRAND, logoUrl: this.config.logoUrl };
   protected nav = computed(() => {
