@@ -7,7 +7,7 @@
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { CardGridComponent, LoadStateComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
+import { ButtonComponent, CardGridComponent, LoadStateComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { BoardService } from '@core/services/board.service';
 import { AdminService } from '@core/services/admin.service';
 import { ConfigService } from '@core/services/config.service';
@@ -38,7 +38,7 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
 @Component({
   selector: 'app-board-health',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, CardGridComponent, StatCardComponent, RouterModule, TableComponent, LoadStateComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, ButtonComponent, CardGridComponent, StatCardComponent, RouterModule, TableComponent, LoadStateComponent],
   template: `
     <gr-load-state [loading]="healthLoading()" [error]="healthError()" [empty]="!health()"
                    loadingMessage="Loading system health..." errorTitle="Failed to load health" (retry)="refreshHealth()">
@@ -99,14 +99,14 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
       <h2>Admin</h2>
       <div class="admin-actions">
         @if (!config.githubAppEnabled) {
-          <a class="btn" [routerLink]="links.admin('github-app')">Set up GitHub App</a>
+          <a grButton severity="secondary" size="small" label="Set up GitHub App" [routerLink]="links.admin('github-app')"></a>
         }
-        <a class="btn" [routerLink]="links.admin('webhooks')">Event notifications</a>
-        <button class="btn" (click)="runDeepGc()">Run Deep GC</button>
+        <a grButton severity="secondary" size="small" label="Event notifications" [routerLink]="links.admin('webhooks')"></a>
+        <button grButton severity="secondary" size="small" label="Run Deep GC" (click)="runDeepGc()"></button>
         @if (h.draining) {
-          <button class="btn" (click)="disableDraining()" [disabled]="drainBusy()">Disable Draining</button>
+          <button grButton severity="secondary" size="small" label="Disable Draining" [loading]="drainBusy()" (click)="disableDraining()"></button>
         } @else {
-          <button class="btn danger" (click)="enableDraining()">Enable Draining</button>
+          <button grButton severity="danger" size="small" label="Enable Draining" (click)="enableDraining()"></button>
         }
       </div>
 

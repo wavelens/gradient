@@ -16,12 +16,8 @@ gr-table.http { display: block; margin-bottom: 1rem; }
 tbody td.bad { color: var(--gr-status-danger); }
 .muted { color: var(--gr-text-muted); }
 .admin-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin: 0 0 1rem; }
-.admin-actions .btn { white-space: nowrap; }
 .supervision td { white-space: nowrap; }
 .supervision td:last-child { white-space: normal; min-width: 16rem; }
-.btn { background: var(--gr-surface-hover); color: var(--gr-text-primary); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.4rem 0.8rem; cursor: pointer; text-decoration: none; font-size: $font-size-sm; }
-.btn[disabled], .btn.disabled { opacity: 0.5; pointer-events: none; }
-.btn.danger { border-color: var(--gr-status-danger); color: var(--gr-status-danger-text); }
 .drain-banner { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); border: 1px solid var(--gr-status-danger); color: var(--gr-status-danger-text); border-radius: $border-radius-md; padding: 0.6rem 0.9rem; margin-bottom: 1rem; font-size: $font-size-sm; }
     
 

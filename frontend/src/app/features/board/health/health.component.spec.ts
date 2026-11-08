@@ -6,7 +6,7 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { EMPTY, type Observable, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, type Observable, of, throwError } from 'rxjs';
 import { BoardHealthComponent } from './health.component';
 import { BoardService } from '@core/services/board.service';
 import { AdminService } from '@core/services/admin.service';
@@ -93,7 +93,7 @@ function setup(
 }
 
 function adminButton(fixture: ComponentFixture<BoardHealthComponent>, label: string): HTMLButtonElement {
-  return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button.btn'))
+  return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('.admin-actions button'))
     .find((b) => b.textContent?.includes(label))!;
 }
 
@@ -145,7 +145,7 @@ describe('BoardHealthComponent', () => {
     });
 
     it('hides the "Set up GitHub App" link', () => {
-      const link: HTMLAnchorElement = fixture.nativeElement.querySelector('a.btn[href="/admin/github-app"]');
+      const link: HTMLAnchorElement = fixture.nativeElement.querySelector('.admin-actions a[href="/admin/github-app"]');
       expect(link).toBeNull();
       expect(fixture.nativeElement.textContent).not.toContain('Set up GitHub App');
     });
@@ -158,7 +158,7 @@ describe('BoardHealthComponent', () => {
     afterEach(() => TestBed.resetTestingModule());
 
     it('shows "Set up GitHub App" text without disabled class', () => {
-      const link: HTMLAnchorElement = fixture.nativeElement.querySelector('a.btn[href="/admin/github-app"]');
+      const link: HTMLAnchorElement = fixture.nativeElement.querySelector('.admin-actions a[href="/admin/github-app"]');
       expect(link).toBeTruthy();
       expect(link.textContent?.trim()).toBe('Set up GitHub App');
       expect(link.classList.contains('disabled')).toBe(false);
@@ -194,6 +194,14 @@ describe('BoardHealthComponent', () => {
       adminButton(fixture, 'Enable Draining').click();
       expect(confirm).toHaveBeenCalledOnce();
       expect(setDraining).not.toHaveBeenCalled();
+    });
+
+    it('marks Disable Draining as busy while the request runs', () => {
+      const fixture = setup(true, { ...HEALTH, draining: true }, vi.fn(() => NEVER));
+      const button = adminButton(fixture, 'Disable Draining');
+      button.click();
+      fixture.detectChanges();
+      expect(button.getAttribute('aria-busy')).toBe('true');
     });
 
     it('disables draining at once and reports a failure', () => {
