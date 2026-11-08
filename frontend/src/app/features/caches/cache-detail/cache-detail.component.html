@@ -10,11 +10,9 @@
     [title]="c.display_name"
     [subtitle]="c.description || 'No description'"
   >
-    <div slot="meta">
-      <gr-badge [severity]="c.active ? 'success' : 'danger'">
-        {{ c.active ? 'Active' : 'Inactive' }}
-      </gr-badge>
-    </div>
+    @if (!c.active) {
+      <gr-badge slot="meta" severity="danger">Inactive</gr-badge>
+    }
     <div slot="actions">
       <a grButton label="NARs" icon="database" severity="secondary" [routerLink]="links.cachePage(cacheName, 'nars')"></a>
       @if (c.can_edit) {

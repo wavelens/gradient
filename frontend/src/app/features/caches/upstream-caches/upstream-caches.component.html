@@ -39,7 +39,9 @@
           <gr-row icon="cloud_download">
             {{ u.display_name }}
             <gr-badge>{{ kindLabel(u) }}</gr-badge>
-            <gr-badge>{{ modeLabel(u.mode) }}</gr-badge>
+            @if (u.kind === 'internal') {
+              <gr-badge>{{ modeLabel(u.mode) }}</gr-badge>
+            }
             @if (u.http1_only) {
               <gr-badge severity="neutral">HTTP/1.1</gr-badge>
             }

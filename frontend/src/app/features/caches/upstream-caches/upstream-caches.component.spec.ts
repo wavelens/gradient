@@ -96,6 +96,15 @@ function setup(
   return fixture;
 }
 
+describe('UpstreamCachesComponent - badges', () => {
+  it('show the mode only for internal upstream caches, since external upstream caches are always read-only', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [...oneUpstream, httpUpstream]);
+    const rows = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row'));
+    const badges = rows.map((row) => Array.from(row.querySelectorAll('gr-badge')).map((b) => b.textContent?.trim()));
+    expect(badges).toEqual([['Internal', 'Read Only'], ['HTTP']]);
+  });
+});
+
 describe('UpstreamCachesComponent - loading', () => {
   it('shows a failed load with Try Again instead of No upstream caches', () => {
     const load = vi.fn()
