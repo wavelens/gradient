@@ -24,6 +24,7 @@ import { formatBytes, formatDuration, formatMegabytes, serverTime, ServerTimesta
 import { LabelHelpComponent, WaitingNoticeComponent } from '@shared/ui';
 import { JobTimelineComponent } from './job-timeline.component';
 import { BUILD_KIND, EXEC_KIND, jobKindName, jobSubjectLabel } from '../job-kind';
+import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
 import { abortExecJobConfirm } from '@features/exec-jobs/exec-job-status';
 import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, waitingAccessFrom } from '@shared/evaluation';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
@@ -73,7 +74,11 @@ interface RuleRow {
         </div>
         <div>
           <span class="label">Worker</span>
-          <a class="mono worker-link" [routerLink]="links.workerMetrics(j.project_name, j.worker_id)">{{ j.worker_name ?? j.worker_id }}</a>
+          @if (j.worker_name) {
+            <a class="mono worker-link" [routerLink]="links.workerMetrics(j.project_name, j.worker_id)">{{ j.worker_name }}</a>
+          } @else {
+            <span class="mono">{{ workerDisplayNameOrNotSharedLabel(null) }}</span>
+          }
         </div>
         <div>
           <span class="label">Evaluation</span>
@@ -196,62 +201,64 @@ interface RuleRow {
       <details class="scheduler">
         <summary>Scheduler details</summary>
 
-        <h3>Score breakdown <gr-label-help doc="reference/scheduler-policies/" title="About the scoring rules" /></h3>
-        <gr-table class="rules">
-          <thead><tr><th>Rule</th><th class="num">Contribution</th><th>Share</th></tr></thead>
-          <tbody>
-            @for (r of rules(); track r.name) {
-              <tr>
-                <td class="mono">
-                  {{ r.name }}
-                  @if (r.description) {
-                    <button type="button" class="help" aria-label="Explain rule" (click)="showHelp($event, r, rulePop)">?</button>
-                  }
-                </td>
-                <td class="num" [class.neg]="!r.positive">{{ r.value | number: '1.2-2' }}</td>
-                <td class="bar-cell">
-                  <div class="bar" [class.neg]="!r.positive" [style.width.%]="r.share"></div>
-                </td>
-              </tr>
-            } @empty {
-              <tr><td colspan="3" class="muted">No per-rule breakdown recorded.</td></tr>
-            }
-          </tbody>
-          <tfoot><tr class="total"><td>Total</td><td class="num">{{ j.score | number: '1.2-2' }}</td><td></td></tr></tfoot>
-        </gr-table>
-
-        <gr-popover #rulePop>
-          @if (activeRule(); as a) {
-            <div class="rule-help"><strong>{{ a.rule }}</strong><p>{{ a.description }}</p></div>
-          }
-        </gr-popover>
-
-        @if (j.candidates) {
-          <h3>Runner-up candidates</h3>
-          <pre>{{ j.candidates | json }}</pre>
-        }
-
-        <section class="ctx worker">
-          <h3>Worker context</h3>
-          <gr-table class="kv">
+        @if (superuser()) {
+          <h3>Score breakdown <gr-label-help doc="reference/scheduler-policies/" title="About the scoring rules" /></h3>
+          <gr-table class="rules">
+            <thead><tr><th>Rule</th><th class="num">Contribution</th><th>Share</th></tr></thead>
             <tbody>
-              <tr><td class="label">Architectures</td><td class="mono">{{ j.worker_context.architectures.join(', ') || '-' }}</td></tr>
-              <tr><td class="label">System features</td><td class="mono">{{ j.worker_context.system_features.join(', ') || '-' }}</td></tr>
-              <tr><td class="label">Capabilities</td><td class="mono">{{ capabilityList(j.worker_context.capabilities) || '-' }}</td></tr>
-              <tr><td class="label">CPU count</td><td class="mono">{{ j.worker_context.cpu_count }}</td></tr>
-              <tr><td class="label">CPU core score</td><td class="mono">{{ j.worker_context.cpu_core_score | number: '1.0-2' }}</td></tr>
-              <tr><td class="label">CPU usage</td><td class="mono">{{ j.worker_context.cpu_usage_pct != null ? (j.worker_context.cpu_usage_pct | number: '1.0-1') + ' %' : '-' }}</td></tr>
-              <tr><td class="label">RAM total</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_total_mb) }}</td></tr>
-              <tr><td class="label">RAM free</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_free_mb) }}</td></tr>
-              <tr><td class="label">RAM reserved</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_mb) }}</td></tr>
-              <tr><td class="label">RAM reserved, unused</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_unused_mb) }}</td></tr>
-              <tr><td class="label">RAM kept for held build</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_for_waiting_build_mb) }}</td></tr>
-              <tr><td class="label">Disk speed</td><td class="mono">{{ j.worker_context.disk_speed_mbps != null ? (j.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
-              <tr><td class="label">Upload speed</td><td class="mono">{{ j.worker_context.upload_speed_mbps != null ? (j.worker_context.upload_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
-              <tr><td class="label">Download speed</td><td class="mono">{{ j.worker_context.download_speed_mbps != null ? (j.worker_context.download_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
+              @for (r of rules(); track r.name) {
+                <tr>
+                  <td class="mono">
+                    {{ r.name }}
+                    @if (r.description) {
+                      <button type="button" class="help" aria-label="Explain rule" (click)="showHelp($event, r, rulePop)">?</button>
+                    }
+                  </td>
+                  <td class="num" [class.neg]="!r.positive">{{ r.value | number: '1.2-2' }}</td>
+                  <td class="bar-cell">
+                    <div class="bar" [class.neg]="!r.positive" [style.width.%]="r.share"></div>
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="3" class="muted">No per-rule breakdown recorded.</td></tr>
+              }
             </tbody>
+            <tfoot><tr class="total"><td>Total</td><td class="num">{{ j.score | number: '1.2-2' }}</td><td></td></tr></tfoot>
           </gr-table>
-        </section>
+
+          <gr-popover #rulePop>
+            @if (activeRule(); as a) {
+              <div class="rule-help"><strong>{{ a.rule }}</strong><p>{{ a.description }}</p></div>
+            }
+          </gr-popover>
+
+          @if (j.candidates) {
+            <h3>Runner-up candidates</h3>
+            <pre>{{ j.candidates | json }}</pre>
+          }
+
+          <section class="ctx worker">
+            <h3>Worker context</h3>
+            <gr-table class="kv">
+              <tbody>
+                <tr><td class="label">Architectures</td><td class="mono">{{ j.worker_context.architectures.join(', ') || '-' }}</td></tr>
+                <tr><td class="label">System features</td><td class="mono">{{ j.worker_context.system_features.join(', ') || '-' }}</td></tr>
+                <tr><td class="label">Capabilities</td><td class="mono">{{ capabilityList(j.worker_context.capabilities) || '-' }}</td></tr>
+                <tr><td class="label">CPU count</td><td class="mono">{{ j.worker_context.cpu_count }}</td></tr>
+                <tr><td class="label">CPU core score</td><td class="mono">{{ j.worker_context.cpu_core_score | number: '1.0-2' }}</td></tr>
+                <tr><td class="label">CPU usage</td><td class="mono">{{ j.worker_context.cpu_usage_pct != null ? (j.worker_context.cpu_usage_pct | number: '1.0-1') + ' %' : '-' }}</td></tr>
+                <tr><td class="label">RAM total</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_total_mb) }}</td></tr>
+                <tr><td class="label">RAM free</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_free_mb) }}</td></tr>
+                <tr><td class="label">RAM reserved</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_mb) }}</td></tr>
+                <tr><td class="label">RAM reserved, unused</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_unused_mb) }}</td></tr>
+                <tr><td class="label">RAM kept for held build</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_for_waiting_build_mb) }}</td></tr>
+                <tr><td class="label">Disk speed</td><td class="mono">{{ j.worker_context.disk_speed_mbps != null ? (j.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
+                <tr><td class="label">Upload speed</td><td class="mono">{{ j.worker_context.upload_speed_mbps != null ? (j.worker_context.upload_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
+                <tr><td class="label">Download speed</td><td class="mono">{{ j.worker_context.download_speed_mbps != null ? (j.worker_context.download_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
+              </tbody>
+            </gr-table>
+          </section>
+        }
 
         <section class="ctx job">
           <h3>Job context</h3>
@@ -298,7 +305,7 @@ interface RuleRow {
           }
         </section>
 
-        @if (j.instance_context; as inst) {
+        @if (superuser() && j.instance_context; as inst) {
           <section class="ctx instance">
             <h3>Instance context</h3>
             <gr-table class="rules">
@@ -336,7 +343,7 @@ interface RuleRow {
       @if (p.waiting_reason && p.project_name) {
         <gr-waiting-notice banner [reason]="p.waiting_reason" [project]="p.project_name" [access]="pendingAccess()" />
       } @else {
-        <p class="muted">The job can stay in the queue until a matching worker is free. The worker and score appear after assignment.</p>
+        <p class="muted">A job can wait in the queue until a matching worker can take it. Worker details appear after assignment.</p>
       }
       <section class="ids">
         @if (p.project_name; as project) {
@@ -449,17 +456,20 @@ export class BoardJobDetailComponent implements OnInit {
     this.location.back();
   }
 
+  protected superuser = computed(() => this.auth.user()?.superuser === true);
+
   pendingAccess = computed(() =>
-    waitingAccessFrom(this.pending()?.permissions ?? [], false, this.auth.user()?.superuser === true));
+    waitingAccessFrom(this.pending()?.permissions ?? [], false, this.superuser()));
 
   canAbort = computed(() => {
     const j = this.job();
-    if (!j || j.passed_over || j.finished_at || this.auth.user()?.superuser !== true) return false;
+    if (!j || j.passed_over || j.finished_at || !this.superuser()) return false;
     return j.kind !== EXEC_KIND || !!j.exec_job;
   });
 
   protected readonly jobKindName = jobKindName;
   protected readonly jobSubjectLabel = jobSubjectLabel;
+  protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
   protected readonly formatBytes = formatBytes;
   protected readonly formatMegabytes = formatMegabytes;
   protected readonly formatDuration = formatDuration;
@@ -506,7 +516,8 @@ export class BoardJobDetailComponent implements OnInit {
   buildWorker = computed(() => {
     const worker = this.build()?.worker ?? null;
     const job = this.job();
-    return (worker === job?.worker_id ? job.worker_name : null) ?? worker ?? '-';
+    if (!worker) return '-';
+    return workerDisplayNameOrNotSharedLabel(worker === job?.worker_id ? job.worker_name : null);
   });
 
   waitLabel = computed(() => {

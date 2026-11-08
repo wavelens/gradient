@@ -8,3 +8,7 @@
 export function workerAxisLabel(name?: string | null, id?: string | null): string {
   return name || (id ?? '-').slice(0, 12);
 }
+
+export function workerDisplayNameOrNotSharedLabel(name?: string | null): string {
+  return name || 'Not shared with this account';
+}

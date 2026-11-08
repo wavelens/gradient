@@ -14,6 +14,7 @@ import { AuthService } from '@core/services/auth.service';
 import { ButtonComponent, LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
 import { subscribeToBoardSocketWithReload } from '../board-socket';
+import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
 import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel } from '../job-kind';
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 import { links } from '@shared/routing';
@@ -71,18 +72,20 @@ interface DecisionRow {
               <option value="exec">exec</option>
             </select>
           </label>
-          <label>Score min
-            <input type="number" step="0.1" [ngModel]="scoreMin()" (ngModelChange)="scoreMin.set($event)" placeholder="-" />
-          </label>
-          <label>Score max
-            <input type="number" step="0.1" [ngModel]="scoreMax()" (ngModelChange)="scoreMax.set($event)" placeholder="-" />
-          </label>
+          @if (superuser()) {
+            <label>Score min
+              <input type="number" step="0.1" [ngModel]="scoreMin()" (ngModelChange)="scoreMin.set($event)" placeholder="-" />
+            </label>
+            <label>Score max
+              <input type="number" step="0.1" [ngModel]="scoreMax()" (ngModelChange)="scoreMax.set($event)" placeholder="-" />
+            </label>
+          }
         </div>
 
         @if (!showDecisions()) {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>Assigned</th><th><span class="sr-only">Details</span></th></tr>
+              <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th>@if (superuser()) {<th>Score</th>}<th>Assigned</th><th><span class="sr-only">Details</span></th></tr>
             </thead>
             <tbody>
               @for (row of assignedRows(); track row.job.id) {
@@ -90,14 +93,16 @@ interface DecisionRow {
                 <tr class="clickable" (click)="inspect(j)">
                   @let subject = rowSubject(row);
                   <td>{{ jobKindName(j.kind) }}</td>
-                  <td class="mono">{{ j.cluster_job ? subJobLabel(row.subJobs) : (j.worker_name ?? j.worker_id) }}</td>
+                  <td class="mono">{{ j.cluster_job ? subJobLabel(row.subJobs) : workerDisplayNameOrNotSharedLabel(j.worker_name) }}</td>
                   <td class="mono subject" [title]="subject">{{ subject }}</td>
-                  <td>{{ j.score | number: '1.1-1' }}</td>
+                  @if (superuser()) {
+                    <td>{{ j.score | number: '1.1-1' }}</td>
+                  }
                   <td>{{ j.dispatched_at | serverDate: 'HH:mm:ss' }}</td>
                   <td>›</td>
                 </tr>
               } @empty {
-                <tr><td colspan="6" class="muted">No matching assigned jobs.</td></tr>
+                <tr><td [attr.colspan]="superuser() ? 6 : 5" class="muted">No matching assigned jobs.</td></tr>
               }
             </tbody>
           </gr-table>
@@ -188,6 +193,7 @@ export class BoardLiveJobsComponent implements OnInit {
   protected first = firstLoad();
   protected connected = subscribeToBoardSocketWithReload(() => this.load());
   protected readonly jobKindName = jobKindName;
+  protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
   protected readonly jobSubjectLabel = jobSubjectLabel;
   protected readonly collapseClusters = collapseClusters;
   protected readonly relativeTime = relativeTime;
@@ -228,8 +234,8 @@ export class BoardLiveJobsComponent implements OnInit {
 
   filteredJobs = computed(() => {
     const kind = this.kindFilter();
-    const min = this.scoreMin();
-    const max = this.scoreMax();
+    const min = this.superuser() ? this.scoreMin() : null;
+    const max = this.superuser() ? this.scoreMax() : null;
     return this.jobs().filter((j) => {
       if (kind !== 'all' && jobKindName(j.kind) !== kind) return false;
       if (min !== null && j.score < min) return false;

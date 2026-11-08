@@ -66,7 +66,7 @@ const ASSIGNED: DispatchedJobSummary = {
   subject: 'hello-2.12.1',
 };
 
-function setupWithAssigned(assigned: DispatchedJobSummary[]): ComponentFixture<BoardLiveJobsComponent> {
+function setupWithAssigned(assigned: DispatchedJobSummary[], superuser = false): ComponentFixture<BoardLiveJobsComponent> {
   TestBed.configureTestingModule({
     imports: [BoardLiveJobsComponent],
     providers: [
@@ -82,7 +82,7 @@ function setupWithAssigned(assigned: DispatchedJobSummary[]): ComponentFixture<B
         provide: BoardLiveService,
         useValue: { connect: () => EMPTY },
       },
-      authAs(false),
+      authAs(superuser),
     ],
   });
   const fixture = TestBed.createComponent(BoardLiveJobsComponent);
@@ -110,11 +110,25 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
 
   it('names an exec job by task, entry point and node, with its score', () => {
     const exec_job = { id: 'x1', project: 'infra', task: 'nightly', entry_point: 'apps.x86_64-linux.train', node_index: 1, nodes: 2 };
-    const fixture = setupWithAssigned([{ ...ASSIGNED, kind: 2, build_id: null, score: 7.25, subject: exec_job.entry_point, exec_job }]);
+    const fixture = setupWithAssigned(
+      [{ ...ASSIGNED, kind: 2, build_id: null, score: 7.25, worker_name: 'Builder One', subject: exec_job.entry_point, exec_job }],
+      true,
+    );
     fixture.detectChanges();
     const cells = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr td'))
       .map((cell) => cell.textContent?.trim());
-    expect(cells.slice(0, 4)).toEqual(['exec', 'worker-1', 'nightly: apps.x86_64-linux.train (node 1)', '7.3']);
+    expect(cells.slice(0, 4)).toEqual(['exec', 'Builder One', 'nightly: apps.x86_64-linux.train (node 1)', '7.3']);
+  });
+
+  it('hides the score column and score filters from a non-superuser and ignores a saved score filter', () => {
+    sessionStorage.setItem('board.live-jobs.filters', JSON.stringify({ view: 'assigned', scoreMin: 100, scoreMax: null }));
+    const fixture = setupWithAssigned([ASSIGNED]);
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent?.trim())).not.toContain('Score');
+    expect(el.querySelector('.filters')?.textContent).not.toContain('Score');
+    expect(el.querySelectorAll('tbody tr td').length).toBe(5);
+    expect(fixture.componentInstance.filteredJobs().length).toBe(1);
   });
 
   it('keeps exec jobs under the exec type filter only', () => {
@@ -132,12 +146,12 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Derivation / Evaluation');
   });
 
-  it('shows the worker display name, falling back to its id', () => {
+  it('shows the worker display name, or marks a worker the server does not name as not shared', () => {
     const fixture = setupWithAssigned([{ ...ASSIGNED, worker_name: 'Builder One' }, { ...ASSIGNED, id: 'j2' }]);
     fixture.detectChanges();
     const workers = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr'))
       .map((row) => row.querySelectorAll('td')[1].textContent?.trim());
-    expect(workers).toEqual(['Builder One', 'worker-1']);
+    expect(workers).toEqual(['Builder One', 'Not shared with this account']);
   });
 
   it('lists the nodes of a multi-node job as one cluster job that opens the cluster page', () => {

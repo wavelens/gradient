@@ -166,6 +166,7 @@ function setup(board: Partial<BoardService> = {}, id = 'job-1', pending = false)
       },
       { provide: EvaluationsService, useValue: { getBuild: () => EMPTY } },
       { provide: ExecJobsService, useValue: { abort: () => EMPTY } },
+      { provide: AuthService, useValue: { user: () => ({ superuser: true }) } },
     ],
   });
   const fixture = TestBed.createComponent(BoardJobDetailComponent);
@@ -265,11 +266,23 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(el.querySelector('.ids .worker-link')?.textContent?.trim()).toBe('Builder One');
   });
 
-  it('falls back to the worker id and project name without display names', () => {
+  it('falls back to the project name and marks an unnamed worker as not shared, without a link', () => {
     const detail = { ...DETAIL, worker_name: null, project_display_name: '' };
     const el = setup({ getJob: () => of(detail) }).nativeElement as HTMLElement;
     expect(el.querySelector('.ids .project-link')?.textContent?.trim()).toBe('project-one');
-    expect(el.querySelector('.ids .worker-link')?.textContent?.trim()).toBe('w1');
+    expect(el.querySelector('.ids .worker-link')).toBeNull();
+    expect(el.querySelector('.ids')?.textContent).toContain('Not shared with this account');
+    expect(el.querySelector('.ids')?.textContent).not.toContain('w1');
+  });
+
+  it('hides the scores and the worker and instance context from a non-superuser', () => {
+    TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: false }) } });
+    const el = setup().nativeElement as HTMLElement;
+    expect(el.querySelector('.head .total')).toBeNull();
+    expect(el.textContent).not.toContain('Score breakdown');
+    expect(el.querySelector('section.ctx.worker')).toBeNull();
+    expect(el.querySelector('section.ctx.instance')).toBeNull();
+    expect(el.querySelector('section.ctx.job')).toBeTruthy();
   });
 
   it('shows the architecture for build jobs', () => {
