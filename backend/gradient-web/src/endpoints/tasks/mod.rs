@@ -295,11 +295,11 @@ pub fn bar_segment(status: BuildStatus) -> Option<BarSegment> {
     use BuildStatus::*;
     Some(match status {
         Completed => BarSegment::Completed,
-        FailedPermanent | FailedTimeout | DependencyFailed => BarSegment::Failed,
+        FailedPermanent | FailedTimeout => BarSegment::Failed,
         Building => BarSegment::Building,
         Queued | Created | FailedTransient => BarSegment::Queued,
         Substituted => BarSegment::Substituted,
-        Aborted => BarSegment::Aborted,
+        Aborted | DependencyFailed => BarSegment::Aborted,
         Skipped => return None,
     })
 }
@@ -347,7 +347,7 @@ mod rollup_tests {
     fn segment_mapping_matches_spec() {
         use BuildStatus::*;
         assert_eq!(bar_segment(Completed), Some(BarSegment::Completed));
-        for s in [FailedPermanent, FailedTimeout, DependencyFailed] {
+        for s in [FailedPermanent, FailedTimeout] {
             assert_eq!(bar_segment(s), Some(BarSegment::Failed));
         }
         assert_eq!(bar_segment(Building), Some(BarSegment::Building));
@@ -355,7 +355,9 @@ mod rollup_tests {
             assert_eq!(bar_segment(s), Some(BarSegment::Queued));
         }
         assert_eq!(bar_segment(Substituted), Some(BarSegment::Substituted));
-        assert_eq!(bar_segment(Aborted), Some(BarSegment::Aborted));
+        for s in [Aborted, DependencyFailed] {
+            assert_eq!(bar_segment(s), Some(BarSegment::Aborted));
+        }
         assert_eq!(
             bar_segment(Skipped),
             None,
