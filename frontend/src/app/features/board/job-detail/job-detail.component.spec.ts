@@ -533,6 +533,12 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     expect(el.querySelector('section.timeline')?.textContent).toContain('completed');
   });
 
+  it('shows why a failed attempt ended next to its end reason', () => {
+    const failed: AssignedJobDetail = { ...EXEC_DETAIL, exec_attempt: { ...EXEC_DETAIL.exec_attempt!, end_reason: 'failed', message: 'program exited with code 3' } };
+    const cell = (setup({ getJob: () => of(failed) }).nativeElement as HTMLElement).querySelector('section.exec .end-reason');
+    expect(cell?.textContent?.replace(/\s+/g, ' ').trim()).toBe('failed program exited with code 3');
+  });
+
   it('shows the architecture of the exec job but no flake fetch', () => {
     const job = (setup({ getJob: () => of(EXEC_DETAIL) }).nativeElement as HTMLElement).querySelector('section.ctx.job') as HTMLElement;
     expect(job.textContent).toContain('Architecture');

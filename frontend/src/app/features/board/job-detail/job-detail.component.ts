@@ -131,7 +131,10 @@ interface RuleRow {
                 <tr><td class="label">Attempt</td><td class="mono">{{ a.number }}</td></tr>
                 <tr><td class="label">Ended</td><td class="mono">{{ a.ended_at ? (a.ended_at | serverDate) : '-' }}</td></tr>
                 @if (a.end_reason) {
-                  <tr><td class="label">End reason</td><td class="mono" [title]="a.message ?? ''">{{ a.end_reason }}</td></tr>
+                  <tr>
+                    <td class="label">End reason</td>
+                    <td class="mono end-reason">{{ a.end_reason }}@if (a.message) { <span class="muted"> {{ a.message }}</span> }</td>
+                  </tr>
                 }
               }
             </tbody>
