@@ -48,6 +48,10 @@ export function isFindShortcut(event: KeyboardEvent): boolean {
   return (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f';
 }
 
+export function isSelectAllShortcut(event: KeyboardEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a';
+}
+
 function extendsLog(shown: readonly string[], next: readonly string[]): boolean {
   const kept = shown.length;
   return next.length >= kept && next[0] === shown[0] && (kept < 2 || next[kept - 2] === shown[kept - 2]);
@@ -290,6 +294,10 @@ export class LogViewerComponent implements OnDestroy {
 
   @HostListener('document:keydown', ['$event'])
   onDocumentKeydown(event: KeyboardEvent): void {
+    if (isSelectAllShortcut(event) && this.selectAllRenderedLogLines()) {
+      event.preventDefault();
+      return;
+    }
     if (!this.shortcuts()) return;
     if (isFindShortcut(event)) {
       event.preventDefault();
@@ -297,6 +305,23 @@ export class LogViewerComponent implements OnDestroy {
     } else if (event.key === 'Escape' && this.searchOpen()) {
       this.closeSearch();
     }
+  }
+
+  selectAllRenderedLogLines(): boolean {
+    const container = this.logContainerRef?.nativeElement;
+    const lines = container?.querySelector('.log-lines');
+    const selection = window.getSelection();
+    const active = document.activeElement;
+    if (!container || !lines || !selection) return false;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return false;
+    const focusInLog = container.contains(active);
+    const cursorInLog = !!selection.anchorNode && container.contains(selection.anchorNode);
+    if (!focusInLog && !cursorInLog) return false;
+    const range = document.createRange();
+    range.selectNodeContents(lines);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
   }
 
   openSearch(): void {

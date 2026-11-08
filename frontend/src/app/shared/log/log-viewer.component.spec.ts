@@ -267,6 +267,32 @@ describe('LogViewerComponent', () => {
     });
   });
 
+  describe('select all', () => {
+    const selectAll = () => new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, cancelable: true });
+
+    it('selects only the log lines once the text cursor is in the log', async () => {
+      const { fixture } = setup({ shortcuts: false });
+      await show(fixture, ['first', 'second']);
+      const lines = fixture.nativeElement.querySelector('.log-lines') as HTMLElement;
+      window.getSelection()!.collapse(lines.querySelector('.log-line-content')!, 0);
+      const event = selectAll();
+      document.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(window.getSelection()!.toString()).toContain('first');
+      expect(window.getSelection()!.toString()).toContain('second');
+      expect(window.getSelection()!.getRangeAt(0).commonAncestorContainer).toBe(lines);
+    });
+
+    it('leaves select all to the page when the log has neither focus nor the cursor', async () => {
+      const { fixture } = setup();
+      await show(fixture, ['first']);
+      window.getSelection()!.removeAllRanges();
+      const event = selectAll();
+      document.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    });
+  });
+
   describe('opening a finished log', () => {
     it('loads only the tail window from the server', async () => {
       const log = serverLog(5000);
