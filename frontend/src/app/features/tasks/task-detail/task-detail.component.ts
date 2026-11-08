@@ -41,7 +41,7 @@ import { EvalStatusBadgeComponent, inputFetchRows, SegmentedBarComponent, StarBu
 import { saveResponse } from '@shared/download';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
-import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
+import { groupEntryPoints } from './entry-point-groups';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { links } from '@shared/routing';
 import { formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
@@ -582,10 +582,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const term = this.searchTerm().toLowerCase();
     return this.failedAttributes().filter(f => f.eval.toLowerCase().includes(term));
   });
-  entryPointGroups = computed(() => groupEntryPoints(
-    this.entryPoints(),
-    failuresWithinLoadedRows(this.matchingFailedAttributes(), this.entryPoints(), this.entryPointsTotal()),
-  ));
+  entryPointGroups = computed(() => groupEntryPoints(this.entryPoints(), this.matchingFailedAttributes()));
 
   protected readonly evaluationPhase = evaluationPhase;
   protected readonly inputFetchPhase = inputFetchPhase;

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { failuresWithinLoadedRows, groupEntryPoints } from './entry-point-groups';
+import { groupEntryPoints } from './entry-point-groups';
 import { EntryPointSummary, FailedAttributeSummary } from '@core/models';
 
 const ep = (attr: string, architecture = 'x86_64-linux') =>
@@ -12,21 +12,6 @@ const ep = (attr: string, architecture = 'x86_64-linux') =>
 
 const shape = (eps: EntryPointSummary[], failed: FailedAttributeSummary[] = []) =>
   groupEntryPoints(eps, failed).map((g) => [g.title, g.rows.map((r) => r.label)]);
-
-describe('failuresWithinLoadedRows', () => {
-  const failure = (attr: string) => ({ eval: attr, message: 'boom' });
-  const failed = [failure('packages.x86_64-linux.b'), failure('packages.x86_64-linux.y')];
-  const loaded = [ep('packages.x86_64-linux.a'), ep('packages.x86_64-linux.m')];
-
-  it('holds back a failure that sorts behind the last loaded row', () => {
-    expect(failuresWithinLoadedRows(failed, loaded, 40).map((f) => f.eval)).toEqual(['packages.x86_64-linux.b']);
-  });
-
-  it('lists every failure with the last page loaded', () => {
-    expect(failuresWithinLoadedRows(failed, loaded, 2)).toEqual(failed);
-    expect(failuresWithinLoadedRows(failed, [], 0)).toEqual(failed);
-  });
-});
 
 describe('groupEntryPoints', () => {
   it('heads the rows with their attribute set and drops it and the architecture from the labels', () => {
@@ -71,19 +56,25 @@ describe('groupEntryPoints', () => {
       ]);
   });
 
-  it('places an attribute that failed to evaluate among its built siblings', () => {
+  it('Attributes that failed evaluation come before their built siblings', () => {
     const host = (n: string) => `nixosConfigurations.${n}.config.system.build.toplevel`;
     const groups = groupEntryPoints([ep(host('a')), ep(host('c'))], [{ eval: host('b'), message: 'boom' }]);
 
     expect(groups.map((g) => [g.title, g.rows.map((r) => [r.label, r.kind])])).toEqual([
-      ['Nixos Configurations', [['a', 'build'], ['b', 'failed'], ['c', 'build']]],
+      ['Nixos Configurations', [['b', 'failed'], ['a', 'build'], ['c', 'build']]],
     ]);
+  });
+
+  it('Sets with an attribute that failed to evaluate go before sets without one.', () => {
+    const groups = groupEntryPoints([ep('checks.x86_64-linux.fmt')], [{ eval: 'packages.x86_64-linux.hello', message: 'boom' }]);
+
+    expect(groups.map((g) => g.title)).toEqual(['Packages', 'Checks']);
   });
 
   it('labels a failure that stopped partway down the path by the part it reached', () => {
     const host = (n: string) => ep(`nixosConfigurations.${n}.config.system.build.toplevel`);
     const groups = groupEntryPoints([host('a'), host('c')], [{ eval: 'nixosConfigurations.b.config', message: 'boom' }]);
 
-    expect(groups.map((g) => g.rows.map((r) => r.label))).toEqual([['a', 'b.config', 'c']]);
+    expect(groups.map((g) => g.rows.map((r) => r.label))).toEqual([['b.config', 'a', 'c']]);
   });
 });

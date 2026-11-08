@@ -14,7 +14,6 @@ export type EntryPointRow = Row & { label: string };
 
 interface Member {
   row: Row;
-  attr: string;
   path: string[];
 }
 
@@ -53,21 +52,6 @@ function sharedTailLength(paths: string[][]): number {
   return tail;
 }
 
-function compareAttr(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-// Rows load page by page in attribute order, so a failure behind the last loaded row waits for its page.
-export function failuresWithinLoadedRows(
-  failed: FailedAttributeSummary[],
-  loaded: EntryPointSummary[],
-  total: number,
-): FailedAttributeSummary[] {
-  if (loaded.length >= total) return failed;
-  const last = loaded.at(-1);
-  return last ? failed.filter((f) => compareAttr(f.eval, last.eval) < 0) : [];
-}
-
 export function groupEntryPoints(
   entryPoints: EntryPointSummary[],
   failed: FailedAttributeSummary[] = [],
@@ -76,14 +60,13 @@ export function groupEntryPoints(
   const add = (attr: string, architecture: string | undefined, row: Row) => {
     const { set, path } = pathWithinSet(attr, architecture);
     const members = sets.get(set);
-    if (members) members.push({ row, attr, path });
-    else sets.set(set, [{ row, attr, path }]);
+    if (members) members.push({ row, path });
+    else sets.set(set, [{ row, path }]);
   };
-  for (const entry of entryPoints) add(entry.eval, entry.architecture, { kind: 'build', key: entry.id, entry });
   for (const failure of failed) add(failure.eval, undefined, { kind: 'failed', key: `failed:${failure.eval}`, failure });
+  for (const entry of entryPoints) add(entry.eval, entry.architecture, { kind: 'build', key: entry.id, entry });
 
   return [...sets].sort(([a], [b]) => Number(isOtherSet(a)) - Number(isOtherSet(b))).map(([set, members]) => {
-    if (failed.length) members.sort((a, b) => compareAttr(a.attr, b.attr));
     const tail = sharedTail(members);
     return {
       title: headingOf(set),

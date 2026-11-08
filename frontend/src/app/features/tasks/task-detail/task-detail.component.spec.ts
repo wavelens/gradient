@@ -781,31 +781,23 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(fixture.nativeElement.querySelector('.pkg-wait a[grButton]')?.getAttribute('href')).toBe('/project/acme/workers');
   });
 
-  it('holds a failed attribute back until the rows before it are loaded', () => {
+  it('Show attributes that failed evaluation above built rows on the first page', () => {
     const host = (n: string) => `nixosConfigurations.${n}.config.system.build.toplevel`;
-    const { fixture, tasksService } = setup(
+    const { fixture } = setup(
       { managed: false, canEdit: true, canTrigger: true },
       {
         primaryStatus: 'Failed',
         getEntryPoints: () => of({
           entry_points: [epSummary('a', host('a'))],
           total: 2,
-          failed_attributes: [{ eval: host('b'), message: 'boom' }],
+          failed_attributes: [{ eval: host('z'), message: 'boom' }],
         }),
       },
     );
-    const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('.pkg[data-phase="failure"]')).toBeNull();
+    const names = [...(fixture.nativeElement as HTMLElement).querySelectorAll('.pkg .pkg-name')]
+      .map(el => el.textContent?.trim());
 
-    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({
-      entry_points: [epSummary('c', host('c'))],
-      total: 2,
-      failed_attributes: [{ eval: host('b'), message: 'boom' }],
-    }));
-    fixture.componentInstance.loadMoreEntryPoints();
-    fixture.detectChanges();
-
-    expect(root.querySelector('.pkg[data-phase="failure"] .pkg-name')?.textContent?.trim()).toBe('b');
+    expect(names.slice(0, 2)).toEqual(['z', 'a']);
   });
 
   /// The server walks one dependency closure per entry point it returns, so a

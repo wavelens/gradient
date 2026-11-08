@@ -8,8 +8,8 @@ use gradient_types::*;
 use sea_orm::sea_query::extension::postgres::PgExpr;
 use sea_orm::sea_query::{Expr, Query};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Select,
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, Order, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, Select,
 };
 
 fn built(evaluation: EvaluationId, search: Option<&str>) -> Select<EEntryPoint> {
@@ -30,6 +30,17 @@ fn built(evaluation: EvaluationId, search: Option<&str>) -> Select<EEntryPoint> 
     }
 }
 
+/// Failed builds come first, then builds with failed dependencies, then the rest. The first page can show what to fix.
+fn failure_rank_sql() -> String {
+    use gradient_entity::build::BuildStatus::*;
+    format!(
+        "(SELECT CASE WHEN db.status IN ({failed}) THEN 0 WHEN db.status = {dependency_failed} THEN 1 ELSE 2 END \
+         FROM derivation_build db WHERE db.derivation = \"entry_point\".\"derivation\")",
+        failed = crate::sql::status::build_in(&[FailedPermanent, FailedTransient, FailedTimeout]),
+        dependency_failed = i32::from(DependencyFailed),
+    )
+}
+
 pub async fn count_built<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -46,6 +57,7 @@ pub async fn built_page<C: ConnectionTrait>(
     limit: u64,
 ) -> Result<Vec<MEntryPoint>, DbErr> {
     built(evaluation, search)
+        .order_by(Expr::cust(failure_rank_sql()), Order::Asc)
         .order_by_asc(CEntryPoint::Eval)
         .offset(offset)
         .limit(limit)
@@ -121,5 +133,18 @@ mod tests {
     fn a_blank_search_term_keeps_every_entry_point() {
         assert!(!str::contains(&entry_point_sql(Some("  ")), "ILIKE"));
         assert!(!str::contains(&entry_point_sql(None), "ILIKE"));
+    }
+
+    #[test]
+    fn sql_entry_point_order_ranks_failed_builds_first_failed_dependency_second_other_builds_last()
+    {
+        let sql = failure_rank_sql();
+        assert!(
+            str::contains(
+                &sql,
+                "WHEN db.status IN (4, 8, 9) THEN 0 WHEN db.status = 6 THEN 1 ELSE 2"
+            ),
+            "{sql}"
+        );
     }
 }
