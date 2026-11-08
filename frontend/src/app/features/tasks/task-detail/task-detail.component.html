@@ -170,7 +170,7 @@
                     @if (!sel.only_evaluate) {
                       <gr-segmented-bar class="pkg-bar" [counts]="counts" />
                       @let depTally = buildTally(counts);
-                      <span class="pkg-deps" [title]="depTally.overall + ' deps in total'">{{ depTally.done }} / {{ depTally.total }} deps</span>
+                      <span class="pkg-deps" [title]="'Builds in total, including substituted ones: ' + depTally.overall">{{ depTally.done }} / {{ depTally.total }} builds</span>
                       <span class="pkg-time">
                         {{ pkgDuration(ep) }}
                         @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }

@@ -137,7 +137,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     waitingAccessFrom(this.taskPermissions(), this.access().canTrigger, this.authService.user()?.superuser === true),
   );
   duration = signal('0s');
-  totalBuildsCount = signal(0);
   activeBuildsCount = signal(0);
   private tick = signal(0);
 
@@ -154,9 +153,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   scopeBuildId = signal<string | null>(null);
   private initialShowEval = false;
   private fetchingInitialBuild = false;
-
-  // Derived from backend totals - accurate regardless of how many builds are loaded.
-  completedBuildsCount = computed(() => this.totalBuildsCount() - this.activeBuildsCount());
 
   queuedCount = computed(() =>
     this.builds().filter(b => b.status === 'Queued').length
@@ -487,7 +483,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.evalService.getBuilds(this.evaluationId, limit, 0, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.totalBuilds = result.total;
-        this.totalBuildsCount.set(result.total);
         this.activeBuildsCount.set(result.active_count);
         const prevSelected = this.selectedBuild();
 
@@ -603,8 +598,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
     this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, offset, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
-        // Do NOT update totalBuildsCount / activeBuildsCount here - those metric signals
-        // are owned exclusively by loadBuilds() to avoid jumps from concurrent responses.
+        // Don't update activeBuildsCount here. loadBuilds() is the only owner of this signal, so a response that comes back at the same time can't change the value unexpectedly.
         this.totalBuilds = result.total;
         if (result.builds.length > 0) {
           const existingIds = new Set(this.builds().map(b => b.id));

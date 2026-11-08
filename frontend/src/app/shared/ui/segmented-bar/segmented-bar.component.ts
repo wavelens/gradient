@@ -8,15 +8,15 @@ import { ChangeDetectionStrategy, Component, computed, input, signal } from '@an
 import { BuildStatusCounts } from '@core/models';
 import { injectOnScreen } from '@gradient/ui/ui';
 
-export type SegmentTone = 'completed' | 'failed' | 'building' | 'queued';
+export type SegmentTone = 'completed' | 'failed' | 'aborted' | 'building' | 'queued';
 export interface BarSegment { tone: SegmentTone; pct: number; }
 interface CountSegment extends BarSegment { label: string; }
 interface Tip { text: string; x: number; }
 
-const ORDER: SegmentTone[] = ['completed', 'failed', 'building', 'queued'];
+const ORDER: SegmentTone[] = ['completed', 'failed', 'aborted', 'building', 'queued'];
 
 function countSegments(c: BuildStatusCounts): CountSegment[] {
-  const total = c.completed + c.failed + c.building + c.queued;
+  const total = ORDER.reduce((sum, tone) => sum + c[tone], 0);
   if (total === 0) {
     return c.substituted > 0 ? [{ tone: 'completed', pct: 100, label: `${c.substituted} substituted` }] : [];
   }

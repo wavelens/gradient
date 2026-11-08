@@ -23,12 +23,13 @@ describe('SegmentedBarComponent', () => {
 
   const widths = () => [...fixture.nativeElement.querySelectorAll('.seg')].map((s: HTMLElement) => [s.className.replace(' seg-pulsing', ''), s.style.width]);
 
-  it('renders all four segments proportionally excluding substituted/aborted, zero counts at 0% width', () => {
-    fixture.componentRef.setInput('counts', counts({ completed: 3, failed: 1, substituted: 9000, aborted: 5 }));
+  it('Draw all segments proportionally. Aborted segments use gray. No replacement build.', () => {
+    fixture.componentRef.setInput('counts', counts({ completed: 3, failed: 1, substituted: 9000, aborted: 4 }));
     fixture.detectChanges();
     expect(widths()).toEqual([
-      ['seg seg-completed', '75%'],
-      ['seg seg-failed', '25%'],
+      ['seg seg-completed', '37.5%'],
+      ['seg seg-failed', '12.5%'],
+      ['seg seg-aborted', '50%'],
       ['seg seg-building', '0%'],
       ['seg seg-queued', '0%'],
     ]);

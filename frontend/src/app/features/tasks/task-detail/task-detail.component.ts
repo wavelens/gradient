@@ -815,7 +815,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     switch (ep.build_status) {
       case 'Completed': c.completed++; break;
       case 'Substituted': c.substituted++; break;
-      case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': c.failed++; break;
+      case 'FailedPermanent': case 'FailedTimeout': c.failed++; break;
       case 'Aborted': case 'DependencyFailed': c.aborted++; break;
       case 'Building': c.building++; break;
       // Settled work with no result: it is not pending, so it draws nothing.

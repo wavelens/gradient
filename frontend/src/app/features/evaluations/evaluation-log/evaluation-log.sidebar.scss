@@ -6,12 +6,6 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-.builds-count {
-  font-size: $font-size-xs;
-  color: var(--gr-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
 .sidebar-search {
   padding: 0 $spacing-md $spacing-sm;
 

@@ -12,9 +12,9 @@ const counts = (c: Partial<BuildStatusCounts>): BuildStatusCounts => ({
 });
 
 describe('buildTally', () => {
-  it('counts only the builds the bar shows, with substituted and aborted in the overall total', () => {
+  it('counts aborted builds as done and substituted builds only in the overall total', () => {
     expect(buildTally(counts({ completed: 500, failed: 34, building: 6, queued: 1110, substituted: 5400, aborted: 100 })))
-      .toEqual({ done: 534, total: 1650, overall: 7150 });
+      .toEqual({ done: 634, total: 1750, overall: 7150 });
   });
 
   it('falls back to the substituted builds when nothing had to be built, matching the full bar', () => {
