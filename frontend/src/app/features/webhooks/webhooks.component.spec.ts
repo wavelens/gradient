@@ -91,7 +91,7 @@ describe('WebhooksComponent', () => {
     { scope: 'project', trail: ['Projects', 'Acme', 'Settings', 'Event notifications'] },
     { scope: 'cache', trail: ['Caches', 'Main', 'Settings', 'Event notifications'] },
     { scope: 'team', trail: ['Teams', 'Platform', 'Settings', 'Event notifications'] },
-    { scope: 'instance', trail: ['Job Board', 'Event notifications'] },
+    { scope: 'instance', trail: ['Admin', 'Event notifications'] },
   ])('leads the $scope scope back to the page its webhooks are reached from', ({ scope, trail }) => {
     const { root } = setup({ webhookScope: scope }, { [scope]: 'main' });
     const crumbs = Array.from(root.querySelectorAll('.breadcrumb-link, .breadcrumb-current'));

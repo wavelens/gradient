@@ -75,6 +75,10 @@ export class BreadcrumbsService {
     return [{ label: 'Teams', link: links.teams() }, { label: name(), link: links.team(team) }, ...tail];
   }
 
+  admin(...tail: Crumb[]): Crumb[] {
+    return [{ label: 'Admin', link: links.board('health') }, ...tail];
+  }
+
   rememberProject(project: string, displayName: string): void {
     this.remember(`project/${project}`, displayName);
   }

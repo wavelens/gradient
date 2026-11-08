@@ -101,7 +101,7 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
         @if (!config.githubAppEnabled) {
           <a class="btn" [routerLink]="links.admin('github-app')">Set up GitHub App</a>
         }
-        <a class="btn" [routerLink]="links.admin('webhooks')">Instance Webhooks</a>
+        <a class="btn" [routerLink]="links.admin('webhooks')">Event notifications</a>
         <button class="btn" (click)="runDeepGc()">Run Deep GC</button>
         @if (h.draining) {
           <button class="btn" (click)="disableDraining()" [disabled]="drainBusy()">Disable Draining</button>

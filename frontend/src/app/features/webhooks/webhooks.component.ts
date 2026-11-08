@@ -144,7 +144,7 @@ export class WebhooksComponent implements OnInit {
       case 'team':
         return this.crumbs.team(this.scope.name, { label: 'Settings', link: links.teamPage(this.scope.name, 'settings') }, page);
       case 'instance':
-        return [{ label: 'Job Board', link: links.board('health') }, page];
+        return this.crumbs.admin(page);
     }
   }
 

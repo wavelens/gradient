@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AdminService } from '@core/services/admin.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
 import {
   ButtonComponent,
@@ -22,7 +23,6 @@ import { Observable, defaultIfEmpty, of } from 'rxjs';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { ManifestResult } from '@core/models';
-import { links } from '@shared/routing';
 
 @Component({
   selector: 'app-admin-github-app',
@@ -34,8 +34,8 @@ import { links } from '@shared/routing';
   styleUrl: './github-app.component.scss',
 })
 export class GithubAppComponent implements OnInit {
-  protected readonly links = links;
   private admin = inject(AdminService);
+  protected readonly trail = inject(BreadcrumbsService).admin({ label: 'GitHub App' });
   private route = inject(ActivatedRoute);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
