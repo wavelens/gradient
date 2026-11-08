@@ -692,8 +692,8 @@ export interface CreateWebhookResponse {
 }
 
 export interface DashboardStats {
-  cpu_time_ms: number;
-  cpu_time_ms_7d: number;
+  cpu_time_ms?: number | null;
+  cpu_time_ms_7d?: number | null;
   builds_completed: number;
   cache_size_bytes: number;
   workers: OnlineWorkerLoad;

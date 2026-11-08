@@ -44,13 +44,13 @@ describe('DashboardStatsComponent', () => {
       Builds: '1.28M',
       'Cache size': '2.4 TiB',
       'Workers busy': '72%',
-      'Avg. Queue wait': '38.0 s',
+      'Median queue wait time': '38.0 s',
     });
   });
 
   it('lays out every labelled card with a placeholder value until the stats arrive', () => {
     const root = render(() => NEVER).root;
-    expect(Object.keys(cards(root))).toEqual(['CPU time', 'Builds', 'Cache size', 'Workers busy', 'Avg. Queue wait']);
+    expect(Object.keys(cards(root))).toEqual(['CPU time', 'Builds', 'Cache size', 'Workers busy', 'Median queue wait time']);
     expect(root.querySelectorAll('.stat-value gr-skeleton').length).toBe(5);
   });
 

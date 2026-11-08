@@ -63,8 +63,8 @@ impl OnlineWorkerLoad {
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DashboardStats {
-    pub cpu_time_ms: i64,
-    pub cpu_time_ms_7d: i64,
+    pub cpu_time_ms: Option<i64>,
+    pub cpu_time_ms_7d: Option<i64>,
     pub builds_completed: i64,
     pub cache_size_bytes: i64,
     pub workers: OnlineWorkerLoad,
@@ -91,7 +91,7 @@ async fn visible_loads(scheduler: &Scheduler, scope: &MetricsScope) -> Vec<Worke
     operation_id = "getDashboardStats",
     tag = "dashboard",
     summary = "Stat tiles of the current user",
-    description = "Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).\n`builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median wait for a worker over the last 24 hours.\n`cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); each size is recounted every metrics rollup pass, and a path held by two caches counts in both.\nOnly connected workers of visible projects appear in ``workers``. ``busy_pct`` is the average load across those workers. A worker's load is the CPU usage when metrics are on, or the number of assigned jobs relative to ``max_concurrent_builds`` when metrics are off. Both values use 100 as the maximum.",
+    description = "Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).\n`builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median wait for a worker over the last 24 hours.\n`cpu_time_ms` and `cpu_time_ms_7d` are null if no workers report CPU time (build metrics are off on the worker).\n`cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); each size is recounted every metrics rollup pass, and a path held by two caches counts in both.\nOnly connected workers of visible projects appear in ``workers``. ``busy_pct`` is the average load across those workers. A worker's load is the CPU usage when metrics are on, or the number of assigned jobs relative to ``max_concurrent_builds`` when metrics are off. Both values use 100 as the maximum.",
     responses((status = OK, description = "Dashboard stat tiles", body = DashboardStats), WebError)
 )]
 pub async fn get_stats(

@@ -13,8 +13,8 @@ use sea_orm::{ConnectionTrait, DbErr, QueryResult};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Totals {
-    pub cpu_time_ms: i64,
-    pub cpu_time_ms_7d: i64,
+    pub cpu_time_ms: Option<i64>,
+    pub cpu_time_ms_7d: Option<i64>,
     pub builds_completed: i64,
     pub queue_wait_p50_ms: i64,
 }
@@ -46,8 +46,8 @@ fn metrics_in_projects(filter: Option<&str>) -> String {
 pub fn totals_sql(filter: Option<&str>) -> String {
     format!(
         "SELECT \
-            coalesce(sum(dm.cpu_time_ms), 0)::bigint AS cpu_time_ms, \
-            coalesce(sum(dm.cpu_time_ms) FILTER (WHERE dm.created_at > now() - interval '7 days'), 0)::bigint AS cpu_time_ms_7d, \
+            sum(dm.cpu_time_ms)::bigint AS cpu_time_ms, \
+            (sum(dm.cpu_time_ms) FILTER (WHERE dm.created_at > now() - interval '7 days'))::bigint AS cpu_time_ms_7d, \
             count(*)::bigint AS builds_completed, \
             (SELECT coalesce((percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM (j.dispatched_at - j.queued_at)))) * 1000, 0)::bigint \
                 FROM dispatched_job j WHERE j.dispatched_at > now() - interval '24 hours'{jobs}) AS queue_wait_p50_ms \

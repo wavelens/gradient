@@ -5310,6 +5310,7 @@ paths:
       description: |-
         Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).
         `builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median wait for a worker over the last 24 hours.
+        `cpu_time_ms` and `cpu_time_ms_7d` are null if no workers report CPU time (build metrics are off on the worker).
         `cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); each size is recounted every metrics rollup pass, and a path held by two caches counts in both.
         Only connected workers of visible projects appear in ``workers``. ``busy_pct`` is the average load across those workers. A worker's load is the CPU usage when metrics are on, or the number of assigned jobs relative to ``max_concurrent_builds`` when metrics are off. Both values use 100 as the maximum.
       operationId: getDashboardStats
@@ -16071,18 +16072,20 @@ components:
     DashboardStats:
       type: object
       required:
-      - cpu_time_ms
-      - cpu_time_ms_7d
       - builds_completed
       - cache_size_bytes
       - workers
       - queue_wait_p50_ms
       properties:
         cpu_time_ms:
-          type: integer
+          type:
+          - integer
+          - 'null'
           format: int64
         cpu_time_ms_7d:
-          type: integer
+          type:
+          - integer
+          - 'null'
           format: int64
         builds_completed:
           type: integer

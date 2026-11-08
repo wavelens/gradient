@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { formatDuration } from '@shared/text';
+
 const HOUR = 3_600_000;
 const YEAR = 365 * 24 * HOUR;
 const BAR_PITCH_PX = 7;
 const MAX_BARS = 60;
 
-export function formatCpuTime(ms: number): string {
+export function formatCpuTime(ms: number | null | undefined): string {
+  if (ms == null || ms < HOUR) return formatDuration(ms);
   return ms >= YEAR ? `${(ms / YEAR).toFixed(1)} y` : `${Math.round(ms / HOUR)} h`;
 }
 
