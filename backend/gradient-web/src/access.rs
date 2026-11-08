@@ -448,11 +448,18 @@ async fn is_cache_member(
     db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
-    _api_key: Option<&ApiKeyContext>,
+    api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
+    if request_uses_project_pinned_api_key(api_key) {
+        return Ok(false);
+    }
     Ok(gradient_db::caches::access_of_user(db, cache_id, user_id)
         .await?
         .is_some())
+}
+
+fn request_uses_project_pinned_api_key(api_key: Option<&ApiKeyContext>) -> bool {
+    api_key.is_some_and(|key| key.project.is_some())
 }
 
 async fn is_cache_project_subscriber(
@@ -489,7 +496,7 @@ pub async fn effective_cache_mask(
     cache_id: CacheId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<Option<i64>> {
-    if let Some(mask) = cache_role_mask(db, user_id, cache_id).await? {
+    if let Some(mask) = cache_role_mask(db, user_id, cache_id, api_key).await? {
         return Ok(Some(mask));
     }
     if is_cache_project_subscriber(db, user_id, cache_id, api_key).await? {
@@ -498,7 +505,15 @@ pub async fn effective_cache_mask(
     Ok(None)
 }
 
-async fn cache_role_mask(db: &WebDb, user_id: UserId, cache_id: CacheId) -> WebResult<Option<i64>> {
+async fn cache_role_mask(
+    db: &WebDb,
+    user_id: UserId,
+    cache_id: CacheId,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<Option<i64>> {
+    if request_uses_project_pinned_api_key(api_key) {
+        return Ok(None);
+    }
     Ok(gradient_db::access::cache_permission_mask(db, cache_id, user_id).await?)
 }
 
@@ -526,7 +541,7 @@ pub async fn caller_cache_mask(
     let Some(user_id) = caller.user_id() else {
         return Ok(0);
     };
-    Ok(cache_role_mask(db, user_id, cache_id)
+    Ok(cache_role_mask(db, user_id, cache_id, api_key)
         .await?
         .map_or(0, |mask| key_limited_cache_mask(mask, api_key)))
 }
@@ -538,7 +553,7 @@ pub async fn has_cache_permission(
     permission: CachePermission,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
-    let Some(role_mask) = cache_role_mask(db, user_id, cache_id).await? else {
+    let Some(role_mask) = cache_role_mask(db, user_id, cache_id, api_key).await? else {
         return Ok(false);
     };
 
@@ -553,7 +568,7 @@ async fn require_cache_permission(
     label: Resource,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<()> {
-    let role_mask = cache_role_mask(db, user_id, cache_id)
+    let role_mask = cache_role_mask(db, user_id, cache_id, api_key)
         .await?
         .ok_or_else(|| WebError::not_found(label))?;
 
@@ -1583,6 +1598,86 @@ mod tests {
             .await
             .expect_err("API key View mask must block WriteStore even with Admin role");
             assert!(matches!(err, WebError::Forbidden(..)));
+        });
+    }
+
+    fn api_key_context_for_fixed_test_project() -> ApiKeyContext {
+        ApiKeyContext {
+            mask: i64::MAX,
+            project: Some(ProjectId::new(uuid!(
+                "a0000000-0000-0000-0000-000000000001"
+            ))),
+            cache_pin: None,
+            cache_permission_mask: None,
+            allowed_ips: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn project_pinned_key_ignores_direct_cache_membership() {
+        run(async {
+            let user = user_fixture();
+            let api_key = api_key_context_for_fixed_test_project();
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                Some(&api_key),
+                "test-cache".into(),
+                CacheAccess::Readable,
+            )
+            .await
+            .expect_err("a project-pinned key must not reach the owner's private caches");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
+    fn project_pinned_key_reads_a_cache_its_project_subscribes_to() {
+        run(async {
+            let user = user_fixture();
+            let api_key = api_key_context_for_fixed_test_project();
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([vec![project_cache_fixture()]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let r = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                Some(&api_key),
+                "test-cache".into(),
+                CacheAccess::Readable,
+            )
+            .await;
+            assert!(r.is_ok(), "{:?}", r.err());
+        });
+    }
+
+    #[test]
+    fn project_pinned_key_cannot_write_to_a_cache() {
+        run(async {
+            let user = user_fixture();
+            let api_key = api_key_context_for_fixed_test_project();
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                Some(&api_key),
+                "test-cache".into(),
+                write_store_access(),
+            )
+            .await
+            .expect_err("a project-pinned key has no cache role");
+            assert!(matches!(err, WebError::NotFound(..)));
         });
     }
 
