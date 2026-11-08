@@ -152,11 +152,10 @@
   (closed)="showEditDialog.set(false); editingAction.set(null)"
 />
 
-@if (deliveriesActionId(); as id) {
-  <app-action-deliveries
-    [project]="projectName"
-    [task]="taskName"
-    [actionId]="id"
+@if (openTaskActionDeliveryHistoryLoadFunctions(); as load) {
+  <app-outgoing-webhook-delivery-list-dialog
+    [loadDeliveryPage]="load.page"
+    [loadDeliveryDetail]="load.detail"
     (closed)="closeDeliveries()"
   />
 }

@@ -37,7 +37,7 @@ import {
   eventNameToReadableText,
 } from '@core/models';
 import { ActionFormComponent } from './action-form.component';
-import { ActionDeliveriesComponent } from './action-deliveries.component';
+import { OutgoingWebhookDeliveryListDialog } from '@shared/outgoing-deliveries';
 import { RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 
@@ -62,7 +62,7 @@ interface IntegrationOption {
     WritableDirective,
     ManagedDisableDirective,
     ActionFormComponent,
-    ActionDeliveriesComponent,
+    OutgoingWebhookDeliveryListDialog,
     IconComponent,
     PageLayoutComponent,
     BadgeComponent,
@@ -123,6 +123,14 @@ export class TaskActionsComponent implements OnInit {
   showEditDialog = signal(false);
 
   deliveriesActionId = signal<string | null>(null);
+  openTaskActionDeliveryHistoryLoadFunctions = computed(() => {
+    const actionId = this.deliveriesActionId();
+    if (!actionId) return null;
+    return {
+      page: (limit: number, offset: number) => this.actionsService.listDeliveries(this.projectName, this.taskName, actionId, limit, offset),
+      detail: (deliveryId: string) => this.actionsService.getDelivery(this.projectName, this.taskName, actionId, deliveryId),
+    };
+  });
 
   revealedToken = signal<string | null>(null);
 

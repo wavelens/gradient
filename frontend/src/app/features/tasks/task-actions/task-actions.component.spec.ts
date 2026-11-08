@@ -161,6 +161,16 @@ describe('TaskActionsComponent', () => {
     expect(text).toContain('Build failed');
   });
 
+  it('opens the shared delivery history with the deliveries of the chosen action', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const listDeliveries = vi.fn(() => of([]));
+    (TestBed.inject(ActionsService) as unknown as Record<string, unknown>)['listDeliveries'] = listDeliveries;
+    fixture.componentInstance.openDeliveries('a-1');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-outgoing-webhook-delivery-list-dialog')).not.toBeNull();
+    expect(listDeliveries).toHaveBeenCalledWith('acme', 'demo', 'a-1', 50, 0);
+  });
+
   it('reveals token after create when response includes one', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     const comp = fixture.componentInstance;
