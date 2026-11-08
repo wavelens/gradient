@@ -1060,13 +1060,10 @@ describe('EvaluationLogComponent', () => {
       delete objectUrls['revokeObjectURL'];
     });
 
-    it('saves the whole log under the store file name', async () => {
+    it('saves the whole log as plain text under the store file name', async () => {
       const { cmp } = setup();
-      const fetchMock = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ error: false, message: 'line 1\nline 2\n' }),
-      });
-      vi.stubGlobal('fetch', fetchMock);
+      const getLog = vi.spyOn(TestBed.inject(EvaluationsService), 'getBuildLog')
+        .mockReturnValue(of('\u001b[31mline 1\u001b[0m\nline 2\n'));
       const created: Blob[] = [];
       objectUrls['createObjectURL'] = (b: Blob) => (created.push(b), 'blob:log');
       const revoke = vi.fn();
@@ -1078,21 +1075,37 @@ describe('EvaluationLogComponent', () => {
 
       await cmp.downloadLog(build('b1', 'hash-hello-1.0.drv'));
 
-      expect(fetchMock).toHaveBeenCalledWith('/api/v1/builds/b1/log', { credentials: 'include' });
+      expect(getLog).toHaveBeenCalledWith('b1');
       expect(await created[0].text()).toBe('line 1\nline 2\n');
       expect(clicked[0].download).toBe('hash-hello-1.0.log');
       expect(revoke).toHaveBeenCalledWith('blob:log');
     });
 
-    it('saves nothing when the log cannot be read', async () => {
+    it('reports the server reason and saves nothing when the log cannot be read', async () => {
       const { cmp } = setup();
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }));
+      const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+      const error = new ApiError('Log not found', 404);
+      vi.spyOn(TestBed.inject(EvaluationsService), 'getBuildLog').mockReturnValue(throwError(() => error));
       const create = vi.fn();
       objectUrls['createObjectURL'] = create;
 
       await cmp.downloadLog(build('b1', 'hash-hello-1.0.drv'));
 
       expect(create).not.toHaveBeenCalled();
+      expect(failure).toHaveBeenCalledWith("Couldn't download log", error);
+    });
+
+    it('never saves an empty file, telling why a build that never ran has no log', async () => {
+      const { cmp } = setup();
+      const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
+      vi.spyOn(TestBed.inject(EvaluationsService), 'getBuildLog').mockReturnValue(of(''));
+      const create = vi.fn();
+      objectUrls['createObjectURL'] = create;
+
+      await cmp.downloadLog(build('b1', 'hash-hello-1.0.drv', 'DependencyFailed'));
+
+      expect(create).not.toHaveBeenCalled();
+      expect(failure.mock.calls[0][0]).toContain('dependencies failed');
     });
   });
 

@@ -42,11 +42,15 @@ export function windowAround(
 // eslint-disable-next-line no-control-regex -- ESC is the sequence introducer
 const ANSI_ESCAPE = /\u001b\[[?0-9;]*[A-Za-z~]/g;
 
+export function removeAnsiEscapeSequences(text: string): string {
+  return text.replace(ANSI_ESCAPE, '');
+}
+
 export function searchLines(lines: readonly string[], query: string): LogSearchHit[] {
   const needle = query.toLowerCase();
   const hits: LogSearchHit[] = [];
   lines.forEach((line, i) => {
-    const text = line.replace(ANSI_ESCAPE, '');
+    const text = removeAnsiEscapeSequences(line);
     if (text.toLowerCase().includes(needle)) {
       hits.push({ line_number: i + 1, chunk_index: 0, byte_offset: 0, preview: text });
     }

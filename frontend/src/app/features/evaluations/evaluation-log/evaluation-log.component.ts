@@ -17,14 +17,14 @@ import {
   ChangeDetectionStrategy
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, splitLogLines } from '@shared/log';
+import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, removeAnsiEscapeSequences, splitLogLines } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
 import { buildLog } from './build-log';
 import { lastRateLimitNote, rateLimitMarker } from './log-rate-limit';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
-import { Observable, Subscription, merge } from 'rxjs';
+import { Observable, Subscription, firstValueFrom, merge } from 'rxjs';
 import { auditTime, filter, map, share, switchMap } from 'rxjs/operators';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService, createResyncOnLiveSocketReconnectCallback } from '@core/services/live.service';
@@ -1114,12 +1114,15 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   async downloadLog(build: BuildItem): Promise<void> {
     let log: string;
     try {
-      const response = await fetch(`${environment.apiUrl}/builds/${build.id}/log`, { credentials: 'include' });
-      if (!response.ok) return;
-      const data = await response.json();
-      if (data.error || typeof data.message !== 'string') return;
-      log = data.message;
-    } catch {
+      log = removeAnsiEscapeSequences(await firstValueFrom(this.evalService.getBuildLog(build.id)));
+    } catch (error) {
+      this.notify.failure("Couldn't download log", error);
+      return;
+    }
+    if (!log.trim()) {
+      this.notify.failure(build.status === 'DependencyFailed'
+        ? "Couldn't download log: This build didn't run because dependencies failed."
+        : "Couldn't download log: build produced no output", null);
       return;
     }
 
