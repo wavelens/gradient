@@ -44,6 +44,10 @@ describe('job timeline', () => {
     expect(depths([span(0, 0, 'build', 0, 10)])).toEqual([0]);
   });
 
+  it('stops walking when two spans name each other as parent', () => {
+    expect(depths([span(1, 2, 'compress', 0, 10), span(2, 1, 'nar_push', 0, 5)])).toEqual([1, 1]);
+  });
+
   it('labels every phase the API can send', () => {
     expect(phaseLabel('nar_push')).toBe('NAR push');
     expect(phaseLabel('nar_fetch')).toBe('NAR fetch');

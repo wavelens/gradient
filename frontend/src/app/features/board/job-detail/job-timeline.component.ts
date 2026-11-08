@@ -22,15 +22,15 @@ echarts.use([CustomChart, GridComponent, TooltipComponent, SVGRenderer]);
 export function depths(phases: JobPhaseView[]): number[] {
   const bySeq = new Map(phases.map(p => [p.seq, p]));
   return phases.map(p => {
-    let depth = 0;
+    const visited = new Set([p.seq]);
     let cur = p;
-    while (cur.parent_seq != null) {
+    while (cur.parent_seq != null && !visited.has(cur.parent_seq)) {
       const parent = bySeq.get(cur.parent_seq);
-      if (!parent || parent === cur) { break; }
+      if (!parent) { break; }
+      visited.add(parent.seq);
       cur = parent;
-      depth += 1;
     }
-    return depth;
+    return visited.size - 1;
   });
 }
 
