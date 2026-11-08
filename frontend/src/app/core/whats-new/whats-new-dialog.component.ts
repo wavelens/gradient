@@ -37,10 +37,12 @@ const SWIPE_PX = 50;
       }
       <div grDialogFooter class="footer">
         <div class="dots">
-          @for (p of pages(); track $index) {
-            <button type="button" class="dot" [class.active]="$index === index()"
-                    [attr.aria-current]="$index === index() ? 'step' : null" [attr.aria-label]="'Page ' + ($index + 1)"
-                    (click)="go($index)"></button>
+          @if (pages().length > 1) {
+            @for (p of pages(); track $index) {
+              <button type="button" class="dot" [class.active]="$index === index()"
+                      [attr.aria-current]="$index === index() ? 'step' : null" [attr.aria-label]="'Page ' + ($index + 1)"
+                      (click)="go($index)"></button>
+            }
           }
         </div>
         @if (index() > 0) {

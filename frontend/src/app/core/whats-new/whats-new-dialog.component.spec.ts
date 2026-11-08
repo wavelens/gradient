@@ -21,11 +21,11 @@ const NOTES: ReleaseNotes[] = [
   { version: '2.0', pages: [{ title: 'Caches', html: '<p>Create</p>' }] },
 ];
 
-function setup() {
+function setup(notes = NOTES) {
   const close = vi.fn();
   const open = signal(false);
   TestBed.configureTestingModule({
-    providers: [{ provide: WhatsNewService, useValue: { open, notes: signal(NOTES), close } }],
+    providers: [{ provide: WhatsNewService, useValue: { open, notes: signal(notes), close } }],
   });
   const fixture = TestBed.createComponent(WhatsNewDialogComponent);
   open.set(true);
@@ -69,6 +69,11 @@ describe('WhatsNewDialogComponent', () => {
     expect(panel().querySelector('h3')!.textContent).toBe('Caches');
     click('Back');
     expect(panel().querySelector('h3')!.textContent).toBe('Exec Jobs');
+  });
+
+  it('shows no page dots for a single page', () => {
+    const { panel } = setup([NOTES[1]]);
+    expect(panel().querySelectorAll('.dot')).toHaveLength(0);
   });
 
   it('turns the page on a horizontal swipe', () => {
