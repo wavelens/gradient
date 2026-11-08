@@ -118,8 +118,9 @@ export class CliAuthorizeComponent implements OnInit {
 
   authorize(): void {
     const userCode = this.info()?.user_code;
-    if (!userCode) return;
+    if (!userCode || this.submitting()) return;
     this.submitting.set(true);
+    this.errorMessage.set(null);
     this.api.post('auth/cli/authorize', { user_code: userCode }).subscribe({
       next: () => {
         this.submitting.set(false);
@@ -134,8 +135,9 @@ export class CliAuthorizeComponent implements OnInit {
 
   deny(): void {
     const userCode = this.info()?.user_code;
-    if (!userCode) return;
+    if (!userCode || this.submitting()) return;
     this.submitting.set(true);
+    this.errorMessage.set(null);
     this.api.post('auth/cli/deny', { user_code: userCode }).subscribe({
       next: () => {
         this.submitting.set(false);
