@@ -20,12 +20,12 @@ import { CheckGroupsComponent, type CheckGroup } from '@shared/ui';
 export class ActionEventsComponent {
   selected = input.required<string[]>();
   disabled = input(false);
-  families = input<string[] | undefined>(undefined);
+  eventNamePrefixes = input<readonly string[] | undefined>(undefined);
   selectedChange = output<string[]>();
 
   private readonly catalog = toSignal(inject(EventsService).catalog$, { initialValue: [] });
 
   readonly grouped = computed<CheckGroup[]>(() =>
-    groupCatalog(this.catalog(), this.families()).map(({ group, items }) => ({ label: group, items })),
+    groupCatalog(this.catalog(), this.eventNamePrefixes()).map(({ group, items }) => ({ label: group, items })),
   );
 }

@@ -45,4 +45,16 @@ describe('groupCatalog', () => {
       'Evaluation',
     ]);
   });
+
+  it('keeps a whole-name prefix without matching longer segments', () => {
+    const entries = [
+      { name: 'cache.subscription.approve', durable: true },
+      { name: 'cache.update', durable: true },
+      { name: 'login.success', durable: true },
+      { name: 'taskforce.created', durable: true },
+    ];
+    expect(groupCatalog(entries, ['cache.subscription', 'task'])).toEqual([
+      { group: 'Cache', items: [{ value: 'cache.subscription.approve', label: 'Subscription approve' }] },
+    ]);
+  });
 });

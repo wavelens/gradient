@@ -37,7 +37,7 @@ describe('ActionEventsComponent', () => {
   });
 
   it('limits the groups to the requested families', () => {
-    fixture.componentRef.setInput('families', ['build']);
+    fixture.componentRef.setInput('eventNamePrefixes', ['build']);
     expect(component.grouped().map(g => g.label)).toEqual(['Build']);
   });
 

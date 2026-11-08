@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { finalize } from 'rxjs';
-import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo, eventNameToReadableText } from '@core/models';
+import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo, eventNameToReadableText, eventNamePrefixesByNotificationScope } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
 import { canManageTeam, createMissingPermissionLoadStateError, createNoAccessLoadStateError } from '@shared/access';
@@ -76,6 +76,7 @@ export class WebhooksComponent implements OnInit {
   private auth = inject(AuthService);
 
   scope!: WebhookScopeRef;
+  protected readonly eventNamePrefixesByNotificationScope = eventNamePrefixesByNotificationScope;
   title = '';
   breadcrumb = computed(() => this.trail());
 

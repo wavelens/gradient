@@ -280,12 +280,12 @@
     <gr-form-field label="Events">
       <gr-label-help slot="label" doc="reference/events/#event-families" title="Event families" />
       @if (type() === 'git_host_status_report') {
-        <app-action-events [selected]="displayedEvents()" [disabled]="true" [families]="taskFamilies" />
+        <app-action-events [selected]="displayedEvents()" [disabled]="true" [eventNamePrefixes]="taskFamilies" />
         <small class="text-secondary">Events are fixed for Git host status reports.</small>
       } @else {
         <app-action-events
           [selected]="events()"
-          [families]="taskFamilies"
+          [eventNamePrefixes]="taskFamilies"
           (selectedChange)="events.set($event)"
         />
       }

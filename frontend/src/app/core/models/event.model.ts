@@ -20,7 +20,7 @@ export interface EventGroup {
 function familyLabel(family: string): string {
   return family
     .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => WORD_OVERRIDES[word] ?? word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 }
 
@@ -48,12 +48,13 @@ export function eventNameToReadableText(name: string): string {
   return name.includes('*') ? name : readableWords(name.split('.'));
 }
 
-/** Durable events grouped by their first dotted segment, optionally limited to `families`. */
-export function groupCatalog(entries: CatalogEntry[], families?: string[]): EventGroup[] {
+/** Group durable events by their first dot-separated segment. If `eventNamePrefixes` is present, keep only names equal to the prefix or names that start with the prefix followed by a dot. */
+export function groupCatalog(entries: CatalogEntry[], eventNamePrefixes?: readonly string[]): EventGroup[] {
   const groups = new Map<string, EventGroup>();
   for (const { name, durable } of entries) {
     const [family, ...rest] = name.split('.');
-    if (!durable || (families && !families.includes(family))) continue;
+    const offered = !eventNamePrefixes || eventNamePrefixes.some((prefix) => name === prefix || name.startsWith(`${prefix}.`));
+    if (!durable || !offered) continue;
     const group = familyLabel(family);
     if (!groups.has(group)) groups.set(group, { group, items: [] });
     groups.get(group)!.items.push({ value: name, label: rest.length ? readableWords(rest) : familyLabel(name) });

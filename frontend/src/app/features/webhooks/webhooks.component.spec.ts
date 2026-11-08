@@ -18,7 +18,7 @@ import { TeamsService } from '@core/services/teams.service';
 import { EventsService } from '@core/services/events.service';
 import { NotifyService } from '@core/services/notify.service';
 import { AuthService } from '@core/services/auth.service';
-import type { WebhookResponse } from '@core/models';
+import type { CatalogEntry, WebhookResponse } from '@core/models';
 import { webhooksBase } from '@core/models/webhook.model';
 import { EVERY_CACHE_PERMISSION, EVERY_PERMISSION } from '@core/resolvers/access-route.testing';
 
@@ -39,6 +39,7 @@ function setup(
   data: Record<string, unknown>,
   params: Record<string, string>,
   list: () => Observable<WebhookResponse[]> = () => of([hook]),
+  catalog: CatalogEntry[] = [],
 ) {
   const service = {
     list: vi.fn(list),
@@ -59,7 +60,7 @@ function setup(
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: CachesService, useValue: { getCache: () => of({ display_name: 'Main' }) } },
       { provide: TeamsService, useValue: { get: () => of({ display_name: 'Platform' }) } },
-      { provide: EventsService, useValue: { catalog$: of([]) } },
+      { provide: EventsService, useValue: { catalog$: of(catalog) } },
       {
         provide: ActivatedRoute,
         useValue: {
@@ -133,6 +134,21 @@ describe('WebhooksComponent', () => {
       { kind: 'instance' },
       expect.objectContaining({ events: ['task.star', 'gc.*', 'build.*'] }),
     );
+  });
+
+  it.each([
+    { scope: 'project', groups: ['Build', 'Project', 'Cache'] },
+    { scope: 'cache', groups: ['Cache'] },
+    { scope: 'team', groups: ['Team'] },
+    { scope: 'instance', groups: ['Login', 'Build', 'Project', 'Cache', 'Team', 'GC'] },
+  ])('offers the $scope scope only the event groups it can receive', ({ scope, groups }) => {
+    const catalog = ['login.success', 'build.failed', 'project.update', 'cache.update', 'cache.subscription.approve', 'team.worker.create', 'gc.swept']
+      .map((name) => ({ name, durable: true }));
+    const { fixture, component } = setup({ webhookScope: scope }, { [scope]: 'main' }, () => of([hook]), catalog);
+    component.startCreate();
+    fixture.detectChanges();
+    const legends = Array.from(document.querySelectorAll('.gr-dialog legend')).map((legend) => legend.textContent?.trim());
+    expect(legends).toEqual(groups);
   });
 
   it('names the empty name and URL under their fields and sends nothing', () => {
