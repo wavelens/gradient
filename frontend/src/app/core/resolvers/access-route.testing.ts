@@ -47,7 +47,8 @@ export function projectRouteStub(
   query: Record<string, string> = {},
 ): Partial<ActivatedRoute> {
   const permissions: Permission[] = access.canEdit ? EVERY_PERMISSION : ['viewProject'];
-  const resolved = { id: 'project-uuid', name: project, managed: access.managed, permissions, ...fields } as ProjectResponse;
+  const role = access.canEdit ? 'Admin' : 'View';
+  const resolved = { id: 'project-uuid', name: project, managed: access.managed, permissions, role, ...fields } as ProjectResponse;
   const data = { projectAccess: { project: resolved } };
   return { snapshot: { paramMap: convertToParamMap({ project }), queryParamMap: convertToParamMap(query), data } as never, data: of(data) };
 }

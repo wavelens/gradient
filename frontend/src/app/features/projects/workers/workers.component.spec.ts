@@ -72,6 +72,7 @@ function setup(opts: {
   gradientCi?: boolean;
   memberOf?: string[];
   permissions?: Permission[];
+  role?: string | null;
 }) {
   const workersService = {
     getWorkers: vi.fn(() => of(opts.workers)),
@@ -103,7 +104,14 @@ function setup(opts: {
         },
       },
       { provide: AuthService, useValue: { isAuthenticated: () => true, user: signal({ superuser: false }) } },
-      { provide: ActivatedRoute, useFactory: () => projectRouteStub('demo', opts.access, opts.permissions && { permissions: opts.permissions }) },
+      {
+        provide: ActivatedRoute,
+        useFactory: () =>
+          projectRouteStub('demo', opts.access, {
+            ...(opts.permissions && { permissions: opts.permissions }),
+            ...(opts.role !== undefined && { role: opts.role }),
+          }),
+      },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
       {
@@ -478,6 +486,19 @@ describe('WorkersComponent - load errors', () => {
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     await settled(fixture);
     expect(root.textContent).not.toContain('Failed to load workers');
+  });
+
+  it('shows a visitor outside the project no access and asks the server nothing', async () => {
+    const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [], caches: [], gradientCi: false, role: null });
+    const service = TestBed.inject(WorkersService) as unknown as { getWorkers: ReturnType<typeof vi.fn> };
+    const projects = TestBed.inject(ProjectsService) as unknown as MockedProjects;
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('No access');
+    expect(root.textContent).toContain('Only the members of this project can view this.');
+    expect(root.textContent).not.toContain('Try Again');
+    expect(service.getWorkers).not.toHaveBeenCalled();
+    expect(projects.getSubscribedCaches).not.toHaveBeenCalled();
   });
 });
 

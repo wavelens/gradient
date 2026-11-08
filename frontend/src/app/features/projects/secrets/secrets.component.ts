@@ -27,7 +27,7 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { WritableDirective, createMissingPermissionLoadStateError } from '@shared/access';
+import { WritableDirective, createMissingPermissionLoadStateError, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { relativeTime } from '@shared/text';
@@ -94,7 +94,7 @@ export class SecretsComponent implements OnInit {
   }
 
   loadSopsRecipient(): void {
-    this.secretsService.sopsRecipient(this.projectName).subscribe({
+    requestIfProjectMember(this.resolvedProject(), () => this.secretsService.sopsRecipient(this.projectName)).subscribe({
       next: (recipient) => this.sopsRecipient.set(recipient),
       error: () => this.sopsRecipient.set(null),
     });

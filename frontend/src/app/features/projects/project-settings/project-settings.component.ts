@@ -30,7 +30,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, accessDisabledReason } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, accessDisabledReason, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -170,7 +170,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   loadSSHKey(): void {
     this.sshLoading.set(true);
     this.sshError.set(null);
-    this.projectsService.getSSHKey(this.projectName).subscribe({
+    requestIfProjectMember(this.resolvedProject(), () => this.projectsService.getSSHKey(this.projectName)).subscribe({
       next: (key) => {
         this.sshKey.set(key);
         this.sshLoading.set(false);

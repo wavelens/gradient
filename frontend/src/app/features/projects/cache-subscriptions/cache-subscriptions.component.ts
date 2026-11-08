@@ -30,7 +30,7 @@ import {
   TooltipDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { CreateCacheButtonComponent, CreateCacheDialogComponent, injectCanCreateCache } from '@shared/forms';
 import { accessTo, CacheSubscriptionItem } from '@core/models';
@@ -105,7 +105,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   loadCaches(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    this.projectsService.getSubscribedCaches(this.projectName).subscribe({
+    requestIfProjectMember(this.resolvedProject(), () => this.projectsService.getSubscribedCaches(this.projectName)).subscribe({
       next: (list) => {
         this.caches.set(list);
         this.loading.set(false);

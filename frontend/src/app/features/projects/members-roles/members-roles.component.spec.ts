@@ -36,7 +36,7 @@ const deleteRole = vi.fn();
 const notify = { success: vi.fn(), failure: vi.fn() };
 const confirm = vi.fn();
 
-function setup(access: AccessState, permissions?: Permission[]): ComponentFixture<MembersRolesComponent> {
+function setup(access: AccessState, permissions?: Permission[], role?: string | null): ComponentFixture<MembersRolesComponent> {
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   deleteRole.mockReset().mockReturnValue(of(true));
   revokeInvitation.mockReset().mockReturnValue(of('Invitation revoked'));
@@ -51,7 +51,10 @@ function setup(access: AccessState, permissions?: Permission[]): ComponentFixtur
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useFactory: () => projectRouteStub('acme', access, permissions && { permissions }) },
+      {
+        provide: ActivatedRoute,
+        useFactory: () => projectRouteStub('acme', access, { ...(permissions && { permissions }), ...(role !== undefined && { role }) }),
+      },
       {
         provide: ProjectsService,
         useValue: {
@@ -109,6 +112,16 @@ describe('MembersRolesComponent - access gating', () => {
     expect(addBtn!.disabled).toBe(true);
     expect(newRoleBtn).not.toBeNull();
     expect(newRoleBtn!.disabled).toBe(true);
+  });
+
+  it('lists the members to a visitor outside the project but shows the roles as no access', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, undefined, null);
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(getMembers).toHaveBeenCalled();
+    expect(root.textContent).toContain('No access');
+    expect(root.textContent).toContain('Only the members of this project can view this.');
+    expect(root.textContent).not.toContain('Failed to load roles');
   });
 });
 

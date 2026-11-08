@@ -57,7 +57,7 @@ import {
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, canOpenTeam } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, canOpenTeam, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { fieldChecks } from '@shared/forms';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
@@ -227,7 +227,7 @@ export class WorkersComponent implements OnInit {
   loadWorkers(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    this.workersService.getWorkers(this.projectName).subscribe({
+    requestIfProjectMember(this.resolvedProject(), () => this.workersService.getWorkers(this.projectName)).subscribe({
       next: (workers) => {
         this.workers.set(workers);
         this.loading.set(false);
@@ -240,7 +240,7 @@ export class WorkersComponent implements OnInit {
   }
 
   private loadCacheSubscriptions(): void {
-    this.projectsService.getSubscribedCaches(this.projectName).subscribe({
+    requestIfProjectMember(this.resolvedProject(), () => this.projectsService.getSubscribedCaches(this.projectName)).subscribe({
       next: (caches) => this.hasNoCacheSubscribed.set(caches.length === 0),
       error: () => this.hasNoCacheSubscribed.set(false),
     });

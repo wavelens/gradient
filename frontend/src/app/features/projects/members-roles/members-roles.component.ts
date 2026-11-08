@@ -30,7 +30,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
-import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import {
   accessTo,
@@ -178,7 +178,7 @@ export class MembersRolesComponent implements OnInit {
   loadRoles(): void {
     this.rolesLoading.set(true);
     this.rolesLoadError.set(null);
-    this.projectsService.getRoles(this.projectName).subscribe({
+    requestIfProjectMember(this.resolvedProject(), () => this.projectsService.getRoles(this.projectName)).subscribe({
       next: (response) => {
         this.roles.set(response.roles);
         this.availablePermissions.set(response.available_permissions);

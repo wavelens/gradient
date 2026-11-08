@@ -9,3 +9,4 @@ export * from './writable.directive';
 export * from './managed-disable.directive';
 export * from './team-access';
 export * from './missing-permission';
+export * from './project-membership';
