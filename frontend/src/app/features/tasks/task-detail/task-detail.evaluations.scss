@@ -83,6 +83,20 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   &::-webkit-scrollbar { display: none; }
 }
 
+.strip-row { position: relative; }
+
+.strip-arrow {
+  position: absolute;
+  top: 50%;
+  z-index: 6;
+  transform: translateY(-50%);
+
+  &--start { left: -sm; }
+  &--end { right: -sm; }
+
+  @media (hover: none) { display: none; }
+}
+
 .eval-strip { display: flex; gap: $spacing-sm; align-items: flex-start; }
 .strip-more { flex: none; width: 1px; align-self: stretch; }
 

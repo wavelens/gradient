@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, OnDestroy, ElementRef, HostListener, Injector, afterNextRender, computed, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ElementRef, HostListener, Injector, afterNextRender, afterRenderEffect, computed, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -44,7 +44,7 @@ import { groupEntryPoints } from './entry-point-groups';
 import { firstLine } from '@features/evaluations/evaluation-summary/summary-text';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { links } from '@shared/routing';
-import { CurrentTimeSignal, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { CurrentTimeSignal, formatDuration, monthDayClockTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import {
   StarTarget,
   TaskDetailsResponse,
@@ -536,6 +536,28 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       card?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
     });
   }
+
+  private evaluationTabsScrollElement = viewChild<ElementRef<HTMLElement>>('evaluationTabsScrollElement');
+  isEvaluationTabStripScrolledAwayFromStart = signal(false);
+  hasHiddenOlderEvaluationTabs = signal(false);
+  private readonly evaluationTabScrollArrowsAfterRenderEffect = afterRenderEffect(() => {
+    this.evaluations();
+    this.updateEvaluationTabScrollArrows();
+  });
+
+  @HostListener('window:resize')
+  updateEvaluationTabScrollArrows(): void {
+    const strip = this.evaluationTabsScrollElement()?.nativeElement;
+    this.isEvaluationTabStripScrolledAwayFromStart.set(!!strip && strip.scrollLeft > 1);
+    this.hasHiddenOlderEvaluationTabs.set(!!strip && strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1);
+  }
+
+  scrollEvaluationTabStripByDirection(direction: -1 | 1): void {
+    const strip = this.evaluationTabsScrollElement()?.nativeElement;
+    strip?.scrollBy({ left: direction * strip.clientWidth * 0.8, behavior: 'smooth' });
+  }
+
+  readonly monthDayClockTime = monthDayClockTime;
 
   isRunning(status: EvaluationStatus): boolean { return isRunningEvaluationStatus(status); }
   protected readonly links = links;

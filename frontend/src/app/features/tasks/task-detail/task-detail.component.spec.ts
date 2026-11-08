@@ -23,6 +23,7 @@ import { ApiError } from '@core/services/api.service';
 import { AccessState } from '@core/models/access.model';
 import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
+import { monthDayClockTime } from '@shared/text';
 
 function zeroCounts(): BuildStatusCounts {
   return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0 };
@@ -1222,6 +1223,23 @@ describe('TaskDetailComponent - #636 eval page', () => {
     expect(pressed({})).toBe(true);
     expect(comp.selected()?.id).toBe('e2');
     raf.mockRestore();
+  });
+
+  it('dates each evaluation tab and scrolls the strip from its arrow buttons', () => {
+    const { fixture } = setup(access, { extraEvals: [evalSummary('e2', 'Completed')] });
+    const root = fixture.nativeElement as HTMLElement;
+    const times = Array.from(root.querySelectorAll('.eval-card time'));
+    expect(times.map((time) => time.textContent)).toEqual([monthDayClockTime('2026-01-01T00:00:00'), monthDayClockTime('2026-01-01T00:00:00')]);
+
+    const strip = root.querySelector<HTMLElement>('.strip-wrap')!;
+    const scrollBy = vi.fn();
+    Object.assign(strip, { scrollBy });
+    Object.defineProperties(strip, { clientWidth: { value: 500 }, scrollWidth: { value: 1200 } });
+    window.dispatchEvent(new Event('resize'));
+    fixture.detectChanges();
+    expect(root.querySelector('.strip-arrow--start')).toBeNull();
+    root.querySelector<HTMLButtonElement>('.strip-arrow--end')!.click();
+    expect(scrollBy).toHaveBeenCalledWith({ left: 400, behavior: 'smooth' });
   });
 
   it('offers the evaluations as keyboard tabs and moves focus with the arrows', () => {

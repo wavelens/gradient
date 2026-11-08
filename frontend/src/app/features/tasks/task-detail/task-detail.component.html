@@ -62,26 +62,38 @@
   </div>
 
   @if (evaluations().length > 0) {
-    <div class="strip-wrap pad gr-scroll-fade-row">
-      <div class="eval-strip" role="tablist" aria-label="Evaluation">
-        @for (e of evaluations(); track e.id) {
-          @let isSelected = selected()?.id === e.id;
-          <button type="button" role="tab" class="eval-card" [id]="'evaluation-tab-' + e.id"
-                  [attr.aria-selected]="isSelected" aria-controls="evaluation-detail-panel" [tabindex]="isSelected ? 0 : -1"
-                  [attr.data-phase]="evaluationPhase(e.status)" [class.selected]="isSelected" (click)="select(e)"
-                  (contextmenu)="select(e); evalMenu.openAt($event)">
-            <span class="l1">
-              <gr-status-icon class="phase-swatch" [phase]="evaluationPhase(e.status)" [prioritized]="e.prioritized" size="sm" />
-              <span class="ev-title" [class.mono]="!e.commit_message">{{ evalTitle(e) }}</span>
-            </span>
-            <span class="l2"><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span></span>
-          </button>
-        }
-        @if (hasOlderEvaluations()) {
-          <div class="strip-more" aria-hidden="true" (grInView)="loadOlderEvaluations()" [grInViewKey]="evaluations().length"></div>
-        }
+    <div class="strip-row">
+      @if (isEvaluationTabStripScrolledAwayFromStart()) {
+        <button grButton class="strip-arrow strip-arrow--start" icon="chevron_left" severity="secondary" size="small" tabindex="-1"
+                aria-label="Show new evaluations" (click)="scrollEvaluationTabStripByDirection(-1)"></button>
+      }
+      <div class="strip-wrap pad gr-scroll-fade-row" #evaluationTabsScrollElement (scroll)="updateEvaluationTabScrollArrows()">
+        <div class="eval-strip" role="tablist" aria-label="Evaluation">
+          @for (e of evaluations(); track e.id) {
+            @let isSelected = selected()?.id === e.id;
+            <button type="button" role="tab" class="eval-card" [id]="'evaluation-tab-' + e.id"
+                    [attr.aria-selected]="isSelected" aria-controls="evaluation-detail-panel" [tabindex]="isSelected ? 0 : -1"
+                    [attr.data-phase]="evaluationPhase(e.status)" [class.selected]="isSelected" (click)="select(e)"
+                    (contextmenu)="select(e); evalMenu.openAt($event)">
+              <span class="l1">
+                <gr-status-icon class="phase-swatch" [phase]="evaluationPhase(e.status)" [prioritized]="e.prioritized" size="sm" />
+                <span class="ev-title" [class.mono]="!e.commit_message">{{ evalTitle(e) }}</span>
+              </span>
+              <span class="l2">
+                <time [attr.datetime]="e.created_at">{{ monthDayClockTime(e.created_at) }}</time><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span>
+              </span>
+            </button>
+          }
+          @if (hasOlderEvaluations()) {
+            <div class="strip-more" aria-hidden="true" (grInView)="loadOlderEvaluations()" [grInViewKey]="evaluations().length"></div>
+          }
+        </div>
+        <gr-menu #evalMenu [model]="evalMenuModel()" />
       </div>
-      <gr-menu #evalMenu [model]="evalMenuModel()" />
+      @if (hasHiddenOlderEvaluationTabs()) {
+        <button grButton class="strip-arrow strip-arrow--end" icon="chevron_right" severity="secondary" size="small" tabindex="-1"
+                aria-label="Show older evaluations" (click)="scrollEvaluationTabStripByDirection(1)"></button>
+      }
     </div>
 
     <div class="panel pad" id="evaluation-detail-panel" role="tabpanel" [attr.aria-labelledby]="'evaluation-tab-' + selected()?.id">
