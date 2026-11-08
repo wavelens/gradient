@@ -93,6 +93,8 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   access = computed(() => accessTo(this.resolvedProject(), 'manageProjectSettings'));
   sshKeyAccess = computed(() => accessTo(this.resolvedProject(), 'manageProjectSettings', 'manageSshKey'));
   deleteAccess = computed(() => accessTo(this.resolvedProject(), 'deleteProject'));
+  manageIntegrationsAccess = computed(() => accessTo(this.resolvedProject(), 'manageIntegrations'));
+  webhooksAccess = computed(() => accessTo(this.resolvedProject(), 'manageWebhooks'));
 
   loading = signal(true);
   loadError = signal<unknown>(null);

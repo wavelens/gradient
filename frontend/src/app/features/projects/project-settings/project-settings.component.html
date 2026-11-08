@@ -105,20 +105,24 @@
         Cache Subscriptions
         <span slot="meta">Nix binary caches this project pushes builds to</span>
       </gr-row>
-      <gr-row icon="account_tree" linkLabel="Integrations" [link]="links.projectPage(projectName, 'integrations')">
-        Integrations
-        <span slot="meta">Inbound Git host webhooks and outbound status reporters</span>
-      </gr-row>
-      @if (config.execEnabled) {
+      @if (manageIntegrationsAccess().canEdit) {
+        <gr-row icon="account_tree" linkLabel="Integrations" [link]="links.projectPage(projectName, 'integrations')">
+          Integrations
+          <span slot="meta">Inbound Git host webhooks and outbound status reporters</span>
+        </gr-row>
+      }
+      @if (config.execEnabled && access().canEdit) {
         <gr-row icon="key" linkLabel="Secrets" [link]="links.projectPage(projectName, 'secrets')">
           Secrets
           <span slot="meta">Values for exec jobs, set here and never shown again</span>
         </gr-row>
       }
-      <gr-row icon="webhook" linkLabel="Event notifications" [link]="links.projectPage(projectName, 'webhooks')">
-        Event notifications
-        <span slot="meta">Signed HTTP requests for this project's events</span>
-      </gr-row>
+      @if (webhooksAccess().canEdit) {
+        <gr-row icon="webhook" linkLabel="Event notifications" [link]="links.projectPage(projectName, 'webhooks')">
+          Event notifications
+          <span slot="meta">Signed HTTP requests for this project's events</span>
+        </gr-row>
+      }
     </gr-row-list>
   </gr-settings-section>
 

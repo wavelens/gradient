@@ -39,7 +39,7 @@ import {
 } from '@gradient/ui/ui';
 import { EvalStatusBadgeComponent, inputFetchRows, SegmentedBarComponent, StarButtonComponent, StatusIconComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
 import { saveResponse } from '@shared/download';
-import { AccessService, WritableDirective } from '@shared/access';
+import { AccessService, WritableDirective, canOpenTaskSettings } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { groupEntryPoints } from './entry-point-groups';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
@@ -100,9 +100,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   );
 
   private resolved = injectTaskAccessData();
-  canOpenSettings = computed(() =>
-    (['editTask', 'manageTriggers', 'manageActions'] as const).some((p) => this.resolved()?.task.permissions.includes(p)),
-  );
+  canOpenSettings = computed(() => canOpenTaskSettings(this.resolved()?.task));
   canIncludeInstance = computed(() => this.resolved()?.task.permissions.includes('manageWorkers') ?? false);
   task = signal<TaskDetailsResponse | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);

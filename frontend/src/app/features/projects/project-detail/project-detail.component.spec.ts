@@ -58,10 +58,10 @@ describe('ProjectDetailComponent header', () => {
     expect(render(false).root.querySelector('gr-star-button')).toBeNull();
   });
 
-  it('offers a viewer Settings but no Connect repository', () => {
+  it('offers a viewer neither Settings nor Connect repository, like the task header', () => {
     const { root } = render(true, undefined, { role: 'View', permissions: ['viewProject'] });
     const labels = Array.from(root.querySelectorAll('[slot="actions"] [grButton]')).map((el) => el.querySelector('.gr-button__label')?.textContent?.trim());
-    expect(labels).toContain('Settings');
+    expect(labels).not.toContain('Settings');
     expect(labels).not.toContain('Connect repository');
     expect(root.textContent).toContain('Ask a project administrator to connect a repository.');
   });

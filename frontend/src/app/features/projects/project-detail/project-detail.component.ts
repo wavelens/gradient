@@ -23,6 +23,7 @@ import { EvalStatusBadgeComponent, StarButtonComponent } from '@shared/ui';
 import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { links } from '@shared/routing';
+import { canOpenProjectSettings } from '@shared/access';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 
 @Component({
@@ -53,6 +54,7 @@ export class ProjectDetailComponent implements OnInit {
 
   project = signal<ProjectResponse>((this.route.snapshot.data['projectAccess'] as ProjectAccessData).project);
   canCreateTask = computed(() => this.project().permissions.includes('createTask'));
+  canOpenSettings = computed(() => canOpenProjectSettings(this.project()));
   tasks = pagedList<TaskResponse>('tasks', (page, options) => this.tasksService.getTasks(this.projectName, page, 50, options));
   starred = signal(false);
 

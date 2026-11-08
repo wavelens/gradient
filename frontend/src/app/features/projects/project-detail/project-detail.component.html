@@ -10,7 +10,7 @@
     @if (canCreateTask()) {
       <a grButton label="Connect repository" icon="add" [routerLink]="links.projectPage(projectName, 'connect')"></a>
     }
-    @if (project.role) {
+    @if (canOpenSettings()) {
       <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
     }
     @if (authService.isAuthenticated()) {

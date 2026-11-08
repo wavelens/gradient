@@ -6,6 +6,7 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { taskAccessData } from '@core/resolvers/access-route.testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, NEVER, Observable, of, throwError } from 'rxjs';
@@ -54,7 +55,7 @@ function activatedRouteStub(c: AccessCase): ActivatedRoute {
   return {
     snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }) },
     data: of({}),
-    parent: { data: of({ taskAccess: { task: taskFor(c), access: asAccess(c) } }) },
+    parent: { data: of(taskAccessData(asAccess(c), taskFor(c))) },
   } as unknown as ActivatedRoute;
 }
 

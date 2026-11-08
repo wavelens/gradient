@@ -203,6 +203,15 @@ describe('ProjectSettingsComponent - permissions', () => {
     expect(findByText(fixture.nativeElement, 'regenerate key')).not.toBeNull();
     expect(findByText(fixture.nativeElement, 'delete project')).toBeNull();
   });
+
+  it('links only to the settings pages the role can open', async () => {
+    const fixture = setup(writable, ['viewProject', 'manageMembers', 'manageWebhooks']);
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Members & Roles');
+    expect(text).toContain('Event notifications');
+    expect(text).not.toContain('Integrations');
+  });
 });
 
 describe('ProjectSettingsComponent - SSH key load errors', () => {
