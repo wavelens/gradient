@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, input, signal } fro
 import { BadgeComponent, ButtonComponent, LoadStateComponent } from '@gradient/ui/ui';
 import { DeliveryResult, IncomingWebhookDeliveryResponse } from '@core/models';
 import { IntegrationsService } from '@core/services/integrations.service';
-import { relativeTime } from '@shared/text';
+import { RelativeTimePipe } from '@shared/text';
 
 type Severity = 'success' | 'info' | 'warning' | 'danger';
 
@@ -40,7 +40,7 @@ export function deliverySummary(delivery: IncomingWebhookDeliveryResponse): stri
 @Component({
   selector: 'app-incoming-deliveries',
   standalone: true,
-  imports: [BadgeComponent, ButtonComponent, LoadStateComponent],
+  imports: [BadgeComponent, ButtonComponent, LoadStateComponent, RelativeTimePipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="deliveries-head">
@@ -57,7 +57,7 @@ export function deliverySummary(delivery: IncomingWebhookDeliveryResponse): stri
           <li>
             <gr-badge [severity]="severity(delivery.result)">{{ delivery.event || 'unknown' }}</gr-badge>
             <span class="summary">{{ summary(delivery) }}</span>
-            <span class="text-secondary when">{{ since(delivery.created_at) }}</span>
+            <span class="text-secondary when">{{ delivery.created_at | relativeTime }}</span>
           </li>
         }
       </ul>
@@ -110,9 +110,5 @@ export class IncomingDeliveriesComponent implements OnInit {
 
   summary(delivery: IncomingWebhookDeliveryResponse): string {
     return deliverySummary(delivery);
-  }
-
-  since(at: string): string {
-    return relativeTime(at);
   }
 }

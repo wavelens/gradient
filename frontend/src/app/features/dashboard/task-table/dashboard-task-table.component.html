@@ -36,7 +36,7 @@
             <span class="name" [title]="t.project + ' / ' + t.task"><span class="project">{{ t.project }} /</span> {{ t.task }}</span>
             <span slot="meta" class="meta">
               @if (t.latest; as l) {
-                <code>{{ l.commit.slice(0, 7) }}</code> · {{ age(l.created_at) }}
+                <code>{{ l.commit.slice(0, 7) }}</code> · {{ l.created_at | relativeTime }}
                 @if (l.status === 'Waiting') {
                   · {{ newestEvaluationWaitingReasonTitle(t.project, l) }}
                 }

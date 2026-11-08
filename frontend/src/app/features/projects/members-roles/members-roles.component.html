@@ -76,7 +76,7 @@
             <span class="mono">{{ invitation.user }}</span>
             <span slot="meta">
               Role {{ invitation.role }} ·
-              Expires {{ invitation.expires_at | serverDate: 'medium' }}
+              Expires {{ invitation.expires_at | serverDate }}
             </span>
             <button
               slot="actions"

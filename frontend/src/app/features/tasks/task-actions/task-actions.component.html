@@ -51,7 +51,7 @@
                     <gr-badge [severity]="action.active ? 'success' : 'warning'">
                       {{ action.active ? 'Active' : 'Inactive' }}
                     </gr-badge>
-                    <span>Last fired: {{ relativeTime(action.last_fired_at) }}</span>
+                    <span>Last fired: {{ action.last_fired_at | relativeTime }}</span>
                     @if (testSuccessId() === action.id) {
                       <span class="fire-success">
                         <gr-icon name="check_circle" size="sm" />

@@ -74,8 +74,8 @@ describe('BoardStorageComponent', () => {
     };
 
     expect(labelAs('minute')).toEqual(['15:04']);
-    expect(labelAs('hour')).toEqual(['09-29 15:04']);
-    expect(labelAs('day')).toEqual(['09-29']);
+    expect(labelAs('hour')).toEqual(['Sep 29 15:04']);
+    expect(labelAs('day')).toEqual(['Sep 29']);
     vi.unstubAllEnvs();
   });
 

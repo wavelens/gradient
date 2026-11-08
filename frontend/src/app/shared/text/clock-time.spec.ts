@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { clockTime, monthDay } from './clock-time';
+import { clockTime, dateTimeText, monthDay } from './clock-time';
 
 describe('clock time of a server timestamp', () => {
   beforeEach(() => vi.stubEnv('TZ', 'Asia/Tokyo'));
@@ -21,6 +21,10 @@ describe('clock time of a server timestamp', () => {
   });
 
   it('moves the date along with the clock', () => {
-    expect(monthDay('2026-09-29T15:04:00Z')).toBe('09-30');
+    expect(monthDay('2026-09-29T15:04:00Z')).toBe('Sep 30');
+  });
+
+  it('writes a full timestamp as month, day, year and clock time', () => {
+    expect(dateTimeText('2026-12-31 15:04:00')).toBe('Jan 1, 2027, 00:04');
   });
 });

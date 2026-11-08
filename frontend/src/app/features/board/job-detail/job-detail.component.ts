@@ -129,7 +129,7 @@ interface RuleRow {
               }
               @if (j.exec_attempt; as a) {
                 <tr><td class="label">Attempt</td><td class="mono">{{ a.number }}</td></tr>
-                <tr><td class="label">Ended</td><td class="mono">{{ a.ended_at ? (a.ended_at | serverDate: 'medium') : '-' }}</td></tr>
+                <tr><td class="label">Ended</td><td class="mono">{{ a.ended_at ? (a.ended_at | serverDate) : '-' }}</td></tr>
                 @if (a.end_reason) {
                   <tr><td class="label">End reason</td><td class="mono" [title]="a.message ?? ''">{{ a.end_reason }}</td></tr>
                 }
@@ -140,14 +140,14 @@ interface RuleRow {
       }
 
       <section class="timeline">
-        <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | serverDate: 'medium' }}</span></div>
-        <div class="step"><span class="label">Ready</span><span>{{ j.ready_at ? (j.ready_at | serverDate: 'medium') : '-' }}</span></div>
+        <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | serverDate }}</span></div>
+        <div class="step"><span class="label">Ready</span><span>{{ j.ready_at ? (j.ready_at | serverDate) : '-' }}</span></div>
         <div class="step"><span class="label">Wait</span><span class="hl">{{ waitLabel() }}</span></div>
-        <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Assigned' }}</span><span>{{ j.dispatched_at | serverDate: 'medium' }}</span></div>
+        <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Assigned' }}</span><span>{{ j.dispatched_at | serverDate }}</span></div>
         @if (j.exec_attempt; as a) {
-          <div class="step"><span class="label">Started</span><span>{{ a.started_at | serverDate: 'medium' }}</span></div>
+          <div class="step"><span class="label">Started</span><span>{{ a.started_at | serverDate }}</span></div>
         }
-        <div class="step"><span class="label">Finished</span><span>{{ j.finished_at ? (j.finished_at | serverDate: 'medium') : '-' }}</span></div>
+        <div class="step"><span class="label">Finished</span><span>{{ j.finished_at ? (j.finished_at | serverDate) : '-' }}</span></div>
         @if (j.worker_tail_ms !== null) {
           <div class="step"><span class="label">Worker tail</span><span>{{ formatDuration(j.worker_tail_ms) }}</span></div>
         }
@@ -196,7 +196,7 @@ interface RuleRow {
                   <td>{{ a.substitute ? 'substitute' : 'build' }}</td>
                   <td class="mono">{{ attemptOutcome(a.outcome) }}</td>
                   <td class="mono reason" [title]="a.failure_message ?? ''">{{ a.failure_message ?? '-' }}</td>
-                  <td>{{ a.created_at | serverDate: 'medium' }}</td>
+                  <td>{{ a.created_at | serverDate }}</td>
                   <td>{{ opens ? '\u203a' : '' }}</td>
                 </tr>
               }
@@ -386,7 +386,7 @@ interface RuleRow {
         }
       </section>
       <section class="timeline">
-        <div class="step"><span class="label">Queued</span><span>{{ p.queued_at | serverDate: 'medium' }}</span></div>
+        <div class="step"><span class="label">Queued</span><span>{{ p.queued_at | serverDate }}</span></div>
         @if (p.dependency_count > 0) {
           <div class="step"><span class="label">Dependencies</span><span class="hl">{{ p.dependency_count }}</span></div>
         }
@@ -414,8 +414,8 @@ interface RuleRow {
           <div><span class="label">Architecture</span><span class="mono">{{ b.architecture }}</span></div>
           <div><span class="label">Worker</span><span class="mono">{{ buildWorker() }}</span></div>
           <div class="span2"><span class="label">Derivation</span><span class="mono">{{ b.derivation_path }}</span></div>
-          <div><span class="label">Created</span><span>{{ b.created_at | serverDate: 'medium' }}</span></div>
-          <div><span class="label">Updated</span><span>{{ b.updated_at | serverDate: 'medium' }}</span></div>
+          <div><span class="label">Created</span><span>{{ b.created_at | serverDate }}</span></div>
+          <div><span class="label">Updated</span><span>{{ b.updated_at | serverDate }}</span></div>
           @if (outputs(b).length) {
             <div class="span2">
               <span class="label">Outputs</span>

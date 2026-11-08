@@ -19,7 +19,7 @@ import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel }
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 import { links } from '@shared/routing';
 import { type WaitingExplanation, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
-import { relativeTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 
 type KindFilter = 'all' | JobKindName;
 type ScoreScope = 'current' | 'all';
@@ -37,7 +37,7 @@ interface DecisionRow {
 @Component({
   selector: 'app-board-live-jobs',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, LoadStateComponent, LiveStatusComponent],
+  imports: [RelativeTimePipe, CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, LoadStateComponent, LiveStatusComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
@@ -101,7 +101,7 @@ interface DecisionRow {
                   @if (superuser()) {
                     <td>{{ j.score | number: '1.1-1' }}</td>
                   }
-                  <td>{{ j.dispatched_at | serverDate: 'HH:mm:ss' }}</td>
+                  <td>{{ j.dispatched_at | serverDate }}</td>
                   <td>›</td>
                 </tr>
               } @empty {
@@ -124,7 +124,7 @@ interface DecisionRow {
                     <a [routerLink]="links.boardJob(r.id)" (click)="$event.stopPropagation()">{{ r.subject }}</a>
                   </td>
                   <td>{{ r.score | number: '1.1-1' }}</td>
-                  <td>{{ r.at | serverDate: 'HH:mm:ss' }}</td>
+                  <td>{{ r.at | serverDate }}</td>
                   <td>›</td>
                 </tr>
               } @empty {
@@ -175,7 +175,7 @@ interface DecisionRow {
                     <span class="muted">Waiting</span>
                   }
                 </td>
-                <td class="age" [title]="p.queued_at | serverDate: 'medium'">{{ relativeTime(p.queued_at) }}</td>
+                <td class="age" [title]="p.queued_at | serverDate">{{ p.queued_at | relativeTime }}</td>
               </tr>
             } @empty {
               <tr><td colspan="5" class="muted">No pending jobs.</td></tr>
@@ -201,7 +201,6 @@ export class BoardLiveJobsComponent implements OnInit {
   protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
   protected readonly jobSubjectLabel = jobSubjectLabel;
   protected readonly collapseClusters = collapseClusters;
-  protected readonly relativeTime = relativeTime;
 
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);

@@ -12,7 +12,7 @@ import { BoardService } from '@core/services/board.service';
 import { LoadStateComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { oneOf, queryParamSignal } from '@shared/routing';
-import { clockTime, monthDay, formatCount, formatDuration } from '@shared/text';
+import { clockTime, monthDay, monthDayClockTime, formatCount, formatDuration } from '@shared/text';
 import { alignSeries, windowBuckets } from './storage-chart';
 import { BoardStorage } from '@core/models';
 
@@ -109,7 +109,7 @@ export class BoardStorageComponent implements OnInit {
     const granularity = this.stats()?.granularity;
     const format = (at: number) => {
       if (granularity === 'day') return monthDay(at);
-      if (granularity === 'hour') return `${monthDay(at)} ${clockTime(at)}`;
+      if (granularity === 'hour') return monthDayClockTime(at);
       return clockTime(at);
     };
 

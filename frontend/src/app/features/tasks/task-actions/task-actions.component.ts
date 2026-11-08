@@ -38,7 +38,7 @@ import {
 } from '@core/models';
 import { ActionFormComponent } from './action-form.component';
 import { ActionDeliveriesComponent } from './action-deliveries.component';
-import { relativeTime } from '@shared/text';
+import { RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 
 interface IntegrationOption {
@@ -50,6 +50,7 @@ interface IntegrationOption {
   selector: 'app-task-actions',
   standalone: true,
   imports: [
+    RelativeTimePipe,
     CopyFieldComponent,
     CommonModule,
     RouterModule,
@@ -291,6 +292,5 @@ export class TaskActionsComponent implements OnInit {
     }
   }
 
-  relativeTime = relativeTime;
   eventNameToReadableText = eventNameToReadableText;
 }

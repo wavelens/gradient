@@ -26,7 +26,7 @@ import { ConfigService } from '@core/services/config.service';
 import { AuthService } from '@core/services/auth.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { IncomingDeliveriesComponent, SELF_HOSTED_GIT_HOSTS, deliverySummary, gitHostSettingsLinks, guessGitHost, repositoryHost, webhookEvents } from '@shared/git';
-import { relativeTime, slugify } from '@shared/text';
+import { CurrentTimeSignal, relativeTime, slugify } from '@shared/text';
 import { fieldChecks, splitList, unsavedChanges } from '@shared/forms';
 import { provisioningIntegration } from './provisioning';
 import { accessDisabledReason } from '@shared/access';
@@ -97,6 +97,7 @@ export class RepositoryEventsComponent {
   private notify = inject(NotifyService);
   private config = inject(ConfigService);
   private auth = inject(AuthService);
+  private clock = inject(CurrentTimeSignal);
 
   project = input.required<string>();
   task = input.required<string>();
@@ -134,13 +135,13 @@ export class RepositoryEventsComponent {
   events = computed(() => webhookEvents(this.selectedInbound()?.git_host_type ?? 'forgejo'));
   lastEvent = computed(() => {
     const event = this.state().last_event;
-    return event ? `${deliverySummary(event)} · ${relativeTime(event.created_at)}` : null;
+    return event ? `${deliverySummary(event)} · ${relativeTime(event.created_at, this.clock.currentTimeMilliseconds())}` : null;
   });
   lastReport = computed(() => {
     const report = this.state().report_status?.last_delivery;
     if (!report) return null;
     const outcome = report.success ? `HTTP ${report.response_status ?? 200}` : (report.error_message ?? `HTTP ${report.response_status}`);
-    return `${outcome} · ${relativeTime(report.delivered_at)}`;
+    return `${outcome} · ${relativeTime(report.delivered_at, this.clock.currentTimeMilliseconds())}`;
   });
   formError = computed(() => {
     const f = this.form();

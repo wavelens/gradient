@@ -49,7 +49,7 @@
       @for (invitation of invitations(); track invitation.user) {
         <gr-row icon="mail">
           {{ invitation.user }}
-          <span slot="meta">Role {{ invitation.role }} · Expires {{ invitation.expires_at | serverDate: 'medium' }}</span>
+          <span slot="meta">Role {{ invitation.role }} · Expires {{ invitation.expires_at | serverDate }}</span>
           <div slot="actions">
             <button grButton label="Revoke" icon="close" severity="danger"
               (click)="revokeInvitation(invitation.user)"></button>

@@ -11,8 +11,8 @@
       <gr-stat-card compact label="Total NARs" [value]="s && formatCount(s.total_nars)" />
       <gr-stat-card compact label="NAR size" [value]="s && formatBytes(s.total_nar_size)" />
       <gr-stat-card compact label="File size" [value]="s && formatBytes(s.total_file_size)" />
-      <gr-stat-card compact label="Last uploaded" [value]="s && relativeTime(s.last_uploaded_at)" />
-      <gr-stat-card compact label="Oldest fetched" [value]="s && relativeTime(s.oldest_fetched_at)" />
+      <gr-stat-card compact label="Last uploaded" [value]="s && (s.last_uploaded_at | relativeTime)" />
+      <gr-stat-card compact label="Oldest fetched" [value]="s && (s.oldest_fetched_at | relativeTime)" />
     </gr-card-grid>
   }
 
@@ -91,8 +91,8 @@
             <td>{{ row.package }}</td>
             <td class="size-col">{{ formatBytes(row.nar_size) }}</td>
             <td class="size-col">{{ formatBytes(row.file_size) }}</td>
-            <td class="text-secondary">{{ relativeTime(row.created_at) }}</td>
-            <td class="text-secondary">{{ relativeTime(row.last_fetched_at) }}</td>
+            <td class="text-secondary">{{ row.created_at | relativeTime }}</td>
+            <td class="text-secondary">{{ row.last_fetched_at | relativeTime }}</td>
             <td class="nar-actions" (click)="$event.stopPropagation()">
               <button grButton icon="info" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
               <button

@@ -66,7 +66,7 @@ import { links } from '@shared/routing';
         <thead><tr><th>Connected</th><th>Disconnected</th></tr></thead>
         <tbody>
           @for (c of connections(); track $index) {
-            <tr><td>{{ c.connected_at | serverDate: 'short' }}</td><td>{{ c.disconnected_at ? (c.disconnected_at | serverDate: 'short') : 'connected' }}</td></tr>
+            <tr><td>{{ c.connected_at | serverDate }}</td><td>{{ c.disconnected_at ? (c.disconnected_at | serverDate) : 'connected' }}</td></tr>
           } @empty {
             <tr><td colspan="2" class="muted">No sessions recorded.</td></tr>
           }

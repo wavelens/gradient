@@ -26,8 +26,8 @@
           }
           <span slot="meta">
             IP: {{ s.ip || 'unknown' }} ·
-            Last used {{ s.last_used_at | serverDate: 'medium' }} ·
-            Expires {{ s.expires_at | serverDate: 'medium' }}
+            Last used {{ s.last_used_at | serverDate }} ·
+            Expires {{ s.expires_at | serverDate }}
           </span>
           <button
             slot="actions"

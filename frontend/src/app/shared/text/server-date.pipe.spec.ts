@@ -4,20 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { formatDate } from '@angular/common';
-import { TestBed } from '@angular/core/testing';
 import { ServerTimestampToLocalDateTimePipe } from './server-date.pipe';
 
 describe('ServerTimestampToLocalDateTimePipe', () => {
-  const pipe = () => TestBed.runInInjectionContext(() => new ServerTimestampToLocalDateTimePipe());
+  const pipe = new ServerTimestampToLocalDateTimePipe();
 
-  it('Read API Timestamps Without Zone as UTC', () => {
-    const utc = new Date(Date.UTC(2026, 8, 1, 11, 0, 0));
-    expect(pipe().transform('2026-09-01 11:00:00', 'medium')).toBe(formatDate(utc, 'medium', 'en-US'));
-    expect(pipe().transform('2026-09-01T11:00:00Z', 'medium')).toBe(formatDate(utc, 'medium', 'en-US'));
+  beforeEach(() => vi.stubEnv('TZ', 'Asia/Tokyo'));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('shows one format in local time with a 24 hour clock', () => {
+    expect(pipe.transform('2026-09-01 15:04:00')).toBe('Sep 2, 2026, 00:04');
+    expect(pipe.transform('2026-09-01T15:04:00Z')).toBe('Sep 2, 2026, 00:04');
   });
 
   it('renders nothing without a timestamp', () => {
-    expect(pipe().transform(null)).toBe('');
+    expect(pipe.transform(null)).toBe('');
   });
 });

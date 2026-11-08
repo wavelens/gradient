@@ -43,7 +43,7 @@ import {
   TrafficKind,
 } from '@core/models';
 import { docsUrl } from '@core/docs';
-import { formatBytes, formatCount, subscriptionModeLabel } from '@shared/text';
+import { clockTime, formatBytes, formatCount, monthDay, subscriptionModeLabel } from '@shared/text';
 import { UseCacheDialogComponent } from './use-cache-dialog.component';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { FormsModule } from '@angular/forms';
@@ -222,10 +222,6 @@ export class CacheDetailComponent implements OnInit {
   }
 
   private formatTime(iso: string, window: Window): string {
-    const d = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z');
-    if (window === 'minutes') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    if (window === 'hours') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    if (window === 'days') return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return window === 'minutes' || window === 'hours' ? clockTime(iso) : monthDay(iso);
   }
 }

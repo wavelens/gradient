@@ -26,7 +26,7 @@ import {
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
-import { formatBytes, formatCount, relativeTime } from '@shared/text';
+import { formatBytes, formatCount, RelativeTimePipe } from '@shared/text';
 import { narSearchText, parseNarSearch } from './nar-search';
 import { NarSummary, NarStats, Paginated } from '@core/models';
 
@@ -37,6 +37,7 @@ type SortOrder = 'asc' | 'desc';
   selector: 'app-cache-nars',
   standalone: true,
   imports: [
+    RelativeTimePipe,
     CommonModule,
     FormsModule,
     RouterModule,
@@ -213,7 +214,6 @@ export class CacheNarsComponent implements OnInit {
       });
   }
 
-  readonly relativeTime = relativeTime;
   readonly formatBytes = formatBytes;
   readonly formatCount = formatCount;
 }

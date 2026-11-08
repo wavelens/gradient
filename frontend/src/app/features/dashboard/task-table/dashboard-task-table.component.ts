@@ -32,7 +32,7 @@ import {
   TabSwitchComponent,
 } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
-import { formatDuration, relativeTime } from '@shared/text';
+import { formatDuration, RelativeTimePipe } from '@shared/text';
 import { EvaluationHistoryComponent } from '../evaluation-history/evaluation-history.component';
 import { barsThatFit } from '../format';
 import { links } from '@shared/routing';
@@ -55,6 +55,7 @@ function parseFilter(value: string | null): Filter | null {
   selector: 'app-dashboard-task-table',
   standalone: true,
   imports: [
+    RelativeTimePipe,
     FormsModule,
     ButtonComponent,
     MessageBannerComponent,
@@ -98,7 +99,6 @@ export class DashboardTaskTableComponent implements OnInit {
 
   readonly placeholders = Array.from({ length: TOP });
   readonly duration = formatDuration;
-  readonly age = relativeTime;
   readonly phase = evaluationPhase;
 
   ngOnInit(): void {

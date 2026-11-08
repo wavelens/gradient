@@ -8,7 +8,7 @@ import { Component, OnInit, OnDestroy, ElementRef, HostListener, Injector, after
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { finalize, interval, Observable, Subject, Subscription } from 'rxjs';
+import { finalize, Observable, Subject, Subscription } from 'rxjs';
 import { auditTime, debounceTime, filter, share } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LiveEvent, LiveService } from '@core/services/live.service';
@@ -44,7 +44,7 @@ import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-a
 import { groupEntryPoints } from './entry-point-groups';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { links } from '@shared/routing';
-import { formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { CurrentTimeSignal, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import {
   StarTarget,
   TaskDetailsResponse,
@@ -120,7 +120,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   starting = signal(false);
   starred = signal(false);
   aborting = signal(false);
-  tick = signal(Date.now());
+  private tick = inject(CurrentTimeSignal).currentTimeMilliseconds;
 
   projectName = '';
   taskName = '';
@@ -129,7 +129,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   private liveSub?: Subscription;
   private querySub?: Subscription;
-  private tickSubscription?: Subscription;
 
   // Content signatures + a throttle so a running evaluation's rapid live pings
   // don't re-render the cards or re-run the expensive entry-point query.
@@ -189,13 +188,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     if (resolved) this.applyTask(resolved, false);
     this.loadTaskData(!!resolved);
     this.startLiveUpdates();
-    this.tickSubscription = interval(1000).subscribe(() => this.tick.set(Date.now()));
   }
 
   ngOnDestroy(): void {
     this.liveSub?.unsubscribe();
     this.querySub?.unsubscribe();
-    this.tickSubscription?.unsubscribe();
   }
 
   private followEvalParam(id: string | null): void {

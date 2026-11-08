@@ -64,7 +64,7 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
       <h2>Pipeline</h2>
       <div class="grid">
         <div class="cell"><span class="label">Rollup lag</span><span [class.bad]="(h.rollup_lag_seconds ?? 0) > 300">{{ h.rollup_lag_seconds != null ? seconds(h.rollup_lag_seconds) : 'no data' }}</span></div>
-        <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | serverDate: 'short') : '-' }}</span></div>
+        <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | serverDate) : '-' }}</span></div>
         <div class="cell"><span class="label">Cache size</span><span>{{ bytes(h.cache_bytes) }}</span></div>
         <div class="cell"><span class="label">Packages</span><span>{{ h.cache_packages }}</span></div>
         <div class="cell"><span class="label">Pending deliveries</span><span>{{ h.pending_deliveries }}</span></div>
@@ -118,8 +118,8 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
               <td>{{ taskKindLabel(t.kind) }}</td>
               <td>{{ t.status }}</td>
               <td class="muted">{{ t.checkpoint ? checkpointLabel(t.checkpoint) : '-' }}</td>
-              <td>{{ t.created_at | serverDate: 'short' }}</td>
-              <td>{{ t.finished_at ? (t.finished_at | serverDate: 'short') : '-' }}</td>
+              <td>{{ t.created_at | serverDate }}</td>
+              <td>{{ t.finished_at ? (t.finished_at | serverDate) : '-' }}</td>
               <td [class.bad]="!!t.error">{{ t.error ?? '' }}</td>
             </tr>
           } @empty {

@@ -21,7 +21,7 @@
 
   <app-repository-fetch-banner [status]="state().fetch" [canEdit]="state().can_edit" />
   @if (fetchOk(); as fetch) {
-    <p class="text-secondary" role="status" data-testid="fetch-ok">Gradient can fetch the repository. Verified {{ since(fetch.checked_at) }}</p>
+    <p class="text-secondary" role="status" data-testid="fetch-ok">Gradient can fetch the repository. Verified {{ fetch.checked_at | relativeTime }}</p>
   } @else if (!state().fetch) {
     <p class="text-secondary" role="status">No access test yet. Add the deploy key, then test access.</p>
   }

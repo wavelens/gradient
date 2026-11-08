@@ -8,20 +8,20 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import { RouterLink, UrlTree } from '@angular/router';
 import { MessageBannerComponent } from '@gradient/ui/ui';
 import { RepositoryFetchStatus } from '@core/models';
-import { relativeTime } from '@shared/text';
+import { RelativeTimePipe } from '@shared/text';
 import { fetchFailureHint } from './fetch-failure-hint';
 
 @Component({
   selector: 'app-repository-fetch-banner',
   standalone: true,
-  imports: [MessageBannerComponent, RouterLink],
+  imports: [MessageBannerComponent, RelativeTimePipe, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (status(); as fetch) {
       @if (fetch.failed) {
         <gr-message-banner type="warning" data-testid="repository-fetch-failed">
           <strong>Gradient can't fetch the repository</strong>
-          <span>Last attempt {{ since(fetch.checked_at) }}. Last success {{ since(fetch.ok_at) }}.</span>
+          <span>Last attempt {{ fetch.checked_at | relativeTime }}. Last success {{ fetch.ok_at | relativeTime }}.</span>
           @if (fetch.error) {
             <code class="fetch-error">{{ fetch.error }}</code>
           }
@@ -51,8 +51,4 @@ export class RepositoryFetchBannerComponent {
   fixLink = input<UrlTree | null>(null);
 
   hint = computed(() => fetchFailureHint(this.status()?.error));
-
-  since(at: string | null | undefined): string {
-    return relativeTime(at);
-  }
 }

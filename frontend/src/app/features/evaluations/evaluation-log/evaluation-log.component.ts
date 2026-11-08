@@ -35,7 +35,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { AccessService, WritableDirective } from '@shared/access';
 import { links } from '@shared/routing';
-import { formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { CurrentTimeSignal, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
   BuildProgress,
@@ -138,9 +138,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   waitingAccess = computed(() =>
     waitingAccessFrom(this.taskPermissions(), this.access().canTrigger, this.authService.user()?.superuser === true),
   );
-  duration = signal('0s');
+  private clock = inject(CurrentTimeSignal);
+  duration = computed(() => {
+    const evaluation = this.evaluation();
+    return evaluation ? formatDuration(evaluationDuration(evaluation, this.clock.currentTimeMilliseconds())) : '';
+  });
   activeBuildsCount = signal(0);
-  private tick = signal(0);
 
   projectName = '';
   projectAndTaskCrumbs = computed(() => {
@@ -241,7 +244,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   private liveSub?: Subscription;
   private progressSub?: Subscription;
-  private durationInterval?: ReturnType<typeof setInterval>;
   private activeStreamReader?: ReadableStreamDefaultReader<Uint8Array>;
   private streamingBuildId?: string;
   private autoFollowBuilding = false;
@@ -288,7 +290,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     document.documentElement.style.overflow = '';
     document.body.style.overflow = '';
     this.stopLiveUpdates();
-    this.stopDurationTimer();
     this.stopActiveStream();
     this.stopBuildRevealTimer();
   }
@@ -318,7 +319,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       this.loadBuilds();
     }
     this.loadMessages();
-    this.startDurationTimer(evaluation);
     this.startLiveUpdates(evaluation.status);
   }
 
@@ -327,7 +327,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       this.evaluation.set(evaluation);
       this.loadBuilds();
       if (this.isRunningStatus(evaluation.status) && !this.liveSub) {
-        this.startDurationTimer(evaluation);
         this.startLiveUpdates(evaluation.status);
       }
     });
@@ -656,8 +655,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             this.loadBuilds();
             if (!this.isRunningStatus(evaluation.status)) {
               this.stopLiveUpdates();
-              this.updateDuration(evaluation);
-              this.stopDurationTimer();
               this.loadBuilds(); // final update
               this.loadMessages(true); // pick up any messages recorded during eval
             }
@@ -1065,32 +1062,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
   }
 
-  // ── Duration ─────────────────────────────────────────────────────────────────
-
-  private startDurationTimer(evaluation: EvaluationResponse): void {
-    this.stopDurationTimer();
-    this.updateDuration(evaluation);
-
-    if (!this.isRunningStatus(evaluation.status)) return;
-
-    this.durationInterval = setInterval(() => {
-      const ev = this.evaluation();
-      if (ev) this.updateDuration(ev);
-      this.tick.update(t => t + 1);
-    }, 1000);
-  }
-
-  private stopDurationTimer(): void {
-    if (this.durationInterval !== undefined) {
-      clearInterval(this.durationInterval);
-      this.durationInterval = undefined;
-    }
-  }
-
-  private updateDuration(evaluation: EvaluationResponse): void {
-    this.duration.set(formatDuration(evaluationDuration(evaluation, Date.now())));
-  }
-
   isRunningStatus(status: EvaluationStatus): boolean {
     return isRunningEvaluationStatus(status);
   }
@@ -1245,8 +1216,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   getBuildElapsed(build: BuildItem): string {
     if (build.status !== 'Completed' && build.status !== 'Building') return '';
-    this.tick(); // reactive dependency - re-evaluated every second
-    const ms = buildDuration(build, Date.now());
+    const ms = buildDuration(build, this.clock.currentTimeMilliseconds());
     return ms == null ? '' : formatDuration(ms);
   }
 

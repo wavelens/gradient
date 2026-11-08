@@ -36,7 +36,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
-import { getLastErrorCause, relativeTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { getLastErrorCause, RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { fieldChecks } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 import { links } from '@shared/routing';
@@ -45,6 +45,7 @@ import { links } from '@shared/routing';
   selector: 'app-webhooks',
   standalone: true,
   imports: [
+    RelativeTimePipe,
     CopyFieldComponent,
     LabelHelpComponent,
     CommonModule,
@@ -107,7 +108,6 @@ export class WebhooksComponent implements OnInit {
   deliveriesLoading = signal(false);
   deliveriesError = signal<unknown>(null);
 
-  relativeTime = relativeTime;
   eventNameToReadableText = eventNameToReadableText;
   getLastErrorCause = getLastErrorCause;
 

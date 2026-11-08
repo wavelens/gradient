@@ -14,6 +14,8 @@ export function serverTime(at: string | number): Date {
   return new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(normalised) ? normalised : `${normalised}Z`);
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 export function clockTime(at: string | number): string {
   const time = serverTime(at);
 
@@ -23,5 +25,13 @@ export function clockTime(at: string | number): string {
 export function monthDay(at: string | number): string {
   const time = serverTime(at);
 
-  return `${pad(time.getMonth() + 1)}-${pad(time.getDate())}`;
+  return `${MONTHS[time.getMonth()]} ${time.getDate()}`;
+}
+
+export function monthDayClockTime(at: string | number): string {
+  return `${monthDay(at)} ${clockTime(at)}`;
+}
+
+export function dateTimeText(at: string | number): string {
+  return `${monthDay(at)}, ${serverTime(at).getFullYear()}, ${clockTime(at)}`;
 }

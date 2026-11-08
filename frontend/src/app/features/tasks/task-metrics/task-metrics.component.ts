@@ -11,7 +11,7 @@ import { LoadStateComponent, PageLayoutComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { formatBytes, formatCount, formatDuration } from '@shared/text';
+import { formatBytes, formatCount, formatDuration, monthDayClockTime } from '@shared/text';
 import { TaskMetricPoint, TaskMetricsResponse } from '@core/models';
 
 const CHART_COLORS = {
@@ -66,7 +66,7 @@ export class TaskMetricsComponent implements OnInit {
     });
   }
 
-  labels = computed(() => this.metrics().map((p) => this.formatDate(p.created_at)));
+  labels = computed(() => this.metrics().map((p) => monthDayClockTime(p.created_at)));
 
   buildTimeSeries = computed(() => [
     { name: 'Build time', data: this.metrics().map((p) => p.build_time_total_ms) },
@@ -94,9 +94,4 @@ export class TaskMetricsComponent implements OnInit {
   readonly formatDuration = formatDuration;
   readonly formatBytes = formatBytes;
   readonly formatDeps = (v: number) => `${formatCount(v)} deps`;
-
-  private formatDate(iso: string): string {
-    const d = new Date(iso.includes('Z') || iso.includes('+') ? iso : iso + 'Z');
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
 }

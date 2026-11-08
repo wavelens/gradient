@@ -15,7 +15,7 @@ import {
 import { MetricChartComponent } from '@shared/ui';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { formatBytes, formatCount, formatDuration, serverTime } from '@shared/text';
+import { formatBytes, formatCount, formatDuration, monthDayClockTime } from '@shared/text';
 import { buildPhase, buildStatusLabel } from '@shared/evaluation';
 import { BuildStatus, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/models';
 import { links } from '@shared/routing';
@@ -80,7 +80,7 @@ export class EntryPointMetricsComponent implements OnInit {
     });
   }
 
-  labels = computed(() => this.points().map((p) => this.formatDate(p.created_at)));
+  labels = computed(() => this.points().map((p) => monthDayClockTime(p.created_at)));
 
   buildTimeSeries = computed(() => [
     {
@@ -120,10 +120,4 @@ export class EntryPointMetricsComponent implements OnInit {
       .sort(([, a], [, b]) => b - a)
       .map(([status, count]) => ({ status, count, label: buildStatusLabel(status), phase: buildPhase(status) }));
   });
-
-
-  private formatDate(iso: string): string {
-    const d = serverTime(iso);
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
 }

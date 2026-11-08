@@ -88,8 +88,8 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
       </section>
 
       <section class="timeline">
-        <div class="step"><span class="label">Created</span><span>{{ c.created_at | serverDate: 'medium' }}</span></div>
-        <div class="step"><span class="label">Updated</span><span>{{ c.updated_at | serverDate: 'medium' }}</span></div>
+        <div class="step"><span class="label">Created</span><span>{{ c.created_at | serverDate }}</span></div>
+        <div class="step"><span class="label">Updated</span><span>{{ c.updated_at | serverDate }}</span></div>
         <div class="step"><span class="label">Attempts</span><span class="hl">{{ c.attempts }}</span></div>
         <div class="step"><span class="label">Retry budget</span><span>{{ c.retry_budget }}</span></div>
         <div class="step"><span class="label">Same zone</span><span>{{ c.same_zone ? 'yes' : 'no' }}</span></div>
@@ -105,7 +105,7 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
                 <td>{{ row.member }}</td>
                 <td class="mono">{{ job.worker_name ?? job.worker_id }}</td>
                 <td>{{ job.attempt }}</td>
-                <td>{{ job.dispatched_at | serverDate: 'medium' }}</td>
+                <td>{{ job.dispatched_at | serverDate }}</td>
                 <td class="mono">{{ job.outcome ?? (job.finished_at ? 'finished' : 'running') }}</td>
                 <td>›</td>
               </tr>

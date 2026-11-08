@@ -30,7 +30,7 @@ import {
 import { WritableDirective, createMissingPermissionLoadStateError, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
-import { relativeTime } from '@shared/text';
+import { RelativeTimePipe } from '@shared/text';
 
 const SECRET_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -38,6 +38,7 @@ const SECRET_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
   selector: 'app-project-secrets',
   standalone: true,
   imports: [
+    RelativeTimePipe,
     FormsModule,
     BadgeComponent,
     ButtonComponent,
@@ -65,7 +66,6 @@ export class SecretsComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
-  protected readonly relativeTime = relativeTime;
   protected readonly docsUrl = docsUrl('exec/secrets/');
 
   access = computed(() => accessTo(this.resolvedProject(), 'manageProjectSettings'));

@@ -42,7 +42,7 @@ import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, createMissingPermissionLoadStateError } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { IncomingDeliveriesComponent, SELF_HOSTED_GIT_HOSTS, firstRepositoryHost, gitHostLabel, guessGitHost, webhookEvents } from '@shared/git';
-import { slugify } from '@shared/text';
+import { ServerTimestampToLocalDateTimePipe, slugify } from '@shared/text';
 import { links } from '@shared/routing';
 import { fieldChecks, isIpNetwork, splitLines } from '@shared/forms';
 
@@ -55,6 +55,7 @@ interface Option<T> {
   selector: 'app-integrations',
   standalone: true,
   imports: [
+    ServerTimestampToLocalDateTimePipe,
     MessageBannerComponent,
     CommonModule,
     RouterModule,
@@ -412,12 +413,4 @@ export class IntegrationsComponent implements OnInit {
   }
 
   protected readonly gitHostLabel = gitHostLabel;
-
-  formatDate(s: string): string {
-    try {
-      return new Date(s).toLocaleString();
-    } catch {
-      return s;
-    }
-  }
 }

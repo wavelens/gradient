@@ -88,7 +88,7 @@
           @for (pr of pullRequests(); track pr.url) {
             <a class="sidebar-item" [href]="pr.url" target="_blank" rel="noopener" [title]="pr.branch">
               <span class="sidebar-item-label">#{{ pr.number }} <span class="mono item-meta">{{ pr.branch }}</span></span>
-              <span class="item-meta">{{ time(pr.created_at) }}</span>
+              <span class="item-meta" [title]="pr.created_at | serverDate">{{ pr.created_at | relativeTime }}</span>
             </a>
           }
         }
@@ -102,7 +102,7 @@
             <a class="sidebar-item" [routerLink]="links.evaluationLog(job.project, started.evaluation)">
               <gr-status-icon size="sm" [phase]="evaluationPhase(started.status)" [label]="started.status" />
               <span class="sidebar-item-label">{{ started.task }}</span>
-              <span class="item-meta">{{ time(started.created_at) }}</span>
+              <span class="item-meta" [title]="started.created_at | serverDate">{{ started.created_at | relativeTime }}</span>
             </a>
           }
         }
@@ -125,7 +125,7 @@
           </div>
           <div class="info-metric">
             <span class="metric-label">Created</span>
-            <span class="metric-value">{{ day(job.created_at) }} {{ time(job.created_at) }}</span>
+            <span class="metric-value">{{ job.created_at | serverDate }}</span>
           </div>
           @if (job.worker) {
             <div class="info-metric">

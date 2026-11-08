@@ -80,7 +80,7 @@
                         {{ integration.kind === 'inbound' ? 'Inbound' : 'Outbound' }}
                       </gr-badge>
                       <gr-badge>{{ gitHostLabel(integration.git_host_type) }}</gr-badge>
-                      <span>Created {{ formatDate(integration.created_at) }}</span>
+                      <span>Created {{ integration.created_at | serverDate }}</span>
                     </div>
                   </div>
                 </div>

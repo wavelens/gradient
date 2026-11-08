@@ -30,7 +30,7 @@ import { JobTimelineComponent } from '@features/board/job-detail/job-timeline.co
 import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
 import { LogViewerComponent, splitLogLines } from '@shared/log';
 import { WritableDirective, AccessService } from '@shared/access';
-import { clockTime, formatDuration, monthDay, plural, serverTime } from '@shared/text';
+import { formatDuration, plural, RelativeTimePipe, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { evaluationPhase, waitingAccessFrom } from '@shared/evaluation';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -72,7 +72,8 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
     RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MenuComponent, MessageBannerComponent,
     SelectButtonComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
-    LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, WaitingNoticeComponent, DrawerDirective,
+    LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, WaitingNoticeComponent, DrawerDirective, RelativeTimePipe,
+    ServerTimestampToLocalDateTimePipe,
   ],
   templateUrl: './exec-job-page.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -173,9 +174,7 @@ export class ExecJobPageComponent implements OnInit {
   protected readonly links = links;
   protected readonly device = deviceLabel;
   protected readonly guestSize = guestSizeLabel;
-  protected readonly time = clockTime;
   protected readonly plural = plural;
-  protected readonly day = monthDay;
   protected readonly evaluationPhase = evaluationPhase;
   protected readonly phaseMarker = phaseMarker;
 

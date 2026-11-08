@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input } from '@an
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, catchError, interval, of, startWith, switchMap } from 'rxjs';
 import { inBackground } from '@core/interceptors/request-context';
-import { clockTime, formatBytes } from '@shared/text';
+import { formatBytes, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import type { ExecJobOutputView, ExecJobResponse } from '@core/models';
 import { isOpenExecJob } from '../exec-job-status';
@@ -26,6 +26,7 @@ const sameTarget = (a: PollTarget, b: PollTarget): boolean => a.id === b.id && a
 @Component({
   selector: 'app-exec-job-outputs',
   standalone: true,
+  imports: [ServerTimestampToLocalDateTimePipe],
   templateUrl: './exec-job-outputs.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['../../../shared/log/log-sidebar.scss', './exec-job-outputs.component.scss'],
@@ -46,7 +47,6 @@ export class ExecJobOutputsComponent {
   });
 
   protected readonly size = formatBytes;
-  protected readonly time = clockTime;
 
   url(path: string): string {
     return this.execJobs.outputUrl(this.job().id, path, this.node());

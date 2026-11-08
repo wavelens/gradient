@@ -53,7 +53,7 @@
                   <gr-badge [severity]="trigger.active ? 'success' : 'warning'">
                     {{ trigger.active ? 'Active' : 'Inactive' }}
                   </gr-badge>
-                  <span>Last fired: {{ relativeTime(trigger.last_fired_at) }}</span>
+                  <span>Last fired: {{ trigger.last_fired_at | relativeTime }}</span>
                   @if (fireSuccessId() === trigger.id) {
                     <span class="fire-success">
                       <gr-icon name="check_circle" size="sm" />

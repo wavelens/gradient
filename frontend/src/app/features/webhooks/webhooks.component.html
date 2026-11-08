@@ -29,7 +29,7 @@
             <div class="webhook-meta text-secondary">
               <code>{{ hook.url }}</code>
               <gr-badge [severity]="hook.active ? 'success' : 'warning'">{{ hook.active ? 'Active' : 'Inactive' }}</gr-badge>
-              <span>Last fired: {{ relativeTime(hook.last_fired_at) }}</span>
+              <span>Last fired: {{ hook.last_fired_at | relativeTime }}</span>
               @if (testResult(); as result) {
                 @if (result.id === hook.id && result.delivery; as d) {
                   <gr-badge [severity]="d.success ? 'success' : 'danger'">
@@ -100,7 +100,7 @@
       <tbody>
         @for (d of deliveries(); track d.id) {
           <tr>
-            <td [title]="d.delivered_at | serverDate: 'medium'">{{ relativeTime(d.delivered_at) }}</td>
+            <td [title]="d.delivered_at | serverDate">{{ d.delivered_at | relativeTime }}</td>
             <td>{{ eventNameToReadableText(d.event) }}</td>
             <td><gr-badge [severity]="d.success ? 'success' : 'danger'">{{ d.success ? 'OK' : 'FAIL' }}</gr-badge></td>
             <td [title]="d.error_message ?? ''">{{ d.response_status ?? (d.error_message && getLastErrorCause(d.error_message)) }}</td>

@@ -38,7 +38,7 @@ import {
   CreateTriggerRequest,
   UpdateTriggerRequest,
 } from '@core/models';
-import { relativeTime } from '@shared/text';
+import { RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 import { splitList } from '@shared/forms';
 import { gitHostLabel } from '@shared/git';
@@ -83,6 +83,7 @@ const DEFAULT_FORM: TriggerFormState = {
   selector: 'app-task-triggers',
   standalone: true,
   imports: [
+    RelativeTimePipe,
     LabelHelpComponent,
     CommonModule,
     RouterModule,
@@ -475,7 +476,6 @@ export class TaskTriggersComponent implements OnInit {
     return 'deleted integration';
   }
 
-  relativeTime = relativeTime;
 
   private formatSeconds(secs: number): string {
     if (secs < 60) return `${secs}s`;

@@ -19,7 +19,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { RepositoryFetchBannerComponent, gitHostSettingsLinks, repositoryHost } from '@shared/git';
 import { repositoryUrlError } from '@shared/text/repository-url';
-import { relativeTime } from '@shared/text';
+import { RelativeTimePipe } from '@shared/text';
 import { fieldChecks, firstFieldError } from '@shared/forms';
 import { provisioningIntegration } from './provisioning';
 
@@ -27,6 +27,7 @@ import { provisioningIntegration } from './provisioning';
   selector: 'app-repository-access',
   standalone: true,
   imports: [
+    RelativeTimePipe,
     FormsModule,
     ButtonComponent,
     CopyFieldComponent,
@@ -121,9 +122,5 @@ export class RepositoryAccessComponent {
         this.notify.failure("Couldn't install deploy key", error);
       },
     });
-  }
-
-  since(at: string | null | undefined): string {
-    return relativeTime(at);
   }
 }
