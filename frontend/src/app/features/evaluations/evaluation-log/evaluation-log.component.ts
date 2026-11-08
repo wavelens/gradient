@@ -17,7 +17,7 @@ import {
   ChangeDetectionStrategy
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, parseLineFragment, splitLogLines } from '@shared/log';
+import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, splitLogLines } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
 import { buildLog } from './build-log';
 import { lastRateLimitNote, rateLimitMarker } from './log-rate-limit';
@@ -259,7 +259,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   logPaused = signal(false);
   protected readonly rateLimitMarker = rateLimitMarker;
   serverLog = signal<ServerLog | null>(null);
-  deepLinkLine = signal<number | null>(null);
   sidebarSearchOpen = signal(false);
   sidebarSearchQuery = signal('');
   private sidebarFocused = false;
@@ -275,7 +274,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.scopeBuildId.set(query.get('build'));
     this.initialShowEval = query.get('eval') !== null;
     this.initialBuildId = this.initialShowEval ? null : query.get('selected') ?? query.get('build');
-    this.deepLinkLine.set(parseLineFragment(this.route.snapshot.fragment));
     if (!this.evaluationId) {
       this.loading.set(false);
       return;
@@ -747,6 +745,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.userPickedBuild = isUserAction;
     this.autoFollowBuilding = false;
     this.stopActiveStream();
+    const keepLineLinkUntilBuildLogShown = this.logLineCount() === 0;
     this.resetLogState();
     this.selectedBuildId.set(build.id);
 
@@ -755,6 +754,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       relativeTo: this.route,
       queryParams: { build: scope ?? build.id, selected: scope && scope !== build.id ? build.id : null, eval: null },
       queryParamsHandling: 'merge',
+      preserveFragment: keepLineLinkUntilBuildLogShown,
       replaceUrl: true,
     });
 
@@ -893,7 +893,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private resetLogState(): void {
-    if (this.logLineCount() > 0) this.deepLinkLine.set(null);
     this.logLines.set([]);
     this.serverLog.set(null);
     this.logLineCount.set(0);

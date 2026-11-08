@@ -603,15 +603,15 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.logLoading()).toBe(false);
     });
 
-    it('keeps a deep-linked line for the first log only', async () => {
+    it('keeps the #L line link in the URL for the first log only', () => {
       const { cmp } = setup();
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ message: chunkIndex }) }));
-      cmp.deepLinkLine.set(12);
-      cmp.builds.set([build('b1', 'hash-hello.drv', 'Completed'), build('b2', 'hash-world.drv', 'Completed')]);
-      await (cmp as unknown as Internals).fetchInitialLogs('b1');
-      expect(cmp.deepLinkLine()).toBe(12);
-      await (cmp as unknown as Internals).fetchInitialLogs('b2');
-      expect(cmp.deepLinkLine()).toBeNull();
+      vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      cmp.selectBuild(build('b1', 'hash-hello.drv', 'Completed'), true);
+      expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ preserveFragment: true }));
+      cmp.logLineCount.set(12);
+      cmp.selectBuild(build('b2', 'hash-world.drv', 'Completed'), true);
+      expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ preserveFragment: false }));
     });
   });
 

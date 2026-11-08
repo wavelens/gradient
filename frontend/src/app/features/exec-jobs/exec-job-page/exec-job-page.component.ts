@@ -28,7 +28,7 @@ import { LabelHelpComponent, StatusBadgeComponent, StatusIconComponent, WaitingN
 import { AuthService } from '@core/services/auth.service';
 import { JobTimelineComponent } from '@features/board/job-detail/job-timeline.component';
 import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
-import { LogViewerComponent, parseLineFragment, splitLogLines } from '@shared/log';
+import { LogViewerComponent, splitLogLines } from '@shared/log';
 import { WritableDirective, AccessService } from '@shared/access';
 import { clockTime, formatDuration, monthDay, plural, serverTime } from '@shared/text';
 import { evaluationPhase, waitingAccessFrom } from '@shared/evaluation';
@@ -108,7 +108,6 @@ export class ExecJobPageComponent implements OnInit {
   job = signal<ExecJobResponse | null>(null);
   node = signal(0);
   logLines = signal<readonly string[]>([]);
-  initialLine: number | null = null;
   pullRequests = signal<ExecJobPullRequestView[]>([]);
   starting = signal(false);
   switchingKeep = signal(false);
@@ -185,7 +184,6 @@ export class ExecJobPageComponent implements OnInit {
     this.projectName = params.get('project') ?? '';
     this.taskName = params.get('task') ?? '';
     this.jobId = params.get('job') ?? '';
-    this.initialLine = parseLineFragment(this.route.snapshot.fragment);
     this.wantsTerminal = this.route.snapshot.queryParamMap?.get('view') === 'terminal';
     this.node.set(nodeFromQuery(this.route.snapshot.queryParamMap?.get('node')));
     this.watch();

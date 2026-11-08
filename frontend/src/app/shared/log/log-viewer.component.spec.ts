@@ -38,6 +38,10 @@ async function show(fixture: ComponentFixture<LogViewerComponent>, lines: readon
   await settle(fixture);
 }
 
+async function linkTo(line: number): Promise<void> {
+  await TestBed.inject(Router).navigate([], { fragment: `L${line}` });
+}
+
 const numbered = (count: number, from = 1) => Array.from({ length: count }, (_, i) => `l${from + i}`);
 
 function serverLog(total: number, hits: LogSearchHit[] = [], totalMatches = hits.length): ServerLog & { lines: ReturnType<typeof vi.fn> } {
@@ -230,12 +234,42 @@ describe('LogViewerComponent', () => {
       expect(viewer.autoScroll()).toBe(true);
     });
 
-    it('opens on the initial line, highlighted, without following the tail', async () => {
-      const { fixture, viewer } = setup({ serverLog: serverLog(5000), initialLine: 3000 });
+    it('opens on the linked line, highlighted, without following the tail', async () => {
+      const { fixture, viewer } = setup();
+      await linkTo(3000);
+      fixture.componentRef.setInput('serverLog', serverLog(5000));
       await settle(fixture);
       expect(viewer.highlightLine()).toBe(3000);
       expect(viewer.autoScroll()).toBe(false);
       expect(viewer.windowLines().some((l) => l.n === 3000)).toBe(true);
+    });
+
+    it('uses the linked line for the first log only', async () => {
+      const { fixture, viewer } = setup();
+      await linkTo(5);
+      await show(fixture, numbered(20));
+      expect(viewer.highlightLine()).toBe(5);
+      await show(fixture, numbered(20, 100));
+      expect(viewer.highlightLine()).toBeNull();
+      expect(viewer.autoScroll()).toBe(true);
+    });
+  });
+
+  describe('changing the linked line on an open live log', () => {
+    it('jumps to the new line and stays there while lines stream in', async () => {
+      const { fixture, viewer } = setup();
+      await show(fixture, numbered(580));
+      expect(viewer.autoScroll()).toBe(true);
+
+      await linkTo(50);
+      await settle(fixture);
+      expect(viewer.highlightLine()).toBe(50);
+      expect(viewer.autoScroll()).toBe(false);
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+
+      await show(fixture, numbered(600));
+      expect(viewer.highlightLine()).toBe(50);
+      expect(viewer.autoScroll()).toBe(false);
     });
   });
 

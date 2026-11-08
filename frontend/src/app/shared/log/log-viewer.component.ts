@@ -20,10 +20,12 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { map } from 'rxjs';
 import type { LogSearchHit } from '@core/models';
 import { IconComponent, InputDirective, ScrollRegionDirective } from '@gradient/ui/ui';
 import { ansiToHtml } from './ansi';
-import { searchLines, windowAround } from './log-window';
+import { parseLineFragment, searchLines, windowAround } from './log-window';
 
 export interface ServerLog {
   total: number;
@@ -68,7 +70,6 @@ export class LogViewerComponent implements OnDestroy {
   lines = input<readonly string[]>([]);
   serverLog = input<ServerLog | null>(null);
   marker = input<LogMarker>(() => null);
-  initialLine = input<number | null>(null);
   shortcuts = input(true);
 
   @ViewChild('logContainer') logContainerRef?: ElementRef<HTMLDivElement>;
@@ -89,7 +90,7 @@ export class LogViewerComponent implements OnDestroy {
 
   private memory: readonly string[] = [];
   private server: ServerLog | null = null;
-  private initialLineUsed = false;
+  private pendingLineNumberFromUrlFragment: number | null = null;
   private windowStart = 1;
   private loadingWindow = false;
   private followScroll = false;
@@ -107,6 +108,15 @@ export class LogViewerComponent implements OnDestroy {
       const lines = this.lines();
       untracked(() => (server ? this.showServerLog(server) : this.showLines(lines)));
     });
+    this.router.routerState.root.fragment
+      .pipe(map(parseLineFragment), takeUntilDestroyed())
+      .subscribe((line) => this.applyLineNumberFromFragment(line));
+  }
+
+  private applyLineNumberFromFragment(line: number | null): void {
+    if (line === null || line === this.highlightLine()) return;
+    if (this.totalLines() === 0) this.pendingLineNumberFromUrlFragment = line;
+    else if (line <= this.totalLines()) void this.jumpToLine(line);
   }
 
   ngOnDestroy(): void {
@@ -155,8 +165,8 @@ export class LogViewerComponent implements OnDestroy {
 
   private async showTailOrInitialLine(): Promise<void> {
     const total = this.totalLines();
-    const target = this.initialLineUsed ? null : this.initialLine();
-    this.initialLineUsed = true;
+    const target = this.pendingLineNumberFromUrlFragment;
+    this.pendingLineNumberFromUrlFragment = null;
     if (target && target <= total) {
       await this.jumpToLine(target);
     } else {

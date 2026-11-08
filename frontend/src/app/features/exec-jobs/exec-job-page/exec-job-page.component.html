@@ -220,7 +220,7 @@
             <gr-job-timeline [phases]="job.timeline" />
           </div>
         } @else {
-          <gr-log-viewer [lines]="logLines()" [marker]="phaseMarker" [initialLine]="initialLine">
+          <gr-log-viewer [lines]="logLines()" [marker]="phaseMarker">
             <div class="log-header">
               <code class="log-header-title">{{ job.entry_point }}</code>
               @if (logLines().length > 0) {
