@@ -91,7 +91,7 @@ export class CacheMembersRolesComponent implements OnInit {
   private cacheAccess = injectCacheAccessData();
   private router = inject(Router);
   private auth = inject(AuthService);
-  private cache = linkedSignal(() => this.cacheAccess()?.cache);
+  protected cache = linkedSignal(() => this.cacheAccess()?.cache);
   access = computed(() => accessTo(this.cache(), 'manageCacheMembers'));
   roleAccess = computed(() => accessTo(this.cache(), 'manageCacheRoles'));
 

@@ -14,7 +14,7 @@ import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
-import { TeamGrantEntry, TeamSummary } from '@core/models';
+import type { CachePermission, TeamGrantEntry, TeamSummary } from '@core/models';
 import { By } from '@angular/platform-browser';
 import { CreateTeamDialogComponent } from '@shared/forms';
 
@@ -30,11 +30,11 @@ const myTeams: TeamSummary[] = [
   { name: 'infra', display_name: 'Build Farm', role: 'admin' },
 ];
 
-function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false) {
+function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false, cachePermissions: CachePermission[] = ['viewCache']) {
   const service = {
     list: () => of(myTeams),
     projectGrants: () => of(grants),
-    cacheGrants: () => of(grants.filter((g) => g.users)),
+    cacheGrants: vi.fn(() => of(grants.filter((g) => g.users))),
     grantProject: vi.fn().mockReturnValue(of('Team granted')),
     grantCache: vi.fn().mockReturnValue(of('Team granted')),
     removeProjectGrant: vi.fn().mockReturnValue(of('ok')),
@@ -57,6 +57,7 @@ function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false)
   const fixture = TestBed.createComponent(TeamGrantsComponent);
   fixture.componentRef.setInput('kind', kind);
   fixture.componentRef.setInput('name', 'acme');
+  if (kind === 'cache') fixture.componentRef.setInput('cacheWithViewerPermissions', { permissions: cachePermissions });
   if (part) fixture.componentRef.setInput('grants', part);
   fixture.componentRef.setInput('roles', ['Admin', 'Write', 'View']);
   fixture.componentRef.setInput('canEdit', true);
@@ -80,6 +81,14 @@ describe('TeamGrantsComponent', () => {
     expect(text()).toContain('Failed to load teams');
     expect(text()).toContain('Try Again');
     expect(text()).not.toContain('No teams');
+  });
+
+  it('shows a cache visitor without a cache role no access and asks the server nothing', () => {
+    const { service, text } = setup('cache', undefined, false, []);
+    expect(service.cacheGrants).not.toHaveBeenCalled();
+    expect(text()).toContain('Only the members of this cache can view this.');
+    expect(text()).not.toContain('Cache not found');
+    expect(text()).not.toContain('Try Again');
   });
 
   describe('for users', () => {

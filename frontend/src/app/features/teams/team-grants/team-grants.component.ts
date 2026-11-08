@@ -21,8 +21,8 @@ import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
-import { TeamGrantEntry, TeamSummary } from '@core/models';
-import { canOpenTeam } from '@shared/access';
+import type { CacheResponse, TeamGrantEntry, TeamSummary } from '@core/models';
+import { canOpenTeam, requestIfCacheMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { CreateTeamDialogComponent, injectCanCreateTeam } from '@shared/forms';
 import {
@@ -75,6 +75,7 @@ export class TeamGrantsComponent implements OnInit {
 
   kind = input.required<'project' | 'cache'>();
   name = input.required<string>();
+  cacheWithViewerPermissions = input<Pick<CacheResponse, 'permissions'> | null>();
   grants = input<GrantedPart>('users');
   roles = input<string[]>([]);
   canEdit = input(false);
@@ -107,7 +108,9 @@ export class TeamGrantsComponent implements OnInit {
   }
 
   load(): void {
-    const grants = this.kind() === 'project' ? this.teams.projectGrants(this.name()) : this.teams.cacheGrants(this.name());
+    const grants = this.kind() === 'project'
+      ? this.teams.projectGrants(this.name())
+      : requestIfCacheMember(this.cacheWithViewerPermissions(), () => this.teams.cacheGrants(this.name()), 'viewCache');
     this.loadError.set(null);
     this.loading.set(this.allGrants().length === 0);
     grants.subscribe({

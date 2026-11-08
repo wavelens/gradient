@@ -95,7 +95,7 @@
     </gr-settings-section>
   }
 
-  <app-team-grants kind="cache" [name]="cacheName" [roles]="roleNames()" [canEdit]="access().canEdit && !access().managed" />
+  <app-team-grants kind="cache" [name]="cacheName" [cacheWithViewerPermissions]="cache()" [roles]="roleNames()" [canEdit]="access().canEdit && !access().managed" />
 
   <!-- Roles -->
   <gr-settings-section title="Roles" [card]="false">
