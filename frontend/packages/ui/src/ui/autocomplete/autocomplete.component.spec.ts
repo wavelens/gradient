@@ -55,6 +55,15 @@ describe('AutoCompleteComponent', () => {
     expect(fixture.componentInstance.queries()).toEqual(['my']);
   });
 
+  it('lists all suggestions on focus before anything is typed', async () => {
+    const { fixture, input } = await render();
+    fixture.componentInstance.suggestions.set(['my-cache']);
+    input().dispatchEvent(new Event('focus'));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.queries()).toEqual(['']);
+    expect(options()).toHaveLength(1);
+  });
+
   it('writes the typed text back as the model value', async () => {
     const { fixture, type } = await render();
     type('my-cache');

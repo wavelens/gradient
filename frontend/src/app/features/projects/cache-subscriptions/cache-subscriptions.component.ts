@@ -33,8 +33,9 @@ import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { CreateCacheButtonComponent, CreateCacheDialogComponent, injectCanCreateCache } from '@shared/forms';
-import { accessTo, CacheSubscriptionItem } from '@core/models';
+import { accessTo, Cache, CacheSubscriptionItem } from '@core/models';
 import { links } from '@shared/routing';
+import { catchError, forkJoin, map, of } from 'rxjs';
 
 @Component({
   selector: 'app-cache-subscriptions',
@@ -93,7 +94,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   caches = signal<CacheSubscriptionItem[]>([]);
   newCacheName = '';
   cacheSuggestions = signal<string[]>([]);
-  private availableCacheNames: string[] = [];
+  private availableCaches: Cache[] = [];
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
@@ -127,31 +128,22 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   private loadAvailableCaches(): void {
     const subscribedNames = new Set(this.caches().map((c) => c.name));
-    this.cachesService.getCaches(1, 100).subscribe({
-      next: (own) => {
-        this.cachesService.getPublicCaches().subscribe({
-          next: (pub) => {
-            const all = [...own.items, ...pub];
-            const seen = new Set<string>();
-            this.availableCacheNames = all
-              .filter((c) => !subscribedNames.has(c.name) && !seen.has(c.name) && seen.add(c.name))
-              .map((c) => c.name);
-          },
-          error: () => {
-            this.availableCacheNames = own.items
-              .filter((c) => !subscribedNames.has(c.name))
-              .map((c) => c.name);
-          },
-        });
-      },
-      error: () => {},
+    forkJoin([
+      this.cachesService.getCaches(1, 100).pipe(map((own) => own.items), catchError(() => of([]))),
+      this.cachesService.getPublicCaches().pipe(catchError(() => of([]))),
+    ]).subscribe(([own, pub]) => {
+      const seen = new Set<string>();
+      this.availableCaches = [...own, ...pub].filter((c) => !subscribedNames.has(c.name) && !seen.has(c.name) && seen.add(c.name));
+      if (this.showSubscribeDialog()) this.onCacheSearch({ query: this.newCacheName });
     });
   }
 
   onCacheSearch(event: { query: string }): void {
-    const q = event.query.toLowerCase();
+    const q = event.query.trim().toLowerCase();
     this.cacheSuggestions.set(
-      this.availableCacheNames.filter((name) => name.toLowerCase().includes(q))
+      this.availableCaches
+        .filter((c) => c.name.toLowerCase().includes(q) || c.display_name.toLowerCase().includes(q))
+        .map((c) => c.name),
     );
   }
 

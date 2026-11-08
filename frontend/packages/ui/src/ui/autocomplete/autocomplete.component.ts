@@ -73,6 +73,11 @@ export class AutoCompleteComponent implements ControlValueAccessor {
     this.open.set(true);
   }
 
+  protected onFocus(): void {
+    this.completeMethod.emit({ query: this.value() });
+    this.open.set(true);
+  }
+
   protected pick(suggestion: string): void {
     this.value.set(suggestion);
     this.onChange(suggestion);

@@ -123,6 +123,19 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     expect(subscribeCache).toHaveBeenCalledWith('acme', 'fresh');
   });
 
+  it('suggests caches by display name as well as by name, without the subscribed ones', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    TestBed.inject(CachesService).getCaches = (() =>
+      of({ items: [{ name: 'mycache', display_name: 'MyCache' }, { name: 'shared', display_name: 'Shared' }] })) as never;
+    await settled(fixture);
+    const component = fixture.componentInstance;
+    component.openSubscribeDialog();
+    component.onCacheSearch({ query: 'My' });
+    expect(component.cacheSuggestions()).toEqual(['mycache']);
+    component.onCacheSearch({ query: '' });
+    expect(component.cacheSuggestions()).toEqual(['mycache']);
+  });
+
   it('opens Subscribe with the cache picked on the cache page', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, { subscribe: 'nixpkgs' });
     await settled(fixture);
