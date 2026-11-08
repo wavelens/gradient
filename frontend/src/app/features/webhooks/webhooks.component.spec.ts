@@ -347,6 +347,16 @@ describe('WebhooksComponent', () => {
     expect(root.querySelector('.newest-delivery')?.textContent).toContain('Connection refused');
   });
 
+  it('shows a failed test as the newest delivery with its reason', () => {
+    const { fixture, root, service } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([hook]), [], () => of([newestDelivery]));
+    service.test.mockReturnValue(of({ ...newestDelivery, id: 'd2', success: false, response_status: 404 }));
+    rowButton(root, 'Test').click();
+    fixture.detectChanges();
+    expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe('Failing');
+    expect(root.querySelector('.newest-delivery')?.textContent).toContain('HTTP 404');
+    expect(rowButton(root, 'Test').disabled).toBe(false);
+  });
+
   it.each([
     { state: 'delivered', webhook: hook, newest: [newestDelivery], chip: 'Active', line: 'Last delivery' },
     { state: 'never delivered', webhook: hook, newest: [], chip: 'Active', line: 'No deliveries yet' },

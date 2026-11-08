@@ -39,13 +39,6 @@
               } @else if (newest === null) {
                 <span>No deliveries yet</span>
               }
-              @if (testResult(); as result) {
-                @if (result.id === hook.id && result.delivery; as d) {
-                  <gr-badge [severity]="d.success ? 'success' : 'danger'">
-                    Test {{ d.success ? 'delivered' : 'failed' }} {{ d.response_status ?? '' }}
-                  </gr-badge>
-                }
-              }
             </div>
             <div class="events-chips">
               @for (ev of hook.events; track ev) {
@@ -56,7 +49,7 @@
             </div>
           </div>
           <div class="webhook-actions">
-            <button grButton label="Test" icon="play_arrow" severity="secondary" size="small" [loading]="testing(hook)" (click)="test(hook)"></button>
+            <button grButton label="Test" icon="play_arrow" severity="secondary" size="small" [loading]="webhookIdWithTestDeliveryInFlight() === hook.id" (click)="test(hook)"></button>
             <button grButton label="Deliveries" icon="list" severity="secondary" size="small" (click)="openDeliveries(hook)"></button>
             <button grButton [label]="hook.active ? 'Disable' : 'Enable'" icon="power_settings_new" severity="secondary" size="small" [loading]="togglingId() === hook.id" (click)="toggleActive(hook)"></button>
             <button grButton label="Rotate secret" icon="key" severity="secondary" size="small" (click)="rotate(hook)"></button>

@@ -103,7 +103,7 @@ export class WebhooksComponent implements OnInit {
   });
 
   revealedSecret = signal<string | null>(null);
-  testResult = signal<{ id: string; delivery: DeliveryListItem_WebhookDeliveryId | null } | null>(null);
+  webhookIdWithTestDeliveryInFlight = signal<string | null>(null);
   deliveriesFor = signal<WebhookResponse | null>(null);
   openWebhookDeliveryHistoryLoadFunctions = computed(() => {
     const hook = this.deliveriesFor();
@@ -305,20 +305,15 @@ export class WebhooksComponent implements OnInit {
       });
   }
 
-  testing(hook: WebhookResponse): boolean {
-    const result = this.testResult();
-    return result?.id === hook.id && result.delivery === null;
-  }
-
   test(hook: WebhookResponse): void {
-    this.testResult.set({ id: hook.id, delivery: null });
-    this.service.test(this.scope, hook.id).subscribe({
-      next: (delivery) => this.testResult.set({ id: hook.id, delivery }),
-      error: (err: unknown) => {
-        this.testResult.set(null);
-        this.notify.failure("Can't send test delivery", err);
-      },
-    });
+    this.webhookIdWithTestDeliveryInFlight.set(hook.id);
+    this.service
+      .test(this.scope, hook.id)
+      .pipe(finalize(() => this.webhookIdWithTestDeliveryInFlight.set(null)))
+      .subscribe({
+        next: (delivery) => this.newestDeliveryByWebhookId.update((newest) => new Map(newest).set(hook.id, delivery)),
+        error: (err: unknown) => this.notify.failure("Can't send test delivery", err),
+      });
   }
 
   openDeliveries(hook: WebhookResponse): void {
