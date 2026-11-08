@@ -32,6 +32,7 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
+import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { ConfirmService } from '@shared/confirm';
 import { AccessService, WritableDirective } from '@shared/access';
 import { BuildOrigin, links } from '@shared/routing';
@@ -77,7 +78,7 @@ import { saveResponse } from '@shared/download';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, ExecJobListComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [

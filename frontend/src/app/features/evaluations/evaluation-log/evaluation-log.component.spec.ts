@@ -14,6 +14,7 @@ import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
+import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { EMPTY, NEVER, type Observable, Subject, map, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
@@ -1277,6 +1278,17 @@ describe('EvaluationLogComponent', () => {
       const { fixture, root } = render({ getEvaluation: () => throwError(() => new ApiError('Evaluation not found', 404)) });
       expect(root.textContent).toContain('Evaluation not found');
       expect(root.textContent).not.toContain('Failed to load evaluation');
+      fixture.destroy();
+    });
+
+    it('lists the exec jobs of an exec task in the evaluation section', () => {
+      TestBed.overrideProvider(ExecJobsService, { useValue: {
+        forEvaluation: () => of([{ id: 'job-1', entry_point: 'deploy', status: 'completed', nodes: 1, labels: [], devices: [] }]),
+      } });
+      const { fixture, root } = render({ getEvaluation: () => of({ ...EVALUATION, task_name: 'exec' }) });
+      fixture.componentInstance.selectEvaluationSection();
+      fixture.detectChanges();
+      expect(root.querySelector('app-exec-job-list')?.textContent).toContain('deploy');
       fixture.destroy();
     });
 
