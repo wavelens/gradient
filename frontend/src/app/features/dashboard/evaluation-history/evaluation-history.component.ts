@@ -6,12 +6,12 @@
 
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { EvaluationStatus, HistoryBar } from '@core/models';
+import { HistoryBar } from '@core/models';
+import { PHASE_COLOR, evaluationPhase } from '@shared/evaluation';
 import { formatDuration } from '@shared/text';
 import { TooltipDirective } from '@gradient/ui/ui';
 import { links } from '@shared/routing';
 
-const TONE: Partial<Record<EvaluationStatus, string>> = { Completed: 'ok', Failed: 'fail', Aborted: 'fail' };
 const MIN_HEIGHT_PCT = 15;
 
 @Component({
@@ -23,7 +23,8 @@ const MIN_HEIGHT_PCT = 15;
     <div class="history">
       @for (b of view(); track b.id) {
         <a
-          [class]="'bar bar--' + b.tone"
+          class="bar"
+          [style.background]="b.color"
           [style.height]="b.height"
           [routerLink]="links.task(project(), task(), b.id)"
           [grTooltip]="b.title"
@@ -45,7 +46,7 @@ export class EvaluationHistoryComponent {
     const max = Math.max(1, ...bars.map((b) => b.duration_ms ?? 0));
     return bars.map((b) => ({
       id: b.id,
-      tone: TONE[b.status] ?? 'run',
+      color: PHASE_COLOR[evaluationPhase(b.status)],
       height: `${Math.max(MIN_HEIGHT_PCT, Math.round(((b.duration_ms ?? max) / max) * 100))}%`,
       title: `${b.status} · ${formatDuration(b.duration_ms)}`,
     }));

@@ -114,24 +114,6 @@ ul {
   height: 8px;
   border-radius: 50%;
   background: var(--gr-text-muted);
-
-  &--Completed {
-    background: var(--gr-graph-success);
-  }
-
-  &--Failed,
-  &--Aborted {
-    background: var(--gr-graph-danger);
-  }
-
-  &--Queued,
-  &--Fetching,
-  &--EvaluatingFlake,
-  &--EvaluatingDerivation,
-  &--Building,
-  &--Waiting {
-    background: var(--gr-graph-running);
-  }
 }
 
 .error {

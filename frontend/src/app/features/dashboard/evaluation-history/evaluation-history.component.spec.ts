@@ -20,12 +20,18 @@ describe('EvaluationHistoryComponent', () => {
   it('draws one bar per evaluation, colored by status, tallest for the slowest', () => {
     TestBed.configureTestingModule({ imports: [EvaluationHistoryComponent], providers: [provideRouter([])] });
     const f = TestBed.createComponent(EvaluationHistoryComponent);
-    f.componentRef.setInput('bars', [bar('Completed', 1000), bar('Failed', 4000), bar('Building', 2000)]);
+    f.componentRef.setInput('bars', [bar('Completed', 1000), bar('Failed', 4000), bar('Building', 2000), bar('Waiting', 500), bar('Aborted', 500)]);
     f.componentRef.setInput('project', 'p');
     f.componentRef.setInput('task', 't');
     f.detectChanges();
     const rects = Array.from((f.nativeElement as HTMLElement).querySelectorAll('a.bar'));
-    expect(rects.map((r) => r.className)).toEqual(['bar bar--ok', 'bar bar--fail', 'bar bar--run']);
+    expect(rects.map((r) => (r as HTMLElement).style.background)).toEqual([
+      'var(--gr-graph-success)',
+      'var(--gr-graph-danger)',
+      'var(--gr-graph-running)',
+      'var(--gr-status-warning)',
+      'var(--gr-text-secondary)',
+    ]);
     expect((rects[1] as HTMLElement).style.height).toBe('100%');
     expect(rects[1].getAttribute('href')).toBe('/project/p/task/t?eval=Failed4000');
   });

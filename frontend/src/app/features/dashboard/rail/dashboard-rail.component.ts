@@ -10,10 +10,11 @@ import { RouterLink } from '@angular/router';
 import { filter } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
-import { Rail } from '@core/models';
+import { EvaluationStatus, Rail } from '@core/models';
 import { ButtonComponent, SkeletonComponent } from '@gradient/ui/ui';
 import { StarButtonComponent } from '@shared/ui';
 import { formatCount } from '@shared/text';
+import { PHASE_COLOR, evaluationPhase } from '@shared/evaluation';
 import { links } from '@shared/routing';
 
 @Component({
@@ -33,6 +34,10 @@ export class DashboardRailComponent implements OnInit {
   empty = output<boolean>();
 
   readonly count = formatCount;
+
+  evaluationStatusDotColor(status: EvaluationStatus | null | undefined): string | null {
+    return status ? PHASE_COLOR[evaluationPhase(status)] : null;
+  }
 
   constructor() {
     inject(StarsService).changed$

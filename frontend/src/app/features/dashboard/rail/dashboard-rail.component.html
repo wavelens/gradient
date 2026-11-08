@@ -13,7 +13,7 @@
           <li>
             <span class="row">
               <gr-star-button [target]="{ kind: 'project', project: p.name }" [(starred)]="p.starred" />
-              <span [class]="'dot dot--' + (p.status ?? 'none')"></span>
+              <span class="dot" [style.background]="evaluationStatusDotColor(p.status)"></span>
               <a class="n" [routerLink]="links.project(p.name)">{{ p.display_name }}</a>
               @if (!p.tasks) {
                 <span class="count">{{ p.task_count }} {{ p.task_count === 1 ? 'task' : 'tasks' }}</span>
@@ -24,7 +24,7 @@
                 @for (t of p.tasks; track t.name) {
                   <li>
                     <a class="row" [routerLink]="links.task(p.name, t.name)">
-                      <span [class]="'dot dot--' + (t.status ?? 'none')"></span>
+                      <span class="dot" [style.background]="evaluationStatusDotColor(t.status)"></span>
                       <span class="n">{{ t.name }}</span>
                     </a>
                   </li>
