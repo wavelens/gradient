@@ -47,12 +47,13 @@
               @if (waitingReason) {
                 <span class="waiting" [title]="waitingReason">{{ waitingReason }}</span>
               } @else {
+                @let failingEntryPointCountChange = t.entry_points?.total ? t.delta : null;
                 <span class="value">
-                  <b>{{ t.entry_points ? t.entry_points.ok + '/' + t.entry_points.total : '-' }}</b>
+                  <b>{{ t.entry_points?.total ? t.entry_points!.ok + '/' + t.entry_points!.total : '-' }}</b>
                   <small class="sr-only">entry points</small>
                 </span>
                 <span class="value" title="Failing entry points against the previous evaluation">
-                  <b [class.up]="(t.delta ?? 0) > 0" [class.down]="(t.delta ?? 0) < 0">{{ delta(t.delta) }}</b>
+                  <b [class.up]="(failingEntryPointCountChange ?? 0) > 0" [class.down]="(failingEntryPointCountChange ?? 0) < 0">{{ delta(failingEntryPointCountChange) }}</b>
                   <small class="sr-only">change</small>
                 </span>
                 <span class="value">

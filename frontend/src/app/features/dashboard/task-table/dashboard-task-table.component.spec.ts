@@ -76,6 +76,14 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelectorAll('gr-row .value').length).toBe(0);
   });
 
+  it('shows "-" for entry points and change when the evaluation failed before it produced entry points', async () => {
+    const evaluationError = { ...row('hosts'), entry_points: { ok: 0, failing: 0, total: 0 }, delta: 0 };
+    const { f, root } = render(null, () => of({ ...PAGE, tasks: [evaluationError] }));
+    await settle(f);
+    const values = Array.from(root.querySelectorAll('gr-row .value b')).map((b) => b.textContent?.trim());
+    expect(values.slice(0, 2)).toEqual(['-', '-']);
+  });
+
   it('leaves the filter to the server when the url has no filter and puts Starred first for a user with starred tasks', async () => {
     const { f, tasks, root } = render(null, () => of(STARRED));
     await settle(f);
