@@ -6,7 +6,7 @@
 
 import { DestroyRef, Signal, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Observable } from 'rxjs';
+import { EMPTY, Observable, tap } from 'rxjs';
 import { Paginated } from '@core/models';
 import { NotifyService } from '@core/services/notify.service';
 
@@ -18,6 +18,7 @@ export interface PagedList<T> {
   readonly error: Signal<unknown>;
   reload(): void;
   loadMore(): void;
+  refreshFirstPageSilently(): Observable<unknown>;
 }
 
 export function pagedList<T>(noun: string, fetch: (page: number) => Observable<Paginated<T[]>>): PagedList<T> {
@@ -71,6 +72,17 @@ export function pagedList<T>(noun: string, fetch: (page: number) => Observable<P
         notify.failure(`Couldn't load more ${noun}`, err);
         loadingMore.set(false);
       });
+    },
+    refreshFirstPageSilently: () => {
+      if (page !== 1 || fetching() || loadingMore() || error() !== null) return EMPTY;
+      const current = generation;
+      return fetch(1).pipe(
+        tap((result) => {
+          if (current !== generation) return;
+          items.set(result.items);
+          total.set(result.total);
+        }),
+      );
     },
   };
 }

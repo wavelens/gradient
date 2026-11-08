@@ -13,6 +13,8 @@ import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
 import { SubscriptionRequestItem } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
+import { tap } from 'rxjs';
 import {
   ButtonComponent,
   LoadStateComponent,
@@ -50,6 +52,14 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   deciding = signal<string | null>(null);
   requests = signal<SubscriptionRequestItem[]>([]);
   loadError = signal<unknown>(null);
+
+  constructor() {
+    runReloadIntervalWhileTabVisible(() =>
+      this.cachesService.getSubscriptionRequests(this.cacheName).pipe(tap((requests) => {
+        this.requests.set(requests);
+        this.loadError.set(null);
+      })));
+  }
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';

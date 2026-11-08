@@ -48,4 +48,20 @@ describe('pagedList', () => {
     expect(list.loadingMore()).toBe(false);
     expect(failure).toHaveBeenCalledWith("Couldn't load more numbers", expect.any(Error));
   });
+
+  it('swaps in a fresh first page without a spinner, but leaves a longer list alone', () => {
+    let first = page([1, 2], 1);
+    const fetch = vi.fn((n: number) => of(n === 1 ? first : page([3], 2)));
+    const { list } = setup(fetch);
+    list.reload();
+    first = page([9, 1], 1, 4);
+    list.refreshFirstPageSilently().subscribe();
+    expect(list.items()).toEqual([9, 1]);
+    expect(list.total()).toBe(4);
+
+    list.loadMore();
+    fetch.mockClear();
+    list.refreshFirstPageSilently().subscribe();
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });

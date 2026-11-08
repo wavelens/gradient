@@ -23,7 +23,8 @@ import {
 import { CreateCacheButtonComponent, CreateCacheDialogComponent } from '@shared/forms';
 import { Cache } from '@core/models';
 import { links } from '@shared/routing';
-import { pagedList } from '@shared/paging';
+import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
+import { EMPTY } from 'rxjs';
 
 @Component({
   selector: 'app-cache-list',
@@ -67,6 +68,10 @@ export class CacheListComponent implements OnInit {
 
   get showPublic(): boolean {
     return this.config.publicListing;
+  }
+
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => (this.authService.isAuthenticated() ? this.caches.refreshFirstPageSilently() : EMPTY));
   }
 
   ngOnInit(): void {

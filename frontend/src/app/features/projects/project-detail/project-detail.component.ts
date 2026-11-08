@@ -23,7 +23,7 @@ import { EvalStatusBadgeComponent, StarButtonComponent } from '@shared/ui';
 import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { links } from '@shared/routing';
-import { pagedList } from '@shared/paging';
+import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 
 @Component({
   selector: 'app-project-detail',
@@ -59,6 +59,10 @@ export class ProjectDetailComponent implements OnInit {
   projectName = '';
   breadcrumb = computed(() => this.crumbs.project(this.projectName));
   starTarget: StarTarget = { kind: 'project', project: '' };
+
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => this.tasks.refreshFirstPageSilently());
+  }
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';

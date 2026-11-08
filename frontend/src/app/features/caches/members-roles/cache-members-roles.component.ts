@@ -31,6 +31,8 @@ import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
+import { EMPTY, merge, tap } from 'rxjs';
 import { injectCacheAccessTo } from '@core/resolvers/inject-access';
 import {
   MemberItem,
@@ -120,6 +122,21 @@ export class CacheMembersRolesComponent implements OnInit {
     }
     return map;
   });
+
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => merge(
+      this.cachesService.getMembers(this.cacheName).pipe(tap((members) => {
+        this.members.set(members);
+        this.membersLoadError.set(null);
+      })),
+      this.access().canEdit
+        ? this.cachesService.getInvitations(this.cacheName).pipe(tap((invitations) => {
+          this.invitations.set(invitations);
+          this.invitationsLoadError.set(null);
+        }))
+        : EMPTY,
+    ));
+  }
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';

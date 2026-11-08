@@ -5,3 +5,4 @@
  */
 
 export * from './paged-list';
+export * from './refresh';
