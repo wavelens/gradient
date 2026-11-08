@@ -61,7 +61,7 @@ describe('DashboardTaskTableComponent', () => {
   it('reads the chip from the url and shows every count', async () => {
     const { f, tasks, root } = render('failing', () => of(PAGE));
     await settle(f);
-    expect(tasks).toHaveBeenCalledWith('failing', 1, 10, 30);
+    expect(tasks).toHaveBeenCalledWith('failing', 1, 10, 21);
     expect(chipLabels(root)).toEqual(['All 12', 'Failing 3']);
     expect(root.querySelector('gr-tab-switch button.is-selected')?.textContent).toContain('Failing');
   });
@@ -77,7 +77,7 @@ describe('DashboardTaskTableComponent', () => {
   it('leaves the filter to the server when the url has no filter and puts Starred first for a user with starred tasks', async () => {
     const { f, tasks, root } = render(null, () => of(STARRED));
     await settle(f);
-    expect(tasks).toHaveBeenCalledWith(null, 1, 10, 30);
+    expect(tasks).toHaveBeenCalledWith(null, 1, 10, 21);
     expect(chipLabels(root)).toEqual(['Starred 2', 'All 12', 'Failing 3']);
     expect(root.querySelector('gr-tab-switch button.is-selected')?.textContent).toContain('Starred');
   });
@@ -101,7 +101,7 @@ describe('DashboardTaskTableComponent', () => {
     const { f, tasks, params, root } = render(null, () => of(STARRED));
     params.next(convertToParamMap({ filter: 'starred' }));
     await settle(f);
-    expect(tasks).toHaveBeenLastCalledWith('starred', 1, 10, 30);
+    expect(tasks).toHaveBeenLastCalledWith('starred', 1, 10, 21);
     expect(root.querySelector('gr-tab-switch button.is-selected')?.textContent).toContain('Starred');
     params.next(convertToParamMap({ filter: 'starred', other: 'x' }));
     expect(tasks).toHaveBeenCalledTimes(2);
@@ -119,10 +119,13 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelector('gr-row-list')?.textContent).not.toContain('stale');
   });
 
-  it('labels entry points, change and speed without a header', () => {
-    const values = Array.from(render(null, () => of(PAGE)).root.querySelectorAll('gr-row .value')).map((c) => [
+  it('entrypoint, changes, and duration labels appear once in header row', () => {
+    const { root } = render(null, () => of(PAGE));
+    const header = Array.from(root.querySelectorAll('.columns span')).map((s) => s.textContent?.trim());
+    expect(header).toEqual(['', 'entry points', 'change', 'average time']);
+    const values = Array.from(root.querySelectorAll('gr-row .value')).map((c) => [
       c.querySelector('b')?.textContent?.trim(),
-      c.querySelector('small')?.textContent?.trim(),
+      c.querySelector('small.sr-only')?.textContent?.trim(),
     ]);
     expect(values).toEqual([['41/45', 'entry points'], ['+3', 'change'], ['14m 00s', 'average time']]);
   });
@@ -144,7 +147,7 @@ describe('DashboardTaskTableComponent', () => {
     const { f, tasks, root } = render(null, () => of(PAGE));
     (root.querySelector('.show-all') as HTMLElement).click();
     f.detectChanges();
-    expect(tasks).toHaveBeenLastCalledWith(null, 1, 25, 30);
+    expect(tasks).toHaveBeenLastCalledWith(null, 1, 25, 21);
     TestBed.resetTestingModule();
     expect(render(null, () => of({ ...PAGE, total: 1 })).root.querySelector('.show-all')).toBeNull();
   });

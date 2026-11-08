@@ -22,6 +22,12 @@
       </gr-message-banner>
     } @else if (data(); as d) {
       <gr-row-list>
+        <div class="columns" aria-hidden="true">
+          <span></span>
+          <span>entry points</span>
+          <span>change</span>
+          <span>average time</span>
+        </div>
         @for (t of d.tasks; track t.project + '/' + t.task) {
           <gr-row [link]="links.task(t.project, t.task)" [linkLabel]="t.project + ' / ' + t.task">
             @if (t.latest; as l) {
@@ -42,15 +48,15 @@
               <app-evaluation-history [bars]="t.history" [project]="t.project" [task]="t.task" />
               <span class="value">
                 <b>{{ t.entry_points ? t.entry_points.ok + '/' + t.entry_points.total : '-' }}</b>
-                <small>entry points</small>
+                <small class="sr-only">entry points</small>
               </span>
               <span class="value" title="Failing entry points against the previous evaluation">
                 <b [class.up]="(t.delta ?? 0) > 0" [class.down]="(t.delta ?? 0) < 0">{{ delta(t.delta) }}</b>
-                <small>change</small>
+                <small class="sr-only">change</small>
               </span>
               <span class="value">
                 <b>{{ duration(t.speed_ms) }}</b>
-                <small>average time</small>
+                <small class="sr-only">average time</small>
               </span>
             </div>
           </gr-row>

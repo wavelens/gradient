@@ -42,7 +42,7 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'failing', label: 'Failing' },
 ];
-const HISTORY_COLUMN_PX = 210;
+const HISTORY_COLUMN_PX = 150;
 const TOP = 10;
 const PAGE_SIZE = 25;
 const RESIZE_DEBOUNCE_MS = 150;

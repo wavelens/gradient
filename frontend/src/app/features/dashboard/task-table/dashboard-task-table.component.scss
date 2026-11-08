@@ -6,8 +6,24 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-gr-row-list {
+$task-table-value-cell-grid-template-columns: 24cqi 6rem 3.5rem 5rem;
+$linked-list-row-chevron-icon-width: 20px;
+
+.section {
   container-type: inline-size;
+}
+
+// The header and row cells match in position. The row border, padding, chevron and flex gap sit to the right of the value cells.
+.columns {
+  display: grid;
+  grid-template-columns: $task-table-value-cell-grid-template-columns;
+  justify-content: end;
+  justify-items: end;
+  gap: $spacing-md;
+  padding-right: calc(1px + #{$spacing-lg} + #{$linked-list-row-chevron-icon-width} + #{$spacing-md});
+  color: var(--gr-text-muted);
+  font-size: $font-size-xs;
+  margin-bottom: -$spacing-sm;
 }
 
 .name {
@@ -34,7 +50,7 @@ code {
 
 .cells {
   display: grid;
-  grid-template-columns: 34cqi 6rem 3.5rem 5rem;
+  grid-template-columns: $task-table-value-cell-grid-template-columns;
   align-items: center;
   gap: $spacing-md;
 }
@@ -56,11 +72,6 @@ code {
       color: var(--gr-status-success-text);
     }
   }
-
-  small {
-    color: var(--gr-text-muted);
-    font-size: $font-size-xs;
-  }
 }
 
 .show-all {
@@ -80,6 +91,7 @@ code {
     grid-template-columns: 22cqi;
   }
 
+  .columns,
   .value {
     display: none;
   }
