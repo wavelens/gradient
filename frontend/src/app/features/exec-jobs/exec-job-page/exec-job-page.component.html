@@ -24,7 +24,9 @@
       <div class="overview-block">
         <div class="status-row">
           <gr-status-badge [phase]="phase(job.status)" [label]="job.status" />
-          <span class="item-meta">{{ job.retries_left }} {{ job.retries_left === 1 ? 'retry' : 'retries' }} left</span>
+          @if (job.retries > 0) {
+            <span class="item-meta">{{ plural(job.retries_left, 'retry', 'retries') }} left</span>
+          }
         </div>
       </div>
 

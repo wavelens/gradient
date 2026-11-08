@@ -30,7 +30,7 @@ import { JobTimelineComponent } from '@features/board/job-detail/job-timeline.co
 import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
 import { LogViewerComponent, parseLineFragment, splitLogLines } from '@shared/log';
 import { WritableDirective, AccessService } from '@shared/access';
-import { clockTime, formatDuration, monthDay, serverTime } from '@shared/text';
+import { clockTime, formatDuration, monthDay, plural, serverTime } from '@shared/text';
 import { evaluationPhase, waitingAccessFrom } from '@shared/evaluation';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -175,6 +175,7 @@ export class ExecJobPageComponent implements OnInit {
   protected readonly device = deviceLabel;
   protected readonly guestSize = guestSizeLabel;
   protected readonly time = clockTime;
+  protected readonly plural = plural;
   protected readonly day = monthDay;
   protected readonly evaluationPhase = evaluationPhase;
   protected readonly phaseMarker = phaseMarker;
