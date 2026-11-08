@@ -43,9 +43,10 @@ fn task_facts_sql() -> String {
             WHERE e.task = t.id AND {NON_PR} AND e.created_at > now() - interval '14 days') a ON true \
         LEFT JOIN LATERAL (SELECT (avg(extract(epoch FROM (r.finished_at - r.fetch_started_at))) * 1000)::bigint AS speed_ms \
             FROM (SELECT e.fetch_started_at, e.finished_at FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
-                WHERE e.task = t.id AND {NON_PR} AND e.status IN ({term}) AND e.finished_at IS NOT NULL AND e.fetch_started_at IS NOT NULL \
+                WHERE e.task = t.id AND {NON_PR} AND e.status IN ({run_time}) AND e.finished_at IS NOT NULL AND e.fetch_started_at IS NOT NULL \
                 ORDER BY e.created_at DESC LIMIT 30) r) sp ON true",
         term = terminal(),
+        run_time = crate::sql::status::eval_in(&EvaluationStatus::RUN_TIME_AVERAGE_STATUSES),
     )
 }
 
