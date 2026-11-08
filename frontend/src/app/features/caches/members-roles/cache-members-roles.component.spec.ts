@@ -217,3 +217,30 @@ describe('CacheMembersRolesComponent - confirmed removals', () => {
     expect(notify.success).toHaveBeenCalledWith('Role deleted');
   });
 });
+
+describe('CacheMembersRolesComponent - busy rows', () => {
+  it('Disable role dropdowns and Remove buttons on all member rows during a save of one role change.', async () => {
+    const fixture = setup(true);
+    getMembers.mockReturnValue(of([{ id: 'alice', name: 'Admin' }, { id: 'dave', name: 'Admin' }]));
+    const service = TestBed.inject(CachesService) as unknown as { updateMember: () => unknown };
+    service.updateMember = vi.fn(() => new Subject());
+    await settled(fixture);
+    fixture.componentInstance.updateMemberRole('dave', 'Admin');
+    await settled(fixture);
+    const controls = Array.from((fixture.nativeElement as HTMLElement).querySelector('gr-row-list')!.querySelectorAll('button'));
+    expect(controls.length).toBe(4);
+    expect(controls.every((control) => control.disabled)).toBe(true);
+  });
+
+  it('Keep the role button disabled until role deletion is complete.', async () => {
+    const fixture = setup(true);
+    const pending = new Subject<boolean>();
+    deleteRole.mockReturnValue(pending);
+    await settled(fixture);
+    fixture.componentInstance.deleteRole({ id: 'r2', name: 'releaser', builtin: false } as RoleResponse_CacheRoleOwner);
+    expect(fixture.componentInstance.deletingRole()).toBe(true);
+    pending.next(true);
+    pending.complete();
+    expect(fixture.componentInstance.deletingRole()).toBe(false);
+  });
+});

@@ -34,7 +34,7 @@ import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.com
 import { WritableDirective, ManagedDisableDirective, requestIfCacheMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
-import { EMPTY, merge, tap } from 'rxjs';
+import { EMPTY, finalize, merge, tap } from 'rxjs';
 import { injectCacheAccessData } from '@core/resolvers/inject-access';
 import { links } from '@shared/routing';
 import {
@@ -103,6 +103,7 @@ export class CacheMembersRolesComponent implements OnInit {
   addingMember = signal(false);
   pendingMemberRoleSelection = signal<{ user: string; role: string } | null>(null);
   savingRole = signal(false);
+  deletingRole = signal(false);
 
   members = signal<MemberItem[]>([]);
   invitations = signal<PendingInvitationItem[]>([]);
@@ -367,7 +368,10 @@ export class CacheMembersRolesComponent implements OnInit {
         consequence: `Complete removal of ${role.name} from the cache.`,
         confirmLabel: 'Delete',
         failure: 'Failed to delete role.',
-        action: () => this.cachesService.deleteRole(this.cacheName, role.id),
+        action: () => {
+          this.deletingRole.set(true);
+          return this.cachesService.deleteRole(this.cacheName, role.id).pipe(finalize(() => this.deletingRole.set(false)));
+        },
       })
       .subscribe(() => {
         this.notify.success('Role deleted');
