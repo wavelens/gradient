@@ -53,6 +53,9 @@ svg * {
 :host([data-phase='waiting']) .ring,
 :host([data-phase='aborted']) .ring { opacity: 0.55; }
 
+.track { opacity: 0; }
+:host([data-phase='running']) .track { opacity: 0.25; }
+
 .glyph { stroke-dasharray: 1; stroke-dashoffset: 1; opacity: 0; }
 :host([data-phase='success']) .check,
 :host([data-phase='failure']) .cross,
@@ -65,6 +68,7 @@ svg * {
   svg { transition: color 200ms; }
 
   .ring { transition: stroke-dasharray 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms; }
+  .track { transition: opacity 200ms; }
   .glyph { transition: stroke-dashoffset 120ms ease-in, opacity 120ms; }
 }
 

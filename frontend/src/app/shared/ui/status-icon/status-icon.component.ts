@@ -55,6 +55,7 @@ function motionAllowed(): boolean {
       </span>
       <span class="glyphs">
         <svg viewBox="0 0 24 24">
+          <circle class="track" cx="12" cy="12" r="9" />
           <path class="glyph check" pathLength="1" d="M8 12.4l2.8 2.8 5.2-5.6" />
           <path class="glyph cross" pathLength="1" d="M9.2 9.2l5.6 5.6" />
           <path class="glyph cross second" pathLength="1" d="M14.8 9.2l-5.6 5.6" />
