@@ -36,7 +36,7 @@ describe('DependencyGraphComponent live updates', () => {
             queryParamMap: convertToParamMap(query),
           },
         } },
-        { provide: EvaluationsService, useValue: { getBuildGraph } },
+        { provide: EvaluationsService, useValue: { getBuildGraph, getBuild: () => of({ id: 'b1', evaluation: 'e9' }) } },
         { provide: LiveService, useValue: { connect: () => frames } },
       ],
     });
@@ -109,6 +109,18 @@ describe('DependencyGraphComponent live updates', () => {
     cmp.onMouseup();
     card.dispatchEvent(new MouseEvent('click'));
     expect(navigate).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+  });
+
+  it('opens the log from a focused node with Enter, also when the link carries no evaluation', () => {
+    const { fixture } = setup({ root: 'root', nodes: [node('root', 'FailedPermanent')], edges: [] });
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const card = (fixture.nativeElement as HTMLElement).querySelector('svg g g') as SVGGElement;
+
+    expect(card.getAttribute('tabindex')).toBe('0');
+    expect(card.getAttribute('aria-label')).toBe('root, Failed');
+    card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(String(navigate.mock.calls[0][0])).toBe('/project/proj/log/e9?build=root');
     fixture.destroy();
   });
 });

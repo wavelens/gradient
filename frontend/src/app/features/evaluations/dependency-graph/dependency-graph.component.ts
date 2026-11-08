@@ -77,6 +77,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   projectName = '';
   buildId = '';
   private from: BuildOrigin = {};
+  private rootBuildEvaluationId?: string | null;
   breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from, this.buildId, 'Dependency graph'));
   back = computed(() => buildOriginLink(this.projectName, this.from, this.buildId));
   rootId = signal('');
@@ -123,6 +124,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.buildId = this.route.snapshot.paramMap.get('buildId') || '';
     this.from = readBuildOrigin(this.route.snapshot.queryParamMap);
+    this.rootBuildEvaluationId = this.from.evaluation;
     this.loadGraph();
   }
 
@@ -145,6 +147,12 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
         this.rootName.set(root?.name ?? '');
         this.rootStatus.set(root?.status ?? '');
 
+        if (!this.rootBuildEvaluationId) {
+          this.evalService.getBuild(this.buildId).subscribe({
+            next: (build) => (this.rootBuildEvaluationId = build.evaluation),
+            error: () => {},
+          });
+        }
         this.initLayout(graph);
         this.loading.set(false);
         this.cdr.detectChanges();
@@ -354,15 +362,29 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       this.resetHighlight();
       this.zone.run(() => this.hoveredNode.set(null));
     });
-    // Click navigates to build log
-    g.addEventListener('click', () => {
-      const evaluation = this.from.evaluation;
-      if (evaluation && node.build && !this.didDrag) {
-        this.zone.run(() => this.router.navigateByUrl(links.evaluationLog(this.projectName, evaluation, { build: node.build })));
-      }
-    });
+    if (node.build) {
+      g.setAttribute('tabindex', '0');
+      g.setAttribute('role', 'link');
+      g.setAttribute('aria-label', `${node.name}, ${this.statusLabel(node.status)}`);
+      g.addEventListener('click', () => {
+        if (!this.didDrag) this.navigateToEvaluationLogForNode(node);
+      });
+      g.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        this.navigateToEvaluationLogForNode(node);
+      });
+      g.addEventListener('focus', () => this.highlightNode(node.id));
+      g.addEventListener('blur', () => this.resetHighlight());
+    }
 
     return g;
+  }
+
+  private navigateToEvaluationLogForNode(node: LayoutNode): void {
+    const evaluation = this.rootBuildEvaluationId;
+    if (!evaluation || !node.build) return;
+    this.zone.run(() => this.router.navigateByUrl(links.evaluationLog(this.projectName, evaluation, { build: node.build })));
   }
 
   private updateSvgPositions(): void {
