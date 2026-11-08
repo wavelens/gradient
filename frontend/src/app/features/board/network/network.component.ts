@@ -8,7 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { BoardService } from '@core/services/board.service';
 import { AuthService } from '@core/services/auth.service';
-import { LoadStateComponent, TableComponent } from '@gradient/ui/ui';
+import { LoadMoreComponent, LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { workerAxisLabel } from '../worker-label';
@@ -20,7 +20,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
 @Component({
   selector: 'app-board-network',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, TableComponent, LoadStateComponent],
+  imports: [CommonModule, MetricChartComponent, TableComponent, LoadStateComponent, LoadMoreComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading network stats..." errorTitle="Failed to load network" (retry)="retry()">
@@ -67,7 +67,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
             </tr>
           </thead>
           <tbody>
-            @for (r of sortedHttp(); track r.method + r.route) {
+            @for (r of visibleSortedHttpRows(); track r.method + r.route) {
               <tr>
                 <td>{{ r.method }}</td>
                 <td class="mono">{{ r.route }}</td>
@@ -80,6 +80,8 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
             }
           </tbody>
         </gr-table>
+        <gr-load-more [shown]="visibleSortedHttpRows().length" [total]="sortedHttp().length"
+                      (more)="httpRouteRowDisplayCount.update((n) => n + 10)" />
       }
     </gr-load-state>
   `,
@@ -119,6 +121,9 @@ export class BoardNetworkComponent implements OnInit {
       return cmp * dir;
     });
   });
+
+  httpRouteRowDisplayCount = signal(10);
+  visibleSortedHttpRows = computed(() => this.sortedHttp().slice(0, this.httpRouteRowDisplayCount()));
 
   sortBy(key: HttpSortKey): void {
     if (this.sortKey() === key) {

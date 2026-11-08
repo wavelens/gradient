@@ -19,7 +19,7 @@ The **Job Board** in the header shows scheduler and worker activity, both live a
 | Workers | Fleet size, load by capability, system and feature, slot use per worker | Reveal a missing worker kind. Capability and system load: **Now** or the average over **24h**, **7d**, **30d** |
 | Cache | Stored size, traffic, growth, latency per upstream cache. The 10 busiest caches by bytes sent in the last 24 h, limited to public caches and caches visible to the viewer | Switch traffic between **Total** and **External**. **External**: only NARs sent over the HTTP binary cache and the `/proto` cache session |
 | Storage | NAR storage latency and errors per operation (file or S3), writer lane fill and send stalls, NAR delivery queue and failures. All charts share one time axis across the whole window, minute resolution up to 6 h. Superusers only | Choose the time window |
-| Network | NAR egress, worker upload, download and disk speed, HTTP latency per route | |
+| Network | NAR egress, worker upload, download and disk speed, HTTP latency per route (top 10 busiest routes first, **Load more** for the rest) | |
 | Jobs | Costliest builds by wall time, peak RAM, CPU time and disk I/O | Choose the time window |
 | Evals | Costliest evaluations by time, peak memory, thunks, function calls and allocations | Choose the time window |
 | System Health | Server runtime, metric pipeline lag, route stats, and supervised background loops that restarted or failed. Superusers only | **Run Deep GC**, **Enable Draining** |
