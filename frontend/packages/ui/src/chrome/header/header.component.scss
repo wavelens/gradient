@@ -52,6 +52,7 @@
     color: var(--gr-text-secondary);
     transition: $transition-fast;
     border-radius: $border-radius-sm;
+    white-space: nowrap;
 
     &:hover {
       color: var(--gr-text-primary);
@@ -75,10 +76,13 @@
 }
 
 .header-search {
+  display: flex;
+  min-width: 0;
   order: 1;
 }
 
 .header-account {
+  min-width: 0;
   display: flex;
   order: 2;
   align-items: center;

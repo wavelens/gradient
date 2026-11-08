@@ -18,6 +18,7 @@
 }
 
 .header-user {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: $spacing-md;
@@ -32,6 +33,7 @@
   }
 
   .user-menu-trigger {
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: $spacing-xs;
@@ -51,6 +53,7 @@
   }
 
   .user-name {
+    min-width: 4ch;
     max-width: 16ch;
     overflow: hidden;
     text-overflow: ellipsis;
