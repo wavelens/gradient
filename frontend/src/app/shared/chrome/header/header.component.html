@@ -15,11 +15,12 @@
 
   <div slot="actions" class="header-user">
     @if (authService.user(); as user) {
-      <button #userTrigger type="button" class="user-menu-trigger" aria-haspopup="menu" [attr.aria-expanded]="userMenu()?.isOpen() ?? false" (click)="toggleUserMenu(userTrigger)"
-              [attr.aria-label]="invites.count() ? user.name + ', ' + invites.count() + ' pending invitations' : null">
+      <button #userTrigger type="button" class="user-menu-trigger" aria-haspopup="menu" [attr.aria-expanded]="userMenu()?.isOpen() ?? false" (click)="toggleUserMenu(userTrigger)">
         <gr-icon name="account_circle" />
         <span class="user-name" [title]="user.name">{{ user.name }}</span>
-        @if (invites.count(); as count) { <gr-badge severity="info">{{ count }}</gr-badge> }
+        @if (invites.count(); as count) {
+          <gr-badge severity="info">{{ count }}<span class="sr-only"> {{ count === 1 ? 'pending invitation' : 'pending invitations' }}</span></gr-badge>
+        }
         <gr-icon name="expand_more" size="sm" />
       </button>
       @defer (on idle; on interaction(userTrigger)) {

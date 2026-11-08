@@ -14,6 +14,7 @@ import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
 import { RELEASE_NOTES_SOURCE } from '@core/whats-new/whats-new.service';
+import { PendingInvitesService } from '@core/services/pending-invites.service';
 
 const logout = vi.fn(() => ({ subscribe: () => undefined }));
 
@@ -90,6 +91,13 @@ describe('AppHeaderComponent - user menu', () => {
       expect.stringContaining('My Invites'),
       expect.stringContaining('Log out'),
     ]);
+  });
+
+  it('names the menu button by its visible text plus the pending invitation count', () => {
+    TestBed.overrideProvider(PendingInvitesService, { useValue: { count: () => 3 } });
+    const trigger = (setup(false, true).nativeElement as HTMLElement).querySelector('.user-menu-trigger') as HTMLElement;
+    expect(trigger.hasAttribute('aria-label')).toBe(false);
+    expect(trigger.querySelector('gr-badge')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('3 pending invitations');
   });
 
   it('logs out from the dropdown', async () => {
