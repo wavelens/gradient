@@ -130,7 +130,8 @@
             [control]="password"
             [errorMessages]="{
               required: 'Password is required',
-              minlength: 'Password must be at least 8 characters'
+              minlength: 'Password must be at least 8 characters',
+              maxlength: 'Keep the password to 128 characters or fewer.'
             }"
           >
             <gr-password-input
@@ -157,6 +158,18 @@
                   <div class="requirement" [class.met]="strength.hasSpecialChar">
                     <gr-icon [name]="strength.hasSpecialChar ? 'check' : 'close'" size="sm" />
                     Special character ({{ specialCharacters }})
+                  </div>
+                  <div class="requirement" [class.met]="strength.passwordDoesNotContainPasswordWord">
+                    <gr-icon [name]="strength.passwordDoesNotContainPasswordWord ? 'check' : 'close'" size="sm" />
+                    No "password" substring
+                  </div>
+                  <div class="requirement" [class.met]="!strength.hasFourConsecutiveAscendingCharacters">
+                    <gr-icon [name]="strength.hasFourConsecutiveAscendingCharacters ? 'close' : 'check'" size="sm" />
+                    No runs of 4 consecutive characters (abcd, 1234)
+                  </div>
+                  <div class="requirement" [class.met]="strength.passwordHasNoCharacterRepeatedThreeTimesInARow">
+                    <gr-icon [name]="strength.passwordHasNoCharacterRepeatedThreeTimesInARow ? 'check' : 'close'" size="sm" />
+                    Don't use the same character 3 times in a row.
                   </div>
                 </div>
               }

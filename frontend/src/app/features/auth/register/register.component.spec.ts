@@ -90,6 +90,18 @@ describe('RegisterComponent - password rule', () => {
     password.setValue('Zebra7kq"');
     expect(password.errors?.['passwordStrength']?.hasSpecialChar).toBe(false);
   });
+
+  it('refuses the sequences, repeats and the word the server refuses', () => {
+    const { fixture } = setup(() => of('Username is available'));
+    const password = fixture.componentInstance.password!;
+    const strength = (value: string) => {
+      password.setValue(value);
+      return password.errors?.['passwordStrength'];
+    };
+    expect(strength('Abcdefg1!x')?.hasFourConsecutiveAscendingCharacters).toBe(true);
+    expect(strength('Zebra7kqqq!')?.passwordHasNoCharacterRepeatedThreeTimesInARow).toBe(false);
+    expect(strength('MyPassword7!')?.passwordDoesNotContainPasswordWord).toBe(false);
+  });
 });
 
 describe('RegisterComponent - submit', () => {

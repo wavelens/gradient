@@ -72,6 +72,7 @@ export class RegisterComponent {
           [
             Validators.required,
             Validators.minLength(8),
+            Validators.maxLength(128),
             this.passwordValidator,
           ],
         ],
@@ -90,8 +91,18 @@ export class RegisterComponent {
     const hasLowerCase = /\p{Ll}/u.test(value);
     const hasNumeric = /[0-9]/.test(value);
     const hasSpecialChar = [...value].some((c) => PASSWORD_SPECIAL_CHARACTERS.includes(c));
+    const codes = [...value].map((c) => c.codePointAt(0)! & 0xff);
+    const hasFourConsecutiveAscendingCharacters = codes.some((code, i) =>
+      i + 3 < codes.length && codes[i + 1] === code + 1 && codes[i + 2] === code + 2 && codes[i + 3] === code + 3);
+    const characters = [...value];
+    const passwordHasNoCharacterRepeatedThreeTimesInARow = !characters.some((c, i) =>
+      i + 2 < characters.length && characters[i + 1] === c && characters[i + 2] === c);
+    const passwordDoesNotContainPasswordWord = !value.toLowerCase().includes('password');
 
-    const valid = hasUpperCase && hasLowerCase && hasNumeric && hasSpecialChar;
+    const valid = hasUpperCase && hasLowerCase && hasNumeric && hasSpecialChar
+      && !hasFourConsecutiveAscendingCharacters
+      && passwordHasNoCharacterRepeatedThreeTimesInARow
+      && passwordDoesNotContainPasswordWord;
 
     if (!valid) {
       return {
@@ -100,6 +111,9 @@ export class RegisterComponent {
           hasLowerCase,
           hasNumeric,
           hasSpecialChar,
+          hasFourConsecutiveAscendingCharacters,
+          passwordHasNoCharacterRepeatedThreeTimesInARow,
+          passwordDoesNotContainPasswordWord,
         },
       };
     }
