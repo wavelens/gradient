@@ -8,18 +8,21 @@
 
 .gr-toast {
   position: fixed;
-  top: calc(var(--gr-header-height, 4.5rem) + #{$spacing-md});
-  right: $spacing-md;
+  bottom: $spacing-md;
+  left: 50%;
   z-index: $z-tooltip;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: $spacing-sm;
+  max-width: calc(100vw - 2 * #{$spacing-md});
+  transform: translateX(-50%);
 
   &:empty { display: none; }
 }
 
 @keyframes gr-toast-enter {
-  from { opacity: 0; transform: translateX(16px); }
+  from { opacity: 0; transform: translateY(16px); }
   to   { opacity: 1; transform: none; }
 }
 
@@ -29,7 +32,7 @@
   display: flex;
   align-items: flex-start;
   gap: $spacing-sm;
-  min-width: 18rem;
+  min-width: min(18rem, 100%);
   max-width: 26rem;
   padding: $spacing-sm $spacing-md;
   background: var(--gr-surface-raised);
