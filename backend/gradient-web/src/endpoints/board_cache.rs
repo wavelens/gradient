@@ -121,12 +121,7 @@ pub async fn get_board_cache(
         &scheduler,
     )
     .await?;
-    let visible = board_cache_condition(
-        &state.web_db,
-        state.config.server.public_listing,
-        &maybe_user,
-    )
-    .await?;
+    let visible = board_cache_condition(state.config.server.public_listing, &maybe_user);
     let stats = cache_stats(
         &state.web_db,
         &obs,
@@ -182,12 +177,7 @@ pub async fn cache_live_ws(
         admission: state.memory.upload_admission.clone(),
         scheduler,
         scope: MetricsScope::resolve(&state.web_db, &maybe_user).await?,
-        visible: board_cache_condition(
-            &state.web_db,
-            state.config.server.public_listing,
-            &maybe_user,
-        )
-        .await?,
+        visible: board_cache_condition(state.config.server.public_listing, &maybe_user),
         window: window_clause(&params),
         traffic,
     };

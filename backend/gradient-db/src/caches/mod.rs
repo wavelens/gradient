@@ -14,7 +14,7 @@ pub mod usage;
 
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::LockType;
+use sea_orm::sea_query::{LockType, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect, Select,
@@ -105,8 +105,24 @@ pub fn public_or(visible: Option<Condition>) -> Condition {
     }
 }
 
-pub fn created_by_or_among(creator: UserId, caches: Vec<CacheId>) -> Condition {
+pub fn visible_to_user(user: UserId) -> Condition {
+    let member_of = Query::select()
+        .column(CCacheAccess::Cache)
+        .from(gradient_entity::cache_access::Entity)
+        .and_where(CCacheAccess::User.eq(user))
+        .to_owned();
+    let reachable_projects = Query::select()
+        .column(CProjectAccess::Project)
+        .from(gradient_entity::project_access::Entity)
+        .and_where(CProjectAccess::User.eq(user))
+        .to_owned();
+    let subscribed_by_reachable_project = Query::select()
+        .column(CProjectCache::Cache)
+        .from(gradient_entity::project_cache::Entity)
+        .and_where(CProjectCache::Project.in_subquery(reachable_projects))
+        .to_owned();
     Condition::any()
-        .add(CCache::CreatedBy.eq(creator))
-        .add(CCache::Id.is_in(caches))
+        .add(CCache::CreatedBy.eq(user))
+        .add(CCache::Id.in_subquery(member_of))
+        .add(CCache::Id.in_subquery(subscribed_by_reachable_project))
 }

@@ -141,7 +141,7 @@ type PaginatedCache = Paginated<MCache>;
     operation_id = "listCaches",
     tag = "caches",
     summary = "List caches",
-    description = "Returns a paginated list of binary caches the current user owns or can access through a project subscription.",
+    description = "Get a paginated list of binary caches for the current user. Include caches that belong to the user, caches shared with the user as a member, and caches available through a project subscription. Sort the list by display name.",
     params(PaginationParams),
     responses((status = OK, description = "Paginated cache list", body = PaginatedCache), WebError)
 )]
@@ -150,7 +150,7 @@ pub async fn get(
     Extension(user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<MCache>>>> {
-    let condition = crate::access::visible_cache_condition(&state.web_db, user.id).await?;
+    let condition = gradient_db::caches::visible_to_user(user.id);
     let listing = crate::helpers::paginate(
         gradient_db::caches::ordered_by_name(condition),
         &state.web_db,

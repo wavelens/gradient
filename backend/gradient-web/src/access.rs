@@ -274,40 +274,13 @@ pub async fn load_cache(
     Ok(cache)
 }
 
-pub async fn visible_cache_condition(db: &WebDb, user_id: UserId) -> WebResult<Condition> {
-    let project_ids: Vec<ProjectId> = gradient_db::projects::access_of_user(db, user_id)
-        .await?
-        .into_iter()
-        .map(|m| m.project)
-        .collect();
-
-    let project_cache_ids: Vec<CacheId> = if project_ids.is_empty() {
-        Vec::new()
-    } else {
-        gradient_db::projects::caches::subscriptions_of_projects(db, project_ids)
-            .await?
-            .into_iter()
-            .map(|oc| oc.cache)
-            .collect()
-    };
-
-    Ok(gradient_db::caches::created_by_or_among(
-        user_id,
-        project_cache_ids,
-    ))
-}
-
-pub async fn board_cache_condition(
-    db: &WebDb,
-    public_listing: bool,
-    user: &Option<MUser>,
-) -> WebResult<Condition> {
+pub fn board_cache_condition(public_listing: bool, user: &Option<MUser>) -> Condition {
     let visible = match user {
-        Some(user) if user.superuser => return Ok(Condition::all()),
-        Some(user) => Some(visible_cache_condition(db, user.id).await?),
+        Some(user) if user.superuser => return Condition::all(),
+        Some(user) => Some(gradient_db::caches::visible_to_user(user.id)),
         None => None,
     };
-    Ok(listed_or(public_listing, visible))
+    listed_or(public_listing, visible)
 }
 
 fn listed_or(public_listing: bool, visible: Option<Condition>) -> Condition {
@@ -1682,43 +1655,20 @@ mod tests {
     }
 
     #[test]
-    fn visible_cache_condition_includes_owned_and_subscribed() {
+    fn cache_visibility_filter_covers_created_direct_and_project_caches() {
         use sea_orm::QueryTrait;
-        run(async {
-            let user = user_fixture();
-            let db = mock_db()
-                .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
-                .append_query_results([vec![project_cache_fixture()]])
-                .into_connection();
-            let state = make_state(db);
-            let cond = visible_cache_condition(&state.web_db, user.id)
-                .await
-                .expect("condition builds");
-            let stmt = ECache::find().filter(cond).build(DatabaseBackend::Postgres);
-            assert!(stmt.sql.contains("created_by"), "sql = {}", stmt.sql);
-            let values = format!("{:?}", stmt.values);
-            assert!(
-                values.contains("a0000000-0000-0000-0000-000000000020"),
-                "subscribed cache id must feed the filter: {values}"
-            );
-        });
-    }
-
-    #[test]
-    fn visible_cache_condition_owner_only_without_memberships() {
-        use sea_orm::QueryTrait;
-        run(async {
-            let user = user_fixture();
-            let db = mock_db()
-                .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
-                .into_connection();
-            let state = make_state(db);
-            let cond = visible_cache_condition(&state.web_db, user.id)
-                .await
-                .expect("condition builds");
-            let stmt = ECache::find().filter(cond).build(DatabaseBackend::Postgres);
-            assert!(stmt.sql.contains("created_by"), "sql = {}", stmt.sql);
-        });
+        let sql = ECache::find()
+            .filter(gradient_db::caches::visible_to_user(UserId::now_v7()))
+            .build(DatabaseBackend::Postgres)
+            .to_string();
+        for name in [
+            "created_by",
+            "cache_access",
+            "project_access",
+            "project_cache",
+        ] {
+            assert!(sql.contains(name), "{name} missing from sql = {sql}");
+        }
     }
 
     fn listed_sql(public_listing: bool, visible: Option<Condition>) -> String {
@@ -1733,7 +1683,7 @@ mod tests {
 
     #[test]
     fn listing_on_adds_public_caches_to_the_visible_ones() {
-        let visible = gradient_db::caches::created_by_or_among(UserId::now_v7(), vec![]);
+        let visible = gradient_db::caches::visible_to_user(UserId::now_v7());
         let sql = listed_sql(true, Some(visible));
         assert!(sql.contains("\"public\" = TRUE"), "sql = {sql}");
         assert!(sql.contains("created_by"), "sql = {sql}");
@@ -1741,7 +1691,7 @@ mod tests {
 
     #[test]
     fn listing_off_keeps_only_the_visible_caches() {
-        let visible = gradient_db::caches::created_by_or_among(UserId::now_v7(), vec![]);
+        let visible = gradient_db::caches::visible_to_user(UserId::now_v7());
         let sql = listed_sql(false, Some(visible));
         assert!(!sql.contains("\"public\""), "sql = {sql}");
         assert!(sql.contains("created_by"), "sql = {sql}");
