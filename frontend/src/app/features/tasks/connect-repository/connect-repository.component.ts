@@ -127,14 +127,12 @@ export class ConnectRepositoryComponent implements OnInit {
   }
 
   repositoryChanged(url: string): void {
+    const previous = repositoryName(this.form.repository);
     this.form.repository = url;
-    if (!this.form.display_name && !this.form.name) {
-      const name = repositoryName(url);
-      if (name) {
-        this.form.display_name = name;
-        this.form.name = slugify(name);
-      }
-    }
+    if (this.form.display_name !== previous || this.form.name !== slugify(previous)) return;
+    const name = repositoryName(url);
+    this.form.display_name = name;
+    this.form.name = slugify(name);
   }
 
   createTask(): void {

@@ -64,6 +64,17 @@ describe('ConnectRepositoryComponent', () => {
     expect(comp.step()).toBe('access');
   });
 
+  it('follows later URL edits until the user names the task', () => {
+    const comp = render({}, {}).componentInstance;
+    comp.repositoryChanged('file:///etc');
+    comp.repositoryChanged('git://gradient.local/states');
+    expect(comp.form.name).toBe('states');
+    comp.form.display_name = 'My States';
+    comp.repositoryChanged('git://gradient.local/other');
+    expect(comp.form.display_name).toBe('My States');
+    expect(comp.form.name).toBe('states');
+  });
+
   it('keeps the form and shows the reason when creating fails', () => {
     const fixture = render({}, { createTask: () => throwError(() => new ApiError('Task name taken', 409)) });
     const comp = fixture.componentInstance;
