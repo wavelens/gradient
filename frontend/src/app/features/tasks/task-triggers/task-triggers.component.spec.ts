@@ -43,6 +43,7 @@ const trigger = {
   active: true,
   config: { type: 'polling', interval_secs: 300, branch: null },
   last_fired_at: null,
+  created_at: '2026-01-01T00:00:00',
   integration: null,
 };
 
@@ -190,6 +191,15 @@ describe('TaskTriggersComponent - default trigger', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [trigger, { ...trigger, id: 't9', active: false }]);
     const badges = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.trigger-meta gr-badge')).map((b) => b.textContent?.trim());
     expect(badges).toEqual(['Inactive']);
+  });
+
+  it('lists triggers oldest first, so Make Default never moves a row', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [
+      { ...trigger, id: 't3', created_at: '2026-03-01T00:00:00', is_default: true },
+      { ...trigger, id: 't2' },
+      { ...trigger, id: 't1' },
+    ]);
+    expect(fixture.componentInstance.triggers().map((t) => t.id)).toEqual(['t1', 't2', 't3']);
   });
 
   it('offers Make Default on every other trigger', () => {

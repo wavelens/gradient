@@ -196,7 +196,7 @@ export class TaskTriggersComponent implements OnInit {
     this.loadError.set(null);
     requestIfProjectMember(this.taskAccessData()?.task, () => this.triggersService.list(this.projectName, this.taskName)).subscribe({
       next: (list) => {
-        this.triggers.set(list);
+        this.triggers.set([...list].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)));
         this.loading.set(false);
         this.openRequestedEdit(list);
       },
