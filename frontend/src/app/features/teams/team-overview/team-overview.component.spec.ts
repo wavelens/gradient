@@ -100,6 +100,17 @@ describe('TeamOverviewComponent', () => {
     expect(root.textContent).toContain('Settings, Members and roles');
   });
 
+  it('shows a failed grants request as an error with retry, not as no projects', () => {
+    const { fixture, root } = setup();
+    const teams = TestBed.inject(TeamsService) as unknown as { grants: () => Observable<unknown> };
+    teams.grants = () => throwError(() => new ApiError('Database unavailable', 500));
+    fixture.componentInstance.loadGrants();
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Failed to load projects and caches');
+    expect(root.textContent).toContain('Database unavailable');
+    expect(root.textContent).not.toContain('No projects or caches');
+  });
+
   it('reports a failed approval as a toast and keeps the page usable', () => {
     const failure = new ApiError('Project no longer exists', 404);
     const { fixture, notify, root } = setup('admin', vi.fn().mockReturnValue(throwError(() => failure)));

@@ -30,7 +30,7 @@ import {
   BadgeComponent,
   ButtonComponent,
   DialogComponent,
-  EmptyStateComponent,
+  LoadStateComponent,
   FormFieldComponent,
   RowComponent,
   RowListComponent,
@@ -56,7 +56,7 @@ interface GrantForm {
     BadgeComponent,
     ButtonComponent,
     DialogComponent,
-    EmptyStateComponent,
+    LoadStateComponent,
     FormFieldComponent,
     RowComponent,
     RowListComponent,
@@ -83,6 +83,8 @@ export class TeamGrantsComponent implements OnInit {
   part = computed<GrantedPart>(() => (this.kind() === 'cache' ? 'users' : this.grants()));
   roleOptions = computed(() => this.roles().map((role) => ({ label: role, value: role })));
   allGrants = signal<TeamGrantEntry[]>([]);
+  loading = signal(true);
+  loadError = signal<unknown>(null);
   shownGrants = computed(() => this.allGrants().filter((grant) => grant[this.part()]));
   myTeams = signal<TeamSummary[]>([]);
   suggestions = signal<string[]>([]);
@@ -106,9 +108,17 @@ export class TeamGrantsComponent implements OnInit {
 
   load(): void {
     const grants = this.kind() === 'project' ? this.teams.projectGrants(this.name()) : this.teams.cacheGrants(this.name());
+    this.loadError.set(null);
+    this.loading.set(this.allGrants().length === 0);
     grants.subscribe({
-      next: (items) => this.allGrants.set(items),
-      error: () => this.allGrants.set([]),
+      next: (items) => {
+        this.allGrants.set(items);
+        this.loading.set(false);
+      },
+      error: (error: unknown) => {
+        this.loadError.set(error);
+        this.loading.set(false);
+      },
     });
   }
 

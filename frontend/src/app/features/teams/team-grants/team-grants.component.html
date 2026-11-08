@@ -8,7 +8,10 @@
   @if (canEdit()) {
     <button slot="actions" grButton severity="secondary" label="Grant Team" icon="add" (click)="openGrant()"></button>
   }
-  @if (shownGrants().length > 0) {
+  <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="shownGrants().length === 0"
+    loadingMessage="Loading teams..." errorTitle="Failed to load teams" (retry)="load()"
+    emptyIcon="groups" emptyTitle="No teams"
+    [emptyMessage]="part() === 'workers' ? 'Grant a team to run this project\'s builds on the team\'s workers.' : 'Grant a team to give its members a role here.'">
     <gr-row-list>
       @for (grant of shownGrants(); track grant.team) {
         <gr-row icon="groups" [link]="teamLink(grant.team)" linkLabel="Open team">
@@ -27,11 +30,7 @@
         </gr-row>
       }
     </gr-row-list>
-  } @else if (part() === 'workers') {
-    <gr-empty-state icon="groups" title="No teams" message="Grant a team to run this project's builds on the team's workers." />
-  } @else {
-    <gr-empty-state icon="groups" title="No teams" message="Grant a team to give its members a role here." />
-  }
+  </gr-load-state>
 </gr-settings-section>
 
 <gr-dialog header="Grant Team" [(visible)]="showGrant" width="420px" [error]="grantError()" [busy]="granting()">

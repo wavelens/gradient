@@ -72,6 +72,16 @@ function grantOf(team: string): TeamGrantEntry {
 }
 
 describe('TeamGrantsComponent', () => {
+  it('shows a failed grants request as an error with retry, not as no teams', () => {
+    const { fixture, component, service, text } = setup('project', 'users');
+    service.projectGrants = () => throwError(() => new ApiError('Database unavailable', 500));
+    component.load();
+    fixture.detectChanges();
+    expect(text()).toContain('Failed to load teams');
+    expect(text()).toContain('Try Again');
+    expect(text()).not.toContain('No teams');
+  });
+
   describe('for users', () => {
     it('lists only the grants that include users, with their role', () => {
       const { text } = setup('project', 'users');

@@ -16,7 +16,7 @@ import { ConfirmService } from '@shared/confirm';
 import { canManageTeam } from '@shared/access';
 import {
   ButtonComponent,
-  EmptyStateComponent,
+  LoadStateComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -32,7 +32,7 @@ import { links } from '@shared/routing';
   imports: [
     RouterModule,
     ButtonComponent,
-    EmptyStateComponent,
+    LoadStateComponent,
     TeamMembersComponent,
     TeamWorkersComponent,
     PageLayoutComponent,
@@ -58,6 +58,8 @@ export class TeamOverviewComponent implements OnInit {
   breadcrumb = computed(() => this.crumbs.team(this.teamName));
   team = linkedSignal<TeamResponse | null>(() => this.resolvedTeam() ?? null);
   grants = signal<TeamGrants>({ projects: [], caches: [] });
+  grantsLoading = signal(true);
+  grantsLoadError = signal<unknown>(null);
   requests = signal<TeamRequestItem[]>([]);
   busy = signal<string | null>(null);
 
@@ -112,8 +114,20 @@ export class TeamOverviewComponent implements OnInit {
     this.loadGrants();
   }
 
-  private loadGrants(): void {
-    this.teams.grants(this.teamName).subscribe({ next: (grants) => this.grants.set(grants) });
+  loadGrants(): void {
+    const grants = this.grants();
+    this.grantsLoadError.set(null);
+    this.grantsLoading.set(grants.projects.length + grants.caches.length === 0);
+    this.teams.grants(this.teamName).subscribe({
+      next: (loaded) => {
+        this.grants.set(loaded);
+        this.grantsLoading.set(false);
+      },
+      error: (error: unknown) => {
+        this.grantsLoadError.set(error);
+        this.grantsLoading.set(false);
+      },
+    });
   }
 
   private loadRequests(): void {
