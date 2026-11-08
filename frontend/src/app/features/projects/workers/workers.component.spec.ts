@@ -489,7 +489,7 @@ describe('WorkersComponent - load errors', () => {
   });
 
   it('shows a visitor outside the project no access and asks the server nothing', async () => {
-    const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [], caches: [], gradientCi: false, role: null });
+    const fixture = setup({ access: { managed: false, canEdit: false, canTrigger: false }, workers: [], caches: [], gradientCi: false, permissions: [], role: null });
     const service = TestBed.inject(WorkersService) as unknown as { getWorkers: ReturnType<typeof vi.fn> };
     const projects = TestBed.inject(ProjectsService) as unknown as MockedProjects;
     await settled(fixture);

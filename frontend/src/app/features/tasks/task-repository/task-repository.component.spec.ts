@@ -12,6 +12,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ApiError } from '@core/services/api.service';
 import { TaskRepositoryComponent } from './task-repository.component';
+import { taskAccessData } from '@core/resolvers/access-route.testing';
 
 const state: TaskRepositoryResponse = {
   repository: 'ssh://git@forgejo.example.com/acme/app.git',
@@ -27,12 +28,17 @@ const state: TaskRepositoryResponse = {
   can_manage_integrations: true,
 };
 
-function render(getRepository: () => unknown) {
+function render(getRepository: () => unknown, member = true) {
+  const data = taskAccessData({ managed: false, canEdit: member, canTrigger: member });
+  if (!member) data.taskAccess.task.permissions = [];
   TestBed.configureTestingModule({
     imports: [TaskRepositoryComponent],
     providers: [
       provideRouter([]),
-      { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'app' }) } } },
+      {
+        provide: ActivatedRoute,
+        useValue: { snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'app' }) }, parent: { data: of(data) } },
+      },
       { provide: TasksService, useValue: { getRepository, getTaskInfo: () => of({ display_name: 'App' }) } },
       { provide: IntegrationsService, useValue: { listIntegrationDeliveries: () => of([]) } },
     ],
@@ -55,5 +61,13 @@ describe('TaskRepositoryComponent', () => {
   it('shows a load error with a retry instead of an empty page', () => {
     const el = render(() => throwError(() => new ApiError('boom', 500))).nativeElement as HTMLElement;
     expect(el.textContent).toContain('Failed to load repository');
+  });
+
+  it('shows a visitor outside the project no access and asks the server nothing', () => {
+    const getRepository = vi.fn(() => of(state));
+    const el = render(getRepository, false).nativeElement as HTMLElement;
+    expect(getRepository).not.toHaveBeenCalled();
+    expect(el.textContent).toContain('Only the members of this project can view this.');
+    expect(el.textContent).not.toContain('Try Again');
   });
 });

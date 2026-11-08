@@ -14,6 +14,8 @@ import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { RepositoryAccessComponent } from './repository-access.component';
 import { RepositoryEventsComponent } from './repository-events.component';
 import { repositoryHost } from '@shared/git';
+import { requestIfProjectMember } from '@shared/access';
+import { injectTaskAccessData } from '@core/resolvers/inject-access';
 
 @Component({
   selector: 'app-task-repository',
@@ -38,6 +40,7 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
   private route = inject(ActivatedRoute);
   private tasks = inject(TasksService);
   private crumbs = inject(BreadcrumbsService);
+  private taskAccess = injectTaskAccessData();
 
   private events = viewChild(RepositoryEventsComponent);
 
@@ -65,7 +68,7 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
   load(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    this.tasks.getRepository(this.projectName, this.taskName).subscribe({
+    requestIfProjectMember(this.taskAccess()?.task, () => this.tasks.getRepository(this.projectName, this.taskName)).subscribe({
       next: (state) => {
         this.state.set(state);
         this.loading.set(false);

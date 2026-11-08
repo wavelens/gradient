@@ -115,7 +115,7 @@ describe('MembersRolesComponent - access gating', () => {
   });
 
   it('lists the members to a visitor outside the project but shows the roles as no access', async () => {
-    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, undefined, null);
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [], null);
     await settled(fixture);
     const root = fixture.nativeElement as HTMLElement;
     expect(getMembers).toHaveBeenCalled();

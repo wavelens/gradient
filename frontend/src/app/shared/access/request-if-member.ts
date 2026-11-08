@@ -9,10 +9,11 @@ import type { CachePermission, CacheResponse, ProjectResponse } from '@core/mode
 import { createMissingPermissionLoadStateError, createNoAccessLoadStateError } from './missing-permission';
 
 export function requestIfProjectMember<T>(
-  project: Pick<ProjectResponse, 'role'> | null | undefined,
+  projectOrTask: Partial<Pick<ProjectResponse, 'role'>> & Pick<ProjectResponse, 'permissions'> | null | undefined,
   request: () => Observable<T>,
 ): Observable<T> {
-  return project?.role != null ? request() : throwError(() => createNoAccessLoadStateError('project', 'members'));
+  const member = projectOrTask?.role != null || (projectOrTask?.permissions.length ?? 0) > 0;
+  return member ? request() : throwError(() => createNoAccessLoadStateError('project', 'members'));
 }
 
 export function requestIfCacheMember<T>(
