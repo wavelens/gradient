@@ -276,7 +276,7 @@
         } @else {
           <gr-log-viewer [lines]="logLines()" [serverLog]="serverLog()" [marker]="rateLimitMarker" [shortcuts]="false">
             <div class="log-header">
-              <code class="log-header-title">{{ selectedBuild()?.name }}</code>
+              <code class="log-header-title" [title]="selectedBuild()?.name ?? ''">{{ buildDisplayName(selectedBuild()?.name ?? '') }}</code>
               @if (logLineCount() > 0) {
                 <span class="log-line-count">{{ logLineCount() }} {{ logLineCount() === 1 ? 'line' : 'lines' }}</span>
               }

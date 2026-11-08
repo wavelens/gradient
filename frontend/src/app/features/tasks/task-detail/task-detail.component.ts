@@ -561,12 +561,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     }
   }
 
-  getDerivationName(path: string): string {
-    const parts = path.split('/').pop() ?? path;
-    const match = parts.match(/^[a-z0-9]+-(.+?)(?:\.drv)?$/);
-    return match ? match[1] : parts;
-  }
-
   searchTerm = signal('');
   private searchOpened = signal(false);
   private listSpansPages = signal(false);

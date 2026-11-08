@@ -21,7 +21,7 @@ import {
   RowListComponent,
 } from '@gradient/ui/ui';
 import { environment } from '@environments/environment';
-import { formatBytes } from '@shared/text';
+import { formatBytes, packageNameFromDerivationPath } from '@shared/text';
 import { BuildProduct } from '@core/models';
 
 @Component({
@@ -42,6 +42,7 @@ export class BuildArtefactsComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   artefacts = signal<BuildProduct[]>([]);
+  packageName = signal('');
   private downloadToken = signal<string | null>(null);
 
   projectName = '';
@@ -54,6 +55,10 @@ export class BuildArtefactsComponent implements OnInit {
     this.buildId     = this.route.snapshot.paramMap.get('buildId') || '';
     this.from = readBuildOrigin(this.route.snapshot.queryParamMap);
     this.loadArtefacts();
+    this.evalService.getBuild(this.buildId).subscribe({
+      next: (build) => this.packageName.set(packageNameFromDerivationPath(build.derivation_path)),
+      error: () => this.packageName.set(this.buildId.slice(0, 8)),
+    });
     if (this.authService.isAuthenticated()) {
       this.projectsService.getProject(this.projectName).subscribe({
         next: (project) => {
@@ -89,10 +94,6 @@ export class BuildArtefactsComponent implements OnInit {
   }
 
   readonly formatBytes = formatBytes;
-
-  buildShortId(): string {
-    return this.buildId.slice(0, 8);
-  }
 
   /** True when the artefact should open inline in a browser tab. */
   isHtml(p: BuildProduct): boolean {

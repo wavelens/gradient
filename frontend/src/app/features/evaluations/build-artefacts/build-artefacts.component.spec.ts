@@ -13,13 +13,13 @@ import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { BuildArtefactsComponent } from './build-artefacts.component';
 
-function render(getBuildDownloads: () => unknown) {
+function render(getBuildDownloads: () => unknown, getBuild: () => unknown = () => of({ derivation_path: '/nix/store/abc-hello-2.12.drv' })) {
   TestBed.configureTestingModule({
     imports: [BuildArtefactsComponent],
     providers: [
       provideRouter([]),
       { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ project: 'p', buildId: 'b1' }), queryParamMap: convertToParamMap({}) } } },
-      { provide: EvaluationsService, useValue: { getBuildDownloads } },
+      { provide: EvaluationsService, useValue: { getBuildDownloads, getBuild } },
       { provide: AuthService, useValue: { isAuthenticated: () => false } },
       { provide: ProjectsService, useValue: {} },
       { provide: BreadcrumbsService, useValue: { buildPage: () => [] } },
@@ -49,5 +49,10 @@ describe('BuildArtefactsComponent', () => {
     const { root } = render(() => of([]));
     expect(root.textContent).toContain('No artefacts available for this build.');
     expect(root.textContent).toContain('hydra-build-products');
+  });
+
+  it('names the package instead of the build id', () => {
+    const { root } = render(() => of([]));
+    expect(root.textContent).toContain('hello-2.12');
   });
 });

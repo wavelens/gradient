@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="form" title="Build Artefacts" [subtitle]="buildShortId()" [breadcrumb]="breadcrumb()">
+<gr-page-layout width="form" title="Build Artefacts" [subtitle]="packageName()" [breadcrumb]="breadcrumb()">
 
   <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="artefacts().length === 0"
                  loadingMessage="Loading artefacts..." errorTitle="Failed to load artefacts" (retry)="loadArtefacts()">

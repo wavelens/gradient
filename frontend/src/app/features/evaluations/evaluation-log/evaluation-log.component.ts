@@ -35,7 +35,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { AccessService, WritableDirective } from '@shared/access';
 import { BuildOrigin, links } from '@shared/routing';
-import { CurrentTimeSignal, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { CurrentTimeSignal, formatDuration, packageNameFromDerivationPath, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
   BuildProgress,
@@ -1241,11 +1241,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return (path.split('/').pop() ?? path).replace(/\.drv$/, '');
   }
 
-  buildDisplayName(path: string): string {
-    // <hash>-name-version.drv -> name-version (strip leading hash, drop .drv)
-    const filename = path.split('/').pop() ?? path;
-    return filename.replace(/^[^-]+-/, '').replace(/\.drv$/, '');
-  }
+  readonly buildDisplayName = packageNameFromDerivationPath;
 
   getBuildElapsed(build: BuildItem): string {
     if (build.status !== 'Completed' && build.status !== 'Building') return '';
