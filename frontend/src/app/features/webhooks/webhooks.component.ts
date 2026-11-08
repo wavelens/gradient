@@ -241,6 +241,7 @@ export class WebhooksComponent implements OnInit {
       this.service.create(this.scope, body).subscribe({
         next: (res) => {
           this.revealedSecret.set(res.secret);
+          this.notify.success('Event notification saved');
           done();
         },
         error: failed,
@@ -273,7 +274,10 @@ export class WebhooksComponent implements OnInit {
         failure: "Couldn't rotate event notification secret",
         action: () => this.service.rotateSecret(this.scope, hook.id),
       })
-      .subscribe((res) => this.revealedSecret.set(res.secret));
+      .subscribe((res) => {
+        this.revealedSecret.set(res.secret);
+        this.notify.success('Event notification secret rotated');
+      });
   }
 
   testing(hook: WebhookResponse): boolean {

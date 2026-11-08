@@ -112,11 +112,12 @@ describe('WebhooksComponent', () => {
   });
 
   it('shows the secret once after create', () => {
-    const { component } = setup({ webhookScope: 'project' }, { project: 'p' });
+    const { component, notify } = setup({ webhookScope: 'project' }, { project: 'p' });
     component.name.set('ci');
     component.url.set('https://example.com/hook');
     component.save();
     expect(component.revealedSecret()).toBe('whs_abc');
+    expect(notify.success).toHaveBeenCalledWith('Event notification saved');
     component.revealedSecret.set(null);
     expect(component.webhooks()[0]).not.toHaveProperty('secret');
   });
