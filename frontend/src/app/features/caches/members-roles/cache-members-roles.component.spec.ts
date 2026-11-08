@@ -126,6 +126,14 @@ describe('CacheMembersRolesComponent', () => {
     expect(findByText(fixture.nativeElement, 'new role')).toBeNull();
   });
 
+  it('names the role of each member as text instead of a select under read-only access', async () => {
+    const fixture = setup();
+    await settled(fixture);
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.querySelector('gr-row gr-select')).toBeNull();
+    expect(element.querySelector('.member-role')?.textContent?.trim()).toBe('Admin');
+  });
+
   it('shows members and roles as no access to a visitor without a cache role and asks the server nothing', async () => {
     const fixture = setup(false, []);
     await settled(fixture);

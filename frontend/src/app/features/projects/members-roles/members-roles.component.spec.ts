@@ -123,6 +123,22 @@ describe('MembersRolesComponent - access gating', () => {
     expect(root.textContent).toContain('Only the members of this project can view this.');
     expect(root.textContent).not.toContain('Failed to load roles');
   });
+
+  it('names the role of each member as text instead of a select under read-only access', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [], null);
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('gr-row gr-select')).toBeNull();
+    expect(root.querySelector('.member-role')?.textContent?.trim()).toBe('Admin');
+  });
+
+  it('offers the role select to members who can manage members', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('gr-row gr-select')).not.toBeNull();
+    expect(root.querySelector('.member-role')).toBeNull();
+  });
 });
 
 describe('MembersRolesComponent - permissions', () => {

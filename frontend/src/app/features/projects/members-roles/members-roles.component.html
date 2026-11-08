@@ -35,7 +35,11 @@
             <gr-row icon="person">
               <span class="mono">{{ member.id }}</span>
               <div slot="actions">
+                @if (!access().canEdit) {
+                  <gr-badge severity="neutral" class="member-role">{{ member.name }}</gr-badge>
+                }
                 <gr-select
+                  *appWritable="access()"
                   [ngModel]="pending?.user === member.id ? pending.role : member.name"
                   [options]="roles()"
                   optionLabel="name"
