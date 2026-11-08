@@ -10,6 +10,7 @@
       <gr-breadcrumb [trail]="breadcrumb()" />
       <div class="title-row">
         <h1>{{ proj.display_name }}</h1>
+        @if (liveConnectionOpen() !== null) { <gr-live-status [connected]="!!liveConnectionOpen()" /> }
       </div>
     </div>
     <div class="head-actions phone-icon-buttons">

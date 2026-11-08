@@ -163,9 +163,11 @@ function setup(
   frames: Subject<LiveEvent>;
   notify: { success: ReturnType<typeof vi.fn>; failure: ReturnType<typeof vi.fn> };
   confirm: ReturnType<typeof vi.fn>;
+  liveConnectionChange: { fn?: (open: boolean) => void };
 } {
   const query = new BehaviorSubject(convertToParamMap(initialQuery));
   const frames = new Subject<LiveEvent>();
+  const liveConnectionChange: { fn?: (open: boolean) => void } = {};
   const notify = { success: vi.fn(), failure: vi.fn() };
   const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   const tasksService = makeTasksService(access, serviceOverrides);
@@ -191,14 +193,17 @@ function setup(
         user: () => (visitor === 'anonymous' ? null : { superuser: visitor === 'superuser' }),
       } },
       { provide: StarsService, useValue: { starred: vi.fn(() => of(true)), set: () => of(true) } },
-      { provide: LiveService, useValue: { connect: () => frames } },
+      { provide: LiveService, useValue: { connect: (_path: string, onChange?: (open: boolean) => void) => {
+        liveConnectionChange.fn = onChange;
+        return frames;
+      } } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
     ],
   });
   const fixture = TestBed.createComponent(TaskDetailComponent);
   fixture.detectChanges();
-  return { fixture, tasksService, evaluationsService, query, frames, notify, confirm };
+  return { fixture, tasksService, evaluationsService, query, frames, notify, confirm, liveConnectionChange };
 }
 
 const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
@@ -251,6 +256,21 @@ describe('TaskDetailComponent - loading', () => {
     expect(root.querySelector('gr-loading-spinner')).toBeNull();
     expect(root.querySelector('h1')?.textContent).toContain('Demo');
     expect(root.querySelector('.eval-card')).not.toBeNull();
+  });
+
+  it('reloads the task after the live socket reconnects and shows the connection state', () => {
+    const getTask = vi.fn(() => of(resolvedTask(access, {})));
+    const { fixture, liveConnectionChange } = setup(access, { getTask });
+    const root = fixture.nativeElement as HTMLElement;
+    liveConnectionChange.fn?.(true);
+    liveConnectionChange.fn?.(false);
+    fixture.detectChanges();
+    expect(root.querySelector('gr-live-status')?.textContent).toContain('Reconnecting');
+    const callsBeforeReconnect = getTask.mock.calls.length;
+    liveConnectionChange.fn?.(true);
+    fixture.detectChanges();
+    expect(getTask).toHaveBeenCalledTimes(callsBeforeReconnect + 1);
+    expect(root.querySelector('gr-live-status')?.textContent).toContain('Live');
   });
 
   it('holds the project crumb with a placeholder until the project name arrives', () => {

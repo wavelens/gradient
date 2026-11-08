@@ -11,7 +11,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { finalize, Observable, Subject, Subscription } from 'rxjs';
 import { auditTime, debounceTime, filter, share } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { LiveEvent, LiveService } from '@core/services/live.service';
+import { LiveEvent, LiveService, createResyncOnLiveSocketReconnectCallback } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -37,7 +37,7 @@ import {
   SkeletonComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, inputFetchRows, SegmentedBarComponent, StarButtonComponent, StatusIconComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, inputFetchRows, LiveStatusComponent, SegmentedBarComponent, StarButtonComponent, StatusIconComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
 import { saveResponse } from '@shared/download';
 import { AccessService, WritableDirective, canOpenTaskSettings } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
@@ -67,7 +67,7 @@ import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, build
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, StarButtonComponent,
     ExecJobListComponent, WaitingNoticeComponent, ScrollRegionDirective,
-    RepositoryFetchBannerComponent,
+    RepositoryFetchBannerComponent, LiveStatusComponent,
   ],
   templateUrl: './task-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -120,6 +120,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   starting = signal(false);
   starred = signal(false);
   aborting = signal(false);
+  liveConnectionOpen = signal<boolean | null>(null);
   private tick = inject(CurrentTimeSignal).currentTimeMilliseconds;
 
   projectName = '';
@@ -442,7 +443,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   private startLiveUpdates(): void {
     const frames = this.live
-      .connect<LiveEvent>(`/tasks/${this.projectName}/${this.taskName}/live`)
+      .connect<LiveEvent>(
+        `/tasks/${this.projectName}/${this.taskName}/live`,
+        createResyncOnLiveSocketReconnectCallback(() => this.loadTaskData(), (open) => this.liveConnectionOpen.set(open)),
+      )
       .pipe(share());
     this.liveSub = frames
       .pipe(filter(e => e.event === 'evaluation.activity'))

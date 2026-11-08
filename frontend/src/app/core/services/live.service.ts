@@ -25,6 +25,19 @@ export type LiveEvent = EventEnvelope<{
 
 const MAX_BACKOFF_MS = 15000;
 
+/// Build the `onLiveSocketConnectedChange` callback for `LiveService.connect` (or `BoardLiveService.connect`). It calls `resync` each time the socket opens again after a drop, never on the first open, so the page refetches what it missed while offline. It passes every change on to `onConnectedChange`, which can drive `gr-live-status`.
+export function createResyncOnLiveSocketReconnectCallback(
+  resync: () => void,
+  onConnectedChange?: (connected: boolean) => void,
+): (connected: boolean) => void {
+  let dropped = false;
+  return (connected) => {
+    if (connected && dropped) resync();
+    dropped = !connected;
+    onConnectedChange?.(connected);
+  };
+}
+
 @Injectable({ providedIn: 'root' })
 export class LiveService {
   /// Subscribe to a live channel. The path is relative to the API root, e.g. `/evals/{id}/live`. Frames arrive as parsed JSON. The socket can reconnect with capped exponential backoff, so an open page can survive short disconnects. Only the caller can complete the observable through unsubscribe. Connection events pass true to `onLiveSocketConnectedChange` on every open and false on every disconnect. A page can set a stale flag and refetch missed content after reconnect.

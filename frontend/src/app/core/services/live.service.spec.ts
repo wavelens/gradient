@@ -6,7 +6,7 @@
 
 import { Subscription } from 'rxjs';
 import { vi } from 'vitest';
-import { LiveService } from './live.service';
+import { LiveService, createResyncOnLiveSocketReconnectCallback } from './live.service';
 import { environment } from '@environments/environment';
 
 class FakeWebSocket {
@@ -89,6 +89,21 @@ describe('LiveService', () => {
     FakeWebSocket.instances[1].onopen?.();
     expect(states).toEqual([true, false, true]);
     vi.useRealTimers();
+  });
+
+  it('resyncs on every reopen after a drop, never on the first open', () => {
+    const resync = vi.fn();
+    const states: boolean[] = [];
+    const onChange = createResyncOnLiveSocketReconnectCallback(resync, (connected) => states.push(connected));
+    onChange(true);
+    expect(resync).not.toHaveBeenCalled();
+    onChange(false);
+    onChange(false);
+    onChange(true);
+    onChange(false);
+    onChange(true);
+    expect(resync).toHaveBeenCalledTimes(2);
+    expect(states).toEqual([true, false, false, true, false, true]);
   });
 
   it('closes the socket on unsubscribe', () => {
