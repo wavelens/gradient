@@ -27,7 +27,7 @@
   } @else if (fetchOk(); as fetch) {
     <p class="text-secondary" role="status" data-testid="fetch-ok">Gradient can fetch the repository. Verified {{ fetch.checked_at | relativeTime }}</p>
   } @else if (!state().fetch) {
-    <p class="text-secondary" role="status">No access test yet. Add the deploy key, then test access.</p>
+    <p class="text-secondary" role="status">No access test yet.@if (state().deploy_key) { Add the deploy key, then test access.}</p>
   }
   @if (testError(); as error) {
     <p class="text-secondary" role="alert">{{ error }}</p>
@@ -41,7 +41,7 @@
       <p class="text-secondary" data-testid="github-deploy-key">GitHub can accept each deploy key for only one repository. Add the key to an account for a machine user or connect GitHub through a GitHub App to cover more repositories.</p>
     }
   } @else {
-    <p class="text-secondary">Public HTTPS repositories need no key.</p>
+    <p class="text-secondary">Repositories over HTTPS or git:// need no key.</p>
   }
 
   @if (state().can_edit) {

@@ -222,7 +222,6 @@ export class RepositoryEventsComponent {
         next: (connected) => {
           this.connecting.set(false);
           this.showConnect.set(false);
-          this.notify.success('Git host connected');
           const secret = connected.inbound.generated_secret;
           this.createdSecret.set(secret ? { url: connected.inbound.webhook_url ?? '', secret } : null);
           const revealSecret = () => this.showSecret.set(!!secret);
@@ -234,7 +233,7 @@ export class RepositoryEventsComponent {
             pullRequest: true,
             outbound: connected.outbound?.id ?? base.outbound,
             reportStatus: !!connected.outbound || base.reportStatus,
-          });
+          }, 'Git host connected');
           if (connected.outbound && token) {
             this.install(connected.inbound.id, connected.outbound.id, revealSecret);
             if (this.state().deploy_key) this.installDeployKey(connected.outbound.id);
@@ -284,7 +283,7 @@ export class RepositoryEventsComponent {
     this.persist(this.form());
   }
 
-  private persist(form: EventsForm): void {
+  private persist(form: EventsForm, successMessage = 'Repository settings saved'): void {
     this.saving.set(true);
     this.saveError.set(null);
     const body: UpdateTaskRepositoryRequest = {
@@ -301,7 +300,7 @@ export class RepositoryEventsComponent {
     this.tasks.updateRepository(this.project(), this.task(), body).subscribe({
       next: (state) => {
         this.saving.set(false);
-        this.notify.success('Repository settings saved');
+        this.notify.success(successMessage);
         this.saved.emit(state);
       },
       error: (error: unknown) => {
