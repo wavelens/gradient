@@ -62,6 +62,13 @@ describe('findEntityName', () => {
     expect(find(tree)).toBe('Wavelens');
   });
 
+  it('returns the team display_name from resolved data', () => {
+    const tree = snap({}, [snap({ teamAccess: { team: { display_name: 'Research' } } })]);
+    expect(find(tree)).toBe('Research');
+    expect(composeTitle(find(tree), 'Team')).toBe('Research · Gradient');
+    expect(composeTitle(find(tree), 'Team Settings')).toBe('Research · Team Settings · Gradient');
+  });
+
   it('returns undefined when no entity data is in the tree', () => {
     expect(find(snap())).toBeUndefined();
   });
