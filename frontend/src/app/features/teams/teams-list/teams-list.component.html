@@ -26,7 +26,7 @@
       @for (team of items(); track team.name) {
         <gr-row icon="groups" [link]="links.team(team.name)" linkLabel="Open team">
           {{ team.display_name }}
-          <gr-badge severity="info">{{ team.role }}</gr-badge>
+          <gr-badge>{{ team.role }}</gr-badge>
           <span slot="meta">{{ team.name }}</span>
         </gr-row>
       }

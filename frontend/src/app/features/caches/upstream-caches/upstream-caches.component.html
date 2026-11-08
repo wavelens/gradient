@@ -36,8 +36,8 @@
         @for (u of upstreamCaches(); track u.id) {
           <gr-row icon="cloud_download">
             {{ u.display_name }}
-            <gr-badge [severity]="u.kind === 'internal' ? 'info' : 'neutral'">{{ kindLabel(u) }}</gr-badge>
-            <gr-badge [severity]="modeSeverity(u.mode)">{{ modeLabel(u.mode) }}</gr-badge>
+            <gr-badge>{{ kindLabel(u) }}</gr-badge>
+            <gr-badge>{{ modeLabel(u.mode) }}</gr-badge>
             @if (u.http1_only) {
               <gr-badge severity="neutral">HTTP/1.1</gr-badge>
             }

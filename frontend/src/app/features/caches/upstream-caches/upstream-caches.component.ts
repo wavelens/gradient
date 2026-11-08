@@ -12,7 +12,6 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import {
   BadgeComponent,
-  BadgeSeverity,
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
@@ -393,13 +392,6 @@ export class UpstreamCachesComponent implements OnInit {
   }
 
   /// Writing is the consequential mode, so it reads warmer than reading.
-  modeSeverity(mode: CacheSubscriptionMode): BadgeSeverity {
-    switch (mode) {
-      case 'ReadOnly': return 'neutral';
-      case 'WriteOnly': return 'warning';
-      default: return 'info';
-    }
-  }
 
   protected readonly modeLabel = subscriptionModeLabel;
   protected readonly links = links;

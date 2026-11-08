@@ -130,7 +130,7 @@
             </div>
             <div slot="actions" class="phone-icon-buttons">
               @if (worker.team) {
-                <gr-badge severity="info">Team {{ worker.team }}</gr-badge>
+                <gr-badge>Team {{ worker.team }}</gr-badge>
               }
               @if (worker.live?.draining) {
                 <gr-badge severity="warning">Draining</gr-badge>

@@ -26,7 +26,7 @@
           <span slot="meta">{{ member.name }}</span>
           <div slot="actions">
             @if (sourceLabels[member.source]; as label) {
-              <gr-badge severity="info">{{ label }}</gr-badge>
+              <gr-badge>{{ label }}</gr-badge>
             }
             @if (canEdit() && member.source !== 'state') {
               <gr-select [ngModel]="pending?.user === member.user ? pending.role : member.role" [options]="roles" optionLabel="label" optionValue="value"
