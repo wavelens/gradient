@@ -53,7 +53,7 @@ pub struct DispatchedJobSummary {
     pub project: Uuid,
     pub worker_id: String,
     pub worker_name: Option<String>,
-    pub score: f64,
+    pub score: Option<f64>,
     pub dispatched_at: String,
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
@@ -68,6 +68,7 @@ impl DispatchedJobSummary {
         worker_name: Option<String>,
         subjects: &JobSubjects,
         clusters: &HashMap<DispatchedJobId, ClusterJobId>,
+        scope: &MetricsScope,
     ) -> Self {
         let subject = subject_of(&job);
         Self {
@@ -77,7 +78,7 @@ impl DispatchedJobSummary {
             project: job.project.into(),
             worker_id: job.worker_id,
             worker_name,
-            score: job.score,
+            score: scope.is_all().then_some(job.score),
             dispatched_at: job.dispatched_at.and_utc().to_rfc3339(),
             build_id: subject.and_then(JobSubject::shared_build).map(Into::into),
             evaluation_id: job.evaluation_id.into(),
@@ -247,7 +248,7 @@ pub async fn get_dispatched_jobs(
         .into_iter()
         .map(|j| {
             let worker_name = worker_names.name(&j.worker_id);
-            DispatchedJobSummary::new(j, worker_name, &subjects, &clusters)
+            DispatchedJobSummary::new(j, worker_name, &subjects, &clusters, &scope)
         })
         .collect();
 
@@ -534,7 +535,6 @@ pub struct DispatchedJobDetail {
     pub project_display_name: String,
     pub worker_id: String,
     pub worker_name: Option<String>,
-    pub score: f64,
     pub queued_at: String,
     pub dispatched_at: String,
     pub finished_at: Option<String>,
@@ -552,13 +552,19 @@ pub struct DispatchedJobDetail {
     pub exec_attempt: Option<ExecJobAttemptView>,
     pub cluster_job: Option<Uuid>,
     pub pname: Option<String>,
+    pub assigned_scheduler_reasoning: Option<AssignedJobSchedulerReasoning>,
+    pub previous_attempts: Vec<AttemptSummary>,
+    pub passed_over: bool,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct AssignedJobSchedulerReasoning {
+    pub score: f64,
     pub score_breakdown: serde_json::Value,
     pub worker_context: serde_json::Value,
     pub job_context: serde_json::Value,
     pub instance_context: serde_json::Value,
     pub candidates: Option<serde_json::Value>,
-    pub previous_attempts: Vec<AttemptSummary>,
-    pub passed_over: bool,
 }
 
 #[utoipa::path(
@@ -567,7 +573,7 @@ pub struct DispatchedJobDetail {
     operation_id = "getBoardJob",
     tag = "board",
     summary = "Assigned job detail",
-    description = "Full assignment record incl. per-rule scoring breakdown, job/worker/instance contexts. The `phases` of an exec job also hold its reported phases as spans. Runner-up candidates are superuser-only.",
+    description = "An allocation record for one job and its timeline. The `phases` of an exec job also stores the reported phases as spans. The `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is superuser-only and null for other users.",
     params(("id" = Uuid, Path)),
     responses((status = OK, description = "Job detail", body = DispatchedJobDetail), WebError)
 )]
@@ -616,7 +622,6 @@ pub async fn get_dispatched_job(
             project_display_name: project.display_name,
             worker_id: c.worker_id,
             worker_name,
-            score: c.score,
             queued_at: c.queued_at.and_utc().to_rfc3339(),
             dispatched_at: c.scored_at.and_utc().to_rfc3339(),
             finished_at: None,
@@ -639,11 +644,14 @@ pub async fn get_dispatched_job(
             exec_attempt: None,
             cluster_job: None,
             pname: c.pname,
-            score_breakdown: c.score_breakdown,
-            worker_context: c.worker_context,
-            job_context: c.job_context,
-            instance_context: c.instance_context,
-            candidates: None,
+            assigned_scheduler_reasoning: scope.is_all().then_some(AssignedJobSchedulerReasoning {
+                score: c.score,
+                score_breakdown: c.score_breakdown,
+                worker_context: c.worker_context,
+                job_context: c.job_context,
+                instance_context: c.instance_context,
+                candidates: None,
+            }),
             previous_attempts: Vec::new(),
             passed_over: !c.won,
         }));
@@ -744,7 +752,6 @@ pub async fn get_dispatched_job(
         project_display_name: project.display_name,
         worker_id: j.worker_id,
         worker_name,
-        score: j.score,
         queued_at: j.queued_at.and_utc().to_rfc3339(),
         dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
         finished_at: j.finished_at.map(|t| t.and_utc().to_rfc3339()),
@@ -770,11 +777,14 @@ pub async fn get_dispatched_job(
             .copied()
             .map(Into::into),
         pname,
-        score_breakdown: j.score_breakdown,
-        worker_context: j.worker_context,
-        job_context: j.job_context,
-        instance_context: j.instance_context.unwrap_or(serde_json::Value::Null),
-        candidates: if scope.is_all() { j.candidates } else { None },
+        assigned_scheduler_reasoning: scope.is_all().then(|| AssignedJobSchedulerReasoning {
+            score: j.score,
+            score_breakdown: j.score_breakdown,
+            worker_context: j.worker_context,
+            job_context: j.job_context,
+            instance_context: j.instance_context.unwrap_or(serde_json::Value::Null),
+            candidates: j.candidates,
+        }),
         previous_attempts,
         passed_over: false,
     }))
@@ -1161,33 +1171,21 @@ pub async fn get_scoring_rules() -> WebResult<Json<BaseResponse<Vec<RuleDescript
     operation_id = "getBoardScoringSummary",
     tag = "board",
     summary = "Aggregate scoring summary",
-    description = "Score histogram and mean per-rule contribution over recently assigned jobs, masked to the caller's projects.",
+    description = "Score histogram and average contribution per rule for jobs that were assigned recently. Superuser only.",
     params(ScoringParams),
     responses((status = OK, description = "Scoring summary", body = ScoringSummary), WebError)
 )]
 pub async fn get_scoring_summary(
     State(state): State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(user): Extension<MUser>,
     Query(params): Query<ScoringParams>,
 ) -> WebResult<Json<BaseResponse<ScoringSummary>>> {
-    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    require_superuser(&user)?;
     let window = params.window_hours.unwrap_or(24).max(1);
     let limit = params.limit.unwrap_or(2000).min(10_000);
 
-    let project_filter = scope.project_in_list();
-    if let Some(list) = &project_filter
-        && list.is_empty()
-    {
-        return Ok(ok_json(ScoringSummary::default()));
-    }
-
-    let rows = gradient_db::worker_registrations::recent_scores(
-        &state.web_db,
-        window,
-        limit,
-        project_filter.as_deref(),
-    )
-    .await?;
+    let rows =
+        gradient_db::worker_registrations::recent_scores(&state.web_db, window, limit).await?;
 
     let mut scores: Vec<f64> = Vec::with_capacity(rows.len());
     let mut rule_acc: std::collections::BTreeMap<String, (f64, i64, f64, f64)> =

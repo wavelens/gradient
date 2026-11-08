@@ -1754,7 +1754,7 @@ paths:
       tags:
       - board
       summary: Assigned job detail
-      description: Full assignment record incl. per-rule scoring breakdown, job/worker/instance contexts. The `phases` of an exec job also hold its reported phases as spans. Runner-up candidates are superuser-only.
+      description: An allocation record for one job and its timeline. The `phases` of an exec job also stores the reported phases as spans. The `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is superuser-only and null for other users.
       operationId: getBoardJob
       parameters:
       - name: id
@@ -1903,7 +1903,7 @@ paths:
       tags:
       - board
       summary: Aggregate scoring summary
-      description: Score histogram and mean per-rule contribution over recently assigned jobs, masked to the caller's projects.
+      description: Score histogram and average contribution per rule for jobs that were assigned recently. Superuser only.
       operationId: getBoardScoringSummary
       parameters:
       - name: window_hours
@@ -1937,7 +1937,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security:
-      - {}
       - bearerAuth: []
   /api/v1/board/storage:
     get:
@@ -14476,6 +14475,23 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DecisionCandidateView'
+    AssignedJobSchedulerReasoning:
+      type: object
+      required:
+      - score
+      - score_breakdown
+      - worker_context
+      - job_context
+      - instance_context
+      properties:
+        score:
+          type: number
+          format: double
+        score_breakdown: {}
+        worker_context: {}
+        job_context: {}
+        instance_context: {}
+        candidates: {}
     AttemptEndReason:
       type: string
       enum:
@@ -16415,16 +16431,11 @@ components:
         - project_name
         - project_display_name
         - worker_id
-        - score
         - queued_at
         - dispatched_at
         - phases
         - derivations
         - evaluation_id
-        - score_breakdown
-        - worker_context
-        - job_context
-        - instance_context
         - previous_attempts
         - passed_over
         properties:
@@ -16447,9 +16458,6 @@ components:
             type:
             - string
             - 'null'
-          score:
-            type: number
-            format: double
           queued_at:
             type: string
           dispatched_at:
@@ -16508,11 +16516,10 @@ components:
             type:
             - string
             - 'null'
-          score_breakdown: {}
-          worker_context: {}
-          job_context: {}
-          instance_context: {}
-          candidates: {}
+          assigned_scheduler_reasoning:
+            oneOf:
+            - $ref: '#/components/schemas/AssignedJobSchedulerReasoning'
+            - type: 'null'
           previous_attempts:
             type: array
             items:
@@ -16529,7 +16536,6 @@ components:
       - kind
       - project
       - worker_id
-      - score
       - dispatched_at
       - evaluation_id
       properties:
@@ -16549,7 +16555,9 @@ components:
           - string
           - 'null'
         score:
-          type: number
+          type:
+          - number
+          - 'null'
           format: double
         dispatched_at:
           type: string

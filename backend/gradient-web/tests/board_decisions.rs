@@ -74,3 +74,18 @@ async fn pending_jobs_of_an_idle_scheduler_are_empty() {
         serde_json::json!({ "jobs": [], "other_pending": 0 })
     );
 }
+
+#[tokio::test]
+async fn scoring_summary_rejects_non_superuser() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+    let db = with_user(mock_db(), session_id, user());
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/api/v1/board/scoring/summary")
+        .add_header("authorization", format!("Bearer {}", token))
+        .await;
+
+    res.assert_status_forbidden();
+}

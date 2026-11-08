@@ -205,10 +205,10 @@ interface RuleRow {
         </section>
       }
 
-      <details class="scheduler">
-        <summary>Scheduler details</summary>
+      @if (j.assigned_scheduler_reasoning; as s) {
+        <details class="scheduler">
+          <summary>Scheduler details</summary>
 
-        @if (superuser()) {
           <h3>Score breakdown <gr-label-help doc="reference/scheduler-policies/" title="About the scoring rules" /></h3>
           <gr-table class="rules">
             <thead><tr><th>Rule</th><th class="num">Contribution</th><th>Share</th></tr></thead>
@@ -230,7 +230,7 @@ interface RuleRow {
                 <tr><td colspan="3" class="muted">No per-rule breakdown recorded.</td></tr>
               }
             </tbody>
-            <tfoot><tr class="total"><td>Total</td><td class="num">{{ j.score | number: '1.2-2' }}</td><td></td></tr></tfoot>
+            <tfoot><tr class="total"><td>Total</td><td class="num">{{ s.score | number: '1.2-2' }}</td><td></td></tr></tfoot>
           </gr-table>
 
           <gr-popover #rulePop>
@@ -239,107 +239,107 @@ interface RuleRow {
             }
           </gr-popover>
 
-          @if (j.candidates) {
+          @if (s.candidates) {
             <h3>Runner-up candidates</h3>
-            <pre>{{ j.candidates | json }}</pre>
+            <pre>{{ s.candidates | json }}</pre>
           }
 
           <section class="ctx worker">
             <h3>Worker context</h3>
             <gr-table class="kv">
               <tbody>
-                <tr><td class="label">Architectures</td><td class="mono">{{ j.worker_context.architectures.join(', ') || '-' }}</td></tr>
-                <tr><td class="label">System features</td><td class="mono">{{ j.worker_context.system_features.join(', ') || '-' }}</td></tr>
-                <tr><td class="label">Capabilities</td><td class="mono">{{ capabilityList(j.worker_context.capabilities) || '-' }}</td></tr>
-                <tr><td class="label">CPU count</td><td class="mono">{{ j.worker_context.cpu_count }}</td></tr>
-                <tr><td class="label">CPU core score</td><td class="mono">{{ j.worker_context.cpu_core_score | number: '1.0-2' }}</td></tr>
-                <tr><td class="label">CPU usage</td><td class="mono">{{ j.worker_context.cpu_usage_pct != null ? (j.worker_context.cpu_usage_pct | number: '1.0-1') + ' %' : '-' }}</td></tr>
-                <tr><td class="label">RAM total</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_total_mb) }}</td></tr>
-                <tr><td class="label">RAM free</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_free_mb) }}</td></tr>
-                <tr><td class="label">RAM reserved</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_mb) }}</td></tr>
-                <tr><td class="label">RAM reserved, unused</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_unused_mb) }}</td></tr>
-                <tr><td class="label">RAM kept for held build</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_reserved_for_waiting_build_mb) }}</td></tr>
-                <tr><td class="label">Disk speed</td><td class="mono">{{ j.worker_context.disk_speed_mbps != null ? (j.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
-                <tr><td class="label">Upload speed</td><td class="mono">{{ j.worker_context.upload_speed_mbps != null ? (j.worker_context.upload_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
-                <tr><td class="label">Download speed</td><td class="mono">{{ j.worker_context.download_speed_mbps != null ? (j.worker_context.download_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
+                <tr><td class="label">Architectures</td><td class="mono">{{ s.worker_context.architectures.join(', ') || '-' }}</td></tr>
+                <tr><td class="label">System features</td><td class="mono">{{ s.worker_context.system_features.join(', ') || '-' }}</td></tr>
+                <tr><td class="label">Capabilities</td><td class="mono">{{ capabilityList(s.worker_context.capabilities) || '-' }}</td></tr>
+                <tr><td class="label">CPU count</td><td class="mono">{{ s.worker_context.cpu_count }}</td></tr>
+                <tr><td class="label">CPU core score</td><td class="mono">{{ s.worker_context.cpu_core_score | number: '1.0-2' }}</td></tr>
+                <tr><td class="label">CPU usage</td><td class="mono">{{ s.worker_context.cpu_usage_pct != null ? (s.worker_context.cpu_usage_pct | number: '1.0-1') + ' %' : '-' }}</td></tr>
+                <tr><td class="label">RAM total</td><td class="mono">{{ formatMegabytes(s.worker_context.ram_total_mb) }}</td></tr>
+                <tr><td class="label">RAM free</td><td class="mono">{{ formatMegabytes(s.worker_context.ram_free_mb) }}</td></tr>
+                <tr><td class="label">RAM reserved</td><td class="mono">{{ formatMegabytes(s.worker_context.ram_reserved_mb) }}</td></tr>
+                <tr><td class="label">RAM reserved, unused</td><td class="mono">{{ formatMegabytes(s.worker_context.ram_reserved_unused_mb) }}</td></tr>
+                <tr><td class="label">RAM kept for held build</td><td class="mono">{{ formatMegabytes(s.worker_context.ram_reserved_for_waiting_build_mb) }}</td></tr>
+                <tr><td class="label">Disk speed</td><td class="mono">{{ s.worker_context.disk_speed_mbps != null ? (s.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
+                <tr><td class="label">Upload speed</td><td class="mono">{{ s.worker_context.upload_speed_mbps != null ? (s.worker_context.upload_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
+                <tr><td class="label">Download speed</td><td class="mono">{{ s.worker_context.download_speed_mbps != null ? (s.worker_context.download_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
               </tbody>
             </gr-table>
           </section>
-        }
 
-        <section class="ctx job">
-          <h3>Job context</h3>
-          <gr-table class="kv">
-            <tbody>
-              <tr><td class="label">Kind</td><td class="mono">{{ j.job_context.kind }}</td></tr>
-              @if (j.job_context.kind !== 'Eval') {
-                <tr><td class="label">Architecture</td><td class="mono">{{ j.job_context.architecture }}</td></tr>
-              }
-              <tr><td class="label">Missing count</td><td class="mono">{{ j.job_context.missing_count ?? '-' }}</td></tr>
-              <tr><td class="label">Missing NAR size</td><td class="mono">{{ formatBytes(j.job_context.missing_nar_size) }}</td></tr>
-              <tr><td class="label">Outputs in store</td><td class="mono">{{ j.job_context.outputs_present ? 'yes' : 'no' }}</td></tr>
-              @if (j.job_context.substitute_outputs != null) {
-                <tr><td class="label">Substituted outputs</td><td class="mono">{{ j.job_context.substitute_outputs }}</td></tr>
-              }
-              <tr><td class="label">Project work share</td><td class="mono">{{ j.job_context.project_work_share != null ? (j.job_context.project_work_share | number: '1.0-3') : '-' }}</td></tr>
-              <tr><td class="label">Rescore count</td><td class="mono">{{ j.job_context.rescore_count }}</td></tr>
-              @if (j.job_context.kind === 'Build') {
-                <tr><td class="label">Dependency count</td><td class="mono">{{ j.job_context.dependency_count ?? '-' }}</td></tr>
-                <tr><td class="label">Package name</td><td class="mono">{{ j.job_context.pname ?? '-' }}</td></tr>
-                <tr><td class="label">Closure size</td><td class="mono">{{ formatBytes(j.job_context.closure_size) }}</td></tr>
-                <tr><td class="label">Prefer local build</td><td class="mono">{{ j.job_context.prefer_local_build ? 'yes' : 'no' }}</td></tr>
-                <tr><td class="label">Fixed output</td><td class="mono">{{ j.job_context.is_fixed_output ? 'yes' : 'no' }}</td></tr>
-              } @else if (j.job_context.kind === 'Eval') {
-                <tr><td class="label">Fetch flake</td><td class="mono">{{ j.job_context.fetch_flake ? 'yes' : 'no' }}</td></tr>
-              }
-            </tbody>
-          </gr-table>
-
-          @if (j.job_context.kind === 'Build' && j.job_context.estimate; as e) {
-            <h3>Estimate</h3>
+          <section class="ctx job">
+            <h3>Job context</h3>
             <gr-table class="kv">
               <tbody>
-                <tr><td class="label">Cores</td><td class="mono">{{ e.cores }}</td></tr>
-                <tr><td class="label">Peak RAM</td><td class="mono">{{ formatMegabytes(e.ram_mb) }}</td></tr>
-                <tr><td class="label">Build time</td><td class="mono">{{ formatDuration(e.build_ms) }}</td></tr>
-                <tr><td class="label">Output size</td><td class="mono">{{ formatBytes(e.output_nar_bytes) }}</td></tr>
-                <tr><td class="label">Own builds</td><td class="mono">{{ e.own_samples }}</td></tr>
-                @for (b of e.similar_builds; track b[0]) {
-                  <tr><td class="label">Like {{ b[0] }}</td><td class="mono">{{ b[1] | percent }} same inputs</td></tr>
+                <tr><td class="label">Kind</td><td class="mono">{{ s.job_context.kind }}</td></tr>
+                @if (s.job_context.kind !== 'Eval') {
+                  <tr><td class="label">Architecture</td><td class="mono">{{ s.job_context.architecture }}</td></tr>
+                }
+                <tr><td class="label">Missing count</td><td class="mono">{{ s.job_context.missing_count ?? '-' }}</td></tr>
+                <tr><td class="label">Missing NAR size</td><td class="mono">{{ formatBytes(s.job_context.missing_nar_size) }}</td></tr>
+                <tr><td class="label">Outputs in store</td><td class="mono">{{ s.job_context.outputs_present ? 'yes' : 'no' }}</td></tr>
+                @if (s.job_context.substitute_outputs != null) {
+                  <tr><td class="label">Substituted outputs</td><td class="mono">{{ s.job_context.substitute_outputs }}</td></tr>
+                }
+                <tr><td class="label">Project work share</td><td class="mono">{{ s.job_context.project_work_share != null ? (s.job_context.project_work_share | number: '1.0-3') : '-' }}</td></tr>
+                <tr><td class="label">Rescore count</td><td class="mono">{{ s.job_context.rescore_count }}</td></tr>
+                @if (s.job_context.kind === 'Build') {
+                  <tr><td class="label">Dependency count</td><td class="mono">{{ s.job_context.dependency_count ?? '-' }}</td></tr>
+                  <tr><td class="label">Package name</td><td class="mono">{{ s.job_context.pname ?? '-' }}</td></tr>
+                  <tr><td class="label">Closure size</td><td class="mono">{{ formatBytes(s.job_context.closure_size) }}</td></tr>
+                  <tr><td class="label">Prefer local build</td><td class="mono">{{ s.job_context.prefer_local_build ? 'yes' : 'no' }}</td></tr>
+                  <tr><td class="label">Fixed output</td><td class="mono">{{ s.job_context.is_fixed_output ? 'yes' : 'no' }}</td></tr>
+                } @else if (s.job_context.kind === 'Eval') {
+                  <tr><td class="label">Fetch flake</td><td class="mono">{{ s.job_context.fetch_flake ? 'yes' : 'no' }}</td></tr>
                 }
               </tbody>
             </gr-table>
-          }
-        </section>
 
-        @if (superuser() && j.instance_context; as inst) {
-          <section class="ctx instance">
-            <h3>Instance context</h3>
-            <gr-table class="rules">
-              <thead><tr><th>Metric</th><th class="num">5m</th><th class="num">1h</th><th class="num">24h</th></tr></thead>
-              <tbody>
-                @for (m of instanceWindows(inst); track m.name) {
-                  <tr>
-                    <td class="mono">{{ m.name }}</td>
-                    <td class="num">{{ m.w.w5m | number: '1.0-2' }}</td>
-                    <td class="num">{{ m.w.w1h | number: '1.0-2' }}</td>
-                    <td class="num">{{ m.w.w24h | number: '1.0-2' }}</td>
-                  </tr>
-                }
-              </tbody>
-            </gr-table>
-            <gr-table class="kv counts">
-              <tbody>
-                <tr><td class="label">Active builds</td><td class="mono">{{ inst.active_builds }}</td></tr>
-                <tr><td class="label">Pending builds</td><td class="mono">{{ inst.pending_builds }}</td></tr>
-                <tr><td class="label">Total workers</td><td class="mono">{{ inst.total_workers }}</td></tr>
-                <tr><td class="label">Idle workers</td><td class="mono">{{ inst.idle_workers }}</td></tr>
-                <tr><td class="label">Fleet CPU score</td><td class="mono">{{ inst.cpu_core_score_mean != null ? (inst.cpu_core_score_mean | number: '1.0-0') : '-' }}</td></tr>
-              </tbody>
-            </gr-table>
+            @if (s.job_context.kind === 'Build' && s.job_context.estimate; as e) {
+              <h3>Estimate</h3>
+              <gr-table class="kv">
+                <tbody>
+                  <tr><td class="label">Cores</td><td class="mono">{{ e.cores }}</td></tr>
+                  <tr><td class="label">Peak RAM</td><td class="mono">{{ formatMegabytes(e.ram_mb) }}</td></tr>
+                  <tr><td class="label">Build time</td><td class="mono">{{ formatDuration(e.build_ms) }}</td></tr>
+                  <tr><td class="label">Output size</td><td class="mono">{{ formatBytes(e.output_nar_bytes) }}</td></tr>
+                  <tr><td class="label">Own builds</td><td class="mono">{{ e.own_samples }}</td></tr>
+                  @for (b of e.similar_builds; track b[0]) {
+                    <tr><td class="label">Like {{ b[0] }}</td><td class="mono">{{ b[1] | percent }} same inputs</td></tr>
+                  }
+                </tbody>
+              </gr-table>
+            }
           </section>
-        }
-      </details>
+
+          @if (s.instance_context; as inst) {
+            <section class="ctx instance">
+              <h3>Instance context</h3>
+              <gr-table class="rules">
+                <thead><tr><th>Metric</th><th class="num">5m</th><th class="num">1h</th><th class="num">24h</th></tr></thead>
+                <tbody>
+                  @for (m of instanceWindows(inst); track m.name) {
+                    <tr>
+                      <td class="mono">{{ m.name }}</td>
+                      <td class="num">{{ m.w.w5m | number: '1.0-2' }}</td>
+                      <td class="num">{{ m.w.w1h | number: '1.0-2' }}</td>
+                      <td class="num">{{ m.w.w24h | number: '1.0-2' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </gr-table>
+              <gr-table class="kv counts">
+                <tbody>
+                  <tr><td class="label">Active builds</td><td class="mono">{{ inst.active_builds }}</td></tr>
+                  <tr><td class="label">Pending builds</td><td class="mono">{{ inst.pending_builds }}</td></tr>
+                  <tr><td class="label">Total workers</td><td class="mono">{{ inst.total_workers }}</td></tr>
+                  <tr><td class="label">Idle workers</td><td class="mono">{{ inst.idle_workers }}</td></tr>
+                  <tr><td class="label">Fleet CPU score</td><td class="mono">{{ inst.cpu_core_score_mean != null ? (inst.cpu_core_score_mean | number: '1.0-0') : '-' }}</td></tr>
+                </tbody>
+              </gr-table>
+            </section>
+          }
+        </details>
+      }
     } @else if (pending(); as p) {
       <header class="head">
         <div>
@@ -500,7 +500,7 @@ export class BoardJobDetailComponent implements OnInit {
   });
 
   rules = computed<RuleRow[]>(() => {
-    const rules = this.job()?.score_breakdown?.rules ?? {};
+    const rules = this.job()?.assigned_scheduler_reasoning?.score_breakdown.rules ?? {};
     const descriptions = this.descriptions();
     const entries = Object.entries(rules);
     const maxAbs = Math.max(1e-9, ...entries.map(([, v]) => Math.abs(v)));

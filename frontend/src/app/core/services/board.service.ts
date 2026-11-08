@@ -30,6 +30,7 @@ import {
   FlakeGraphNode,
   MetricPoint,
   DispatchedJobDetail,
+  AssignedJobSchedulerReasoning,
   ClusterJobDetail,
 } from '@core/models';
 
@@ -100,12 +101,16 @@ export interface InstanceContextView {
   cpu_core_score_mean?: number | null;
 }
 
-export interface AssignedJobDetail
-  extends Omit<DispatchedJobDetail, 'score_breakdown' | 'worker_context' | 'job_context' | 'instance_context'> {
+export interface AssignedJobSchedulerReasoningDetail
+  extends Omit<AssignedJobSchedulerReasoning, 'score_breakdown' | 'worker_context' | 'job_context' | 'instance_context'> {
   score_breakdown: { rules: Record<string, number>; total: number };
   worker_context: WorkerContextView;
   job_context: JobContextView;
   instance_context: InstanceContextView | null;
+}
+
+export interface AssignedJobDetail extends Omit<DispatchedJobDetail, 'assigned_scheduler_reasoning'> {
+  assigned_scheduler_reasoning?: AssignedJobSchedulerReasoningDetail | null;
 }
 
 @Injectable({ providedIn: 'root' })

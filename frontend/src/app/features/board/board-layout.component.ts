@@ -13,7 +13,7 @@ import { links, type BoardTab } from '@shared/routing';
 const TABS: { path: BoardTab; label: string; superuser?: boolean }[] = [
   { path: 'overview', label: 'Overview' },
   { path: 'live', label: 'Live Jobs' },
-  { path: 'scheduler', label: 'Scheduler' },
+  { path: 'scheduler', label: 'Scheduler', superuser: true },
   { path: 'throughput', label: 'Throughput' },
   { path: 'durations', label: 'Durations' },
   { path: 'workers', label: 'Workers' },

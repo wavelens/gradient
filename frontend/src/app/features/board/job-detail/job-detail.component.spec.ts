@@ -25,7 +25,6 @@ const DETAIL: AssignedJobDetail = {
   project_display_name: 'Project One',
   worker_id: 'w1',
   worker_name: 'Builder One',
-  score: 12.5,
   dispatched_at: '2026-06-08T00:01:00Z',
   build_id: null,
   evaluation_id: 'e1',
@@ -45,64 +44,67 @@ const DETAIL: AssignedJobDetail = {
   transit_ms: null,
   derivation_build_id: 'a1',
   derivations: [{ build: 'bj1', derivation_build: 'a1', drv_path: '/nix/store/xxx-foo', pname: 'foo' }],
-  score_breakdown: { rules: { wait: 3.5, missing: -1.2 }, total: 12.5 },
-  worker_context: {
-    architectures: ['x86_64-linux'],
-    system_features: ['kvm'],
-    capabilities: { core: true, federate: false, network: true, secrets: false, exec: false, eval: false, build: true, cache: true },
-    cpu_count: 8,
-    cpu_core_score: 1.5,
-    ram_total_mb: 32000,
-    ram_free_mb: 16000,
-    cpu_usage_pct: 42,
-    disk_speed_mbps: null,
-    upload_speed_mbps: 940,
-    download_speed_mbps: null,
-  },
-  job_context: {
-    kind: 'Build',
-    architecture: 'x86_64-linux',
-    missing_count: 5,
-    missing_nar_size: 1024,
-    outputs_present: false,
-    project_work_share: 0.25,
-    rescore_count: 2,
-    queued_at: '2026-06-08T00:00:00Z',
-    ready_at: '2026-06-08T00:00:30Z',
-    dependency_count: 3,
-    pname: 'foo',
-    closure_size: 2048,
-    prefer_local_build: true,
-    is_fixed_output: false,
-    estimate: {
-      own_samples: 4,
-      cores: 43,
-      ram_mb: 777,
-      build_ms: 4200,
-      output_nar_bytes: null,
-      similar_builds: [['python3.14-torchaudio', 0.75], ['magma', 0.4]],
+  assigned_scheduler_reasoning: {
+    score: 12.5,
+    score_breakdown: { rules: { wait: 3.5, missing: -1.2 }, total: 12.5 },
+    worker_context: {
+      architectures: ['x86_64-linux'],
+      system_features: ['kvm'],
+      capabilities: { core: true, federate: false, network: true, secrets: false, exec: false, eval: false, build: true, cache: true },
+      cpu_count: 8,
+      cpu_core_score: 1.5,
+      ram_total_mb: 32000,
+      ram_free_mb: 16000,
+      cpu_usage_pct: 42,
+      disk_speed_mbps: null,
+      upload_speed_mbps: 940,
+      download_speed_mbps: null,
     },
-    derivations: [{ build_id: 'b1', drv_path: '/nix/store/xxx-foo', pname: 'foo' }],
+    job_context: {
+      kind: 'Build',
+      architecture: 'x86_64-linux',
+      missing_count: 5,
+      missing_nar_size: 1024,
+      outputs_present: false,
+      project_work_share: 0.25,
+      rescore_count: 2,
+      queued_at: '2026-06-08T00:00:00Z',
+      ready_at: '2026-06-08T00:00:30Z',
+      dependency_count: 3,
+      pname: 'foo',
+      closure_size: 2048,
+      prefer_local_build: true,
+      is_fixed_output: false,
+      estimate: {
+        own_samples: 4,
+        cores: 43,
+        ram_mb: 777,
+        build_ms: 4200,
+        output_nar_bytes: null,
+        similar_builds: [['python3.14-torchaudio', 0.75], ['magma', 0.4]],
+      },
+      derivations: [{ build_id: 'b1', drv_path: '/nix/store/xxx-foo', pname: 'foo' }],
+    },
+    instance_context: {
+      wait_secs: { w5m: 1, w1h: 2, w24h: 3 },
+      build_time_ms: { w5m: 100, w1h: 200, w24h: 300 },
+      peak_ram_mb: { w5m: 10, w1h: 20, w24h: 30 },
+      cpu_time_ms: { w5m: 1, w1h: 2, w24h: 3 },
+      avg_cpu_pct: { w5m: 1, w1h: 2, w24h: 3 },
+      disk_bytes: { w5m: 1, w1h: 2, w24h: 3 },
+      oom_rate: { w5m: 0, w1h: 0, w24h: 0 },
+      closure_size: { w5m: 1, w1h: 2, w24h: 3 },
+      nar_size_mb: { w5m: 1, w1h: 2, w24h: 3 },
+      missing_paths: { w5m: 1, w1h: 2, w24h: 3 },
+      dependency_cnt: { w5m: 1, w1h: 2, w24h: 3 },
+      completed: { w5m: 1, w1h: 2, w24h: 3 },
+      active_builds: 7,
+      pending_builds: 4,
+      total_workers: 5,
+      idle_workers: 2,
+    },
+    candidates: null,
   },
-  instance_context: {
-    wait_secs: { w5m: 1, w1h: 2, w24h: 3 },
-    build_time_ms: { w5m: 100, w1h: 200, w24h: 300 },
-    peak_ram_mb: { w5m: 10, w1h: 20, w24h: 30 },
-    cpu_time_ms: { w5m: 1, w1h: 2, w24h: 3 },
-    avg_cpu_pct: { w5m: 1, w1h: 2, w24h: 3 },
-    disk_bytes: { w5m: 1, w1h: 2, w24h: 3 },
-    oom_rate: { w5m: 0, w1h: 0, w24h: 0 },
-    closure_size: { w5m: 1, w1h: 2, w24h: 3 },
-    nar_size_mb: { w5m: 1, w1h: 2, w24h: 3 },
-    missing_paths: { w5m: 1, w1h: 2, w24h: 3 },
-    dependency_cnt: { w5m: 1, w1h: 2, w24h: 3 },
-    completed: { w5m: 1, w1h: 2, w24h: 3 },
-    active_builds: 7,
-    pending_builds: 4,
-    total_workers: 5,
-    idle_workers: 2,
-  },
-  candidates: null,
   passed_over: false,
   previous_attempts: [],
 };
@@ -118,17 +120,20 @@ const EVAL_DETAIL: AssignedJobDetail = {
     wildcard: 'packages.**',
     task: 'ci',
   },
-  job_context: {
-    kind: 'Eval',
-    architecture: '',
-    missing_count: null,
-    missing_nar_size: null,
-    outputs_present: false,
-    project_work_share: null,
-    rescore_count: 0,
-    queued_at: '2026-06-08T00:00:00Z',
-    ready_at: '2026-06-08T00:00:30Z',
-    fetch_flake: true,
+  assigned_scheduler_reasoning: {
+    ...DETAIL.assigned_scheduler_reasoning!,
+    job_context: {
+      kind: 'Eval',
+      architecture: '',
+      missing_count: null,
+      missing_nar_size: null,
+      outputs_present: false,
+      project_work_share: null,
+      rescore_count: 0,
+      queued_at: '2026-06-08T00:00:00Z',
+      ready_at: '2026-06-08T00:00:30Z',
+      fetch_flake: true,
+    },
   },
 };
 
@@ -275,14 +280,12 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(el.querySelector('.ids')?.textContent).not.toContain('w1');
   });
 
-  it('hides the scores and the worker and instance context from a non-superuser', () => {
+  it('leaves out the scheduler details when the server sends no scheduler reasoning', () => {
     TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: false }) } });
-    const el = setup().nativeElement as HTMLElement;
-    expect(el.querySelector('.head .total')).toBeNull();
+    const el = setup({ getJob: () => of({ ...DETAIL, assigned_scheduler_reasoning: null }) }).nativeElement as HTMLElement;
+    expect(el.querySelector('details.scheduler')).toBeNull();
     expect(el.textContent).not.toContain('Score breakdown');
-    expect(el.querySelector('section.ctx.worker')).toBeNull();
-    expect(el.querySelector('section.ctx.instance')).toBeNull();
-    expect(el.querySelector('section.ctx.job')).toBeTruthy();
+    expect(el.querySelector('section.timeline')).toBeTruthy();
   });
 
   it('shows the architecture for build jobs', () => {
@@ -484,7 +487,6 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     ...EVAL_DETAIL,
     kind: 2,
     evaluation: null,
-    score: 3.75,
     finished_at: '2026-06-08T00:05:00Z',
     outcome: 'completed',
     exec_job: EXEC_JOB,
@@ -496,7 +498,11 @@ describe('BoardJobDetailComponent - exec jobs', () => {
       end_reason: 'completed',
       message: null,
     },
-    job_context: { ...EVAL_DETAIL.job_context, kind: 'Exec', architecture: 'x86_64-linux', missing_count: 4 },
+    assigned_scheduler_reasoning: {
+      ...EVAL_DETAIL.assigned_scheduler_reasoning!,
+      score: 3.75,
+      job_context: { ...EVAL_DETAIL.assigned_scheduler_reasoning!.job_context, kind: 'Exec', architecture: 'x86_64-linux', missing_count: 4 },
+    },
   };
 
   it('names the kind, its score and the exec job it ran with a link to its page', () => {

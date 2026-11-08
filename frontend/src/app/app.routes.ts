@@ -404,6 +404,7 @@ export const routes: Routes = [
           },
           {
             path: 'scheduler',
+            canActivate: [adminGuard],
             loadComponent: () =>
               import('./features/board/scheduler/scheduler.component').then(
                 (m) => m.BoardSchedulerComponent

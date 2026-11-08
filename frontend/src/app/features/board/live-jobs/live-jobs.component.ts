@@ -243,8 +243,8 @@ export class BoardLiveJobsComponent implements OnInit {
     const max = this.superuser() ? this.scoreMax() : null;
     return this.jobs().filter((j) => {
       if (kind !== 'all' && jobKindName(j.kind) !== kind) return false;
-      if (min !== null && j.score < min) return false;
-      if (max !== null && j.score > max) return false;
+      if (min !== null && j.score != null && j.score < min) return false;
+      if (max !== null && j.score != null && j.score > max) return false;
 
       return true;
     });

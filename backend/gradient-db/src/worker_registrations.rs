@@ -159,28 +159,16 @@ pub async fn phases_of_dispatched_job<C: ConnectionTrait>(
         .await
 }
 
-fn scoring_summary_sql(window_hours: i64, limit: u64, project_filter: Option<&str>) -> String {
-    let mut clauses = vec![format!(
-        "dispatched_at >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours'"
-    )];
-
-    if let Some(list) = project_filter {
-        clauses.push(format!("project IN ({list})"));
-    }
-
+fn scoring_summary_sql(window_hours: i64, limit: u64) -> String {
     format!(
-        "SELECT score, score_breakdown FROM dispatched_job WHERE {} \
-         ORDER BY dispatched_at DESC LIMIT {limit}",
-        clauses.join(" AND ")
+        "SELECT score, score_breakdown FROM dispatched_job \
+         WHERE dispatched_at >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours' \
+         ORDER BY dispatched_at DESC LIMIT {limit}"
     )
 }
 
 crate::sql_fn! {
-    SCORING_SUMMARY = || scoring_summary_sql(
-        24,
-        2000,
-        Some("'11111111-1111-1111-1111-111111111111'"),
-    ),
+    SCORING_SUMMARY = || scoring_summary_sql(24, 2000),
         params = [];
 }
 
@@ -193,13 +181,9 @@ pub async fn recent_scores<C: ConnectionTrait>(
     db: &C,
     window_hours: i64,
     limit: u64,
-    project_filter: Option<&str>,
 ) -> Result<Vec<DispatchScore>, DbErr> {
     let rows = db
-        .query_all_raw(
-            SCORING_SUMMARY
-                .bind_built(scoring_summary_sql(window_hours, limit, project_filter), []),
-        )
+        .query_all_raw(SCORING_SUMMARY.bind_built(scoring_summary_sql(window_hours, limit), []))
         .await?;
 
     Ok(rows

@@ -35,6 +35,7 @@ describe('BoardLayoutComponent', () => {
     const shown = tabs(false);
     expect(shown).not.toContain('System Health');
     expect(shown).not.toContain('Storage');
+    expect(shown).not.toContain('Scheduler');
     expect(shown).toContain('Workers');
   });
 });

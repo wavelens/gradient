@@ -13,7 +13,7 @@ The **Job Board** in the header shows scheduler and worker activity, both live a
 |---|---|---|
 | Overview | Connected workers, pending and active jobs, builds per hour | |
 | Live Jobs | Currently running jobs with live updates | Open a job's inspection page |
-| Scheduler | Queue wait versus dependency wait, score distribution, mean contribution per scoring rule | **?** next to a rule explains that rule |
+| Scheduler | Queue wait and dependency wait, score distribution, average contribution for each scoring rule. Superusers only | **?** next to a rule explains that rule |
 | Throughput | Builds created, completed and failed, evaluations per hour, active jobs per worker | |
 | Durations | Average and maximum build time, plus the wait split over time | |
 | Workers | A worker table for slots, CPU load, and free RAM, then fleet size and load by capability, system, and feature. | Reveal a missing worker kind. Capability and system load: **Now** or the average over **24h**, **7d**, **30d** |
@@ -69,7 +69,7 @@ Open a job from **Live Jobs** to see five sections.
 - **Worker tail**: for finished jobs, the time the worker spent after its last phase.
 - **Transit**: for finished jobs, the remaining time between **Assigned** and **Finished**, consumed by the network and by queues on both ends.
 - The worker timeline: nested phases (fetch, evaluate, build, compress, upload wait, NAR push) with duration, share and bytes moved. Exec jobs add their [reported phases](../exec/phases-and-outputs.md).
-- The score breakdown and the worker, job, and instance context under **Scheduler details** (closed by default). Scoring rules' contributions to the winning worker appear in the breakdown, with a total at the end.
+- Superusers see the score breakdown under **Scheduler details** and the context for the worker, job, and instance (closed by default). Scoring rules show their contribution to the winning worker in the breakdown, with the total at the end.
 
 A slow job's timeline shows where the time went. The score explains why the server picked that worker.
 

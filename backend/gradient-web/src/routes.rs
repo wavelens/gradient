@@ -54,6 +54,7 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(board_storage::get_board_storage))
                 .routes(routes!(board::get_top_projects_by_buildtime))
                 .routes(routes!(board::get_assign_decisions))
+                .routes(routes!(board::get_scoring_summary))
                 .routes(routes!(board_abort::post_board_job_abort))
                 .routes(routes!(
                     projects::management::patch_project,
@@ -400,7 +401,6 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(board::get_expensive_evals_by_resource))
                 .routes(routes!(board::get_dispatched_job))
                 .routes(routes!(board_clusters::get_cluster_job))
-                .routes(routes!(board::get_scoring_summary))
                 .routes(routes!(board::get_scoring_rules))
                 .routes(routes!(board_cache::get_board_cache))
                 .routes(routes!(board_cache::get_board_upstream_caches))

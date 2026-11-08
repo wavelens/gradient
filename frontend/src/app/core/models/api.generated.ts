@@ -137,6 +137,15 @@ export interface AssignDecisionView {
   candidates: DecisionCandidateView[];
 }
 
+export interface AssignedJobSchedulerReasoning {
+  score: number;
+  score_breakdown: unknown;
+  worker_context: unknown;
+  job_context: unknown;
+  instance_context: unknown;
+  candidates?: unknown;
+}
+
 export type AttemptEndReason = "completed" | "failed" | "timeout" | "lost" | "aborted";
 
 export interface AttemptSummary {
@@ -819,7 +828,6 @@ export type DispatchedJobDetail = ReportGap & {
   project_display_name: string;
   worker_id: string;
   worker_name?: string | null;
-  score: number;
   queued_at: string;
   dispatched_at: string;
   finished_at?: string | null;
@@ -835,11 +843,7 @@ export type DispatchedJobDetail = ReportGap & {
   exec_attempt?: ExecJobAttemptView | null;
   cluster_job?: string | null;
   pname?: string | null;
-  score_breakdown: unknown;
-  worker_context: unknown;
-  job_context: unknown;
-  instance_context: unknown;
-  candidates?: unknown;
+  assigned_scheduler_reasoning?: AssignedJobSchedulerReasoning | null;
   previous_attempts: AttemptSummary[];
   passed_over: boolean;
 };
@@ -852,7 +856,7 @@ export interface DispatchedJobSummary {
   project: string;
   worker_id: string;
   worker_name?: string | null;
-  score: number;
+  score?: number | null;
   dispatched_at: string;
   build_id?: string | null;
   evaluation_id: string;
