@@ -74,7 +74,23 @@ button.sidebar-group-header {
   &:hover { color: var(--gr-text-primary); }
 }
 
+:is(.sidebar-item, .build-item):has(> .sidebar-row-link) { position: relative; }
+
+.sidebar-row-link {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+
+  &:focus-visible { outline-offset: -$focus-ring-width; }
+}
+
 .sidebar-kebab {
+  position: relative;
+  z-index: 2;
   display: inline-flex;
   flex-shrink: 0;
   margin-right: -$spacing-xs;

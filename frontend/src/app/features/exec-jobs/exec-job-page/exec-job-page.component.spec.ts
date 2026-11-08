@@ -294,7 +294,7 @@ describe('ExecJobPageComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     Array.from(root.querySelectorAll<HTMLElement>('.log-sidebar .sidebar-item'))
       .find((item) => item.textContent?.includes('Timeline'))
-      ?.click();
+      ?.querySelector<HTMLElement>('.sidebar-row-link')?.click();
     fixture.detectChanges();
     expect(root.querySelector('gr-log-viewer')).toBeNull();
     expect(root.querySelector('gr-job-timeline .phases')?.textContent).toContain('epoch-3');
@@ -318,7 +318,7 @@ describe('ExecJobPageComponent', () => {
       const root = fixture.nativeElement as HTMLElement;
       Array.from(root.querySelectorAll<HTMLElement>('.log-sidebar .sidebar-item'))
         .find((item) => item.textContent?.includes('Info'))
-        ?.click();
+        ?.querySelector<HTMLElement>('.sidebar-row-link')?.click();
       await vi.advanceTimersByTimeAsync(2000);
       fixture.detectChanges();
       expect(root.querySelector('gr-log-viewer')).toBeNull();
@@ -344,7 +344,7 @@ describe('ExecJobPageComponent', () => {
     const items = () => Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item'))
       .map((item) => (item.textContent ?? '').replace(item.querySelector('.gr-menu__icon')?.textContent ?? '', '').trim());
     expect(items()).toEqual(['Show job', 'Terminal', 'Abort']);
-    expect(log.querySelector('.sidebar-kebab')).not.toBeNull();
+    expect(log.querySelector('button.sidebar-kebab')?.getAttribute('aria-label')).toBe('Actions for Exec Job');
 
     Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item')).find((item) => item.textContent?.includes('Abort'))!.click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'apps.x86_64-linux.train' }));
@@ -553,7 +553,7 @@ describe('ExecJobPageComponent', () => {
 
     function openTerminalTab(fixture: ComponentFixture<ExecJobPageComponent>): HTMLElement {
       const root = fixture.nativeElement as HTMLElement;
-      sidebarItem(root, 'Terminal')?.click();
+      sidebarItem(root, 'Terminal')?.querySelector<HTMLElement>('.sidebar-row-link')?.click();
       fixture.detectChanges();
       return root;
     }

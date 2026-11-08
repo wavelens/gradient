@@ -420,14 +420,31 @@ describe('EvaluationLogComponent', () => {
       fixture.detectChanges();
       const select = vi.spyOn(cmp, 'selectBuild');
 
-      const kebabs = fixture.nativeElement.querySelectorAll('.build-item .sidebar-kebab') as NodeListOf<HTMLButtonElement>;
+      const kebabs = fixture.nativeElement.querySelectorAll('.build-item button.sidebar-kebab') as NodeListOf<HTMLButtonElement>;
       expect(kebabs).toHaveLength(2);
+      expect(kebabs[1].getAttribute('aria-label')).toBe('Actions for hello-1.0');
       kebabs[1].click();
       fixture.detectChanges();
 
       expect(cmp.contextBuild()!.id).toBe('b2');
       expect(select).not.toHaveBeenCalled();
       expect(document.querySelectorAll('.gr-menu__item').length).toBeGreaterThan(0);
+    });
+
+    it('selects a build from a keyboard button that holds no other control', () => {
+      const { fixture, cmp } = setup();
+      vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
+      fixture.detectChanges();
+      cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
+      cmp.visibleBuilds.set([target({ id: 'b1' })]);
+      fixture.detectChanges();
+
+      const select = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.build-item button.sidebar-row-link')!;
+      expect(select.getAttribute('aria-label')).toBe('hello-1.0');
+      expect(select.querySelector('button')).toBeNull();
+      select.click();
+      expect(cmp.selectedBuildId()).toBe('b1');
     });
 
     describe('prioritize', () => {

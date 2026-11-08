@@ -1105,7 +1105,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   toggleBuildMenu(event: MouseEvent, build: BuildItem, menu: MenuComponent): void {
-    event.stopPropagation();
     this.contextBuild.set(build);
     menu.toggle(event);
   }
@@ -1228,7 +1227,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.selectBuild(target, true);
     const targetId = target.id;
     setTimeout(() => {
-      const el = document.querySelector<HTMLElement>(`.build-item[data-build-id="${targetId}"]`);
+      const el = document.querySelector<HTMLElement>(`.build-item[data-build-id="${targetId}"] .sidebar-row-link`);
       el?.scrollIntoView({ block: 'nearest' });
       el?.focus();
     }, 0);

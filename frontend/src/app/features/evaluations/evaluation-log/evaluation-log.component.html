@@ -98,27 +98,25 @@
                   [style.--build-status-color]="buildStatusColor(build.status)"
                   [class.selected]="selectedBuildId() === build.id"
                   [attr.data-build-id]="build.id"
-                  (click)="selectBuild(build, true)"
-                  (keydown.enter)="selectBuild(build, true)"
-                  (keydown.space)="$event.preventDefault(); selectBuild(build, true)"
-                  (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(build.id, 1)"
-                  (keydown.arrowup)="$event.preventDefault(); selectAdjacentBuild(build.id, -1)"
                   (contextmenu)="openBuildMenu($event, build, buildMenu)"
                   [title]="build.name"
-                  tabindex="0"
-                  role="button"
-                  [attr.aria-pressed]="selectedBuildId() === build.id"
                 >
+                  <button type="button" class="sidebar-row-link"
+                          [attr.aria-label]="buildDisplayName(build.name)"
+                          [attr.aria-pressed]="selectedBuildId() === build.id"
+                          (click)="selectBuild(build, true)"
+                          (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(build.id, 1)"
+                          (keydown.arrowup)="$event.preventDefault(); selectAdjacentBuild(build.id, -1)"></button>
                   <span class="build-dot"></span>
                   <span class="build-name">{{ buildDisplayName(build.name) }}</span>
                   @if (build.ifd) { <gr-badge severity="info">IFD</gr-badge> }
                   @if (getBuildElapsed(build)) {
                     <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
                   }
-                  <span class="sidebar-kebab" aria-hidden="true"
-                        (click)="toggleBuildMenu($event, build, buildMenu)">
+                  <button type="button" class="sidebar-kebab" [attr.aria-label]="'Actions for ' + buildDisplayName(build.name)"
+                          (click)="toggleBuildMenu($event, build, buildMenu)">
                     <gr-icon name="more_vert" size="sm" />
-                  </span>
+                  </button>
                 </div>
               }
             </div>
