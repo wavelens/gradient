@@ -78,7 +78,8 @@ const splitLine = (t: ChartTheme) => ({ lineStyle: { color: t.grid, type: 'dashe
 
 /// Builds the full ECharts option for `gr-metric-chart`. Kept pure and free of
 /// Angular/DOM so every chart shape is unit-testable without a renderer.
-export function buildMetricChartOption(cfg: MetricChartConfig, theme: ChartTheme): EChartsOption {
+export function buildMetricChartOption(requested: MetricChartConfig, theme: ChartTheme): EChartsOption {
+  const cfg = convertOneOrTwoCategoryRadarChartToBarChart(requested);
   const format = cfg.valueFormatter ?? ((v: number) => String(v));
   const base: EChartsOption = {
     backgroundColor: 'transparent',
@@ -103,6 +104,13 @@ export function buildMetricChartOption(cfg: MetricChartConfig, theme: ChartTheme
   if (cfg.type === 'radar') return { ...base, ...radarOption(cfg, theme) };
   if (cfg.type === 'heatmap') return { ...base, ...heatmapOption(cfg, format, theme) };
   return { ...base, ...cartesianOption(cfg, format, theme) };
+}
+
+const RADAR_CHART_MIN_CATEGORY_COUNT = 3;
+
+function convertOneOrTwoCategoryRadarChartToBarChart(cfg: MetricChartConfig): MetricChartConfig {
+  const count = cfg.categories?.length ?? 0;
+  return cfg.type === 'radar' && count > 0 && count < RADAR_CHART_MIN_CATEGORY_COUNT ? { ...cfg, type: 'bar' } : cfg;
 }
 
 function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, theme: ChartTheme): EChartsOption {

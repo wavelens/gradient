@@ -182,6 +182,14 @@ describe('buildMetricChartOption radar', () => {
     const opt = buildMetricChartOption({ type: 'radar', series: [{ name: 'busy %', data: [] }], categories: [] }, THEME);
     expect((opt.series as any[])[0].data).toEqual([]);
   });
+
+  it('draws bars for two categories, which a radar would flatten into a line', () => {
+    const opt = buildMetricChartOption({ type: 'radar', series: [{ name: 'busy %', data: [40, 60] }], categories: ['x86_64-linux', 'aarch64-linux'] }, THEME);
+    expect(opt.radar).toBeUndefined();
+    expect((opt.xAxis as any).data).toEqual(['x86_64-linux', 'aarch64-linux']);
+    expect((opt.series as any[])[0].type).toBe('bar');
+    expect((opt.tooltip as any).trigger).toBe('axis');
+  });
 });
 
 describe('buildMetricChartOption heatmap', () => {
