@@ -20,11 +20,12 @@ crate::sql! {
         params = [UserId, CacheIds(4), CachedPathHashes(4), Bool(true)],
         tier = Bulk;
 
-    SEARCH_COMMITS = concat!("SELECT p.name AS project, t.name AS task, e.id AS evaluation, \
-        encode(c.hash, 'hex') AS hash FROM commit c JOIN evaluation e ON e.commit = c.id \
+    SEARCH_COMMITS = concat!("SELECT project, task, evaluation, hash FROM ( \
+        SELECT DISTINCT ON (c.hash, t.id) p.name AS project, t.name AS task, e.id AS evaluation, \
+        encode(c.hash, 'hex') AS hash, e.created_at FROM commit c JOIN evaluation e ON e.commit = c.id \
         JOIN task t ON t.id = e.task JOIN project p ON p.id = t.project \
         WHERE c.hash BETWEEN decode($2, 'hex') AND decode($3, 'hex') AND ", project_readable!("$4"), " \
-        ORDER BY e.created_at DESC LIMIT 5"),
+        ORDER BY c.hash, t.id, e.created_at DESC) latest ORDER BY created_at DESC LIMIT 5"),
         params = [UserId, CommitPrefixLow, CommitPrefixHigh, Bool(true)],
         tier = Hot;
 
@@ -199,5 +200,15 @@ mod tests {
     #[test]
     fn ilike_wildcards_in_the_query_match_literally() {
         assert_eq!(ilike_contains(r"50%_a\b"), r"%50\%\_a\\b%");
+    }
+
+    #[test]
+    fn commit_search_returns_one_row_per_commit_and_task() {
+        let sql = SEARCH_COMMITS.text();
+        assert!(sql.contains("DISTINCT ON (c.hash, t.id)"), "{sql}");
+        assert!(
+            sql.contains("ORDER BY c.hash, t.id, e.created_at DESC"),
+            "{sql}"
+        );
     }
 }
