@@ -14,6 +14,9 @@ import { NotifyService } from '@core/services/notify.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfirmService } from '@shared/confirm';
 import { canManageTeam } from '@shared/access';
+import { EMPTY, merge, tap } from 'rxjs';
+import { inBackground } from '@core/interceptors/request-context';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import {
   TeamRole,
   TeamResponse,
@@ -91,6 +94,13 @@ export class TeamMembersComponent implements OnInit {
 
   private isSignedInUser(user: string): boolean {
     return this.auth.user()?.username === user;
+  }
+
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => this.loading() || this.loadError() !== null ? EMPTY : merge(
+      this.teams.members(this.teamName, inBackground()).pipe(tap((members) => this.members.set(members))),
+      this.canEdit() ? this.teams.invitations(this.teamName, inBackground()).pipe(tap((invitations) => this.invitations.set(invitations))) : EMPTY,
+    ));
   }
 
   ngOnInit(): void {

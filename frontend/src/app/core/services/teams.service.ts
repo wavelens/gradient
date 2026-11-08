@@ -53,8 +53,8 @@ export class TeamsService {
     return this.api.delete<string>(`teams/${team}`);
   }
 
-  members(team: string): Observable<TeamMemberItem[]> {
-    return this.api.get<TeamMemberItem[]>(`teams/${team}/members`);
+  members(team: string, options?: RequestOptions): Observable<TeamMemberItem[]> {
+    return this.api.get<TeamMemberItem[]>(`teams/${team}/members`, options);
   }
 
   addMember(team: string, user: string, role: TeamRole): Observable<string> {
@@ -69,8 +69,8 @@ export class TeamsService {
     return this.api.delete<string>(`teams/${team}/members`, { user });
   }
 
-  invitations(team: string): Observable<PendingInvitationItem[]> {
-    return this.api.get<PendingInvitationItem[]>(`teams/${team}/invitations`);
+  invitations(team: string, options?: RequestOptions): Observable<PendingInvitationItem[]> {
+    return this.api.get<PendingInvitationItem[]>(`teams/${team}/invitations`, options);
   }
 
   revokeInvitation(team: string, user: string): Observable<string> {
@@ -93,12 +93,12 @@ export class TeamsService {
     return this.api.delete<string>(`teams/${team}/workers/${workerId}`);
   }
 
-  grants(team: string): Observable<TeamGrants> {
-    return this.api.get<TeamGrants>(`teams/${team}/grants`);
+  grants(team: string, options?: RequestOptions): Observable<TeamGrants> {
+    return this.api.get<TeamGrants>(`teams/${team}/grants`, options);
   }
 
-  requests(team: string): Observable<TeamRequestItem[]> {
-    return this.api.get<TeamRequestItem[]>(`teams/${team}/requests`);
+  requests(team: string, options?: RequestOptions): Observable<TeamRequestItem[]> {
+    return this.api.get<TeamRequestItem[]>(`teams/${team}/requests`, options);
   }
 
   approveRequest(team: string, id: string): Observable<string> {

@@ -94,6 +94,24 @@ describe('TeamOverviewComponent', () => {
     expect(headings(render())).toEqual(expect.arrayContaining(['Members', 'Workers']));
   });
 
+  it('picks up new grants, members and workers while the page stays open', () => {
+    vi.useFakeTimers();
+    try {
+      const { fixture } = setup();
+      const teams = TestBed.inject(TeamsService) as unknown as Record<'grants' | 'members' | 'workers', () => Observable<unknown>>;
+      teams.grants = () => of({ projects: [{ project: 'acme', display_name: 'Acme', users: true, workers: false, role: 'View' }], caches: [] });
+      teams.members = () => of([{ user: 'bob', name: 'Bob', role: 'member', source: 'manual' }]);
+      teams.workers = () => of([]);
+      vi.advanceTimersByTime(15_000);
+      fixture.detectChanges();
+      const text = (fixture.nativeElement as HTMLElement).textContent;
+      expect(text).toContain('Acme');
+      expect(text).toContain('Bob');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('explains how a team without grants gets access to a project or cache', () => {
     const root = render();
     expect(headings(root)).toContain('Projects and Caches');

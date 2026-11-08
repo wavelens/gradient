@@ -27,7 +27,8 @@ import { AllowedCapabilitiesComponent, GradientCiConnectComponent } from '@share
 import { ConfirmService } from '@shared/confirm';
 import { canManageTeam } from '@shared/access';
 import { fieldChecks } from '@shared/forms';
-import { Observable, map } from 'rxjs';
+import { EMPTY, Observable, map, tap } from 'rxjs';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -108,6 +109,11 @@ export class TeamWorkersComponent implements OnInit {
 
   get gradientCiLabel(): string {
     return `${window.location.host} / ${this.teamName}`;
+  }
+
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => this.loading() || this.loadError() !== null ? EMPTY :
+      this.teams.workers(this.teamName, inBackground()).pipe(tap((workers) => this.workers.set(workers))));
   }
 
   ngOnInit(): void {
