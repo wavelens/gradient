@@ -17,6 +17,7 @@ import { NameCheckState, NameFieldComponent } from './name-field.component';
       inputId="name"
       label="Name"
       [state]="state()"
+      [maxLength]="maxLength()"
       [ngModel]="name()"
       (ngModelChange)="name.set($event)"
       name="name"
@@ -26,6 +27,7 @@ import { NameCheckState, NameFieldComponent } from './name-field.component';
 class HostComponent {
   name = signal('');
   state = signal<NameCheckState>('idle');
+  maxLength = signal<number | null>(null);
 }
 
 async function render() {
@@ -86,6 +88,14 @@ describe('gr-name-field', () => {
     const { root, set } = await render();
     await set('checking');
     expect(root().querySelector('.gr-spin')).not.toBeNull();
+  });
+
+  it('caps the input length only when a limit is given', async () => {
+    const { fixture, root } = await render();
+    expect(root().querySelector('input')?.hasAttribute('maxlength')).toBe(false);
+    fixture.componentInstance.maxLength.set(64);
+    fixture.detectChanges();
+    expect(root().querySelector('input')?.getAttribute('maxlength')).toBe('64');
   });
 
   it('writes typed text back through ngModel', async () => {

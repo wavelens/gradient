@@ -12,7 +12,7 @@ import { slugify } from '@shared/text';
 
 const NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 const DEBOUNCE_MS = 400;
-const maxSlugNameCharacterCount = 64;
+export const maxSlugNameCharacterCount = 64;
 const BLOCKING: NameCheckState[] = ['checking', 'invalid', 'reserved', 'taken'];
 
 export interface NameAvailability {

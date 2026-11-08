@@ -38,6 +38,7 @@ export class NameFieldComponent implements ControlValueAccessor {
   hint = input('Lowercase letters, numbers, and hyphens only');
   state = input<NameCheckState>('idle');
   required = input(false, { transform: booleanAttribute });
+  maxLength = input<number | null>(null);
 
   protected value = signal('');
   protected isDisabled = signal(false);

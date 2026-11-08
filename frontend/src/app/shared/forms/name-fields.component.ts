@@ -7,7 +7,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, model, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { FormFieldComponent, InputDirective, NameFieldComponent } from '@gradient/ui/ui';
-import { NameAvailability } from './name-availability';
+import { NameAvailability, maxSlugNameCharacterCount } from './name-availability';
 
 @Component({
   selector: 'app-name-fields',
@@ -30,6 +30,7 @@ import { NameAvailability } from './name-availability';
       required
       [inputId]="noun() + '-name'"
       [placeholder]="noun() + '-name'"
+      [maxLength]="maxSlugNameCharacterCount"
       [state]="names().state()"
       [ngModel]="name()"
       [ngModelOptions]="{ standalone: true }"
@@ -45,6 +46,7 @@ export class NameFieldsComponent {
   name = model('');
   submitted = output();
 
+  protected readonly maxSlugNameCharacterCount = maxSlugNameCharacterCount;
   protected title = computed(() => this.noun().charAt(0).toUpperCase() + this.noun().slice(1));
 
   protected onDisplayNameChange(value: string): void {

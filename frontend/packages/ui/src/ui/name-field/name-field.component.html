@@ -19,6 +19,7 @@ SPDX-License-Identifier: AGPL-3.0-only
       [value]="value()"
       [disabled]="isDisabled()"
       [placeholder]="placeholder()"
+      [attr.maxlength]="maxLength()"
       (input)="onInput($event)"
       (blur)="onTouched()"
     />
