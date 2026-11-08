@@ -23,19 +23,30 @@ function render(editable: boolean) {
 }
 
 describe('AllowedCapabilitiesComponent', () => {
-  it('lists what a worker is allowed and marks the rest as off', () => {
+  const pills = (root: HTMLElement, selector = '.allowed-pill') =>
+    Array.from(root.querySelectorAll(selector)).map((el) => el.textContent?.trim());
+
+  it('lists only the allowed capabilities, in the order network, secrets, exec, eval, build', () => {
     const root = render(false).nativeElement as HTMLElement;
 
     expect(root.textContent).toContain('Allowed:');
     expect(root.querySelectorAll('button').length).toBe(0);
-    const off = Array.from(root.querySelectorAll('[data-allowed="false"]')).map((el) => el.textContent?.trim());
-    expect(off).toEqual(['secrets', 'exec']);
+    expect(pills(root)).toEqual(['network', 'eval', 'build']);
   });
 
-  it('lists the capabilities in the order network, secrets, exec, eval, build', () => {
-    const root = render(false).nativeElement as HTMLElement;
-    const labels = Array.from(root.querySelectorAll('[data-allowed]')).map((el) => el.textContent?.trim());
-    expect(labels).toEqual(['network', 'secrets', 'exec', 'eval', 'build']);
+  it('says none when no capability is allowed', () => {
+    const fixture = render(false);
+    fixture.componentRef.setInput('value', {
+      enable_network: false,
+      enable_secrets: false,
+      enable_exec: false,
+      enable_eval: false,
+      enable_build: false,
+    });
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(pills(root)).toEqual([]);
+    expect(root.textContent).toContain('none');
   });
 
   it("grey out an allowed capability that the connected worker doesn't report", () => {
@@ -43,10 +54,7 @@ describe('AllowedCapabilitiesComponent', () => {
     fixture.componentRef.setInput('workerReportedCapabilities', { network: true, secrets: true, exec: true, eval: false, build: true });
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
-    const on = Array.from(root.querySelectorAll('.allowed-pill--on')).map((el) => el.textContent?.trim());
-    const unsupported = Array.from(root.querySelectorAll('.allowed-pill--unsupported-by-worker')).map((el) => el.textContent?.trim());
-    expect(on).toEqual(['network', 'build']);
-    expect(unsupported).toEqual(['eval']);
+    expect(pills(root, '.allowed-pill--unsupported-by-worker')).toEqual(['eval']);
   });
 
   it('toggles only the clicked capability when editable', () => {

@@ -19,6 +19,8 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
 
+use crate::error_with_causes_line_formatting::error_chain;
+
 pub type PassError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type PassFuture = Pin<Box<dyn Future<Output = Result<(), PassError>> + Send>>;
 pub type PassFn = Arc<dyn Fn() -> PassFuture + Send + Sync>;
@@ -186,13 +188,6 @@ pub async fn run_pass(
         }
     }
     true
-}
-
-fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
-    std::iter::successors(Some(error), |e| e.source())
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(": ")
 }
 
 async fn wait_for_turn(spec: &PeriodicSpec, cancel: &CancellationToken) -> bool {
@@ -519,31 +514,6 @@ mod tests {
     use super::*;
     use crate::shutdown::Shutdown;
     use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-
-    #[derive(Debug)]
-    struct Wrapped(&'static str, Option<Box<Wrapped>>);
-
-    impl std::fmt::Display for Wrapped {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str(self.0)
-        }
-    }
-
-    impl std::error::Error for Wrapped {
-        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-            self.1.as_deref().map(|e| e as _)
-        }
-    }
-
-    #[test]
-    fn a_failed_pass_reports_the_cause_under_its_context() {
-        let error: PassError = Box::new(Wrapped(
-            "deep GC unit nars/ql",
-            Some(Box::new(Wrapped("listing failed", None))),
-        ));
-
-        assert_eq!(error_chain(&*error), "deep GC unit nars/ql: listing failed");
-    }
 
     struct Counting {
         calls: Arc<AtomicU32>,

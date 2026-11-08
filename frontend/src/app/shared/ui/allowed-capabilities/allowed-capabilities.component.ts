@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, booleanAttribute, input, model } from '@angular/core';
+import { ChangeDetectionStrategy, Component, booleanAttribute, computed, input, model } from '@angular/core';
 import { AllowedCapabilities, GradientCapabilities } from '@core/models';
 import { IconComponent } from '@gradient/ui/ui';
 
@@ -32,14 +32,17 @@ import { IconComponent } from '@gradient/ui/ui';
       <div class="allowed-summary">
         Allowed:
         @for (cap of capabilities; track cap.key) {
-          @let unsupported = value()[cap.key] && workerReportedCapabilities()?.[cap.reportedCapabilityKey] === false;
-          <span
-            class="allowed-pill"
-            [class.allowed-pill--on]="value()[cap.key] && !unsupported"
-            [class.allowed-pill--unsupported-by-worker]="unsupported"
-            [attr.data-allowed]="value()[cap.key]"
-            [attr.title]="unsupported ? 'Allowed, but the worker doesn\\'t report support' : null"
-          >{{ cap.label }}</span>
+          @if (value()[cap.key]) {
+            @let unsupported = workerReportedCapabilities()?.[cap.reportedCapabilityKey] === false;
+            <span
+              class="allowed-pill"
+              [class.allowed-pill--unsupported-by-worker]="unsupported"
+              [attr.title]="unsupported ? 'Allowed, but the worker doesn\\'t report support' : null"
+            >{{ cap.label }}</span>
+          }
+        }
+        @if (!hasAnyCapability()) {
+          none
         }
       </div>
     }
@@ -59,6 +62,8 @@ export class AllowedCapabilitiesComponent {
     { key: 'enable_eval', reportedCapabilityKey: 'eval', label: 'eval' },
     { key: 'enable_build', reportedCapabilityKey: 'build', label: 'build' },
   ];
+
+  readonly hasAnyCapability = computed(() => this.capabilities.some((cap) => this.value()[cap.key]));
 
   toggle(key: keyof AllowedCapabilities): void {
     this.value.update((value) => ({ ...value, [key]: !value[key] }));

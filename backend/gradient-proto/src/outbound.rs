@@ -13,6 +13,7 @@ use gradient_db::WorkerDb;
 use gradient_entity::{team_worker, worker_registration};
 use gradient_types::ids::ProjectId;
 use gradient_types::{ETeamWorker, EWorkerRegistration, SecretString};
+use gradient_util::error_with_causes_line_formatting::error_chain;
 use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
 use gradient_wire::Rejection;
 use gradient_wire::session::handshake::DialerCredentials;
@@ -378,7 +379,7 @@ async fn dial(
                 &worker_id,
                 ConnectionDirection::Outbound,
                 false,
-                format!("dial failed: {e:#}"),
+                format!("dial failed: {}", error_chain(e.as_ref())),
             );
         }
         Err(_) => {

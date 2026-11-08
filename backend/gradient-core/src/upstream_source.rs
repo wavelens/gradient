@@ -12,6 +12,7 @@ use futures::stream::BoxStream;
 use gradient_entity::cache_upstream::{CacheUpstreamKind, Model as MCacheUpstream};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::CacheUpstreamId;
+use gradient_util::error_with_causes_line_formatting::error_chain;
 use gradient_util::http::{HttpVersion, build_version_download_client, upstream_download_client};
 
 use crate::upstream::{SampleKind, breakers};
@@ -188,19 +189,6 @@ async fn fetch_cache_info(
         ));
     }
     Ok(())
-}
-
-fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
-    let mut parts = vec![err.to_string()];
-    let mut cause = err.source();
-    while let Some(e) = cause {
-        let part = e.to_string();
-        if !parts.iter().any(|p| p.contains(&part)) {
-            parts.push(part);
-        }
-        cause = e.source();
-    }
-    parts.join(": ")
 }
 
 #[cfg(test)]

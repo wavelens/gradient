@@ -53,13 +53,8 @@
   font-weight: 500;
   white-space: nowrap;
   overflow-wrap: normal;
-  background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-  color: var(--gr-status-danger-text);
-
-  &--on {
-    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: var(--gr-status-success-text);
-  }
+  background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
+  color: var(--gr-status-success-text);
 
   &--unsupported-by-worker {
     background: var(--gr-surface-sunken);
