@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { InteractivityChecker } from '@angular/cdk/a11y';
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { DrawerDirective } from './drawer.directive';
@@ -24,14 +23,7 @@ class HostComponent {
   open = signal(false);
 }
 
-class LayoutFreeInteractivityChecker extends InteractivityChecker {
-  override isVisible(): boolean {
-    return true;
-  }
-}
-
 async function render() {
-  TestBed.configureTestingModule({ providers: [{ provide: InteractivityChecker, useClass: LayoutFreeInteractivityChecker }] });
   const fixture = TestBed.createComponent(HostComponent);
   fixture.detectChanges();
   await fixture.whenStable();
@@ -64,14 +56,24 @@ describe('DrawerDirective', () => {
     expect(document.activeElement).toBe(toggle);
   });
 
-  it('keeps Tab inside the open panel and releases it on close', async () => {
-    const { fixture, openDrawer } = await render();
-    const anchors = () => Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.cdk-focus-trap-anchor'), (a) => a.getAttribute('tabindex'));
+  it('wraps Tab and Shift+Tab around the open panel and lets Tab go once closed', async () => {
+    const { fixture, first, openDrawer } = await render();
+    const pick = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.pick')!;
+    const tab = (target: HTMLElement, shiftKey = false) => {
+      const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      return event;
+    };
     await openDrawer();
-    expect(anchors()).toEqual(['0', '0']);
+    pick.focus();
+    expect(tab(pick).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(first);
+    expect(tab(first, true).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(pick);
     fixture.componentInstance.open.set(false);
     fixture.detectChanges();
-    expect(anchors()).not.toContain('0');
+    pick.focus();
+    expect(tab(pick).defaultPrevented).toBe(false);
   });
 
   it('returns focus to the opener when an action inside the panel closes it', async () => {

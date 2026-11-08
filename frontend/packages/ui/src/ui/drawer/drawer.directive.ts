@@ -4,36 +4,36 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { FocusTrapFactory } from '@angular/cdk/a11y';
-import { DestroyRef, Directive, ElementRef, afterRenderEffect, inject, input, output } from '@angular/core';
+import { Directive, ElementRef, afterRenderEffect, inject, input, output } from '@angular/core';
+
+const keyboardTabFocusableElementSelector =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /// Side panels slide over the page on narrow screens. Escape can close it anywhere, focus can move inside, and focus can return to the opener.
 @Directive({
   selector: '[grDrawer]',
   standalone: true,
-  host: { '(document:keydown.escape)': 'onEscape()' },
+  host: {
+    '(document:keydown.escape)': 'onEscape()',
+    '(keydown)': 'wrapFocusInsideDrawerOnTab($event)',
+  },
 })
 export class DrawerDirective {
   readonly open = input.required<boolean>({ alias: 'grDrawer' });
   readonly closed = output<void>({ alias: 'grDrawerClose' });
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
-  private readonly focusTrap = inject(FocusTrapFactory).create(this.host, true);
   private opener: HTMLElement | null = null;
   private wasOpen = false;
 
   constructor() {
-    this.focusTrap.enabled = false;
-    inject(DestroyRef).onDestroy(() => this.focusTrap.destroy());
     afterRenderEffect(() => {
       const open = this.open();
       if (open === this.wasOpen) return;
       this.wasOpen = open;
-      this.focusTrap.enabled = open;
       if (open) {
         this.opener = document.activeElement as HTMLElement | null;
-        this.focusTrap.attachAnchors();
-        this.focusTrap.focusFirstTabbableElement();
+        this.getFocusableElementsInDrawer()[0]?.focus();
       } else {
         this.returnFocusToOpener();
       }
@@ -42,6 +42,22 @@ export class DrawerDirective {
 
   protected onEscape(): void {
     if (this.open()) this.closed.emit();
+  }
+
+  protected wrapFocusInsideDrawerOnTab(event: KeyboardEvent): void {
+    if (!this.open() || event.key !== 'Tab') return;
+    const focusable = this.getFocusableElementsInDrawer();
+    if (!focusable.length) return;
+    const edge = event.shiftKey ? focusable[0] : focusable[focusable.length - 1];
+    if (document.activeElement !== edge) return;
+    event.preventDefault();
+    (event.shiftKey ? focusable[focusable.length - 1] : focusable[0]).focus();
+  }
+
+  private getFocusableElementsInDrawer(): HTMLElement[] {
+    return Array.from(this.host.querySelectorAll<HTMLElement>(keyboardTabFocusableElementSelector)).filter(
+      (element) => !element.closest('[hidden], [inert]'),
+    );
   }
 
   private returnFocusToOpener(): void {
