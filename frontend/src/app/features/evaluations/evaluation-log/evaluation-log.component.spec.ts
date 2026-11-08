@@ -323,6 +323,13 @@ describe('EvaluationLogComponent', () => {
       return new Map(labelled.map((i) => [i.label, i]));
     }
 
+    it('passes the task to the graph so its breadcrumb leads back through the task', () => {
+      const { cmp } = setup();
+      cmp.evaluation.set({ id: 'eval-1', task_name: 'ci' } as EvaluationResponse);
+      const items = open(cmp, target({ dispatched_job: 'job-1' }));
+      expect(String(items.get('Graph')!.routerLink)).toBe('/project/proj/graph/b1?task=ci&eval=eval-1');
+    });
+
     it('offers graph, job, artefacts and log download for an assigned build', () => {
       const { cmp } = setup();
       const items = open(cmp, target({ dispatched_job: 'job-1', has_artefacts: true }));

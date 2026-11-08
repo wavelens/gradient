@@ -34,7 +34,7 @@ import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { AccessService, WritableDirective } from '@shared/access';
-import { links } from '@shared/routing';
+import { BuildOrigin, links } from '@shared/routing';
 import { CurrentTimeSignal, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
@@ -145,6 +145,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   activeBuildsCount = signal(0);
 
   projectName = '';
+  evaluationLogBuildOrigin(): BuildOrigin {
+    return { task: this.evaluation()?.task_name, evaluation: this.evaluationId };
+  }
+
   projectAndTaskCrumbs = computed(() => {
     const task = this.evaluation()?.task_name;
     const trail = task ? this.crumbs.taskAt(this.projectName, task, this.evaluationId) : this.crumbs.project(this.projectName);
@@ -191,7 +195,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const build = this.contextBuild();
     if (!build) return [];
 
-    const from = { evaluation: this.evaluationId };
+    const from = this.evaluationLogBuildOrigin();
     const job = build.dispatched_job;
     return [
       {

@@ -268,7 +268,7 @@
                 }
               }
               <a grButton severity="secondary" size="small" icon="account_tree" label="Dependency graph"
-                [routerLink]="links.dependencyGraph(projectName, selectedBuild()!.id, { evaluation: evaluationId })"></a>
+                [routerLink]="links.dependencyGraph(projectName, selectedBuild()!.id, evaluationLogBuildOrigin())"></a>
             </div>
           </div>
         } @else if (downloadProgress(); as p) {
