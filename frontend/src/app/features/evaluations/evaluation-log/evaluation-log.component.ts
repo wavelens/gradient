@@ -27,7 +27,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { Observable, Subscription, merge } from 'rxjs';
 import { auditTime, filter, map, share, switchMap } from 'rxjs/operators';
 import { EvaluationsService } from '@core/services/evaluations.service';
-import { LiveEvent, LiveService } from '@core/services/live.service';
+import { LiveEvent, LiveService, createResyncOnLiveSocketReconnectCallback } from '@core/services/live.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
@@ -68,7 +68,7 @@ import {
   DrawerDirective,
   SkeletonComponent,
 } from '@gradient/ui/ui';
-import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
+import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
 import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
@@ -77,7 +77,7 @@ import { saveResponse } from '@shared/download';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -129,6 +129,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   logLineCount = signal(0);
   logLoading = signal(true);
   aborting = signal(false);
+  liveConnectionOpen = signal<boolean | null>(null);
   // The log page is reachable without the task route's access resolver, so the
   // owning task is asked directly: a viewer must not be offered an abort.
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
@@ -497,6 +498,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       next: (result) => {
         this.totalBuilds = result.total;
         this.activeBuildsCount.set(result.active_count);
+        if (!this.isRunning() && result.active_count === 0) this.stopLiveUpdates();
         const prevSelected = this.selectedBuild();
 
         // Merge: keep any already-loaded builds beyond the first page,
@@ -639,7 +641,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopLiveUpdates();
     if (!this.isRunningStatus(status)) return;
 
-    const frames = this.live.connect<LiveEvent>(`/evals/${this.evaluationId}/live`).pipe(share());
+    const frames = this.live.connect<LiveEvent>(
+      `/evals/${this.evaluationId}/live`,
+      createResyncOnLiveSocketReconnectCallback(() => this.refreshEvaluation(), (open) => this.liveConnectionOpen.set(open)),
+    ).pipe(share());
     this.liveSub = frames
       .pipe(filter(e => e.event === 'evaluation.activity'))
       .subscribe(e => this.liveProgress.set(e.content.progress ?? null));
@@ -652,13 +657,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         )
         .subscribe({
           next: (evaluation) => {
+            const finishedNow = this.isRunning() && !this.isRunningStatus(evaluation.status);
             this.evaluation.set(evaluation);
             this.loadBuilds();
-            if (!this.isRunningStatus(evaluation.status)) {
-              this.stopLiveUpdates();
-              this.loadBuilds(); // final update
-              this.loadMessages(true); // pick up any messages recorded during eval
-            }
+            if (finishedNow) this.loadMessages(true);
           },
         }),
     );
@@ -667,6 +669,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   stopLiveUpdates(): void {
     this.liveSub?.unsubscribe();
     this.liveSub = undefined;
+    this.liveConnectionOpen.set(null);
   }
 
   setSidebarFocus(v: boolean): void { this.sidebarFocused = v; }
@@ -1196,7 +1199,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   private evaluationAborted(): void {
     this.notify.success('Evaluation aborted');
-    this.loadEvaluation();
+    this.refreshEvaluation();
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────────

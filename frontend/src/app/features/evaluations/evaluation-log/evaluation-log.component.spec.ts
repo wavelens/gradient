@@ -868,6 +868,54 @@ describe('EvaluationLogComponent', () => {
       expect(fixture.componentInstance.progress()).toEqual({ kind: 'fetching', inputs: rows('live') });
       fixture.destroy();
     });
+
+    it('keeps following the builds after an abort until no build is active', async () => {
+      const frames = new Subject<LiveEvent>();
+      const state = { evaluation: 'Building', build: 'Building' as BuildItem['status'] };
+      TestBed.configureTestingModule({
+        imports: [EvaluationLogComponent],
+        providers: [
+          provideRouter([]), provideHttpClient(), provideHttpClientTesting(),
+          { provide: ActivatedRoute, useValue: {
+            snapshot: {
+              paramMap: convertToParamMap({ project: 'proj', evaluationId: 'eval-1' }),
+              queryParamMap: convertToParamMap({}),
+              fragment: null,
+            },
+          } },
+          { provide: EvaluationsService, useValue: {
+            getEvaluation: () => of({
+              id: 'eval-1', status: state.evaluation, created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
+              started_at: '2026-01-01T00:00:00', finished_at: null, trigger: null,
+            }),
+            getBuild: () => of({ progress: null }),
+            getBuilds: () => of({
+              builds: [build('b1', 'hash-hello.drv', state.build)], total: 1, active_count: state.build === 'Building' ? 1 : 0,
+            }),
+            getEvaluationMessages: () => of([]),
+            abortEvaluation: () => of('ok'),
+          } },
+          { provide: LiveService, useValue: { connect: () => frames } },
+        ],
+      });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
+      const fixture = TestBed.createComponent(EvaluationLogComponent);
+      const cmp = fixture.componentInstance;
+      cmp.ngOnInit();
+
+      state.evaluation = 'Aborted';
+      cmp.requestAbort(new MouseEvent('click', { ctrlKey: true }));
+      expect(cmp.evaluation()?.status).toBe('Aborted');
+      expect(cmp.builds()[0].status).toBe('Building');
+      expect(frames.observed).toBe(true);
+
+      state.build = 'Aborted';
+      frames.next({ event: 'build.status', at: '', content: {} } as LiveEvent);
+      await new Promise(resolve => setTimeout(resolve, 350));
+      expect(cmp.builds()[0].status).toBe('Aborted');
+      expect(frames.observed).toBe(false);
+      fixture.destroy();
+    });
   });
 
   describe('build progress', () => {
@@ -1024,7 +1072,6 @@ describe('EvaluationLogComponent', () => {
       cmp.evaluationId = 'eval-1';
       cmp.evaluation.set({ id: 'eval-1', status: 'Building', commit: 'abc1234def5678', task_name: 'ci', task_display_name: 'CI' } as EvaluationResponse);
       const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(of('ok'));
-      vi.spyOn(cmp, 'loadEvaluation').mockImplementation(() => {});
       const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
       cmp.requestAbort(new MouseEvent('click'));
       expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Evaluation', target: 'CI · abc1234d' }));
@@ -1044,7 +1091,6 @@ describe('EvaluationLogComponent', () => {
     it('aborts at once on a Ctrl click, with no confirmation', () => {
       const { cmp, confirm } = setup();
       const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(of('ok'));
-      vi.spyOn(cmp, 'loadEvaluation').mockImplementation(() => {});
       cmp.requestAbort(new MouseEvent('click', { ctrlKey: true }));
       expect(abort).toHaveBeenCalledOnce();
       expect(confirm).not.toHaveBeenCalled();
