@@ -48,10 +48,11 @@
                   @if (trigger.is_default) {
                     <gr-badge severity="info" grTooltip="Start Evaluation uses this trigger">Default</gr-badge>
                   }
-                  <gr-badge [severity]="trigger.active ? 'success' : 'warning'">
-                    {{ trigger.active ? 'Active' : 'Inactive' }}
-                  </gr-badge>
+                  @if (!trigger.active) {
+                    <gr-badge severity="warning">Inactive</gr-badge>
+                  }
                   <span>Last fired: {{ trigger.last_fired_at | relativeTime }}</span>
+                  @if (fireSuccessId() === trigger.id) {
                     <span class="fire-success">
                       <gr-icon name="check_circle" size="sm" />
                       Evaluation queued

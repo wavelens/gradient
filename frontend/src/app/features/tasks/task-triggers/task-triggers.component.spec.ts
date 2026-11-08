@@ -186,6 +186,12 @@ describe('TaskTriggersComponent - default trigger', () => {
     expect(findByText(fixture.nativeElement, 'make default')).toBeNull();
   });
 
+  it('marks only inactive triggers with a badge', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [trigger, { ...trigger, id: 't9', active: false }]);
+    const badges = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.trigger-meta gr-badge')).map((b) => b.textContent?.trim());
+    expect(badges).toEqual(['Inactive']);
+  });
+
   it('offers Make Default on every other trigger', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [{ ...trigger, is_default: false }]);
     const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
