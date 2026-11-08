@@ -40,7 +40,7 @@
                   [options]="roles()"
                   optionLabel="name"
                   optionValue="name"
-                  [disabled]="pending?.user === member.id || rolesLoading()"
+                  [disabled]="pending !== null || rolesLoading()"
                   [appManagedDisable]="access()"
                   [ariaLabel]="'Role: ' + member.id"
                   (ngModelChange)="updateMemberRole(member.id, $event)"
@@ -134,7 +134,7 @@
                     icon="edit"
                     severity="secondary"
                     [attr.aria-label]="'Edit role ' + role.name"
-                    [disabled]="savingRole()"
+                    [disabled]="savingRole() || deletingRole()"
                     [appManagedDisable]="roleAccess()"
                     (click)="openEditRoleDialog(role)"
                   ></button>
@@ -145,6 +145,7 @@
                     icon="delete"
                     severity="danger"
                     [attr.aria-label]="'Delete role ' + role.name"
+                    [disabled]="savingRole() || deletingRole()"
                     [appManagedDisable]="roleAccess()"
                     (click)="deleteRole(role)"
                   ></button>

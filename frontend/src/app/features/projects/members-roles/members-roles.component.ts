@@ -43,7 +43,7 @@ import {
 } from '@core/models';
 import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
-import { Observable } from 'rxjs';
+import { Observable, finalize } from 'rxjs';
 
 const ROLE_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
@@ -107,6 +107,7 @@ export class MembersRolesComponent implements OnInit {
   addingMember = signal(false);
   pendingMemberRoleSelection = signal<{ user: string; role: string } | null>(null);
   savingRole = signal(false);
+  deletingRole = signal(false);
   roleAttempted = signal(false);
 
   members = signal<MemberItem[]>([]);
@@ -383,7 +384,10 @@ export class MembersRolesComponent implements OnInit {
         consequence: `${role.name} is gone for good.`,
         confirmLabel: 'Delete',
         failure: 'Failed to delete the role.',
-        action: () => this.projectsService.deleteRole(this.projectName, role.id),
+        action: () => {
+          this.deletingRole.set(true);
+          return this.projectsService.deleteRole(this.projectName, role.id).pipe(finalize(() => this.deletingRole.set(false)));
+        },
       })
       .subscribe(() => {
         this.notify.success('Role deleted');
