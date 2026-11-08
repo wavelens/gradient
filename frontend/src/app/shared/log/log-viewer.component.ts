@@ -37,6 +37,7 @@ export type LogMarker = (line: string) => string | null;
 
 interface RenderedLine {
   n: number;
+  text: string;
   html: SafeHtml | null;
   marker: string | null;
 }
@@ -96,6 +97,7 @@ export class LogViewerComponent implements OnDestroy {
   private followScroll = false;
   private searchDebounceTimer?: ReturnType<typeof setTimeout>;
   private searchSeq = 0;
+  private highlightedQuery = '';
   private readonly MIN_SEARCH_LEN = 3;
   private readonly SEARCH_DEBOUNCE_MS = 300;
   private readonly LINE_PX = 18;
@@ -185,7 +187,14 @@ export class LogViewerComponent implements OnDestroy {
 
   private renderLine(text: string, n: number): RenderedLine {
     const marker = this.marker()(text);
-    return { n, marker, html: marker === null ? this.sanitizer.bypassSecurityTrustHtml(ansiToHtml(text)) : null };
+    const html = marker === null ? this.sanitizer.bypassSecurityTrustHtml(ansiToHtml(text, this.highlightedQuery)) : null;
+    return { n, text, marker, html };
+  }
+
+  private setHighlightedQuery(query: string): void {
+    if (query === this.highlightedQuery) return;
+    this.highlightedQuery = query;
+    this.windowLines.set(this.windowLines().map((line) => this.renderLine(line.text, line.n)));
   }
 
   private renderLines(lines: readonly string[], startLine: number): RenderedLine[] {
@@ -241,6 +250,7 @@ export class LogViewerComponent implements OnDestroy {
       }
     }
 
+    this.recountStreamedSearchHits();
     this.updateSpacers();
     this.scrollToBottomIfAuto(true);
   }
@@ -296,6 +306,7 @@ export class LogViewerComponent implements OnDestroy {
   closeSearch(): void {
     this.searchOpen.set(false);
     this.highlightLine.set(null);
+    this.setHighlightedQuery('');
     if (this.searchDebounceTimer !== undefined) clearTimeout(this.searchDebounceTimer);
     this.searchSeq++;
     this.searchLoading.set(false);
@@ -311,9 +322,8 @@ export class LogViewerComponent implements OnDestroy {
     if (this.searchQuery().trim().length < this.MIN_SEARCH_LEN) {
       this.searchSeq++;
       this.searchLoading.set(false);
-      this.searchHits.set([]);
-      this.searchTotal.set(0);
-      this.currentHit.set(-1);
+      this.setHighlightedQuery('');
+      this.showSearchResult([], 0);
       return;
     }
     this.searchLoading.set(true);
@@ -331,12 +341,11 @@ export class LogViewerComponent implements OnDestroy {
     }
     const seq = ++this.searchSeq;
     const server = this.server;
+    this.setHighlightedQuery(query);
     if (!server) {
       const hits = searchLines(this.memory, query);
-      this.searchHits.set(hits);
-      this.searchTotal.set(hits.length);
       this.searchLoading.set(false);
-      if (hits.length > 0) this.gotoHit(0);
+      this.showSearchResult(hits, hits.length);
       return;
     }
     this.searchHits.set([]);
@@ -347,13 +356,27 @@ export class LogViewerComponent implements OnDestroy {
     try {
       const total = await server.search(query, (hits) => this.searchHits.set(hits), isStale);
       if (isStale()) return;
-      this.searchTotal.set(total);
-      if (this.searchHits().length > 0) this.gotoHit(0);
+      this.showSearchResult(this.searchHits(), total);
     } catch {
       return;
     } finally {
       if (!isStale()) this.searchLoading.set(false);
     }
+  }
+
+  private showSearchResult(hits: LogSearchHit[], total: number): void {
+    this.searchHits.set(hits);
+    this.searchTotal.set(total);
+    if (hits.length > 0) return this.gotoHit(0);
+    this.currentHit.set(-1);
+    this.highlightLine.set(null);
+  }
+
+  private recountStreamedSearchHits(): void {
+    if (this.server || !this.highlightedQuery || this.searchLoading()) return;
+    const hits = searchLines(this.memory, this.highlightedQuery);
+    this.searchHits.set(hits);
+    this.searchTotal.set(hits.length);
   }
 
   gotoHit(i: number): void {

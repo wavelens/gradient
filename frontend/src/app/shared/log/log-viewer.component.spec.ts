@@ -174,6 +174,33 @@ describe('LogViewerComponent', () => {
       expect(viewer.highlightLine()).toBe(2);
     });
 
+    it('marks the matched text and drops the highlight once nothing matches', async () => {
+      const { fixture, viewer } = setup();
+      await show(fixture, ['compiling', 'error: nope', 'linking']);
+      viewer.searchQuery.set('ERROR');
+      await viewer.runSearch();
+      await settle(fixture);
+      const marks = () => Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.log-line-content mark')).map((m) => m.textContent);
+      expect(marks()).toEqual(['error']);
+
+      viewer.searchQuery.set('missing');
+      await viewer.runSearch();
+      await settle(fixture);
+      expect(viewer.highlightLine()).toBeNull();
+      expect(marks()).toEqual([]);
+      expect(fixture.nativeElement.querySelector('.log-line--hl')).toBeNull();
+    });
+
+    it('counts matches in lines that stream in after the search', async () => {
+      const { fixture, viewer } = setup();
+      await show(fixture, ['error: one']);
+      viewer.searchQuery.set('error');
+      await viewer.runSearch();
+      await show(fixture, ['error: one', 'ok', 'error: two']);
+      expect(viewer.searchTotal()).toBe(2);
+      expect(viewer.searchHits().map((h) => h.line_number)).toEqual([1, 3]);
+    });
+
     it('asks the server for a finished log and jumps to the first hit', async () => {
       const { fixture, viewer } = setup({ serverLog: serverLog(5000, [hit(40), hit(90)], 7) });
       await settle(fixture);

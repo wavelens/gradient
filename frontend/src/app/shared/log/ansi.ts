@@ -41,8 +41,39 @@ const SGR_RESETS = new Set(['0', '', '39', '49', '22', '23', '24']);
 // eslint-disable-next-line no-control-regex -- ESC is the sequence introducer
 const CSI_SEQUENCE = /\u001b\[([?0-9;]*)([A-Za-z~])/g;
 
-export function ansiToHtml(text: string): string {
-  const escaped = text
+const MATCH_START = '\uE000';
+const MATCH_END = '\uE001';
+const MATCH_MARK = '<mark style="background:color-mix(in srgb, var(--gr-status-warning) 45%, transparent);color:inherit">';
+// eslint-disable-next-line no-control-regex -- ESC is the sequence introducer
+const CSI_SPLIT = /(\u001b\[[?0-9;]*[A-Za-z~])/;
+
+function wrapMatches(text: string, query: string): string {
+  const pieces = text.split(CSI_SPLIT);
+  const plain = pieces.filter((_, i) => i % 2 === 0).join('').toLowerCase();
+  const needle = query.toLowerCase();
+  const starts = new Set<number>();
+  const ends = new Set<number>();
+  for (let at = plain.indexOf(needle); needle && at >= 0; at = plain.indexOf(needle, at + needle.length)) {
+    starts.add(at);
+    ends.add(at + needle.length);
+  }
+  if (starts.size === 0) return text;
+  let position = 0;
+  const wrapped = pieces.map((piece, i) => {
+    if (i % 2 === 1) return piece;
+    let out = '';
+    for (let k = 0; k < piece.length; k++, position++) {
+      if (ends.has(position)) out += MATCH_END;
+      if (starts.has(position)) out += MATCH_START;
+      out += piece[k];
+    }
+    return out;
+  });
+  return wrapped.join('') + (ends.has(position) ? MATCH_END : '');
+}
+
+export function ansiToHtml(text: string, highlightedQuery = ''): string {
+  const escaped = (highlightedQuery ? wrapMatches(text, highlightedQuery) : text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
@@ -59,5 +90,5 @@ export function ansiToHtml(text: string): string {
     openSpans++;
     return span;
   });
-  return html + '</span>'.repeat(openSpans);
+  return (html + '</span>'.repeat(openSpans)).replaceAll(MATCH_START, MATCH_MARK).replaceAll(MATCH_END, '</mark>');
 }
