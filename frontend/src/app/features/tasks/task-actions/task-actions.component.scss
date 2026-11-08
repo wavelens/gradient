@@ -82,15 +82,3 @@
   font-size: $font-size-sm;
 
 }
-
-.token-reveal {
-  background: var(--gr-text-secondary);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-sm;
-  padding: $spacing-sm $spacing-md;
-  font-family: monospace;
-  font-size: $font-size-sm;
-  user-select: all;
-  word-break: break-all;
-  white-space: pre-wrap;
-}

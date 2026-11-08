@@ -83,7 +83,7 @@
 
 <gr-dialog header="Save this secret now" [visible]="revealedSecret() !== null" [closable]="false" width="520px">
   <p>Use it to verify <code>X-Gradient-Signature</code>. It will not be displayed again.</p>
-  <pre class="secret-reveal">{{ revealedSecret() }}</pre>
+  <gr-copy-field label="Webhook Secret" [value]="revealedSecret() ?? ''" />
   <div grDialogFooter>
     <button grButton label="I've copied it" icon="check" (click)="revealedSecret.set(null)"></button>
   </div>

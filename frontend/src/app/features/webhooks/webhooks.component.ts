@@ -23,6 +23,7 @@ import {
   BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
+  CopyFieldComponent,
   type Crumb,
   DialogComponent,
   FormFieldComponent,
@@ -44,6 +45,7 @@ import { links } from '@shared/routing';
   selector: 'app-webhooks',
   standalone: true,
   imports: [
+    CopyFieldComponent,
     LabelHelpComponent,
     CommonModule,
     ServerTimestampToLocalDateTimePipe,

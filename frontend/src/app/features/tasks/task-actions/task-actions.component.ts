@@ -19,6 +19,7 @@ import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
   ButtonComponent,
+  CopyFieldComponent,
   DialogComponent,
   IconComponent,
   LoadStateComponent,
@@ -51,6 +52,7 @@ interface IntegrationOption {
   selector: 'app-task-actions',
   standalone: true,
   imports: [
+    CopyFieldComponent,
     MessageBannerComponent,
     CommonModule,
     RouterModule,

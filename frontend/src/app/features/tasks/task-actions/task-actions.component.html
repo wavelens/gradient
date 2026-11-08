@@ -166,7 +166,7 @@
   width="520px"
 >
   <p>The action's token is shown below. It will not be displayed again - copy it now and store it somewhere safe.</p>
-  <pre class="token-reveal">{{ revealedToken() }}</pre>
+  <gr-copy-field label="Action token" [value]="revealedToken() ?? ''" />
   <div grDialogFooter>
     <button grButton label="I've copied it" icon="check" (click)="dismissToken()"></button>
   </div>
