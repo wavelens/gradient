@@ -245,6 +245,8 @@
               <gr-empty-state class="pkg-wait" flat icon="hourglass_empty" title="Waiting for packages"
                 message="Packages appear as their entry points are found." />
             }
+          } @else if (selectedEvaluationErrorFirstLine(); as error) {
+            <gr-empty-state flat icon="error" title="Evaluation failed" [message]="error" />
           } @else if (!entryPointsLoading()) {
             <gr-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />

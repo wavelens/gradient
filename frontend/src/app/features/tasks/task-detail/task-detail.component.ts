@@ -8,9 +8,9 @@ import { Component, OnInit, OnDestroy, ElementRef, HostListener, Injector, after
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { finalize, Observable, Subject, Subscription } from 'rxjs';
+import { catchError, finalize, map, Observable, of, Subject, Subscription, switchMap } from 'rxjs';
 import { auditTime, debounceTime, filter, share } from 'rxjs/operators';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { LiveEvent, LiveService, createResyncOnLiveSocketReconnectCallback } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
@@ -42,6 +42,7 @@ import { saveResponse } from '@shared/download';
 import { AccessService, WritableDirective, canOpenTaskSettings } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { groupEntryPoints } from './entry-point-groups';
+import { firstLine } from '@features/evaluations/evaluation-summary/summary-text';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { links } from '@shared/routing';
 import { CurrentTimeSignal, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
@@ -170,6 +171,16 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return p?.kind === 'fetching' ? inputFetchRows(p.inputs) : [];
   });
   selectedThunkRow = computed(() => thunkProgress(this.selectedProgress(), this.selected()?.expected_thunks));
+  private failedEvaluationId = computed(() => {
+    const selected = this.selected();
+    return selected?.status === 'Failed' ? selected.id : null;
+  });
+  selectedEvaluationErrorFirstLine = toSignal(toObservable(this.failedEvaluationId).pipe(
+    switchMap((id) => (id ? this.evaluationsService.getEvaluation(id).pipe(
+      map((evaluation) => (evaluation.error ? firstLine(evaluation.error) : null)),
+      catchError(() => of(null)),
+    ) : of(null))),
+  ), { initialValue: null });
 
   latestEvaluation = computed<EvaluationSummary | null>(() => this.evaluations()[0] ?? null);
   evaluationInProgress = computed(() => {

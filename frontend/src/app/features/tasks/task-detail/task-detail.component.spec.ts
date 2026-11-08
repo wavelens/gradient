@@ -129,6 +129,7 @@ type SetupOverrides = Partial<{
   downloadReport: () => ReturnType<TasksService['downloadReport']>;
   getEntryPoints: () => ReturnType<TasksService['getEntryPoints']>;
   getEvaluations: TasksService['getEvaluations'];
+  getEvaluation: () => unknown;
   extraEvals: EvaluationSummary[];
   primaryStatus: EvaluationSummary['status'];
   primary: Partial<EvaluationSummary>;
@@ -172,6 +173,7 @@ function setup(
   const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   const tasksService = makeTasksService(access, serviceOverrides);
   const evaluationsService = {
+    getEvaluation: serviceOverrides.getEvaluation ?? (() => of({ error: null })),
     prioritizeEvaluation: () => of('Success'),
     retryEvaluation: () => of('c68e2ded-bd0c-4c4e-82fd-ec8f86f50df2'),
     prioritizeBuild: () => of('Success'),
@@ -209,6 +211,23 @@ function setup(
 const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
 const menuLabels = (fixture: ComponentFixture<TaskDetailComponent>) =>
   fixture.componentInstance.evalMenuModel().map(i => i.label);
+
+describe('TaskDetailComponent - failed evaluation without packages', () => {
+  const access = { managed: false, canEdit: true, canTrigger: true };
+
+  it('shows the first line of the evaluation error instead of "No packages"', () => {
+    const { fixture } = setup(access, {
+      primaryStatus: 'Failed',
+      getEvaluation: () => of({ error: "\nerror: in pure evaluation mode, 'fetchTree' doesn't fetch unlocked input\n  at flake.lock" }),
+    });
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Evaluation failed');
+    expect(text).toContain("error: in pure evaluation mode, 'fetchTree' doesn't fetch unlocked input");
+    expect(text).not.toContain('at flake.lock');
+    expect(text).not.toContain('No packages');
+  });
+});
 
 describe('TaskDetailComponent - older evaluations', () => {
   const access = { managed: false, canEdit: true, canTrigger: true };
