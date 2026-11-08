@@ -68,6 +68,9 @@ const valuesOf = (s: MetricSeries) => (isXY(s.data) ? s.data.map((p) => p.y) : s
 const areAllSeriesValuesWholeNumbers = (series: MetricSeries[]) =>
   series.every((s) => valuesOf(s).every((v) => v === null || Number.isInteger(v)));
 
+const hasIsolatedNonNullValue = (data: (number | null)[]) =>
+  data.some((v, i) => v !== null && (data[i - 1] ?? null) === null && (data[i + 1] ?? null) === null);
+
 const axisLabel = (t: ChartTheme) => ({ color: t.text, fontSize: 12, fontFamily: t.mono });
 const axisLine = (t: ChartTheme) => ({ lineStyle: { color: t.border } });
 const AXIS_TICKS = 4;
@@ -138,7 +141,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
     series: cfg.series.map((s) => {
       const data = valuesOf(s);
       const kind = kindOf(s);
-      const showSymbol = s.type === 'line' && data.includes(null);
+      const showSymbol = (s.type === 'line' && data.includes(null)) || hasIsolatedNonNullValue(data);
       return {
         name: s.name,
         type: kind,

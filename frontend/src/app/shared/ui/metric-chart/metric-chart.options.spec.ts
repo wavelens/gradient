@@ -308,7 +308,7 @@ describe('buildMetricChartOption dual axis', () => {
         categories: cats,
         series: [
           { name: 'sparse', data: [null, 4, null], type: 'line' as const },
-          { name: 'untyped', data: [null, 4, null] },
+          { name: 'untyped', data: [null, 4, 5] },
         ],
       },
       THEME
@@ -317,6 +317,13 @@ describe('buildMetricChartOption dual axis', () => {
     expect(s[0].showSymbol).toBe(true);
     expect(s[1].showSymbol).toBe(false);
     expect((opt.xAxis as any).boundaryGap).toBe(false);
+  });
+
+  it('mark a point with no neighbor to draw a line to', () => {
+    const single = buildMetricChartOption({ type: 'area', categories: ['15:00'], series: [{ name: 'a', data: [42] }] }, THEME);
+    const islands = buildMetricChartOption({ type: 'line', categories: cats, series: [{ name: 'a', data: [null, 4, null] }] }, THEME);
+    expect((single.series as any[])[0].showSymbol).toBe(true);
+    expect((islands.series as any[])[0].showSymbol).toBe(true);
   });
 
   it('keeps a single axis when no secondary is configured', () => {
