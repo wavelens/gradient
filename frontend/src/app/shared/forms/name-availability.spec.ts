@@ -63,4 +63,10 @@ describe('nameAvailability', () => {
     expect(names.state()).toBe('idle');
     expect(names.suggest('Other Team')).toBe('other-team');
   });
+
+  it('cuts a suggested name to the server limit without a trailing hyphen', () => {
+    const { names } = setup();
+    expect(names.suggest(`${'a'.repeat(63)} b`)).toBe('a'.repeat(63));
+    expect(names.suggest('x'.repeat(80))).toBe('x'.repeat(64));
+  });
 });
