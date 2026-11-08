@@ -111,12 +111,20 @@ describe('errorInterceptor on 429', () => {
     expect(calls()).toBe(2);
   });
 
-  it('caps a long Retry-After', async () => {
-    setup();
-    const { result, calls } = throttled(1, '3600');
-    await vi.advanceTimersByTimeAsync(MAX_THROTTLE_WAIT_MS);
-    expect(calls()).toBe(2);
-    await result;
+  it('shows the 429 page at once when the server asks for a wait beyond the cap', async () => {
+    const { navigate, toasts } = setup();
+    const { result, calls } = throttled(1, String(MAX_THROTTLE_WAIT_MS / 1000 + 1));
+    expect(await result.catch((e: HttpErrorResponse) => e.status)).toBe(429);
+    expect(calls()).toBe(1);
+    expect(toasts.messages()).toEqual([]);
+    expect(navigate).toHaveBeenCalledWith(['/error/429'], expect.objectContaining({ skipLocationChange: true }));
+  });
+
+  it('names the full server wait when a write is throttled for long', async () => {
+    const { toasts } = setup();
+    const { result } = throttled(Infinity, '3600', 'POST');
+    await result.catch(() => undefined);
+    expect(toasts.messages()[0]?.detail).toBe('Try again in 3600 seconds.');
   });
 
   it('shows the 429 page when the server keeps throttling a read', async () => {

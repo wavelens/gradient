@@ -23,7 +23,7 @@ export function throttleWaitMs(error: HttpErrorResponse): number {
   const header = error.headers?.get('retry-after') ?? null;
   const seconds = Number(header);
   const named = header === null ? 0 : Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now();
-  return Math.min(MAX_THROTTLE_WAIT_MS, Math.max(MIN_THROTTLE_WAIT_MS, Number.isFinite(named) ? named : 0));
+  return Math.max(MIN_THROTTLE_WAIT_MS, Number.isFinite(named) ? named : 0);
 }
 
 function pageUrl(router: Router): string {
@@ -44,6 +44,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   const throttled = (error: unknown): Observable<number> => {
     if (!(error instanceof HttpErrorResponse) || error.status !== 429) return throwError(() => error);
     const wait = throttleWaitMs(error);
+    if (wait > MAX_THROTTLE_WAIT_MS) return throwError(() => error);
     if (!background && wait >= NOTICE_THRESHOLD_MS) notify(`Retry in ${Math.ceil(wait / 1000)} s.`, wait);
     return timer(wait);
   };
