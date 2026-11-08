@@ -81,7 +81,12 @@ describe('ClosureGraphComponent - diagram', () => {
     const root = fixture.nativeElement as HTMLElement;
 
     await vi.waitFor(() => expect(root.querySelector('svg text')?.textContent).toBe('ok · 120 B'), { timeout: 5000 });
-    expect(root.querySelector('svg rect')?.getAttribute('height')).not.toContain('NaN');
+    const rect = root.querySelector('svg rect')!;
+    for (const attribute of ['x', 'y', 'width', 'height']) {
+      expect(Number(rect.getAttribute(attribute))).not.toBeNaN();
+    }
+    expect(Number(rect.getAttribute('width'))).toBeGreaterThan(0);
+    expect(Number(root.querySelector('svg text')?.getAttribute('x'))).not.toBeNaN();
     expect(root.querySelector('.header-meta')?.textContent).toContain('1 package in closure');
     fixture.destroy();
   });

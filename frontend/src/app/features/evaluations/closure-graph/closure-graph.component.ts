@@ -31,6 +31,7 @@ const ACCENT = 'var(--gr-chart-orange)';
 const OTHERS_FILL = 'var(--gr-text-muted)';
 const MIN_SCALE = 0.02;
 const MAX_SCALE = 4;
+const NODE_WIDTH = 14;
 const NODE_PADDING = 28;
 const ROW_HEIGHT = 56;
 const COLUMN_WIDTH = 320;
@@ -141,16 +142,24 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       try {
         const probeWidth = svg.clientWidth || 1200;
 
-        const layout = (width: number, height: number) =>
-          sankey<SankeyNode, SankeyLink>()
+        const layout = (width: number, height: number) => {
+          const laid = sankey<SankeyNode, SankeyLink>()
             .nodeId((d) => d.id)
-            .nodeWidth(14)
+            .nodeWidth(NODE_WIDTH)
             .nodePadding(NODE_PADDING)
             .nodeAlign(sankeyJustify)
             .extent([[1, 6], [width - 1, height - 6]])({
             nodes: model.nodes.map((n) => ({ ...n, fixedValue: Math.max(1, n.subtreeSizeBytes) })),
             links: model.links.map((l) => ({ ...l, value: Math.max(1, l.value) })),
           });
+          // d3-sankey x positions use a divisor of column count minus 1. A closure with one column (a package with no dependencies) can get an x position of NaN. Place that column in the center in this case.
+          for (const node of laid.nodes) {
+            if (Number.isFinite(node.x0)) continue;
+            node.x0 = (width - NODE_WIDTH) / 2;
+            node.x1 = node.x0 + NODE_WIDTH;
+          }
+          return laid;
+        };
 
         // Probe pass derives the column layout; size the canvas to the densest
         // column so every band gets room, and widen columns to stay legible.
