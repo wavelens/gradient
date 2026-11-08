@@ -8,10 +8,14 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { links } from '@shared/routing';
+import { createMissingPermissionLoadStateError } from '@shared/access';
+import { accessTo } from '@core/models/access.model';
+import { injectProject } from '@core/resolvers/project-access.resolver';
 import {
   ButtonComponent,
   FormFieldComponent,
   InputDirective,
+  LoadStateComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   SettingsSectionComponent,
@@ -54,6 +58,7 @@ function repositoryName(url: string): string {
     ButtonComponent,
     FormFieldComponent,
     InputDirective,
+    LoadStateComponent,
     MessageBannerComponent,
     PageLayoutComponent,
     SettingsSectionComponent,
@@ -75,8 +80,11 @@ export class ConnectRepositoryComponent implements OnInit {
   private projects = inject(ProjectsService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private project = injectProject();
 
   readonly steps = STEPS;
+  access = computed(() => accessTo(this.project(), 'createTask'));
+  missingPermission = createMissingPermissionLoadStateError('createTask', 'project');
   projectName = '';
   step = signal<ConnectStep>('repository');
   stepIndex = computed(() => STEPS.findIndex((s) => s.id === this.step()));
@@ -107,6 +115,7 @@ export class ConnectRepositoryComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') ?? '';
+    if (!this.access().canEdit) return;
     const query = this.route.snapshot.queryParamMap;
     const task = query.get('task');
     if (task) {

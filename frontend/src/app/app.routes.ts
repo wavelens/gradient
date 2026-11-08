@@ -83,6 +83,7 @@ export const routes: Routes = [
         path: 'connect',
         title: 'Connect repository',
         canActivate: [authGuard],
+        resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
           import('./features/tasks/connect-repository/connect-repository.component').then(
             (m) => m.ConnectRepositoryComponent,

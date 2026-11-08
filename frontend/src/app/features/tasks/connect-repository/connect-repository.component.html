@@ -6,72 +6,76 @@
 
 <gr-page-layout width="form" [breadcrumb]="breadcrumb()" title="Connect repository"
   subtitle="Gradient can build each new commit in a repository and report the result to the Git host.">
-  <ol class="connect-steps" aria-label="Steps">
-    @for (s of steps; track s.id; let i = $index) {
-      <li [class.current]="s.id === step()" [class.done]="i < stepIndex()" [attr.aria-current]="s.id === step() ? 'step' : null">
-        <span class="connect-steps__number">{{ i + 1 }}</span>{{ s.label }}
-      </li>
-    }
-  </ol>
+  @if (!access().canEdit) {
+    <gr-load-state [error]="missingPermission" />
+  } @else {
+    <ol class="connect-steps" aria-label="Steps">
+      @for (s of steps; track s.id; let i = $index) {
+        <li [class.current]="s.id === step()" [class.done]="i < stepIndex()" [attr.aria-current]="s.id === step() ? 'step' : null">
+          <span class="connect-steps__number">{{ i + 1 }}</span>{{ s.label }}
+        </li>
+      }
+    </ol>
 
-  @switch (step()) {
-    @case ('repository') {
-      <gr-settings-section title="Repository">
-        @if (missingCache()) {
-          <gr-message-banner type="warning" data-testid="cache-missing">
-            <strong>Builds need a cache</strong>
-            This project doesn't push builds to any Nix binary cache yet. Register the project for a cache subscription before the first build.
-          </gr-message-banner>
-          <div class="gr-form-actions">
-            <a grButton label="Open the cache subscription" icon="open_in_new" severity="secondary"
-              [routerLink]="links.projectPage(projectName, 'caches')" target="_blank"></a>
-            <button grButton label="Check again" icon="refresh" severity="secondary" (click)="loadCaches()"></button>
+    @switch (step()) {
+      @case ('repository') {
+        <gr-settings-section title="Repository">
+          @if (missingCache()) {
+            <gr-message-banner type="warning" data-testid="cache-missing">
+              <strong>Builds need a cache</strong>
+              This project doesn't push builds to any Nix binary cache yet. Register the project for a cache subscription before the first build.
+            </gr-message-banner>
+            <div class="gr-form-actions">
+              <a grButton label="Open the cache subscription" icon="open_in_new" severity="secondary"
+                [routerLink]="links.projectPage(projectName, 'caches')" target="_blank"></a>
+              <button grButton label="Check again" icon="refresh" severity="secondary" (click)="loadCaches()"></button>
+            </div>
+          }
+          @if (createError(); as error) {
+            <gr-message-banner type="error">{{ error }}</gr-message-banner>
+          }
+          <gr-form-field label="Repository URL" for="connect-repo" required hint="URL of the Git repository to evaluate"
+            [invalid]="!!repositoryError" [error]="repositoryError ?? ''">
+            <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path" />
+            <input grInput id="connect-repo" [ngModel]="form.repository" (ngModelChange)="repositoryChanged($event)"
+              placeholder="ssh://git@forgejo.example.com/acme/app.git" (keyup.enter)="createTask()" />
+          </gr-form-field>
+          <app-name-fields noun="task" [names]="names" [(displayName)]="form.display_name" [(name)]="form.name" (submitted)="createTask()" />
+          @if (missingNamesError; as error) {
+            <p class="text-secondary" role="alert">{{ error }}</p>
+          }
+          <gr-form-field label="Evaluation Wildcard" for="connect-wildcard" hint="Pattern for the outputs to evaluate (default: packages.x86_64-linux.**)">
+            <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" />
+            <input grInput id="connect-wildcard" [(ngModel)]="form.wildcard" (keyup.enter)="createTask()" />
+          </gr-form-field>
+          <div class="gr-form-actions gr-form-actions--end">
+            <a grButton label="Back" severity="secondary" [routerLink]="links.project(projectName)"></a>
+            <button grButton label="Create task" icon="add" (grSubmit)="createTask()" [loading]="creating()"
+              [disabled]="creating() || names.blocksSubmit()"></button>
           </div>
+        </gr-settings-section>
+      }
+      @case ('access') {
+        @if (state(); as repo) {
+          <app-repository-access [project]="projectName" [task]="taskName()!" [state]="repo" (changed)="loadState()" />
         }
-        @if (createError(); as error) {
-          <gr-message-banner type="error">{{ error }}</gr-message-banner>
+      }
+      @case ('events') {
+        @if (state(); as repo) {
+          <app-repository-events [project]="projectName" [task]="taskName()!" [state]="repo" (saved)="state.set($event)" />
         }
-        <gr-form-field label="Repository URL" for="connect-repo" required hint="URL of the Git repository to evaluate"
-          [invalid]="!!repositoryError" [error]="repositoryError ?? ''">
-          <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path" />
-          <input grInput id="connect-repo" [ngModel]="form.repository" (ngModelChange)="repositoryChanged($event)"
-            placeholder="ssh://git@forgejo.example.com/acme/app.git" (keyup.enter)="createTask()" />
-        </gr-form-field>
-        <app-name-fields noun="task" [names]="names" [(displayName)]="form.display_name" [(name)]="form.name" (submitted)="createTask()" />
-        @if (missingNamesError; as error) {
-          <p class="text-secondary" role="alert">{{ error }}</p>
-        }
-        <gr-form-field label="Evaluation Wildcard" for="connect-wildcard" hint="Pattern for the outputs to evaluate (default: packages.x86_64-linux.**)">
-          <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" />
-          <input grInput id="connect-wildcard" [(ngModel)]="form.wildcard" (keyup.enter)="createTask()" />
-        </gr-form-field>
-        <div class="gr-form-actions gr-form-actions--end">
-          <a grButton label="Back" severity="secondary" [routerLink]="links.project(projectName)"></a>
-          <button grButton label="Create task" icon="add" (grSubmit)="createTask()" [loading]="creating()"
-            [disabled]="creating() || names.blocksSubmit()"></button>
-        </div>
-      </gr-settings-section>
-    }
-    @case ('access') {
-      @if (state(); as repo) {
-        <app-repository-access [project]="projectName" [task]="taskName()!" [state]="repo" (changed)="loadState()" />
       }
     }
-    @case ('events') {
-      @if (state(); as repo) {
-        <app-repository-events [project]="projectName" [task]="taskName()!" [state]="repo" (saved)="state.set($event)" />
-      }
-    }
-  }
 
-  @if (step() === 'access') {
-    <div class="gr-form-actions gr-form-actions--end">
-      <button grButton label="Continue" icon="arrow_forward" (click)="next()"></button>
-    </div>
-  } @else if (step() === 'events') {
-    <div class="gr-form-actions gr-form-actions--end">
-      <button grButton label="Back" severity="secondary" (click)="back()"></button>
-      <a grButton label="Open task" icon="arrow_forward" [routerLink]="links.task(projectName, taskName()!)"></a>
-    </div>
+    @if (step() === 'access') {
+      <div class="gr-form-actions gr-form-actions--end">
+        <button grButton label="Continue" icon="arrow_forward" (click)="next()"></button>
+      </div>
+    } @else if (step() === 'events') {
+      <div class="gr-form-actions gr-form-actions--end">
+        <button grButton label="Back" severity="secondary" (click)="back()"></button>
+        <a grButton label="Open task" icon="arrow_forward" [routerLink]="links.task(projectName, taskName()!)"></a>
+      </div>
+    }
   }
 </gr-page-layout>

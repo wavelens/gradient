@@ -28,14 +28,15 @@ const repo: TaskRepositoryResponse = {
   can_manage_integrations: true,
 };
 
-function render(query: Record<string, string>, tasks: object, projects: object = {}) {
+function render(query: Record<string, string>, tasks: object, projects: object = {}, permissions: string[] = ['createTask', 'editTask']) {
+  const data = { projectAccess: { project: { managed: false, permissions } } };
   TestBed.configureTestingModule({
     imports: [ConnectRepositoryComponent],
     providers: [
       provideRouter([]),
       {
         provide: ActivatedRoute,
-        useValue: { snapshot: { paramMap: convertToParamMap({ project: 'acme' }), queryParamMap: convertToParamMap(query) } },
+        useValue: { data: of(data), snapshot: { data, paramMap: convertToParamMap({ project: 'acme' }), queryParamMap: convertToParamMap(query) } },
       },
       { provide: TasksService, useValue: { checkTaskNameAvailable: () => of(true), getRepository: () => of(repo), ...tasks } },
       { provide: ProjectsService, useValue: { getSubscribedCaches: () => of([]), getProject: () => of({ display_name: 'Acme' }), ...projects } },
@@ -86,6 +87,14 @@ describe('ConnectRepositoryComponent', () => {
   it('shows no cache warning when the project has an active cache', () => {
     const fixture = render({}, {}, { getSubscribedCaches: () => of([{ name: 'main', status: 'active' }]) });
     expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="cache-missing"]')).toBeNull();
+  });
+
+  it('shows the missing permission instead of the form to a role that cannot create tasks, without a request', () => {
+    const getSubscribedCaches = vi.fn(() => of([]));
+    const el = render({}, {}, { getSubscribedCaches }, ['viewProject']).nativeElement as HTMLElement;
+    expect(el.querySelector('#connect-repo')).toBeNull();
+    expect(el.querySelector('gr-load-state')?.textContent).toContain('create task permission');
+    expect(getSubscribedCaches).not.toHaveBeenCalled();
   });
 
   it('ends on the events step with a link to the task', () => {
