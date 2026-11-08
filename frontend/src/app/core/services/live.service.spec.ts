@@ -5,6 +5,7 @@
  */
 
 import { Subscription } from 'rxjs';
+import { vi } from 'vitest';
 import { LiveService } from './live.service';
 import { environment } from '@environments/environment';
 
@@ -76,6 +77,18 @@ describe('LiveService', () => {
     const frame = { event: 'build.status_changed', at: '2026-09-26T12:00:00Z', content: {} };
     ws.emit(JSON.stringify(frame));
     expect(frames).toEqual([frame]);
+  });
+
+  it('reports each open and drop, then reconnects', () => {
+    vi.useFakeTimers();
+    const states: boolean[] = [];
+    sub = service.connect('/board/live', (connected) => states.push(connected)).subscribe();
+    FakeWebSocket.instances[0].onopen?.();
+    FakeWebSocket.instances[0].onclose?.();
+    vi.advanceTimersByTime(1000);
+    FakeWebSocket.instances[1].onopen?.();
+    expect(states).toEqual([true, false, true]);
+    vi.useRealTimers();
   });
 
   it('closes the socket on unsubscribe', () => {

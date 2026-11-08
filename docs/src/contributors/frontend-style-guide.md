@@ -52,6 +52,7 @@ flowchart LR
 - Call the function from ``injectRevealFirstInvalid()`` inside ``@shared/forms`` after a rejected submit. The function can scroll to the first invalid field and focus that field. Place the save result directly above `Save` on long settings pages. Scroll the result into view.
 - Build every in-app link with links from @shared/routing. Never write a path as an array or a string. A builder returns a UrlTree with its query, so bind it to routerLink alone, without queryParams, and navigate with router.navigateByUrl. Pages that open from a task or an evaluation keep it in the link, so the way back returns to the same evaluation and build. Every page shows a gr-breadcrumb trail (through gr-page-layout or on its own) back to its parent.
 - Show a waiting or stuck state through gr-waiting-notice, never as bare text. Its mapping, explainWaiting in @shared/evaluation, gives each reason a title, a detail and either an action (a link or Run) or a hint whom to ask, chosen by the viewer's permission. Add a new reason there, not on a page.
+- Show connection status with `gr-live-status` on all pages that receive socket updates. Get status from the `onLiveSocketConnectedChange` callback of `LiveService.connect`. Refetch page data on each reconnect, so missed events while the socket is down don't skew counters.
 - Use `buildStatusLabel()` from `@shared/evaluation` to display build status. Never show raw API values such as `FailedPermanent`.
 - Link sibling pages of one area, such as the user settings, with gr-link-tabs in the page banner slot, so every page reaches its siblings in one click.
 - Show repository fetch failures in `app-repository-fetch-banner` of `@shared/git`. Members who can edit the task see the git error and how to fix the failure. Everyone else sees who to ask.
@@ -88,7 +89,7 @@ The package `@gradient/ui` lives in the pnpm workspace at `frontend/packages/ui`
 
 ## `gr-ui`
 
-The generic building blocks live in `frontend/packages/ui/src/ui/` and build on `@angular/cdk`. Gradient-specific components (`gr-eval-status-badge`, `gr-status-icon`, `gr-waiting-notice`, `gr-metric-chart`, `gr-star-button`, `gr-label-help`) live in `frontend/src/app/shared/ui/`. Imports go through the barrel of each layer.
+The generic building blocks live in `frontend/packages/ui/src/ui/` and build on `@angular/cdk`. Gradient-specific components (`gr-eval-status-badge`, `gr-status-icon`, `gr-waiting-notice`, `gr-live-status`, `gr-metric-chart`, `gr-star-button`, `gr-label-help`) live in `frontend/src/app/shared/ui/`. Imports go through the barrel of each layer.
 
 ```ts
 import { FormFieldComponent, PageLayoutComponent, SettingsSectionComponent } from '@gradient/ui/ui';

@@ -13,6 +13,7 @@ export * from './status-badge/status-badge.component';
 export * from './gradient-ci-connect/gradient-ci-connect.component';
 export * from './input-fetch-list/input-fetch-list.component';
 export * from './label-help/label-help.component';
+export * from './live-status/live-status.component';
 export * from './metric-chart/metric-chart.component';
 export * from './metric-chart/metric-chart.options';
 export * from './segmented-bar/ratio-segments';

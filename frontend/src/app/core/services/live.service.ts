@@ -27,12 +27,8 @@ const MAX_BACKOFF_MS = 15000;
 
 @Injectable({ providedIn: 'root' })
 export class LiveService {
-  /// Subscribe to a per-resource live channel (path is relative to the API
-  /// root, e.g. `/evals/{id}/live`). Frames are parsed JSON. The socket
-  /// reconnects with capped exponential backoff so a long-open page survives
-  /// transient drops; the observable completes only when the caller
-  /// unsubscribes.
-  connect<T = LiveEvent>(path: string): Observable<T> {
+  /// Subscribe to a live channel. The path is relative to the API root, e.g. `/evals/{id}/live`. Frames arrive as parsed JSON. The socket can reconnect with capped exponential backoff, so an open page can survive short disconnects. Only the caller can complete the observable through unsubscribe. Connection events pass true to `onLiveSocketConnectedChange` on every open and false on every disconnect. A page can set a stale flag and refetch missed content after reconnect.
+  connect<T = LiveEvent>(path: string, onLiveSocketConnectedChange?: (connected: boolean) => void): Observable<T> {
     return new Observable<T>((subscriber) => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       const url = `${proto}://${location.host}${environment.apiUrl}${path}`;
@@ -43,7 +39,10 @@ export class LiveService {
 
       const open = () => {
         ws = new WebSocket(url);
-        ws.onopen = () => (attempt = 0);
+        ws.onopen = () => {
+          attempt = 0;
+          onLiveSocketConnectedChange?.(true);
+        };
         ws.onmessage = (e) => {
           try {
             subscriber.next(JSON.parse(e.data) as T);
@@ -54,6 +53,7 @@ export class LiveService {
         ws.onerror = () => ws?.close();
         ws.onclose = () => {
           if (stopped) return;
+          onLiveSocketConnectedChange?.(false);
           timer = setTimeout(open, Math.min(1000 * 2 ** attempt++, MAX_BACKOFF_MS));
         };
       };

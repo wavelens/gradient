@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal, computed, effect, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, effect, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
-import { Subscription } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
-import { BoardLiveService } from '@core/services/board-live.service';
+import { LiveStatusComponent } from '@shared/ui';
 import { AuthService } from '@core/services/auth.service';
 import { ButtonComponent, LoadStateComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
+import { subscribeToBoardSocketWithReload } from '../board-socket';
 import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel } from '../job-kind';
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 import { links } from '@shared/routing';
@@ -21,7 +21,6 @@ import { type WaitingExplanation, explainWaiting, waitingAccessFrom } from '@sha
 import { relativeTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 
 type KindFilter = 'all' | JobKindName;
-type StatusFilter = 'all' | 'pending' | 'assigned';
 type ScoreScope = 'current' | 'all';
 
 interface DecisionRow {
@@ -37,13 +36,14 @@ interface DecisionRow {
 @Component({
   selector: 'app-board-live-jobs',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, LoadStateComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, LoadStateComponent, LiveStatusComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
       <div class="view-toggle">
         <button [class.active]="view() === 'assigned'" (click)="setView('assigned')">Assigned</button>
         <button [class.active]="view() === 'pending'" (click)="setView('pending')">Pending</button>
+        @if (connected() !== null) { <gr-live-status [connected]="!!connected()" /> }
       </div>
 
       @if (view() === 'assigned') {
@@ -71,13 +71,6 @@ interface DecisionRow {
               <option value="exec">exec</option>
             </select>
           </label>
-          <label>Status
-            <select [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)">
-              <option value="all">all</option>
-              <option value="pending">pending (live)</option>
-              <option value="assigned">assigned</option>
-            </select>
-          </label>
           <label>Score min
             <input type="number" step="0.1" [ngModel]="scoreMin()" (ngModelChange)="scoreMin.set($event)" placeholder="-" />
           </label>
@@ -94,14 +87,14 @@ interface DecisionRow {
             <tbody>
               @for (row of assignedRows(); track row.job.id) {
                 @let j = row.job;
-                <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
+                <tr class="clickable" (click)="inspect(j)">
                   @let subject = rowSubject(row);
                   <td>{{ jobKindName(j.kind) }}</td>
                   <td class="mono">{{ j.cluster_job ? subJobLabel(row.subJobs) : (j.worker_name ?? j.worker_id) }}</td>
                   <td class="mono subject" [title]="subject">{{ subject }}</td>
                   <td>{{ j.score | number: '1.1-1' }}</td>
                   <td>{{ j.dispatched_at | serverDate: 'HH:mm:ss' }}</td>
-                  <td>{{ canInspect(j) ? '›' : '' }}</td>
+                  <td>›</td>
                 </tr>
               } @empty {
                 <tr><td colspan="6" class="muted">No matching assigned jobs.</td></tr>
@@ -186,20 +179,15 @@ interface DecisionRow {
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './live-jobs.component.scss',
 })
-export class BoardLiveJobsComponent implements OnInit, OnDestroy {
+export class BoardLiveJobsComponent implements OnInit {
   protected readonly links = links;
   private static readonly STATE_KEY = 'board.live-jobs.filters';
-  // Mirror the server's `board/jobs/dispatched` cap so optimistic live rows and
-  // the refreshed API list converge instead of flipping the count.
-  private static readonly MAX_ASSIGNED = 500;
 
   private board = inject(BoardService);
-  private live = inject(BoardLiveService);
   private router = inject(Router);
   private auth = inject(AuthService);
-  private sub?: Subscription;
-  private refreshTimer?: ReturnType<typeof setTimeout>;
   protected first = firstLoad();
+  protected connected = subscribeToBoardSocketWithReload(() => this.load());
   protected readonly jobKindName = jobKindName;
   protected readonly jobSubjectLabel = jobSubjectLabel;
   protected readonly collapseClusters = collapseClusters;
@@ -213,7 +201,6 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   otherPending = signal(0);
 
   kindFilter = signal<KindFilter>('all');
-  statusFilter = signal<StatusFilter>('all');
   scoreMin = signal<number | null>(null);
   scoreMax = signal<number | null>(null);
 
@@ -228,7 +215,6 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
       const state = {
         view: this.view(),
         kindFilter: this.kindFilter(),
-        statusFilter: this.statusFilter(),
         scoreMin: this.scoreMin(),
         scoreMax: this.scoreMax(),
         scoreScope: this.scoreScope(),
@@ -243,13 +229,10 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   filteredJobs = computed(() => {
     const kind = this.kindFilter();
-    const status = this.statusFilter();
     const min = this.scoreMin();
     const max = this.scoreMax();
     return this.jobs().filter((j) => {
       if (kind !== 'all' && jobKindName(j.kind) !== kind) return false;
-      if (status === 'pending' && !this.isLive(j)) return false;
-      if (status === 'assigned' && this.isLive(j)) return false;
       if (min !== null && j.score < min) return false;
       if (max !== null && j.score > max) return false;
 
@@ -308,31 +291,6 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.load();
-    this.sub = this.live.connect().subscribe({
-      next: ({ event, content: ev }) => {
-        if (event === 'worker.job_dispatched' && ev.project) {
-          this.jobs.update((list) =>
-            [
-              {
-                id: `live:${ev.evaluation_id}:${ev.worker_id}:${Date.now()}`,
-                kind: ev.kind ?? 0,
-                project: ev.project!,
-                worker_id: ev.worker_id ?? '',
-                worker_name: null,
-                score: ev.score ?? 0,
-                dispatched_at: new Date().toISOString(),
-                build_id: ev.build_id ?? null,
-                evaluation_id: ev.evaluation_id ?? '',
-                subject: null,
-              },
-              ...list,
-            ].slice(0, BoardLiveJobsComponent.MAX_ASSIGNED)
-          );
-          this.scheduleRefresh();
-        }
-      },
-      error: () => {},
-    });
   }
 
   retry(): void {
@@ -344,11 +302,6 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     this.loadAssigned();
     if (this.view() === 'pending') this.loadPending();
     if (this.showDecisions()) this.loadDecisions();
-  }
-
-  ngOnDestroy(): void {
-    this.sub?.unsubscribe();
-    clearTimeout(this.refreshTimer);
   }
 
   setView(v: 'assigned' | 'pending'): void {
@@ -374,17 +327,6 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     });
   }
 
-  /// Merge the optimistic live rows with the persisted, selectable rows.
-  /// Throttled so a busy board refreshes at most once per window instead of
-  /// deferring forever under a steady event stream.
-  private scheduleRefresh(): void {
-    if (this.refreshTimer) return;
-    this.refreshTimer = setTimeout(() => {
-      this.refreshTimer = undefined;
-      this.loadAssigned();
-    }, 1500);
-  }
-
   private restoreState(): void {
     try {
       const raw = sessionStorage.getItem(BoardLiveJobsComponent.STATE_KEY);
@@ -392,7 +334,6 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
       const s = JSON.parse(raw);
       if (s.view) this.view.set(s.view);
       if (s.kindFilter) this.kindFilter.set(s.kindFilter);
-      if (s.statusFilter) this.statusFilter.set(s.statusFilter);
       this.scoreMin.set(s.scoreMin ?? null);
       this.scoreMax.set(s.scoreMax ?? null);
       if (s.scoreScope) this.scoreScope.set(s.scoreScope);
@@ -408,16 +349,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     });
   }
 
-  isLive(j: DispatchedJobSummary): boolean {
-    return j.id.startsWith('live:');
-  }
-
-  canInspect(j: DispatchedJobSummary): boolean {
-    return !this.isLive(j);
-  }
-
   inspect(j: DispatchedJobSummary): void {
-    if (this.isLive(j)) return;
     this.router.navigateByUrl(links.boardJobOrCluster(j.id, j.cluster_job) ?? links.boardJob(j.id));
   }
 

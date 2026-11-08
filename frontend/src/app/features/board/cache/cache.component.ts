@@ -12,7 +12,7 @@ import { map, merge, switchMap, timer } from 'rxjs';
 import { LiveService } from '@core/services/live.service';
 import { CardGridComponent, LoadStateComponent, StatCardComponent, TabSwitchComponent } from '@gradient/ui/ui';
 import { oneOf, queryParamSignal } from '@shared/routing';
-import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
+import { LabelHelpComponent, LiveStatusComponent, MetricChartComponent } from '@shared/ui';
 import { clockTime, formatBytes, formatCount, formatDuration, formatPercent } from '@shared/text';
 import { BoardCacheSnapshot, BoardUpstreamCache, EventEnvelope, TrafficKind } from '@core/models';
 
@@ -22,10 +22,13 @@ const FIRST_FRAME_MS = 10_000;
 @Component({
   selector: 'app-board-cache',
   standalone: true,
-  imports: [CommonModule, FormsModule, TabSwitchComponent, CardGridComponent, StatCardComponent, MetricChartComponent, LabelHelpComponent, LoadStateComponent],
+  imports: [CommonModule, FormsModule, TabSwitchComponent, CardGridComponent, StatCardComponent, MetricChartComponent, LabelHelpComponent, LoadStateComponent, LiveStatusComponent],
   template: `
     <gr-load-state [loading]="!stalled()" [error]="stalled()" [empty]="!snapshot()"
                    loadingMessage="Loading cache stats..." errorTitle="Failed to load cache activity" (retry)="retry()">
+      @if (connected() !== null) {
+        <gr-live-status [connected]="!!connected()" />
+      }
       <gr-card-grid class="kpis" min="160px">
         <gr-stat-card compact label="Compressed size" [value]="bytes(stats()?.totals?.bytes ?? 0)" />
         <gr-stat-card compact label="NAR size" [value]="bytes(stats()?.totals?.nar_bytes ?? 0)" />
@@ -101,6 +104,7 @@ export class BoardCacheComponent {
   private live = inject(LiveService);
   snapshot = signal<BoardCacheSnapshot | null>(null);
   stalled = signal<string | null>(null);
+  connected = signal<boolean | null>(null);
   private attempt = signal(0);
   readonly trafficOptions: { label: string; value: TrafficKind }[] = [
     { label: 'Total', value: 'total' },
@@ -143,7 +147,7 @@ export class BoardCacheComponent {
         switchMap(({ traffic }) =>
           merge(
             this.live
-              .connect<EventEnvelope<BoardCacheSnapshot>>(`/board/cache/live?window_hours=${WINDOW_HOURS}&traffic=${traffic}`)
+              .connect<EventEnvelope<BoardCacheSnapshot>>(`/board/cache/live?window_hours=${WINDOW_HOURS}&traffic=${traffic}`, (open) => this.connected.set(open))
               .pipe(map((frame) => frame.content)),
             timer(FIRST_FRAME_MS).pipe(map(() => null)),
           )

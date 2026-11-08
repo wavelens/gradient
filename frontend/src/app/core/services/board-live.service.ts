@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { environment } from '@environments/environment';
 import type { EventEnvelope } from '@core/models';
+import { LiveService } from './live.service';
 
 export type BoardLiveEvent = EventEnvelope<{
   project?: string;
@@ -23,27 +23,9 @@ export type BoardLiveEvent = EventEnvelope<{
 
 @Injectable({ providedIn: 'root' })
 export class BoardLiveService {
-  /// Live board events over a WebSocket. Auto-completes on close; resubscribe to
-  /// reconnect. Errors surface to the subscriber so callers can retry.
-  connect(): Observable<BoardLiveEvent> {
-    return new Observable<BoardLiveEvent>((subscriber) => {
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const url = `${proto}://${location.host}${environment.apiUrl}/board/live`;
-      const ws = new WebSocket(url);
-      ws.onmessage = (e) => {
-        try {
-          subscriber.next(JSON.parse(e.data) as BoardLiveEvent);
-        } catch {
-          /* ignore malformed frames */
-        }
-      };
-      ws.onerror = () => subscriber.error(new Error('board live socket error'));
-      ws.onclose = () => subscriber.complete();
-      return () => {
-        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-          ws.close();
-        }
-      };
-    });
+  private live = inject(LiveService);
+
+  connect(onLiveSocketConnectedChange?: (connected: boolean) => void): Observable<BoardLiveEvent> {
+    return this.live.connect<BoardLiveEvent>('/board/live', onLiveSocketConnectedChange);
   }
 }
