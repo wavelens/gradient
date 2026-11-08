@@ -37,6 +37,7 @@ import { composeTitle } from '@core/title/gradient-title-strategy';
 import { JobTimelineComponent } from './job-timeline.component';
 import { BUILD_KIND, EXEC_KIND, jobKindName, jobSubjectLabel } from '../job-kind';
 import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
+import { scoringRuleClassNameToReadableLabel } from '../scoring-rule-label';
 import { abortExecJobConfirm } from '@features/exec-jobs/exec-job-status';
 import {
   abortBuildConfirm,
@@ -72,6 +73,7 @@ export function getAssignedJobName(j: AssignedJobDetail): string {
 
 interface RuleRow {
   name: string;
+  label: string;
   value: number;
   share: number;
   positive: boolean;
@@ -251,8 +253,8 @@ interface RuleRow {
             <tbody>
               @for (r of rules(); track r.name) {
                 <tr>
-                  <td class="mono">
-                    {{ r.name }}
+                  <td>
+                    {{ r.label }}
                     @if (r.description) {
                       <button type="button" class="help" aria-label="Explain rule" (click)="showHelp($event, r, rulePop)">?</button>
                     }
@@ -271,7 +273,7 @@ interface RuleRow {
 
           <gr-popover #rulePop>
             @if (activeRule(); as a) {
-              <div class="rule-help"><strong>{{ a.rule }}</strong><p>{{ a.description }}</p></div>
+              <div class="rule-help"><strong>{{ ruleLabel(a.rule) }}</strong> <span class="mono muted">{{ a.rule }}</span><p>{{ a.description }}</p></div>
             }
           </gr-popover>
 
@@ -527,6 +529,7 @@ export class BoardJobDetailComponent implements OnInit {
   ];
 
   protected readonly getAssignedJobName = getAssignedJobName;
+  protected readonly ruleLabel = scoringRuleClassNameToReadableLabel;
 
   jobStatusBadge = computed<{ phase: StatusPhase; label: string }>(() => {
     const j = this.job();
@@ -545,6 +548,7 @@ export class BoardJobDetailComponent implements OnInit {
     return entries
       .map(([name, value]) => ({
         name,
+        label: scoringRuleClassNameToReadableLabel(name),
         value,
         share: (Math.abs(value) / maxAbs) * 100,
         positive: value >= 0,

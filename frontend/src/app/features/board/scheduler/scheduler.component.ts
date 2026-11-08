@@ -10,6 +10,7 @@ import { BoardService } from '@core/services/board.service';
 import { CardGridComponent, LoadStateComponent, PopoverComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
+import { scoringRuleClassNameToReadableLabel } from '../scoring-rule-label';
 import { clockTime, formatDuration } from '@shared/text';
 import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
 
@@ -51,8 +52,8 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
         <tbody>
           @for (r of ruleRows(); track r.rule) {
             <tr>
-              <td class="mono">
-                {{ r.rule }}
+              <td>
+                {{ r.label }}
                 @if (r.description) {
                   <button type="button" class="help" aria-label="Explain rule" (click)="showHelp($event, r, rulePop)">?</button>
                 }
@@ -70,7 +71,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
 
       <gr-popover #rulePop>
         @if (activeRule(); as a) {
-          <div class="rule-help"><strong>{{ a.rule }}</strong><p>{{ a.description }}</p></div>
+          <div class="rule-help"><strong>{{ ruleLabel(a.rule) }}</strong> <span class="mono muted">{{ a.rule }}</span><p>{{ a.description }}</p></div>
         }
       </gr-popover>
     </gr-load-state>
@@ -106,12 +107,15 @@ export class BoardSchedulerComponent implements OnInit {
     { name: 'assignments', data: (this.summary()?.histogram ?? []).map((b) => b.count) },
   ]);
 
+  protected readonly ruleLabel = scoringRuleClassNameToReadableLabel;
+
   ruleRows = computed(() => {
     const rules = this.summary()?.rules ?? [];
     const descriptions = this.descriptions();
     const maxAbs = Math.max(1e-9, ...rules.map((r) => Math.abs(r.avg)));
     return rules.map((r) => ({
       ...r,
+      label: scoringRuleClassNameToReadableLabel(r.rule),
       share: (Math.abs(r.avg) / maxAbs) * 100,
       description: descriptions.get(r.rule) ?? '',
     }));
