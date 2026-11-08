@@ -132,6 +132,19 @@ describe('MembersRolesComponent - access gating', () => {
     expect(root.querySelector('.member-role')?.textContent?.trim()).toBe('Admin');
   });
 
+  it('names each member by username and adds the display name when it differs', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
+    getMembers.mockReturnValue(of([
+      { id: 'alice', user_display_name: 'Alice Doe', name: 'Admin' },
+      { id: 'bob', user_display_name: 'bob', name: 'Admin' },
+    ]));
+    await settled(fixture);
+    const rows = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row'));
+    expect(rows[0].querySelector('.mono')?.textContent?.trim()).toBe('alice');
+    expect(rows[0].querySelector('[slot="meta"]')?.textContent?.trim()).toBe('Alice Doe');
+    expect(rows[1].querySelector('[slot="meta"]')).toBeNull();
+  });
+
   it('offers the role select to members who can manage members', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);

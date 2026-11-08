@@ -134,6 +134,19 @@ describe('CacheMembersRolesComponent', () => {
     expect(element.querySelector('.member-role')?.textContent?.trim()).toBe('Admin');
   });
 
+  it('names each member by username and adds the display name when it differs', async () => {
+    const fixture = setup();
+    getMembers.mockReturnValue(of([
+      { id: 'alice', user_display_name: 'Alice Doe', name: 'Admin' },
+      { id: 'bob', user_display_name: null, name: 'Admin' },
+    ]));
+    await settled(fixture);
+    const rows = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row'));
+    expect(rows[0].querySelector('.mono')?.textContent?.trim()).toBe('alice');
+    expect(rows[0].querySelector('[slot="meta"]')?.textContent?.trim()).toBe('Alice Doe');
+    expect(rows[1].querySelector('[slot="meta"]')).toBeNull();
+  });
+
   it('shows members and roles as no access to a visitor without a cache role and asks the server nothing', async () => {
     const fixture = setup(false, []);
     await settled(fixture);

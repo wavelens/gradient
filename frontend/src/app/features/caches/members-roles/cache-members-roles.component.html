@@ -35,6 +35,9 @@
           @for (member of members(); track member.id) {
             <gr-row icon="person">
               <span class="mono">{{ member.id }}</span>
+              @if (member.user_display_name && member.user_display_name !== member.id) {
+                <span slot="meta">{{ member.user_display_name }}</span>
+              }
               <div slot="actions">
                 @if (!access().canEdit) {
                   <gr-badge severity="neutral" class="member-role">{{ member.name }}</gr-badge>
