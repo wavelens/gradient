@@ -379,8 +379,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     skipped: 6,
   };
 
-  /// Sidebar sections, in display order. Failures sort above queued so they stay
-  /// visible. `Completed` absorbs `Substituted`, `Skipped` absorbs `DependencyFailed`.
+  /// Sidebar sections in display order. Failures appear above queued and always show. `Completed` can include `Substituted`. `Skipped` can include `DependencyFailed`. `Other` can take every status that this list doesn't recognize. The list shows every build.
   private readonly buildGroups: { key: string; label: string; members: string[] }[] = [
     { key: 'building', label: 'Building', members: ['building'] },
     { key: 'failed', label: 'Failed', members: ['failed'] },
@@ -388,6 +387,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     { key: 'queued', label: 'Queued', members: ['queued'] },
     { key: 'completed', label: 'Completed', members: ['completed', 'substituted'] },
     { key: 'skipped', label: 'Skipped', members: ['dependencyfailed', 'skipped'] },
+    { key: 'other', label: 'Other', members: [] },
   ];
 
   collapsedGroups = signal<ReadonlySet<string>>(new Set());
@@ -400,8 +400,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const buckets: BuildItem[][] = this.buildGroups.map(() => []);
     for (const build of this.visibleBuilds()) {
       if (!matchesBuildSearch(build.name, this.sidebarSearchQuery())) continue;
-      const gi = indexByGroup.get(this.statusClass(build.status));
-      if (gi !== undefined) buckets[gi].push(build);
+      buckets[indexByGroup.get(this.statusClass(build.status)) ?? buckets.length - 1].push(build);
     }
     const collapsed = this.collapsedGroups();
     return this.buildGroups

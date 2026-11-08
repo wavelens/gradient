@@ -173,6 +173,12 @@ describe('EvaluationLogComponent', () => {
   describe('collapsible sections', () => {
     const builds = () => [build('b1', 'b1', 'Building'), build('f1', 'f1', 'Failed'), build('c1', 'c1', 'Completed')];
 
+    it('Add builds of unknown status to the Other section.', () => {
+      const { cmp } = setup();
+      cmp.visibleBuilds.set([build('c1', 'c1', 'Completed'), build('n1', 'n1', 'Rebuilding')]);
+      expect(cmp.groupedBuilds().map((g) => [g.key, g.builds.map((b) => b.id)])).toEqual([['completed', ['c1']], ['other', ['n1']]]);
+    });
+
     it('starts with every section expanded', () => {
       const { cmp } = setup();
       cmp.visibleBuilds.set(builds());
