@@ -25,7 +25,13 @@
   transition: width 0.5s ease, filter $transition-fast;
 }
 
-.segbar--hover .seg:hover { filter: brightness(1.25); }
+.segbar--build-status-counts {
+  .seg:hover { filter: brightness(1.25); }
+
+  .seg-building {
+    background: repeating-linear-gradient(-45deg, var(--gr-graph-running) 0 3px, transparent 3px 6px);
+  }
+}
 
 .seg-empty { width: 100%; background: var(--gr-surface-hover); }
 .seg-completed { background: var(--gr-graph-success); }

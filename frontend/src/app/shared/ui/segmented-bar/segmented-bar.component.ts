@@ -28,7 +28,7 @@ function countSegments(c: BuildStatusCounts): CountSegment[] {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <span class="segbar" [class.segbar--hover]="!segments()" (mouseleave)="tip.set(null)">
+    <span class="segbar" [class.segbar--build-status-counts]="!segments()" (mouseleave)="tip.set(null)">
       @for (s of shown(); track s.tone) {
         <i class="seg seg-{{ s.tone }}" [class.seg-pulsing]="onScreen() && s.tone === 'building' && s.pct > 0"
            [style.width.%]="s.pct" (mouseenter)="showTip($event, s.label)"></i>

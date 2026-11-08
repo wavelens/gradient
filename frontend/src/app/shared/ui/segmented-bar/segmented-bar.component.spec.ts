@@ -77,7 +77,7 @@ describe('SegmentedBarComponent', () => {
     fixture.componentRef.setInput('segments', ratioSegments(512, 2048));
     fixture.detectChanges();
     expect(widths()).toEqual([['seg seg-building', '25%'], ['seg seg-queued', '75%']]);
-    expect(fixture.nativeElement.querySelector('.segbar').classList).not.toContain('segbar--hover');
+    expect(fixture.nativeElement.querySelector('.segbar').classList).not.toContain('segbar--build-status-counts');
     fixture.nativeElement.querySelector('.seg-building').dispatchEvent(new MouseEvent('mouseenter'));
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.tipbox')).toBeNull();
