@@ -118,7 +118,7 @@ export function phaseLabel(phase: string): string {
       </table>
       </div>
     } @else {
-      <gr-empty-state icon="schedule" title="No timeline" message="This job reported no phase spans." flat />
+      <gr-empty-state icon="schedule" title="No timeline" message="Timings for each step arrive from the worker at job completion." flat />
     }
   `,
   styleUrl: './job-timeline.component.scss',
