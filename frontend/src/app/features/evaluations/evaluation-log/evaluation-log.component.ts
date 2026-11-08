@@ -158,6 +158,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   });
   evaluationId = '';
   private initialBuildId: string | null = null;
+  missingBuildId = signal<string | null>(null);
   // #489: when set, the build list is scoped to this build's package closure.
   scopeBuildId = signal<string | null>(null);
   private initialShowEval = false;
@@ -723,6 +724,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       next: (b: BuildWithOutputs) => {
         this.fetchingInitialBuild = false;
         if (this.initialBuildId !== id) return settled?.();
+        if (b.evaluation !== this.evaluationId) return this.dropMissingInitialBuild(id, settled);
         const item: BuildItem = {
           id: b.id,
           name: b.derivation_path,
@@ -742,11 +744,25 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.selectBuild(item, true);
         settled?.();
       },
-      error: () => {
+      error: (error: unknown) => {
         this.fetchingInitialBuild = false;
+        if (error instanceof ApiError && (error.status === 404 || error.status === 403)) return this.dropMissingInitialBuild(id, settled);
         settled?.();
       },
     });
+  }
+
+  private dropMissingInitialBuild(id: string, settled?: () => void): void {
+    this.initialBuildId = null;
+    this.missingBuildId.set(id);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { build: null },
+      queryParamsHandling: 'merge',
+      preserveFragment: true,
+      replaceUrl: true,
+    });
+    settled?.();
   }
 
   selectBuild(build: BuildItem, isUserAction = false): void {
@@ -755,6 +771,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     if (this.selectedBuildId() === build.id) return;
 
     this.userPickedBuild = isUserAction;
+    if (isUserAction) this.missingBuildId.set(null);
     this.autoFollowBuilding = false;
     this.stopActiveStream();
     const keepLineLinkUntilBuildLogShown = this.logLineCount() === 0;

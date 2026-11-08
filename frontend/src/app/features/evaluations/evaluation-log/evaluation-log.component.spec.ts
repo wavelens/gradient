@@ -14,7 +14,7 @@ import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
-import { EMPTY, NEVER, type Observable, Subject, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, type Observable, Subject, map, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { NotifyService } from '@core/services/notify.service';
@@ -694,12 +694,12 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
-    function setupScoped(query: Record<string, string>) {
-      const getBuild = vi.fn((id: string) => of({
-        id, evaluation: 'eval-1', status: 'Completed', derivation_path: `hash-${id}.drv`,
+    function setupScoped(query: Record<string, string>, buildEvaluation: Observable<string> = of('eval-1'), listed: BuildItem[] = []) {
+      const getBuild = vi.fn((id: string) => buildEvaluation.pipe(map((evaluation) => ({
+        id, evaluation, status: 'Completed', derivation_path: `hash-${id}.drv`,
         architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, prioritized: false, ifd: false, created_at: '', updated_at: '',
-      }));
-      const getBuilds = vi.fn((..._args: unknown[]) => of({ builds: [], total: 0, active_count: 0 }));
+      }))));
+      const getBuilds = vi.fn((..._args: unknown[]) => of({ builds: listed, total: listed.length, active_count: 0 }));
       TestBed.configureTestingModule({
         imports: [EvaluationLogComponent],
         providers: [
@@ -764,6 +764,21 @@ describe('EvaluationLogComponent', () => {
       expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { package: null } }));
       expect(getBuilds.mock.lastCall?.[3]).toBeUndefined();
       expect(host.querySelector('.build-limit')).toBeNull();
+      fixture.destroy();
+    });
+
+    it.each([
+      ['of another evaluation', of('eval-2')],
+      ['that does not exist', throwError(() => new ApiError('Build not found', 404))],
+    ])('flags a linked build %s and opens the evaluation as usual', (_case, buildEvaluation) => {
+      const failed = build('bad', 'hash-openssl.drv', 'FailedPermanent');
+      const { cmp, fixture, navigate } = setupScoped({ build: 'other' }, buildEvaluation, [failed]);
+      fixture.detectChanges();
+      expect(cmp.missingBuildId()).toBe('other');
+      expect(cmp.builds().map(b => b.id)).toEqual(['bad']);
+      expect(cmp.selectedBuildId()).toBe('bad');
+      expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { build: null } }));
+      expect((fixture.nativeElement as HTMLElement).querySelector('.log-area gr-message-banner')?.textContent).toContain('does not belong');
       fixture.destroy();
     });
   });

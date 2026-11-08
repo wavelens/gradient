@@ -186,6 +186,9 @@
 
       <!-- Log area -->
       <div class="log-area">
+        @if (missingBuildId()) {
+          <gr-message-banner type="warning">The linked build does not belong to this evaluation.</gr-message-banner>
+        }
         @if (ev.status === 'Waiting' && selectedSection() !== 'messages' && selectedBuildId()) {
           <gr-waiting-notice banner [reason]="ev.waiting_reason" [project]="projectName" [access]="waitingAccess()" />
         }
