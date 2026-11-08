@@ -5,7 +5,8 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { ActivatedRoute, provideRouter } from '@angular/router';
+import { taskAccessData } from '@core/resolvers/access-route.testing';
 import { of, throwError } from 'rxjs';
 import { RepositoryIntegration, TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
@@ -44,11 +45,12 @@ function repo(overrides: Partial<TaskRepositoryResponse> = {}): TaskRepositoryRe
   };
 }
 
-function render(state: TaskRepositoryResponse, services: { tasks?: object; integrations?: object } = {}) {
+function render(state: TaskRepositoryResponse, services: { tasks?: object; integrations?: object } = {}, managed = false) {
   TestBed.configureTestingModule({
     imports: [RepositoryEventsComponent],
     providers: [
       provideRouter([]),
+      { provide: ActivatedRoute, useValue: { parent: { data: of(taskAccessData({ managed, canEdit: !managed, canTrigger: !managed })) } } },
       { provide: TasksService, useValue: services.tasks ?? {} },
       { provide: IntegrationsService, useValue: services.integrations ?? { listIntegrationDeliveries: () => of([]) } },
     ],
@@ -76,6 +78,11 @@ describe('RepositoryEventsComponent', () => {
     const el = render(repo({ can_edit: false, can_manage_integrations: false, integrations: [inbound] })).nativeElement as HTMLElement;
     expect(el.querySelector('[data-testid="read-only"]')).not.toBeNull();
     expect(el.textContent).not.toContain('Save');
+  });
+
+  it('names Nix as the reason a state-managed task is read-only, not a missing role', () => {
+    const el = render(repo({ can_edit: false, integrations: [inbound] }), {}, true).nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="read-only"]')?.textContent).toContain('Managed by Nix');
   });
 
   it('turns on push and pull request builds when a connection is picked and saves them', () => {

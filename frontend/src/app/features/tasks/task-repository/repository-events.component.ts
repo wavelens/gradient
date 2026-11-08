@@ -27,6 +27,8 @@ import { IncomingDeliveriesComponent, SELF_HOSTED_GIT_HOSTS, deliverySummary, gi
 import { relativeTime, slugify } from '@shared/text';
 import { fieldChecks, splitList, unsavedChanges } from '@shared/forms';
 import { provisioningIntegration } from './provisioning';
+import { accessDisabledReason } from '@shared/access';
+import { injectTaskAccess } from '@core/resolvers/inject-access';
 
 interface EventsForm {
   inbound: string | null;
@@ -95,6 +97,8 @@ export class RepositoryEventsComponent {
   project = input.required<string>();
   task = input.required<string>();
   state = input.required<TaskRepositoryResponse>();
+  private access = injectTaskAccess();
+  repositoryEventSettingsReadOnlyReason = computed(() => accessDisabledReason(this.access()));
   saved = output<TaskRepositoryResponse>();
 
   form = signal<EventsForm>({
