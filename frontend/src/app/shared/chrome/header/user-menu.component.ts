@@ -28,6 +28,13 @@ export class UserMenuComponent {
     { label: 'Settings', icon: 'settings', routerLink: links.settings('profile') },
     { label: 'My Invites', icon: 'mail', routerLink: links.settings('invites') },
     ...(this.whatsNew.hasNotes ? [{ label: "What's New", icon: 'new_releases', command: () => this.whatsNew.showAll() }] : []),
+    ...(this.auth.user()?.superuser
+      ? [
+          { separator: true },
+          { label: 'Event notifications', icon: 'webhook', routerLink: links.admin('webhooks') },
+          { label: 'GitHub App', icon: 'hub', routerLink: links.admin('github-app') },
+        ]
+      : []),
     { separator: true },
     { label: 'Log out', icon: 'logout', command: () => this.auth.logout().subscribe() },
   ]);

@@ -23,6 +23,7 @@ function setup(
   signedIn = false,
   publicListing = true,
   serverUnreachable = false,
+  superuser = false,
 ): ComponentFixture<AppHeaderComponent> {
   logout.mockClear();
   TestBed.configureTestingModule({
@@ -34,7 +35,7 @@ function setup(
       {
         provide: AuthService,
         useValue: {
-          user: signal(signedIn ? { name: 'Alice' } : null),
+          user: signal(signedIn ? { name: 'Alice', superuser } : null),
           isAuthenticated: () => signedIn,
           serverUnreachable: () => serverUnreachable,
           logout,
@@ -79,8 +80,8 @@ describe('AppHeaderComponent - registration visibility', () => {
 });
 
 describe('AppHeaderComponent - user menu', () => {
-  async function openMenu(): Promise<{ root: HTMLElement; items: HTMLElement[] }> {
-    const fixture = setup(false, true);
+  async function openMenu(superuser = false): Promise<{ root: HTMLElement; items: HTMLElement[] }> {
+    const fixture = setup(false, true, true, false, superuser);
     const root = fixture.nativeElement as HTMLElement;
     (root.querySelector('.user-menu-trigger') as HTMLElement).click();
     await fixture.whenStable();
@@ -111,6 +112,12 @@ describe('AppHeaderComponent - user menu', () => {
     const trigger = (setup(false, true).nativeElement as HTMLElement).querySelector('.user-menu-trigger') as HTMLElement;
     expect(trigger.hasAttribute('aria-label')).toBe(false);
     expect(trigger.querySelector('gr-badge')).toBeNull();
+  });
+
+  it('leads a superuser to the admin pages, which have no other entry point', async () => {
+    const { items } = await openMenu(true);
+    const admin = items.filter((item) => ['Event notifications', 'GitHub App'].some((label) => item.textContent?.includes(label)));
+    expect(admin.map((item) => item.getAttribute('href'))).toEqual(['/admin/webhooks', '/admin/github-app']);
   });
 
   it('logs out from the dropdown', async () => {
