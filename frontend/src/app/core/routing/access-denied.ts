@@ -22,11 +22,11 @@ export interface DeniedTarget {
 /// The app can show the shared Not Found page in place. The address bar can keep the link that the user followed.
 export function deniedPage(router: Router, target: DeniedTarget, from: string): RedirectCommand {
   const tree = router.createUrlTree(['/error/404'], { queryParams: { ...target, from } });
-  return new RedirectCommand(tree, { skipLocationChange: true });
+  return new RedirectCommand(tree, { browserUrl: from });
 }
 
 export function adminOnlyPage(router: Router, from: string): RedirectCommand {
-  return new RedirectCommand(router.createUrlTree(['/error/403'], { queryParams: { from } }), { skipLocationChange: true });
+  return new RedirectCommand(router.createUrlTree(['/error/403'], { queryParams: { from } }), { browserUrl: from });
 }
 
 export function denyOnRefusal<T>(target: DeniedTarget, from: string): OperatorFunction<T, T | RedirectCommand> {
@@ -40,6 +40,6 @@ export function denyOnRefusal<T>(target: DeniedTarget, from: string): OperatorFu
     }
     if (error instanceof ApiError && error.unreachable) return EMPTY;
     const failed = router.createUrlTree(['/error/500'], { queryParams: { from } });
-    return of(new RedirectCommand(failed, { skipLocationChange: true }));
+    return of(new RedirectCommand(failed, { browserUrl: from }));
   });
 }

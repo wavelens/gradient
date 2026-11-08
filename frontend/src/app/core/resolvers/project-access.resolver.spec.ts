@@ -19,7 +19,7 @@ function snap(params: Record<string, string>): ActivatedRouteSnapshot {
 
 function runResolver(route: ActivatedRouteSnapshot): Promise<ProjectAccessData> {
   const result = TestBed.runInInjectionContext(() =>
-    projectAccessResolver(route, {} as never),
+    projectAccessResolver(route, { url: '/project/missing' } as never),
   ) as Observable<ProjectAccessData>;
   return firstValueFrom(result);
 }
@@ -63,7 +63,7 @@ describe('projectAccessResolver', () => {
     getProject.mockReturnValue(throwError(() => new ApiError('Project not found', 404)));
     const result = (await runResolver(snap({ project: 'missing' }))) as unknown as RedirectCommand;
     expect(result).toBeInstanceOf(RedirectCommand);
-    expect(result.navigationBehaviorOptions?.skipLocationChange).toBe(true);
+    expect(result.navigationBehaviorOptions?.browserUrl).toBe('/project/missing');
     expect(TestBed.inject(Router).serializeUrl(result.redirectTo)).toContain('/error/404?kind=project&name=missing&back=%2Fprojects');
   });
 });

@@ -36,7 +36,7 @@ export const appConfig: ApplicationConfig = {
       withNavigationErrorHandler(({ error, url }) => {
         if (error instanceof ApiError && error.unreachable) return;
         const router = inject(Router);
-        return new RedirectCommand(router.createUrlTree(['/error/500'], { queryParams: { from: url } }), { skipLocationChange: true });
+        return new RedirectCommand(router.createUrlTree(['/error/500'], { queryParams: { from: url } }), { browserUrl: url });
       }),
     ),
     provideScrollToTopOnPageChange(),

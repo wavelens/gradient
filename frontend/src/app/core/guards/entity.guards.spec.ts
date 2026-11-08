@@ -83,7 +83,7 @@ async function outcome(guard: CanActivateFn, params: Record<string, string>, dat
 function page(result: unknown): string {
   expect(result).toBeInstanceOf(RedirectCommand);
   const command = result as RedirectCommand;
-  expect(command.navigationBehaviorOptions?.skipLocationChange).toBe(true);
+  expect(command.navigationBehaviorOptions?.browserUrl).toBe(URL);
   return TestBed.inject(Router).serializeUrl(command.redirectTo);
 }
 
