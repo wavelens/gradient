@@ -73,7 +73,7 @@ a {
 :where(a:hover) { text-decoration: underline; }
 
 // Links in body text need an underline. Color alone doesn't distinguish them from surrounding text.
-:where(p, small) a:not([class]) { text-decoration: underline; }
+:where(p, small, gr-message-banner) a:not([class]) { text-decoration: underline; }
 
 .breadcrumb {
   display: flex;
