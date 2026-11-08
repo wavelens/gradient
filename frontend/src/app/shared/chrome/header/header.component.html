@@ -26,7 +26,7 @@
       @defer (on idle; on interaction(userTrigger)) {
         <app-user-menu #userMenu />
       }
-    } @else {
+    } @else if (!authService.serverUnreachable()) {
       <a [routerLink]="links.login(router.url.startsWith('/account/') ? null : router.url)" class="user-link">Login</a>
       @if (!registrationDisabled) {
         <a [routerLink]="links.register()" class="user-link">Register</a>

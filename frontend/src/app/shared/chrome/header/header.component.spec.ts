@@ -22,6 +22,7 @@ function setup(
   registrationDisabled: boolean,
   signedIn = false,
   publicListing = true,
+  serverUnreachable = false,
 ): ComponentFixture<AppHeaderComponent> {
   logout.mockClear();
   TestBed.configureTestingModule({
@@ -35,6 +36,7 @@ function setup(
         useValue: {
           user: signal(signedIn ? { name: 'Alice' } : null),
           isAuthenticated: () => signedIn,
+          serverUnreachable: () => serverUnreachable,
           logout,
         },
       },
@@ -62,6 +64,11 @@ describe('AppHeaderComponent - registration visibility', () => {
   it('hides the Register link when registration is disabled', () => {
     const fixture = setup(true);
     expect(registerLink(fixture.nativeElement)).toBeNull();
+  });
+
+  it('offers no sign-in while the server is unreachable, since the session is unknown', () => {
+    const root = setup(false, false, true, true).nativeElement as HTMLElement;
+    expect(root.querySelectorAll('.user-link').length).toBe(0);
   });
 });
 
