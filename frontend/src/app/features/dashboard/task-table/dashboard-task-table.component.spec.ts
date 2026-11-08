@@ -71,7 +71,9 @@ describe('DashboardTaskTableComponent', () => {
     waiting.latest = { ...waiting.latest!, status: 'Waiting', waiting_reason: { kind: 'no_cache' } };
     const { f, root } = render(null, () => of({ ...PAGE, tasks: [waiting] }));
     await settle(f);
-    expect(root.querySelector('.meta')?.textContent).toContain('Cache not configured');
+    expect(root.querySelector('.waiting')?.textContent).toContain('Cache not configured');
+    expect(root.querySelector('.meta')?.textContent).not.toContain('Cache not configured');
+    expect(root.querySelectorAll('gr-row .value').length).toBe(0);
   });
 
   it('leaves the filter to the server when the url has no filter and puts Starred first for a user with starred tasks', async () => {

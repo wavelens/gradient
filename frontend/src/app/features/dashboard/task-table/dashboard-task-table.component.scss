@@ -74,6 +74,17 @@ code {
   }
 }
 
+.waiting {
+  grid-column: 2 / -1;
+  justify-self: end;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+}
+
 .show-all {
   align-self: flex-start;
 }
@@ -92,7 +103,8 @@ code {
   }
 
   .columns,
-  .value {
+  .value,
+  .waiting {
     display: none;
   }
 }

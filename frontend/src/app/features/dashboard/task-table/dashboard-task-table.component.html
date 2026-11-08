@@ -29,35 +29,37 @@
           <span>average time</span>
         </div>
         @for (t of d.tasks; track t.project + '/' + t.task) {
+          @let waitingReason = t.latest?.status === 'Waiting' ? newestEvaluationWaitingReasonTitle(t.project, t.latest!) : null;
           <gr-row [link]="links.task(t.project, t.task)" [linkLabel]="t.project + ' / ' + t.task">
             @if (t.latest; as l) {
-              <gr-status-icon slot="icon" size="sm" [phase]="phase(l.status)" [label]="l.status" />
+              <gr-status-icon slot="icon" size="sm" [phase]="phase(l.status)" [label]="waitingReason ?? l.status" />
             }
             <span class="name" [title]="t.project + ' / ' + t.task"><span class="project">{{ t.project }} /</span> {{ t.task }}</span>
             <span slot="meta" class="meta">
               @if (t.latest; as l) {
                 <code>{{ l.commit.slice(0, 7) }}</code> · {{ l.created_at | relativeTime }}
-                @if (l.status === 'Waiting') {
-                  · {{ newestEvaluationWaitingReasonTitle(t.project, l) }}
-                }
               } @else {
                 No evaluations yet
               }
             </span>
             <div slot="actions" class="cells">
               <app-evaluation-history [bars]="t.history" [project]="t.project" [task]="t.task" />
-              <span class="value">
-                <b>{{ t.entry_points ? t.entry_points.ok + '/' + t.entry_points.total : '-' }}</b>
-                <small class="sr-only">entry points</small>
-              </span>
-              <span class="value" title="Failing entry points against the previous evaluation">
-                <b [class.up]="(t.delta ?? 0) > 0" [class.down]="(t.delta ?? 0) < 0">{{ delta(t.delta) }}</b>
-                <small class="sr-only">change</small>
-              </span>
-              <span class="value">
-                <b>{{ duration(t.speed_ms) }}</b>
-                <small class="sr-only">average time</small>
-              </span>
+              @if (waitingReason) {
+                <span class="waiting" [title]="waitingReason">{{ waitingReason }}</span>
+              } @else {
+                <span class="value">
+                  <b>{{ t.entry_points ? t.entry_points.ok + '/' + t.entry_points.total : '-' }}</b>
+                  <small class="sr-only">entry points</small>
+                </span>
+                <span class="value" title="Failing entry points against the previous evaluation">
+                  <b [class.up]="(t.delta ?? 0) > 0" [class.down]="(t.delta ?? 0) < 0">{{ delta(t.delta) }}</b>
+                  <small class="sr-only">change</small>
+                </span>
+                <span class="value">
+                  <b>{{ duration(t.speed_ms) }}</b>
+                  <small class="sr-only">average time</small>
+                </span>
+              }
             </div>
           </gr-row>
         }
