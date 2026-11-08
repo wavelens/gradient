@@ -18,7 +18,7 @@ export interface LinkTab {
   standalone: true,
   imports: [RouterLink, RouterLinkActive],
   template: `
-    <nav class="link-tabs" [attr.aria-label]="ariaLabel()">
+    <nav class="link-tabs gr-scroll-fade-row" [attr.aria-label]="ariaLabel()">
       @for (tab of tabs(); track tab.label) {
         <a #link class="link-tab" [routerLink]="tab.link" routerLinkActive="is-active" ariaCurrentWhenActive="page"
           (isActiveChange)="$event && activeLink.set(link)">{{ tab.label }}</a>

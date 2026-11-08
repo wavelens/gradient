@@ -194,6 +194,42 @@ a {
   @include sr-only;
 }
 
+@property --gr-scroll-fade-start {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --gr-scroll-fade-end {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes gr-scroll-fade-start {
+  to { --gr-scroll-fade-start: #{$spacing-xl}; }
+}
+
+@keyframes gr-scroll-fade-end {
+  from { --gr-scroll-fade-end: #{$spacing-xl}; }
+}
+
+// Items that are cut off at a scrollable edge fade out. The row can look like more items continue there instead of clipped text.
+@supports (animation-timeline: scroll()) {
+  .gr-scroll-fade-row {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 var(--gr-scroll-fade-start),
+      #000 calc(100% - var(--gr-scroll-fade-end)),
+      transparent
+    );
+    animation: gr-scroll-fade-start linear both, gr-scroll-fade-end linear both;
+    animation-timeline: scroll(self inline);
+    animation-range: 0 $spacing-xl, calc(100% - #{$spacing-xl}) 100%;
+  }
+}
+
 // A skip link can stay off-screen until keyboard focus.
 .gr-skip-link {
   position: absolute;
