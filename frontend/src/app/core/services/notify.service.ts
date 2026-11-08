@@ -9,18 +9,19 @@ import { MessageService } from '@gradient/ui/ui';
 import { ApiError } from './api.service';
 
 const FAILURE_LIFE_MS = 8000;
+const WRITE_RESULT_TOAST_KEY = 'writeResultToastKey';
 
-/// Report write results as toasts. A failed write can stay on screen longer and include the reason from the server.
+/// Write results appear as toasts. Failed writes stay on screen longer and include the reason from the server. New results replace the previous toast. Later successes leave no old failure toast beside them.
 @Injectable({ providedIn: 'root' })
 export class NotifyService {
   private messages = inject(MessageService);
 
   success(summary: string): void {
-    this.messages.add({ severity: 'success', summary });
+    this.messages.add({ severity: 'success', summary, key: WRITE_RESULT_TOAST_KEY });
   }
 
   failure(summary: string, error: unknown): void {
     const detail = error instanceof ApiError ? error.message : undefined;
-    this.messages.add({ severity: 'error', summary, detail, life: FAILURE_LIFE_MS });
+    this.messages.add({ severity: 'error', summary, detail, life: FAILURE_LIFE_MS, key: WRITE_RESULT_TOAST_KEY });
   }
 }

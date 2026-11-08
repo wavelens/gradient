@@ -37,6 +37,13 @@ describe('NotifyService', () => {
     expect(messages.messages()).toHaveLength(1);
   });
 
+  it('replaces a stale failure with a later success', () => {
+    const { notify, messages } = setup();
+    notify.failure("Couldn't save role", new ApiError('Conflict', 409));
+    notify.success('Role saved');
+    expect(messages.messages()).toEqual([expect.objectContaining({ severity: 'success', summary: 'Role saved' })]);
+  });
+
   it('never shows the text of a programming error', () => {
     const { notify, messages } = setup();
     notify.failure('Failed to delete webhook', new TypeError('x is undefined'));
