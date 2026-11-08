@@ -4,17 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
 import { ApiService } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import { CurrentTimeSignal } from '@shared/text';
 import { CliAuthorizeComponent, formatCliConfirmationCode } from './cli-authorize.component';
 
-const INFO = { user_code: 'ABCD-EF23', ip: null, user_agent: null };
+const NOW = Date.parse('2026-11-08T12:00:00Z');
+const INFO = { user_code: 'ABCD-EF23', ip: null, user_agent: null, expires_at: '2026-11-08T12:09:05' };
 
-function setup(code: string) {
+function setup(code: string, now = NOW) {
   const get = vi.fn(() => of(INFO));
   const post = vi.fn();
   TestBed.configureTestingModule({
@@ -24,6 +27,7 @@ function setup(code: string) {
       { provide: ApiService, useValue: { get, post } },
       { provide: AuthService, useValue: { initialized$: of(true), isAuthenticated: () => true } },
       { provide: ConfigService, useValue: { logoUrl: null } },
+      { provide: CurrentTimeSignal, useValue: { currentTimeMilliseconds: signal(now) } },
       { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap({ code }) } } },
     ],
   });
@@ -58,6 +62,22 @@ describe('CliAuthorizeComponent', () => {
     expect(post).toHaveBeenCalledTimes(2);
     expect(component.errorMessage()).toBeNull();
     expect(component.status()).toBe('authorized');
+  });
+
+  it('counts down to the code expiry and blocks Authorize once it passed', () => {
+    const expiration = (fixture: ReturnType<typeof setup>['fixture']) =>
+      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="cli-code-expiration"]')?.textContent?.trim();
+    const authorizeButton = (fixture: ReturnType<typeof setup>['fixture']) =>
+      Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find((b) => b.textContent?.includes('Authorize'))!;
+
+    const pending = setup('ABCD-EF23').fixture;
+    expect(expiration(pending)).toBe('in 9:05');
+    expect(authorizeButton(pending).disabled).toBe(false);
+
+    TestBed.resetTestingModule();
+    const expired = setup('ABCD-EF23', Date.parse('2026-11-08T12:10:00Z')).fixture;
+    expect(expiration(expired)).toContain('Expired');
+    expect(authorizeButton(expired).disabled).toBe(true);
   });
 
   it('returns to an empty code form for another code', () => {

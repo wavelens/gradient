@@ -40,6 +40,14 @@
         <dl>
           <dt>Confirmation code</dt>
           <dd class="code">{{ info()!.user_code }}</dd>
+          <dt>Expiration</dt>
+          <dd data-testid="cli-code-expiration">
+            @if (cliConfirmationCodeRemainingTimeText(); as remaining) {
+              in {{ remaining }}
+            } @else {
+              Expired. Run <code>gradient login</code> again.
+            }
+          </dd>
           <dt>Origin IP</dt>
           <dd>{{ info()!.ip || 'unknown' }}</dd>
           <dt>User agent</dt>
@@ -56,7 +64,7 @@
             class="w-full"
             label="Authorize"
             [loading]="submitting()"
-            [disabled]="submitting()"
+            [disabled]="submitting() || !cliConfirmationCodeRemainingTimeText()"
             (click)="authorize()"
           ></button>
           <button

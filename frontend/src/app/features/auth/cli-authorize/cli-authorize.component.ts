@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormBuilder,
@@ -27,6 +27,7 @@ import {
   MessageBannerComponent,
 } from '@gradient/ui/ui';
 import { links } from '@shared/routing';
+import { CurrentTimeSignal, serverTime } from '@shared/text';
 
 export function formatCliConfirmationCode(raw: string): string {
   const characters = raw.toUpperCase().replace(/[\s-]/g, '');
@@ -48,6 +49,7 @@ export class CliAuthorizeComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private config = inject(ConfigService);
+  private clock = inject(CurrentTimeSignal);
 
   form: FormGroup;
   info = signal<CliDeviceInfoResponse | null>(null);
@@ -55,6 +57,13 @@ export class CliAuthorizeComponent implements OnInit {
   submitting = signal(false);
   status = signal<'pending' | 'authorized' | 'denied'>('pending');
   errorMessage = signal<string | null>(null);
+  cliConfirmationCodeRemainingTimeText = computed(() => {
+    const info = this.info();
+    if (!info) return null;
+    const seconds = Math.ceil((serverTime(info.expires_at).getTime() - this.clock.currentTimeMilliseconds()) / 1000);
+    if (seconds <= 0) return null;
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  });
   get logoUrl() { return this.config.logoUrl; }
 
   constructor() {
