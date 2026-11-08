@@ -20,7 +20,7 @@ class Page {}
 class Host {
   nav = [
     { label: 'Dashboard', href: '/', exact: true },
-    { label: 'Projects', href: '/projects' },
+    { label: 'Projects', href: '/projects', activePathPrefixes: ['/project'] },
   ];
 }
 
@@ -83,5 +83,18 @@ describe('gr-header menu', () => {
     await router.navigateByUrl('/projects/demo?page=2');
     fixture.detectChanges();
     expect(active()).toEqual(['Projects']);
+  });
+
+  it('marks a link as the current page on its detail routes', async () => {
+    const current = () => Array.from(root().querySelectorAll('.header-nav a[aria-current=page]'), (link) => link.textContent?.trim());
+    const router = TestBed.inject(Router);
+
+    await router.navigateByUrl('/project/demo/log');
+    fixture.detectChanges();
+    expect(current()).toEqual(['Projects']);
+
+    await router.navigateByUrl('/projectile');
+    fixture.detectChanges();
+    expect(current()).toEqual([]);
   });
 });

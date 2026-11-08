@@ -16,6 +16,7 @@ export interface Brand extends ChromeLink {
 
 export interface NavLink extends ChromeLink {
   exact?: boolean;
+  activePathPrefixes?: string[];
 }
 
 export interface FooterLink extends ChromeLink {

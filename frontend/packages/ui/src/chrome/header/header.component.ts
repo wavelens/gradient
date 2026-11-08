@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, inject, input, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, computed, inject, input, signal, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { NavigationEnd, Router, RouterLink, isActive } from '@angular/router';
 import { filter } from 'rxjs';
 import { activeLinkMatch } from '../active-link-match';
 import { DrawerDirective } from '../../ui/drawer/drawer.directive';
@@ -17,7 +17,7 @@ import { Brand, NavLink } from '../types';
 @Component({
   selector: 'gr-header',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive, DrawerDirective, IconComponent, LogoComponent],
+  imports: [RouterLink, DrawerDirective, IconComponent, LogoComponent],
   templateUrl: './header.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './header.component.scss',
@@ -26,12 +26,21 @@ export class HeaderComponent {
   brand = input.required<Brand>();
   nav = input<NavLink[]>([]);
 
+  private readonly router = inject(Router);
   protected readonly menuOpen = signal(false);
-  protected readonly activeLinkMatch = activeLinkMatch;
+  protected readonly navigationLinksWithCurrentPageSignals = computed(() =>
+    this.nav().map((link) => {
+      const matches = [
+        isActive(link.href, this.router, activeLinkMatch(link.exact ?? false)),
+        ...(link.activePathPrefixes ?? []).map((prefix) => isActive(prefix, this.router, activeLinkMatch(false))),
+      ];
+      return { link, current: computed(() => matches.some((match) => match())) };
+    }),
+  );
 
   constructor() {
-    inject(Router)
-      .events.pipe(
+    this.router.events
+      .pipe(
         filter((event) => event instanceof NavigationEnd),
         takeUntilDestroyed(),
       )
