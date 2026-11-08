@@ -5,7 +5,7 @@
  */
 
 import { inject } from '@angular/core';
-import { ResolveFn } from '@angular/router';
+import { ResolveFn, RunGuardsAndResolvers } from '@angular/router';
 import { map, tap } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
@@ -28,4 +28,11 @@ export const cacheAccessResolver: ResolveFn<CacheAccessData> = (route, state) =>
     map((c) => ({ cache: c, access: accessFromEntity(c) })),
     denyOnRefusal({ kind: 'cache', name: cache, back: String(links.caches()) }, state.url),
   );
+};
+
+export const shouldRefetchCacheRecordOnCacheNameOrCacheRecordPageChange: RunGuardsAndResolvers = (from, to) => {
+  const navigatedToChildRouteConfig = to.firstChild?.routeConfig;
+  return from.paramMap.get('cache') !== to.paramMap.get('cache')
+    || (navigatedToChildRouteConfig !== from.firstChild?.routeConfig
+      && (navigatedToChildRouteConfig?.path === '' || navigatedToChildRouteConfig?.path === 'settings'));
 };

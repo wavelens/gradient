@@ -13,6 +13,7 @@ import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { CacheSettingsComponent } from './cache-settings.component';
 import { CachesService } from '@core/services/caches.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { AccessState } from '@core/models/access.model';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -62,15 +63,27 @@ function setup(access: AccessState): ComponentFixture<CacheSettingsComponent> {
       provideHttpClient(),
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
-      { provide: CachesService, useValue: { getCache: () => of(cacheFor(access)) } },
+      { provide: CachesService, useValue: { getCache: vi.fn(() => of(cacheFor(access))) } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
     ],
   });
+  TestBed.inject(BreadcrumbsService).rememberCache('demo', 'Demo');
   const fixture = TestBed.createComponent(CacheSettingsComponent);
   fixture.detectChanges();
   return fixture;
 }
+
+describe('CacheSettingsComponent - first load', () => {
+  it('fills the form from the resolved cache without a second request', () => {
+    const access = { managed: false, canEdit: true, canTrigger: true };
+    const fixture = setup(access);
+    const { getCache } = TestBed.inject(CachesService);
+    expect(fixture.componentInstance.formData.display_name).toBe('Demo');
+    expect(fixture.componentInstance.loading()).toBe(false);
+    expect(getCache).not.toHaveBeenCalled();
+  });
+});
 
 describe('CacheSettingsComponent - access gating', () => {
   it('hides Save / Delete / Toggle under read-only access', () => {

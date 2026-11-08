@@ -8,7 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { ActivatedRouteSnapshot, convertToParamMap } from '@angular/router';
 import { Observable, firstValueFrom, of } from 'rxjs';
 import { CachesService } from '@core/services/caches.service';
-import { cacheAccessResolver, CacheAccessData } from './cache-access.resolver';
+import { cacheAccessResolver, CacheAccessData, shouldRefetchCacheRecordOnCacheNameOrCacheRecordPageChange } from './cache-access.resolver';
 import { CacheResponse } from '@core/models';
 
 function snap(params: Record<string, string>): ActivatedRouteSnapshot {
@@ -66,5 +66,24 @@ describe('cacheAccessResolver', () => {
     );
     const data = await runResolver(snap({ cache: 'demo' }));
     expect(data.access).toEqual({ managed: true, canEdit: false, canTrigger: false });
+  });
+});
+
+describe('shouldRefetchCacheRecordOnCacheNameOrCacheRecordPageChange', () => {
+  const at = (cache: string, path: string) =>
+    ({ paramMap: convertToParamMap({ cache }), firstChild: { routeConfig: { path } } }) as unknown as ActivatedRouteSnapshot;
+  const refetch = shouldRefetchCacheRecordOnCacheNameOrCacheRecordPageChange as (from: ActivatedRouteSnapshot, to: ActivatedRouteSnapshot) => boolean;
+
+  it('fetches the cache again on entering the pages that show the record', () => {
+    const nars = at('demo', 'nars');
+    const overview = at('demo', '');
+    expect(refetch(nars, overview)).toBe(true);
+    expect(refetch(overview, at('demo', 'settings'))).toBe(true);
+  });
+
+  it('keeps the resolved cache for other tabs and query changes on the same page', () => {
+    const overview = at('demo', '');
+    expect(refetch(overview, at('demo', 'nars'))).toBe(false);
+    expect(refetch(overview, { ...overview } as ActivatedRouteSnapshot)).toBe(false);
   });
 });

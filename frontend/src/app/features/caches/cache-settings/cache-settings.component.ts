@@ -28,7 +28,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
-import { injectCacheAccess, injectCacheAccessTo } from '@core/resolvers/inject-access';
+import { injectCacheAccess, injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { CacheResponse, PatchCacheRequest } from '@core/models';
 import { LabelHelpComponent } from '@shared/ui';
@@ -101,6 +101,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
+  private resolved = injectCacheAccessData();
   access = injectCacheAccess();
   deleteAccess = injectCacheAccessTo('deleteCache');
 
@@ -139,7 +140,9 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
-    this.loadCache();
+    const resolved = this.resolved()?.cache;
+    if (resolved) this.applyCacheRecord(resolved);
+    else this.loadCache();
   }
 
   loadCache(): void {
@@ -147,26 +150,30 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
     this.loadError.set(null);
     this.cachesService.getCache(this.cacheName).subscribe({
       next: (cache) => {
-        this.cache.set(cache);
         this.crumbs.rememberCache(this.cacheName, cache.display_name);
-        this.saved = {
-          display_name: cache.display_name,
-          description: cache.description,
-          priority: cache.priority,
-          local_priority: cache.local_priority ?? null,
-          max_storage_gb: cache.max_storage_gb ?? 0,
-          pull_through: cache.pull_through ?? true,
-          public: cache.public,
-        };
-        this.formData = { ...this.saved };
-        this.unsaved.mark();
-        this.loading.set(false);
+        this.applyCacheRecord(cache);
       },
       error: (error: unknown) => {
         this.loadError.set(error);
         this.loading.set(false);
       },
     });
+  }
+
+  private applyCacheRecord(cache: CacheResponse): void {
+    this.cache.set(cache);
+    this.saved = {
+      display_name: cache.display_name,
+      description: cache.description,
+      priority: cache.priority,
+      local_priority: cache.local_priority ?? null,
+      max_storage_gb: cache.max_storage_gb ?? 0,
+      pull_through: cache.pull_through ?? true,
+      public: cache.public,
+    };
+    this.formData = { ...this.saved };
+    this.unsaved.mark();
+    this.loading.set(false);
   }
 
   fieldError(field: CheckedField): string | null {

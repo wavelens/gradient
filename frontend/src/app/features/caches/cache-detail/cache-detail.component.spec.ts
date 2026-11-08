@@ -19,9 +19,8 @@ const OWN_KEY = 'public.gradient.ci-main:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oN
 const UPSTREAM_KEY = 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=';
 
 describe('CacheDetailComponent cache usage instructions', () => {
-  function setup() {
+  function setup(cache: object | null = { name: 'main', public_key: OWN_KEY, public: true }) {
     const caches = {
-      getCache: vi.fn().mockReturnValue(of({ name: 'main', public_key: OWN_KEY, public: true })),
       getCacheStats: vi.fn().mockReturnValue(of(null)),
       getSubscribers: () => NEVER,
     };
@@ -34,7 +33,10 @@ describe('CacheDetailComponent cache usage instructions', () => {
         { provide: CachesService, useValue: caches },
         {
           provide: ActivatedRoute,
-          useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) } },
+          useValue: {
+            snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) },
+            parent: { data: of({ cacheAccess: cache ? { cache } : undefined }) },
+          },
         },
       ],
     });
@@ -59,8 +61,7 @@ describe('CacheDetailComponent cache usage instructions', () => {
   // A cache whose key has not been generated yet must not render a snippet that
   // looks copy-pasteable but silently trusts nothing.
   it('says so when no key is available', () => {
-    const component = setup();
-    component.cache.set(null);
+    const component = setup(null);
 
     expect(component.trustedPublicKeys()).toEqual([]);
     expect(component.nixConfSnippet()).toContain('<unavailable>');
@@ -140,12 +141,12 @@ describe('CacheDetailComponent header', () => {
         {
           provide: CachesService,
           useValue: {
-            getCache: () => of({ name: 'main', display_name: 'Main', public_key: OWN_KEY, public: true, active: true }),
+            getCache: () => NEVER,
             getCacheStats: () => NEVER,
             getSubscribers: () => of({ projects: [{ project: 'acme', project_display_name: 'Acme', mode: 'ReadWrite' }], hidden: 2 }),
           },
         },
-        { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) } } },
+        { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) }, parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', public_key: OWN_KEY, public: true, active: true } } }) } } },
         { provide: AuthService, useValue: { isAuthenticated: () => authenticated, user: () => null } },
         { provide: StarsService, useValue: { starred, set: () => of(true) } },
       ],

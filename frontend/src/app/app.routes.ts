@@ -20,7 +20,7 @@ import {
 } from '@core/guards/entity.guards';
 import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
 import { taskAccessResolver } from '@core/resolvers/task-access.resolver';
-import { cacheAccessResolver } from '@core/resolvers/cache-access.resolver';
+import { cacheAccessResolver, shouldRefetchCacheRecordOnCacheNameOrCacheRecordPageChange } from '@core/resolvers/cache-access.resolver';
 import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
 
 export const routes: Routes = [
@@ -246,7 +246,7 @@ export const routes: Routes = [
         (m) => m.CacheLayoutComponent,
       ),
     resolve: { cacheAccess: cacheAccessResolver },
-    runGuardsAndResolvers: 'paramsChange',
+    runGuardsAndResolvers: shouldRefetchCacheRecordOnCacheNameOrCacheRecordPageChange,
     children: [
       {
         path: '',

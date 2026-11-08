@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed, linkedSignal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -97,7 +97,7 @@ export class CacheDetailComponent implements OnInit {
   protected authService = inject(AuthService);
 
   private access = injectCacheAccessData();
-  cache = linkedSignal<CacheResponse | null>(() => this.access()?.cache ?? null);
+  cache = computed<CacheResponse | null>(() => this.access()?.cache ?? null);
   statsLoading = signal(true);
   stats = signal<CacheStatsResponse | null>(null);
   statsError = signal<unknown>(null);
@@ -194,7 +194,6 @@ export class CacheDetailComponent implements OnInit {
     this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
     this.serverUrl = window.location.origin;
     this.cacheUrl = `${this.serverUrl}/cache/${this.cacheName}`;
-    this.loadCache();
     this.loadStats();
     this.loadSubscribers();
   }
@@ -204,13 +203,6 @@ export class CacheDetailComponent implements OnInit {
     this.cachesService.getSubscribers(this.cacheName).subscribe({
       next: (used) => this.subscribers.set(used),
       error: (error: unknown) => this.subscribersError.set(error),
-    });
-  }
-
-  loadCache(): void {
-    this.cachesService.getCache(this.cacheName).subscribe((cache) => {
-      this.cache.set(cache);
-      this.crumbs.rememberCache(this.cacheName, cache.display_name);
     });
   }
 
