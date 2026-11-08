@@ -128,7 +128,7 @@ describe('TaskSettingsComponent - repository', () => {
   it('links to the Repository page for the URL, key, events and status', () => {
     const fixture = setup({ managed: false, canEdit: true });
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('#proj-repo')).toBeNull();
+    expect(root.querySelector('#task-repo')).toBeNull();
     const link = Array.from(root.querySelectorAll('a')).find((a) => a.getAttribute('href') === '/project/acme/task/demo/repository');
     expect(link).toBeDefined();
   });
@@ -161,7 +161,7 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
   it.each(['0', '-5', '1.5'])('refuses %s evaluations to keep without sending it', async (value) => {
     const updateTask = vi.fn(() => of('ok'));
     const fixture = setup(editor, undefined, updateTask);
-    await typeInto(fixture, '#proj-keep', value);
+    await typeInto(fixture, '#task-keep', value);
     expect(fieldError(fixture)).toContain('1 or higher');
     expect(save(fixture).disabled).toBe(true);
     fixture.componentInstance.saveSettings();
@@ -171,7 +171,7 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
   it('refuses an empty number of evaluations instead of saving null', async () => {
     const updateTask = vi.fn(() => of('ok'));
     const fixture = setup(editor, undefined, updateTask);
-    await typeInto(fixture, '#proj-keep', '');
+    await typeInto(fixture, '#task-keep', '');
     expect(fieldError(fixture)).toContain('number of evaluations');
     fixture.componentInstance.saveSettings();
     expect(updateTask).not.toHaveBeenCalled();
@@ -180,7 +180,7 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
   it('refuses an empty display name', async () => {
     const updateTask = vi.fn(() => of('ok'));
     const fixture = setup(editor, undefined, updateTask);
-    await typeInto(fixture, '#proj-display', '  ');
+    await typeInto(fixture, '#task-display', '  ');
     expect(fieldError(fixture)).toContain('display name');
     fixture.componentInstance.saveSettings();
     expect(updateTask).not.toHaveBeenCalled();
@@ -189,8 +189,8 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
   it('sends only the changed fields when Enter is pressed in a field', async () => {
     const updateTask = vi.fn(() => of('ok'));
     const fixture = setup(editor, undefined, updateTask);
-    await typeInto(fixture, '#proj-display', 'Renamed');
-    const input = (fixture.nativeElement as HTMLElement).querySelector('#proj-display') as HTMLInputElement;
+    await typeInto(fixture, '#task-display', 'Renamed');
+    const input = (fixture.nativeElement as HTMLElement).querySelector('#task-display') as HTMLInputElement;
     input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
     expect(updateTask).toHaveBeenCalledWith('acme', 'demo', { display_name: 'Renamed' });
   });
@@ -200,7 +200,7 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
     Element.prototype.scrollIntoView = scroll;
     const updateTask = vi.fn(() => throwError(() => new ApiError('branch does not exist', 400)));
     const fixture = setup(editor, undefined, updateTask);
-    await typeInto(fixture, '#proj-display', 'Renamed');
+    await typeInto(fixture, '#task-display', 'Renamed');
     fixture.componentInstance.saveSettings();
     fixture.detectChanges();
     await fixture.whenStable();
@@ -213,12 +213,12 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
 
   it('hides the saved banner as soon as the form changes again', async () => {
     const fixture = setup(editor);
-    await typeInto(fixture, '#proj-display', 'Renamed');
+    await typeInto(fixture, '#task-display', 'Renamed');
     fixture.componentInstance.saveSettings();
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
     expect(root.textContent).toContain('Changes saved.');
-    await typeInto(fixture, '#proj-display', 'Renamed again');
+    await typeInto(fixture, '#task-display', 'Renamed again');
     expect(root.textContent).not.toContain('Changes saved.');
   });
 
@@ -229,7 +229,7 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
     expect(fixture.componentInstance.canDeactivate()).toBe(true);
     expect(confirm).not.toHaveBeenCalled();
 
-    await typeInto(fixture, '#proj-display', 'Renamed');
+    await typeInto(fixture, '#task-display', 'Renamed');
     expect(fixture.componentInstance.canDeactivate()).not.toBe(true);
     expect(confirm).toHaveBeenCalledOnce();
   });
@@ -286,7 +286,7 @@ describe('TaskSettingsComponent - write failures', () => {
     const updateTask = vi.fn(() => NEVER);
     const fixture = setup(admin, undefined, updateTask);
     await fixture.whenStable();
-    const display = (fixture.nativeElement as HTMLElement).querySelector('#proj-display') as HTMLInputElement;
+    const display = (fixture.nativeElement as HTMLElement).querySelector('#task-display') as HTMLInputElement;
     display.value = 'Renamed';
     display.dispatchEvent(new Event('input'));
     fixture.detectChanges();

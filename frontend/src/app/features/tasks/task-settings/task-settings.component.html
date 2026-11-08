@@ -12,32 +12,32 @@
                errorTitle="Failed to load task settings" (retry)="loadTask()">
 @if (task(); as proj) {
   <gr-settings-section title="General">
-    <gr-form-field label="Name" for="proj-name">
-      <input grInput id="proj-name" [value]="proj.name" disabled />
+    <gr-form-field label="Name" for="task-name">
+      <input grInput id="task-name" [value]="proj.name" disabled />
     </gr-form-field>
 
-    <gr-form-field label="Display Name" for="proj-display" required [invalid]="!!displayNameError" [error]="displayNameError ?? ''">
-      <input grInput id="proj-display" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
+    <gr-form-field label="Display Name" for="task-display" required [invalid]="!!displayNameError" [error]="displayNameError ?? ''">
+      <input grInput id="task-display" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
 
-    <gr-form-field label="Description" for="proj-desc">
-      <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
+    <gr-form-field label="Description" for="task-desc">
+      <textarea grInput id="task-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
     </gr-form-field>
 
-    <gr-form-field label="Evaluation Wildcard" for="proj-wildcard">
+    <gr-form-field label="Evaluation Wildcard" for="task-wildcard">
       <gr-label-help slot="label" doc="reference/wildcards/" title="Pattern for selecting which outputs to evaluate" />
-      <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
+      <input grInput id="task-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
 
-    <gr-form-field label="Keep Evaluations" for="proj-keep" required [invalid]="!!keepEvaluationsError" [error]="keepEvaluationsError ?? ''">
+    <gr-form-field label="Keep Evaluations" for="task-keep" required [invalid]="!!keepEvaluationsError" [error]="keepEvaluationsError ?? ''">
       <gr-label-help slot="label" doc="concepts/projects-and-tasks/#task" title="Number of completed evaluations to retain for metrics and history" />
-      <input grInput id="proj-keep" type="number" min="1" step="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
+      <input grInput id="task-keep" type="number" min="1" step="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
 
-    <gr-form-field label="Trigger Concurrency" for="proj-concurrency">
+    <gr-form-field label="Trigger Concurrency" for="task-concurrency">
       <gr-label-help slot="label" doc="concepts/projects-and-tasks/#concurrency" title="Determines how this task handles a new trigger event when an evaluation is already running." />
       <gr-select
-        inputId="proj-concurrency"
+        inputId="task-concurrency"
         [(ngModel)]="formData.concurrency"
         [options]="concurrencyOptions"
         optionLabel="label"
@@ -49,7 +49,7 @@
 
     <gr-form-field>
       <gr-checkbox
-        inputId="proj-sign-cache"
+        inputId="task-sign-cache"
         [(ngModel)]="formData.sign_cache"
         [binary]="true"
         [appManagedDisable]="access()"
