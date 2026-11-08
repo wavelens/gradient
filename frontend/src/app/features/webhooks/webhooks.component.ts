@@ -32,11 +32,11 @@ import {
   MissingPermissionLoadStateError,
   PageLayoutComponent,
   SubmitDirective,
-  TableComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
-import { getLastErrorCause, RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { RelativeTimePipe } from '@shared/text';
+import { OutgoingWebhookDeliveryListDialog } from '@shared/outgoing-deliveries';
 import { fieldChecks } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 import { links } from '@shared/routing';
@@ -49,9 +49,9 @@ import { links } from '@shared/routing';
     CopyFieldComponent,
     LabelHelpComponent,
     CommonModule,
-    ServerTimestampToLocalDateTimePipe,
     FormsModule,
     ActionEventsComponent,
+    OutgoingWebhookDeliveryListDialog,
     BadgeComponent,
     ButtonComponent,
     CheckboxComponent,
@@ -61,7 +61,6 @@ import { links } from '@shared/routing';
     LoadStateComponent,
     PageLayoutComponent,
     SubmitDirective,
-    TableComponent,
   ],
   templateUrl: './webhooks.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -105,12 +104,16 @@ export class WebhooksComponent implements OnInit {
   revealedSecret = signal<string | null>(null);
   testResult = signal<{ id: string; delivery: DeliveryListItem_WebhookDeliveryId | null } | null>(null);
   deliveriesFor = signal<WebhookResponse | null>(null);
-  deliveries = signal<DeliveryListItem_WebhookDeliveryId[]>([]);
-  deliveriesLoading = signal(false);
-  deliveriesError = signal<unknown>(null);
+  openWebhookDeliveryHistoryLoadFunctions = computed(() => {
+    const hook = this.deliveriesFor();
+    if (!hook) return null;
+    return {
+      page: (limit: number, offset: number) => this.service.deliveries(this.scope, hook.id, limit, offset),
+      detail: (deliveryId: string) => this.service.delivery(this.scope, hook.id, deliveryId),
+    };
+  });
 
   eventNameToReadableText = eventNameToReadableText;
-  getLastErrorCause = getLastErrorCause;
 
   ngOnInit(): void {
     const { data, paramMap } = this.route.snapshot;
@@ -299,27 +302,6 @@ export class WebhooksComponent implements OnInit {
 
   openDeliveries(hook: WebhookResponse): void {
     this.deliveriesFor.set(hook);
-    this.deliveries.set([]);
-    this.loadDeliveries();
-  }
-
-  loadDeliveries(): void {
-    const hook = this.deliveriesFor();
-    if (!hook) return;
-    this.deliveriesLoading.set(true);
-    this.deliveriesError.set(null);
-    this.service.deliveries(this.scope, hook.id).subscribe({
-      next: (list) => {
-        if (this.deliveriesFor() !== hook) return;
-        this.deliveries.set(list);
-        this.deliveriesLoading.set(false);
-      },
-      error: (error: unknown) => {
-        if (this.deliveriesFor() !== hook) return;
-        this.deliveriesError.set(error);
-        this.deliveriesLoading.set(false);
-      },
-    });
   }
 
   startDelete(hook: WebhookResponse): void {

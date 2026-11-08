@@ -1,0 +1,102 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+.deliveries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  li + li {
+    border-top: 1px solid var(--gr-border-subtle);
+  }
+}
+
+.delivery {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-xs $spacing-sm;
+  width: 100%;
+  padding: $spacing-sm;
+  background: none;
+  border: 0;
+  color: var(--gr-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--gr-surface-sunken);
+  }
+}
+
+.event {
+  flex: 1 1 10rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.reason {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--gr-status-danger-text);
+  font-size: $font-size-sm;
+}
+
+.facts {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-left: auto;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chevron {
+  transition: transform 0.15s ease;
+
+  &.is-open {
+    transform: rotate(180deg);
+  }
+}
+
+.detail {
+  padding: $spacing-sm $spacing-md $spacing-md;
+  background: var(--gr-surface-sunken);
+
+  p {
+    margin: 0;
+  }
+
+  pre {
+    margin: $spacing-xs 0 0;
+    font-family: $font-family-mono;
+    font-size: $font-size-xs;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--gr-text-primary);
+  }
+
+  details {
+    margin-top: $spacing-sm;
+  }
+
+  summary {
+    cursor: pointer;
+    font-size: $font-size-sm;
+    color: var(--gr-text-secondary);
+  }
+}
+
+.error {
+  color: var(--gr-status-danger-text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

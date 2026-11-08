@@ -317,6 +317,7 @@ describe('WebhooksComponent', () => {
     service.deliveries.mockReturnValueOnce(throwError(() => new ApiError('database is down', 500)));
     component.openDeliveries(hook);
     TestBed.inject(ApplicationRef).tick();
+    expect(service.deliveries).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1', 50, 0);
     expect(document.body.textContent).toContain('Failed to load deliveries');
     expect(document.body.textContent).not.toContain('No deliveries yet');
 

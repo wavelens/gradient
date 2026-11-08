@@ -93,25 +93,10 @@
   </div>
 </gr-dialog>
 
-<gr-dialog header="Delivery history" [visible]="deliveriesFor() !== null" (visibleChange)="$event || deliveriesFor.set(null)" width="860px">
-  <gr-load-state flat [loading]="deliveriesLoading()" [error]="deliveriesError()" [empty]="deliveries().length === 0"
-                 loadingMessage="Loading deliveries..." errorTitle="Failed to load deliveries"
-                 emptyIcon="send" emptyTitle="No deliveries yet" (retry)="loadDeliveries()">
-    <gr-table>
-      <thead>
-        <tr><th>Time</th><th>Event</th><th>Result</th><th>Status</th><th>Duration</th></tr>
-      </thead>
-      <tbody>
-        @for (d of deliveries(); track d.id) {
-          <tr>
-            <td [title]="d.delivered_at | serverDate">{{ d.delivered_at | relativeTime }}</td>
-            <td>{{ eventNameToReadableText(d.event) }}</td>
-            <td><gr-badge [severity]="d.success ? 'success' : 'danger'">{{ d.success ? 'OK' : 'FAIL' }}</gr-badge></td>
-            <td [title]="d.error_message ?? ''">{{ d.response_status ?? (d.error_message && getLastErrorCause(d.error_message)) }}</td>
-            <td>{{ d.duration_ms }} ms</td>
-          </tr>
-        }
-      </tbody>
-    </gr-table>
-  </gr-load-state>
-</gr-dialog>
+@if (openWebhookDeliveryHistoryLoadFunctions(); as load) {
+  <app-outgoing-webhook-delivery-list-dialog
+    [loadDeliveryPage]="load.page"
+    [loadDeliveryDetail]="load.detail"
+    (closed)="deliveriesFor.set(null)"
+  />
+}

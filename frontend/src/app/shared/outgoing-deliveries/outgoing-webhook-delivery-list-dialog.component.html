@@ -1,0 +1,56 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-dialog header="Delivery history" width="860px" [(visible)]="visible" (hide)="closed.emit()">
+  <gr-load-state flat [loading]="loading()" [error]="loadError()" [empty]="deliveries().length === 0"
+                 loadingMessage="Loading deliveries..." errorTitle="Failed to load deliveries"
+                 emptyIcon="send" emptyTitle="No deliveries yet" (retry)="loadPage()">
+    <ul class="deliveries">
+      @for (d of deliveries(); track d.id) {
+        @let detail = expandedDeliveryDetailByDeliveryId().get(d.id);
+        @let resultReason = getDeliveryResultReason(d);
+        <li>
+          <button type="button" class="delivery" [attr.aria-expanded]="!!detail" (click)="toggleDeliveryRowExpansion(d.id)">
+            <gr-badge [severity]="d.success ? 'success' : 'danger'">{{ d.success ? 'Delivered' : 'Failure' }}</gr-badge>
+            <span class="event">{{ eventNameToReadableText(d.event) }}</span>
+            @if (resultReason) {
+              <span class="reason" [title]="d.error_message ?? resultReason">{{ resultReason }}</span>
+            }
+            <span class="facts">
+              <span [title]="d.delivered_at | serverDate">{{ d.delivered_at | relativeTime }}</span>
+              <span>{{ duration(d.duration_ms) }}</span>
+              <gr-icon name="expand_more" size="sm" class="chevron" [class.is-open]="!!detail" />
+            </span>
+          </button>
+          @if (detail) {
+            <div class="detail">
+              @if (detail === 'loading') {
+                <p class="text-secondary">Loading details...</p>
+              } @else if (detail === 'error') {
+                <p class="error">Delivery details failed to load.</p>
+              } @else {
+                @if (detail.error_message) {
+                  <p class="error">{{ detail.error_message }}</p>
+                }
+                <details><summary>Request Body</summary><pre>{{ detail.request_body }}</pre></details>
+                @if (detail.response_body) {
+                  <details><summary>Response body</summary><pre>{{ detail.response_body }}</pre></details>
+                }
+              }
+            </div>
+          }
+        </li>
+      }
+    </ul>
+  </gr-load-state>
+
+  @if (offset() > 0 || hasMore()) {
+    <div grDialogFooter>
+      <button grButton type="button" label="Previous" severity="secondary" [disabled]="offset() === 0" (click)="changePageOffsetAndLoadPage(-1)"></button>
+      <button grButton type="button" label="Next" severity="secondary" [disabled]="!hasMore()" (click)="changePageOffsetAndLoadPage(1)"></button>
+    </div>
+  }
+</gr-dialog>
