@@ -120,10 +120,12 @@ describe('TaskActionsComponent', () => {
     expect(findByText(fixture.nativeElement, 'test')).toBeNull();
   });
 
-  it('links to the Repository page for status reports', () => {
-    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
-    const link = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Repository'));
-    expect(link?.getAttribute('href')).toMatch(/\/project\/acme\/task\/[^/]+\/repository$/);
+  it('links editors to the Repository page for status reports, not read-only users', () => {
+    const repositoryLink = (fixture: ReturnType<typeof setup>) =>
+      Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Repository'));
+    expect(repositoryLink(setup({ managed: false, canEdit: true, canTrigger: true }))?.getAttribute('href')).toMatch(/\/project\/acme\/task\/[^/]+\/repository$/);
+    TestBed.resetTestingModule();
+    expect(repositoryLink(setup({ managed: false, canEdit: false, canTrigger: false }))).toBeUndefined();
   });
 
   it('shows but disables write buttons under state-managed access', () => {

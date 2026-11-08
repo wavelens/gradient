@@ -5,10 +5,8 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Actions" subtitle="Side effects triggered by evaluation and build events">
-  @if (viewerIsProjectMember()) {
-    <a slot="actions" grButton label="Open the Repository page" icon="hub" severity="secondary"
-       [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
-  }
+  <a slot="actions" *appWritable="access()" grButton label="Open the Repository page" icon="hub" severity="secondary"
+     [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
   @if (actions().length) {
     <button slot="actions"
         *appWritable="access()"

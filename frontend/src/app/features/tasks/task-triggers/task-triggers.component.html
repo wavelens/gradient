@@ -5,10 +5,8 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that start an evaluation. Start Evaluation uses the default trigger.">
-  @if (viewerIsProjectMember()) {
-    <a slot="actions" grButton label="Open the Repository page" icon="hub" severity="secondary"
-       [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
-  }
+  <a slot="actions" *appWritable="access()" grButton label="Open the Repository page" icon="hub" severity="secondary"
+     [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
   @if (triggers().length) {
     <button slot="actions"
         *appWritable="access()"
@@ -54,7 +52,6 @@
                     {{ trigger.active ? 'Active' : 'Inactive' }}
                   </gr-badge>
                   <span>Last fired: {{ trigger.last_fired_at | relativeTime }}</span>
-                  @if (fireSuccessId() === trigger.id) {
                     <span class="fire-success">
                       <gr-icon name="check_circle" size="sm" />
                       Evaluation queued
