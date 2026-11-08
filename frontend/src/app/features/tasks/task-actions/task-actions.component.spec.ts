@@ -136,7 +136,7 @@ describe('TaskActionsComponent', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     const text = fixture.nativeElement.textContent ?? '';
     expect(text).toContain('Notify Ops');
-    expect(text).toContain('build.failed');
+    expect(text).toContain('Build failed');
   });
 
   it('reveals token after create when response includes one', () => {

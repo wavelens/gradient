@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { finalize } from 'rxjs';
-import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo } from '@core/models';
+import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo, eventNameToReadableText } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
 import { canManageTeam, createMissingPermissionLoadStateError, createNoAccessLoadStateError } from '@shared/access';
@@ -36,7 +36,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
-import { relativeTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { getLastErrorCause, relativeTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { fieldChecks } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 import { links } from '@shared/routing';
@@ -108,6 +108,8 @@ export class WebhooksComponent implements OnInit {
   deliveriesError = signal<unknown>(null);
 
   relativeTime = relativeTime;
+  eventNameToReadableText = eventNameToReadableText;
+  getLastErrorCause = getLastErrorCause;
 
   ngOnInit(): void {
     const { data, paramMap } = this.route.snapshot;

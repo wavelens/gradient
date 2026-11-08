@@ -65,6 +65,7 @@ flowchart LR
 - Show a waiting or stuck state through gr-waiting-notice, never as bare text. Its mapping, explainWaiting in @shared/evaluation, gives each reason a title, a detail and either an action (a link or Run) or a hint whom to ask, chosen by the viewer's permission. Add a new reason there, not on a page.
 - Show connection status with `gr-live-status` on all pages that receive socket updates. Get status from the `onLiveSocketConnectedChange` callback of `LiveService.connect`. Refetch page data on each reconnect, so missed events while the socket is down don't skew counters.
 - Use `buildStatusLabel()` from `@shared/evaluation` to display build status. Never show raw API values such as `FailedPermanent`.
+- Event names via `eventNameToReadableText()` of `@core/models`, never dotted like `build.failed_transient`. Server error chains in table cells via `getLastErrorCause()` of `@shared/text`. Put full text in `title`.
 - Link sibling pages of one area, such as the user settings, with gr-link-tabs in the page banner slot, so every page reaches its siblings in one click.
 - Show repository fetch failures in `app-repository-fetch-banner` of `@shared/git`. Members who can edit the task see the git error and how to fix the failure. Everyone else sees who to ask.
 - Show the webhooks that a Git host sent to an integration with the `app-incoming-deliveries` of `@shared/git`. Rows contain the event, result, and rejection reason.

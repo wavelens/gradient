@@ -37,6 +37,7 @@ import {
   CreateActionRequest,
   UpdateActionRequest,
   ActionConfig,
+  eventNameToReadableText,
 } from '@core/models';
 import { ActionFormComponent } from './action-form.component';
 import { ActionDeliveriesComponent } from './action-deliveries.component';
@@ -304,4 +305,5 @@ export class TaskActionsComponent implements OnInit {
   }
 
   relativeTime = relativeTime;
+  eventNameToReadableText = eventNameToReadableText;
 }

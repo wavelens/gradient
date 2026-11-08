@@ -40,7 +40,7 @@
             </div>
             <div class="events-chips">
               @for (ev of hook.events; track ev) {
-                <gr-badge>{{ ev }}</gr-badge>
+                <gr-badge>{{ eventNameToReadableText(ev) }}</gr-badge>
               } @empty {
                 <gr-badge>all events</gr-badge>
               }
@@ -101,9 +101,9 @@
         @for (d of deliveries(); track d.id) {
           <tr>
             <td [title]="d.delivered_at | serverDate: 'medium'">{{ relativeTime(d.delivered_at) }}</td>
-            <td>{{ d.event }}</td>
+            <td>{{ eventNameToReadableText(d.event) }}</td>
             <td><gr-badge [severity]="d.success ? 'success' : 'danger'">{{ d.success ? 'OK' : 'FAIL' }}</gr-badge></td>
-            <td>{{ d.response_status ?? d.error_message }}</td>
+            <td [title]="d.error_message ?? ''">{{ d.response_status ?? (d.error_message && getLastErrorCause(d.error_message)) }}</td>
             <td>{{ d.duration_ms }} ms</td>
           </tr>
         }

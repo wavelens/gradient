@@ -24,6 +24,30 @@ function familyLabel(family: string): string {
     .join(' ');
 }
 
+const WORD_OVERRIDES: Record<string, string> = {
+  failed_transient: 'failed, will retry',
+  api: 'API',
+  cli: 'CLI',
+  gc: 'GC',
+  nar: 'NAR',
+  ssh: 'SSH',
+  vm: 'VM',
+};
+
+function readableWords(segments: string[]): string {
+  const words = segments.flatMap((segment) => WORD_OVERRIDES[segment] ?? segment.split('_').map((word) => WORD_OVERRIDES[word] ?? word));
+  const text = words.join(' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * Readable text for a dot-separated event name. The name build.failed_transient can yield "Build failed, will retry".
+ * - Wildcard names stay as they are.
+ */
+export function eventNameToReadableText(name: string): string {
+  return name.includes('*') ? name : readableWords(name.split('.'));
+}
+
 /** Durable events grouped by their first dotted segment, optionally limited to `families`. */
 export function groupCatalog(entries: CatalogEntry[], families?: string[]): EventGroup[] {
   const groups = new Map<string, EventGroup>();
@@ -32,7 +56,7 @@ export function groupCatalog(entries: CatalogEntry[], families?: string[]): Even
     if (!durable || (families && !families.includes(family))) continue;
     const group = familyLabel(family);
     if (!groups.has(group)) groups.set(group, { group, items: [] });
-    groups.get(group)!.items.push({ value: name, label: rest.join('.') || name });
+    groups.get(group)!.items.push({ value: name, label: rest.length ? readableWords(rest) : familyLabel(name) });
   }
   return Array.from(groups.values());
 }

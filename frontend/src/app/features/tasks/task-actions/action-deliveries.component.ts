@@ -12,6 +12,7 @@ import { formatDuration, relativeTime, ServerTimestampToLocalDateTimePipe } from
 import {
   DeliveryListItem_TaskActionDeliveryId,
   DeliveryDetail_TaskActionDeliveryId,
+  eventNameToReadableText,
 } from '@core/models';
 
 @Component({
@@ -32,6 +33,7 @@ export class ActionDeliveriesComponent implements OnInit {
 
   readonly duration = formatDuration;
   readonly relativeTime = relativeTime;
+  readonly eventNameToReadableText = eventNameToReadableText;
   visible = signal(true);
   deliveries = signal<DeliveryListItem_TaskActionDeliveryId[]>([]);
   loading = signal(true);

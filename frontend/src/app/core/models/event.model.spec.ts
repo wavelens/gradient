@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { groupCatalog } from './event.model';
+import { eventNameToReadableText, groupCatalog } from './event.model';
 
 const catalog = [
   { name: 'build.completed', durable: true },
@@ -15,18 +15,27 @@ const catalog = [
   { name: 'proto.client.*', durable: false },
 ];
 
+describe('eventNameToReadableText', () => {
+  it('Event names turn into readable text.', () => {
+    expect(eventNameToReadableText('evaluation.completed')).toBe('Evaluation completed');
+    expect(eventNameToReadableText('build.failed_transient')).toBe('Build failed, will retry');
+    expect(eventNameToReadableText('cache.nar.fetched')).toBe('Cache NAR fetched');
+    expect(eventNameToReadableText('build.*')).toBe('build.*');
+  });
+});
+
 describe('groupCatalog', () => {
   it('groups durable events by their first segment', () => {
     expect(groupCatalog(catalog)).toEqual([
-      { group: 'Build', items: [{ value: 'build.completed', label: 'completed' }] },
-      { group: 'Evaluation', items: [{ value: 'evaluation.failed', label: 'failed' }] },
-      { group: 'Task', items: [{ value: 'task.star', label: 'star' }] },
+      { group: 'Build', items: [{ value: 'build.completed', label: 'Completed' }] },
+      { group: 'Evaluation', items: [{ value: 'evaluation.failed', label: 'Failed' }] },
+      { group: 'Task', items: [{ value: 'task.star', label: 'Star' }] },
     ]);
   });
 
   it('labels a family with an underscore in words', () => {
     expect(groupCatalog([{ name: 'exec_job.completed', durable: true }])).toEqual([
-      { group: 'Exec Job', items: [{ value: 'exec_job.completed', label: 'completed' }] },
+      { group: 'Exec Job', items: [{ value: 'exec_job.completed', label: 'Completed' }] },
     ]);
   });
 
