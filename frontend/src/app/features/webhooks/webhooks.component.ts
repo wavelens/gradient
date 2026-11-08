@@ -30,6 +30,7 @@ import {
   LoadStateComponent,
   MissingPermissionLoadStateError,
   PageLayoutComponent,
+  SubmitDirective,
   TableComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
@@ -56,6 +57,7 @@ import { links } from '@shared/routing';
     InputDirective,
     LoadStateComponent,
     PageLayoutComponent,
+    SubmitDirective,
     TableComponent,
   ],
   templateUrl: './webhooks.component.html',

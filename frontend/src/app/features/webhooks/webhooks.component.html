@@ -77,7 +77,7 @@
   <gr-checkbox label="Active" [ngModel]="active()" (ngModelChange)="active.set($event)" />
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" [disabled]="saving()" (click)="formOpen.set(false)"></button>
-    <button grButton label="Save" icon="check" [loading]="saving()" (click)="save()"></button>
+    <button grButton label="Save" icon="check" [loading]="saving()" (grSubmit)="save()"></button>
   </div>
 </gr-dialog>
 

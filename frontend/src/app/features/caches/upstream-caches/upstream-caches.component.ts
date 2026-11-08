@@ -25,6 +25,7 @@ import {
   RowComponent,
   RowListComponent,
   SelectComponent,
+  SubmitDirective,
 } from '@gradient/ui/ui';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -82,6 +83,7 @@ const hasError = (errors: UpstreamErrors): boolean => Object.values(errors).some
     BadgeComponent,
     RowListComponent,
     RowComponent,
+    SubmitDirective,
   ],
   templateUrl: './upstream-caches.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

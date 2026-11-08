@@ -5,14 +5,7 @@
  */
 
 import { Injector, afterNextRender, inject } from '@angular/core';
-
-export function revealFirstInvalid(root: ParentNode): boolean {
-  const control = root.querySelector<HTMLElement>('[aria-invalid="true"]');
-  if (!control) return false;
-  control.scrollIntoView({ block: 'nearest' });
-  control.focus({ preventScroll: true });
-  return true;
-}
+import { revealFirstInvalid } from '@gradient/ui/ui';
 
 /// `gr-form-field` can mark its control invalid during render. Wait for the next render.
 export function injectRevealFirstInvalid(): (root: () => ParentNode | null | undefined) => void {

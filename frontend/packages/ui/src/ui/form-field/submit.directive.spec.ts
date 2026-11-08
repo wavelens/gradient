@@ -60,6 +60,18 @@ describe('grSubmit', () => {
     expect(host.saved).toBe(1);
   });
 
+  it('Focus the first field with an error after the click', async () => {
+    const { fixture, host, button } = await render();
+    button.focus();
+    button.addEventListener('click', () => host.urlBad.set(true));
+    Element.prototype.scrollIntoView = vi.fn();
+    button.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const field = (fixture.nativeElement as HTMLElement).querySelector('input');
+    expect(document.activeElement).toBe(field);
+  });
+
   it('ignores errors in another section', async () => {
     const { fixture, host, button } = await render();
     host.nameBad.set(true);

@@ -138,7 +138,7 @@
   }
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="savingUpstream()"></button>
-    <button grButton label="Save" icon="check" (click)="saveUpstream()" [loading]="savingUpstream()"></button>
+    <button grButton label="Save" icon="check" (grSubmit)="saveUpstream()" [loading]="savingUpstream()"></button>
   </div>
 </gr-dialog>
 
@@ -234,7 +234,7 @@
   </div>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showAddDialog.set(false)" [disabled]="addingUpstream()"></button>
-    <button grButton label="Add" icon="add" (click)="addUpstream()" [loading]="addingUpstream()"></button>
+    <button grButton label="Add" icon="add" (grSubmit)="addUpstream()" [loading]="addingUpstream()"></button>
   </div>
 </gr-dialog>
 

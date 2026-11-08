@@ -46,7 +46,10 @@ export class FormFieldComponent {
   private hostRef = inject(ElementRef<HTMLElement>);
 
   constructor() {
-    inject(FormErrors, { optional: true })?.track(this.showError, inject(DestroyRef));
+    inject(FormErrors, { optional: true })?.track(
+      { errorShown: this.showError, element: this.hostRef.nativeElement },
+      inject(DestroyRef),
+    );
     effect((onCleanup) => {
       const ctrl = this.control();
       const events = (ctrl instanceof NgControl ? ctrl.control : ctrl)?.events;
