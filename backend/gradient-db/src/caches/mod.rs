@@ -44,6 +44,7 @@ pub async fn lock_for_admin_change<C: ConnectionTrait>(
 pub fn ordered_by_name(condition: Condition) -> Select<ECache> {
     ECache::find()
         .filter(condition)
+        .order_by_asc(CCache::DisplayName)
         .order_by_asc(CCache::Name)
         .order_by_asc(CCache::Id)
 }

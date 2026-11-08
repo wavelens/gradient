@@ -11085,7 +11085,7 @@ paths:
       tags:
       - teams
       summary: List my teams
-      description: Teams the caller is a member of, with the caller's role, sorted by name.
+      description: Teams that include the caller as a member, with the caller's role, sorted by display name.
       operationId: listTeams
       responses:
         '200':

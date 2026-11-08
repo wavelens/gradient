@@ -121,7 +121,7 @@ fn blank_to_none(value: String) -> Option<String> {
     operation_id = "listTeams",
     tag = "teams",
     summary = "List my teams",
-    description = "Teams the caller is a member of, with the caller's role, sorted by name.",
+    description = "Teams that include the caller as a member, with the caller's role, sorted by display name.",
     responses((status = OK, description = "OK", body = Vec<TeamSummary>), WebError)
 )]
 pub async fn get_teams(
@@ -134,7 +134,7 @@ pub async fn get_teams(
         .into_iter()
         .filter_map(|(membership, team)| team.map(|team| TeamSummary::new(team, membership.role)))
         .collect();
-    items.sort_by(|a, b| a.name.cmp(&b.name));
+    items.sort_by(|a, b| (&a.display_name, &a.name).cmp(&(&b.display_name, &b.name)));
 
     Ok(ok_json(items))
 }

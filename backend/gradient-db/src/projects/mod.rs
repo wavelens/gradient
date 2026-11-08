@@ -33,6 +33,7 @@ pub fn reachable_by_user(user: UserId) -> Select<EProject> {
         .to_owned();
     EProject::find()
         .filter(CProject::Id.in_subquery(reachable))
+        .order_by_asc(CProject::DisplayName)
         .order_by_asc(CProject::Name)
         .order_by_asc(CProject::Id)
 }
@@ -40,6 +41,7 @@ pub fn reachable_by_user(user: UserId) -> Select<EProject> {
 pub fn all_public() -> Select<EProject> {
     EProject::find()
         .filter(CProject::Public.eq(true))
+        .order_by_asc(CProject::DisplayName)
         .order_by_asc(CProject::Name)
         .order_by_asc(CProject::Id)
 }
