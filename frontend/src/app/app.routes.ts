@@ -41,7 +41,7 @@ export const routes: Routes = [
       },
       {
         path: 'register',
-        title: 'Register',
+        title: 'Sign Up',
         canActivate: [redirectSignedInUserToDashboardGuard],
         loadComponent: () =>
           import('./features/auth/register/register.component').then((m) => m.RegisterComponent),

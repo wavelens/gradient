@@ -8,8 +8,8 @@
   <div class="auth-card">
     <div class="auth-header">
       <gr-logo class="auth-logo" [src]="logoUrl" />
-      <h1>Create Account</h1>
-      <p class="text-secondary">Sign up for Gradient</p>
+      <h1>Sign Up</h1>
+      <p class="text-secondary">Start using Gradient</p>
     </div>
 
     @if (!passwordLoginEnabled) {
@@ -194,7 +194,7 @@
             grButton
             type="submit"
             class="w-full"
-            [label]="loading() ? 'Creating account...' : 'Create Account'"
+            [label]="loading() ? 'Signing up...' : 'Sign Up'"
             [loading]="loading()"
             [disabled]="registerForm.pending || loading()"
           ></button>

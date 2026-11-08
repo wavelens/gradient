@@ -51,17 +51,17 @@ function setup(
 
 function registerLink(root: HTMLElement): HTMLAnchorElement | null {
   return (Array.from(root.querySelectorAll('a')) as HTMLAnchorElement[]).find(
-    (el) => (el.textContent ?? '').trim().toLowerCase() === 'register',
+    (el) => (el.textContent ?? '').trim().toLowerCase() === 'sign up',
   ) ?? null;
 }
 
 describe('AppHeaderComponent - registration visibility', () => {
-  it('renders the Register link when registration is enabled', () => {
+  it('renders the Sign Up link when registration is enabled', () => {
     const fixture = setup(false);
     expect(registerLink(fixture.nativeElement)).not.toBeNull();
   });
 
-  it('hides the Register link when registration is disabled', () => {
+  it('hides the Sign Up link when registration is disabled', () => {
     const fixture = setup(true);
     expect(registerLink(fixture.nativeElement)).toBeNull();
   });
