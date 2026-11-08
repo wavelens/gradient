@@ -142,6 +142,10 @@ export class ExecJobPageComponent implements OnInit {
     return job ? isOpenExecJob(job.status) : false;
   });
   keepVmRunning = computed(() => this.job()?.keep_vm_running ?? false);
+  keepVmRunningToggleIsApplicable = computed(() => {
+    const job = this.job();
+    return !!job && (hasExecTerminal(job.status) || (this.open() && job.keep_vm_running));
+  });
   keptExitCode = computed(() => {
     const job = this.job();
     return this.open() && job?.keep_vm_running ? job.program_exit_code ?? null : null;

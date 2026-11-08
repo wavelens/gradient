@@ -188,6 +188,15 @@ describe('ExecJobPageComponent', () => {
     expect(keepButton(fixture.nativeElement)).toBeUndefined();
   });
 
+  it('offers abort but no keep VM running before a VM exists', () => {
+    for (const status of ['created', 'queued'] as const) {
+      const { fixture } = setup(status);
+      expect(abortButton(fixture.nativeElement)).toBeDefined();
+      expect(keepButton(fixture.nativeElement)).toBeUndefined();
+      TestBed.resetTestingModule();
+    }
+  });
+
   describe('keep VM running', () => {
     it('switches on from the info bar', () => {
       const { fixture, keepVmRunning } = setup('running');

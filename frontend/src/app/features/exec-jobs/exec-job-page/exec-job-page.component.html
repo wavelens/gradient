@@ -135,7 +135,7 @@
           }
         </div>
         <div class="info-bar-right">
-          @if (open()) {
+          @if (keepVmRunningToggleIsApplicable()) {
             <button *appWritable="triggerAccess()" grButton label="Keep VM running" icon="push_pin" size="small"
                     [severity]="keepVmRunning() ? 'primary' : 'secondary'" [attr.aria-pressed]="keepVmRunning()"
                     [loading]="switchingKeep()" [disabled]="switchingKeep()" (click)="toggleKeepVmRunning()"></button>
