@@ -189,17 +189,7 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 
 .panel-head > div:first-child { min-width: 0; }
 
-.panel-title { display: flex; align-items: center; gap: $spacing-sm; min-width: 0; }
-
-.panel-title > div { min-width: 0; }
-
-.s-ico {
-  width: 34px;
-  height: 34px;
-  border-radius: $border-radius-md;
-  justify-content: center;
-  flex-shrink: 0;
-}
+.panel-title { min-width: 0; }
 
 .panel-title .title-line {
   display: flex;

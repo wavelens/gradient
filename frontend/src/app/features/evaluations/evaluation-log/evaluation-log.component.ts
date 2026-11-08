@@ -56,7 +56,6 @@ import { AuthService } from '@core/services/auth.service';
 import { EvaluationWithOptionalTask } from '@core/resolvers/evaluation-access.resolver';
 import {
   BadgeComponent,
-  BadgeSeverity,
   ButtonComponent,
   LoadStateComponent,
   IconComponent,
@@ -70,7 +69,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, PHASE_SEVERITY, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -435,16 +434,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     });
   }
 
-  statusSeverity(status: string | null | undefined): BadgeSeverity {
-    return (status && PHASE_SEVERITY[buildPhase(status as BuildStatus)]) || 'neutral';
-  }
-
   buildStatusColor(status: string | null | undefined): string {
     return PHASE_COLOR[(status && buildPhase(status as BuildStatus)) || 'aborted'];
-  }
-
-  statusLabel(status: string): string {
-    return buildStatusLabel(status as BuildStatus);
   }
 
   statusClass(status: string | null | undefined): string {

@@ -1466,8 +1466,15 @@ describe('TaskDetailComponent repository chip', () => {
 
   it('links the selected commit hash to the commit page', () => {
     const { fixture } = setup(access, { repository: 'git@github.com:acme/demo.git' });
-    const link = (fixture.nativeElement as HTMLElement).querySelector('.panel-title .sub a.commit-link');
+    const link = (fixture.nativeElement as HTMLElement).querySelector('.panel-title a.commit-link');
     expect(link!.getAttribute('href')).toBe('https://github.com/acme/demo/commit/abc1234def5678');
+  });
+
+  it('names the selected commit once in the panel header', () => {
+    const { fixture } = setup(access, { repository: 'git@github.com:acme/demo.git' });
+    const head = (fixture.nativeElement as HTMLElement).querySelector('.panel-head') as HTMLElement;
+    expect(head.textContent!.match(/abc1234d/g)).toHaveLength(1);
+    expect(head.querySelector('.panel-title > gr-status-icon')).toBeNull();
   });
 });
 

@@ -32,11 +32,6 @@
         <span class="breadcrumb-current" aria-current="page">Evaluation</span>
       </div>
 
-      <div class="overview-block">
-        <div class="status-row">
-          <gr-eval-status-badge [status]="ev.status" [prioritized]="ev.prioritized" />
-        </div>
-      </div>
 
       <div
         class="sidebar-item evaluation-messages-item"
@@ -284,9 +279,6 @@
               <code class="log-header-title">{{ selectedBuild()?.name }}</code>
               @if (logLineCount() > 0) {
                 <span class="log-line-count">{{ logLineCount() }} {{ logLineCount() === 1 ? 'line' : 'lines' }}</span>
-              }
-              @if (selectedBuild(); as build) {
-                <gr-badge [severity]="statusSeverity(build.status)">{{ statusLabel(build.status) }}</gr-badge>
               }
             </div>
             @if (transferProgress(); as p) {

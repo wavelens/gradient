@@ -1206,6 +1206,7 @@ describe('EvaluationLogComponent', () => {
     expect(fixture.componentInstance.access().managed).toBe(true);
     expect(getEvaluation).not.toHaveBeenCalled();
     expect(getTask).not.toHaveBeenCalled();
+    expect((fixture.nativeElement as HTMLElement).querySelectorAll('gr-eval-status-badge')).toHaveLength(1);
     fixture.destroy();
   });
 });
