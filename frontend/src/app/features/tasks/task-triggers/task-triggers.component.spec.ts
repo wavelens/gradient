@@ -163,6 +163,7 @@ describe('TaskTriggersComponent - access gating', () => {
 
   it('shows but disables write buttons under state-managed access', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
+    expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain('server configuration');
     const newBtn = findByText(fixture.nativeElement, 'new trigger') as HTMLButtonElement | null;
     const editBtn = findByText(fixture.nativeElement, 'edit') as HTMLButtonElement | null;
     const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;

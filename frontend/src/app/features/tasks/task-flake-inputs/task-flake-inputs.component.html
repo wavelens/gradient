@@ -15,6 +15,9 @@
         [appManagedDisable]="access()"
       ></button>
   }
+  @if (access().managed) {
+    <gr-message-banner type="info">This task is part of the server configuration. No changes are possible here.</gr-message-banner>
+  }
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

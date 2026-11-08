@@ -24,6 +24,7 @@ import {
   IconComponent,
   LoadStateComponent,
   PageLayoutComponent,
+  MessageBannerComponent,
 } from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccessData, injectTaskAccessTo } from '@core/resolvers/inject-access';
@@ -50,6 +51,7 @@ interface IntegrationOption {
   selector: 'app-task-actions',
   standalone: true,
   imports: [
+    MessageBannerComponent,
     RelativeTimePipe,
     CopyFieldComponent,
     CommonModule,

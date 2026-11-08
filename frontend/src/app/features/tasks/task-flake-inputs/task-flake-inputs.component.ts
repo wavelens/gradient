@@ -20,6 +20,7 @@ import {
   LoadStateComponent,
   MessageService,
   PageLayoutComponent,
+  MessageBannerComponent,
 } from '@gradient/ui/ui';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -49,6 +50,7 @@ const DEFAULT_FORM: FlakeInputFormState = {
   selector: 'app-task-flake-inputs',
   standalone: true,
   imports: [
+    MessageBannerComponent,
     LabelHelpComponent,
     CommonModule,
     RouterModule,

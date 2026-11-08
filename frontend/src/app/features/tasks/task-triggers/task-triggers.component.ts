@@ -26,6 +26,7 @@ import {
   PageLayoutComponent,
   SelectComponent,
   TooltipDirective,
+  MessageBannerComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
@@ -83,6 +84,7 @@ const DEFAULT_FORM: TriggerFormState = {
   selector: 'app-task-triggers',
   standalone: true,
   imports: [
+    MessageBannerComponent,
     RelativeTimePipe,
     LabelHelpComponent,
     CommonModule,

@@ -8,6 +8,9 @@
 @if (canOpenParentProjectSettings()) {
   <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
 }
+@if (access().managed) {
+  <gr-message-banner type="info">This task is part of the server configuration. No changes are possible here.</gr-message-banner>
+}
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!task()" loadingMessage="Loading task settings..."
                errorTitle="Failed to load task settings" (retry)="loadTask()">
 @if (task(); as proj) {
