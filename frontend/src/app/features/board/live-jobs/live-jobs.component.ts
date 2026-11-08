@@ -11,7 +11,7 @@ import { Router, RouterModule, UrlTree } from '@angular/router';
 import { BoardService } from '@core/services/board.service';
 import { LiveStatusComponent } from '@shared/ui';
 import { AuthService } from '@core/services/auth.service';
-import { ButtonComponent, LoadStateComponent, TableComponent } from '@gradient/ui/ui';
+import { ButtonComponent, LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
 import { subscribeToBoardSocketWithReload } from '../board-socket';
 import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
@@ -37,13 +37,12 @@ interface DecisionRow {
 @Component({
   selector: 'app-board-live-jobs',
   standalone: true,
-  imports: [RelativeTimePipe, CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, LoadStateComponent, LiveStatusComponent],
+  imports: [RelativeTimePipe, CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, TabSwitchComponent, LoadStateComponent, LiveStatusComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
       <div class="view-toggle">
-        <button [class.active]="view() === 'assigned'" (click)="setView('assigned')">Assigned</button>
-        <button [class.active]="view() === 'pending'" (click)="setView('pending')">Pending</button>
+        <gr-tab-switch ariaLabel="Job list" [options]="assignedAndPendingJobListTabOptions" [ngModel]="view()" (ngModelChange)="setView($event)" />
         @if (connected() !== null) { <gr-live-status [connected]="!!connected()" /> }
       </div>
 
@@ -206,6 +205,10 @@ export class BoardLiveJobsComponent implements OnInit {
   otherRunning = signal(0);
 
   view = signal<'assigned' | 'pending'>('assigned');
+  readonly assignedAndPendingJobListTabOptions = [
+    { label: 'Assigned', value: 'assigned' },
+    { label: 'Pending', value: 'pending' },
+  ];
   pendingJobs = signal<PendingJobSummary[]>([]);
   otherPending = signal(0);
 

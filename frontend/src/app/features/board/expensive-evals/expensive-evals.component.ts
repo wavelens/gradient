@@ -7,7 +7,8 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { LoadStateComponent, TableComponent } from '@gradient/ui/ui';
+import { LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
+import { FormsModule } from '@angular/forms';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { firstLoad } from '../first-load';
 import { formatQuantity } from '@shared/text';
@@ -20,15 +21,11 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
 @Component({
   selector: 'app-board-expensive-evals',
   standalone: true,
-  imports: [CommonModule, RouterModule, TableComponent, LoadStateComponent],
+  imports: [CommonModule, FormsModule, RouterModule, TableComponent, TabSwitchComponent, LoadStateComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading evaluations..." errorTitle="Failed to load evaluations" (retry)="retry()">
-      <nav class="tabs">
-        @for (t of tabs; track t.key) {
-          <button [class.active]="tab() === t.key" (click)="setTab(t.key)">{{ t.label }}</button>
-        }
-      </nav>
+      <gr-tab-switch class="ranking" ariaLabel="Ranking" [options]="tabs" optionValue="key" [ngModel]="tab()" (ngModelChange)="setTab($event)" />
 
       <div class="controls">
         <label>Window (days)

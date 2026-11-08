@@ -9,7 +9,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, Subject, catchError, interval, map, startWith, switchMap } from 'rxjs';
 import { inBackground } from '@core/interceptors/request-context';
 import { BoardService } from '@core/services/board.service';
-import { LoadStateComponent } from '@gradient/ui/ui';
+import { FormsModule } from '@angular/forms';
+import { LoadStateComponent, TabSwitchComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { clockTime, monthDay, monthDayClockTime, formatCount, formatDuration } from '@shared/text';
@@ -28,15 +29,9 @@ interface StorageView {
 @Component({
   selector: 'app-board-storage',
   standalone: true,
-  imports: [MetricChartComponent, LoadStateComponent],
+  imports: [FormsModule, MetricChartComponent, LoadStateComponent, TabSwitchComponent],
   template: `
-    <div class="windows">
-      @for (w of windows; track w) {
-        <button type="button" class="window btn" [class.active]="hours() === w" (click)="select(w)">
-          {{ w === 168 ? '7d' : w + 'h' }}
-        </button>
-      }
-    </div>
+    <gr-tab-switch class="windows" ariaLabel="Time window" [options]="storageChartTimeWindowOptions" [ngModel]="hours()" (ngModelChange)="select($event)" />
 
     <gr-load-state [loading]="!view() && !loadError()" [error]="loadError()" [empty]="!view()"
                    errorTitle="Failed to load storage" (retry)="retry()">
@@ -92,7 +87,7 @@ export class BoardStorageComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private reload = new Subject<void>();
 
-  readonly windows = WINDOWS;
+  readonly storageChartTimeWindowOptions = WINDOWS.map((hours) => ({ label: hours === 168 ? '7d' : `${hours}h`, value: hours }));
   readonly inset = INSET;
   readonly count = formatCount;
   readonly duration = formatDuration;

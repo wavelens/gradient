@@ -8,7 +8,8 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { BoardService } from '@core/services/board.service';
 import { AuthService } from '@core/services/auth.service';
-import { LoadStateComponent, TableComponent } from '@gradient/ui/ui';
+import { LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
+import { FormsModule } from '@angular/forms';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { firstLoad } from '../first-load';
@@ -20,15 +21,11 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 @Component({
   selector: 'app-board-expensive-jobs',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent, LabelHelpComponent, TableComponent, LoadStateComponent],
+  imports: [CommonModule, FormsModule, MetricChartComponent, LabelHelpComponent, TableComponent, TabSwitchComponent, LoadStateComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
-      <nav class="tabs">
-        @for (t of tabs; track t.key) {
-          <button [class.active]="tab() === t.key" (click)="setTab(t.key)">{{ t.label }}</button>
-        }
-      </nav>
+      <gr-tab-switch class="ranking" ariaLabel="Ranking" [options]="tabs" optionValue="key" [ngModel]="tab()" (ngModelChange)="setTab($event)" />
 
       <div class="controls">
         <label>Window (days)

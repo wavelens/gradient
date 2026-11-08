@@ -39,7 +39,7 @@ describe('BoardStorageComponent', () => {
   });
 
   it('refetches when the window changes', () => {
-    const button = [...fixture.nativeElement.querySelectorAll('button.window')].find(
+    const button = [...fixture.nativeElement.querySelectorAll('.windows [role=tab]')].find(
       (b: HTMLButtonElement) => b.textContent?.trim() === '24h'
     ) as HTMLButtonElement;
     button.click();
