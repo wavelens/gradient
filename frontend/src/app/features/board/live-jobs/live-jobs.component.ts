@@ -105,7 +105,7 @@ interface DecisionRow {
                   <td>›</td>
                 </tr>
               } @empty {
-                <tr><td [attr.colspan]="superuser() ? 6 : 5" class="muted">No matching assigned jobs.</td></tr>
+                <tr><td [attr.colspan]="superuser() ? 6 : 5" class="muted">{{ scoreFilterMinimumExceedsMaximum() ? 'Score min is above Score max.' : 'No matching assigned jobs.' }}</td></tr>
               }
             </tbody>
           </gr-table>
@@ -235,6 +235,12 @@ export class BoardLiveJobsComponent implements OnInit {
       }
     });
   }
+
+  scoreFilterMinimumExceedsMaximum = computed(() => {
+    const min = this.scoreMin();
+    const max = this.scoreMax();
+    return this.superuser() && min !== null && max !== null && min > max;
+  });
 
   filteredJobs = computed(() => {
     const kind = this.kindFilter();

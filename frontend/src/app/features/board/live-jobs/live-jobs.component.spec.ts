@@ -139,6 +139,14 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     expect(cells[0].querySelector('a')?.getAttribute('href')).toBe(`/board/jobs/${ASSIGNED.id}`);
   });
 
+  it('names an inverted score range instead of claiming no job matches', () => {
+    const fixture = setupWithAssigned([ASSIGNED], true);
+    fixture.componentInstance.scoreMin.set(5000);
+    fixture.componentInstance.scoreMax.set(100);
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('tbody td.muted')?.textContent?.trim()).toBe('Score min is above Score max.');
+  });
+
   it('keeps exec jobs under the exec type filter only', () => {
     const fixture = setupWithAssigned([ASSIGNED, { ...ASSIGNED, id: 'x', kind: 2, build_id: null }]);
     const cmp = fixture.componentInstance;
