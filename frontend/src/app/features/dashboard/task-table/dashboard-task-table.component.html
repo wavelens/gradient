@@ -37,7 +37,7 @@
             <span class="name" [title]="t.project + ' / ' + t.task"><span class="project">{{ t.project }} /</span> {{ t.task }}</span>
             <span slot="meta" class="meta">
               @if (t.latest; as l) {
-                <code>{{ l.commit.slice(0, 7) }}</code> · {{ l.created_at | relativeTime }}
+                <code>{{ l.commit.slice(0, 7) }}</code><span class="latest-evaluation-relative-time">&nbsp;· {{ l.created_at | relativeTime }}</span>
               } @else {
                 No evaluations yet
               }

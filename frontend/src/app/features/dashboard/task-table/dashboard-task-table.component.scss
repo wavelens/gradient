@@ -38,10 +38,18 @@ $linked-list-row-chevron-icon-width: 20px;
 }
 
 .meta {
-  overflow: hidden;
+  display: flex;
   min-width: 0;
-  text-overflow: ellipsis;
   white-space: nowrap;
+
+  code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.latest-evaluation-relative-time {
+  flex-shrink: 0;
 }
 
 code {
