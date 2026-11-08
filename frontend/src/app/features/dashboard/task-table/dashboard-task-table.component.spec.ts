@@ -129,6 +129,18 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelector('gr-row-list')?.textContent).not.toContain('stale');
   });
 
+  it('drops a background reload that a filter change overtook', () => {
+    const background = new Subject<TasksPage>();
+    let call = 0;
+    const { f, params, root } = render(null, () => (++call === 2 ? background : of({ ...PAGE, tasks: [row(`load${call}`)] })));
+    f.componentInstance.reloadSilentlyKeepingContentOnError().subscribe();
+    params.next(convertToParamMap({ filter: 'failing' }));
+    background.next({ ...PAGE, tasks: [row('stale')] });
+    f.detectChanges();
+    expect(root.querySelector('gr-row-list')?.textContent).toContain('load3');
+    expect(root.querySelector('gr-row-list')?.textContent).not.toContain('stale');
+  });
+
   it('entrypoint, changes, and duration labels appear once in header row', () => {
     const { root } = render(null, () => of(PAGE));
     const header = Array.from(root.querySelectorAll('.columns span')).map((s) => s.textContent?.trim());

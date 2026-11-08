@@ -7,7 +7,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { filter } from 'rxjs';
+import { Observable, filter, tap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
 import { EvaluationStatus, Rail } from '@core/models';
@@ -49,13 +49,19 @@ export class DashboardRailComponent implements OnInit {
     this.load();
   }
 
+  reloadSilentlyKeepingContentOnError(): Observable<Rail> {
+    return this.dashboard.rail().pipe(
+      tap((r) => {
+        this.rail.set(r);
+        this.failed.set(false);
+        this.empty.emit(r.projects.length === 0 && r.caches.length === 0);
+      }),
+    );
+  }
+
   load(): void {
     this.failed.set(false);
-    this.dashboard.rail().subscribe({
-      next: (r) => {
-        this.rail.set(r);
-        this.empty.emit(r.projects.length === 0 && r.caches.length === 0);
-      },
+    this.reloadSilentlyKeepingContentOnError().subscribe({
       error: (e: { status?: number }) => {
         this.hidden.set(e?.status === 403);
         this.failed.set(e?.status !== 403);

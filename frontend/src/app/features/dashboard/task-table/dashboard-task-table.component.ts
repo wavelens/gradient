@@ -19,7 +19,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { EMPTY, Observable, Subject, catchError, debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs';
+import { EMPTY, Observable, Subject, catchError, debounceTime, distinctUntilChanged, filter, map, switchMap, tap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
 import { Filter, Latest, TasksPage } from '@core/models';
 import { evaluationPhase, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
@@ -47,8 +47,18 @@ const TOP = 10;
 const PAGE_SIZE = 25;
 const RESIZE_DEBOUNCE_MS = 150;
 
+interface DashboardTaskListRequestParameters {
+  filter: Filter | null;
+  page: number;
+  perPage: number;
+}
+
 function parseFilter(value: string | null): Filter | null {
   return FILTERS.find((x) => x.key === value)?.key ?? null;
+}
+
+function areDashboardTaskListRequestParametersEqual(a: DashboardTaskListRequestParameters, b: DashboardTaskListRequestParameters): boolean {
+  return a.filter === b.filter && a.page === b.page && a.perPage === b.perPage;
 }
 
 @Component({
@@ -174,10 +184,28 @@ export class DashboardTaskTableComponent implements OnInit {
     });
   }
 
+  reloadSilentlyKeepingContentOnError(): Observable<TasksPage> {
+    const shown = this.getCurrentTaskListRequestParameters();
+    return this.requestDashboardTaskListWithFullEvaluationHistory(shown).pipe(
+      filter(() => areDashboardTaskListRequestParametersEqual(shown, this.getCurrentTaskListRequestParameters())),
+      tap((d) => {
+        this.data.set(d);
+        this.failed.set(false);
+      }),
+    );
+  }
+
+  private getCurrentTaskListRequestParameters(): DashboardTaskListRequestParameters {
+    return { filter: this.filter(), page: this.page(), perPage: this.expanded() ? PAGE_SIZE : TOP };
+  }
+
+  private requestDashboardTaskListWithFullEvaluationHistory(q: DashboardTaskListRequestParameters): Observable<TasksPage> {
+    return this.dashboard.tasks(q.filter, q.page, q.perPage, MAX_BARS);
+  }
+
   private fetch(): Observable<TasksPage> {
     this.failed.set(false);
-    const perPage = this.expanded() ? PAGE_SIZE : TOP;
-    return this.dashboard.tasks(this.filter(), this.page(), perPage, MAX_BARS).pipe(
+    return this.requestDashboardTaskListWithFullEvaluationHistory(this.getCurrentTaskListRequestParameters()).pipe(
       catchError((e: { status?: number }) => {
         this.hidden.set(e?.status === 403);
         this.failed.set(e?.status !== 403);

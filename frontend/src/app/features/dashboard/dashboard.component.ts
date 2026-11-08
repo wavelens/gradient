@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { merge } from 'rxjs';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { MessageBannerComponent } from '@gradient/ui/ui';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { links } from '@shared/routing';
@@ -36,4 +38,17 @@ export class DashboardComponent {
   protected invites = inject(PendingInvitesService);
   // null until the rail answers; the router blocks load alongside it and give way if it reports first steps.
   newUser = signal<boolean | null>(null);
+
+  private stats = viewChild(DashboardStatsComponent);
+  private tasks = viewChild(DashboardTaskTableComponent);
+  private rail = viewChild(DashboardRailComponent);
+  private reloadableRenderedDashboardSections = computed(() =>
+    [this.stats(), this.tasks(), this.rail()].filter((section) => section !== undefined),
+  );
+
+  constructor() {
+    runReloadIntervalWhileTabVisible(() =>
+      merge(...this.reloadableRenderedDashboardSections().map((section) => section.reloadSilentlyKeepingContentOnError())),
+    );
+  }
 }

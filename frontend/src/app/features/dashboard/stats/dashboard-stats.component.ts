@@ -5,6 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Observable, tap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
 import { DashboardStats } from '@core/models';
 import {
@@ -57,10 +58,18 @@ export class DashboardStatsComponent implements OnInit {
     this.load();
   }
 
+  reloadSilentlyKeepingContentOnError(): Observable<DashboardStats> {
+    return this.dashboard.stats().pipe(
+      tap((s) => {
+        this.stats.set(s);
+        this.failed.set(false);
+      }),
+    );
+  }
+
   load(): void {
     this.failed.set(false);
-    this.dashboard.stats().subscribe({
-      next: (s) => this.stats.set(s),
+    this.reloadSilentlyKeepingContentOnError().subscribe({
       error: (e: { status?: number }) => {
         this.hidden.set(e?.status === 403);
         this.failed.set(e?.status !== 403);
