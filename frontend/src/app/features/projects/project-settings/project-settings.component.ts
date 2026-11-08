@@ -227,7 +227,8 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
       .confirm({
         title: 'Delete project',
         target: this.project()?.display_name ?? this.projectName,
-        consequence: "This action can't be undone.",
+        consequence:
+          "Delete all tasks in the project along with their evaluations, builds, and logs. Delete the project's secrets, workers, and members. Nothing can undo this action.",
         confirmLabel: 'Delete',
         failure: 'Project deletion failed.',
         action: () => this.projectsService.deleteProject(this.projectName),
