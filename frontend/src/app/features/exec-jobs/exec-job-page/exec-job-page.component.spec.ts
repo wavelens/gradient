@@ -494,6 +494,15 @@ describe('ExecJobPageComponent', () => {
       expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { node: 1 } }));
       expect(nodeItem(fixture.nativeElement, 1)?.classList).toContain('selected');
     });
+
+    it('shows the job on node 0 and clears ?node= for a node the job does not have', () => {
+      const { fixture, log, navigate } = setup('completed', SSH, { node: '99' }, twoNodeJob('completed'));
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledWith('j1', undefined, 0, expect.anything());
+      expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { node: null } }));
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('apps.x86_64-linux.train');
+      expect(nodeItem(fixture.nativeElement, 0)?.classList).toContain('selected');
+    });
   });
 
   describe('terminal', () => {

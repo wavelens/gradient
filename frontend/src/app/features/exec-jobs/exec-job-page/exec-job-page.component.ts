@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, injec
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { EMPTY, Subscription, catchError, forkJoin, interval, startWith, switchMap, takeWhile } from 'rxjs';
+import { EMPTY, Subscription, catchError, forkJoin, interval, map, startWith, switchMap, takeWhile } from 'rxjs';
 import { inBackground } from '@core/interceptors/request-context';
 import {
   BadgeComponent,
@@ -190,16 +190,20 @@ export class ExecJobPageComponent implements OnInit {
   }
 
   pickNode(node: number): void {
-    this.node.set(node);
+    this.setSelectedNodeIndexAndUrl(node);
     this.sidebarOpen.set(false);
+    this.watch();
+    if (this.view() === 'terminal') this.openTerminal(this.terminalMode());
+  }
+
+  private setSelectedNodeIndexAndUrl(node: number): void {
+    this.node.set(node);
     this.router.navigate([], {
       relativeTo: this.route,
       queryParams: { node: node === 0 ? null : node },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
-    this.watch();
-    if (this.view() === 'terminal') this.openTerminal(this.terminalMode());
   }
 
   private watch(): void {
@@ -208,9 +212,12 @@ export class ExecJobPageComponent implements OnInit {
       startWith(-1),
       switchMap((tick) => forkJoin({
         job: this.execJobs.get(this.jobId, tick >= 0 ? inBackground() : undefined),
-        log: this.execJobs.log(this.jobId, undefined, this.node(), inBackground()),
         pullRequests: this.execJobs.pullRequests(this.jobId, inBackground()),
       }).pipe(
+        switchMap(({ job, pullRequests }) => {
+          if (this.node() !== 0 && !job.node_jobs.some((n) => n.node === this.node())) this.setSelectedNodeIndexAndUrl(0);
+          return this.execJobs.log(this.jobId, undefined, this.node(), inBackground()).pipe(map((log) => ({ job, log, pullRequests })));
+        }),
         catchError((error: Error) => {
           this.errorMessage.set(error.message);
           return EMPTY;
