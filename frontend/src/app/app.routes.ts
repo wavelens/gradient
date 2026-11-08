@@ -14,7 +14,6 @@ import { publicListingGuard } from '@core/guards/public-listing.guard';
 import { visibleProjectGuard } from '@core/guards/visible-project.guard';
 import {
   execJobInTaskGuard,
-  visibleTeamGuard,
   workerInProjectGuard,
 } from '@core/guards/entity.guards';
 import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
@@ -22,6 +21,7 @@ import { taskAccessResolver } from '@core/resolvers/task-access.resolver';
 import { cacheAccessResolver, shouldRefetchCacheRecordOnCacheNameOrCacheRecordPageChange } from '@core/resolvers/cache-access.resolver';
 import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
 import { evaluationAccessResolver } from '@core/resolvers/evaluation-access.resolver';
+import { teamAccessResolver } from '@core/resolvers/team-access.resolver';
 
 export const routes: Routes = [
   // Authentication routes (public)
@@ -517,14 +517,14 @@ export const routes: Routes = [
       {
         path: 'team/:team',
         title: 'Team',
-        canActivate: [visibleTeamGuard],
+        resolve: { teamAccess: teamAccessResolver },
         loadComponent: () =>
           import('./features/teams/team-overview/team-overview.component').then((m) => m.TeamOverviewComponent),
       },
       {
         path: 'team/:team/settings',
         title: 'Team Settings',
-        canActivate: [visibleTeamGuard],
+        resolve: { teamAccess: teamAccessResolver },
         canDeactivate: [unsavedChangesGuard],
         loadComponent: () =>
           import('./features/teams/team-settings/team-settings.component').then((m) => m.TeamSettingsComponent),
@@ -532,7 +532,7 @@ export const routes: Routes = [
       {
         path: 'team/:team/webhooks',
         title: 'Team event notifications',
-        canActivate: [visibleTeamGuard],
+        resolve: { teamAccess: teamAccessResolver },
         data: { webhookScope: 'team' },
         loadComponent: () =>
           import('./features/webhooks/webhooks.component').then((m) => m.WebhooksComponent),

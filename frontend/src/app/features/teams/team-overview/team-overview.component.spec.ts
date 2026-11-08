@@ -53,7 +53,10 @@ function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().m
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ team: 'platform' }) } } },
+      {
+        provide: ActivatedRoute,
+        useValue: { snapshot: { paramMap: convertToParamMap({ team: 'platform' }), data: { teamAccess: { team: { ...team, role } } } }, data: of({ teamAccess: { team: { ...team, role } } }) },
+      },
       { provide: ConfigService, useValue: { gradientCiEnabled: false } },
       {
         provide: TeamsService,

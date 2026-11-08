@@ -8,18 +8,9 @@ import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
 import { map } from 'rxjs';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
-import { TeamsService } from '@core/services/teams.service';
 import { WorkersService } from '@core/services/workers.service';
 import { DeniedTarget, deniedPage, denyOnRefusal } from '@core/routing/access-denied';
 import { links } from '@shared/routing';
-
-export const visibleTeamGuard: CanActivateFn = (route, state) => {
-  const name = route.paramMap.get('team') ?? '';
-  return inject(TeamsService).get(name).pipe(
-    map(() => true as const),
-    denyOnRefusal({ kind: 'team', name, back: String(links.teams()) }, state.url),
-  );
-};
 
 export const execJobInTaskGuard: CanActivateFn = (route, state) => {
   const router = inject(Router);

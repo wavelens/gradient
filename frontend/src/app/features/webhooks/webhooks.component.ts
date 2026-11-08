@@ -12,7 +12,9 @@ import { finalize } from 'rxjs';
 import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
-import { createMissingPermissionLoadStateError } from '@shared/access';
+import { canManageTeam, createMissingPermissionLoadStateError, createNoAccessLoadStateError } from '@shared/access';
+import { TeamAccessData } from '@core/resolvers/team-access.resolver';
+import { AuthService } from '@core/services/auth.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { WebhooksService } from '@core/services/webhooks.service';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -66,6 +68,7 @@ export class WebhooksComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private auth = inject(AuthService);
 
   scope!: WebhookScopeRef;
   title = '';
@@ -147,6 +150,10 @@ export class WebhooksComponent implements OnInit {
     if (this.scope.kind === 'cache') {
       const cache = (this.route.parent?.snapshot.data['cacheAccess'] as CacheAccessData | undefined)?.cache;
       return accessTo(cache, 'manageCacheWebhooks').canEdit ? null : createMissingPermissionLoadStateError('manageCacheWebhooks', 'cache');
+    }
+    if (this.scope.kind === 'team') {
+      const team = (this.route.snapshot.data['teamAccess'] as TeamAccessData | undefined)?.team;
+      return canManageTeam(team, this.auth.user()) ? null : createNoAccessLoadStateError('team', 'admins');
     }
     return null;
   }

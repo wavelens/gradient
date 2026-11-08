@@ -25,6 +25,7 @@ import {
 } from '@core/models';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
+import { canManageTeam } from '@shared/access';
 import { fieldChecks } from '@shared/forms';
 import { Observable, map } from 'rxjs';
 import {
@@ -87,7 +88,7 @@ export class TeamWorkersComponent implements OnInit {
   editAllowed: AllowedCapabilities = ALL_ALLOWED;
   form: RegisterWorkerRequest = { worker_id: '', display_name: '' };
 
-  isAdmin = computed(() => this.team().role === 'admin' || this.authService.user()?.superuser === true);
+  isAdmin = computed(() => canManageTeam(this.team(), this.authService.user()));
   offlineCount = computed(() => this.workers().filter((worker) => !worker.connected).length);
   shownWorkers = computed(() => (this.showOffline() ? this.workers() : this.workers().filter((worker) => worker.connected)));
   canConnectGradientCi = computed(

@@ -26,9 +26,10 @@ import { WorkersService } from '@core/services/workers.service';
 import { taskAccessResolver } from '@core/resolvers/task-access.resolver';
 import { cacheAccessResolver } from '@core/resolvers/cache-access.resolver';
 import { evaluationAccessResolver } from '@core/resolvers/evaluation-access.resolver';
+import { teamAccessResolver } from '@core/resolvers/team-access.resolver';
 import { CachesService } from '@core/services/caches.service';
 import { adminGuard } from './admin.guard';
-import { execJobInTaskGuard, visibleTeamGuard, workerInProjectGuard } from './entity.guards';
+import { execJobInTaskGuard, workerInProjectGuard } from './entity.guards';
 import { visibleProjectGuard } from './visible-project.guard';
 
 const URL = '/project/acme/somewhere';
@@ -104,7 +105,7 @@ describe('not-found or no-access page', () => {
 
   it('replaces a missing team', async () => {
     configure({ teams: { get: () => refused(404) } });
-    expect(page(await outcome(visibleTeamGuard, { team: 'qa' }))).toContain('kind=team&name=qa&back=%2Fteams');
+    expect(page(await outcome(teamAccessResolver as unknown as CanActivateFn, { team: 'qa' }))).toContain('kind=team&name=qa&back=%2Fteams');
   });
 
   it('replaces an evaluation that belongs to another project', async () => {
@@ -134,12 +135,12 @@ describe('not-found or no-access page', () => {
 
   it('leaves an unreachable server to the error page the interceptor shows', async () => {
     configure({ teams: { get: () => refused(503) } });
-    expect(await outcome(visibleTeamGuard, { team: 'qa' })).toBe('cancelled');
+    expect(await outcome(teamAccessResolver as unknown as CanActivateFn, { team: 'qa' })).toBe('cancelled');
   });
 
   it('shows the server error page for other failures', async () => {
     configure({ teams: { get: () => refused(500) } });
-    expect(page(await outcome(visibleTeamGuard, { team: 'qa' }))).toContain('/error/500');
+    expect(page(await outcome(teamAccessResolver as unknown as CanActivateFn, { team: 'qa' }))).toContain('/error/500');
   });
 
   it('shows the admin-only page to a signed-in user without superuser rights', async () => {

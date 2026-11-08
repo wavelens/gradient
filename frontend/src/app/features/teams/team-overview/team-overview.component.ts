@@ -4,20 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, linkedSignal, signal } from '@angular/core';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { apiErrorMessage } from '@core/services/api.service';
+import { injectTeam } from '@core/resolvers/team-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
 import { TeamResponse, TeamGrants, TeamRequestItem } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
+import { canManageTeam } from '@shared/access';
 import {
   ButtonComponent,
   EmptyStateComponent,
-  LoadingSpinnerComponent,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -34,10 +33,8 @@ import { links } from '@shared/routing';
     RouterModule,
     ButtonComponent,
     EmptyStateComponent,
-    LoadingSpinnerComponent,
     TeamMembersComponent,
     TeamWorkersComponent,
-    MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -55,30 +52,19 @@ export class TeamOverviewComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
+  private resolvedTeam = injectTeam();
+
   teamName = '';
   breadcrumb = computed(() => this.crumbs.team(this.teamName));
-  team = signal<TeamResponse | null>(null);
+  team = linkedSignal<TeamResponse | null>(() => this.resolvedTeam() ?? null);
   grants = signal<TeamGrants>({ projects: [], caches: [] });
   requests = signal<TeamRequestItem[]>([]);
-  loading = signal(true);
   busy = signal<string | null>(null);
-  error = signal<string | null>(null);
 
-  isAdmin = computed(() => this.team()?.role === 'admin' || this.authService.user()?.superuser === true);
+  isAdmin = computed(() => canManageTeam(this.team(), this.authService.user()));
   ngOnInit(): void {
     this.teamName = this.route.snapshot.paramMap.get('team') || '';
-    this.teams.get(this.teamName).subscribe({
-      next: (team) => {
-        this.team.set(team);
-        this.crumbs.rememberTeam(this.teamName, team.display_name);
-        this.loading.set(false);
-        if (this.isAdmin()) this.loadRequests();
-      },
-      error: (err: unknown) => {
-        this.error.set(apiErrorMessage(err, 'Failed to load the team.'));
-        this.loading.set(false);
-      },
-    });
+    if (this.isAdmin()) this.loadRequests();
     this.loadGrants();
   }
 

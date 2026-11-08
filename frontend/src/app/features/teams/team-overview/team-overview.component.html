@@ -8,13 +8,7 @@
   @if (isAdmin()) {
     <a slot="actions" grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.teamPage(teamName, 'settings')"></a>
   }
-  @if (error(); as message) {
-    <gr-message-banner type="error">{{ message }}</gr-message-banner>
-  }
-
-  @if (loading()) {
-    <gr-loading-spinner message="Loading team..." />
-  } @else if (team(); as team) {
+  @if (team(); as team) {
     @if (isAdmin() && requests().length > 0) {
       <gr-settings-section title="Requests" [card]="false">
         <gr-row-list>

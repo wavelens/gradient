@@ -42,7 +42,9 @@ function setup(
   managed = false,
   listMembers = vi.fn().mockReturnValue(of(members)),
   invitations: PendingInvitationItem[] = [],
+  access: { role: TeamResponse['role']; superuser: boolean } = { role: 'admin', superuser: false },
 ) {
+  const listInvitations = vi.fn(() => of(invitations));
   const addMember = vi.fn().mockReturnValue(of('Invitation sent'));
   const updateMember = vi.fn().mockReturnValue(of('ok'));
   const revokeInvitation = vi.fn().mockReturnValue(of('ok'));
@@ -58,7 +60,7 @@ function setup(
         provide: TeamsService,
         useValue: {
           members: listMembers,
-          invitations: () => of(invitations),
+          invitations: listInvitations,
           addMember,
           updateMember,
           removeMember,
@@ -67,13 +69,13 @@ function setup(
       },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
-      { provide: AuthService, useValue: { user: signal({ username: 'alice' }) } },
+      { provide: AuthService, useValue: { user: signal({ username: 'alice', superuser: access.superuser }) } },
     ],
   });
   const fixture = TestBed.createComponent(TeamMembersComponent);
-  fixture.componentRef.setInput('team', { ...team, managed });
+  fixture.componentRef.setInput('team', { ...team, managed, role: access.role });
   fixture.detectChanges();
-  return { fixture, addMember, updateMember, removeMember, revokeInvitation, notify, confirm };
+  return { fixture, addMember, updateMember, removeMember, revokeInvitation, listInvitations, notify, confirm };
 }
 
 describe('TeamMembersComponent', () => {
@@ -106,6 +108,18 @@ describe('TeamMembersComponent', () => {
     expect(row('alice').querySelector('gr-select')).not.toBeNull();
     expect(row('dave').querySelector('gr-select')).toBeNull();
     expect(row('dave').querySelector('button')).toBeNull();
+  });
+
+  it('lets a superuser outside the team add members', () => {
+    const { fixture } = setup(undefined, false, undefined, [], { role: null, superuser: true });
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Add Member');
+  });
+
+  it('shows a team member the members without asking for the invitations only admins may see', () => {
+    const { fixture, listInvitations } = setup(undefined, false, undefined, [], { role: 'member', superuser: false });
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('alice');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Add Member');
+    expect(listInvitations).not.toHaveBeenCalled();
   });
 
   it('invites a user with the chosen role', () => {

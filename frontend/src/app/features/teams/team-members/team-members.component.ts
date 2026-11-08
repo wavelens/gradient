@@ -13,6 +13,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfirmService } from '@shared/confirm';
+import { canManageTeam } from '@shared/access';
 import {
   TeamRole,
   TeamResponse,
@@ -79,7 +80,7 @@ export class TeamMembersComponent implements OnInit {
 
   readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'State', group: 'Group' };
 
-  canEdit = computed(() => this.team().role === 'admin');
+  canEdit = computed(() => canManageTeam(this.team(), this.auth.user()));
   countLabel = computed(() => `${this.members().length} ${this.members().length === 1 ? 'member' : 'members'}`);
 
   private get teamName(): string {
@@ -103,6 +104,7 @@ export class TeamMembersComponent implements OnInit {
         this.loading.set(false);
       },
     });
+    if (!this.canEdit()) return;
     this.teams.invitations(this.teamName).subscribe({
       next: (invitations) => this.invitations.set(invitations),
       error: () => this.invitations.set([]),

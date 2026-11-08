@@ -5,13 +5,7 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Settings">
-  @if (error(); as message) {
-    <gr-message-banner type="error">{{ message }}</gr-message-banner>
-  }
-
-  @if (loading()) {
-    <gr-loading-spinner message="Loading team..." />
-  } @else if (team(); as team) {
+  @if (team(); as team) {
     @if (team.managed) {
       <gr-message-banner type="info">This team is managed by the server configuration and cannot be changed here.</gr-message-banner>
     }

@@ -17,6 +17,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { TeamsService } from '@core/services/teams.service';
 import { EventsService } from '@core/services/events.service';
 import { NotifyService } from '@core/services/notify.service';
+import { AuthService } from '@core/services/auth.service';
 import type { WebhookResponse } from '@core/models';
 import { webhooksBase } from '@core/models/webhook.model';
 import { EVERY_CACHE_PERMISSION, EVERY_PERMISSION } from '@core/resolvers/access-route.testing';
@@ -62,12 +63,16 @@ function setup(
       {
         provide: ActivatedRoute,
         useValue: {
-          snapshot: { data: { projectAccess: { project: { permissions: EVERY_PERMISSION } }, ...data }, paramMap: convertToParamMap(params) },
+          snapshot: {
+            data: { projectAccess: { project: { permissions: EVERY_PERMISSION } }, teamAccess: { team: { role: 'admin' } }, ...data },
+            paramMap: convertToParamMap(params),
+          },
           parent: { snapshot: { data: { cacheAccess: { cache: { permissions: EVERY_CACHE_PERMISSION } } } } },
         },
       },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
+      { provide: AuthService, useValue: { user: () => ({ superuser: false }) } },
     ],
   });
   const fixture = TestBed.createComponent(WebhooksComponent);
@@ -269,6 +274,14 @@ describe('WebhooksComponent', () => {
     expect(root.textContent).toContain('No access');
     expect(root.textContent).toContain('manage webhooks permission for this project');
     expect(root.textContent).not.toContain('New Webhook');
+    expect(root.textContent).not.toContain('Try Again');
+  });
+
+  it('shows a team member no access without asking the server', () => {
+    const { root, service } = setup({ webhookScope: 'team', teamAccess: { team: { role: 'member' } } }, { team: 'platform' });
+    expect(service.list).not.toHaveBeenCalled();
+    expect(root.textContent).toContain('No access');
+    expect(root.textContent).toContain('Only the admins of this team can view this.');
     expect(root.textContent).not.toContain('Try Again');
   });
 

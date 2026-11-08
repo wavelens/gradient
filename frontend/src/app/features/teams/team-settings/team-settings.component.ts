@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, linkedSignal, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
-import { apiErrorMessage } from '@core/services/api.service';
+import { injectTeam } from '@core/resolvers/team-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
 import { AccessState, TeamResponse, PatchTeamRequest } from '@core/models';
-import { ManagedDisableDirective, WritableDirective } from '@shared/access';
+import { ManagedDisableDirective, WritableDirective, canManageTeam } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -22,7 +22,6 @@ import {
   CheckboxComponent,
   FormFieldComponent,
   InputDirective,
-  LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -54,7 +53,6 @@ interface SettingsForm {
     CheckboxComponent,
     FormFieldComponent,
     InputDirective,
-    LoadingSpinnerComponent,
     MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
@@ -88,39 +86,24 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
     { label: 'View', value: 'View' },
   ];
 
+  private resolvedTeam = injectTeam();
+
   teamName = '';
   breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Settings' }));
-  team = signal<TeamResponse | null>(null);
-  loading = signal(true);
+  team = linkedSignal<TeamResponse | null>(() => this.resolvedTeam() ?? null);
   saving = signal(false);
   saved = signal(false);
-  error = signal<string | null>(null);
   form: SettingsForm = this.formOf(null);
   readonly unsaved = unsavedChanges(() => this.form, 'Team settings');
 
   isSuperuser = computed(() => this.authService.user()?.superuser === true);
-  access = computed(() => this.accessFor(this.team()?.role === 'admin' || this.isSuperuser()));
+  access = computed(() => this.accessFor(canManageTeam(this.team(), this.authService.user())));
   superuserAccess = computed(() => this.accessFor(this.isSuperuser()));
 
   ngOnInit(): void {
     this.teamName = this.route.snapshot.paramMap.get('team') || '';
-    this.load();
-  }
-
-  load(): void {
-    this.teams.get(this.teamName).subscribe({
-      next: (team) => {
-        this.team.set(team);
-        this.crumbs.rememberTeam(this.teamName, team.display_name);
-        this.form = this.formOf(team);
-        this.unsaved.mark();
-        this.loading.set(false);
-      },
-      error: (err: unknown) => {
-        this.error.set(apiErrorMessage(err, 'Failed to load the team.'));
-        this.loading.set(false);
-      },
-    });
+    this.form = this.formOf(this.team());
+    this.unsaved.mark();
   }
 
   canDeactivate() {
@@ -149,10 +132,10 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
     this.teams.update(this.teamName, patch).subscribe({
       next: () => {
         this.team.set({ ...team, ...this.form });
+        this.crumbs.rememberTeam(this.teamName, this.form.display_name);
         this.unsaved.mark();
         this.saving.set(false);
         this.saved.set(true);
-        this.load();
       },
       error: (err: unknown) => {
         this.saving.set(false);

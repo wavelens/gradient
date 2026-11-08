@@ -31,7 +31,7 @@ const team: TeamResponse = {
 
 function setup(superuser: boolean, managed = false) {
   const update = vi.fn().mockReturnValue(of('Team updated'));
-  const get = vi.fn(() => of<TeamResponse>({ ...team, managed, oidc_group: managed ? 'ci-admins' : null }));
+  const resolved: TeamResponse = { ...team, managed, oidc_group: managed ? 'ci-admins' : null };
   const remove = vi.fn().mockReturnValue(of('Team deleted'));
   const notify = { success: vi.fn(), failure: vi.fn() };
   const confirm = vi.fn((request: ConfirmRequest) => request.action());
@@ -39,8 +39,14 @@ function setup(superuser: boolean, managed = false) {
     imports: [TeamSettingsComponent],
     providers: [
       provideRouter([]),
-      { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ team: 'platform' }) } } },
-      { provide: TeamsService, useValue: { get, update, remove } },
+      {
+        provide: ActivatedRoute,
+        useValue: {
+          snapshot: { paramMap: convertToParamMap({ team: 'platform' }), data: { teamAccess: { team: resolved } } },
+          data: of({ teamAccess: { team: resolved } }),
+        },
+      },
+      { provide: TeamsService, useValue: { get: () => of(resolved), update, remove } },
       { provide: AuthService, useValue: { user: signal({ superuser }) } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
@@ -48,7 +54,7 @@ function setup(superuser: boolean, managed = false) {
   });
   const fixture = TestBed.createComponent(TeamSettingsComponent);
   fixture.detectChanges();
-  return { fixture, update, get, remove, notify, confirm };
+  return { fixture, update, remove, notify, confirm };
 }
 
 function buttonByText(root: HTMLElement, label: string): HTMLButtonElement {
@@ -61,14 +67,13 @@ function input(fixture: { nativeElement: HTMLElement }, id: string): HTMLInputEl
 
 describe('TeamSettingsComponent', () => {
   it('names the team in the breadcrumb by its new display name after a rename', () => {
-    const { fixture, get } = setup(true);
+    const { fixture } = setup(true);
     const component = fixture.componentInstance;
     const crumbs = () =>
       Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.breadcrumb-link, .breadcrumb-current'))
         .map((crumb) => crumb.textContent?.trim());
     expect(crumbs()).toEqual(['Teams', 'Platform', 'Settings']);
 
-    get.mockReturnValue(of({ ...team, display_name: 'Platform Team' }));
     component.form = { ...component.form, display_name: 'Platform Team' };
     component.save();
     fixture.detectChanges();
@@ -121,10 +126,9 @@ describe('TeamSettingsComponent', () => {
   });
 
   it('sends one PATCH for two clicks on Save Changes', async () => {
-    const { fixture, update, get } = setup(true);
+    const { fixture, update } = setup(true);
     const pending = new Subject<string>();
     update.mockReturnValue(pending);
-    get.mockReturnValue(new Subject<TeamResponse>());
     await fixture.whenStable();
     const name = input(fixture, 'team-display-name');
     name.value = 'Ops';
