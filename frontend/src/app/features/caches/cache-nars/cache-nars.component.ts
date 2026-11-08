@@ -117,6 +117,7 @@ export class CacheNarsComponent implements OnInit {
       next: (r: Paginated<NarSummary[]>) => {
         this.rows.set(r.items);
         this.total.set(r.total);
+        if (!r.items.length && r.total > 0 && this.page() > 1) this.goToPage(this.totalPages());
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -206,6 +207,7 @@ export class CacheNarsComponent implements OnInit {
       .subscribe(() => {
         this.rows.update((rows) => rows?.filter((r) => r.hash !== row.hash) ?? rows);
         this.total.set(Math.max(0, this.total() - 1));
+        if (!this.rows()?.length && this.page() > 1) this.goToPage(this.page() - 1);
         this.notify.success('NAR removed');
         this.loadStats();
       });

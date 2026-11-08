@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { BehaviorSubject, EMPTY, NEVER, Observable, of, throwError } from 'rxjs';
@@ -128,5 +128,25 @@ describe('CacheNarsComponent delete', () => {
     fixture.componentInstance.askDelete(NAR);
     expect(service.deleteCacheNar).not.toHaveBeenCalled();
     expect(fixture.componentInstance.rows()).toEqual([NAR]);
+  });
+});
+
+describe('CacheNarsComponent paging', () => {
+  it('moves to the last page that has rows when the requested page is past the end', () => {
+    const { fixture, query } = render(() => of({ ...PAGE, items: [], total: 60, page: 3 }));
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    query.next(convertToParamMap({ page: '3' }));
+    fixture.detectChanges();
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { page: 2 } }));
+  });
+
+  it('Delete last row on page -> previous page', () => {
+    const { fixture, query } = render(() => of({ ...PAGE, total: 51, page: 2 }));
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    query.next(convertToParamMap({ page: '2' }));
+    const service = TestBed.inject(CachesService) as unknown as { deleteCacheNar: () => unknown };
+    service.deleteCacheNar = vi.fn(() => of('ok'));
+    fixture.componentInstance.askDelete(NAR);
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { page: 1 } }));
   });
 });
