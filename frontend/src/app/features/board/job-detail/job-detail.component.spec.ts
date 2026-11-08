@@ -533,6 +533,13 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     expect(el.querySelector('section.timeline')?.textContent).toContain('completed');
   });
 
+  it('names the finish once and leaves out an empty worker timeline', () => {
+    const el = setup({ getJob: () => of({ ...EXEC_DETAIL, phases: [] }) }).nativeElement as HTMLElement;
+    const execLabels = Array.from(el.querySelectorAll('section.exec td.label')).map((td) => td.textContent?.trim());
+    expect(execLabels).not.toContain('Ended');
+    expect(el.querySelector('gr-job-timeline')).toBeNull();
+  });
+
   it('shows why a failed attempt ended next to its end reason', () => {
     const failed: AssignedJobDetail = { ...EXEC_DETAIL, exec_attempt: { ...EXEC_DETAIL.exec_attempt!, end_reason: 'failed', message: 'program exited with code 3' } };
     const cell = (setup({ getJob: () => of(failed) }).nativeElement as HTMLElement).querySelector('section.exec .end-reason');

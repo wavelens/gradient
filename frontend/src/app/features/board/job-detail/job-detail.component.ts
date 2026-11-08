@@ -129,7 +129,6 @@ interface RuleRow {
               }
               @if (j.exec_attempt; as a) {
                 <tr><td class="label">Attempt</td><td class="mono">{{ a.number }}</td></tr>
-                <tr><td class="label">Ended</td><td class="mono">{{ a.ended_at ? (a.ended_at | serverDate) : '-' }}</td></tr>
                 @if (a.end_reason) {
                   <tr>
                     <td class="label">End reason</td>
@@ -160,7 +159,7 @@ interface RuleRow {
         <div class="step"><span class="label">Current State</span><span class="hl">{{ currentState() }}</span></div>
       </section>
 
-      @if (!j.passed_over) {
+      @if (j.phases.length) {
         <h2>Worker timeline <gr-label-help doc="ui/job-board/#job-inspection" title="About the worker timeline" /></h2>
         <gr-job-timeline [phases]="j.phases" />
       }
