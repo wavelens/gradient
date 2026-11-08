@@ -91,9 +91,13 @@
         </ul>
       }
 
-      @if (!running() && !failureGroups().length && !s.failed_attributes.length) {
-        <gr-empty-state flat icon="check_circle" title="Nothing went wrong"
-                        message="No build failed and every attribute evaluated." />
+      @if (!failureGroups().length && !s.failed_attributes.length) {
+        @if (ev.status === 'Completed') {
+          <gr-empty-state flat icon="check_circle" title="Nothing went wrong"
+                          message="No build failed and every attribute evaluated." />
+        } @else if (ev.status === 'Failed' && ev.error) {
+          <gr-empty-state flat icon="error" title="First error" [message]="firstLine(ev.error)" />
+        }
       }
     </gr-page-layout>
   }

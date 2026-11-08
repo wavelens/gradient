@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { BuildStatus, EvaluationFailureSummary, FailedBuildSummary } from '@core/models';
+import type { BuildStatus, EvaluationFailureSummary, EvaluationStatus, FailedBuildSummary } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
-import { buildStatusLabel } from '@shared/evaluation';
+import { buildStatusLabel, isRunningEvaluationStatus } from '@shared/evaluation';
 import { plural } from '@shared/text';
 
 const BLOCKED_NAMED = 5;
@@ -27,16 +27,22 @@ export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary
   ];
 }
 
-export function headline(summary: EvaluationFailureSummary, running: boolean): string {
+export function headline(summary: EvaluationFailureSummary, status: EvaluationStatus): string {
   const { total, built, failed, blocked, unfinished } = summary.packages;
-  if (running) return `Still running, ${built} of ${plural(total, 'package')} built so far`;
+  if (status === 'Queued' || status === 'Waiting') return 'Not started yet';
+  if (isRunningEvaluationStatus(status)) {
+    return total ? `Still running, ${built} of ${plural(total, 'package')} built so far` : 'Still evaluating';
+  }
   const failedAttributes = summary.failed_attributes.length;
   const problems = [
     ...(failed + blocked > 0 ? [`${plural(failed + blocked, 'package')} did not build`] : []),
     ...(failedAttributes > 0 ? [`${plural(failedAttributes, 'attribute')} failed to evaluate`] : []),
   ];
+  const notBuilt = unfinished > 0 ? [`${plural(unfinished, 'package')} not built`] : [];
+  if (status === 'Aborted') return ['Aborted', ...problems, ...notBuilt].join(', ');
   if (problems.length) return problems.join(', ');
-  if (unfinished > 0) return `${plural(unfinished, 'package')} not built`;
+  if (status === 'Failed') return 'Evaluation failed';
+  if (notBuilt.length) return notBuilt[0];
 
   return `All ${plural(total, 'package')} built`;
 }

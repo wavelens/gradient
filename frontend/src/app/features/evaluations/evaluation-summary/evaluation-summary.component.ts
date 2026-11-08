@@ -87,7 +87,8 @@ export class EvaluationSummaryComponent implements OnInit {
 
   headline = computed(() => {
     const summary = this.summary();
-    return summary ? headline(summary, this.running()) : 'Summary';
+    const evaluation = this.evaluation();
+    return summary && evaluation ? headline(summary, evaluation.status) : 'Summary';
   });
 
   countTiles = computed(() => {

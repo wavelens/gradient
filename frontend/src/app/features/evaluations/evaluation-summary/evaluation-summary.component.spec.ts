@@ -111,10 +111,36 @@ describe('EvaluationSummaryComponent', () => {
   });
 
   it('says so when nothing went wrong', () => {
-    const fixture = setup({ ...SUMMARY, packages: { total: 20, built: 20, failed: 0, blocked: 0, unfinished: 0 }, failures: [], failures_total: 0, failed_attributes: [] });
+    const fixture = setup(
+      { ...SUMMARY, packages: { total: 20, built: 20, failed: 0, blocked: 0, unfinished: 0 }, failures: [], failures_total: 0, failed_attributes: [] },
+      { ...EVALUATION, status: 'Completed' },
+    );
 
     expect(text(fixture)).toContain('All 20 packages built');
     expect(text(fixture)).toContain('Nothing went wrong');
+  });
+
+  it('reads an aborted evaluation as aborted, never as a clean run', () => {
+    const fixture = setup(
+      { ...SUMMARY, packages: { total: 1, built: 0, failed: 0, blocked: 0, unfinished: 1 }, failures: [], failures_total: 0, failed_attributes: [], compared_with: null },
+      { ...EVALUATION, status: 'Aborted' },
+    );
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('Aborted, 1 package not built');
+    expect(text(fixture)).toContain('Not built');
+    expect(text(fixture)).not.toContain('Nothing went wrong');
+  });
+
+  it('shows the first error of an evaluation that failed before any package', () => {
+    const fixture = setup(
+      { ...SUMMARY, packages: { total: 0, built: 0, failed: 0, blocked: 0, unfinished: 0 }, failures: [], failures_total: 0, failed_attributes: [], compared_with: null },
+      { ...EVALUATION, error: "\nerror: fetchTree doesn't fetch unlocked input\n  at flake.lock" },
+    );
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('Evaluation failed');
+    expect(text(fixture)).toContain("error: fetchTree doesn't fetch unlocked input");
+    expect(text(fixture)).not.toContain('at flake.lock');
+    expect(text(fixture)).not.toContain('Nothing went wrong');
   });
 
   it('leads back through the task, named as the evaluation names it without a lookup', () => {

@@ -32,8 +32,23 @@ const failure = (over: Partial<FailedBuildSummary>): FailedBuildSummary => ({
 
 describe('evaluation summary text', () => {
   it('counts failed and dependency failed packages, and attributes that failed to evaluate on their own', () => {
-    expect(headline(summary({ built: 15, failed: 2, blocked: 3 }, 1), false)).toBe('5 packages did not build, 1 attribute failed to evaluate');
-    expect(headline(summary({ built: 20 }, 2), false)).toBe('2 attributes failed to evaluate');
+    expect(headline(summary({ built: 15, failed: 2, blocked: 3 }, 1), 'Failed')).toBe('5 packages did not build, 1 attribute failed to evaluate');
+    expect(headline(summary({ built: 20 }, 2), 'Failed')).toBe('2 attributes failed to evaluate');
+  });
+
+  it('names an aborted evaluation and what it left unbuilt', () => {
+    expect(headline(summary({ built: 19, unfinished: 1 }), 'Aborted')).toBe('Aborted, 1 package not built');
+    expect(headline(summary({ built: 18, failed: 1, unfinished: 1 }), 'Aborted')).toBe('Aborted, 1 package did not build, 1 package not built');
+  });
+
+  it('says that an evaluation failed when it stopped before any package', () => {
+    expect(headline(summary({ total: 0 }), 'Failed')).toBe('Evaluation failed');
+  });
+
+  it('counts nothing for an evaluation that has not started or found no package yet', () => {
+    expect(headline(summary({ total: 0 }), 'Waiting')).toBe('Not started yet');
+    expect(headline(summary({ total: 0 }), 'Queued')).toBe('Not started yet');
+    expect(headline(summary({ total: 0 }), 'EvaluatingFlake')).toBe('Still evaluating');
   });
 
   it('shows a tile for every count the headline adds up', () => {
@@ -45,11 +60,11 @@ describe('evaluation summary text', () => {
   });
 
   it('reports a clean evaluation', () => {
-    expect(headline(summary({ built: 20 }), false)).toBe('All 20 packages built');
+    expect(headline(summary({ built: 20 }), 'Completed')).toBe('All 20 packages built');
   });
 
   it('holds the verdict back while the evaluation is running', () => {
-    expect(headline(summary({ built: 5, failed: 1, unfinished: 14 }), true))
+    expect(headline(summary({ built: 5, failed: 1, unfinished: 14 }), 'Building'))
       .toBe('Still running, 5 of 20 packages built so far');
   });
 
