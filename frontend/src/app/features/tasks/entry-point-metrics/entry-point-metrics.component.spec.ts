@@ -44,6 +44,14 @@ describe('EntryPointMetricsComponent', () => {
     expect(root.textContent).not.toContain(EMPTY_TITLE);
   });
 
+  it('Display one card per build status and show the total.', () => {
+    const point = (build_status: string) => ({ evaluation_id: 'e', build_id: 'b', created_at: '2026-01-01 00:00:00', build_status, dependencies_count: 0 });
+    const statuses = ['Completed', 'DependencyFailed', 'Completed', 'FailedTransient', 'Aborted'];
+    const { root } = render(() => of({ points: statuses.map(point), keep_evaluations: 30 }));
+    const cards = [...root.querySelectorAll('.summary-card')].map((c) => [c.querySelector('.summary-value')!.textContent!.trim(), c.querySelector('.summary-label')!.textContent!.trim()]);
+    expect(cards).toEqual([['2', 'Completed'], ['1', 'Dependency failed'], ['1', 'Worker fault'], ['1', 'Aborted'], ['5', 'Total evaluations']]);
+  });
+
   it('loads the metrics again on Try Again with the same entry point', () => {
     const { root, metrics, fixture } = render(() => throwError(() => new Error('down')));
     metrics.mockImplementation(() => of({ points: [], keep_evaluations: 30 }));

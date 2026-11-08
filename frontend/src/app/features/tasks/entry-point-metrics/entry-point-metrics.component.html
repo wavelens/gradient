@@ -20,22 +20,10 @@
     (retry)="load()"
   >
     <div class="summary-row">
-      <div class="summary-card">
-        <span class="summary-value success">{{ completedCount() }}</span>
-        <span class="summary-label">Completed</span>
-      </div>
-      <div class="summary-card">
-        <span class="summary-value error">{{ failedCount() }}</span>
-        <span class="summary-label">Failed</span>
-      </div>
-      <div class="summary-card">
-        <span class="summary-value">{{ substitutedCount() }}</span>
-        <span class="summary-label">Substituted</span>
-      </div>
-      @if (skippedCount() > 0) {
+      @for (s of buildStatusCounts(); track s.status) {
         <div class="summary-card">
-          <span class="summary-value">{{ skippedCount() }}</span>
-          <span class="summary-label">Skipped</span>
+          <span class="summary-value" [class.success]="s.phase === 'success'" [class.error]="s.phase === 'failure'">{{ s.count }}</span>
+          <span class="summary-label">{{ s.label }}</span>
         </div>
       }
       <div class="summary-card">

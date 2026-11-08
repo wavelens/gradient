@@ -15,8 +15,9 @@ import {
 import { MetricChartComponent } from '@shared/ui';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { formatBytes, formatCount, formatDuration } from '@shared/text';
-import { EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/models';
+import { formatBytes, formatCount, formatDuration, serverTime } from '@shared/text';
+import { buildPhase, buildStatusLabel } from '@shared/evaluation';
+import { BuildStatus, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/models';
 import { links } from '@shared/routing';
 
 const CHART_COLORS = {
@@ -112,13 +113,17 @@ export class EntryPointMetricsComponent implements OnInit {
     return pts.length ? pts[pts.length - 1].build_id : '';
   });
 
-  completedCount = computed(() => this.points().filter((p) => p.build_status === 'Completed').length);
-  failedCount = computed(() => this.points().filter((p) => p.build_status === 'FailedPermanent' || p.build_status === 'FailedTimeout').length);
-  substitutedCount = computed(() => this.points().filter((p) => p.build_status === 'Substituted').length);
-  skippedCount = computed(() => this.points().filter((p) => p.build_status === 'Skipped').length);
+  buildStatusCounts = computed(() => {
+    const counts = new Map<BuildStatus, number>();
+    for (const p of this.points()) counts.set(p.build_status, (counts.get(p.build_status) ?? 0) + 1);
+    return [...counts]
+      .sort(([, a], [, b]) => b - a)
+      .map(([status, count]) => ({ status, count, label: buildStatusLabel(status), phase: buildPhase(status) }));
+  });
+
 
   private formatDate(iso: string): string {
-    const d = new Date(iso.includes('Z') || iso.includes('+') ? iso : iso + 'Z');
+    const d = serverTime(iso);
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 }

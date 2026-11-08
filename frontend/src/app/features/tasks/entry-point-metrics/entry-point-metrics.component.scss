@@ -8,6 +8,7 @@
 
 .summary-row {
   display: flex;
+  flex-wrap: wrap;
   gap: $spacing-md;
   margin-bottom: $spacing-lg;
 }
