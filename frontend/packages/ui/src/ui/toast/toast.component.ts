@@ -21,7 +21,7 @@ const ICONS: Record<MessageSeverity, string> = {
   template: `
     <div class="gr-toast" role="status" aria-live="polite">
       @for (message of messages(); track message.id) {
-        <div class="gr-toast__item gr-toast__item--{{ message.severity }}">
+        <div class="gr-toast__item gr-toast__item--{{ message.severity }}" [attr.role]="message.severity === 'error' ? 'alert' : null">
           <span class="material-symbols-outlined" aria-hidden="true">{{ iconFor(message.severity) }}</span>
           <div class="gr-toast__text">
             <strong>{{ message.summary }}</strong>

@@ -79,7 +79,7 @@ describe('WhatsNewService', () => {
     const failure = new ApiError('database is down', 500);
     const { service, notify } = setup('1.9.4', vi.fn(() => throwError(() => failure)));
     service.close();
-    expect(notify.failure).toHaveBeenCalledWith('Failed to save release notes as read', failure);
+    expect(notify.failure).toHaveBeenCalledWith("Couldn't mark release notes as read", failure);
   });
 
   it('stays closed when the user saw the running version and reopens on demand', () => {

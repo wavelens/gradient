@@ -41,6 +41,14 @@ describe('MessageService and ToastComponent', () => {
     expect(items()[1].classList).toContain('gr-toast__item--info');
   });
 
+  it('Announce error toasts as alerts', () => {
+    const { fixture, service, items } = render();
+    service.add({ severity: 'error', summary: 'Boom', life: 0 });
+    service.add({ severity: 'success', summary: 'Saved', life: 0 });
+    fixture.detectChanges();
+    expect(items().map((item) => item.getAttribute('role'))).toEqual(['alert', null]);
+  });
+
   it('dismisses a message when its close button is used', () => {
     const { fixture, service, items } = render();
     service.add({ summary: 'Saved', life: 0 });

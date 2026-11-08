@@ -71,7 +71,7 @@ export class WhatsNewService {
   private markSeen(): void {
     this.seenVersion = this.current;
     this.api.put<string>('user/whats-new', { version: this.current }).subscribe({
-      error: (err: unknown) => this.notify.failure('Failed to save release notes as read', err),
+      error: (err: unknown) => this.notify.failure("Couldn't mark release notes as read", err),
     });
   }
 }
