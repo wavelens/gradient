@@ -41,9 +41,9 @@ fn task_facts_sql() -> String {
         LEFT JOIN LATERAL (SELECT count(*) AS recent_14d \
             FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
             WHERE e.task = t.id AND {NON_PR} AND e.created_at > now() - interval '14 days') a ON true \
-        LEFT JOIN LATERAL (SELECT (avg(extract(epoch FROM (r.finished_at - r.created_at))) * 1000)::bigint AS speed_ms \
-            FROM (SELECT e.created_at, e.finished_at FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
-                WHERE e.task = t.id AND {NON_PR} AND e.status IN ({term}) AND e.finished_at IS NOT NULL \
+        LEFT JOIN LATERAL (SELECT (avg(extract(epoch FROM (r.finished_at - r.fetch_started_at))) * 1000)::bigint AS speed_ms \
+            FROM (SELECT e.fetch_started_at, e.finished_at FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
+                WHERE e.task = t.id AND {NON_PR} AND e.status IN ({term}) AND e.finished_at IS NOT NULL AND e.fetch_started_at IS NOT NULL \
                 ORDER BY e.created_at DESC LIMIT 30) r) sp ON true",
         term = terminal(),
     )
@@ -73,8 +73,8 @@ fn outcomes_sql() -> String {
 fn history_sql() -> String {
     format!(
         "SELECT l.id AS latest, h.id, h.status, h.created_at, \
-            (extract(epoch FROM (h.finished_at - h.created_at)) * 1000)::bigint AS duration_ms \
-        FROM evaluation l CROSS JOIN LATERAL (SELECT e.id, e.status, e.created_at, e.finished_at \
+            (extract(epoch FROM (h.finished_at - h.fetch_started_at)) * 1000)::bigint AS duration_ms \
+        FROM evaluation l CROSS JOIN LATERAL (SELECT e.id, e.status, e.created_at, e.fetch_started_at, e.finished_at \
             FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
             WHERE e.task = l.task AND {NON_PR} AND e.created_at <= l.created_at \
             ORDER BY e.created_at DESC LIMIT $2) h \
