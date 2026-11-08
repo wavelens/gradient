@@ -27,16 +27,8 @@
     title="How to Use This Cache"
     description="Add the following to your /etc/nix/nix.conf or NixOS configuration."
   >
-    <gr-form-field label="Substituter URL" for="cache-url">
-      <gr-label-help slot="label" doc="concepts/caches/#using-a-cache" title="Using a cache" />
-      <gr-copy-field inputId="cache-url" [value]="cacheUrl" />
-    </gr-form-field>
-
-    <gr-form-field label="Trusted Public Keys" for="cache-keys">
-      <gr-copy-field inputId="cache-keys" [value]="trustedPublicKeys().join(' ') || 'Not available'" />
-    </gr-form-field>
-
     <gr-form-field label="nix.conf snippet" for="cache-conf">
+      <gr-label-help slot="label" doc="concepts/caches/#using-a-cache" title="Using a cache" />
       <gr-copy-field inputId="cache-conf" multiline [rows]="2" [value]="nixConfSnippet()" />
     </gr-form-field>
 
@@ -58,7 +50,17 @@
 
   <gr-load-state [error]="statsError()" errorTitle="Failed to load cache stats" (retry)="loadStats()">
   <div class="section">
-    <h2>Storage</h2>
+    <div class="section-head">
+      <h2>Storage</h2>
+      <gr-tab-switch
+        ariaLabel="Time window of the storage and traffic charts"
+        [options]="windows"
+        optionLabel="label"
+        optionValue="key"
+        [ngModel]="activeWindow()"
+        (ngModelChange)="setWindow($event)"
+        />
+    </div>
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
       <gr-stat-card label="Packages stored" [value]="statsLoading() ? null : formatCount(stats()?.total_packages ?? 0)" />
       <gr-stat-card label="Uncompressed size" [value]="statsLoading() ? null : formatBytes(stats()?.total_nar_bytes ?? 0)" />
@@ -74,17 +76,7 @@
         [colors]="storageColors"
         [valueFormatter]="formatBytes"
         [secondary]="storageSecondary"
-      >
-        <gr-tab-switch
-          slot="actions"
-          ariaLabel="Time window"
-          [options]="windows"
-          optionLabel="label"
-          optionValue="key"
-          [ngModel]="activeWindow()"
-          (ngModelChange)="setWindow($event)"
-          />
-      </gr-metric-chart>
+      />
   </div>
 
   <div class="section">
@@ -112,15 +104,6 @@
           optionValue="key"
           [ngModel]="traffic()"
           (ngModelChange)="setTraffic($event)"
-          />
-        <gr-tab-switch
-          slot="actions"
-          ariaLabel="Time window"
-          [options]="windows"
-          optionLabel="label"
-          optionValue="key"
-          [ngModel]="activeWindow()"
-          (ngModelChange)="setWindow($event)"
           />
       </gr-metric-chart>
   </div>
