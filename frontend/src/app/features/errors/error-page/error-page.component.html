@@ -26,7 +26,11 @@
         <a grButton [routerLink]="links.login(from)" label="Sign In"></a>
       }
       @if (denied(); as view) {
-        <a grButton [routerLink]="view.backLink" [severity]="user() ? 'primary' : 'secondary'" [label]="view.backLabel"></a>
+        @let invited = !!user() && invites.count() > 0;
+        @if (invited) {
+          <a grButton [routerLink]="links.settings('invites')" label="Review Invitations"></a>
+        }
+        <a grButton [routerLink]="view.backLink" [severity]="user() && !invited ? 'primary' : 'secondary'" [label]="view.backLabel"></a>
       } @else {
         <a grButton [routerLink]="links.dashboard()" [severity]="restricted() && !user() ? 'secondary' : 'primary'" label="Go Home"></a>
       }

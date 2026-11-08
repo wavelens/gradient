@@ -8,6 +8,7 @@ import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/c
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { ButtonComponent, IconComponent } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
+import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { DeniedKind } from '@core/routing/access-denied';
 import { links } from '@shared/routing';
 
@@ -102,6 +103,7 @@ export class ErrorPageComponent {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private auth = inject(AuthService);
+  protected invites = inject(PendingInvitesService);
 
   private query = this.route.snapshot.queryParamMap;
   protected readonly from = this.safeFrom();

@@ -9,15 +9,17 @@ import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
+import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { ErrorPageComponent } from './error-page.component';
 
-function render(code: number, query: Record<string, string>, user: { username: string } | null) {
+function render(code: number, query: Record<string, string>, user: { username: string } | null, pendingInvites = 0) {
   const logout = vi.fn(() => of(null));
   TestBed.configureTestingModule({
     imports: [ErrorPageComponent],
     providers: [
       provideRouter([]),
       { provide: AuthService, useValue: { user: signal(user), logout } },
+      { provide: PendingInvitesService, useValue: { count: () => pendingInvites } },
       { provide: ActivatedRoute, useValue: { snapshot: { data: { code }, queryParamMap: convertToParamMap(query) } } },
     ],
   });
@@ -48,6 +50,12 @@ describe('ErrorPageComponent', () => {
     expect(links.map((l) => l.text)).not.toContain('Sign In');
     (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button')?.click();
     expect(logout).toHaveBeenCalledWith('/caches/researchcache/nars');
+  });
+
+  it('points a signed-in invitee to their pending invitations first', () => {
+    const { links } = render(404, DENIED, { username: 'carol' }, 2);
+    expect(links.map((l) => l.text)).toEqual(['Review Invitations', 'Back to Caches', 'Switch Account']);
+    expect(links[0].href).toBe('/settings/invites');
   });
 
   it('explains admin-only pages instead of redirecting', () => {
