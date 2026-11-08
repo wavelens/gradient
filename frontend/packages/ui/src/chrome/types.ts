@@ -10,6 +10,7 @@ export interface ChromeLink {
 }
 
 export interface Brand extends ChromeLink {
+  logoUrl?: string | null;
   tagline?: string;
 }
 

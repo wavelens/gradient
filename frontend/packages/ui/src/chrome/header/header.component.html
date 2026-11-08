@@ -11,7 +11,7 @@
 <header class="main-header" [class.menu-open]="menuOpen()">
   <div class="header-logo">
     <a [routerLink]="brand().href" [attr.aria-label]="brand().label">
-      <gr-logo />
+      <gr-logo [src]="brand().logoUrl ?? null" />
       @if (brand().tagline; as tagline) {
         <span class="header-tagline">{{ tagline }}</span>
       }

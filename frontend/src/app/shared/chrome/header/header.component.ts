@@ -40,7 +40,7 @@ export class AppHeaderComponent {
   private config = inject(ConfigService);
   protected invites = inject(PendingInvitesService);
 
-  protected readonly brand = BRAND;
+  protected readonly brand: Brand = { ...BRAND, logoUrl: this.config.logoUrl };
   protected nav = computed(() => {
     const signedIn = this.authService.isAuthenticated();
     const listed = this.config.publicListing;

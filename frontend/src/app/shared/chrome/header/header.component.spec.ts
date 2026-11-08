@@ -66,6 +66,12 @@ describe('AppHeaderComponent - registration visibility', () => {
     expect(registerLink(fixture.nativeElement)).toBeNull();
   });
 
+  it('shows the custom logo of the instance in the header', () => {
+    TestBed.overrideProvider(ConfigService, { useValue: { registrationDisabled: false, publicListing: true, logoUrl: '/brand.svg' } });
+    const root = setup(false).nativeElement as HTMLElement;
+    expect(root.querySelector('.header-logo img')?.getAttribute('src')).toBe('/brand.svg');
+  });
+
   it('offers no sign-in while the server is unreachable, since the session is unknown', () => {
     const root = setup(false, false, true, true).nativeElement as HTMLElement;
     expect(root.querySelectorAll('.user-link').length).toBe(0);
