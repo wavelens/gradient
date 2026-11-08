@@ -146,26 +146,26 @@ interface DecisionRow {
             @for (row of pendingRows(); track pendingKey(row.job)) {
               @let p = row.job;
               @let subject = rowSubject(row);
-              <tr>
+              <tr class="clickable" (click)="router.navigateByUrl(links.boardPendingJob(p))">
                 <td>{{ jobKindName(p.kind) }}</td>
                 <td class="origin">
                   @if (p.project_name; as project) {
-                    <a [routerLink]="links.project(project)">{{ project }}</a>
+                    <a [routerLink]="links.project(project)" (click)="$event.stopPropagation()">{{ project }}</a>
                     @if (p.task; as task) {
-                      / <a [routerLink]="links.task(project, task, p.evaluation_id)">{{ task }}</a>
+                      / <a [routerLink]="links.task(project, task, p.evaluation_id)" (click)="$event.stopPropagation()">{{ task }}</a>
                     }
                   } @else {
                     <span class="muted">-</span>
                   }
                 </td>
-                <td class="mono subject"><a [routerLink]="links.boardPendingJob(p)" [title]="subject">{{ subject }}</a></td>
+                <td class="mono subject"><a [routerLink]="links.boardPendingJob(p)" [title]="subject" (click)="$event.stopPropagation()">{{ subject }}</a></td>
                 <td class="waiting">
                   @if (waitingFor(p); as wait) {
                     <div class="wait">
                       <span [title]="wait.detail">{{ wait.title }}</span>
                       @if (wait.action; as action) {
                         @if (action.kind === 'link') {
-                          <a grButton size="small" severity="secondary" [label]="action.label" [icon]="action.icon" [routerLink]="action.link"></a>
+                          <a grButton size="small" severity="secondary" [label]="action.label" [icon]="action.icon" [routerLink]="action.link" (click)="$event.stopPropagation()"></a>
                         }
                       } @else if (wait.hint) {
                         <span class="muted hint">{{ wait.hint }}</span>

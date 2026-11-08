@@ -13,6 +13,7 @@ import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
 import { AuthService } from '@core/services/auth.service';
 import { PendingJobSummary, DispatchedJobSummary, AssignDecisionView } from '@core/models';
+import { links } from '@shared/routing';
 
 function authAs(superuser: boolean) {
   return { provide: AuthService, useValue: { user: () => ({ superuser }) } };
@@ -309,6 +310,10 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     const cells = Array.from(row.querySelectorAll('td'));
     expect([cells[0], cells[2]].map((c) => c.textContent?.trim())).toEqual(['exec', 'nightly: apps.x86_64-linux.train']);
     expect(cells[2].querySelector('a')?.getAttribute('href')).toBe('/board/pending/x1');
+
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    cells[0].click();
+    expect(navigate).toHaveBeenCalledWith(links.boardPendingJob({ evaluation_id: PENDING.evaluation_id, build_id: null, exec_job }));
   });
 
   function pendingRow(job: PendingJobSummary, superuser = false): HTMLElement {
