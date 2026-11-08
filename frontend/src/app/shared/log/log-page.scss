@@ -157,18 +157,6 @@
   .breadcrumb-sep { color: var(--gr-text-muted); }
 }
 
-.overview-block {
-  padding: $spacing-sm $spacing-md $spacing-md;
-  border-bottom: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
-}
-
-.status-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-sm;
-}
-
 .log-sidebar-backdrop {
   display: none;
 }

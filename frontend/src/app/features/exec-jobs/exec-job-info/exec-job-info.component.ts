@@ -5,11 +5,10 @@
  */
 
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { BadgeComponent, TableComponent } from '@gradient/ui/ui';
-import { StatusIconComponent } from '@shared/ui';
+import { TableComponent } from '@gradient/ui/ui';
 import { formatDuration } from '@shared/text';
 import type { ExecJobResponse } from '@core/models';
-import { deviceLabel, execJobPhase, guestSizeLabel, unmetParts, waitingReasonText } from '../exec-job-status';
+import { deviceLabel, guestSizeLabel } from '../exec-job-status';
 
 interface RequestedField {
   label: string;
@@ -51,7 +50,7 @@ function requestedFields(job: ExecJobResponse): RequestedField[] {
 @Component({
   selector: 'app-exec-job-info',
   standalone: true,
-  imports: [BadgeComponent, TableComponent, StatusIconComponent],
+  imports: [TableComponent],
   templateUrl: './exec-job-info.component.html',
   styleUrl: './exec-job-info.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -60,11 +59,4 @@ export class ExecJobInfoComponent {
   job = input.required<ExecJobResponse>();
 
   fields = computed(() => requestedFields(this.job()));
-  waiting = computed(() => waitingReasonText(this.job().waiting_reason));
-  missing = computed(() => {
-    const reason = this.job().waiting_reason;
-    return reason?.kind === 'exec_workers' ? unmetParts(reason.unmet) : [];
-  });
-
-  protected readonly phase = execJobPhase;
 }

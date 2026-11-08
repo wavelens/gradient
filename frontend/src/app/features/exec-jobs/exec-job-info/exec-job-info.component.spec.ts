@@ -67,15 +67,7 @@ describe('ExecJobInfoComponent', () => {
     });
   });
 
-  it('shows why the job waits and each missing worker feature', () => {
-    const waiting = render(JOB).querySelector('.waiting');
-    expect(waiting?.querySelector('gr-status-icon')).not.toBeNull();
-    expect(waiting?.textContent).toContain('needs a worker that allows SSH, port 6006');
-    expect(Array.from(waiting?.querySelectorAll('gr-badge') ?? []).map((badge) => badge.textContent?.trim()))
-      .toEqual(['a worker that allows SSH', 'port 6006']);
-  });
-
-  it('shows no wait section for a job that does not wait', () => {
-    expect(render({ ...JOB, status: 'running', waiting_reason: null }).querySelector('.waiting')).toBeNull();
+  it('leaves the wait reason to the banner above every view', () => {
+    expect(render(JOB).textContent).not.toContain('needs a worker');
   });
 });

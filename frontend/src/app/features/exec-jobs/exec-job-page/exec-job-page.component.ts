@@ -11,7 +11,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Subscription, catchError, forkJoin, interval, map, startWith, switchMap, takeWhile } from 'rxjs';
 import { inBackground } from '@core/interceptors/request-context';
 import {
-  BadgeComponent,
   ButtonComponent,
   CopyFieldComponent,
   EmptyStateComponent,
@@ -39,7 +38,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import type { ExecJobPullRequestView, ExecJobResponse } from '@core/models';
-import { abortExecJobConfirm, deviceLabel, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase } from '../exec-job-status';
+import { abortExecJobConfirm, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 import { ExecJobInfoComponent } from '../exec-job-info/exec-job-info.component';
@@ -69,7 +68,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
   selector: 'app-exec-job-page',
   standalone: true,
   imports: [
-    RouterModule, FormsModule, BadgeComponent, ButtonComponent, CopyFieldComponent,
+    RouterModule, FormsModule, ButtonComponent, CopyFieldComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MenuComponent, MessageBannerComponent,
     SelectButtonComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
     LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, WaitingNoticeComponent, DrawerDirective, RelativeTimePipe,
@@ -172,7 +171,6 @@ export class ExecJobPageComponent implements OnInit {
 
   protected readonly phase = execJobPhase;
   protected readonly links = links;
-  protected readonly device = deviceLabel;
   protected readonly guestSize = guestSizeLabel;
   protected readonly plural = plural;
   protected readonly evaluationPhase = evaluationPhase;

@@ -313,7 +313,8 @@ describe('ExecJobPageComponent', () => {
       await vi.advanceTimersByTimeAsync(2000);
       fixture.detectChanges();
       expect(root.querySelector('gr-log-viewer')).toBeNull();
-      expect(root.querySelector('app-exec-job-info .waiting')?.textContent).toContain('needs a worker that allows SSH');
+      expect(root.querySelector('app-exec-job-info')).not.toBeNull();
+      expect(root.querySelector('.log-area gr-waiting-notice')).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }

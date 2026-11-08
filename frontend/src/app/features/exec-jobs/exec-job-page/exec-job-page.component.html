@@ -21,15 +21,6 @@
         }
       </nav>
 
-      <div class="overview-block">
-        <div class="status-row">
-          <gr-status-badge [phase]="phase(job.status)" [label]="job.status" />
-          @if (job.retries > 0) {
-            <span class="item-meta">{{ plural(job.retries_left, 'retry', 'retries') }} left</span>
-          }
-        </div>
-      </div>
-
       <div class="sidebar-items">
         @for (option of views(); track option.value) {
           <div class="sidebar-item" role="button" tabindex="0" [class.selected]="view() === option.value"
@@ -118,6 +109,9 @@
         <div class="info-bar-left">
           <div class="info-metric">
             <gr-status-badge [phase]="phase(job.status)" [label]="job.status" />
+            @if (job.retries > 0) {
+              <span class="metric-value retries-left">{{ plural(job.retries_left, 'retry', 'retries') }} left</span>
+            }
           </div>
           <div class="info-metric">
             <span class="metric-label">Duration</span>
@@ -137,14 +131,6 @@
             <div class="info-metric">
               <span class="metric-label">Guest</span>
               <span class="metric-value">{{ guest }}</span>
-            </div>
-          }
-          @if (job.nodes > 1 || job.labels.length > 0 || job.devices.length > 0) {
-            <div class="info-metric">
-              <span class="metric-label">Needs</span>
-              @if (job.nodes > 1) { <gr-badge>{{ job.nodes }} nodes</gr-badge> }
-              @for (label of job.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
-              @for (d of job.devices; track d.name) { <gr-badge severity="info">{{ device(d) }}</gr-badge> }
             </div>
           }
         </div>

@@ -16,20 +16,6 @@
   padding: $spacing-sm $spacing-md $spacing-md;
 }
 
-.waiting {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-sm;
-}
-
-.waiting-reason {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  color: var(--gr-text-primary);
-}
-
-.badges,
 .values {
   display: flex;
   flex-wrap: wrap;
