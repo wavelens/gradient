@@ -10,6 +10,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
+import { inBackground } from '@core/interceptors/request-context';
 import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -125,12 +126,12 @@ export class CacheMembersRolesComponent implements OnInit {
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => merge(
-      this.cachesService.getMembers(this.cacheName).pipe(tap((members) => {
+      this.cachesService.getMembers(this.cacheName, inBackground()).pipe(tap((members) => {
         this.members.set(members);
         this.membersLoadError.set(null);
       })),
       this.access().canEdit
-        ? this.cachesService.getInvitations(this.cacheName).pipe(tap((invitations) => {
+        ? this.cachesService.getInvitations(this.cacheName, inBackground()).pipe(tap((invitations) => {
           this.invitations.set(invitations);
           this.invitationsLoadError.set(null);
         }))

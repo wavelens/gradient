@@ -26,8 +26,8 @@ export class WorkersService {
     return this.api.get<ProjectWorkerEntry[]>(`projects/${project}/workers`, options);
   }
 
-  getWorkerMetrics(project: string, workerId: string): Observable<WorkerMetricsResponse> {
-    return this.api.get<WorkerMetricsResponse>(`projects/${project}/workers/${workerId}/metrics`);
+  getWorkerMetrics(project: string, workerId: string, options?: RequestOptions): Observable<WorkerMetricsResponse> {
+    return this.api.get<WorkerMetricsResponse>(`projects/${project}/workers/${workerId}/metrics`, options);
   }
 
   registerWorker(

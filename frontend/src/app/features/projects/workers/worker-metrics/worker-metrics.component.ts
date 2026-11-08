@@ -8,6 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { WorkersService } from '@core/services/workers.service';
+import { inBackground } from '@core/interceptors/request-context';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   CardGridComponent,
@@ -116,7 +117,7 @@ export class WorkerMetricsComponent implements OnInit {
 
   constructor() {
     runReloadIntervalWhileTabVisible(() =>
-      this.workers.getWorkerMetrics(this.project, this.workerId).pipe(
+      this.workers.getWorkerMetrics(this.project, this.workerId, inBackground()).pipe(
         tap((stats) => this.copyWorkerMetricsResponseToSignalsAndMarkLoaded(stats))));
   }
 

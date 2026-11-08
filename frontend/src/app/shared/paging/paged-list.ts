@@ -9,6 +9,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, tap } from 'rxjs';
 import { Paginated } from '@core/models';
 import { NotifyService } from '@core/services/notify.service';
+import { RequestOptions } from '@core/services/api.service';
+import { inBackground } from '@core/interceptors/request-context';
 
 export interface PagedList<T> {
   readonly items: Signal<T[]>;
@@ -21,7 +23,7 @@ export interface PagedList<T> {
   refreshFirstPageSilently(): Observable<unknown>;
 }
 
-export function pagedList<T>(noun: string, fetch: (page: number) => Observable<Paginated<T[]>>): PagedList<T> {
+export function pagedList<T>(noun: string, fetch: (page: number, options?: RequestOptions) => Observable<Paginated<T[]>>): PagedList<T> {
   const notify = inject(NotifyService);
   const destroyRef = inject(DestroyRef);
   const items = signal<T[]>([]);
@@ -76,7 +78,7 @@ export function pagedList<T>(noun: string, fetch: (page: number) => Observable<P
     refreshFirstPageSilently: () => {
       if (page !== 1 || fetching() || loadingMore() || error() !== null) return EMPTY;
       const current = generation;
-      return fetch(1).pipe(
+      return fetch(1, inBackground()).pipe(
         tap((result) => {
           if (current !== generation) return;
           items.set(result.items);
