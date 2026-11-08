@@ -30,7 +30,8 @@ import {
 import { NameFieldsComponent, nameAvailability } from '@shared/forms';
 import { ProjectSummary, PublicProjectSummary } from '@core/models';
 import { links } from '@shared/routing';
-import { pagedList } from '@shared/paging';
+import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
+import { EMPTY, merge } from 'rxjs';
 import { PHASE_SEVERITY } from '@shared/evaluation';
 
 @Component({
@@ -77,7 +78,7 @@ export class ProjectListComponent implements OnInit {
     return this.config.canCreate(this.config.createProject, this.authService.user()?.superuser === true);
   }
 
-  projects = pagedList<ProjectSummary>('projects', (page) => this.projectsService.getProjects(page));
+  projects = pagedList<ProjectSummary>('projects', (page, options) => this.projectsService.getProjects(page, 50, options));
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
@@ -90,7 +91,14 @@ export class ProjectListComponent implements OnInit {
     public: false,
   };
 
-  publicProjects = pagedList<PublicProjectSummary>('public projects', (page) => this.projectsService.getPublicProjects(page));
+  publicProjects = pagedList<PublicProjectSummary>('public projects', (page, options) => this.projectsService.getPublicProjects(page, 50, options));
+
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => merge(
+      this.authService.isAuthenticated() ? this.projects.refreshFirstPageSilently() : EMPTY,
+      this.config.publicListing ? this.publicProjects.refreshFirstPageSilently() : EMPTY,
+    ));
+  }
 
   ngOnInit(): void {
     if (this.authService.isAuthenticated()) this.projects.reload();

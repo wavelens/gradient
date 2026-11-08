@@ -6,7 +6,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { ApiService } from './api.service';
+import { ApiService, RequestOptions } from './api.service';
 import {
   Paginated,
   MemberItem,
@@ -27,12 +27,12 @@ import {
 export class ProjectsService {
   private api = inject(ApiService);
 
-  getProjects(page = 1, perPage = 50): Observable<Paginated<ProjectSummary[]>> {
-    return this.api.get<Paginated<ProjectSummary[]>>(`projects?page=${page}&per_page=${perPage}`);
+  getProjects(page = 1, perPage = 50, options?: RequestOptions): Observable<Paginated<ProjectSummary[]>> {
+    return this.api.get<Paginated<ProjectSummary[]>>(`projects?page=${page}&per_page=${perPage}`, options);
   }
 
-  getPublicProjects(page = 1, perPage = 50): Observable<Paginated<PublicProjectSummary[]>> {
-    return this.api.get<Paginated<PublicProjectSummary[]>>(`projects/public?page=${page}&per_page=${perPage}`);
+  getPublicProjects(page = 1, perPage = 50, options?: RequestOptions): Observable<Paginated<PublicProjectSummary[]>> {
+    return this.api.get<Paginated<PublicProjectSummary[]>>(`projects/public?page=${page}&per_page=${perPage}`, options);
   }
 
   setPublic(name: string): Observable<string> {

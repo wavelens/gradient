@@ -52,6 +52,18 @@ describe('ProjectListComponent', () => {
     expect(Array.from(root.querySelectorAll('gr-badge')).map((b) => b.textContent?.trim())).toEqual(['View']);
   });
 
+  it('reloads the list while the tab stays open', () => {
+    vi.useFakeTimers();
+    try {
+      const { projects } = render(() => of(EMPTY_PAGE));
+      expect(projects).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(15_000);
+      expect(projects).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows a failed load as an error, never as "No projects yet"', () => {
     const { root } = render(() => throwError(() => ({ status: 500, message: 'database is down' })));
     expect(root.textContent).toContain('Failed to load projects');
