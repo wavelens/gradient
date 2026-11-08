@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterLink, type UrlTree } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink, type UrlTree } from '@angular/router';
 import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
@@ -47,6 +47,7 @@ export class InvitesComponent implements OnInit {
   protected readonly links = links;
   private userService = inject(UserService);
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
   private pending = inject(PendingInvitesService);
@@ -62,6 +63,7 @@ export class InvitesComponent implements OnInit {
 
     const token = this.route.snapshot.queryParamMap.get('token');
     if (token) {
+      void this.router.navigateByUrl(links.settings('invites'), { replaceUrl: true });
       this.accept(token);
     }
   }

@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Observable, of, throwError } from 'rxjs';
@@ -158,7 +158,10 @@ describe('InvitesComponent', () => {
   });
 
   it('accepts the token carried in the query string on load', () => {
+    const navigate = vi.spyOn(Router.prototype, 'navigateByUrl').mockResolvedValue(true);
     const { accept } = setup([projectInvite], 'tok-project');
     expect(accept).toHaveBeenCalledWith('tok-project');
+    expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/settings/invites');
+    expect(navigate.mock.calls.at(-1)?.[1]).toEqual({ replaceUrl: true });
   });
 });
