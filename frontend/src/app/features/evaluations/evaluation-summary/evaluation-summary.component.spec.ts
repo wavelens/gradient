@@ -6,7 +6,8 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
+import { LiveEvent, LiveService } from '@core/services/live.service';
 import type {
   EvaluationResponse,
   FailedBuildSummary,
@@ -54,12 +55,15 @@ const SUMMARY: EvaluationFailureSummary = {
 };
 
 const getTaskInfo = vi.fn();
+let frames: Subject<LiveEvent>;
 
 function setup(summary: EvaluationFailureSummary | null, evaluation = EVALUATION): ComponentFixture<EvaluationSummaryComponent> {
+  frames = new Subject<LiveEvent>();
   TestBed.configureTestingModule({
     imports: [EvaluationSummaryComponent],
     providers: [
       provideRouter([]),
+      { provide: LiveService, useValue: { connect: () => frames } },
       { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ project: 'testproject', evaluationId: 'e2' }) } } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'MyProject' }) } },
       { provide: TasksService, useValue: { getTaskInfo } },
@@ -141,6 +145,29 @@ describe('EvaluationSummaryComponent', () => {
     expect(text(fixture)).toContain("error: fetchTree doesn't fetch unlocked input");
     expect(text(fixture)).not.toContain('at flake.lock');
     expect(text(fixture)).not.toContain('Nothing went wrong');
+  });
+
+  it('follows a running evaluation live until it ends', async () => {
+    const running = { ...SUMMARY, packages: { total: 1, built: 0, failed: 0, blocked: 0, unfinished: 1 }, failures: [], failures_total: 0, failed_attributes: [], compared_with: null };
+    const fixture = setup(running, { ...EVALUATION, status: 'Building' });
+    const heading = () => (fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent;
+    expect(heading()).toContain('Still running, 0 of 1 package built so far');
+    expect(frames.observed).toBe(true);
+
+    const evaluations = TestBed.inject(EvaluationsService) as unknown as { getEvaluation: () => unknown };
+    evaluations.getEvaluation = () => of({ ...EVALUATION, status: 'Aborted' });
+    frames.next({ event: 'evaluation.status', at: '', content: {} } as LiveEvent);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    fixture.detectChanges();
+
+    expect(heading()).toContain('Aborted, 1 package not built');
+    expect(frames.observed).toBe(false);
+  });
+
+  it('opens no live connection for a finished evaluation', () => {
+    setup(SUMMARY);
+
+    expect(frames.observed).toBe(false);
   });
 
   it('leads back through the task, named as the evaluation names it without a lookup', () => {

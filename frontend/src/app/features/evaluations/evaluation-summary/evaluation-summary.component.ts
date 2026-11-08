@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import { forkJoin, of } from 'rxjs';
+import { EMPTY, Observable, Subject, Subscription, auditTime, catchError, filter, forkJoin, of, switchMap, tap } from 'rxjs';
+import { LiveEvent, LiveService, createResyncOnLiveSocketReconnectCallback } from '@core/services/live.service';
 import { EvaluationWithOptionalTask } from '@core/resolvers/evaluation-access.resolver';
 import type {
   FailedBuildSummary,
@@ -35,9 +37,11 @@ import {
   isRunningEvaluationStatus,
   repositoryWebUrl,
 } from '@shared/evaluation';
-import { formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { EvalStatusBadgeComponent, StatusIconComponent } from '@shared/ui';
+import { CurrentTimeSignal, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { EvalStatusBadgeComponent, LiveStatusComponent, StatusIconComponent } from '@shared/ui';
 import { blockedLine, failureKind, failureTitle, firstLine, getEvaluationSummaryCountTiles, headline } from './summary-text';
+
+const SUMMARY_REFRESH_MS = 1000;
 
 interface FailureGroup {
   title: string;
@@ -56,6 +60,7 @@ interface FailureGroup {
     CardGridComponent,
     EmptyStateComponent,
     EvalStatusBadgeComponent,
+    LiveStatusComponent,
     LoadStateComponent,
     PageLayoutComponent,
     RowComponent,
@@ -71,7 +76,12 @@ export class EvaluationSummaryComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private evaluations = inject(EvaluationsService);
   private crumbs = inject(BreadcrumbsService);
+  private live = inject(LiveService);
+  private now = inject(CurrentTimeSignal).currentTimeMilliseconds;
+  private refresh = new Subject<void>();
+  private liveSub?: Subscription;
   protected readonly links = links;
+  liveConnectionOpen = signal<boolean | null>(null);
 
   project = '';
   evaluationId = '';
@@ -126,7 +136,7 @@ export class EvaluationSummaryComponent implements OnInit {
 
   duration = computed(() => {
     const evaluation = this.evaluation();
-    return evaluation ? formatDuration(evaluationDuration(evaluation, Date.now())) : '';
+    return evaluation ? formatDuration(evaluationDuration(evaluation, this.now())) : '';
   });
 
   protected readonly commitLabel = commitLabel;
@@ -135,6 +145,13 @@ export class EvaluationSummaryComponent implements OnInit {
   protected readonly failureKind = failureKind;
   protected readonly failureTitle = failureTitle;
   protected readonly firstLine = firstLine;
+
+  constructor() {
+    this.refresh
+      .pipe(auditTime(SUMMARY_REFRESH_MS), switchMap(() => this.fetch().pipe(catchError(() => EMPTY))), takeUntilDestroyed())
+      .subscribe();
+    inject(DestroyRef).onDestroy(() => this.stopFollowing());
+  }
 
   ngOnInit(): void {
     this.project = this.route.snapshot.paramMap.get('project') ?? '';
@@ -145,21 +162,47 @@ export class EvaluationSummaryComponent implements OnInit {
   load(resolvedEvaluation?: EvaluationResponse): void {
     this.loading.set(true);
     this.loadError.set(null);
-    forkJoin({
-      evaluation: resolvedEvaluation ? of(resolvedEvaluation) : this.evaluations.getEvaluation(this.evaluationId),
-      summary: this.evaluations.getEvaluationSummary(this.evaluationId),
-    }).subscribe({
-      next: ({ evaluation, summary }) => {
-        this.rememberTaskName(evaluation);
-        this.evaluation.set(evaluation);
-        this.summary.set(summary);
+    this.fetch(resolvedEvaluation).subscribe({
+      next: () => {
         this.loading.set(false);
+        this.followWhileRunning();
       },
       error: (error: unknown) => {
         this.loadError.set(error);
         this.loading.set(false);
       },
     });
+  }
+
+  private fetch(resolvedEvaluation?: EvaluationResponse): Observable<unknown> {
+    return forkJoin({
+      evaluation: resolvedEvaluation ? of(resolvedEvaluation) : this.evaluations.getEvaluation(this.evaluationId),
+      summary: this.evaluations.getEvaluationSummary(this.evaluationId),
+    }).pipe(
+      tap(({ evaluation, summary }) => {
+        this.rememberTaskName(evaluation);
+        this.evaluation.set(evaluation);
+        this.summary.set(summary);
+        if (!this.running()) this.stopFollowing();
+      }),
+    );
+  }
+
+  private followWhileRunning(): void {
+    if (!this.running() || this.liveSub) return;
+    this.liveSub = this.live
+      .connect<LiveEvent>(
+        `/evals/${this.evaluationId}/live`,
+        createResyncOnLiveSocketReconnectCallback(() => this.refresh.next(), (open) => this.liveConnectionOpen.set(open)),
+      )
+      .pipe(filter((event) => event.event !== 'evaluation.activity'))
+      .subscribe(() => this.refresh.next());
+  }
+
+  private stopFollowing(): void {
+    this.liveSub?.unsubscribe();
+    this.liveSub = undefined;
+    this.liveConnectionOpen.set(null);
   }
 
   private rememberTaskName(evaluation: EvaluationResponse): void {
