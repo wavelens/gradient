@@ -146,11 +146,12 @@ describe('TeamMembersComponent', () => {
   });
 
   it('invites a user with the chosen role', () => {
-    const { fixture, addMember } = setup();
+    const { fixture, addMember, notify } = setup();
     const component = fixture.componentInstance;
     component.newMember = { user: 'carol', role: 'member' };
     component.addMember();
     expect(addMember).toHaveBeenCalledWith('platform', 'carol', 'member');
+    expect(notify.success).toHaveBeenCalledWith('Invitation sent');
   });
 
   it('asks for a username under the field instead of ignoring the click', () => {

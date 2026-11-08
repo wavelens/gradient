@@ -146,10 +146,10 @@ export class TeamMembersComponent implements OnInit {
     this.busy.set('add');
     this.addError.set(null);
     this.teams.addMember(this.teamName, this.newMember.user, this.newMember.role).subscribe({
-      next: () => {
+      next: (outcome) => {
         this.busy.set(null);
         this.showAdd.set(false);
-        this.notify.success('Member added');
+        this.notify.success(outcome || 'Member added');
         this.load();
       },
       error: (err: unknown) => {
