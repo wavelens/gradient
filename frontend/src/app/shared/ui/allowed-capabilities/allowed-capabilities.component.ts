@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, booleanAttribute, input, model } from '@angular/core';
-import { AllowedCapabilities } from '@core/models';
+import { AllowedCapabilities, GradientCapabilities } from '@core/models';
 import { IconComponent } from '@gradient/ui/ui';
 
 @Component({
@@ -32,7 +32,14 @@ import { IconComponent } from '@gradient/ui/ui';
       <div class="allowed-summary">
         Allowed:
         @for (cap of capabilities; track cap.key) {
-          <span class="allowed-pill" [class.allowed-pill--on]="value()[cap.key]" [attr.data-allowed]="value()[cap.key]">{{ cap.label }}</span>
+          @let unsupported = value()[cap.key] && workerReportedCapabilities()?.[cap.reportedCapabilityKey] === false;
+          <span
+            class="allowed-pill"
+            [class.allowed-pill--on]="value()[cap.key] && !unsupported"
+            [class.allowed-pill--unsupported-by-worker]="unsupported"
+            [attr.data-allowed]="value()[cap.key]"
+            [attr.title]="unsupported ? 'Allowed, but the worker doesn\\'t report support' : null"
+          >{{ cap.label }}</span>
         }
       </div>
     }
@@ -43,13 +50,14 @@ import { IconComponent } from '@gradient/ui/ui';
 export class AllowedCapabilitiesComponent {
   value = model.required<AllowedCapabilities>();
   editable = input(false, { transform: booleanAttribute });
+  workerReportedCapabilities = input<GradientCapabilities>();
 
-  readonly capabilities: { key: keyof AllowedCapabilities; label: string }[] = [
-    { key: 'enable_network', label: 'network' },
-    { key: 'enable_secrets', label: 'secrets' },
-    { key: 'enable_exec', label: 'exec' },
-    { key: 'enable_eval', label: 'eval' },
-    { key: 'enable_build', label: 'build' },
+  readonly capabilities: { key: keyof AllowedCapabilities; reportedCapabilityKey: keyof GradientCapabilities; label: string }[] = [
+    { key: 'enable_network', reportedCapabilityKey: 'network', label: 'network' },
+    { key: 'enable_secrets', reportedCapabilityKey: 'secrets', label: 'secrets' },
+    { key: 'enable_exec', reportedCapabilityKey: 'exec', label: 'exec' },
+    { key: 'enable_eval', reportedCapabilityKey: 'eval', label: 'eval' },
+    { key: 'enable_build', reportedCapabilityKey: 'build', label: 'build' },
   ];
 
   toggle(key: keyof AllowedCapabilities): void {

@@ -60,4 +60,9 @@
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
     color: var(--gr-status-success-text);
   }
+
+  &--unsupported-by-worker {
+    background: var(--gr-surface-sunken);
+    color: var(--gr-text-muted);
+  }
 }

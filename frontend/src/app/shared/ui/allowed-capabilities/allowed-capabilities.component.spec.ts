@@ -38,6 +38,17 @@ describe('AllowedCapabilitiesComponent', () => {
     expect(labels).toEqual(['network', 'secrets', 'exec', 'eval', 'build']);
   });
 
+  it("grey out an allowed capability that the connected worker doesn't report", () => {
+    const fixture = render(false);
+    fixture.componentRef.setInput('workerReportedCapabilities', { network: true, secrets: true, exec: true, eval: false, build: true });
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const on = Array.from(root.querySelectorAll('.allowed-pill--on')).map((el) => el.textContent?.trim());
+    const unsupported = Array.from(root.querySelectorAll('.allowed-pill--unsupported-by-worker')).map((el) => el.textContent?.trim());
+    expect(on).toEqual(['network', 'build']);
+    expect(unsupported).toEqual(['eval']);
+  });
+
   it('toggles only the clicked capability when editable', () => {
     const fixture = render(true);
     const secrets = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find(

@@ -21,7 +21,7 @@
     </gr-message-banner>
   }
 
-  @if (projectId()) {
+  @if (projectId() && access().canEdit) {
     <gr-form-field label="Project Peer ID">
       <span slot="hint">Use this as <code>peer_id</code> in your worker's peers file alongside the token issued during registration.</span>
       <gr-copy-field [value]="projectId()!" />
@@ -38,7 +38,7 @@
           <div slot="meta">
             @if (gradientCi().worker; as w) {
               <div class="worker-id">{{ w.worker_id }}</div>
-              <gr-allowed-capabilities [value]="w" />
+              <gr-allowed-capabilities [value]="w" [workerReportedCapabilities]="w.live?.capabilities" />
               @if (!w.connected && w.last_error && access().canEdit) {
                 <div class="worker-last-error text-secondary">{{ w.last_error.reason }}</div>
               }
@@ -97,16 +97,11 @@
                 @if (worker.url) {
                   <div class="worker-url text-secondary">{{ worker.url }}</div>
                 }
-                <gr-allowed-capabilities [value]="worker" />
+                <gr-allowed-capabilities [value]="worker" [workerReportedCapabilities]="worker.live?.capabilities" />
                 @if (!worker.connected && worker.last_error && access().canEdit) {
                   <div class="worker-last-error text-secondary">{{ worker.last_error.reason }}</div>
                 }
                 @if (worker.live) {
-                  <div class="worker-caps">
-                    @for (cap of capLabels; track cap.key) {
-                      <gr-badge [severity]="worker.live.capabilities[cap.key] ? 'success' : 'neutral'">{{ cap.label }}</gr-badge>
-                    }
-                  </div>
                   @if (worker.live.architectures.length > 0) {
                     <div class="worker-archs text-secondary">
                       {{ worker.live.architectures.join(', ') }}
@@ -208,11 +203,6 @@
   [busy]="registering()"
   width="480px"
 >
-  @if (projectId()) {
-    <gr-form-field label="Peer ID (this project)">
-      <gr-copy-field [value]="projectId()!" />
-    </gr-form-field>
-  }
   <gr-form-field label="Name" for="worker-name" required
     [invalid]="(registerAttempted() || workerNameModel.touched) && !!workerNameError" [error]="workerNameError ?? ''">
     <input

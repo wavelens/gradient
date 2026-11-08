@@ -29,7 +29,6 @@ import {
   listedWorkers,
   TeamSummary,
   ProjectWorkerEntry,
-  GradientCapabilities,
   RegisterWorkerResponse,
   WorkerConnection,
   PatchWorkerRequest,
@@ -118,15 +117,6 @@ export class WorkersComponent implements OnInit {
   actionAccess(): AccessState {
     return { ...this.access(), managed: false };
   }
-
-  readonly capLabels: { key: keyof GradientCapabilities; label: string }[] = [
-    { key: 'federate', label: 'federate' },
-    { key: 'network',  label: 'network' },
-    { key: 'secrets',  label: 'secrets' },
-    { key: 'exec',     label: 'exec' },
-    { key: 'eval',     label: 'eval' },
-    { key: 'build',    label: 'build' },
-  ];
 
   loading = signal(true);
   loadError = signal<unknown>(null);
