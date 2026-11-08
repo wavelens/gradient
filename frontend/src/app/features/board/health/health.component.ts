@@ -31,8 +31,8 @@ export function formatMaintenanceTaskKindLabel(kind: string): string {
 }
 
 export function formatDeepGcCheckpointLabel(checkpoint: string): string {
-  const [pass, shard] = checkpoint.split('/');
-  return [DEEP_GC_PASS_LABELS[pass] ?? pass, shard].filter(Boolean).join(' ');
+  const [pass] = checkpoint.split('/');
+  return DEEP_GC_PASS_LABELS[pass] ?? pass;
 }
 
 @Component({
@@ -111,7 +111,7 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
       </div>
 
       <gr-table class="http">
-        <thead><tr><th>Task</th><th>Status</th><th>Checkpoint</th><th>Created</th><th>Finished</th><th>Error</th></tr></thead>
+        <thead><tr><th>Task</th><th>Status</th><th>Step</th><th>Created</th><th>Finished</th><th>Error</th></tr></thead>
         <tbody>
           @for (t of tasks(); track t.id) {
             <tr>

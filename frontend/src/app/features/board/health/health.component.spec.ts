@@ -139,8 +139,9 @@ describe('BoardHealthComponent', () => {
       expect(fixture.nativeElement.textContent).toContain('Deep GC');
     });
 
-    it('shows where a running round resumes', () => {
-      expect(fixture.nativeElement.textContent).toContain('NARs 0a');
+    it('names the step a running round is on, without its storage shard', () => {
+      expect(fixture.nativeElement.textContent).toContain('NARs');
+      expect(fixture.nativeElement.textContent).not.toContain('0a');
     });
 
     it('hides the "Set up GitHub App" link', () => {
