@@ -13,7 +13,8 @@ import { EvaluationLogComponent } from './evaluation-log.component';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { EMPTY, type Observable, Subject, of, throwError } from 'rxjs';
+import { TasksService } from '@core/services/tasks.service';
+import { EMPTY, NEVER, type Observable, Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { NotifyService } from '@core/services/notify.service';
@@ -1149,5 +1150,39 @@ describe('EvaluationLogComponent', () => {
       expect(root.textContent).not.toContain('No messages');
       fixture.destroy();
     });
+  });
+
+  it('shows the evaluation and task the route already fetched without fetching them again', () => {
+    const evaluation = {
+      id: 'eval-1', status: 'Failed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
+      started_at: null, finished_at: null, trigger: null, task: 't1', task_name: 'nightly',
+    };
+    const getEvaluation = vi.fn(() => of(evaluation));
+    const getTask = vi.fn(() => of({ id: 't1', permissions: ['abortEvaluation'] }));
+    TestBed.configureTestingModule({
+      imports: [EvaluationLogComponent],
+      providers: [
+        provideRouter([]), provideHttpClient(), provideHttpClientTesting(),
+        { provide: ActivatedRoute, useValue: {
+          snapshot: {
+            paramMap: convertToParamMap({ project: 'proj', evaluationId: 'eval-1' }), queryParamMap: convertToParamMap({}), fragment: null,
+            data: { evaluationAccess: { evaluation, task: { id: 't1', permissions: ['abortEvaluation'], managed: true } } },
+          },
+        } },
+        { provide: EvaluationsService, useValue: {
+          getEvaluation,
+          getBuilds: () => of({ builds: [], total: 0, active_count: 0 }),
+          getEvaluationMessages: () => of([]),
+        } },
+        { provide: TasksService, useValue: { getTask, getTaskInfo: () => NEVER } },
+      ],
+    });
+    const fixture = TestBed.createComponent(EvaluationLogComponent);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.evaluation()?.id).toBe('eval-1');
+    expect(fixture.componentInstance.access().managed).toBe(true);
+    expect(getEvaluation).not.toHaveBeenCalled();
+    expect(getTask).not.toHaveBeenCalled();
+    fixture.destroy();
   });
 });

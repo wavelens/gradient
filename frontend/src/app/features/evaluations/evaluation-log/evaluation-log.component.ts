@@ -40,6 +40,7 @@ import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
   BuildProgress,
   EvaluationResponse,
+  TaskDetailsResponse,
   EvaluationProgress,
   BuildItem,
   BuildStatus,
@@ -52,6 +53,7 @@ import {
   Permission,
 } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
+import { EvaluationWithOptionalTask } from '@core/resolvers/evaluation-access.resolver';
 import {
   BadgeComponent,
   BadgeSeverity,
@@ -278,7 +280,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       this.loading.set(false);
       return;
     }
-    this.loadEvaluation();
+    const resolved = this.route.snapshot.data?.['evaluationAccess'] as EvaluationWithOptionalTask | undefined;
+    if (!resolved) return this.loadEvaluation();
+    this.setEvaluationAndStartLiveUpdates(resolved.evaluation);
+    if (resolved.task) this.setEvaluationAccessFromTask(resolved.task);
   }
 
   ngOnDestroy(): void {
@@ -295,24 +300,28 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.loadError.set(null);
     this.evalService.getEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (evaluation) => {
-        this.rememberTaskName(evaluation);
-        this.evaluation.set(evaluation);
-        this.loading.set(false);
+        this.setEvaluationAndStartLiveUpdates(evaluation);
         this.loadAccess(evaluation.task_name);
-        if (this.initialBuildId) {
-          this.resolveInitialBuild(() => this.loadBuilds());
-        } else {
-          this.loadBuilds();
-        }
-        this.loadMessages();
-        this.startDurationTimer(evaluation);
-        this.startLiveUpdates(evaluation.status);
       },
       error: (error: unknown) => {
         if (!(error instanceof ApiError && error.status === 404)) this.loadError.set(error);
         this.loading.set(false);
       },
     });
+  }
+
+  private setEvaluationAndStartLiveUpdates(evaluation: EvaluationResponse): void {
+    this.rememberTaskName(evaluation);
+    this.evaluation.set(evaluation);
+    this.loading.set(false);
+    if (this.initialBuildId) {
+      this.resolveInitialBuild(() => this.loadBuilds());
+    } else {
+      this.loadBuilds();
+    }
+    this.loadMessages();
+    this.startDurationTimer(evaluation);
+    this.startLiveUpdates(evaluation.status);
   }
 
   private refreshEvaluation(): void {
@@ -337,12 +346,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       .getTask(this.projectName, taskName)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (task) => {
-          this.access.set(accessFromEntity(task));
-          this.taskPermissions.set(task.permissions);
-        },
+        next: (task) => this.setEvaluationAccessFromTask(task),
         error: () => {},
       });
+  }
+
+  private setEvaluationAccessFromTask(task: TaskDetailsResponse): void {
+    this.access.set(accessFromEntity(task));
+    this.taskPermissions.set(task.permissions);
   }
 
   loadMessages(background = false): void {

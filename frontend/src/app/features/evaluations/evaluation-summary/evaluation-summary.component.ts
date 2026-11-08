@@ -7,7 +7,8 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import { forkJoin } from 'rxjs';
+import { forkJoin, of } from 'rxjs';
+import { EvaluationWithOptionalTask } from '@core/resolvers/evaluation-access.resolver';
 import type {
   FailedBuildSummary,
   EvaluationResponse,
@@ -132,14 +133,14 @@ export class EvaluationSummaryComponent implements OnInit {
   ngOnInit(): void {
     this.project = this.route.snapshot.paramMap.get('project') ?? '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') ?? '';
-    this.load();
+    this.load((this.route.snapshot.data?.['evaluationAccess'] as EvaluationWithOptionalTask | undefined)?.evaluation);
   }
 
-  load(): void {
+  load(resolvedEvaluation?: EvaluationResponse): void {
     this.loading.set(true);
     this.loadError.set(null);
     forkJoin({
-      evaluation: this.evaluations.getEvaluation(this.evaluationId),
+      evaluation: resolvedEvaluation ? of(resolvedEvaluation) : this.evaluations.getEvaluation(this.evaluationId),
       summary: this.evaluations.getEvaluationSummary(this.evaluationId),
     }).subscribe({
       next: ({ evaluation, summary }) => {

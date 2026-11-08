@@ -13,7 +13,6 @@ import { adminGuard } from '@core/guards/admin.guard';
 import { publicListingGuard } from '@core/guards/public-listing.guard';
 import { visibleProjectGuard } from '@core/guards/visible-project.guard';
 import {
-  evaluationInProjectGuard,
   execJobInTaskGuard,
   visibleTeamGuard,
   workerInProjectGuard,
@@ -22,6 +21,7 @@ import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
 import { taskAccessResolver } from '@core/resolvers/task-access.resolver';
 import { cacheAccessResolver, shouldRefetchCacheRecordOnCacheNameOrCacheRecordPageChange } from '@core/resolvers/cache-access.resolver';
 import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
+import { evaluationAccessResolver } from '@core/resolvers/evaluation-access.resolver';
 
 export const routes: Routes = [
   // Authentication routes (public)
@@ -210,7 +210,7 @@ export const routes: Routes = [
       {
         path: 'log/:evaluationId',
         title: 'Evaluation Log',
-        canActivate: [evaluationInProjectGuard],
+        resolve: { evaluationAccess: evaluationAccessResolver },
         data: { hideFooter: true },
         loadComponent: () =>
           import('./features/evaluations/evaluation-log/evaluation-log.component').then(
@@ -220,7 +220,7 @@ export const routes: Routes = [
       {
         path: 'summary/:evaluationId',
         title: 'Evaluation Summary',
-        canActivate: [evaluationInProjectGuard],
+        resolve: { evaluationAccess: evaluationAccessResolver },
         loadComponent: () =>
           import('./features/evaluations/evaluation-summary/evaluation-summary.component').then(
             (m) => m.EvaluationSummaryComponent

@@ -25,9 +25,10 @@ import { TeamsService } from '@core/services/teams.service';
 import { WorkersService } from '@core/services/workers.service';
 import { taskAccessResolver } from '@core/resolvers/task-access.resolver';
 import { cacheAccessResolver } from '@core/resolvers/cache-access.resolver';
+import { evaluationAccessResolver } from '@core/resolvers/evaluation-access.resolver';
 import { CachesService } from '@core/services/caches.service';
 import { adminGuard } from './admin.guard';
-import { evaluationInProjectGuard, execJobInTaskGuard, visibleTeamGuard, workerInProjectGuard } from './entity.guards';
+import { execJobInTaskGuard, visibleTeamGuard, workerInProjectGuard } from './entity.guards';
 import { visibleProjectGuard } from './visible-project.guard';
 
 const URL = '/project/acme/somewhere';
@@ -108,12 +109,15 @@ describe('not-found or no-access page', () => {
 
   it('replaces an evaluation that belongs to another project', async () => {
     configure({ tasks: { getTask: () => of({ id: 'other-task' }) } });
-    expect(page(await outcome(evaluationInProjectGuard, { project: 'acme', evaluationId: 'e1' }))).toContain('kind=evaluation&name=e1');
+    expect(page(await outcome(evaluationAccessResolver as unknown as CanActivateFn, { project: 'acme', evaluationId: 'e1' }))).toContain('kind=evaluation&name=e1');
   });
 
-  it('lets an evaluation of the project through', async () => {
+  it('hands an evaluation of the project and its task to the page', async () => {
     configure({});
-    expect(await outcome(evaluationInProjectGuard, { project: 'acme', evaluationId: 'e1' })).toBe(true);
+    expect(await outcome(evaluationAccessResolver as unknown as CanActivateFn, { project: 'acme', evaluationId: 'e1' })).toEqual({
+      evaluation: { task: 't1', task_name: 'demo' },
+      task: { id: 't1' },
+    });
   });
 
   it('replaces an exec job opened under another task', async () => {

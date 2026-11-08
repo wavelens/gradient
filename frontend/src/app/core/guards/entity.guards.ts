@@ -6,10 +6,8 @@
 
 import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
-import { map, of, switchMap } from 'rxjs';
-import { EvaluationsService } from '@core/services/evaluations.service';
+import { map } from 'rxjs';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
-import { TasksService } from '@core/services/tasks.service';
 import { TeamsService } from '@core/services/teams.service';
 import { WorkersService } from '@core/services/workers.service';
 import { DeniedTarget, deniedPage, denyOnRefusal } from '@core/routing/access-denied';
@@ -20,21 +18,6 @@ export const visibleTeamGuard: CanActivateFn = (route, state) => {
   return inject(TeamsService).get(name).pipe(
     map(() => true as const),
     denyOnRefusal({ kind: 'team', name, back: String(links.teams()) }, state.url),
-  );
-};
-
-export const evaluationInProjectGuard: CanActivateFn = (route, state) => {
-  const router = inject(Router);
-  const tasks = inject(TasksService);
-  const project = route.paramMap.get('project') ?? '';
-  const id = route.paramMap.get('evaluationId') ?? '';
-  const target: DeniedTarget = { kind: 'evaluation', name: id, back: String(links.project(project)) };
-  return inject(EvaluationsService).getEvaluation(id).pipe(
-    switchMap((evaluation) => evaluation.task_name
-      ? tasks.getTask(project, evaluation.task_name).pipe(map((task) => task.id === evaluation.task))
-      : of(true)),
-    map((inProject) => inProject || deniedPage(router, target, state.url)),
-    denyOnRefusal(target, state.url),
   );
 };
 
