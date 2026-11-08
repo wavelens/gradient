@@ -405,6 +405,18 @@ describe('ProfileComponent - delete confirmation', () => {
     expect(deleteUser).toHaveBeenCalledTimes(1);
   });
 
+  it('confirms the deletion before signing out', () => {
+    const fixture = setup({ managed: false, oidc: false });
+    TestBed.inject(UserService).deleteUser = vi.fn(() => of('ok'));
+    const logout = vi.fn(() => of(null));
+    Object.assign(TestBed.inject(AuthService), { logout });
+    const component = fixture.componentInstance;
+    component.deletePassword = 'secret';
+    component.deleteAccount();
+    expect(notify.success).toHaveBeenCalledWith('Account deleted');
+    expect(logout).toHaveBeenCalled();
+  });
+
   it('never offers an empty profile form to save after a failed load', () => {
     const opts: SetupOptions = { managed: false, oidc: false, loadFailure: new ApiError('database is down', 500) };
     const fixture = setup(opts);

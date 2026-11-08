@@ -269,6 +269,7 @@ export class ProfileComponent implements OnInit, CanComponentDeactivate {
       : { password: this.deletePassword };
     this.userService.deleteUser(body).subscribe({
       next: () => {
+        this.notify.success('Account deleted');
         this.authService.logout().subscribe();
       },
       error: (error: unknown) => {
