@@ -62,7 +62,7 @@
     <div class="strip-wrap pad" grScrollRegion>
       <div class="eval-strip">
         @for (e of evaluations(); track e.id) {
-          <div class="eval-card" [class.selected]="selected()?.id === e.id" (click)="select(e)"
+          <div class="eval-card" [attr.data-phase]="evaluationPhase(e.status)" [class.selected]="selected()?.id === e.id" (click)="select(e)"
                (contextmenu)="select(e); evalMenu.openAt($event)">
             <div class="l1">
               <gr-status-icon class="phase-swatch" [phase]="evaluationPhase(e.status)" [prioritized]="e.prioritized" size="sm" />
@@ -78,7 +78,7 @@
       <gr-menu #evalMenu [model]="evalMenuModel()" />
     </div>
 
-    <div class="panel">
+    <div class="panel pad">
       @for (sel of selectedList(); track sel.id) {
         <div class="panel-head">
           <div>
