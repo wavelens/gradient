@@ -12,15 +12,29 @@
 
   @if (!showResult()) {
     <div class="setup-panel">
-      <label for="github-host">GitHub Enterprise host (optional)</label>
-      <input
-        id="github-host"
-        grInput
-        type="text"
-        placeholder="github.com"
-        [ngModel]="host()"
-        (ngModelChange)="host.set($event)"
-      />
+      <p class="text-secondary" data-testid="github-app-current-state">
+        @if (githubAppAlreadyConfigured) {
+          This server already has a GitHub App. Create a different GitHub App only to replace the current one.
+        } @else {
+          This server has no GitHub App set up yet.
+        }
+      </p>
+
+      <gr-form-field
+        label="GitHub Enterprise host (optional)"
+        for="github-host"
+        [invalid]="!!githubHostInvalidCharacterErrorMessage()"
+        [error]="githubHostInvalidCharacterErrorMessage()"
+      >
+        <input
+          id="github-host"
+          grInput
+          type="text"
+          placeholder="github.com"
+          [ngModel]="host()"
+          (ngModelChange)="host.set($event)"
+        />
+      </gr-form-field>
 
       <button
         grButton
@@ -28,6 +42,7 @@
         label="Create on GitHub"
         data-testid="github-app-create-button"
         [loading]="loading()"
+        [disabled]="!!githubHostInvalidCharacterErrorMessage()"
         (click)="create()"
       ></button>
     </div>

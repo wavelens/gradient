@@ -14,6 +14,7 @@ import type { Mock } from 'vitest';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { GithubAppComponent } from './github-app.component';
 import { AdminService } from '@core/services/admin.service';
+import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
 
@@ -74,6 +75,37 @@ describe('GithubAppComponent', () => {
     fixture.componentInstance.host.set('ghe.example.com');
     fixture.componentInstance.create();
     expect(admin.requestGithubAppManifest).toHaveBeenCalledWith('ghe.example.com');
+  });
+
+  it('accepts a host typed as a URL and blocks Create for a host with invalid characters', () => {
+    setup({});
+    admin.requestGithubAppManifest.mockReturnValue(EMPTY);
+    const fixture = TestBed.createComponent(GithubAppComponent);
+    const root = fixture.nativeElement as HTMLElement;
+    const button = () => root.querySelector<HTMLButtonElement>('[data-testid="github-app-create-button"]')!;
+
+    fixture.componentInstance.host.set(' https://ghe.example.com/ ');
+    fixture.detectChanges();
+    expect(button().disabled).toBe(false);
+    fixture.componentInstance.create();
+    expect(admin.requestGithubAppManifest).toHaveBeenCalledWith('ghe.example.com');
+
+    fixture.componentInstance.host.set('not a host!!');
+    fixture.detectChanges();
+    expect(button().disabled).toBe(true);
+    expect(root.textContent).toContain('Use only letters, numbers, dots, and dashes');
+  });
+
+  it('tells whether the server already has a GitHub App', () => {
+    setup({});
+    const state = () => {
+      const fixture = TestBed.createComponent(GithubAppComponent);
+      fixture.detectChanges();
+      return (fixture.nativeElement as HTMLElement).querySelector('[data-testid="github-app-current-state"]')?.textContent?.trim();
+    };
+    expect(state()).toBe('This server has no GitHub App set up yet.');
+    TestBed.inject(ConfigService).githubAppEnabled = true;
+    expect(state()).toContain('This server already has a GitHub App.');
   });
 
   it('reports a refused manifest request as a toast and enables the button again', () => {

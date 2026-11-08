@@ -41,7 +41,19 @@ fn default_host() -> String {
     "github.com".to_string()
 }
 
-pub fn validate_host(host: &str) -> Result<(), WebError> {
+pub fn clean_github_enterprise_host(raw: &str) -> Result<String, WebError> {
+    let trimmed = raw.trim();
+    let without_scheme = ["https://", "http://"]
+        .iter()
+        .find_map(|scheme| {
+            trimmed
+                .get(..scheme.len())
+                .filter(|prefix| prefix.eq_ignore_ascii_case(scheme))
+                .map(|_| &trimmed[scheme.len()..])
+        })
+        .unwrap_or(trimmed);
+    let host = without_scheme.trim_end_matches('/');
+
     if host.is_empty() {
         return Err(SharedRefusal::EmptyField("host").into());
     }
@@ -54,7 +66,7 @@ pub fn validate_host(host: &str) -> Result<(), WebError> {
         return Err(AdminRefusal::InvalidHostCharacters.into());
     }
 
-    Ok(())
+    Ok(host.to_owned())
 }
 
 #[utoipa::path(
@@ -72,8 +84,7 @@ pub async fn request_manifest(
     Extension(user): Extension<MUser>,
     Json(body): Json<GithubAppManifestRequest>,
 ) -> WebResult<Json<BaseResponse<GithubAppManifestResponse>>> {
-    let host = body.host.unwrap_or_else(default_host);
-    validate_host(&host)?;
+    let host = clean_github_enterprise_host(&body.host.unwrap_or_else(default_host))?;
 
     let manifest = gradient_ci::github_app_manifest::build_manifest(&state.config.server.serve_url);
     let token = state.memory.manifest_state.issue_state(user.id).await;
@@ -100,8 +111,7 @@ pub async fn callback(
     State(state): State<Arc<ServerState>>,
     Query(q): Query<CallbackQuery>,
 ) -> WebResult<Redirect> {
-    let host = q.host.unwrap_or_else(default_host);
-    validate_host(&host)?;
+    let host = clean_github_enterprise_host(&q.host.unwrap_or_else(default_host))?;
 
     let Some(user_id) = state
         .memory
@@ -153,21 +163,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validate_host_accepts_normal_hosts() {
-        assert!(validate_host("github.com").is_ok());
-        assert!(validate_host("ghe.example.com").is_ok());
-        assert!(validate_host("ghe-1.example.com").is_ok());
+    fn clean_github_enterprise_host_accepts_normal_hosts() {
+        assert!(clean_github_enterprise_host("github.com").is_ok());
+        assert!(clean_github_enterprise_host("ghe.example.com").is_ok());
+        assert!(clean_github_enterprise_host("ghe-1.example.com").is_ok());
     }
 
     #[test]
-    fn validate_host_rejects_path_chars() {
-        assert!(validate_host("evil.com/inject").is_err());
-        assert!(validate_host("evil.com?x=1").is_err());
-        assert!(validate_host("evil com").is_err());
+    fn clean_github_enterprise_host_removes_scheme_spaces_and_trailing_slashes() {
+        for raw in [
+            " https://ghe.example.com/ ",
+            "HTTP://ghe.example.com",
+            "ghe.example.com//",
+        ] {
+            assert_eq!(
+                clean_github_enterprise_host(raw).unwrap(),
+                "ghe.example.com"
+            );
+        }
     }
 
     #[test]
-    fn validate_host_rejects_empty() {
-        assert!(validate_host("").is_err());
+    fn clean_github_enterprise_host_rejects_path_chars() {
+        assert!(clean_github_enterprise_host("evil.com/inject").is_err());
+        assert!(clean_github_enterprise_host("evil.com?x=1").is_err());
+        assert!(clean_github_enterprise_host("evil com").is_err());
+    }
+
+    #[test]
+    fn clean_github_enterprise_host_rejects_empty() {
+        assert!(clean_github_enterprise_host("").is_err());
+        assert!(clean_github_enterprise_host("https://").is_err());
     }
 }

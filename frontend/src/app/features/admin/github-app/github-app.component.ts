@@ -10,6 +10,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AdminService } from '@core/services/admin.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import {
   ButtonComponent,
@@ -41,6 +42,13 @@ export class GithubAppComponent implements OnInit {
   private confirm = inject(ConfirmService);
 
   host = signal<string>('');
+  normalizedGithubEnterpriseHost = computed(() => this.host().trim().replace(/^https?:\/\//i, '').replace(/\/+$/, ''));
+  githubHostInvalidCharacterErrorMessage = computed(() =>
+    /^[A-Za-z0-9.-]*$/.test(this.normalizedGithubEnterpriseHost())
+      ? ''
+      : 'Use only letters, numbers, dots, and dashes (for example: ghe.example.com).',
+  );
+  protected readonly githubAppAlreadyConfigured = inject(ConfigService).githubAppEnabled;
   loading = signal(false);
 
   showResult = signal(false);
@@ -64,7 +72,7 @@ export class GithubAppComponent implements OnInit {
 
   create(): void {
     this.loading.set(true);
-    const host = this.host().trim() || undefined;
+    const host = this.normalizedGithubEnterpriseHost() || undefined;
     this.admin.requestGithubAppManifest(host).subscribe({
       next: (resp) => {
         this.loading.set(false);
