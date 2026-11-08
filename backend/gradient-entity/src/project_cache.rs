@@ -32,6 +32,12 @@ pub enum CacheSubscriptionMode {
     WriteOnly,
 }
 
+impl CacheSubscriptionMode {
+    pub fn writes_build_outputs_to_cache(&self) -> bool {
+        matches!(self, Self::ReadWrite | Self::WriteOnly)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "project_cache")]
 pub struct Model {

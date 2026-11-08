@@ -228,10 +228,7 @@ pub async fn post_project_subscribe_cache(
         return Ok(ok_json("Subscription requested".to_string()));
     }
 
-    let unparks_builds = matches!(
-        mode,
-        CacheSubscriptionMode::ReadWrite | CacheSubscriptionMode::WriteOnly
-    );
+    let unparks_builds = mode.writes_build_outputs_to_cache();
 
     gradient_db::rows::insert::<EProjectCache, _>(
         &state.web_db,

@@ -24,7 +24,7 @@ use sea_orm::Condition;
 use sea_orm::sea_query::Expr;
 
 #[derive(Debug, thiserror::Error)]
-enum AccessRefusal {
+pub(crate) enum AccessRefusal {
     #[error("Cache-pinned API key cannot be used on this endpoint.")]
     CachePinnedKeyOnEndpoint,
     #[error("API key is pinned to a different cache.")]

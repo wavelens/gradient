@@ -282,12 +282,7 @@ pub async fn post_approve_subscription_request(
 
     reauth_project_workers(&state.web_db, &scheduler, project.id).await;
 
-    let unparks_builds = matches!(
-        mode,
-        CacheSubscriptionMode::ReadWrite | CacheSubscriptionMode::WriteOnly
-    );
-
-    if unparks_builds
+    if mode.writes_build_outputs_to_cache()
         && let Err(e) = gradient_ci::unpark_no_cache_for_project(&state.web_db, project.id).await
     {
         tracing::warn!(

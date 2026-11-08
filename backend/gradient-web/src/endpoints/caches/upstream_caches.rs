@@ -5,10 +5,14 @@
  */
 
 use super::refusal::CacheRefusal;
-use crate::access::{CacheAccess, Caller, load_cache, reject_managed_cache};
+use crate::access::{
+    AccessRefusal, CacheAccess, Caller, has_cache_permission, load_cache, reject_managed_cache,
+};
 use crate::api_spec::CachePath;
+use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::permissions::CachePermission;
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
@@ -158,6 +162,25 @@ async fn load_upstream(
         .or_not_found(Resource::UpstreamCache)
 }
 
+async fn require_write_store_permission_for_push_upstream(
+    db: &WebDb,
+    user: &MUser,
+    upstream_cache: CacheId,
+    mode: &CacheSubscriptionMode,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<()> {
+    let permission = CachePermission::WriteStore;
+    if !mode.writes_build_outputs_to_cache()
+        || has_cache_permission(db, user.id, upstream_cache, permission, api_key).await?
+    {
+        return Ok(());
+    }
+    Err(AccessRefusal::MissingCachePermission {
+        permission: permission.as_wire_name().to_string(),
+    }
+    .into())
+}
+
 #[utoipa::path(
     get,
     path = "/caches/{cache}/upstream-caches",
@@ -212,7 +235,7 @@ pub async fn get_upstream_caches(
     operation_id = "addUpstreamCache",
     tag = "caches",
     summary = "Add upstream cache",
-    description = "Adds an upstream cache. Three types are supported, selected by the `type` discriminator:\n\n- **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.\n- **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.\n- **http** - an arbitrary Nix binary cache URL. Always ReadOnly.\n\nRequires `manageUpstreamCaches`.",
+    description = "Adds an upstream cache. Three types are supported, selected by the `type` discriminator:\n\n- **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.\n- **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.\n- **http** - an arbitrary Nix binary cache URL. Always ReadOnly.\n\nRequires `manageUpstreamCaches`. Internal upstream caches in ReadWrite or WriteOnly mode also require `writeStore` on the upstream cache.",
     params(CachePath),
     request_body = AddUpstreamRequest,
     responses((status = OK, description = "Upstream added - returns the new upstream UUID", body = CacheUpstreamId), WebError)
@@ -245,12 +268,21 @@ pub async fn put_cache_upstream(
             if upstream.id == cache.id {
                 return Err(CacheRefusal::CacheIsOwnUpstream.into());
             }
+            let mode = mode.unwrap_or(CacheSubscriptionMode::ReadWrite);
+            require_write_store_permission_for_push_upstream(
+                &db.web_db,
+                &user,
+                upstream.id,
+                &mode,
+                api_key.as_ref(),
+            )
+            .await?;
             let name = display_name.unwrap_or_else(|| upstream.display_name.clone());
             MCacheUpstream {
                 id: CacheUpstreamId::now_v7(),
                 cache: cache.id,
                 display_name: name,
-                mode: mode.unwrap_or(CacheSubscriptionMode::ReadWrite),
+                mode,
                 kind: CacheUpstreamKind::Internal,
                 upstream_cache: Some(upstream.id),
                 ..Default::default()
@@ -314,14 +346,19 @@ pub async fn put_cache_upstream(
     operation_id = "patchUpstreamCache",
     tag = "caches",
     summary = "Update upstream cache",
-    description = "Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;\n`url`, `public_key` and `http1_only` may be updated. For internal upstream caches only `mode` and `display_name` apply.\n`active` toggles any upstream cache. An inactive upstream cache is kept but never queried.\nA state-managed cache accepts only `active`, and the next server start restores the declared value.\nRequires `manageUpstreamCaches`.",
+    description = "Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;\n`url`, `public_key` and `http1_only` may be updated. For internal upstream caches only `mode` and `display_name` apply.\n`active` toggles any upstream cache. An inactive upstream cache is kept but never queried.\nA state-managed cache accepts only `active`, and the next server start restores the declared value.\nRequires `manageUpstreamCaches`. Internal upstream caches in ReadWrite or WriteOnly mode also require `writeStore` on the upstream cache.",
     params(CachePath, ("id" = CacheUpstreamId, Path)),
     request_body = PatchUpstreamRequest,
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn patch_cache_upstream(
     CacheScope {
-        cache, db, params, ..
+        cache,
+        user,
+        api_key,
+        db,
+        params,
+        ..
     }: CacheScope<Requires<can::ManageUpstreamCaches>>,
     Json(body): Json<PatchUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -331,6 +368,17 @@ pub async fn patch_cache_upstream(
         reject_managed_cache(&cache)?;
     }
     let record = load_upstream(&db.web_db, cache.id, upstream_id).await?;
+
+    if let (Some(upstream_cache), Some(mode)) = (record.upstream_cache, &body.mode) {
+        require_write_store_permission_for_push_upstream(
+            &db.web_db,
+            &user,
+            upstream_cache,
+            mode,
+            api_key.as_ref(),
+        )
+        .await?;
+    }
 
     let is_external = matches!(record.as_source(), Some(CacheUpstreamSource::Http { .. }));
     let mut row = record.into_active_model();
