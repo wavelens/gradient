@@ -6,7 +6,7 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-$task-table-value-cell-grid-template-columns: 24cqi 6rem 3.5rem 5rem;
+$task-table-value-cell-grid-template-columns: 24cqi 6rem 5rem;
 $linked-list-row-chevron-icon-width: 20px;
 
 .section {
@@ -71,14 +71,6 @@ code {
   b {
     color: var(--gr-text-primary);
     font-weight: 600;
-
-    &.up {
-      color: var(--gr-status-danger-text);
-    }
-
-    &.down {
-      color: var(--gr-status-success-text);
-    }
   }
 }
 

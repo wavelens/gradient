@@ -33,9 +33,9 @@ const STARRED: TasksPage = { ...PAGE, filter: 'starred', counts: { all: 12, fail
 const chipLabels = (root: HTMLElement) =>
   Array.from(root.querySelectorAll('gr-tab-switch button')).map((c) => c.textContent?.replace(/\s+/g, ' ').trim());
 
-function render(filter: string | null, page: () => Observable<TasksPage>) {
+function render(filter: string | null, page: () => Observable<TasksPage>, extraQueryParams: Record<string, string> = {}) {
   const tasks = vi.fn(page);
-  const params = new BehaviorSubject(convertToParamMap(filter ? { filter } : {}));
+  const params = new BehaviorSubject(convertToParamMap({ ...(filter ? { filter } : {}), ...extraQueryParams }));
   TestBed.configureTestingModule({
     imports: [DashboardTaskTableComponent],
     providers: [
@@ -76,12 +76,11 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelectorAll('gr-row .value').length).toBe(0);
   });
 
-  it('shows "-" for entry points and change when the evaluation failed before it produced entry points', async () => {
+  it('shows "-" for entry points when the evaluation failed before it produced entry points', async () => {
     const evaluationError = { ...row('hosts'), entry_points: { ok: 0, failing: 0, total: 0 }, delta: 0 };
     const { f, root } = render(null, () => of({ ...PAGE, tasks: [evaluationError] }));
     await settle(f);
-    const values = Array.from(root.querySelectorAll('gr-row .value b')).map((b) => b.textContent?.trim());
-    expect(values.slice(0, 2)).toEqual(['-', '-']);
+    expect(root.querySelector('gr-row .value b')?.textContent?.trim()).toBe('-');
   });
 
   it('leaves the filter to the server when the url has no filter and puts Starred first for a user with starred tasks', async () => {
@@ -103,7 +102,7 @@ describe('DashboardTaskTableComponent', () => {
     const { tasks, root } = render(null, () => of(PAGE));
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     (root.querySelectorAll('gr-tab-switch button')[0] as HTMLElement).click();
-    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { filter: 'all' } }));
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { filter: 'all', page: null } }));
     expect(tasks).toHaveBeenCalledTimes(1);
   });
 
@@ -141,15 +140,15 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelector('gr-row-list')?.textContent).not.toContain('stale');
   });
 
-  it('entrypoint, changes, and duration labels appear once in header row', () => {
+  it('passed and duration labels appear once in header row', () => {
     const { root } = render(null, () => of(PAGE));
     const header = Array.from(root.querySelectorAll('.columns span')).map((s) => s.textContent?.trim());
-    expect(header).toEqual(['', 'entry points', 'change', 'average time']);
+    expect(header).toEqual(['', 'passed', 'average time']);
     const values = Array.from(root.querySelectorAll('gr-row .value')).map((c) => [
       c.querySelector('b')?.textContent?.trim(),
       c.querySelector('small.sr-only')?.textContent?.trim(),
     ]);
-    expect(values).toEqual([['41/45', 'entry points'], ['+3', 'change'], ['14m 00s', 'average time']]);
+    expect(values).toEqual([['41/45', 'Entry points passed'], ['14m 00s', 'average time']]);
   });
 
   it('names the full project and task on a truncated task name', () => {
@@ -165,13 +164,28 @@ describe('DashboardTaskTableComponent', () => {
     expect(row.querySelector('.row')?.classList).toContain('is-link');
   });
 
-  it('offers Show all only when more rows exist, then pages by 25', () => {
-    const { f, tasks, root } = render(null, () => of(PAGE));
+  it('offers View all only when more rows exist and writes the first page into the url', () => {
+    const { root } = render(null, () => of(PAGE));
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    expect(root.querySelector('.show-all')?.textContent).toContain('View all 12');
     (root.querySelector('.show-all') as HTMLElement).click();
-    f.detectChanges();
-    expect(tasks).toHaveBeenLastCalledWith(null, 1, 25, 60);
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { page: 1 } }));
     TestBed.resetTestingModule();
     expect(render(null, () => of({ ...PAGE, total: 1 })).root.querySelector('.show-all')).toBeNull();
+  });
+
+  it('pages by 25 from the page in the url and goes back to the top 10 on Show less', () => {
+    const { tasks, root } = render(null, () => of(PAGE), { page: '1' });
+    expect(tasks).toHaveBeenLastCalledWith(null, 1, 25, 60);
+    expect(root.querySelector('.show-all')).toBeNull();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    (root.querySelector('.show-less') as HTMLElement).click();
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { page: null } }));
+  });
+
+  it('ignores a page in the url that is not a positive whole number', () => {
+    const { tasks } = render(null, () => of(PAGE), { page: 'x' });
+    expect(tasks).toHaveBeenLastCalledWith(null, 1, 10, 60);
   });
 
   it('loads the tasks once and shows the newest bars that fit a narrow column', () => {
@@ -211,10 +225,11 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.textContent!.trim()).toBe('');
   });
 
-  it('drops the column captions over a filter without tasks', () => {
+  it('drops the column captions over a filter without tasks and names the empty filter', () => {
     const { root } = render('failing', () => of({ ...PAGE, counts: { all: 12, failing: 0, starred: 0 }, total: 0, tasks: [] }));
     expect(chipLabels(root)).toEqual(['All 12', 'Failing 0']);
     expect(root.querySelector('.columns')).toBeNull();
+    expect(root.querySelector('gr-empty-state')?.textContent).toContain('No failing tasks');
   });
 
   it('hides the whole block on 403', () => {

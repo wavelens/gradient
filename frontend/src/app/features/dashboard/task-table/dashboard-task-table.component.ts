@@ -25,6 +25,7 @@ import { Filter, Latest, TasksPage } from '@core/models';
 import { evaluationPhase, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
 import {
   ButtonComponent,
+  EmptyStateComponent,
   MessageBannerComponent,
   RowComponent,
   RowListComponent,
@@ -37,10 +38,10 @@ import { EvaluationHistoryComponent } from '../evaluation-history/evaluation-his
 import { MAX_BARS, barsThatFit } from '../format';
 import { links } from '@shared/routing';
 
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: 'starred', label: 'Starred' },
-  { key: 'all', label: 'All' },
-  { key: 'failing', label: 'Failing' },
+const FILTERS: { key: Filter; label: string; empty: string }[] = [
+  { key: 'starred', label: 'Starred', empty: 'No starred tasks' },
+  { key: 'all', label: 'All', empty: 'No tasks' },
+  { key: 'failing', label: 'Failing', empty: 'No failing tasks' },
 ];
 const HISTORY_COLUMN_PX = 150;
 const TOP = 10;
@@ -57,6 +58,11 @@ function parseFilter(value: string | null): Filter | null {
   return FILTERS.find((x) => x.key === value)?.key ?? null;
 }
 
+function parsePageQueryParameter(value: string | null): number | null {
+  const page = Number(value);
+  return value !== null && Number.isInteger(page) && page >= 1 ? page : null;
+}
+
 function areDashboardTaskListRequestParametersEqual(a: DashboardTaskListRequestParameters, b: DashboardTaskListRequestParameters): boolean {
   return a.filter === b.filter && a.page === b.page && a.perPage === b.perPage;
 }
@@ -68,6 +74,7 @@ function areDashboardTaskListRequestParametersEqual(a: DashboardTaskListRequestP
     RelativeTimePipe,
     FormsModule,
     ButtonComponent,
+    EmptyStateComponent,
     MessageBannerComponent,
     RowComponent,
     RowListComponent,
@@ -102,6 +109,7 @@ export class DashboardTaskTableComponent implements OnInit {
   taskRowsWithNewestHistoryBarsThatFit = computed(() =>
     (this.data()?.tasks ?? []).map((t) => ({ ...t, history: t.history.slice(-this.history()) })),
   );
+  emptyFilteredTasksTitle = computed(() => FILTERS.find((f) => f.key === this.selected())?.empty ?? 'No tasks');
   chips = computed(() => {
     const counts = this.data()?.counts;
     return FILTERS.filter((f) => f.key !== 'starred' || counts?.starred).map((f) => ({
@@ -127,13 +135,14 @@ export class DashboardTaskTableComponent implements OnInit {
       });
     this.route.queryParamMap
       .pipe(
-        map((q) => parseFilter(q.get('filter'))),
-        distinctUntilChanged(),
+        map((q) => ({ filter: parseFilter(q.get('filter')), page: parsePageQueryParameter(q.get('page')) })),
+        distinctUntilChanged((a, b) => a.filter === b.filter && a.page === b.page),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe((f) => {
-        this.filter.set(f);
-        this.page.set(1);
+      .subscribe(({ filter, page }) => {
+        this.filter.set(filter);
+        this.expanded.set(page !== null);
+        this.page.set(page ?? 1);
         this.load();
       });
     this.resizes()
@@ -142,18 +151,11 @@ export class DashboardTaskTableComponent implements OnInit {
   }
 
   select(f: Filter): void {
-    this.router.navigate([], { relativeTo: this.route, queryParams: { filter: f }, queryParamsHandling: 'merge' });
+    this.router.navigate([], { relativeTo: this.route, queryParams: { filter: f, page: null }, queryParamsHandling: 'merge' });
   }
 
-  showAll(): void {
-    this.expanded.set(true);
-    this.page.set(1);
-    this.load();
-  }
-
-  go(page: number): void {
-    this.page.set(page);
-    this.load();
+  go(page: number | null): void {
+    this.router.navigate([], { relativeTo: this.route, queryParams: { page }, queryParamsHandling: 'merge' });
   }
 
   pages(): number {
@@ -163,11 +165,6 @@ export class DashboardTaskTableComponent implements OnInit {
 
   newestEvaluationWaitingReasonTitle(project: string, latest: Latest): string {
     return explainWaiting(latest.waiting_reason, project, waitingAccessFrom([], false, false)).title;
-  }
-
-  delta(d?: number | null): string {
-    if (d == null) return '-';
-    return d > 0 ? `+${d}` : d < 0 ? String(d) : '0';
   }
 
   load(): void {

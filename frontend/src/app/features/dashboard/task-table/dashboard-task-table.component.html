@@ -25,8 +25,7 @@
         @if (d.tasks.length) {
           <div class="columns" aria-hidden="true">
             <span></span>
-            <span>entry points</span>
-            <span>change</span>
+            <span>passed</span>
             <span>average time</span>
           </div>
         }
@@ -49,14 +48,9 @@
               @if (waitingReason) {
                 <span class="waiting" [title]="waitingReason">{{ waitingReason }}</span>
               } @else {
-                @let failingEntryPointCountChange = t.entry_points?.total ? t.delta : null;
                 <span class="value">
                   <b>{{ t.entry_points?.total ? t.entry_points!.ok + '/' + t.entry_points!.total : '-' }}</b>
-                  <small class="sr-only">entry points</small>
-                </span>
-                <span class="value" title="Failing entry points against the previous evaluation">
-                  <b [class.up]="(failingEntryPointCountChange ?? 0) > 0" [class.down]="(failingEntryPointCountChange ?? 0) < 0">{{ delta(failingEntryPointCountChange) }}</b>
-                  <small class="sr-only">change</small>
+                  <small class="sr-only">Entry points passed</small>
                 </span>
                 <span class="value">
                   <b>{{ duration(t.speed_ms) }}</b>
@@ -68,13 +62,20 @@
         }
       </gr-row-list>
 
+      @if (!d.tasks.length) {
+        <gr-empty-state flat icon="check_circle" [title]="emptyFilteredTasksTitle()" />
+      }
+
       @if (!expanded() && d.total > d.tasks.length) {
-        <button grButton class="show-all" severity="secondary" size="small" [label]="'Show all ' + d.total" (click)="showAll()"></button>
-      } @else if (expanded() && pages() > 1) {
+        <button grButton class="show-all" severity="secondary" size="small" [label]="'View all ' + d.total" (click)="go(1)"></button>
+      } @else if (expanded()) {
         <nav class="pager" aria-label="Task pages">
-          <button grButton severity="secondary" size="small" label="Previous" [disabled]="page() === 1" (click)="go(page() - 1)"></button>
-          <span>{{ page() }} / {{ pages() }}</span>
-          <button grButton severity="secondary" size="small" label="Next" [disabled]="page() === pages()" (click)="go(page() + 1)"></button>
+          @if (pages() > 1) {
+            <button grButton severity="secondary" size="small" label="Previous" [disabled]="page() === 1" (click)="go(page() - 1)"></button>
+            <span>{{ page() }} / {{ pages() }}</span>
+            <button grButton severity="secondary" size="small" label="Next" [disabled]="page() === pages()" (click)="go(page() + 1)"></button>
+          }
+          <button grButton class="show-less" severity="secondary" size="small" [text]="true" label="Show less" (click)="go(null)"></button>
         </nav>
       }
     } @else {
@@ -85,7 +86,7 @@
             <gr-skeleton slot="meta" width="7rem" />
             <div slot="actions" class="cells">
               <gr-skeleton height="26px" />
-              @for (_ of [1, 2, 3]; track $index) {
+              @for (_ of [1, 2]; track $index) {
                 <gr-skeleton class="value" height="2lh" />
               }
             </div>
