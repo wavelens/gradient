@@ -42,19 +42,17 @@
   </gr-load-state>
 </gr-settings-section>
 
-@if (invitations().length > 0) {
+@if (canEdit() && invitations().length > 0) {
   <gr-settings-section title="Pending Invitations" [card]="false">
     <gr-row-list>
       @for (invitation of invitations(); track invitation.user) {
         <gr-row icon="mail">
           {{ invitation.user }}
           <span slot="meta">Role {{ invitation.role }} · Expires {{ invitation.expires_at | serverDate: 'medium' }}</span>
-          @if (canEdit()) {
-            <div slot="actions">
-              <button grButton label="Revoke" icon="close" severity="danger"
-                (click)="revokeInvitation(invitation.user)"></button>
-            </div>
-          }
+          <div slot="actions">
+            <button grButton label="Revoke" icon="close" severity="danger"
+              (click)="revokeInvitation(invitation.user)"></button>
+          </div>
         </gr-row>
       }
     </gr-row-list>

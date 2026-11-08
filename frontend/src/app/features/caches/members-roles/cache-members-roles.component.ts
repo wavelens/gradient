@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, linkedSignal, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { inBackground } from '@core/interceptors/request-context';
 import { UserService } from '@core/services/user.service';
+import { AuthService } from '@core/services/auth.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
@@ -34,8 +35,10 @@ import { WritableDirective, ManagedDisableDirective, requestIfCacheMember } from
 import { ConfirmService } from '@shared/confirm';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, merge, tap } from 'rxjs';
-import { injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
+import { injectCacheAccessData } from '@core/resolvers/inject-access';
+import { links } from '@shared/routing';
 import {
+  accessTo,
   MemberItem,
   RoleResponse_CacheRoleOwner,
   PermissionEntry,
@@ -86,9 +89,11 @@ export class CacheMembersRolesComponent implements OnInit {
   private confirm = inject(ConfirmService);
 
   private cacheAccess = injectCacheAccessData();
-  private cache = computed(() => this.cacheAccess()?.cache);
-  access = injectCacheAccessTo('manageCacheMembers');
-  roleAccess = injectCacheAccessTo('manageCacheRoles');
+  private router = inject(Router);
+  private auth = inject(AuthService);
+  private cache = linkedSignal(() => this.cacheAccess()?.cache);
+  access = computed(() => accessTo(this.cache(), 'manageCacheMembers'));
+  roleAccess = computed(() => accessTo(this.cache(), 'manageCacheRoles'));
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Members & Roles' }));
@@ -247,6 +252,7 @@ export class CacheMembersRolesComponent implements OnInit {
     this.cachesService.updateMember(this.cacheName, username, role).subscribe({
       next: () => {
         this.updatingRole.set(null);
+        if (this.isSignedInUser(username)) this.navigateToCacheOrReloadCache(false);
         this.loadMembers();
       },
       error: (error: unknown) => {
@@ -269,8 +275,27 @@ export class CacheMembersRolesComponent implements OnInit {
       })
       .subscribe(() => {
         this.notify.success('Member removed');
+        if (this.isSignedInUser(username)) {
+          this.navigateToCacheOrReloadCache(true);
+          return;
+        }
         this.loadMembers();
       });
+  }
+
+  navigateToCacheOrReloadCache(removed: boolean): void {
+    if (removed) {
+      void this.router.navigateByUrl(links.cache(this.cacheName));
+      return;
+    }
+    this.cachesService.getCache(this.cacheName).subscribe({
+      next: (cache) => this.cache.set(cache),
+      error: () => void this.router.navigateByUrl(links.cache(this.cacheName)),
+    });
+  }
+
+  private isSignedInUser(username: string): boolean {
+    return this.auth.user()?.username === username;
   }
 
   openCreateRoleDialog(): void {

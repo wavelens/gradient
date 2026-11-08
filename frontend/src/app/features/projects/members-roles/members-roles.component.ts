@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, linkedSignal, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { UserService } from '@core/services/user.service';
+import { AuthService } from '@core/services/auth.service';
 import { injectProject } from '@core/resolvers/project-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -41,6 +42,7 @@ import {
   PatchRoleRequest,
 } from '@core/models';
 import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { links } from '@shared/routing';
 import { Observable } from 'rxjs';
 
 const ROLE_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -83,13 +85,16 @@ export class MembersRolesComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private projectsService = inject(ProjectsService);
   private userService = inject(UserService);
+  private router = inject(Router);
+  private auth = inject(AuthService);
   private resolvedProject = injectProject();
+  project = linkedSignal(() => this.resolvedProject());
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
-  access = computed(() => accessTo(this.resolvedProject(), 'manageMembers'));
-  roleAccess = computed(() => accessTo(this.resolvedProject(), 'manageRoles'));
+  access = computed(() => accessTo(this.project(), 'manageMembers'));
+  roleAccess = computed(() => accessTo(this.project(), 'manageRoles'));
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Members & Roles' }));
@@ -178,7 +183,7 @@ export class MembersRolesComponent implements OnInit {
   loadRoles(): void {
     this.rolesLoading.set(true);
     this.rolesLoadError.set(null);
-    requestIfProjectMember(this.resolvedProject(), () => this.projectsService.getRoles(this.projectName)).subscribe({
+    requestIfProjectMember(this.project(), () => this.projectsService.getRoles(this.projectName)).subscribe({
       next: (response) => {
         this.roles.set(response.roles);
         this.availablePermissions.set(response.available_permissions);
@@ -238,6 +243,7 @@ export class MembersRolesComponent implements OnInit {
       .subscribe({
         next: () => {
           this.updatingRole.set(null);
+          if (this.isSignedInUser(username)) this.navigateToProjectOrReloadProject(false);
           this.loadMembers();
         },
         error: (error: unknown) => {
@@ -260,8 +266,27 @@ export class MembersRolesComponent implements OnInit {
       })
       .subscribe(() => {
         this.notify.success('Member removed');
+        if (this.isSignedInUser(username)) {
+          this.navigateToProjectOrReloadProject(true);
+          return;
+        }
         this.loadMembers();
       });
+  }
+
+  navigateToProjectOrReloadProject(removed: boolean): void {
+    if (removed) {
+      void this.router.navigateByUrl(links.project(this.projectName));
+      return;
+    }
+    this.projectsService.getProject(this.projectName).subscribe({
+      next: (project) => this.project.set(project),
+      error: () => void this.router.navigateByUrl(links.project(this.projectName)),
+    });
+  }
+
+  private isSignedInUser(username: string): boolean {
+    return this.auth.user()?.username === username;
   }
 
   // ── Roles ────────────────────────────────────────────────────────────────

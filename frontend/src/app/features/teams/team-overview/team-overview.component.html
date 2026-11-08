@@ -28,7 +28,7 @@
       </gr-settings-section>
     }
 
-    <app-team-members [team]="team" />
+    <app-team-members [team]="team" (currentUserTeamAccessChanged)="navigateToTeamListOrReloadTeam($event)" />
     <app-team-workers [team]="team" />
 
     <gr-settings-section title="Projects and Caches" [card]="false">

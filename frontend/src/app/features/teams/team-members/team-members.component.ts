@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, output, signal } from '@angular/core';
 import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { FormsModule } from '@angular/forms';
 import { TeamsService } from '@core/services/teams.service';
@@ -67,6 +67,7 @@ export class TeamMembersComponent implements OnInit {
   ];
 
   team = input.required<TeamResponse>();
+  currentUserTeamAccessChanged = output<boolean>();
   loading = signal(true);
   loadError = signal<unknown>(null);
   members = signal<TeamMemberItem[]>([]);
@@ -85,6 +86,10 @@ export class TeamMembersComponent implements OnInit {
 
   private get teamName(): string {
     return this.team().name;
+  }
+
+  private isSignedInUser(user: string): boolean {
+    return this.auth.user()?.username === user;
   }
 
   ngOnInit(): void {
@@ -158,6 +163,7 @@ export class TeamMembersComponent implements OnInit {
     this.teams.updateMember(this.teamName, user, role).subscribe({
       next: () => {
         this.busy.set(null);
+        if (this.isSignedInUser(user)) this.currentUserTeamAccessChanged.emit(false);
         this.load();
       },
       error: (err: unknown) => {
@@ -169,7 +175,7 @@ export class TeamMembersComponent implements OnInit {
   }
 
   removeMember(user: string): void {
-    const self = this.auth.user()?.username === user;
+    const self = this.isSignedInUser(user);
     this.confirm
       .confirm({
         title: 'Remove member',
@@ -181,6 +187,7 @@ export class TeamMembersComponent implements OnInit {
       })
       .subscribe(() => {
         this.notify.success('Member removed');
+        if (self) this.currentUserTeamAccessChanged.emit(true);
         this.load();
       });
   }

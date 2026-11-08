@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, linkedSignal, signal } from '@angular/core';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -46,6 +46,7 @@ import { links } from '@shared/routing';
 export class TeamOverviewComponent implements OnInit {
   protected readonly links = links;
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private teams = inject(TeamsService);
   private crumbs = inject(BreadcrumbsService);
   private authService = inject(AuthService);
@@ -106,6 +107,17 @@ export class TeamOverviewComponent implements OnInit {
         action: () => this.teams.denyRequest(this.teamName, request.id),
       })
       .subscribe(() => this.decided('Request denied'));
+  }
+
+  navigateToTeamListOrReloadTeam(removed: boolean): void {
+    if (removed && !this.authService.user()?.superuser) {
+      void this.router.navigateByUrl(links.teams());
+      return;
+    }
+    this.teams.get(this.teamName).subscribe({
+      next: (team) => this.team.set(team),
+      error: () => void this.router.navigateByUrl(links.teams()),
+    });
   }
 
   private decided(done: string): void {

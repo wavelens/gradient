@@ -6,7 +6,7 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Observable, of, throwError } from 'rxjs';
@@ -98,6 +98,24 @@ describe('TeamOverviewComponent', () => {
     const root = render();
     expect(headings(root)).toContain('Projects and Caches');
     expect(root.textContent).toContain('Settings, Members and roles');
+  });
+
+  it('drops admin controls after an admin demotes themselves', () => {
+    const { fixture, root } = setup('admin');
+    expect(root.querySelector('a[href$="/settings"]')).not.toBeNull();
+    const teams = TestBed.inject(TeamsService) as unknown as { get: () => Observable<TeamResponse> };
+    teams.get = () => of({ ...team, role: 'member' });
+    fixture.componentInstance.navigateToTeamListOrReloadTeam(false);
+    fixture.detectChanges();
+    expect(root.querySelector('a[href$="/settings"]')).toBeNull();
+    expect(root.textContent).not.toContain('Approve');
+  });
+
+  it('returns to the team list after a member removes themselves', () => {
+    const { fixture } = setup('admin');
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    fixture.componentInstance.navigateToTeamListOrReloadTeam(true);
+    expect(String(navigate.mock.calls[0][0])).toBe('/teams');
   });
 
   it('shows a failed grants request as an error with retry, not as no projects', () => {

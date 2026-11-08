@@ -79,6 +79,27 @@ function setup(
 }
 
 describe('TeamMembersComponent', () => {
+  it('reports a change to the signed-in user own role or membership, and only that', () => {
+    const { fixture } = setup();
+    const changed = vi.fn();
+    fixture.componentInstance.currentUserTeamAccessChanged.subscribe(changed);
+    fixture.componentInstance.updateRole('bob', 'admin');
+    expect(changed).not.toHaveBeenCalled();
+    fixture.componentInstance.updateRole('alice', 'member');
+    expect(changed).toHaveBeenLastCalledWith(false);
+    fixture.componentInstance.removeMember('alice');
+    expect(changed).toHaveBeenLastCalledWith(true);
+  });
+
+  it('hides pending invitations from members who cannot manage the team', () => {
+    const invitation = { user: 'carol', role: 'member', expires_at: '2026-09-12T12:00:00' } as PendingInvitationItem;
+    const { fixture } = setup(undefined, false, undefined, [invitation]);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('carol');
+    fixture.componentRef.setInput('team', { ...team, role: 'member' });
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('carol');
+  });
+
   it('shows a failed member load with Try Again instead of No members', () => {
     const listMembers = vi.fn().mockReturnValueOnce(throwError(() => new Error('database is down'))).mockReturnValue(of(members));
     const { fixture } = setup(undefined, false, listMembers);

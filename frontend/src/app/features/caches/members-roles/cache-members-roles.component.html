@@ -62,7 +62,7 @@
     </gr-load-state>
   </gr-settings-section>
 
-  @if (invitations().length > 0 || invitationsLoadError()) {
+  @if (access().canEdit && (invitations().length > 0 || invitationsLoadError())) {
     <gr-settings-section title="Pending Invitations" [card]="false">
       <gr-load-state flat [error]="invitationsLoadError()" errorTitle="Failed to load invitations" (retry)="loadInvitations()">
       <gr-row-list>
