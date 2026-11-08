@@ -199,7 +199,6 @@ export class JobTimelineComponent implements OnDestroy {
           value: (i: number) => number;
           coord: (p: [number, number]) => [number, number];
           size: (p: [number, number]) => [number, number];
-          style: (s: Record<string, unknown>) => Record<string, unknown>;
         }) => {
           const idx = api.value(0);
           const start = api.coord([api.value(1), idx]);
@@ -209,7 +208,7 @@ export class JobTimelineComponent implements OnDestroy {
           return {
             type: 'rect',
             shape: { x: start[0], y: start[1] - height / 2, width, height },
-            style: api.style({ fill: t.palette[rows[params.dataIndex].depth % t.palette.length] }),
+            style: { fill: t.palette[rows[params.dataIndex].depth % t.palette.length] },
           };
         },
         encode: { x: [1, 2], y: 0 },
