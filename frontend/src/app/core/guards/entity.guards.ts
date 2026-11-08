@@ -6,13 +6,16 @@
 
 import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
-import { Observable, map } from 'rxjs';
+import { Observable, catchError, map, of } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
+import { TasksService } from '@core/services/tasks.service';
 import { WorkersService } from '@core/services/workers.service';
+import type { TaskAccessData } from '@core/resolvers/task-access.resolver';
 import { DeniedTarget, deniedPage, denyOnRefusal } from '@core/routing/access-denied';
 import { links } from '@shared/routing';
+import { canOpenTaskSettings } from '@shared/access/settings-access';
 
 export const execJobInTaskGuard: CanActivateFn = (route, state) => {
   const router = inject(Router);
@@ -71,3 +74,14 @@ export const workerInProjectGuard: CanActivateFn = (route, state) => {
 
 export const entryPointEvalQueryParameterMissingGuard: CanActivateFn = (route) =>
   !!route.queryParamMap.get('eval') || links.taskPage(route.paramMap.get('project') ?? '', route.paramMap.get('task') ?? '', 'metrics');
+
+export const taskSettingsAccessGuard: CanActivateFn = (route) => {
+  const project = route.paramMap.get('project') ?? '';
+  const task = route.paramMap.get('task') ?? '';
+  const resolved = route.parent?.data['taskAccess'] as TaskAccessData | undefined;
+  const details = resolved ? of(resolved.task) : inject(TasksService).getTask(project, task);
+  return details.pipe(
+    map((loaded) => canOpenTaskSettings(loaded) || links.task(project, task)),
+    catchError(() => of(true)),
+  );
+};
