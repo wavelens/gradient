@@ -18989,6 +18989,10 @@ components:
       properties:
         id:
           type: string
+        user_display_name:
+          type:
+          - string
+          - 'null'
         name:
           type: string
     MessageLevel:

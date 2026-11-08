@@ -1672,6 +1672,7 @@ export interface ManifestResult {
 
 export interface MemberItem {
   id: string;
+  user_display_name?: string | null;
   name: string;
 }
 

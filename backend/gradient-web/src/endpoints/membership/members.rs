@@ -30,6 +30,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MemberItem {
     pub id: String,
+    pub user_display_name: Option<String>,
     pub name: String,
 }
 
@@ -39,6 +40,7 @@ impl MemberItem {
             id: user
                 .map(|u| u.username.clone())
                 .unwrap_or_else(|| member.user.to_string()),
+            user_display_name: user.map(|u| u.name.clone()),
             name: roles
                 .get(&member.role)
                 .cloned()
