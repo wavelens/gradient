@@ -421,6 +421,7 @@ export class TaskTriggersComponent implements OnInit {
       next: () => {
         this.firingId.set(null);
         this.fireSuccessId.set(id);
+        this.loadTriggers();
         setTimeout(() => {
           if (this.fireSuccessId() === id) this.fireSuccessId.set(null);
         }, 3000);

@@ -283,6 +283,15 @@ describe('TaskTriggersComponent - write failures', () => {
     expect(fixture.componentInstance.firingId()).toBeNull();
   });
 
+  it('shows the new last fired time after Fire Now', () => {
+    const fixture = setup(writer);
+    failingService(fixture)['fireNow'] = () => of('ok');
+    list.mockReturnValue(of([{ ...trigger, last_fired_at: new Date(Date.now() - 1000).toISOString().replace('Z', '') }]));
+    fixture.componentInstance.fireNow('t1');
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).textContent).toMatch(/Last fired: \d+s ago/);
+  });
+
   it('reports a failed make default', () => {
     const fixture = setup(writer);
     failingService(fixture)['setDefault'] = () => throwError(() => refused);
