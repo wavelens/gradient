@@ -33,7 +33,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, accessDisabledReason, canOpenProjectSettings } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, accessDisabledReason, canOpenProjectSettings } from '@shared/access';
 import { fieldChecks, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { TaskResponse, ConcurrencyPolicy, PatchTaskRequest } from '@core/models';
@@ -75,6 +75,7 @@ interface TaskForm {
     LabelHelpComponent,
     SettingsSectionComponent,
     MessageBannerComponent,
+    ServerConfigurationManagedBannerComponent,
     RowComponent,
     RowListComponent,
     SubmitDirective,

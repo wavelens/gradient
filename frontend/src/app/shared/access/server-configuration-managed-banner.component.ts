@@ -21,5 +21,5 @@ import { AccessState } from '@core/models/access.model';
 })
 export class ServerConfigurationManagedBannerComponent {
   access = input.required<AccessState | null | undefined>();
-  kind = input.required<'project' | 'cache' | 'team'>();
+  kind = input.required<'project' | 'cache' | 'team' | 'task'>();
 }

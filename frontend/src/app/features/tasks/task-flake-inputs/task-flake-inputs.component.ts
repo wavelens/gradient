@@ -20,14 +20,13 @@ import {
   LoadStateComponent,
   MessageService,
   PageLayoutComponent,
-  MessageBannerComponent,
 } from '@gradient/ui/ui';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { fieldChecks } from '@shared/forms';
-import { WritableDirective, ManagedDisableDirective, AccessService, requestIfProjectMember } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { FlakeInputOverrideOut, CreateFlakeInputOverrideRequest } from '@core/models';
 
@@ -51,7 +50,7 @@ const DEFAULT_FORM: FlakeInputFormState = {
   selector: 'app-task-flake-inputs',
   standalone: true,
   imports: [
-    MessageBannerComponent,
+    ServerConfigurationManagedBannerComponent,
     LabelHelpComponent,
     CommonModule,
     RouterModule,
