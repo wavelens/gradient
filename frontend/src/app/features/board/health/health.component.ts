@@ -17,6 +17,24 @@ import { formatBytes, formatDuration, ServerTimestampToLocalDateTimePipe } from 
 import { BoardHealth, AdminTaskDto } from '@core/models';
 import { links } from '@shared/routing';
 
+const TASK_KIND_LABELS: Record<string, string> = { deep_gc: 'Deep GC' };
+const DEEP_GC_PASS_LABELS: Record<string, string> = {
+  blobs: 'Blobs',
+  'exec-outputs': 'Exec output',
+  logs: 'Logs',
+  nars: 'NARs',
+  partials: 'Partial uploads',
+};
+
+export function formatMaintenanceTaskKindLabel(kind: string): string {
+  return TASK_KIND_LABELS[kind] ?? kind.replace(/_/g, ' ');
+}
+
+export function formatDeepGcCheckpointLabel(checkpoint: string): string {
+  const [pass, shard] = checkpoint.split('/');
+  return [DEEP_GC_PASS_LABELS[pass] ?? pass, shard].filter(Boolean).join(' ');
+}
+
 @Component({
   selector: 'app-board-health',
   standalone: true,
@@ -97,9 +115,9 @@ import { links } from '@shared/routing';
         <tbody>
           @for (t of tasks(); track t.id) {
             <tr>
-              <td>{{ t.kind }}</td>
+              <td>{{ taskKindLabel(t.kind) }}</td>
               <td>{{ t.status }}</td>
-              <td class="muted">{{ t.checkpoint ?? '-' }}</td>
+              <td class="muted">{{ t.checkpoint ? checkpointLabel(t.checkpoint) : '-' }}</td>
               <td>{{ t.created_at | serverDate: 'short' }}</td>
               <td>{{ t.finished_at ? (t.finished_at | serverDate: 'short') : '-' }}</td>
               <td [class.bad]="!!t.error">{{ t.error ?? '' }}</td>
@@ -132,6 +150,8 @@ export class BoardHealthComponent implements OnInit {
     (this.health()?.supervised ?? []).filter((l) => l.restarts > 0 || l.pass_errors > 0 || l.pass_timeouts > 0 || !!l.last_error));
 
   readonly bytes = formatBytes;
+  protected readonly taskKindLabel = formatMaintenanceTaskKindLabel;
+  protected readonly checkpointLabel = formatDeepGcCheckpointLabel;
 
   seconds(value: number): string {
     return formatDuration(value * 1000);

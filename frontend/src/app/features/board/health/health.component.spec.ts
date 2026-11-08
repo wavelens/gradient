@@ -135,12 +135,12 @@ describe('BoardHealthComponent', () => {
       expect(fixture.nativeElement.textContent).not.toContain('HTTP routes');
     });
 
-    it('renders the deep_gc task row', () => {
-      expect(fixture.nativeElement.textContent).toContain('deep_gc');
+    it('Name the Deep GC task row in words', () => {
+      expect(fixture.nativeElement.textContent).toContain('Deep GC');
     });
 
     it('shows where a running round resumes', () => {
-      expect(fixture.nativeElement.textContent).toContain('nars/0a');
+      expect(fixture.nativeElement.textContent).toContain('NARs 0a');
     });
 
     it('hides the "Set up GitHub App" link', () => {
