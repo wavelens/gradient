@@ -69,6 +69,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
   @ViewChild('svgEl') svgRef!: ElementRef<SVGSVGElement>;
   @ViewChild('graphEl') graphRef!: ElementRef<SVGGElement>;
+  @ViewChild('legendEl') colourLegendBoxRef?: ElementRef<HTMLElement>;
 
   loading = signal(true);
   errorMsg = signal<string | null>(null);
@@ -434,13 +435,15 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       if (n.y < minY) minY = n.y; if (n.y + CARD_H > maxY) maxY = n.y + CARD_H;
     }
 
+    const legendTop = this.colourLegendBoxRef?.nativeElement.getBoundingClientRect().top ?? rect.bottom;
+    const visibleHeight = Math.max(rect.height / 2, Math.min(rect.height, legendTop - rect.top));
     const pad = 60;
     const gw = maxX - minX + pad * 2;
     const gh = maxY - minY + pad * 2;
-    const s = Math.min(rect.width / gw, rect.height / gh, 1.6);
+    const s = Math.min(rect.width / gw, visibleHeight / gh, 1.6);
     this.scale.set(s);
     this.tx.set(rect.width / 2 - ((minX + maxX) / 2) * s);
-    this.ty.set(rect.height / 2 - ((minY + maxY) / 2) * s);
+    this.ty.set(visibleHeight / 2 - ((minY + maxY) / 2) * s);
   }
 
   // ── Interaction ───────────────────────────────────────────────────────────

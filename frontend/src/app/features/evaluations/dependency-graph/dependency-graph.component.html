@@ -71,7 +71,7 @@
     </svg>
 
     <!-- Legend -->
-    <div class="legend">
+    <div #legendEl class="legend">
       @for (entry of legend; track entry.color) {
         <div class="legend-item">
           <span class="dot" [style.background]="entry.color"></span>{{ entry.label }}
