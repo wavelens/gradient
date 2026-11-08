@@ -120,7 +120,7 @@ describe('TeamMembersComponent', () => {
     expect(text).toContain('alice');
     expect(text).toContain('bob');
     expect(text).toContain('Group');
-    expect(text).toContain('State');
+    expect(text).toContain('Server settings');
   });
 
   it('names a source all members share once and skips a name equal to the username', () => {
@@ -130,7 +130,7 @@ describe('TeamMembersComponent', () => {
     ];
     const { fixture } = setup(undefined, true, vi.fn().mockReturnValue(of(declared)));
     const element = fixture.nativeElement as HTMLElement;
-    expect(element.textContent).toContain('2 members · all declared in the state file');
+    expect(element.textContent).toContain('2 members · all set in the server configuration');
     expect(Array.from(element.querySelectorAll('gr-row gr-badge')).map((b) => b.textContent?.trim())).toEqual(['admin', 'member']);
     expect(element.textContent?.match(/admin/g)).toHaveLength(2);
   });

@@ -83,12 +83,12 @@ export class TeamMembersComponent implements OnInit {
   addAttempted = signal(false);
   newMember: { user: string; role: TeamRole } = { user: '', role: 'member' };
 
-  readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'State', group: 'Group' };
+  readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'Server settings', group: 'Group' };
 
   canEdit = computed(() => canManageTeam(this.team(), this.auth.user()));
   readonly allMembersPhraseByMemberSource: Record<TeamMemberSource, string | null> = {
     api: null,
-    state: 'all declared in the state file',
+    state: 'all set in the server configuration',
     group: 'all added through a group',
   };
   memberSourceSharedByAllMembers = computed<TeamMemberSource | null>(() => {
