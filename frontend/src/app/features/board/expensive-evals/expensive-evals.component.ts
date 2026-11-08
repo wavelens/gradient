@@ -48,7 +48,7 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
                 /
                 <a [routerLink]="links.task(r.project_name, r.task_name)">{{ r.task_display_name || r.task_name }}</a>
               </td>
-              <td class="mono">{{ r.name }}</td>
+              <td class="mono"><a class="evaluation-link" [routerLink]="links.evaluationLog(r.project_name, r.evaluation)">{{ r.name }}</a></td>
               <td>{{ quantity(r.value, r.unit) }}</td>
               <td class="mono">{{ r.worker_name ?? (r.worker || '-') }}</td>
             </tr>

@@ -80,6 +80,10 @@ describe('BoardExpensiveEvalsComponent', () => {
     expect(links.map((a) => a.getAttribute('href'))).toEqual(['/project/acme', '/project/acme/task/nixos']);
   });
 
+  it('opens the log of each evaluation, so rows for the same task stay apart', () => {
+    expect(rows().map((r) => r.cells[2].querySelector('a')?.getAttribute('href'))).toEqual(['/project/acme/log/e1', '/project/infra/log/e2']);
+  });
+
   it('falls back to the names when no display name is set', () => {
     const links = Array.from(rows()[1].cells[1].querySelectorAll('a'));
     expect(links.map((a) => a.textContent?.trim())).toEqual(['infra', 'ci']);
