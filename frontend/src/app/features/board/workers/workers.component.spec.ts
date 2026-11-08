@@ -8,7 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { Observable, of, throwError } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
-import type { WorkerLoad, WorkerLoadAverage } from '@core/models';
+import type { BoardWorker, WorkerLoad, WorkerLoadAverage } from '@core/models';
 import { BoardWorkersComponent } from './workers.component';
 
 const bucket = (key: string, in_flight: number, capacity: number) => ({ key, in_flight, capacity, workers: 1 });
@@ -24,7 +24,7 @@ const AVERAGE: WorkerLoadAverage = {
   by_architecture: [bucket('x86_64-linux', 1, 4), bucket('aarch64-linux', 0.5, 2)],
 };
 
-function setup(average: () => Observable<WorkerLoadAverage> = () => of(AVERAGE)) {
+function setup(average: () => Observable<WorkerLoadAverage> = () => of(AVERAGE), workers: BoardWorker[] = []) {
   const getWorkerLoadAverage = vi.fn((_hours: number) => average());
   TestBed.configureTestingModule({
     imports: [BoardWorkersComponent],
@@ -33,7 +33,7 @@ function setup(average: () => Observable<WorkerLoadAverage> = () => of(AVERAGE))
       {
         provide: BoardService,
         useValue: {
-          getWorkers: () => of([]),
+          getWorkers: () => of(workers),
           getFleet: () => of([]),
           getWorkerLoad: () => of(NOW),
           getWorkerLoadAverage,
@@ -78,5 +78,19 @@ describe('BoardWorkersComponent - load range', () => {
     expect(getWorkerLoadAverage).toHaveBeenCalledWith(168);
     expect(cmp.capLoad().series[0].data).toEqual([25, 0, 50]);
     expect(cmp.archLoad()).toEqual({ cats: ['x86_64-linux', 'aarch64-linux'], series: [{ name: 'busy %', data: [25, 25] }] });
+  });
+});
+
+describe('BoardWorkersComponent - exec column', () => {
+  const WORKER: BoardWorker = {
+    id: 'w1', name: 'Dev Worker', projects: [], draining: false, assigned_jobs: 0, max_concurrent_builds: 4,
+    eval: true, network: true, build: true, architectures: ['x86_64-linux'],
+    exec: { labels: ['w1'], devices: [{ name: 'gpu', total: 0, free: 0 }, { name: 'fpga', total: 2, free: 1 }] },
+  };
+
+  it('draws a usage bar only for a device class the worker has', () => {
+    const { fixture } = setup(undefined, [WORKER]);
+    const devices = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('td.exec .device'));
+    expect(devices.map((d) => !!d.querySelector('gr-segmented-bar'))).toEqual([false, true]);
   });
 });

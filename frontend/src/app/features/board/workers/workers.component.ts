@@ -58,7 +58,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
                   </span>
                   @for (d of exec.devices; track d.name) {
                     <span class="device">
-                      <gr-segmented-bar [segments]="heldSegments(d)" />
+                      @if (d.total) { <gr-segmented-bar [segments]="heldSegments(d)" /> }
                       <span class="mono">{{ d.name }} {{ d.free }}/{{ d.total }} free</span>
                     </span>
                   }
