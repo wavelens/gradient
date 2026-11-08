@@ -18,12 +18,16 @@ export function requestIfProjectMember<T>(projectOrTask: ProjectMemberRoleAndPer
   return isViewerProjectMember(projectOrTask) ? request() : throwError(() => createNoAccessLoadStateError('project', 'members'));
 }
 
+export function isViewerCacheMember(cache: Pick<CacheResponse, 'permissions'> | null | undefined): boolean {
+  return (cache?.permissions.length ?? 0) > 0;
+}
+
 export function requestIfCacheMember<T>(
   cache: Pick<CacheResponse, 'permissions'> | null | undefined,
   request: () => Observable<T>,
   permission?: CachePermission,
 ): Observable<T> {
-  if (!cache?.permissions.length) return throwError(() => createNoAccessLoadStateError('cache', 'members'));
+  if (!cache || !isViewerCacheMember(cache)) return throwError(() => createNoAccessLoadStateError('cache', 'members'));
   if (permission && !cache.permissions.includes(permission)) {
     return throwError(() => createMissingPermissionLoadStateError(permission, 'cache'));
   }

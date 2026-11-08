@@ -27,7 +27,7 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, AccessService, isViewerCacheMember } from '@shared/access';
 import { injectCacheAccess, injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { CacheResponse, CacheSubscribersResponse, PatchCacheRequest } from '@core/models';
@@ -114,6 +114,9 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   private resolved = injectCacheAccessData();
   access = injectCacheAccess();
   deleteAccess = injectCacheAccessTo('deleteCache');
+  manageCacheSubscriptionsAccess = injectCacheAccessTo('manageCacheSubscriptions');
+  webhooksAccess = injectCacheAccessTo('manageCacheWebhooks');
+  viewerIsCacheMember = computed(() => isViewerCacheMember(this.resolved()?.cache));
 
   loading = signal(true);
   loadError = signal<unknown>(null);

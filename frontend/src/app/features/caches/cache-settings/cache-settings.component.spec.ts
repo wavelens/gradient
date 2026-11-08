@@ -15,6 +15,7 @@ import { CacheSettingsComponent, buildCacheDeleteConsequenceText } from './cache
 import { CachesService } from '@core/services/caches.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { AccessState } from '@core/models/access.model';
+import type { CachePermission } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 
@@ -37,11 +38,13 @@ function cacheFor(access: AccessState) {
   };
 }
 
-function activatedRouteStub(access: AccessState): ActivatedRoute {
+function activatedRouteStub(access: AccessState, permissions?: CachePermission[]): ActivatedRoute {
+  const data = cacheAccessData(access, cacheFor(access));
+  if (permissions) data.cacheAccess.cache.permissions = permissions;
   return {
     snapshot: { paramMap: convertToParamMap({ cache: 'demo' }) },
     data: of({}),
-    parent: { data: of(cacheAccessData(access, cacheFor(access))) },
+    parent: { data: of(data) },
   } as unknown as ActivatedRoute;
 }
 
@@ -52,7 +55,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function setup(access: AccessState): ComponentFixture<CacheSettingsComponent> {
+function setup(access: AccessState, permissions?: CachePermission[]): ComponentFixture<CacheSettingsComponent> {
   notify.success.mockClear();
   notify.failure.mockClear();
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
@@ -62,7 +65,7 @@ function setup(access: AccessState): ComponentFixture<CacheSettingsComponent> {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
+      { provide: ActivatedRoute, useValue: activatedRouteStub(access, permissions) },
       { provide: CachesService, useValue: { getCache: vi.fn(() => of(cacheFor(access))), getSubscribers: () => of({ projects: [], hidden: 0 }) } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
@@ -110,13 +113,30 @@ describe('CacheSettingsComponent - access gating', () => {
     expect(toggle!.disabled).toBe(false);
   });
 
+  function linkTargets(fixture: ComponentFixture<CacheSettingsComponent>): (string | null)[] {
+    return (Array.from(fixture.nativeElement.querySelectorAll('a')) as HTMLAnchorElement[]).map((el) => el.getAttribute('href'));
+  }
+
   it('always reaches upstream caches and members, even when state-managed', () => {
-    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
-    const hrefs = (Array.from(fixture.nativeElement.querySelectorAll('a')) as HTMLAnchorElement[]).map(
-      (el) => el.getAttribute('href'),
-    );
+    const hrefs = linkTargets(setup({ managed: true, canEdit: true, canTrigger: true }));
     expect(hrefs).toContain('/caches/demo/upstream-caches');
     expect(hrefs).toContain('/caches/demo/members-roles');
+    expect(hrefs).toContain('/caches/demo/subscriptions');
+    expect(hrefs).toContain('/caches/demo/webhooks');
+  });
+
+  it('links a read-only member to members but not to subscriptions or event notifications', () => {
+    const hrefs = linkTargets(setup({ managed: false, canEdit: false, canTrigger: false }));
+    expect(hrefs).toContain('/caches/demo/members-roles');
+    expect(hrefs).not.toContain('/caches/demo/subscriptions');
+    expect(hrefs).not.toContain('/caches/demo/webhooks');
+  });
+
+  it('links a user outside the cache to none of the member-only pages', () => {
+    const hrefs = linkTargets(setup({ managed: false, canEdit: false, canTrigger: false }, []));
+    expect(hrefs).toContain('/caches/demo/upstream-caches');
+    expect(hrefs).not.toContain('/caches/demo/members-roles');
+    expect(hrefs).not.toContain('/caches/demo/subscriptions');
   });
 });
 
