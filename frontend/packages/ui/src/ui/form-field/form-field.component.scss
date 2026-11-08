@@ -14,11 +14,17 @@
   display: block;
   margin-bottom: $space-block;
 
-  label {
+  &__label {
     display: flex;
     align-items: center;
     gap: $spacing-xs;
     margin-bottom: $space-pair;
+  }
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
     font-size: $font-size-md;
     font-weight: 600;
     color: var(--gr-text-primary);

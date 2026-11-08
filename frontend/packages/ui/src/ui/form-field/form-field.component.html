@@ -5,13 +5,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 <div class="form-field" [class.has-error]="showError()">
   @if (label()) {
-    <label [attr.for]="for() ?? null">
-      {{ label() }}
+    <div class="form-field__label">
+      <label [attr.for]="for() ?? null">
+        {{ label() }}
+        @if (required()) {
+          <span class="required" aria-hidden="true">*</span>
+        }
+      </label>
       <ng-content select="[slot=label]"></ng-content>
-      @if (required()) {
-        <span class="required" aria-hidden="true">*</span>
-      }
-    </label>
+    </div>
   }
   <ng-content></ng-content>
   @if (showError()) {

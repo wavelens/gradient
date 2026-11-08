@@ -42,10 +42,12 @@ describe('gr-form-field', () => {
     expect(root.querySelector('.required')).not.toBeNull();
   });
 
-  it('projects extra label content inside the label', async () => {
-    const label = ((await render(TemplateDrivenHost)).nativeElement as HTMLElement).querySelector('label');
-    expect(label?.textContent).toContain('Name');
-    expect(label?.querySelector('.help')).not.toBeNull();
+  it('places extra label content beside the label, out of the field name', async () => {
+    const root = (await render(TemplateDrivenHost)).nativeElement as HTMLElement;
+    const label = root.querySelector('label');
+    expect(label?.textContent?.trim()).toBe('Name');
+    expect(label?.querySelector('.help')).toBeNull();
+    expect(root.querySelector('.form-field__label .help')).not.toBeNull();
   });
 
   it('shows the hint while valid', async () => {
