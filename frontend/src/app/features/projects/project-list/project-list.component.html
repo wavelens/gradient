@@ -34,10 +34,8 @@
             [link]="links.project(project.name)"
           >
             <div slot="meta">
-              @if (project.role) {
-                <gr-badge [severity]="project.role === 'Admin' ? 'info' : 'neutral'">
-                  {{ project.role }}
-                </gr-badge>
+              @if (project.role && project.role !== 'Admin') {
+                <gr-badge>{{ project.role }}</gr-badge>
               }
               @if (project.public) {
                 <gr-badge severity="info">Public</gr-badge>

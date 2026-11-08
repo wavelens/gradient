@@ -39,6 +39,19 @@ describe('ProjectListComponent', () => {
     expect(render(() => of(EMPTY_PAGE)).root.textContent).toContain('No projects yet');
   });
 
+  it('mark only projects with a role below Admin', () => {
+    const page = {
+      items: [
+        { id: 'p1', name: 'own', display_name: 'Own', role: 'Admin' },
+        { id: 'p2', name: 'shared', display_name: 'Shared', role: 'View' },
+      ],
+      total: 2,
+      page: 1,
+    };
+    const { root } = render(() => of(page));
+    expect(Array.from(root.querySelectorAll('gr-badge')).map((b) => b.textContent?.trim())).toEqual(['View']);
+  });
+
   it('shows a failed load as an error, never as "No projects yet"', () => {
     const { root } = render(() => throwError(() => ({ status: 500, message: 'database is down' })));
     expect(root.textContent).toContain('Failed to load projects');
