@@ -18,7 +18,7 @@ import { TeamsService } from '@core/services/teams.service';
 import { EventsService } from '@core/services/events.service';
 import { NotifyService } from '@core/services/notify.service';
 import { AuthService } from '@core/services/auth.service';
-import type { CatalogEntry, WebhookResponse } from '@core/models';
+import type { CatalogEntry, DeliveryListItem_WebhookDeliveryId, WebhookResponse } from '@core/models';
 import { webhooksBase } from '@core/models/webhook.model';
 import { EVERY_CACHE_PERMISSION, EVERY_PERMISSION } from '@core/resolvers/access-route.testing';
 
@@ -34,12 +34,22 @@ const hook: WebhookResponse = {
   created_at: '2026-09-26T12:00:00',
   updated_at: '2026-09-26T12:00:00',
 };
+const newestDelivery: DeliveryListItem_WebhookDeliveryId = {
+  id: 'd1',
+  event: 'build.failed',
+  success: true,
+  response_status: 200,
+  error_message: null,
+  duration_ms: 80,
+  delivered_at: '2026-09-26T12:05:00',
+};
 
 function setup(
   data: Record<string, unknown>,
   params: Record<string, string>,
   list: () => Observable<WebhookResponse[]> = () => of([hook]),
   catalog: CatalogEntry[] = [],
+  deliveries: () => Observable<DeliveryListItem_WebhookDeliveryId[]> = () => of([]),
 ) {
   const service = {
     list: vi.fn(list),
@@ -48,7 +58,8 @@ function setup(
     delete: vi.fn(() => of({ deleted: true })),
     test: vi.fn(),
     rotateSecret: vi.fn(() => of({ secret: 'whs_new' })),
-    deliveries: vi.fn(() => of([])),
+    deliveries: vi.fn(deliveries),
+    delivery: vi.fn(),
   };
   const notify = { success: vi.fn(), failure: vi.fn() };
   const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
@@ -319,11 +330,30 @@ describe('WebhooksComponent', () => {
     TestBed.inject(ApplicationRef).tick();
     expect(service.deliveries).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1', 50, 0);
     expect(document.body.textContent).toContain('Failed to load deliveries');
-    expect(document.body.textContent).not.toContain('No deliveries yet');
+    expect(document.querySelector('.gr-dialog')?.textContent).not.toContain('No deliveries yet');
 
     document.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     TestBed.inject(ApplicationRef).tick();
-    expect(service.deliveries).toHaveBeenCalledTimes(2);
-    expect(document.body.textContent).toContain('No deliveries yet');
+    expect(service.deliveries).toHaveBeenLastCalledWith({ kind: 'project', name: 'p' }, 'w1', 50, 0);
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('No deliveries yet');
+  });
+
+  it('marks an active webhook as failing with the reason of its newest delivery', () => {
+    const { root, service } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([hook]), [], () =>
+      of([{ ...newestDelivery, success: false, response_status: null, error_message: 'send HTTP request: connection refused' }]),
+    );
+    expect(service.deliveries).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1', 1, 0);
+    expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe('Failing');
+    expect(root.querySelector('.newest-delivery')?.textContent).toContain('Connection refused');
+  });
+
+  it.each([
+    { state: 'delivered', webhook: hook, newest: [newestDelivery], chip: 'Active', line: 'Last delivery' },
+    { state: 'never delivered', webhook: hook, newest: [], chip: 'Active', line: 'No deliveries yet' },
+    { state: 'inactive', webhook: { ...hook, active: false }, newest: [{ ...newestDelivery, success: false }], chip: 'Inactive', line: 'Last delivery' },
+  ])('shows the $state webhook as $chip', ({ webhook, newest, chip, line }) => {
+    const { root } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([webhook]), [], () => of(newest));
+    expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe(chip);
+    expect(root.querySelector('.webhook-meta')?.textContent).toContain(line);
   });
 });

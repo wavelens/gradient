@@ -37,6 +37,10 @@
   margin-top: $spacing-xs;
 }
 
+.newest-delivery.is-failed {
+  color: var(--gr-status-danger-text);
+}
+
 .webhook-meta {
   font-size: $font-size-sm;
 }

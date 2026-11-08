@@ -28,8 +28,17 @@
             <div class="webhook-name">{{ hook.name }}</div>
             <div class="webhook-meta text-secondary">
               <code>{{ hook.url }}</code>
-              <gr-badge [severity]="hook.active ? 'success' : 'warning'">{{ hook.active ? 'Active' : 'Inactive' }}</gr-badge>
-              <span>Last fired: {{ hook.last_fired_at | relativeTime }}</span>
+              @let chip = getWebhookCardStatusChip(hook);
+              @let newest = newestDeliveryByWebhookId().get(hook.id);
+              <gr-badge [severity]="chip.severity">{{ chip.label }}</gr-badge>
+              @if (newest) {
+                @let failureReason = newest.success ? null : getDeliveryResultReason(newest);
+                <span class="newest-delivery" [class.is-failed]="!newest.success" [title]="newest.error_message ?? ''">
+                  Last delivery {{ newest.delivered_at | relativeTime }}{{ failureReason ? ': ' + failureReason : '' }}
+                </span>
+              } @else if (newest === null) {
+                <span>No deliveries yet</span>
+              }
               @if (testResult(); as result) {
                 @if (result.id === hook.id && result.delivery; as d) {
                   <gr-badge [severity]="d.success ? 'success' : 'danger'">

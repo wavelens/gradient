@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { finalize } from 'rxjs';
+import { EMPTY, catchError, finalize } from 'rxjs';
 import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo, eventNameToReadableText, eventNamePrefixesByNotificationScope } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
@@ -21,6 +21,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import {
   BadgeComponent,
+  type BadgeSeverity,
   ButtonComponent,
   CheckboxComponent,
   CopyFieldComponent,
@@ -36,7 +37,7 @@ import {
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { RelativeTimePipe } from '@shared/text';
-import { OutgoingWebhookDeliveryListDialog } from '@shared/outgoing-deliveries';
+import { OutgoingWebhookDeliveryListDialog, getDeliveryResultReason } from '@shared/outgoing-deliveries';
 import { fieldChecks } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 import { links } from '@shared/routing';
@@ -113,7 +114,10 @@ export class WebhooksComponent implements OnInit {
     };
   });
 
+  newestDeliveryByWebhookId = signal<ReadonlyMap<string, DeliveryListItem_WebhookDeliveryId | null>>(new Map());
+
   eventNameToReadableText = eventNameToReadableText;
+  getDeliveryResultReason = getDeliveryResultReason;
 
   ngOnInit(): void {
     const { data, paramMap } = this.route.snapshot;
@@ -179,12 +183,29 @@ export class WebhooksComponent implements OnInit {
       next: (list) => {
         this.webhooks.set(list);
         this.loading.set(false);
+        this.loadNewestDeliveryForEachWebhook(list);
       },
       error: (error: unknown) => {
         this.loadError.set(error);
         this.loading.set(false);
       },
     });
+  }
+
+  private loadNewestDeliveryForEachWebhook(hooks: WebhookResponse[]): void {
+    for (const hook of hooks) {
+      this.service
+        .deliveries(this.scope, hook.id, 1, 0)
+        .pipe(catchError(() => EMPTY))
+        .subscribe((rows) => this.newestDeliveryByWebhookId.update((newest) => new Map(newest).set(hook.id, rows[0] ?? null)));
+    }
+  }
+
+  getWebhookCardStatusChip(hook: WebhookResponse): { label: string; severity: BadgeSeverity } {
+    if (!hook.active) return { label: 'Inactive', severity: 'warning' };
+    return this.newestDeliveryByWebhookId().get(hook.id)?.success === false
+      ? { label: 'Failing', severity: 'danger' }
+      : { label: 'Active', severity: 'success' };
   }
 
   startCreate(): void {
