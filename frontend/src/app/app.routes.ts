@@ -15,6 +15,7 @@ import { visibleProjectGuard } from '@core/guards/visible-project.guard';
 import {
   buildOrEvaluationAccessGuard,
   clusterJobBoardGuard,
+  entryPointEvalQueryParameterMissingGuard,
   execJobInTaskGuard,
   jobAssignedOrPendingGuard,
   workerInProjectGuard,
@@ -119,6 +120,7 @@ export const routes: Routes = [
           {
             path: 'entry-point-metrics',
             title: 'Entry Point Metrics',
+            canActivate: [entryPointEvalQueryParameterMissingGuard],
             loadComponent: () =>
               import('./features/tasks/entry-point-metrics/entry-point-metrics.component').then(
                 (m) => m.EntryPointMetricsComponent,

@@ -68,3 +68,6 @@ export const workerInProjectGuard: CanActivateFn = (route, state) => {
     denyOnRefusal(target, state.url),
   );
 };
+
+export const entryPointEvalQueryParameterMissingGuard: CanActivateFn = (route) =>
+  !!route.queryParamMap.get('eval') || links.taskPage(route.paramMap.get('project') ?? '', route.paramMap.get('task') ?? '', 'metrics');

@@ -11,6 +11,7 @@ import {
   RedirectCommand,
   Router,
   RouterStateSnapshot,
+  UrlTree,
   convertToParamMap,
   provideRouter,
 } from '@angular/router';
@@ -33,6 +34,7 @@ import { adminGuard } from './admin.guard';
 import {
   buildOrEvaluationAccessGuard,
   clusterJobBoardGuard,
+  entryPointEvalQueryParameterMissingGuard,
   execJobInTaskGuard,
   jobAssignedOrPendingGuard,
   workerInProjectGuard,
@@ -208,5 +210,25 @@ describe('not-found or no-access page', () => {
   it('lets a superuser into admin pages', async () => {
     configure({}, { superuser: true });
     expect(await outcome(adminGuard, {})).toBe(true);
+  });
+});
+
+describe('entryPointEvalQueryParameterMissingGuard', () => {
+  const run = (query: Record<string, string>) =>
+    TestBed.runInInjectionContext(() =>
+      entryPointEvalQueryParameterMissingGuard(
+        { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }), queryParamMap: convertToParamMap(query) } as ActivatedRouteSnapshot,
+        { url: URL } as RouterStateSnapshot,
+      ),
+    );
+
+  it('opens the page for a named entry point', () => {
+    configure({});
+    expect(run({ eval: 'packages.x86_64-linux.hello' })).toBe(true);
+  });
+
+  it('sends a link without an entry point to the task metrics', () => {
+    configure({});
+    expect(TestBed.inject(Router).serializeUrl(run({}) as UrlTree)).toBe('/project/acme/task/demo/metrics');
   });
 });
