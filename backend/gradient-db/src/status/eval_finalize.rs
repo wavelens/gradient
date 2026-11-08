@@ -6,6 +6,7 @@
 
 use super::evaluation_status::update_evaluation_status;
 use crate::DbContext;
+use crate::exec_jobs::ExecJobFailureAndAbortFlags;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
@@ -51,20 +52,27 @@ pub async fn check_evaluation_done(
         return Ok(());
     }
 
-    let any_failed = crate::graph::reachability::eval_any_shared_build_failed(db, evaluation_id)
-        .await?
-        || crate::exec_jobs::any_exec_job_failed(db, evaluation_id).await?;
+    let shared_build_failed =
+        crate::graph::reachability::eval_any_shared_build_failed(db, evaluation_id).await?;
+    let exec_jobs = if shared_build_failed {
+        ExecJobFailureAndAbortFlags::default()
+    } else {
+        crate::exec_jobs::read_exec_jobs_failure_and_abort_flags(db, evaluation_id).await?
+    };
 
     let eval_errors = eval_error_count(ctx, evaluation_id).await?;
-    let target = if !any_failed && eval_errors == 0 {
-        EvaluationStatus::Completed
-    } else {
+    let target = if shared_build_failed || exec_jobs.failed || eval_errors > 0 {
         EvaluationStatus::Failed
+    } else if exec_jobs.aborted {
+        EvaluationStatus::Aborted
+    } else {
+        EvaluationStatus::Completed
     };
     info!(
         %evaluation_id,
         ?target,
-        any_failed,
+        shared_build_failed,
+        ?exec_jobs,
         eval_errors,
         "evaluation finished"
     );
@@ -150,6 +158,64 @@ mod tests {
         )])]
     }
 
+    fn exec_job_flags(failed: bool, aborted: bool) -> Vec<BTreeMap<String, Value>> {
+        vec![BTreeMap::from([
+            ("failed".to_owned(), Value::Bool(Some(failed))),
+            ("aborted".to_owned(), Value::Bool(Some(aborted))),
+        ])]
+    }
+
+    async fn settled_status(exec_jobs: Vec<BTreeMap<String, Value>>) -> String {
+        let eval = building();
+        let db = mock_db()
+            .append_query_results([counters(0, 0)])
+            .append_query_results([flag("blocked", false)])
+            .append_query_results([vec![eval.clone()]])
+            .append_query_results([flag("open", false)])
+            .append_query_results([flag("open", false)])
+            .append_query_results([flag("failed", false)])
+            .append_query_results([exec_jobs])
+            .append_query_results([Vec::<MEvaluationMessage>::new()])
+            .append_exec_results(vec![exec(1); 3])
+            .append_query_results([vec![eval.clone()]])
+            .append_query_results([crate::test_ctx::inserted_phase_event()])
+            .into_connection();
+
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        check_evaluation_done(&ctx, eval.id).await.unwrap();
+        crate::test_ctx::settle(ctx).await;
+
+        let log = pool.into_transaction_log();
+        let settled = log
+            .iter()
+            .flat_map(|t| t.statements())
+            .find(|s| s.sql.starts_with(r#"UPDATE "evaluation""#))
+            .expect("the evaluation settles");
+        format!("{:?}", settled.values)
+    }
+
+    fn status_value(status: EvaluationStatus) -> String {
+        format!("{:?}", Value::Int(Some(status as i32)))
+    }
+
+    #[tokio::test]
+    async fn an_aborted_exec_job_aborts_the_evaluation() {
+        let values = settled_status(exec_job_flags(false, true)).await;
+        assert!(
+            values.contains(&status_value(EvaluationStatus::Aborted)),
+            "{values}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_exec_job_outranks_an_aborted_one() {
+        let values = settled_status(exec_job_flags(true, true)).await;
+        assert!(
+            values.contains(&status_value(EvaluationStatus::Failed)),
+            "{values}"
+        );
+    }
+
     fn exec(n: u64) -> MockExecResult {
         MockExecResult {
             last_insert_id: 0,
@@ -175,7 +241,7 @@ mod tests {
             .append_query_results([flag("open", false)])
             .append_query_results([flag("open", false)])
             .append_query_results([flag("failed", false)])
-            .append_query_results([flag("failed", false)])
+            .append_query_results([exec_job_flags(false, false)])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
             .append_exec_results(vec![
                 MockExecResult {

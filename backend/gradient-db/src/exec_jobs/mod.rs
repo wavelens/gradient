@@ -51,19 +51,28 @@ static HAS_OPEN_EXEC_JOBS_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-static ANY_EXEC_JOB_FAILED_SQL: LazyLock<String> = LazyLock::new(|| {
+static SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT EXISTS (SELECT 1 FROM exec_job WHERE evaluation = $1 AND status IN ({failed})) \
-         AS failed",
-        failed = exec_in(&[ExecJobStatus::Failed, ExecJobStatus::Aborted]),
+         AS failed, \
+         EXISTS (SELECT 1 FROM exec_job WHERE evaluation = $1 AND status IN ({aborted})) \
+         AS aborted",
+        failed = exec_in(&[ExecJobStatus::Failed]),
+        aborted = exec_in(&[ExecJobStatus::Aborted]),
     )
 });
 
 crate::sql_lazy! {
     HAS_OPEN_EXEC_JOBS = || HAS_OPEN_EXEC_JOBS_SQL.as_str(),
         params = [EvaluationId];
-    ANY_EXEC_JOB_FAILED = || ANY_EXEC_JOB_FAILED_SQL.as_str(),
+    SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS = || SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS_SQL.as_str(),
         params = [EvaluationId];
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExecJobFailureAndAbortFlags {
+    pub failed: bool,
+    pub aborted: bool,
 }
 
 pub async fn has_open_exec_jobs<C: ConnectionTrait>(
@@ -75,11 +84,17 @@ pub async fn has_open_exec_jobs<C: ConnectionTrait>(
         .await
 }
 
-pub async fn any_exec_job_failed<C: ConnectionTrait>(
+pub async fn read_exec_jobs_failure_and_abort_flags<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<bool, DbErr> {
-    ANY_EXEC_JOB_FAILED
-        .scalar(db, [evaluation.into()], "failed")
-        .await
+) -> Result<ExecJobFailureAndAbortFlags, DbErr> {
+    let query = &SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS;
+    let row = db
+        .query_one_raw(query.bind([evaluation.into()]))
+        .await?
+        .ok_or_else(|| DbErr::Custom(format!("{} returned no row", query.name)))?;
+    Ok(ExecJobFailureAndAbortFlags {
+        failed: row.try_get("", "failed")?,
+        aborted: row.try_get("", "aborted")?,
+    })
 }
