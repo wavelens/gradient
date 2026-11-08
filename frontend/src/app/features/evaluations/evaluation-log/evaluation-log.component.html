@@ -287,7 +287,6 @@
             }
             @if (logPaused() && selectedBuild()?.status === 'Building') {
               <gr-message-banner type="warning">
-                <strong>Log paused: build output is faster than the rate limit</strong><br />
                 The build hasn't finished. The log can resume automatically when output is slower. Skipped lines don't show in the log.
               </gr-message-banner>
             }
