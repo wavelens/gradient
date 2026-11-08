@@ -701,6 +701,26 @@ describe('BoardJobDetailComponent - #636', () => {
     expect(text).toContain('777 MiB');
   });
 
+  it('formats the fleet averages by unit and leaves out metrics nobody reported', () => {
+    const reasoning = DETAIL.assigned_scheduler_reasoning!;
+    const job: AssignedJobDetail = {
+      ...DETAIL,
+      assigned_scheduler_reasoning: {
+        ...reasoning,
+        instance_context: {
+          ...reasoning.instance_context!,
+          closure_size: { w5m: null, w1h: 6_503_595.33, w24h: null },
+          disk_bytes: { w5m: null, w1h: null, w24h: null },
+        },
+      },
+    };
+    const instance = (setup({ getJob: () => of(job) }).nativeElement as HTMLElement).querySelector('section.ctx.instance') as HTMLElement;
+    const closure = Array.from(instance.querySelectorAll('tr')).find((r) => r.textContent?.includes('Closure size'));
+    expect(closure?.textContent).toContain('6.2 MiB');
+    expect(instance.textContent).not.toContain('6,503,595');
+    expect(instance.textContent).not.toContain('Disk usage');
+  });
+
   it('names the pending job by what it works on', () => {
     const el = setup({ getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1', true).nativeElement as HTMLElement;
     expect(el.textContent).toContain('hello-2.12.1');

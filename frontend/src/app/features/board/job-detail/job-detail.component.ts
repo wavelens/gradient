@@ -21,7 +21,16 @@ import {
   PopoverComponent,
   TableComponent,
 } from '@gradient/ui/ui';
-import { formatBytes, formatDuration, formatMegabytes, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import {
+  formatBytes,
+  formatCount,
+  formatDuration,
+  formatMegabytes,
+  formatPercent,
+  formatQuantity,
+  serverTime,
+  ServerTimestampToLocalDateTimePipe,
+} from '@shared/text';
 import { LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent } from '@shared/ui';
 import { Title } from '@angular/platform-browser';
 import { composeTitle } from '@core/title/gradient-title-strategy';
@@ -347,9 +356,9 @@ interface RuleRow {
                   @for (m of instanceWindows(inst); track m.name) {
                     <tr>
                       <td class="mono">{{ m.name }}</td>
-                      <td class="num">{{ m.w.w5m | number: '1.0-2' }}</td>
-                      <td class="num">{{ m.w.w1h | number: '1.0-2' }}</td>
-                      <td class="num">{{ m.w.w24h | number: '1.0-2' }}</td>
+                      @for (v of m.values; track $index) {
+                        <td class="num">{{ v }}</td>
+                      }
                     </tr>
                   }
                 </tbody>
@@ -668,21 +677,24 @@ export class BoardJobDetailComponent implements OnInit {
     return ['running', 'built', 'substituted', 'failed', 'aborted'][o] ?? String(o);
   }
 
-  instanceWindows(inst: InstanceContextView): { name: string; w: Windowed }[] {
-    return [
-      { name: 'Wait (s)', w: inst.wait_secs },
-      { name: 'Build time (ms)', w: inst.build_time_ms },
-      { name: 'Peak RAM (MB)', w: inst.peak_ram_mb },
-      { name: 'CPU time (ms)', w: inst.cpu_time_ms },
-      { name: 'Avg CPU (%)', w: inst.avg_cpu_pct },
-      { name: 'Disk bytes', w: inst.disk_bytes },
-      { name: 'OOM rate', w: inst.oom_rate },
-      { name: 'Closure size', w: inst.closure_size },
-      { name: 'NAR size (MB)', w: inst.nar_size_mb },
-      { name: 'Missing paths', w: inst.missing_paths },
-      { name: 'Dependency count', w: inst.dependency_cnt },
-      { name: 'Completed', w: inst.completed },
+  instanceWindows(inst: InstanceContextView): { name: string; values: string[] }[] {
+    const rows: [string, Windowed, (v: number) => string][] = [
+      ['Wait', inst.wait_secs, (v) => formatDuration(v * 1000)],
+      ['Build time', inst.build_time_ms, formatDuration],
+      ['Peak RAM', inst.peak_ram_mb, formatMegabytes],
+      ['CPU time', inst.cpu_time_ms, formatDuration],
+      ['Avg CPU', inst.avg_cpu_pct, (v) => formatQuantity(v, '%')],
+      ['Disk usage', inst.disk_bytes, formatBytes],
+      ['OOM rate', inst.oom_rate, formatPercent],
+      ['Closure size', inst.closure_size, formatBytes],
+      ['NAR size', inst.nar_size_mb, formatMegabytes],
+      ['Missing paths', inst.missing_paths, formatCount],
+      ['Dependency count', inst.dependency_cnt, formatCount],
+      ['Completed', inst.completed, formatCount],
     ];
+    return rows
+      .filter(([, w]) => w.w5m !== null || w.w1h !== null || w.w24h !== null)
+      .map(([name, w, format]) => ({ name, values: [w.w5m, w.w1h, w.w24h].map((v) => (v === null ? '-' : format(v))) }));
   }
 
   private loadBuild(buildId: string): void {
