@@ -143,13 +143,35 @@ describe('CacheSettingsComponent - access gating', () => {
 describe('CacheSettingsComponent - write failures', () => {
   const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
 
-  it('reports a failed deactivate instead of logging it', () => {
+  it('asks before deactivating, naming the cache, then deactivates it', () => {
     const fixture = setup(admin);
-    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
     const service = TestBed.inject(CachesService) as unknown as { deactivateCache: () => unknown };
-    service.deactivateCache = () => throwError(() => failure);
+    service.deactivateCache = vi.fn(() => of('ok'));
     findByText(fixture.nativeElement, 'deactivate')!.click();
-    expect(notify.failure).toHaveBeenCalledWith('Cache deactivation failed', failure);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Deactivate cache', target: 'Demo', failure: "Couldn't deactivate cache" }));
+    expect(service.deactivateCache).toHaveBeenCalled();
+    expect(notify.success).toHaveBeenCalledWith('Cache deactivated');
+  });
+
+  it('sends no deactivation when the confirmation is cancelled', () => {
+    const fixture = setup(admin);
+    confirm.mockImplementation(() => EMPTY);
+    const service = TestBed.inject(CachesService) as unknown as { deactivateCache: () => unknown };
+    service.deactivateCache = vi.fn(() => of('ok'));
+    findByText(fixture.nativeElement, 'deactivate')!.click();
+    expect(service.deactivateCache).not.toHaveBeenCalled();
+  });
+
+  it('activates an inactive cache without asking and reports a failure', () => {
+    const fixture = setup(admin);
+    fixture.componentInstance.cache.update((c) => c && { ...c, active: false });
+    fixture.detectChanges();
+    const failure = new ApiError('The server failed to process the request. Try again later.', 500);
+    const service = TestBed.inject(CachesService) as unknown as { activateCache: () => unknown };
+    service.activateCache = () => throwError(() => failure);
+    findByText(fixture.nativeElement, 'activate')!.click();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(notify.failure).toHaveBeenCalledWith('Cache activation failed', failure);
     expect(fixture.componentInstance.toggling()).toBe(false);
   });
 

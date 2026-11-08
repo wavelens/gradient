@@ -24,6 +24,7 @@ const request: SubscriptionRequestItem = {
   requested_by: 'alice',
   created_at: '2026-09-05T12:00:00',
 };
+const readOnlyRequest: SubscriptionRequestItem = { ...request, mode: 'ReadOnly' };
 
 function buttonByText(root: HTMLElement, text: string): HTMLButtonElement | undefined {
   return Array.from(root.querySelectorAll('button')).find((b) =>
@@ -111,10 +112,25 @@ describe('CacheSubscriptionRequestsComponent', () => {
     expect(element.textContent).not.toContain('Try Again');
   });
 
-  it('approves a request by project name', () => {
-    const { fixture, approve } = setup([request]);
+  it('approves a read-only request by project name without asking', () => {
+    const { fixture, approve, confirm } = setup([readOnlyRequest]);
     buttonByText(fixture.nativeElement, 'Approve')?.click();
+    expect(confirm).not.toHaveBeenCalled();
     expect(approve).toHaveBeenCalledWith('prod', 'wavelens');
+  });
+
+  it('asks before approving a request that may push, naming the project', () => {
+    const { fixture, approve, confirm } = setup([request]);
+    buttonByText(fixture.nativeElement, 'Approve')?.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Approve subscription request', target: 'Wavelens' }));
+    expect(approve).toHaveBeenCalledWith('prod', 'wavelens');
+  });
+
+  it('sends no push approval when the confirmation is cancelled', () => {
+    const { fixture, approve, confirm } = setup([request]);
+    confirm.mockImplementation(() => EMPTY);
+    buttonByText(fixture.nativeElement, 'Approve')?.click();
+    expect(approve).not.toHaveBeenCalled();
   });
 
   it('asks before denying a request, naming the project, then denies it by project name', () => {
@@ -132,14 +148,14 @@ describe('CacheSubscriptionRequestsComponent', () => {
   });
 
   it('shows a failed approve as an error toast with the server reason, not as raw text', () => {
-    const { fixture, approve } = setup([request]);
+    const { fixture, approve } = setup([readOnlyRequest]);
     approve.mockReturnValue(throwError(() => new ApiError('Project wavelens was deleted', 404)));
     buttonByText(fixture.nativeElement, 'Approve')?.click();
     fixture.detectChanges();
     expect(TestBed.inject(MessageService).messages()).toContainEqual(
       expect.objectContaining({
         severity: 'error',
-        summary: 'Failed to approve subscription request',
+        summary: "Couldn't approve the subscription request",
         detail: 'Project wavelens was deleted',
       }),
     );

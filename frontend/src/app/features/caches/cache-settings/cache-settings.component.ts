@@ -261,23 +261,39 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   toggleActive(): void {
     const currentCache = this.cache();
     if (!currentCache) return;
+    if (currentCache.active) {
+      this.confirmDeactivation(currentCache.display_name);
+      return;
+    }
 
     this.toggling.set(true);
-    const action = currentCache.active
-      ? this.cachesService.deactivateCache(this.cacheName)
-      : this.cachesService.activateCache(this.cacheName);
-
-    action.subscribe({
+    this.cachesService.activateCache(this.cacheName).subscribe({
       next: () => {
         this.toggling.set(false);
-        this.notify.success(currentCache.active ? 'Cache deactivated' : 'Cache activated');
+        this.notify.success('Cache activated');
         this.loadCache();
       },
       error: (error: unknown) => {
-        this.notify.failure(currentCache.active ? 'Cache deactivation failed' : 'Cache activation failed', error);
+        this.notify.failure('Cache activation failed', error);
         this.toggling.set(false);
       },
     });
+  }
+
+  private confirmDeactivation(target: string): void {
+    this.confirm
+      .confirm({
+        title: 'Deactivate cache',
+        target,
+        consequence: 'Nix clients stop getting store paths from this cache until you activate it again.',
+        confirmLabel: 'Deactivate',
+        failure: "Couldn't deactivate cache",
+        action: () => this.cachesService.deactivateCache(this.cacheName),
+      })
+      .subscribe(() => {
+        this.notify.success('Cache deactivated');
+        this.loadCache();
+      });
   }
 
   deleteCache(): void {

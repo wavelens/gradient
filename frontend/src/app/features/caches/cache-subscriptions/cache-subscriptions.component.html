@@ -36,7 +36,7 @@
             icon="check"
             [loading]="deciding() === request.project"
             [disabled]="deciding() !== null"
-            (click)="approve(request.project)"
+            (click)="approve(request)"
           ></button>
           <button
             slot="actions"

@@ -88,19 +88,41 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
     });
   }
 
-  approve(project: string): void {
-    this.deciding.set(project);
-    this.cachesService.approveSubscriptionRequest(this.cacheName, project).subscribe({
+  approve(request: SubscriptionRequestItem): void {
+    if (request.mode !== 'ReadOnly') {
+      this.confirmPushApproval(request);
+      return;
+    }
+    this.deciding.set(request.project);
+    this.cachesService.approveSubscriptionRequest(this.cacheName, request.project).subscribe({
       next: () => {
         this.deciding.set(null);
-        this.notify.success('Approved subscription request');
-        this.load();
+        this.onApproved();
       },
       error: (error: unknown) => {
         this.deciding.set(null);
-        this.notify.failure('Failed to approve subscription request', error);
+        this.notify.failure("Couldn't approve the subscription request", error);
       },
     });
+  }
+
+  private confirmPushApproval(request: SubscriptionRequestItem): void {
+    this.confirm
+      .confirm({
+        title: 'Approve subscription request',
+        target: request.project_display_name,
+        consequence: 'The project can push store paths to this cache. All users of this cache get the pushed paths.',
+        confirmLabel: 'Approve',
+        failure: "Couldn't approve the subscription request",
+        severity: 'primary',
+        action: () => this.cachesService.approveSubscriptionRequest(this.cacheName, request.project),
+      })
+      .subscribe(() => this.onApproved());
+  }
+
+  private onApproved(): void {
+    this.notify.success('Approved subscription request');
+    this.load();
   }
 
   deny(request: SubscriptionRequestItem): void {
