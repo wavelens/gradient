@@ -780,8 +780,8 @@ export interface DependencyGraphNode {
   name: string;
   path: string;
   status?: string | null;
-  created_at: string;
-  updated_at: string;
+  build_time_ms?: number | null;
+  build_started_at?: string | null;
 }
 
 export type DerivationId = string;

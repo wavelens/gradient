@@ -34,7 +34,7 @@ import {
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
 import { formatDuration, plural } from '@shared/text';
-import { PHASE_COLOR, PHASE_SEVERITY, buildPhase, buildStatusLabel, type StatusPhase } from '@shared/evaluation';
+import { PHASE_COLOR, PHASE_SEVERITY, buildDuration, buildPhase, buildStatusLabel, type StatusPhase } from '@shared/evaluation';
 import { longestPathDepths } from './dependency-depths';
 import { BuildGraph, BuildStatus, DependencyEdge, DependencyGraphNode } from '@core/models';
 
@@ -524,7 +524,8 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
               const existing = this.nodeMap.get(updated.id);
               if (existing && existing.status !== updated.status) {
                 existing.status = updated.status;
-                existing.updated_at = updated.updated_at;
+                existing.build_time_ms = updated.build_time_ms;
+                existing.build_started_at = updated.build_started_at;
                 changed = true;
               }
             }
@@ -567,13 +568,8 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   }
 
   private calcDuration(node: LayoutNode): string {
-    if (node.status == null) return '';
-    const isActive = this.isActive(node.status);
-    const toUtc = (s: string) => new Date(s.includes('Z') || s.includes('+') ? s : s + 'Z').getTime();
-    const startMs = toUtc(node.created_at);
-    const endMs = isActive ? Date.now() : toUtc(node.updated_at);
-    const elapsed = endMs - startMs;
-    return Number.isNaN(elapsed) || elapsed < 0 ? '' : formatDuration(elapsed);
+    const ms = node.status == null ? null : buildDuration({ ...node, status: node.status }, Date.now());
+    return ms == null ? '' : formatDuration(ms);
   }
 
   protected readonly phaseColor = PHASE_COLOR;

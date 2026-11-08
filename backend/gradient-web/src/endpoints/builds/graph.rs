@@ -28,8 +28,8 @@ pub struct DependencyGraphNode {
     pub name: String,
     pub path: String,
     pub status: Option<String>,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
+    pub build_time_ms: Option<i64>,
+    pub build_started_at: Option<chrono::NaiveDateTime>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
@@ -114,20 +114,24 @@ async fn graph_nodes<C: ConnectionTrait>(
     let shared_builds =
         gradient_db::graph::reachability::shared_builds_by_derivation(db, derivations).await?;
     let drv_by_id = gradient_db::graph::reachability::derivations_by_id(db, derivations).await?;
+    let shared_build_ids: Vec<DerivationBuildId> = shared_builds.values().map(|b| b.id).collect();
+    let attempts =
+        gradient_db::scheduling::build_attempt::latest_attempts(db, &shared_build_ids).await?;
 
     Ok(derivations
         .iter()
         .filter_map(|id| {
             let drv = drv_by_id.get(id)?;
             let shared_build = shared_builds.get(id);
+            let attempt = shared_build.and_then(|b| attempts.get(&b.id));
             Some(DependencyGraphNode {
                 id: *id,
                 build: builds.get(id).copied(),
                 name: drv.name.clone(),
                 path: drv.drv_path(),
                 status: shared_build.map(|b| format!("{:?}", b.status)),
-                created_at: shared_build.map_or(drv.created_at, |b| b.created_at),
-                updated_at: shared_build.map_or(drv.created_at, |b| b.updated_at),
+                build_time_ms: attempt.and_then(|a| a.duration_ms()),
+                build_started_at: attempt.and_then(|a| a.build_started_at),
             })
         })
         .collect())
@@ -164,7 +168,9 @@ pub async fn get_build_graph(
 mod tests {
     use super::*;
     use gradient_entity::build::BuildStatus;
-    use gradient_entity::{build_job, derivation, derivation_build, derivation_dependency};
+    use gradient_entity::{
+        build_attempt, build_job, derivation, derivation_build, derivation_dependency,
+    };
     use gradient_fixtures::mock::mock_db;
     use gradient_fixtures::rows::{derivation_dependency, derivation_named};
 
@@ -212,21 +218,27 @@ mod tests {
                 derivation_named(input, "input"),
                 derivation_named(interior, "interior"),
             ]])
+            .append_query_results([vec![build_attempt::Model {
+                derivation_build: root_job.derivation_build,
+                build_started_at: chrono::DateTime::from_timestamp(100, 0).map(|t| t.naive_utc()),
+                build_finished_at: chrono::DateTime::from_timestamp(107, 0).map(|t| t.naive_utc()),
+                ..Default::default()
+            }]])
             .into_connection();
 
         let graph = dependency_graph(&db, &root_job).await.unwrap();
 
-        let reached: Vec<(DerivationId, Option<BuildJobId>, Option<&str>)> = graph
+        let reached: Vec<_> = graph
             .nodes
             .iter()
-            .map(|n| (n.id, n.build, n.status.as_deref()))
+            .map(|n| (n.id, n.build, n.status.as_deref(), n.build_time_ms))
             .collect();
         assert_eq!(
             reached,
             [
-                (root, Some(root_job.id), Some("Completed")),
-                (input, None, Some("Substituted")),
-                (interior, None, None),
+                (root, Some(root_job.id), Some("Completed"), Some(7_000)),
+                (input, None, Some("Substituted"), None),
+                (interior, None, None, None),
             ]
         );
 

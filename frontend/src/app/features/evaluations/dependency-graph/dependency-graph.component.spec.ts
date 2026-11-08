@@ -15,7 +15,7 @@ import { BuildGraph } from '@core/models';
 
 const node = (id: string, status: string | null) => ({
   id, build: id, name: id, path: `/nix/store/hash-${id}.drv`, status,
-  created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
+  build_time_ms: null, build_started_at: null,
 });
 
 describe('DependencyGraphComponent live updates', () => {

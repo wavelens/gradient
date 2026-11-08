@@ -16316,8 +16316,6 @@ components:
       - id
       - name
       - path
-      - created_at
-      - updated_at
       properties:
         id:
           $ref: '#/components/schemas/DerivationId'
@@ -16333,11 +16331,15 @@ components:
           type:
           - string
           - 'null'
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
+        build_time_ms:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        build_started_at:
+          type:
+          - string
+          - 'null'
           format: date-time
     DerivationId:
       type: string
