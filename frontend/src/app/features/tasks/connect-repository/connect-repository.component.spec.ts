@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
@@ -78,15 +78,19 @@ describe('ConnectRepositoryComponent', () => {
     expect(fixture.componentInstance.state()).toEqual(repo);
   });
 
-  it('warns about a missing cache before the first build and starts the evaluation', () => {
-    const startEvaluation = vi.fn(() => of('eval'));
-    const fixture = render({ task: 'app', step: 'build' }, { startEvaluation });
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
-    fixture.detectChanges();
-    const el = fixture.nativeElement as HTMLElement;
+  it('warns about a missing cache before the task exists, since creating it starts the first evaluation', () => {
+    const el = render({}, {}).nativeElement as HTMLElement;
     expect(el.querySelector('[data-testid="cache-missing"]')).not.toBeNull();
-    fixture.componentInstance.startEvaluation();
-    expect(startEvaluation).toHaveBeenCalledWith('acme', 'app');
-    expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/project/acme/task/app');
+  });
+
+  it('shows no cache warning when the project has an active cache', () => {
+    const fixture = render({}, {}, { getSubscribedCaches: () => of([{ name: 'main', status: 'active' }]) });
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="cache-missing"]')).toBeNull();
+  });
+
+  it('ends on the events step with a link to the task', () => {
+    const fixture = render({ task: 'app', step: 'events' }, {});
+    const link = (fixture.nativeElement as HTMLElement).querySelector('a[href="/project/acme/task/app"]');
+    expect(link?.textContent).toContain('Open task');
   });
 });

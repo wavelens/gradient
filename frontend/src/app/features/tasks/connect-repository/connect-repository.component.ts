@@ -33,12 +33,11 @@ import { RepositoryEventsComponent } from '../task-repository/repository-events.
 const RESERVED_TASK_NAMES = ['build-request'];
 const DEFAULT_WILDCARD = 'packages.x86_64-linux.**';
 
-export type ConnectStep = 'repository' | 'access' | 'events' | 'build';
+export type ConnectStep = 'repository' | 'access' | 'events';
 const STEPS: { id: ConnectStep; label: string }[] = [
   { id: 'repository', label: 'Repository' },
   { id: 'access', label: 'Access' },
   { id: 'events', label: 'Events and Status' },
-  { id: 'build', label: 'First Build' },
 ];
 
 function repositoryName(url: string): string {
@@ -95,7 +94,6 @@ export class ConnectRepositoryComponent implements OnInit {
   taskName = signal<string | null>(null);
   state = signal<TaskRepositoryResponse | null>(null);
   caches = signal<CacheSubscriptionItem[] | null>(null);
-  starting = signal(false);
 
   get repositoryError(): string | null {
     const url = this.form.repository.trim();
@@ -113,7 +111,9 @@ export class ConnectRepositoryComponent implements OnInit {
     const task = query.get('task');
     if (task) {
       this.taskName.set(task);
-      this.go((query.get('step') as ConnectStep | null) ?? 'access');
+      this.go(query.get('step') === 'events' ? 'events' : 'access');
+    } else {
+      this.loadCaches();
     }
   }
 
@@ -161,8 +161,7 @@ export class ConnectRepositoryComponent implements OnInit {
     const task = this.taskName();
     if (task) {
       this.router.navigate([], { relativeTo: this.route, queryParams: { task, step }, replaceUrl: true });
-      if (step === 'access' || step === 'events') this.loadState();
-      if (step === 'build') this.loadCaches();
+      this.loadState();
     }
   }
 
@@ -188,32 +187,12 @@ export class ConnectRepositoryComponent implements OnInit {
   loadCaches(): void {
     this.projects.getSubscribedCaches(this.projectName).subscribe({
       next: (caches) => this.caches.set(caches),
-      error: () => this.caches.set([]),
+      error: () => this.caches.set(null),
     });
   }
 
-  hasActiveCache(): boolean {
-    return (this.caches() ?? []).some((c) => c.status === 'active');
-  }
-
-  cacheNames(): string {
-    return (this.caches() ?? []).filter((c) => c.status === 'active').map((c) => c.name).join(', ');
-  }
-
-  startEvaluation(): void {
-    const task = this.taskName();
-    if (!task || this.starting()) return;
-    this.starting.set(true);
-    this.tasks.startEvaluation(this.projectName, task).subscribe({
-      next: () => {
-        this.starting.set(false);
-        this.notify.success('Evaluation start succeeded');
-        this.router.navigateByUrl(links.task(this.projectName, task));
-      },
-      error: (error: unknown) => {
-        this.starting.set(false);
-        this.notify.failure('Evaluation start failed', error);
-      },
-    });
+  missingCache(): boolean {
+    const list = this.caches();
+    return list !== null && !list.some((c) => c.status === 'active');
   }
 }

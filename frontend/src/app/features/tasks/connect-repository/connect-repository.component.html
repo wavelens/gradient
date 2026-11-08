@@ -18,6 +18,17 @@
   @switch (step()) {
     @case ('repository') {
       <gr-settings-section title="Repository">
+        @if (missingCache()) {
+          <gr-message-banner type="warning" data-testid="cache-missing">
+            <strong>Builds need a cache</strong>
+            This project doesn't push builds to any Nix binary cache yet. Register the project for a cache subscription before the first build.
+          </gr-message-banner>
+          <div class="gr-form-actions">
+            <a grButton label="Open the cache subscription" icon="open_in_new" severity="secondary"
+              [routerLink]="links.projectPage(projectName, 'caches')" target="_blank"></a>
+            <button grButton label="Check again" icon="refresh" severity="secondary" (click)="loadCaches()"></button>
+          </div>
+        }
         @if (createError(); as error) {
           <gr-message-banner type="error">{{ error }}</gr-message-banner>
         }
@@ -52,39 +63,16 @@
         <app-repository-events [project]="projectName" [task]="taskName()!" [state]="repo" (saved)="state.set($event)" />
       }
     }
-    @case ('build') {
-      <gr-settings-section title="First Build">
-        @if (caches(); as list) {
-          @if (hasActiveCache()) {
-            <p role="status" data-testid="cache-ok">The project can push builds to {{ cacheNames() }}.</p>
-          } @else {
-            <gr-message-banner type="warning" data-testid="cache-missing">
-              <strong>Builds need a cache</strong>
-              This project doesn't push builds to any Nix binary cache yet. Register the project for a cache subscription before the first build.
-            </gr-message-banner>
-            <div class="gr-form-actions">
-              <a grButton label="Open the cache subscription" icon="open_in_new" severity="secondary"
-                [routerLink]="links.projectPage(projectName, 'caches')" target="_blank"></a>
-              <button grButton label="Check again" icon="refresh" severity="secondary" (click)="loadCaches()"></button>
-            </div>
-          }
-        }
-        <div class="gr-form-actions gr-form-actions--end">
-          <a grButton label="Open task" severity="secondary" [routerLink]="links.task(projectName, taskName()!)"></a>
-          <button grButton label="Start the first evaluation" icon="play_arrow" (click)="startEvaluation()"
-            [loading]="starting()" [disabled]="starting()"></button>
-        </div>
-      </gr-settings-section>
-    }
   }
 
-  @if (step() === 'access' || step() === 'events') {
+  @if (step() === 'access') {
     <div class="gr-form-actions gr-form-actions--end">
-      @if (step() === 'events') {
-        <button grButton label="Back" severity="secondary" (click)="back()"></button>
-      }
-      <button grButton label="Skip for now" severity="secondary" (click)="next()"></button>
       <button grButton label="Continue" icon="arrow_forward" (click)="next()"></button>
+    </div>
+  } @else if (step() === 'events') {
+    <div class="gr-form-actions gr-form-actions--end">
+      <button grButton label="Back" severity="secondary" (click)="back()"></button>
+      <a grButton label="Open task" icon="arrow_forward" [routerLink]="links.task(projectName, taskName()!)"></a>
     </div>
   }
 </gr-page-layout>

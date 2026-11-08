@@ -54,7 +54,7 @@ A personal access token from a dedicated account works as an alternative. That a
 
 1. Click **Connect repository** in the project. Enter the repository URL and click **Create task**.
 2. Click **Connect gitlab.example.com** in the **Events and Status** step. Select GitLab. Keep the base URL as is and paste the token. Click **Connect**.
-3. Click **Start the first evaluation** in the **First Build** step.
+3. Click **Open task**. The first evaluation has already begun at task creation.
 
 **Connect** can run all of these steps at once.
 
