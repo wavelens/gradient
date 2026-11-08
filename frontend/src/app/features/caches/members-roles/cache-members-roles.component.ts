@@ -254,11 +254,12 @@ export class CacheMembersRolesComponent implements OnInit {
       next: () => {
         this.members.update((members) => members.map((member) => (member.id === username ? { ...member, name: role } : member)));
         this.pendingMemberRoleSelection.set(null);
+        this.notify.success('Member role saved');
         if (this.isSignedInUser(username)) this.navigateToCacheOrReloadCache(false);
       },
       error: (error: unknown) => {
         this.pendingMemberRoleSelection.set(null);
-        this.notify.failure('Failed to change member role', error);
+        this.notify.failure("Couldn't change the member's role", error);
       },
     });
   }

@@ -218,6 +218,15 @@ describe('CacheMembersRolesComponent - confirmed removals', () => {
   });
 });
 
+describe('CacheMembersRolesComponent - role change', () => {
+  it('Confirm the role of the saved member with a toast', async () => {
+    const fixture = setup(true);
+    await settled(fixture);
+    fixture.componentInstance.updateMemberRole('alice', 'Admin');
+    expect(notify.success).toHaveBeenCalledWith('Member role saved');
+  });
+});
+
 describe('CacheMembersRolesComponent - busy rows', () => {
   it('Disable role dropdowns and Remove buttons on all member rows during a save of one role change.', async () => {
     const fixture = setup(true);
