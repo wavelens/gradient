@@ -14,14 +14,14 @@ import { AuthService } from '@core/services/auth.service';
 import { ExpensiveBuild, ExpensiveResource, TopProjectBuildTime } from '@core/models';
 
 const BUILDS: ExpensiveBuild[] = [
-  { build_id: 'b1', project: 'p1', name: 'named', build_time_ms: 5000, worker: 'uuid-1', worker_name: 'builder-1' },
-  { build_id: 'b2', project: 'p1', name: 'unnamed', build_time_ms: 4000, worker: 'uuid-2', worker_name: null },
-  { build_id: 'b3', project: 'p1', name: 'unknown', build_time_ms: 3000, worker: null, worker_name: null },
+  { build_id: 'b1', project: 'p1', project_slug: 'nixpkgs', evaluation: 'e1', name: 'named', build_time_ms: 5000, worker: 'uuid-1', worker_name: 'builder-1' },
+  { build_id: 'b2', project: 'p1', project_slug: 'nixpkgs', evaluation: 'e1', name: 'unnamed', build_time_ms: 4000, worker: 'uuid-2', worker_name: null },
+  { build_id: 'b3', project: 'p1', project_slug: 'nixpkgs', evaluation: 'e1', name: 'unknown', build_time_ms: 3000, worker: null, worker_name: null },
 ];
 
 const RESOURCES: ExpensiveResource[] = [
-  { derivation: 'd1', project: 'p1', name: 'named', value: 10, unit: 'MB', worker: 'uuid-1', worker_name: 'builder-1' },
-  { derivation: 'd2', project: 'p1', name: 'unnamed', value: 5, unit: 'MB', worker: 'uuid-2', worker_name: null },
+  { derivation: 'd1', project: 'p1', project_slug: 'nixpkgs', evaluation: 'e1', name: 'named', value: 10, unit: 'MB', worker: 'uuid-1', worker_name: 'builder-1' },
+  { derivation: 'd2', project: 'p1', project_slug: 'nixpkgs', evaluation: 'e1', name: 'unnamed', value: 5, unit: 'MB', worker: 'uuid-2', worker_name: null },
 ];
 
 const TOP: TopProjectBuildTime[] = [

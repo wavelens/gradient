@@ -37,6 +37,8 @@ const sampleEval: ExpensiveEval = {
 
 const sampleBuild: ExpensiveBuild = {
   build_id: 'build-1',
+  project_slug: 'nixpkgs',
+  evaluation: 'eval-1',
   project: 'project-1',
   name: 'nixos.conf',
   build_time_ms: 5000,
@@ -46,6 +48,8 @@ const sampleBuild: ExpensiveBuild = {
 
 const sampleResource: ExpensiveResource = {
   derivation: 'drv-1',
+  project_slug: 'nixpkgs',
+  evaluation: 'eval-1',
   project: 'project-1',
   name: 'hello',
   value: 512,

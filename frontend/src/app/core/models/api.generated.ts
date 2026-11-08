@@ -1181,6 +1181,8 @@ export interface ExecUnmet {
 export interface ExpensiveBuild {
   build_id: string;
   project: string;
+  project_slug: string;
+  evaluation: string;
   name: string;
   build_time_ms: number;
   worker?: string | null;
@@ -1204,6 +1206,8 @@ export interface ExpensiveEval {
 export interface ExpensiveResource {
   derivation: string;
   project: string;
+  project_slug: string;
+  evaluation: string;
   name: string;
   value: number;
   unit: string;

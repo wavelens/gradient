@@ -17604,6 +17604,8 @@ components:
       required:
       - build_id
       - project
+      - project_slug
+      - evaluation
       - name
       - build_time_ms
       properties:
@@ -17611,6 +17613,11 @@ components:
           type: string
           format: uuid
         project:
+          type: string
+          format: uuid
+        project_slug:
+          type: string
+        evaluation:
           type: string
           format: uuid
         name:
@@ -17672,6 +17679,8 @@ components:
       required:
       - derivation
       - project
+      - project_slug
+      - evaluation
       - name
       - value
       - unit
@@ -17681,6 +17690,11 @@ components:
           type: string
           format: uuid
         project:
+          type: string
+          format: uuid
+        project_slug:
+          type: string
+        evaluation:
           type: string
           format: uuid
         name:

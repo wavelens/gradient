@@ -30,6 +30,8 @@ impl ResourceMetric {
 pub struct ExpensiveResource {
     pub derivation: Uuid,
     pub project: Uuid,
+    pub project_slug: String,
+    pub evaluation: Uuid,
     pub name: String,
     pub value: f64,
     pub unit: &'static str,
@@ -65,22 +67,25 @@ fn expensive_by_resource_sql(
            WHERE dm.created_at >= {window} \
            ORDER BY dm.derivation, dm.created_at DESC \
          ), ranked AS ( \
-           SELECT dm.derivation, pro.project, d.name, {value_expr} AS value, dm.worker_id \
+           SELECT dm.derivation, pro.project, pro.evaluation, d.name, {value_expr} AS value, dm.worker_id \
            FROM latest dm \
            JOIN derivation d ON d.id = dm.derivation \
            JOIN LATERAL ( \
-             SELECT pr.project \
+             SELECT pr.project, bj.evaluation \
              FROM build_job bj \
              JOIN evaluation ev ON ev.id = bj.evaluation \
              JOIN task pr ON pr.id = ev.task \
              WHERE bj.derivation = dm.derivation{project_scope} \
+             ORDER BY bj.created_at DESC \
              LIMIT 1 \
            ) pro ON true \
            WHERE {value_expr} > 0 \
            ORDER BY value DESC LIMIT 20 \
          ) \
-         SELECT r.derivation, r.project, r.name, r.value, r.worker_id, wn.display_name AS worker_name \
-         FROM ranked r {worker_name} \
+         SELECT r.derivation, r.project, p.name AS project_slug, r.evaluation, r.name, r.value, \
+         r.worker_id, wn.display_name AS worker_name \
+         FROM ranked r \
+         JOIN project p ON p.id = r.project {worker_name} \
          ORDER BY r.value DESC",
         window = window_sql(window_days),
         worker_name = worker_name_sql("r.worker_id", project_filter),
@@ -115,6 +120,8 @@ pub async fn expensive_derivations<C: ConnectionTrait>(
         .map(|r| ExpensiveResource {
             derivation: r.try_get("", "derivation").unwrap_or_default(),
             project: r.try_get("", "project").unwrap_or_default(),
+            project_slug: r.try_get("", "project_slug").unwrap_or_default(),
+            evaluation: r.try_get("", "evaluation").unwrap_or_default(),
             name: r.try_get("", "name").unwrap_or_default(),
             value: r.try_get("", "value").unwrap_or(0.0),
             unit: metric.unit,
@@ -258,6 +265,14 @@ mod tests {
                 "sql = {sql}"
             );
         }
+    }
+
+    #[test]
+    fn expensive_resources_link_the_newest_evaluation_of_their_project() {
+        let sql = expensive_by_resource_sql("dm.cpu_time_ms::double precision", 30, None);
+        assert!(sql.contains("p.name AS project_slug"), "sql = {sql}");
+        assert!(sql.contains("ORDER BY bj.created_at DESC"), "sql = {sql}");
+        assert!(sql.contains("r.evaluation"), "sql = {sql}");
     }
 
     #[test]
