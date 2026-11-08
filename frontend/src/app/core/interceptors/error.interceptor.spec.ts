@@ -137,6 +137,18 @@ describe('errorInterceptor on 429', () => {
     expect(navigate).toHaveBeenCalledWith(['/error/429'], expect.objectContaining({ skipLocationChange: true }));
   });
 
+  it('keeps the page and stays silent when a background read stays throttled', async () => {
+    const { navigate, toasts } = setup();
+    let calls = 0;
+    const answers = () => defer(() => (++calls, throwError(() => new HttpErrorResponse({ status: 429, headers: new HttpHeaders({ 'retry-after': '0' }) }))));
+    const settled = send(answers, inBackground()).catch((e: HttpErrorResponse) => e.status);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await settled).toBe(429);
+    expect(calls).toBe(4);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(toasts.messages()).toEqual([]);
+  });
+
   it('never resends a write and keeps the page', async () => {
     const { navigate, toasts } = setup();
     const { result, calls } = throttled(Infinity, '5', 'POST');
