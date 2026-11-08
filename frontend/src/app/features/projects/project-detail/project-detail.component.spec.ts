@@ -5,10 +5,11 @@
  */
 
 import { EVERY_PERMISSION } from '@core/resolvers/access-route.testing';
-import type { ProjectResponse } from '@core/models';
+import type { CacheSubscriptionItem, ProjectResponse } from '@core/models';
+import { ProjectsService } from '@core/services/projects.service';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { Observable, of, throwError } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import { ProjectDetailComponent } from './project-detail.component';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
@@ -20,9 +21,11 @@ function render(
   authenticated: boolean,
   getTasks: () => Observable<unknown> = () => of(NO_TASKS),
   access: Partial<ProjectResponse> = { role: 'Admin', permissions: EVERY_PERMISSION },
+  subscribedCaches: CacheSubscriptionItem[] = [],
 ) {
   const starred = vi.fn(() => of(true));
   const tasks = vi.fn(getTasks);
+  const getSubscribedCaches = vi.fn(() => of(subscribedCaches));
   TestBed.configureTestingModule({
     imports: [ProjectDetailComponent],
     providers: [
@@ -39,12 +42,34 @@ function render(
       { provide: AuthService, useValue: { isAuthenticated: () => authenticated } },
       { provide: TasksService, useValue: { getTasks: tasks } },
       { provide: StarsService, useValue: { starred, set: () => of(true) } },
+      { provide: ProjectsService, useValue: { getSubscribedCaches, getProject: () => NEVER } },
     ],
   });
   const fixture = TestBed.createComponent(ProjectDetailComponent);
   fixture.detectChanges();
-  return { root: fixture.nativeElement as HTMLElement, starred, tasks, fixture };
+  return { root: fixture.nativeElement as HTMLElement, starred, tasks, fixture, getSubscribedCaches };
 }
+
+describe('ProjectDetailComponent subscribed caches', () => {
+  const caches: CacheSubscriptionItem[] = [
+    { id: 'c1', name: 'main', mode: 'ReadWrite', status: 'active' },
+    { id: 'c2', name: 'research', mode: 'ReadOnly', status: 'active' },
+    { id: 'c3', name: 'waiting', mode: 'ReadOnly', status: 'pending' },
+  ];
+
+  it('names the active caches in the header and links to the cache subscriptions', () => {
+    const { root } = render(true, undefined, undefined, caches);
+    const line = root.querySelector<HTMLAnchorElement>('[slot="meta"]')!;
+    expect(line.textContent?.trim()).toBe('Caches: main, research');
+    expect(line.getAttribute('href')).toBe('/project/acme/caches');
+  });
+
+  it('asks nothing for a visitor without a role and shows no cache line', () => {
+    const { root, getSubscribedCaches } = render(false, undefined, { role: null, permissions: [] }, caches);
+    expect(getSubscribedCaches).not.toHaveBeenCalled();
+    expect(root.querySelector('[slot="meta"]')).toBeNull();
+  });
+});
 
 describe('ProjectDetailComponent header', () => {
   it('stars the project from its header', () => {

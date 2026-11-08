@@ -23,8 +23,10 @@ import { EvalStatusBadgeComponent, StarButtonComponent } from '@shared/ui';
 import { StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { links } from '@shared/routing';
-import { canOpenProjectSettings } from '@shared/access';
+import { canOpenProjectSettings, isViewerProjectMember } from '@shared/access';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
+import { ProjectsService } from '@core/services/projects.service';
+import { EMPTY, catchError } from 'rxjs';
 
 @Component({
   selector: 'app-project-detail',
@@ -49,6 +51,7 @@ export class ProjectDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
   protected authService = inject(AuthService);
   private tasksService = inject(TasksService);
+  private projectsService = inject(ProjectsService);
   private stars = inject(StarsService);
   private crumbs = inject(BreadcrumbsService);
 
@@ -57,6 +60,7 @@ export class ProjectDetailComponent implements OnInit {
   canOpenSettings = computed(() => canOpenProjectSettings(this.project()));
   tasks = pagedList<TaskResponse>('tasks', (page, options) => this.tasksService.getTasks(this.projectName, page, 50, options));
   starred = signal(false);
+  activeBinaryCacheNames = signal<string[]>([]);
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.project(this.projectName));
@@ -71,5 +75,11 @@ export class ProjectDetailComponent implements OnInit {
     this.starTarget = { kind: 'project', project: this.projectName };
     this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
     this.tasks.reload();
+    if (isViewerProjectMember(this.project())) {
+      this.projectsService
+        .getSubscribedCaches(this.projectName)
+        .pipe(catchError(() => EMPTY))
+        .subscribe((caches) => this.activeBinaryCacheNames.set(caches.filter((c) => c.status === 'active').map((c) => c.name)));
+    }
   }
 }
