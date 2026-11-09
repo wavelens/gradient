@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed, effect, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule, UrlTree } from '@angular/router';
@@ -17,12 +17,13 @@ import { subscribeToBoardSocketWithReload } from '../board-socket';
 import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
 import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel } from '../job-kind';
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
-import { links } from '@shared/routing';
+import { links, oneOf, queryParamSignal } from '@shared/routing';
 import { type WaitingExplanation, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
 import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 
 type KindFilter = 'all' | JobKindName;
 type ScoreScope = 'current' | 'all';
+type JobListView = 'assigned' | 'pending';
 
 interface DecisionRow {
   id: string;
@@ -39,14 +40,14 @@ interface DecisionRow {
   standalone: true,
   imports: [RelativeTimePipe, CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, TabSwitchComponent, LoadStateComponent, LiveStatusComponent],
   template: `
-    <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
-                   loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
-      <div class="view-toggle">
-        <gr-tab-switch ariaLabel="Job list" [options]="assignedAndPendingJobListTabOptions" [ngModel]="view()" (ngModelChange)="setView($event)" />
-        @if (connected() !== null) { <gr-live-status [connected]="!!connected()" /> }
-      </div>
+    <div class="view-toggle">
+      <gr-tab-switch ariaLabel="Job list" [options]="assignedAndPendingJobListTabOptions" [ngModel]="view()" (ngModelChange)="setView($event)" />
+      @if (connected() !== null) { <gr-live-status [connected]="!!connected()" /> }
+    </div>
 
-      @if (view() === 'assigned') {
+    @if (view() === 'assigned') {
+      <gr-load-state [loading]="assignedJobsPanelFirstLoad.loading()" [error]="assignedJobsPanelFirstLoad.error()" [empty]="!assignedJobsPanelFirstLoad.received()"
+                     loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retryAssigned()">
         <div class="banner">
           Showing {{ assignedRows().length }} of {{ collapseClusters(jobs()).length }} assigned job(s) visible to this account.
           @if (otherRunning() > 0) {
@@ -132,9 +133,10 @@ interface DecisionRow {
             </tbody>
           </gr-table>
         }
-      }
-
-      @if (view() === 'pending') {
+      </gr-load-state>
+    } @else {
+      <gr-load-state [loading]="pendingJobsFirstLoad.loading()" [error]="pendingJobsFirstLoad.error()" [empty]="!pendingJobsFirstLoad.received()"
+                     loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retryPending()">
         <div class="banner">
           {{ pendingRows().length }} pending job(s) visible to this account.
           @if (otherPending() > 0) { <span class="muted">Pending in projects this account can't view: {{ otherPending() }}.</span> }
@@ -181,20 +183,20 @@ interface DecisionRow {
             }
           </tbody>
         </gr-table>
-      }
-    </gr-load-state>
+      </gr-load-state>
+    }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './live-jobs.component.scss',
 })
 export class BoardLiveJobsComponent implements OnInit {
   protected readonly links = links;
-  private static readonly STATE_KEY = 'board.live-jobs.filters';
 
   private board = inject(BoardService);
   protected router = inject(Router);
   private auth = inject(AuthService);
-  protected first = firstLoad();
+  protected assignedJobsPanelFirstLoad = firstLoad();
+  protected pendingJobsFirstLoad = firstLoad();
   protected connected = subscribeToBoardSocketWithReload(() => this.load());
   protected readonly jobKindName = jobKindName;
   protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
@@ -204,11 +206,11 @@ export class BoardLiveJobsComponent implements OnInit {
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
 
-  view = signal<'assigned' | 'pending'>('assigned');
   readonly assignedAndPendingJobListTabOptions = [
     { label: 'Assigned', value: 'assigned' },
     { label: 'Pending', value: 'pending' },
-  ];
+  ] as const;
+  view = queryParamSignal<JobListView>('view', 'assigned', oneOf(this.assignedAndPendingJobListTabOptions.map((o) => o.value)));
   pendingJobs = signal<PendingJobSummary[]>([]);
   otherPending = signal(0);
 
@@ -220,24 +222,6 @@ export class BoardLiveJobsComponent implements OnInit {
   decisions = signal<AssignDecisionView[]>([]);
   protected superuser = computed(() => this.auth.user()?.superuser === true);
   showDecisions = computed(() => this.superuser() && this.scoreScope() === 'all');
-
-  constructor() {
-    this.restoreState();
-    effect(() => {
-      const state = {
-        view: this.view(),
-        kindFilter: this.kindFilter(),
-        scoreMin: this.scoreMin(),
-        scoreMax: this.scoreMax(),
-        scoreScope: this.scoreScope(),
-      };
-      try {
-        sessionStorage.setItem(BoardLiveJobsComponent.STATE_KEY, JSON.stringify(state));
-      } catch {
-        /* storage unavailable */
-      }
-    });
-  }
 
   scoreFilterMinimumExceedsMaximum = computed(() => {
     const min = this.scoreMin();
@@ -311,57 +295,49 @@ export class BoardLiveJobsComponent implements OnInit {
     this.load();
   }
 
-  retry(): void {
-    this.first.restart();
-    this.load();
+  retryAssigned(): void {
+    this.assignedJobsPanelFirstLoad.restart();
+    this.loadAssignedPanel();
+  }
+
+  retryPending(): void {
+    this.pendingJobsFirstLoad.restart();
+    this.loadPending();
   }
 
   private load(): void {
-    this.loadAssigned();
+    this.loadAssignedPanel();
     if (this.view() === 'pending') this.loadPending();
-    if (this.showDecisions()) this.loadDecisions();
   }
 
-  setView(v: 'assigned' | 'pending'): void {
+  setView(v: JobListView): void {
     this.view.set(v);
-    this.first.refresh();
-    if (v === 'pending') this.loadPending();
+    if (v === 'pending') {
+      this.pendingJobsFirstLoad.refresh();
+      this.loadPending();
+    }
   }
 
   setScoreScope(scope: ScoreScope): void {
     this.scoreScope.set(scope);
-    this.first.refresh();
+    this.assignedJobsPanelFirstLoad.refresh();
+    if (this.showDecisions()) this.loadDecisions();
+  }
+
+  private loadAssignedPanel(): void {
+    this.board.getAssignedJobs().pipe(this.assignedJobsPanelFirstLoad.track()).subscribe((r) => {
+      this.jobs.set(r.jobs);
+      this.otherRunning.set(r.other_running);
+    });
     if (this.showDecisions()) this.loadDecisions();
   }
 
   private loadDecisions(): void {
-    this.board.getAssignmentDecisions().pipe(this.first.track()).subscribe((d) => this.decisions.set(d));
-  }
-
-  private loadAssigned(): void {
-    this.board.getAssignedJobs().pipe(this.first.track()).subscribe((r) => {
-      this.jobs.set(r.jobs);
-      this.otherRunning.set(r.other_running);
-    });
-  }
-
-  private restoreState(): void {
-    try {
-      const raw = sessionStorage.getItem(BoardLiveJobsComponent.STATE_KEY);
-      if (!raw) return;
-      const s = JSON.parse(raw);
-      if (s.view) this.view.set(s.view);
-      if (s.kindFilter) this.kindFilter.set(s.kindFilter);
-      this.scoreMin.set(s.scoreMin ?? null);
-      this.scoreMax.set(s.scoreMax ?? null);
-      if (s.scoreScope) this.scoreScope.set(s.scoreScope);
-    } catch {
-      /* ignore malformed state */
-    }
+    this.board.getAssignmentDecisions().pipe(this.assignedJobsPanelFirstLoad.track()).subscribe((d) => this.decisions.set(d));
   }
 
   private loadPending(): void {
-    this.board.getPendingJobs().pipe(this.first.track()).subscribe((r) => {
+    this.board.getPendingJobs().pipe(this.pendingJobsFirstLoad.track()).subscribe((r) => {
       this.pendingJobs.set(r.jobs);
       this.otherPending.set(r.other_pending);
     });

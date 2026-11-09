@@ -5,8 +5,8 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { Router, provideRouter } from '@angular/router';
-import { of, EMPTY } from 'rxjs';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { EMPTY, Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { BoardLiveJobsComponent } from './live-jobs.component';
 import { BoardService } from '@core/services/board.service';
@@ -30,16 +30,20 @@ const PENDING: PendingJobSummary = {
   permissions: [],
 };
 
-function setup(): ComponentFixture<BoardLiveJobsComponent> {
+function setup(
+  query: Record<string, string> = {},
+  getPendingJobs: () => Observable<{ jobs: PendingJobSummary[]; other_pending: number }> = () => of({ jobs: [PENDING], other_pending: 2 }),
+): ComponentFixture<BoardLiveJobsComponent> {
   TestBed.configureTestingModule({
     imports: [BoardLiveJobsComponent],
     providers: [
       provideRouter([]),
+      { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap(query) } } },
       {
         provide: BoardService,
         useValue: {
-          getAssignedJobs: () => of({ jobs: [], other_running: 0 }),
-          getPendingJobs: () => of({ jobs: [PENDING], other_pending: 2 }),
+          getAssignedJobs: () => of({ jobs: [ASSIGNED], other_running: 0 }),
+          getPendingJobs,
         },
       },
       {
@@ -92,8 +96,6 @@ function setupWithAssigned(assigned: DispatchedJobSummary[], superuser = false):
 }
 
 describe('BoardLiveJobsComponent - assigned subject column', () => {
-  beforeEach(() => sessionStorage.clear());
-
   const subjectCell = (fixture: ComponentFixture<BoardLiveJobsComponent>) =>
     (fixture.nativeElement as HTMLElement).querySelector('tbody td.subject')?.textContent?.trim();
 
@@ -121,9 +123,9 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     expect(cells.slice(0, 4)).toEqual(['exec', 'Builder One', 'nightly: apps.x86_64-linux.train (node 1)', '7.3']);
   });
 
-  it('hides the score column and score filters from a non-superuser and ignores a saved score filter', () => {
-    sessionStorage.setItem('board.live-jobs.filters', JSON.stringify({ view: 'assigned', scoreMin: 100, scoreMax: null }));
+  it('hides the score column and score filters from a non-superuser and ignores a score filter', () => {
     const fixture = setupWithAssigned([ASSIGNED]);
+    fixture.componentInstance.scoreMin.set(100);
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;
     expect(Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent?.trim())).not.toContain('Score');
@@ -210,8 +212,6 @@ const DECISIONS: AssignDecisionView[] = [
 ];
 
 describe('BoardLiveJobsComponent - decision scores (#419)', () => {
-  beforeEach(() => sessionStorage.clear());
-
   const getAssignmentDecisions = vi.fn(() => of(DECISIONS));
 
   function setupDecisions(superuser = true): ComponentFixture<BoardLiveJobsComponent> {
@@ -255,8 +255,9 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
   });
 
   it('hides the decision scores from a non-superuser and never asks for them', () => {
-    sessionStorage.setItem('board.live-jobs.filters', JSON.stringify({ scoreScope: 'all' }));
     const fixture = setupDecisions(false);
+    fixture.componentInstance.setScoreScope('all');
+    fixture.detectChanges();
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
 
     expect(text).not.toContain('incl. rejected');
@@ -267,30 +268,34 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
 });
 
 describe('BoardLiveJobsComponent - pending view toggle', () => {
-  beforeEach(() => sessionStorage.clear());
-
   it('defaults to assigned view', () => {
     const fixture = setup();
     expect(fixture.componentInstance.view()).toBe('assigned');
   });
 
-  it('restores the persisted view and filters from sessionStorage', () => {
-    sessionStorage.setItem(
-      'board.live-jobs.filters',
-      JSON.stringify({ view: 'pending', kindFilter: 'build', statusFilter: 'all', scoreMin: null, scoreMax: null }),
-    );
-    const cmp = setup().componentInstance;
+  it('opens the view named in the address', () => {
+    const cmp = setup({ view: 'pending' }).componentInstance;
     expect(cmp.view()).toBe('pending');
-    expect(cmp.kindFilter()).toBe('build');
     expect(cmp.pendingJobs().length).toBe(1);
   });
 
-  it('persists the view to sessionStorage when switched', () => {
+  it('writes the view to the address when switched', () => {
     const fixture = setup();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     fixture.componentInstance.setView('pending');
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { view: 'pending' } }));
+  });
+
+  it('keeps the switch and the assigned list reachable when the pending list fails to load', () => {
+    const fixture = setup({ view: 'pending' }, () => throwError(() => new Error('down')));
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('gr-tab-switch')).not.toBeNull();
+    expect(el.textContent).toContain('Failed to load jobs');
+
+    fixture.componentInstance.setView('assigned');
     fixture.detectChanges();
-    const stored = JSON.parse(sessionStorage.getItem('board.live-jobs.filters') ?? '{}');
-    expect(stored.view).toBe('pending');
+    expect(el.textContent).not.toContain('Failed to load jobs');
+    expect(el.querySelector('tbody td.subject')?.textContent?.trim()).toBe('hello-2.12.1');
   });
 
   it('lists a pending exec job and opens it by its exec job id', () => {
