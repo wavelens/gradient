@@ -38,16 +38,6 @@ import { MetricPoint, DurationsHeatmap } from '@core/models';
         [colors]="['--gr-chart-cyan', '--gr-graph-danger']"
         [valueFormatter]="duration"
       ></gr-metric-chart>
-
-      <gr-metric-chart
-        title="Wait (hourly avg): queue (excl. deps) vs dependency"
-        doc="ui/job-board/"
-        type="area"
-        [series]="waitSeries()"
-        [categories]="waitCategories()"
-        [colors]="['--gr-chart-purple', '--gr-chart-orange']"
-        [valueFormatter]="duration"
-      ></gr-metric-chart>
     </gr-load-state>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -58,8 +48,6 @@ export class BoardDurationsComponent implements OnInit {
   protected first = firstLoad();
 
   private build = signal<MetricPoint[]>([]);
-  private wait = signal<MetricPoint[]>([]);
-  private deps = signal<MetricPoint[]>([]);
   private heatmap = signal<DurationsHeatmap | null>(null);
 
   readonly duration = formatDuration;
@@ -80,15 +68,6 @@ export class BoardDurationsComponent implements OnInit {
     { name: 'max', data: this.build().map((p) => p.max) },
   ]);
 
-  waitCategories = computed(() => this.wait().map((p) => clockTime(p.bucket_start)));
-  waitSeries = computed(() => {
-    const depMap = new Map(this.deps().map((p) => [p.bucket_start, p.avg]));
-    return [
-      { name: 'queue wait (excl. deps)', data: this.wait().map((p) => p.avg) },
-      { name: 'dependency wait', data: this.wait().map((p) => depMap.get(p.bucket_start) ?? 0) },
-    ];
-  });
-
   ngOnInit(): void {
     this.load();
   }
@@ -100,8 +79,6 @@ export class BoardDurationsComponent implements OnInit {
 
   private load(): void {
     this.board.query('builds.duration_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.build.set(p));
-    this.board.query('dispatch.wait_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.wait.set(p));
-    this.board.query('deps.wait_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.deps.set(p));
     this.board.getDurationsHeatmap(24).pipe(this.first.track()).subscribe((h) => this.heatmap.set(h));
   }
 }
