@@ -290,10 +290,7 @@ export class ProfileComponent implements OnInit, CanComponentDeactivate {
       ? { confirm_username: this.deleteUsernameConfirm }
       : { password: this.deletePassword };
     this.userService.deleteUser(body).subscribe({
-      next: () => {
-        this.notify.success('Account deleted');
-        this.authService.logout().subscribe();
-      },
+      next: () => this.authService.forgetDeletedAccountAndGoToSignInPage(),
       error: (error: unknown) => {
         this.deleting.set(false);
         this.deleteError.set(apiErrorMessage(error, 'Failed to delete account.'));

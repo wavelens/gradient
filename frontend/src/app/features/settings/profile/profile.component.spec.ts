@@ -447,16 +447,16 @@ describe('ProfileComponent - delete confirmation', () => {
     expect(deleteUser).toHaveBeenCalledTimes(1);
   });
 
-  it('confirms the deletion before signing out', () => {
+  it('forgets the deleted account and opens the sign-in page', () => {
     const fixture = setup({ managed: false, oidc: false });
     TestBed.inject(UserService).deleteUser = vi.fn(() => of('ok'));
-    const logout = vi.fn(() => of(null));
-    Object.assign(TestBed.inject(AuthService), { logout });
+    const forgetDeletedAccountAndGoToSignInPage = vi.fn();
+    Object.assign(TestBed.inject(AuthService), { forgetDeletedAccountAndGoToSignInPage });
     const component = fixture.componentInstance;
     component.deletePassword = 'secret';
     component.deleteAccount();
-    expect(notify.success).toHaveBeenCalledWith('Account deleted');
-    expect(logout).toHaveBeenCalled();
+    expect(notify.success).not.toHaveBeenCalled();
+    expect(forgetDeletedAccountAndGoToSignInPage).toHaveBeenCalled();
   });
 
   it('never offers an empty profile form to save after a failed load', () => {
