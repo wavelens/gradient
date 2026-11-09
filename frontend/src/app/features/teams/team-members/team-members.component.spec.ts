@@ -102,6 +102,13 @@ describe('TeamMembersComponent', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('carol');
   });
 
+  it('names an invited user like a member, by username and display name', () => {
+    const invitation = { user: 'carol', name: 'Carol Doe', role: 'member', expires_at: '2026-09-12T12:00:00' } as PendingInvitationItem;
+    const row = (setup(undefined, false, undefined, [invitation]).fixture.nativeElement as HTMLElement).querySelector('gr-row[icon="mail"]')!;
+    expect(row.querySelector('.mono')?.textContent).toBe('carol');
+    expect(row.querySelector('[slot="meta"]')?.textContent).toContain('Carol Doe · Role member');
+  });
+
   it('shows a failed member load with Try Again instead of No members', () => {
     const listMembers = vi.fn().mockReturnValueOnce(throwError(() => new Error('database is down'))).mockReturnValue(of(members));
     const { fixture } = setup(undefined, false, listMembers);

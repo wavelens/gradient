@@ -65,7 +65,7 @@ export class ProjectDetailComponent implements OnInit {
   tasks = pagedList<TaskResponse>('tasks', (page) => this.tasksService.getTasks(this.projectName, page, 50));
   starred = signal(false);
   cacheSubscriptions = signal<CacheSubscriptionItem[] | null>(null);
-  activeBinaryCacheNames = computed(() => (this.cacheSubscriptions() ?? []).filter((c) => c.status === 'active').map((c) => c.name));
+  activeBinaryCacheNames = computed(() => (this.cacheSubscriptions() ?? []).filter((c) => c.status === 'active').map((c) => c.display_name));
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.project(this.projectName));

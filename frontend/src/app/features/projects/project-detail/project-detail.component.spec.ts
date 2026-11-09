@@ -62,7 +62,7 @@ describe('ProjectDetailComponent subscribed caches', () => {
   it('names the active caches in the header and links to the cache subscriptions', () => {
     const { root } = render(true, undefined, undefined, caches);
     const line = root.querySelector<HTMLAnchorElement>('[slot="meta"]')!;
-    expect(line.textContent?.trim()).toBe('Caches: main, research');
+    expect(line.textContent?.trim()).toBe('Caches: Main, Research');
     expect(line.getAttribute('href')).toBe('/project/acme/caches');
   });
 

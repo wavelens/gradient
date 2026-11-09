@@ -83,6 +83,7 @@
             <gr-row icon="mail">
               <span class="mono">{{ invitation.user }}</span>
               <span slot="meta">
+                @if (invitation.name !== invitation.user) { {{ invitation.name }} · }
                 Role {{ invitation.role }} ·
                 Expires {{ invitation.expires_at | serverDate }}
               </span>
