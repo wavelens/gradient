@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService } from '@core/services/board.service';
 import { CardGridComponent, LoadStateComponent, StatCardComponent } from '@gradient/ui/ui';
 import { LiveStatusComponent, MetricChartComponent } from '@shared/ui';
-import { firstLoad } from '../first-load';
+import { firstLoad, requestFailedText } from '../first-load';
 import { subscribeToBoardSocketWithReload } from '../board-socket';
 import { clockTime } from '@shared/text';
 import { MetricPoint } from '@core/models';
@@ -25,9 +25,9 @@ import { MetricPoint } from '@core/models';
         <gr-live-status [connected]="!!connected()" />
       }
       <gr-card-grid class="kpis" min="180px">
-        <gr-stat-card compact label="Connected workers" [value]="workers()" />
-        <gr-stat-card compact label="Jobs pending" [value]="pending()" />
-        <gr-stat-card compact label="Jobs active" [value]="active()" />
+        <gr-stat-card compact label="Connected workers" [value]="workers() ?? failed" />
+        <gr-stat-card compact label="Jobs pending" [value]="pending() ?? failed" />
+        <gr-stat-card compact label="Jobs active" [value]="active() ?? failed" />
       </gr-card-grid>
 
       <gr-metric-chart
@@ -37,6 +37,7 @@ import { MetricPoint } from '@core/models';
         [series]="completedSeries()"
         [categories]="categories()"
         [colors]="['--gr-chart-green']"
+        [error]="completed() === null"
       ></gr-metric-chart>
     </gr-load-state>
   `,
@@ -48,11 +49,14 @@ export class BoardOverviewComponent implements OnInit {
   protected first = firstLoad();
   protected connected = subscribeToBoardSocketWithReload(() => this.loadCounts());
 
-  workers = signal(0);
-  pending = signal(0);
-  active = signal(0);
-  completedSeries = signal<{ name: string; data: number[] }[]>([]);
-  categories = signal<string[]>([]);
+  protected readonly failed = requestFailedText;
+
+  workers = signal<number | null>(null);
+  pending = signal<number | null>(null);
+  active = signal<number | null>(null);
+  completed = signal<MetricPoint[] | null>(null);
+  completedSeries = computed(() => [{ name: 'completed', data: (this.completed() ?? []).map((p) => p.count) }]);
+  categories = computed(() => (this.completed() ?? []).map((p) => clockTime(p.bucket_start)));
 
   ngOnInit(): void {
     this.load();
@@ -68,17 +72,12 @@ export class BoardOverviewComponent implements OnInit {
     this.board
       .query('builds.completed', 'hour')
       .pipe(this.first.track())
-      .subscribe((points) => this.applyCompleted(points));
+      .subscribe((points) => this.completed.set(points));
   }
 
   private loadCounts(): void {
     this.board.getWorkers().pipe(this.first.track()).subscribe((w) => this.workers.set(w.length));
     this.board.getPendingJobs().pipe(this.first.track()).subscribe((r) => this.pending.set(r.jobs.length + r.other_pending));
     this.board.getAssignedJobs().pipe(this.first.track()).subscribe((r) => this.active.set(r.jobs.length + r.other_running));
-  }
-
-  private applyCompleted(points: MetricPoint[]): void {
-    this.categories.set(points.map((p) => clockTime(p.bucket_start)));
-    this.completedSeries.set([{ name: 'completed', data: points.map((p) => p.count) }]);
   }
 }

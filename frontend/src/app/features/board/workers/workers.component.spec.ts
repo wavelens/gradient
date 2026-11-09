@@ -24,7 +24,10 @@ const AVERAGE: WorkerLoadAverage = {
   by_architecture: [bucket('x86_64-linux', 1, 4), bucket('aarch64-linux', 0.5, 2)],
 };
 
-function setup(average: () => Observable<WorkerLoadAverage> = () => of(AVERAGE), workers: BoardWorker[] = []) {
+function setup(
+  average: () => Observable<WorkerLoadAverage> = () => of(AVERAGE),
+  workers: Observable<BoardWorker[]> = of([]),
+) {
   const getWorkerLoadAverage = vi.fn((_hours: number) => average());
   TestBed.configureTestingModule({
     imports: [BoardWorkersComponent],
@@ -33,7 +36,7 @@ function setup(average: () => Observable<WorkerLoadAverage> = () => of(AVERAGE),
       {
         provide: BoardService,
         useValue: {
-          getWorkers: () => of(workers),
+          getWorkers: () => workers,
           getFleet: () => of([]),
           getWorkerLoad: () => of(NOW),
           getWorkerLoadAverage,
@@ -81,6 +84,20 @@ describe('BoardWorkersComponent - load range', () => {
   });
 });
 
+describe('BoardWorkersComponent - failed workers request', () => {
+  it('says the worker list failed instead of claiming no workers are connected', () => {
+    const { fixture } = setup(undefined, throwError(() => new Error('Internal server error')));
+    const table = (fixture.nativeElement as HTMLElement).querySelector('.workers tbody')?.textContent ?? '';
+    expect(table).toContain("Couldn't load");
+    expect(table).not.toContain('No connected workers.');
+  });
+
+  it('says no workers are connected once the empty list loads', () => {
+    const { fixture } = setup();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.workers tbody')?.textContent).toContain('No connected workers.');
+  });
+});
+
 describe('BoardWorkersComponent - exec column', () => {
   const WORKER: BoardWorker = {
     id: 'w1', name: 'Dev Worker', projects: [], draining: false, assigned_jobs: 0, max_concurrent_builds: 4,
@@ -89,19 +106,19 @@ describe('BoardWorkersComponent - exec column', () => {
   };
 
   it('leaves out the label every worker carries for its own id', () => {
-    const { fixture } = setup(undefined, [{ ...WORKER, exec: { ...WORKER.exec!, labels: ['w1', 'lab-a'] } }]);
+    const { fixture } = setup(undefined, of([{ ...WORKER, exec: { ...WORKER.exec!, labels: ['w1', 'lab-a'] } }]));
     const labels = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('td.exec gr-badge')).map((b) => b.textContent?.trim());
     expect(labels).toEqual(['lab-a']);
   });
 
   it('draws a usage bar only for a device class the worker has', () => {
-    const { fixture } = setup(undefined, [WORKER]);
+    const { fixture } = setup(undefined, of([WORKER]));
     const devices = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('td.exec .device'));
     expect(devices.map((d) => !!d.querySelector('gr-segmented-bar'))).toEqual([false, true]);
   });
 
   it('hides the column when no worker has a label beyond its own id or a device', () => {
-    const { fixture } = setup(undefined, [{ ...WORKER, exec: { labels: ['w1'], devices: [] } }]);
+    const { fixture } = setup(undefined, of([{ ...WORKER, exec: { labels: ['w1'], devices: [] } }]));
     const el = fixture.nativeElement as HTMLElement;
     expect(Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent?.trim())).not.toContain('Exec');
     expect(el.querySelector('td.exec')).toBeNull();

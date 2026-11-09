@@ -8,6 +8,8 @@ import { Signal, inject, signal } from '@angular/core';
 import { EMPTY, MonoTypeOperatorFunction, catchError, defer, finalize, tap } from 'rxjs';
 import { NotifyService } from '@core/services/notify.service';
 
+export const requestFailedText = "Couldn't load";
+
 export interface FirstLoad {
   /// True until every tracked request of the first paint has settled.
   loading: Signal<boolean>;

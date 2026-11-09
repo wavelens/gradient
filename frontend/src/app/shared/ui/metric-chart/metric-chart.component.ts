@@ -87,6 +87,8 @@ echarts.use([
         <div #host class="metric-chart__plot" [class.metric-chart__plot--waiting]="loading()" [style.height.px]="height()"></div>
         @if (loading()) {
           <gr-skeleton class="metric-chart__placeholder" />
+        } @else if (error()) {
+          <p class="metric-chart__placeholder metric-chart__empty metric-chart__error">Couldn't load</p>
         } @else if (empty()) {
           <p class="metric-chart__placeholder metric-chart__empty">No data</p>
         }
@@ -109,6 +111,7 @@ export class MetricChartComponent implements OnDestroy {
   colors = input<string[]>([]);
   bare = input(false, { transform: booleanAttribute });
   loading = input(false, { transform: booleanAttribute });
+  error = input(false, { transform: booleanAttribute });
   yAxisTitle = input('');
   yAxisMax = input<number | undefined>(undefined);
   valueFormatter = input<((value: number) => string) | undefined>(undefined);

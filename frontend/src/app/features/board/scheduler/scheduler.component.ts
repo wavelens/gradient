@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { BoardService } from '@core/services/board.service';
 import { CardGridComponent, LoadStateComponent, PopoverComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
-import { firstLoad } from '../first-load';
+import { firstLoad, requestFailedText } from '../first-load';
 import { scoringRuleClassNameToReadableLabel, schedulerScoreDecimalPipeDigitsFormat } from '../scoring-rule-label';
 import { clockTime, formatDuration } from '@shared/text';
 import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
@@ -22,9 +22,9 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading scheduler stats..." errorTitle="Failed to load scheduler stats" (retry)="retry()">
       <gr-card-grid class="kpis" min="180px">
-        <gr-stat-card compact label="Scored assignments (24h)" [value]="summary()?.sample_size ?? 0" />
-        <gr-stat-card compact label="Avg score" [value]="summary()?.score_avg | number: scoreDigits" />
-        <gr-stat-card compact label="Min / Max" [value]="(summary()?.score_min | number: '1.0-0') + ' / ' + (summary()?.score_max | number: '1.0-0')" />
+        <gr-stat-card compact label="Scored assignments (24h)" [value]="summary()?.sample_size ?? failed" />
+        <gr-stat-card compact label="Avg score" [value]="summary() === null ? failed : (summary()?.score_avg | number: scoreDigits)" />
+        <gr-stat-card compact label="Min / Max" [value]="summary() === null ? failed : (summary()?.score_min | number: '1.0-0') + ' / ' + (summary()?.score_max | number: '1.0-0')" />
       </gr-card-grid>
 
       <gr-metric-chart
@@ -35,6 +35,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
         [categories]="waitCategories()"
         [colors]="['--gr-chart-cyan', '--gr-chart-orange']"
         [valueFormatter]="duration"
+        [error]="wait() === null || deps() === null"
       ></gr-metric-chart>
 
       <gr-metric-chart
@@ -44,6 +45,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
         [series]="histogramSeries()"
         [categories]="histogramCategories()"
         [colors]="['--gr-chart-purple']"
+        [error]="summary() === null"
       ></gr-metric-chart>
 
       <h2>Per-rule mean contribution <gr-label-help doc="reference/scheduler-policies/" title="About the scoring rules" /></h2>
@@ -64,7 +66,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
               <td class="bar-cell"><div class="bar" [class.neg]="r.avg < 0" [style.width.%]="r.share"></div></td>
             </tr>
           } @empty {
-            <tr><td colspan="5" class="muted">No scored assignments in window.</td></tr>
+            <tr><td colspan="5" class="muted">{{ summary() === null ? failed : 'No scored assignments in window.' }}</td></tr>
           }
         </tbody>
       </gr-table>
@@ -83,20 +85,22 @@ export class BoardSchedulerComponent implements OnInit {
   private board = inject(BoardService);
   protected first = firstLoad();
 
-  private wait = signal<MetricPoint[]>([]);
-  private deps = signal<MetricPoint[]>([]);
+  protected readonly failed = requestFailedText;
+  protected wait = signal<MetricPoint[] | null>(null);
+  protected deps = signal<MetricPoint[] | null>(null);
   summary = signal<ScoringSummary | null>(null);
   private descriptions = signal<Map<string, string>>(new Map());
   activeRule = signal<RuleDescription | null>(null);
 
   readonly duration = formatDuration;
 
-  waitCategories = computed(() => this.wait().map((p) => clockTime(p.bucket_start)));
+  waitCategories = computed(() => (this.wait() ?? []).map((p) => clockTime(p.bucket_start)));
   waitSeries = computed(() => {
-    const depMap = new Map(this.deps().map((p) => [p.bucket_start, Math.round(p.avg)]));
+    const wait = this.wait() ?? [];
+    const depMap = new Map((this.deps() ?? []).map((p) => [p.bucket_start, Math.round(p.avg)]));
     return [
-      { name: 'queue wait (excl. deps)', data: this.wait().map((p) => Math.round(p.avg)) },
-      { name: 'dependency wait', data: this.wait().map((p) => depMap.get(p.bucket_start) ?? 0) },
+      { name: 'queue wait (excl. deps)', data: wait.map((p) => Math.round(p.avg)) },
+      { name: 'dependency wait', data: wait.map((p) => depMap.get(p.bucket_start) ?? 0) },
     ];
   });
 

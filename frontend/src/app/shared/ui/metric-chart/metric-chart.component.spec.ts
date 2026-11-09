@@ -72,6 +72,20 @@ describe('MetricChartComponent', () => {
     expect(fixture.nativeElement.querySelector('.metric-chart__empty')?.textContent).toContain('No data');
   });
 
+  it('says Couldn\'t load instead of No data when the data failed to load', async () => {
+    const fixture = TestBed.createComponent(MetricChartComponent);
+    fixture.componentRef.setInput('error', true);
+    fixture.autoDetectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.metric-chart__error')?.textContent).toContain("Couldn't load");
+    expect(root.textContent).not.toContain('No data');
+
+    fixture.componentRef.setInput('loading', true);
+    await fixture.whenStable();
+    expect(root.querySelector('.metric-chart__error')).toBeNull();
+  });
+
   it('waits for the plot to get a size before it starts the chart', async () => {
     let notify: (width: number, height: number) => void = () => undefined;
     vi.stubGlobal('ResizeObserver', class {

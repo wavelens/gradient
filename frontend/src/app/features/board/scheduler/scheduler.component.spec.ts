@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
 import type { ScoringSummary } from '@core/models';
 import { BoardSchedulerComponent } from './scheduler.component';
@@ -19,13 +19,13 @@ const SUMMARY: ScoringSummary = {
   rules: [{ rule: 'Locality', avg: 1.234, min: 0.5, max: 2.25 }],
 };
 
-function setup() {
+function setup(summary: Observable<ScoringSummary> = of(SUMMARY)) {
   TestBed.configureTestingModule({
     imports: [BoardSchedulerComponent],
     providers: [
       {
         provide: BoardService,
-        useValue: { query: () => of([]), getScoringSummary: () => of(SUMMARY), getScoringRules: () => of([]) },
+        useValue: { query: () => of([]), getScoringSummary: () => summary, getScoringRules: () => of([]) },
       },
     ],
   });
@@ -44,5 +44,13 @@ describe('BoardSchedulerComponent', () => {
     expect(el.querySelector('.kpis')?.textContent).toContain('1,234.6');
     expect(el.querySelector('.rules tbody td.num')?.textContent?.trim()).toBe('1.2');
     expect(el.querySelector('.rules thead')?.textContent).toContain('Share');
+  });
+
+  it('says the summary failed instead of showing zero assignments', () => {
+    const el = setup(throwError(() => new Error('Internal server error')));
+    const cards = Array.from(el.querySelectorAll('.kpis gr-stat-card')).map((c) => c.textContent ?? '');
+    expect(cards.every((text) => text.includes("Couldn't load"))).toBe(true);
+    expect(el.querySelector('.rules tbody')?.textContent).toContain("Couldn't load");
+    expect(el.querySelector('gr-skeleton')).toBeNull();
   });
 });

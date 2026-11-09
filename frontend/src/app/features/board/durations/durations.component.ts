@@ -27,6 +27,7 @@ import { MetricPoint, DurationsHeatmap } from '@core/models';
         [height]="300"
         [series]="heatmapSeries()"
         [colors]="['--gr-chart-cyan']"
+        [error]="heatmap() === null"
       ></gr-metric-chart>
 
       <gr-metric-chart
@@ -37,6 +38,7 @@ import { MetricPoint, DurationsHeatmap } from '@core/models';
         [categories]="buildCategories()"
         [colors]="['--gr-chart-cyan', '--gr-graph-danger']"
         [valueFormatter]="duration"
+        [error]="build() === null"
       ></gr-metric-chart>
     </gr-load-state>
   `,
@@ -47,8 +49,8 @@ export class BoardDurationsComponent implements OnInit {
   private board = inject(BoardService);
   protected first = firstLoad();
 
-  private build = signal<MetricPoint[]>([]);
-  private heatmap = signal<DurationsHeatmap | null>(null);
+  protected build = signal<MetricPoint[] | null>(null);
+  protected heatmap = signal<DurationsHeatmap | null>(null);
 
   readonly duration = formatDuration;
 
@@ -62,10 +64,10 @@ export class BoardDurationsComponent implements OnInit {
     }));
   });
 
-  buildCategories = computed(() => this.build().map((p) => clockTime(p.bucket_start)));
+  buildCategories = computed(() => (this.build() ?? []).map((p) => clockTime(p.bucket_start)));
   buildSeries = computed(() => [
-    { name: 'avg', data: this.build().map((p) => p.avg) },
-    { name: 'max', data: this.build().map((p) => p.max) },
+    { name: 'avg', data: (this.build() ?? []).map((p) => p.avg) },
+    { name: 'max', data: (this.build() ?? []).map((p) => p.max) },
   ]);
 
   ngOnInit(): void {

@@ -26,27 +26,30 @@ import { BoardWorker, MetricPoint } from '@core/models';
         title="Build pipeline (hourly)"
         doc="ui/job-board/"
         type="line"
-        [series]="buildSeries()"
+        [series]="buildSeries() ?? []"
         [categories]="buildCategories()"
         [colors]="['--gr-chart-cyan', '--gr-graph-success', '--gr-graph-danger']"
+        [error]="buildSeries() === null"
       ></gr-metric-chart>
 
       <gr-metric-chart
         title="Evaluations (hourly)"
         doc="ui/job-board/"
         type="line"
-        [series]="evalSeries()"
+        [series]="evalSeries() ?? []"
         [categories]="evalCategories()"
         [colors]="['--gr-graph-success', '--gr-graph-danger']"
+        [error]="evalSeries() === null"
       ></gr-metric-chart>
 
       <gr-metric-chart
         title="Active jobs per worker"
         doc="ui/job-board/"
         type="bar"
-        [series]="workerSeries()"
+        [series]="workerSeries() ?? []"
         [categories]="workerCategories()"
         [colors]="['--gr-chart-orange']"
+        [error]="workerSeries() === null"
       ></gr-metric-chart>
     </gr-load-state>
   `,
@@ -58,11 +61,11 @@ export class BoardThroughputComponent implements OnInit {
   protected first = firstLoad();
 
   buildCategories = signal<string[]>([]);
-  buildSeries = signal<{ name: string; data: number[] }[]>([]);
+  buildSeries = signal<{ name: string; data: number[] }[] | null>(null);
   evalCategories = signal<string[]>([]);
-  evalSeries = signal<{ name: string; data: number[] }[]>([]);
+  evalSeries = signal<{ name: string; data: number[] }[] | null>(null);
   workerCategories = signal<string[]>([]);
-  workerSeries = signal<{ name: string; data: number[] }[]>([]);
+  workerSeries = signal<{ name: string; data: number[] }[] | null>(null);
 
   ngOnInit(): void {
     this.load();

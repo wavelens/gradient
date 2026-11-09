@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { BoardService } from '@core/services/board.service';
-import { firstLoad } from '../first-load';
+import { firstLoad, requestFailedText } from '../first-load';
 import { clockTime, formatMegabytes, formatPercent } from '@shared/text';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { BadgeComponent, LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
@@ -38,7 +38,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
           <tr><th>Worker</th><th>Projects</th><th>State</th><th>Jobs</th><th>CPU load</th><th>Free RAM</th><th>Arch</th>@if (anyWorkerHasExecLabelsOrDevices()) {<th>Exec</th>}</tr>
         </thead>
         <tbody>
-          @for (w of workers(); track $index) {
+          @for (w of workers() ?? []; track $index) {
             <tr>
               <td class="mono">{{ w.name ?? w.id ?? '-' }}</td>
               <td class="projects">
@@ -68,7 +68,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
               }
             </tr>
           } @empty {
-            <tr><td [attr.colspan]="anyWorkerHasExecLabelsOrDevices() ? 8 : 7" class="muted">No connected workers.</td></tr>
+            <tr><td [attr.colspan]="anyWorkerHasExecLabelsOrDevices() ? 8 : 7" class="muted">{{ workers() === null ? failed : 'No connected workers.' }}</td></tr>
           }
         </tbody>
       </gr-table>
@@ -80,6 +80,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         [series]="fleetSeries()"
         [categories]="fleetCats()"
         [colors]="['--gr-chart-green', '--gr-chart-orange']"
+        [error]="fleet() === null"
       ></gr-metric-chart>
 
       <gr-load-state [error]="averageError()" errorTitle="Failed to load worker load" (retry)="loadAverage()" />
@@ -93,6 +94,8 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
           [categories]="capLoad().cats"
           [colors]="['--gr-chart-cyan']"
           [valueFormatter]="percent"
+          [loading]="isAverageLoadForSelectedRangeLoading()"
+          [error]="selectedRangeLoadFailed()"
         >
           <gr-tab-switch slot="actions" ariaLabel="Capability load range" [options]="loadRanges" optionValue="value"
                          [ngModel]="loadRange()" (ngModelChange)="setLoadRange($event)" />
@@ -106,6 +109,8 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
           [categories]="archLoad().cats"
           [colors]="['--gr-chart-green']"
           [valueFormatter]="percent"
+          [loading]="isAverageLoadForSelectedRangeLoading()"
+          [error]="selectedRangeLoadFailed()"
         >
           <gr-tab-switch slot="actions" ariaLabel="Architecture load range" [options]="loadRanges" optionValue="value"
                          [ngModel]="loadRange()" (ngModelChange)="setLoadRange($event)" />
@@ -121,6 +126,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         [categories]="featLoad().cats"
         [colors]="['--gr-chart-pink']"
         [valueFormatter]="percent"
+        [error]="load() === null"
       ></gr-metric-chart>
     </gr-load-state>
   `,
@@ -131,8 +137,9 @@ export class BoardWorkersComponent implements OnInit {
   protected readonly links = links;
   private board = inject(BoardService);
   protected first = firstLoad();
-  workers = signal<BoardWorker[]>([]);
-  fleet = signal<BoardFleetPoint[]>([]);
+  protected readonly failed = requestFailedText;
+  workers = signal<BoardWorker[] | null>(null);
+  fleet = signal<BoardFleetPoint[] | null>(null);
   load = signal<WorkerLoad | null>(null);
   averageLoad = signal<WorkerLoadAverage | null>(null);
   averageError = signal<unknown>(null);
@@ -144,18 +151,21 @@ export class BoardWorkersComponent implements OnInit {
   ];
   loadRange = queryParamSignal<LoadRange>('load', 'now', oneOf(this.loadRanges.map((r) => r.value)));
   private rangedLoad = computed(() => (this.loadRange() === 'now' ? this.load() : this.averageLoad()));
+  protected selectedRangeLoadFailed = computed(() => (this.loadRange() === 'now' ? this.load() === null : this.averageError() !== null));
+  protected isAverageLoadForSelectedRangeLoading = computed(() =>
+    this.loadRange() !== 'now' && this.averageLoad() === null && this.averageError() === null);
 
   readonly megabytes = formatMegabytes;
   readonly heldSegments = (d: DeviceClass) => ratioSegments(d.total - d.free, d.total);
   readonly getExecLabelsWithoutWorkerId = (w: BoardWorker) => (w.exec?.labels ?? []).filter((label) => label !== w.id);
   readonly percent = (value: number) => formatPercent(value / 100);
   anyWorkerHasExecLabelsOrDevices = computed(() =>
-    this.workers().some((w) => this.getExecLabelsWithoutWorkerId(w).length > 0 || (w.exec?.devices.length ?? 0) > 0));
+    (this.workers() ?? []).some((w) => this.getExecLabelsWithoutWorkerId(w).length > 0 || (w.exec?.devices.length ?? 0) > 0));
 
-  fleetCats = computed(() => this.fleet().map((p) => clockTime(p.bucket_start)));
+  fleetCats = computed(() => (this.fleet() ?? []).map((p) => clockTime(p.bucket_start)));
   fleetSeries = computed(() => [
-    { name: 'connected', data: this.fleet().map((p) => p.connected) },
-    { name: 'draining', data: this.fleet().map((p) => p.draining) },
+    { name: 'connected', data: (this.fleet() ?? []).map((p) => p.connected) },
+    { name: 'draining', data: (this.fleet() ?? []).map((p) => p.draining) },
   ]);
 
   private radar(buckets: { key: string; in_flight: number; capacity: number }[]) {

@@ -13,7 +13,7 @@ import { FormsModule } from '@angular/forms';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { RouterModule } from '@angular/router';
 import { links, oneOf, queryParamSignal } from '@shared/routing';
-import { firstLoad } from '../first-load';
+import { firstLoad, requestFailedText } from '../first-load';
 import { formatDuration, formatQuantity } from '@shared/text';
 import { ExpensiveBuild, ExpensiveResource, TopProjectBuildTime } from '@core/models';
 
@@ -42,10 +42,10 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
         <gr-table class="expensive">
           <thead><tr><th>#</th><th>Derivation</th><th>Build time</th><th>Worker</th></tr></thead>
           <tbody>
-            @for (b of builds(); track b.build_id; let i = $index) {
+            @for (b of builds() ?? []; track b.build_id; let i = $index) {
               <tr><td>{{ i + 1 }}</td><td class="mono"><a class="build-link" [routerLink]="links.evaluationLog(b.project_slug, b.evaluation, { build: b.build_id })">{{ b.name }}</a></td><td>{{ duration(b.build_time_ms) }}</td><td class="mono">{{ b.worker_name ?? b.worker ?? '-' }}</td></tr>
             } @empty {
-              <tr><td colspan="4" class="muted">No builds in this window.</td></tr>
+              <tr><td colspan="4" class="muted">{{ builds() === null ? failed : 'No builds in this window.' }}</td></tr>
             }
           </tbody>
         </gr-table>
@@ -62,7 +62,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
         </gr-table>
       }
 
-      @if (tab() === 'time' && topProjects().length) {
+      @if (tab() === 'time' && auth.user()?.superuser && topProjects()?.length !== 0) {
         <h2>Top projects by build time <gr-label-help doc="ui/job-board/" title="About the Job Board" /></h2>
         <gr-metric-chart
           type="bar"
@@ -72,6 +72,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
           [categories]="topProjectCategories()"
           [colors]="['--gr-chart-orange']"
           [valueFormatter]="duration"
+          [error]="topProjects() === null"
         ></gr-metric-chart>
       }
     </gr-load-state>
@@ -82,11 +83,12 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 export class BoardExpensiveJobsComponent implements OnInit {
   protected readonly links = links;
   private board = inject(BoardService);
-  private auth = inject(AuthService);
+  protected auth = inject(AuthService);
   protected first = firstLoad();
-  builds = signal<ExpensiveBuild[]>([]);
+  protected readonly failed = requestFailedText;
+  builds = signal<ExpensiveBuild[] | null>(null);
   resources = signal<ExpensiveResource[]>([]);
-  topProjects = signal<TopProjectBuildTime[]>([]);
+  topProjects = signal<TopProjectBuildTime[] | null>(null);
   tabs: { key: Tab; label: string }[] = [
     { key: 'time', label: 'Longest' },
     { key: 'ram', label: 'Peak RAM' },
@@ -101,9 +103,9 @@ export class BoardExpensiveJobsComponent implements OnInit {
   readonly quantity = formatQuantity;
 
   valueHeader = computed(() => this.tabs.find((t) => t.key === this.tab())?.label ?? '');
-  topProjectCategories = computed(() => this.topProjects().map((o) => o.project_display_name || o.project_name));
+  topProjectCategories = computed(() => (this.topProjects() ?? []).map((o) => o.project_display_name || o.project_name));
   topProjectSeries = computed(() => [
-    { name: 'build time', data: this.topProjects().map((o) => o.total_build_ms) },
+    { name: 'build time', data: (this.topProjects() ?? []).map((o) => o.total_build_ms) },
   ]);
 
   ngOnInit(): void {
