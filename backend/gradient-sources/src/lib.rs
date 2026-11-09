@@ -114,14 +114,36 @@ impl SourceError {
         match self {
             Self::GitCommand(message)
             | Self::GitCommandFailed { stderr: message }
-            | Self::GitExecution { error: message } => message
-                .lines()
-                .map(|line| line.trim().trim_start_matches("fatal:").trim())
-                .find(|line| !line.is_empty())
-                .unwrap_or(message)
-                .to_owned(),
+            | Self::GitExecution { error: message } => {
+                let line = message
+                    .lines()
+                    .map(|line| line.trim().trim_start_matches("fatal:").trim())
+                    .find(|line| !line.is_empty())
+                    .unwrap_or(message);
+                readable_reason_for_git_transport_error_line(line)
+                    .unwrap_or(line)
+                    .to_owned()
+            }
             other => other.to_string(),
         }
+    }
+}
+
+fn readable_reason_for_git_transport_error_line(line: &str) -> Option<&'static str> {
+    let line = line.to_lowercase();
+    if ["failed to fill whole buffer", "early eof", "unexpected eof"]
+        .iter()
+        .any(|pattern| line.contains(pattern))
+    {
+        Some(
+            "The server closed the connection before it listed the repository branches. Check that the repository is at this URL.",
+        )
+    } else if line.contains("handshake") {
+        Some(
+            "The secure connection to the server failed during the handshake. Check the URL, the port and server support for this protocol.",
+        )
+    } else {
+        None
     }
 }
 
@@ -145,6 +167,26 @@ mod short_reason_tests {
             }
             .short_reason_for_user(),
             "branch main does not exist on the remote"
+        );
+    }
+
+    #[test]
+    fn raw_transport_and_handshake_failures_become_readable_reasons_for_user() {
+        let closed = SourceError::GitCommandFailed {
+            stderr: "failed to fill whole buffer".into(),
+        };
+        assert!(
+            closed
+                .short_reason_for_user()
+                .starts_with("The server closed the connection")
+        );
+        let handshake = SourceError::GitCommandFailed {
+            stderr: "SSH to example.com: Kex handshake failed".into(),
+        };
+        assert!(
+            handshake
+                .short_reason_for_user()
+                .starts_with("The secure connection to the server failed")
         );
     }
 }
