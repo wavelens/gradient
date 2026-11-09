@@ -32,6 +32,7 @@ export class DashboardRailComponent implements OnInit {
   failed = signal(false);
   hidden = signal(false);
   empty = output<boolean>();
+  hasProjectsOrLoadFailed = output<boolean>();
 
   readonly count = formatCount;
 
@@ -55,6 +56,7 @@ export class DashboardRailComponent implements OnInit {
         this.rail.set(r);
         this.failed.set(false);
         this.empty.emit(r.projects.length === 0 && r.caches.length === 0);
+        this.hasProjectsOrLoadFailed.emit(r.projects.length > 0);
       }),
     );
   }
@@ -66,6 +68,7 @@ export class DashboardRailComponent implements OnInit {
         this.hidden.set(e?.status === 403);
         this.failed.set(e?.status !== 403);
         this.empty.emit(false);
+        this.hasProjectsOrLoadFailed.emit(true);
       },
     });
   }

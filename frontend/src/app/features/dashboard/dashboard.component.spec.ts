@@ -56,6 +56,13 @@ describe('DashboardComponent', () => {
     expect(root.querySelector('app-dashboard-start')).toBeNull();
   });
 
+  it('leaves out the stats row while the user has caches but no project', () => {
+    const root = render({ projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }] });
+    expect(root.querySelector('app-dashboard-stats')).toBeNull();
+    expect(root.querySelector('app-dashboard-task-table')).not.toBeNull();
+    expect(root.querySelector('app-dashboard-start')).toBeNull();
+  });
+
   it('loads the router blocks alongside the rail instead of waiting for it', () => {
     const root = render(NEVER);
     expect(root.querySelector('app-dashboard-stats')).not.toBeNull();
