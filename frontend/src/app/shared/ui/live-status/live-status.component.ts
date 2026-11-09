@@ -14,7 +14,7 @@ import { BadgeComponent } from '@gradient/ui/ui';
   template: `
     <span role="status">
       @if (connected()) {
-        <gr-badge severity="success">Live</gr-badge>
+        <gr-badge>Live</gr-badge>
       } @else {
         <gr-badge severity="warning" title="Live connection dropped. Displayed values can be stale until reconnection.">Reconnecting</gr-badge>
       }
