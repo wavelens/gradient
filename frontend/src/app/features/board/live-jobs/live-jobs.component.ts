@@ -11,7 +11,7 @@ import { Router, RouterModule, UrlTree } from '@angular/router';
 import { BoardService } from '@core/services/board.service';
 import { LiveStatusComponent } from '@shared/ui';
 import { AuthService } from '@core/services/auth.service';
-import { ButtonComponent, LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
+import { ButtonComponent, LoadMoreComponent, LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
 import { BoardProjectTaskLinksComponent } from '../project-task-links.component';
 import { subscribeToBoardSocketWithReload } from '../board-socket';
@@ -22,6 +22,8 @@ import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@co
 import { links, oneOf, queryParamSignal } from '@shared/routing';
 import { type WaitingExplanation, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
 import { plural, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, serverTime } from '@shared/text';
+
+const boardTableLoadMoreRowCount = 50;
 
 type KindFilter = 'all' | JobKindName;
 type ScoreScope = 'current' | 'all';
@@ -58,7 +60,7 @@ interface DecisionRow {
 @Component({
   selector: 'app-board-live-jobs',
   standalone: true,
-  imports: [RelativeTimePipe, CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, TabSwitchComponent, LoadStateComponent, LiveStatusComponent, BoardProjectTaskLinksComponent],
+  imports: [RelativeTimePipe, CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, LoadMoreComponent, TableComponent, TabSwitchComponent, LoadStateComponent, LiveStatusComponent, BoardProjectTaskLinksComponent],
   template: `
     <div class="view-toggle">
       <gr-tab-switch ariaLabel="Job list" [options]="assignedAndPendingJobListTabOptions" [ngModel]="view()" (ngModelChange)="setView($event)" />
@@ -68,9 +70,7 @@ interface DecisionRow {
     @if (view() === 'assigned') {
       <gr-load-state [loading]="assignedJobsPanelFirstLoad.loading()" [error]="assignedJobsPanelFirstLoad.error()" [empty]="!assignedJobsPanelFirstLoad.received()"
                      loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retryAssigned()">
-        @if (!showDecisions()) {
-          <div class="banner">{{ runningJobsCount() }}</div>
-        }
+        <div class="banner">{{ runningJobsCount() }}</div>
 
         <div class="filters">
           @if (superuser()) {
@@ -135,12 +135,12 @@ interface DecisionRow {
         } @else {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>When</th><th><span class="sr-only">Details</span></th></tr>
+              <tr><th>Decision</th><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>Decided</th><th><span class="sr-only">Details</span></th></tr>
             </thead>
             <tbody>
-              @for (r of decisionRows(); track r.id) {
+              @for (r of visibleDecisionRows(); track r.id + r.at) {
                 <tr [class.negative]="r.score < 0" class="clickable" (click)="router.navigateByUrl(links.boardJob(r.id))">
-                  <td>{{ r.won ? 'assigned' : 'passed over' }}</td>
+                  <td>{{ r.won ? 'Won' : 'Passed over' }}</td>
                   <td>{{ jobKindName(r.kind) }}</td>
                   <td class="mono worker">{{ r.worker }}</td>
                   <td class="mono subject" [title]="r.subject">
@@ -155,6 +155,8 @@ interface DecisionRow {
               }
             </tbody>
           </gr-table>
+          <gr-load-more [shown]="visibleDecisionRows().length" [total]="decisionRows().length"
+                        (more)="visibleDecisionRowCount.set(visibleDecisionRowCount() + boardTableLoadMoreRowCount)" />
         }
       </gr-load-state>
     } @else {
@@ -219,6 +221,7 @@ export class BoardLiveJobsComponent implements OnInit {
   protected readonly scoreDigits = schedulerScoreDecimalPipeDigitsFormat;
   protected readonly jobSubjectLabel = jobSubjectLabel;
   protected readonly plural = plural;
+  protected readonly boardTableLoadMoreRowCount = boardTableLoadMoreRowCount;
 
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
@@ -320,6 +323,8 @@ export class BoardLiveJobsComponent implements OnInit {
 
     return rows;
   });
+  visibleDecisionRowCount = signal(boardTableLoadMoreRowCount);
+  visibleDecisionRows = computed(() => this.decisionRows().slice(0, this.visibleDecisionRowCount()));
 
   ngOnInit(): void {
     this.load();

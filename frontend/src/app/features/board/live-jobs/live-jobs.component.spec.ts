@@ -293,10 +293,27 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
     expect(rows.some((r) => r.subject === 'win' && r.won)).toBe(true);
 
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('passed over');
+    expect(text).toContain('Passed over');
     expect(text).toContain('-8');
     expect(rows.every((r) => r.worker === 'Builder One')).toBe(true);
-    expect((fixture.nativeElement as HTMLElement).querySelector('.banner')).toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.banner')?.textContent?.trim()).toBe('No running jobs');
+  });
+
+  it('caps the decision rows and grows them with Load more', () => {
+    const many: AssignDecisionView[] = Array.from({ length: 30 }, (_, i) => ({
+      ...DECISIONS[0],
+      at: `2026-06-08T00:${String(i).padStart(2, '0')}:00Z`,
+    }));
+    const fixture = setupDecisions();
+    getAssignmentDecisions.mockReturnValueOnce(of(many));
+    fixture.componentInstance.setScoreScope('all');
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelectorAll('gr-table.jobs tbody tr').length).toBe(50);
+    expect(root.querySelector('gr-load-more')?.textContent).toContain('Showing 50 of 60');
+    (root.querySelector('gr-load-more button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(root.querySelectorAll('gr-table.jobs tbody tr').length).toBe(60);
   });
 
   it('hides the decision scores from a non-superuser and never asks for them', () => {
