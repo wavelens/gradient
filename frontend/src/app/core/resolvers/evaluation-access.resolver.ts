@@ -5,7 +5,7 @@
  */
 
 import { inject } from '@angular/core';
-import { RedirectCommand, ResolveFn, Router } from '@angular/router';
+import { RedirectCommand, ResolveFn, Router, UrlSegment } from '@angular/router';
 import { Observable, map, of, switchMap } from 'rxjs';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { TasksService } from '@core/services/tasks.service';
@@ -18,18 +18,27 @@ export interface EvaluationWithOptionalTask {
   task: TaskDetailsResponse | null;
 }
 
+function redirectToCorrectProjectSlug(router: Router, url: string, project: string): RedirectCommand {
+  const tree = router.parseUrl(url);
+  const group = tree.root.children['primary'];
+  if (group) group.segments = group.segments.map((segment, index) => (index === 1 ? new UrlSegment(project, {}) : segment));
+  return new RedirectCommand(tree, { replaceUrl: true });
+}
+
 export const evaluationAccessResolver: ResolveFn<EvaluationWithOptionalTask> = (route, state) => {
   const router = inject(Router);
   const tasks = inject(TasksService);
   const project = route.paramMap.get('project') ?? '';
   const id = route.paramMap.get('evaluationId') ?? '';
   const target: DeniedTarget = { kind: 'evaluation', name: id, back: String(links.project(project)) };
+  const withTask = (evaluation: EvaluationResponse): Observable<EvaluationWithOptionalTask | RedirectCommand> => {
+    const task$: Observable<TaskDetailsResponse | null> = evaluation.task_name ? tasks.getTask(project, evaluation.task_name) : of(null);
+    return task$.pipe(map((task) => (!task || task.id === evaluation.task ? { evaluation, task } : deniedPage(router, target, state.url))));
+  };
   return inject(EvaluationsService).getEvaluation(id).pipe(
-    switchMap((evaluation): Observable<EvaluationWithOptionalTask> => evaluation.task_name
-      ? tasks.getTask(project, evaluation.task_name).pipe(map((task) => ({ evaluation, task })))
-      : of({ evaluation, task: null })),
-    map((data): EvaluationWithOptionalTask | RedirectCommand =>
-      !data.task || data.task.id === data.evaluation.task ? data : deniedPage(router, target, state.url)),
+    switchMap((evaluation) => evaluation.project_name === project
+      ? withTask(evaluation)
+      : of(redirectToCorrectProjectSlug(router, state.url, evaluation.project_name))),
     denyOnRefusal<EvaluationWithOptionalTask | RedirectCommand>(target, state.url),
   );
 };
