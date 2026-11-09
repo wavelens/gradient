@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
@@ -29,7 +29,7 @@ function setup(
   TestBed.configureTestingModule({
     imports: [AppHeaderComponent],
     providers: [
-      provideRouter([]),
+      provideRouter([{ path: '**', children: [] }]),
       provideHttpClient(),
       provideHttpClientTesting(),
       {
@@ -65,6 +65,22 @@ describe('AppHeaderComponent - registration visibility', () => {
   it('hides the Sign Up link when registration is disabled', () => {
     const fixture = setup(true);
     expect(registerLink(fixture.nativeElement)).toBeNull();
+  });
+
+  it('leaves sign in and sign up to the account pages themselves', async () => {
+    const fixture = setup(false);
+    await TestBed.inject(Router).navigateByUrl('/account/login');
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(registerLink(root)).toBeNull();
+    expect(root.textContent).not.toContain('Sign In');
+  });
+
+  it('returns to the current page after signing in from the header', async () => {
+    const fixture = setup(false);
+    await TestBed.inject(Router).navigateByUrl('/projects');
+    fixture.detectChanges();
+    expect(registerLink(fixture.nativeElement)?.getAttribute('href')).toBe('/account/register?next=%2Fprojects');
   });
 
   it('shows the custom logo of the instance in the header', () => {

@@ -23,10 +23,10 @@
       @defer (on idle; on interaction(userTrigger)) {
         <app-user-menu #userMenu (itemCommandSelected)="header.closeMenu()" />
       }
-    } @else if (!authService.serverUnreachable()) {
-      <a [routerLink]="links.login(nextPagePathAfterSignIn)" class="user-link">Sign In</a>
+    } @else if (!authService.serverUnreachable() && !isAccountRoute()) {
+      <a [routerLink]="links.login(urlToReturnToAfterSignIn())" class="user-link">Sign In</a>
       @if (!registrationDisabled) {
-        <a [routerLink]="links.register(nextPagePathAfterSignIn)" class="user-link">Sign Up</a>
+        <a [routerLink]="links.register(urlToReturnToAfterSignIn())" class="user-link">Sign Up</a>
       }
     }
   </div>

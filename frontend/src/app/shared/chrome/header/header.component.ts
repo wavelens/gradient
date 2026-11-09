@@ -35,7 +35,7 @@ export class AppHeaderComponent {
   protected readonly links = links;
   authService = inject(AuthService);
   protected palette = inject(CommandPaletteService);
-  protected router = inject(Router);
+  private router = inject(Router);
   private config = inject(ConfigService);
 
   protected readonly brand: Brand = { ...BRAND, logoUrl: this.config.logoUrl };
@@ -49,9 +49,11 @@ export class AppHeaderComponent {
   private pendingMenuOrigin = signal<HTMLElement | null>(null);
 
   get registrationDisabled() { return this.config.registrationDisabled; }
-  protected get nextPagePathAfterSignIn(): string | null {
-    return this.router.url.startsWith('/account/') ? null : this.router.url;
-  }
+  protected readonly urlToReturnToAfterSignIn = computed(() => {
+    const finalUrl = this.router.lastSuccessfulNavigation()?.finalUrl;
+    return finalUrl ? this.router.serializeUrl(finalUrl) : this.router.url;
+  });
+  protected readonly isAccountRoute = computed(() => this.urlToReturnToAfterSignIn().startsWith('/account/'));
 
   constructor() {
     effect(() => {
