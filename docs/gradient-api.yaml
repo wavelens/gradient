@@ -22592,6 +22592,26 @@ components:
     WebhookId:
       type: string
       format: uuid
+    WebhookNewestDeliveryAttemptSummary:
+      type: object
+      required:
+      - success
+      - delivered_at
+      properties:
+        success:
+          type: boolean
+        delivered_at:
+          type: string
+          format: date-time
+        response_status:
+          type:
+          - integer
+          - 'null'
+          format: int32
+        error_message:
+          type:
+          - string
+          - 'null'
     WebhookResponse:
       type: object
       required:
@@ -22624,6 +22644,10 @@ components:
           - string
           - 'null'
           format: date-time
+        last_delivery:
+          oneOf:
+          - $ref: '#/components/schemas/WebhookNewestDeliveryAttemptSummary'
+          - type: 'null'
         created_by:
           $ref: '#/components/schemas/UserId'
         created_at:

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_db::webhooks::NewestWebhookDeliveryRow;
 use gradient_entity::webhook::WebhookScope;
 use gradient_types::*;
 use serde::Serialize;
@@ -17,14 +18,35 @@ pub struct WebhookResponse {
     pub events: Vec<String>,
     pub active: bool,
     pub last_fired_at: Option<chrono::NaiveDateTime>,
+    pub last_delivery: Option<WebhookNewestDeliveryAttemptSummary>,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
 
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct WebhookNewestDeliveryAttemptSummary {
+    pub success: bool,
+    pub delivered_at: chrono::NaiveDateTime,
+    pub response_status: Option<i32>,
+    pub error_message: Option<String>,
+}
+
+impl From<NewestWebhookDeliveryRow> for WebhookNewestDeliveryAttemptSummary {
+    fn from(row: NewestWebhookDeliveryRow) -> Self {
+        Self {
+            success: row.success,
+            delivered_at: row.delivered_at,
+            response_status: row.response_status,
+            error_message: row.error_message,
+        }
+    }
+}
+
 impl From<MWebhook> for WebhookResponse {
     fn from(m: MWebhook) -> Self {
         Self {
+            last_delivery: None,
             id: m.id,
             scope: m.scope,
             name: m.name,

@@ -107,7 +107,28 @@ pub async fn list_webhooks(
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<Vec<WebhookResponse>>>> {
     let rows = gradient_db::webhooks::of_owner(&state.web_db, (&owner).into()).await?;
-    Ok(ok_json(rows.into_iter().map(Into::into).collect()))
+    Ok(ok_json(
+        webhook_rows_to_api_responses_with_newest_delivery(&state.web_db, rows).await?,
+    ))
+}
+
+async fn webhook_rows_to_api_responses_with_newest_delivery(
+    db: &WebDb,
+    rows: Vec<MWebhook>,
+) -> WebResult<Vec<WebhookResponse>> {
+    let ids: Vec<WebhookId> = rows.iter().map(|row| row.id).collect();
+    let mut newest =
+        gradient_db::webhooks::latest_delivery_summaries_by_webhook_ids(db, &ids).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let last_delivery = newest.remove(&row.id).map(Into::into);
+            WebhookResponse {
+                last_delivery,
+                ..row.into()
+            }
+        })
+        .collect())
 }
 
 #[utoipa::path(
@@ -184,9 +205,19 @@ pub async fn read_webhook(
     State(state): ApiState,
     owner: WebhookOwner,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    Ok(ok_json(WebhookResponse::from(
-        owned_webhook(&state.web_db, &owner).await?,
-    )))
+    let row = owned_webhook(&state.web_db, &owner).await?;
+    webhook_row_to_api_response_with_newest_delivery(&state.web_db, row).await
+}
+
+async fn webhook_row_to_api_response_with_newest_delivery(
+    db: &WebDb,
+    row: MWebhook,
+) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
+    let response = webhook_rows_to_api_responses_with_newest_delivery(db, vec![row])
+        .await?
+        .pop()
+        .or_not_found(Resource::Webhook)?;
+    Ok(ok_json(response))
 }
 
 #[utoipa::path(
@@ -248,7 +279,7 @@ pub async fn update_webhook(
             json!({ "webhook_id": row.id, "fields": fields }),
         )
         .await;
-    Ok(ok_json(WebhookResponse::from(row)))
+    webhook_row_to_api_response_with_newest_delivery(&state.web_db, row).await
 }
 
 #[utoipa::path(

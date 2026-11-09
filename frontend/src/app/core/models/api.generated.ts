@@ -2935,6 +2935,13 @@ export type WebhookDeliveryId = string;
 
 export type WebhookId = string;
 
+export interface WebhookNewestDeliveryAttemptSummary {
+  success: boolean;
+  delivered_at: string;
+  response_status?: number | null;
+  error_message?: string | null;
+}
+
 export interface WebhookResponse {
   id: WebhookId;
   scope: WebhookScope;
@@ -2943,6 +2950,7 @@ export interface WebhookResponse {
   events: string[];
   active: boolean;
   last_fired_at?: string | null;
+  last_delivery?: WebhookNewestDeliveryAttemptSummary | null;
   created_by: UserId;
   created_at: string;
   updated_at: string;

@@ -11,7 +11,7 @@
 
 use gradient_entity::team_user::TeamRole;
 use gradient_entity::webhook::WebhookScope;
-use gradient_entity::{ids::*, role, webhook};
+use gradient_entity::{ids::*, role, webhook, webhook_delivery};
 use gradient_fixtures::ids::{project_id, team_id, user_id};
 use gradient_fixtures::mock::{all_statements, mock_db};
 use gradient_fixtures::rows::{project, project_member, team, team_member};
@@ -124,7 +124,9 @@ async fn create_returns_the_secret_once() {
 #[tokio::test]
 async fn read_webhook_never_returns_the_secret() {
     let session_id = SessionId::now_v7();
-    let db = as_project_admin(session_id).append_query_results([vec![webhook_row()]]);
+    let db = as_project_admin(session_id)
+        .append_query_results([vec![webhook_row()]])
+        .append_query_results([Vec::<webhook_delivery::Model>::new()]);
     let server = make_test_server(db.into_connection());
 
     let res = server
@@ -247,6 +249,7 @@ async fn team_webhook_list_hides_other_team() {
     let session_id = SessionId::now_v7();
     let db = as_team(session_id, TeamRole::Admin)
         .append_query_results([vec![team_webhook_row()]])
+        .append_query_results([Vec::<webhook_delivery::Model>::new()])
         .into_connection();
     let server = make_test_server(db.clone());
 
