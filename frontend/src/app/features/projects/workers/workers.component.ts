@@ -28,7 +28,9 @@ import {
   RegisterWorkerResponse,
   WorkerConnection,
   PatchWorkerRequest,
+  CacheSubscriptionItem,
 } from '@core/models';
+import { ProjectNoActiveWritableCacheSubscriptionWarningComponent } from '../project-no-active-writable-cache-subscription-warning.component';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -42,7 +44,6 @@ import {
   LoadStateComponent,
   MenuComponent,
   MenuItem,
-  MessageBannerComponent,
   MessageService,
   PageLayoutComponent,
   PopoverComponent,
@@ -74,7 +75,7 @@ import { runReloadIntervalWhileTabVisible } from '@shared/paging';
     LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
-    IconComponent, MessageBannerComponent,
+    IconComponent, ProjectNoActiveWritableCacheSubscriptionWarningComponent,
     PageLayoutComponent,
     FormFieldComponent,
     FieldRowComponent,
@@ -131,7 +132,7 @@ export class WorkersComponent implements OnInit {
   errorMessage = signal<string | null>(null);
   renameError = signal<string | null>(null);
   toggleError = signal<string | null>(null);
-  hasNoCacheSubscribed = signal(false);
+  cacheSubscriptions = signal<CacheSubscriptionItem[] | null>(null);
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Workers' }));
@@ -238,8 +239,8 @@ export class WorkersComponent implements OnInit {
 
   private loadCacheSubscriptions(): void {
     requestIfProjectMember(this.resolvedProject(), () => this.projectsService.getSubscribedCaches(this.projectName)).subscribe({
-      next: (caches) => this.hasNoCacheSubscribed.set(caches.length === 0),
-      error: () => this.hasNoCacheSubscribed.set(false),
+      next: (caches) => this.cacheSubscriptions.set(caches),
+      error: () => this.cacheSubscriptions.set(null),
     });
   }
 

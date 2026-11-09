@@ -14,13 +14,7 @@
       (click)="openRegisterDialog()"
       [appManagedDisable]="access()"
     ></button>
-  @if (hasNoCacheSubscribed()) {
-    <gr-message-banner type="warning" data-testid="no-cache-banner">
-      <strong>No cache subscribed</strong>
-      Evaluations wait for a cache subscription.
-      <a [routerLink]="links.projectPage(projectName, 'caches')">Manage cache subscriptions</a>
-    </gr-message-banner>
-  }
+  <app-project-no-active-writable-cache-subscription-warning [projectName]="projectName" [caches]="cacheSubscriptions()" />
 
   @if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading workers..." errorTitle="Failed to load workers" (retry)="loadWorkers()" />

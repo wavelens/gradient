@@ -70,6 +70,23 @@ describe('ProjectDetailComponent subscribed caches', () => {
     const { root, getSubscribedCaches } = render(false, undefined, { role: null, permissions: [] }, caches);
     expect(getSubscribedCaches).not.toHaveBeenCalled();
     expect(root.querySelector('[slot="meta"]')).toBeNull();
+    expect(root.querySelector('[data-testid="no-cache-banner"]')).toBeNull();
+  });
+
+  it('says why evaluations wait only while no active cache accepts writes', () => {
+    expect(render(true, undefined, undefined, caches).root.querySelector('[data-testid="no-cache-banner"]')).toBeNull();
+    TestBed.resetTestingModule();
+    const banner = render(true, undefined, undefined, caches.slice(1)).root.querySelector('[data-testid="no-cache-banner"]');
+    expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/caches');
+  });
+});
+
+describe('ProjectDetailComponent task cards', () => {
+  it('marks inactive tasks', () => {
+    const task = (name: string, active: boolean) => ({ id: name, name, display_name: name, description: '', active });
+    const { root } = render(true, () => of({ items: [task('on', true), task('off', false)], total: 2, page: 1 }));
+    const metas = Array.from(root.querySelectorAll('gr-nav-card')).map((card) => card.querySelector('[slot="meta"]')?.textContent?.trim());
+    expect(metas).toEqual(['', 'Inactive']);
   });
 });
 

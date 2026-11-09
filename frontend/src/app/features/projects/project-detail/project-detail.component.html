@@ -20,6 +20,7 @@
       <gr-star-button labeled [target]="starTarget" [starredItemDisplayName]="project.display_name" [(starred)]="starred" />
     }
   </div>
+  <app-project-no-active-writable-cache-subscription-warning [projectName]="projectName" [caches]="cacheSubscriptions()" />
   <gr-load-state
     [loading]="tasks.loading()"
     [error]="tasks.error()"
@@ -45,6 +46,9 @@
             [link]="links.task(projectName, task.name)"
           >
             <div slot="meta">
+              @if (!task.active) {
+                <gr-badge severity="warning">Inactive</gr-badge>
+              }
               @if (task.last_evaluation_status) {
                 <gr-eval-status-badge [status]="task.last_evaluation_status" />
               }

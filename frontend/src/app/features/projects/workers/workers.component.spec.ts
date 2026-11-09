@@ -17,7 +17,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
-import type { Permission } from '@core/models';
+import type { CacheSubscriptionItem, Permission } from '@core/models';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { signal } from '@angular/core';
@@ -68,7 +68,7 @@ const workerOfTeam: ProjectWorkerEntry = {
 function setup(opts: {
   access: AccessState;
   workers: ProjectWorkerEntry[];
-  caches: { id: string; name: string }[];
+  caches: Partial<CacheSubscriptionItem>[];
   testWorker?: ReturnType<typeof vi.fn>;
   gradientCi?: boolean;
   memberOf?: string[];
@@ -87,7 +87,7 @@ function setup(opts: {
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   const projects: MockedProjects = {
     getProject: vi.fn(() => of({ id: 'project-uuid', display_name: 'Project' } as never)),
-    getSubscribedCaches: vi.fn(() => of(opts.caches)),
+    getSubscribedCaches: vi.fn(() => of(opts.caches.map((cache) => ({ mode: 'ReadWrite', status: 'active', ...cache })))),
   };
   TestBed.configureTestingModule({
     imports: [WorkersComponent],
@@ -178,6 +178,16 @@ describe('WorkersComponent - no-cache banner (existing)', () => {
     await settled(fixture);
     const banner = fixture.nativeElement.querySelector('[data-testid="no-cache-banner"]');
     expect(banner, 'banner element').toBeNull();
+  });
+
+  it('shows the banner when every subscription is read-only or pending', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      workers: [],
+      caches: [{ id: 'r', name: 'read-only', mode: 'ReadOnly' }, { id: 'p', name: 'pending', status: 'pending' }],
+    });
+    await settled(fixture);
+    expect(fixture.nativeElement.querySelector('[data-testid="no-cache-banner"]')?.textContent).toContain('No writable cache');
   });
 });
 
