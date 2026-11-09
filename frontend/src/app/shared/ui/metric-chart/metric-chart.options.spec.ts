@@ -286,6 +286,13 @@ describe('buildMetricChartOption heatmap', () => {
     expect((opt.visualMap as any).inRange.colorAlpha[0]).toBeGreaterThanOrEqual(0.2);
   });
 
+  it('colours the legend handle and out-of-range cells from the theme', () => {
+    const visualMap = buildMetricChartOption({ type: 'heatmap', series: bands }, THEME).visualMap as any;
+    expect(visualMap.controller.inRange.color).toEqual(visualMap.inRange.color);
+    expect(visualMap.outOfRange.color).toEqual([THEME.muted]);
+    expect(visualMap.controller.outOfRange.color).toEqual([THEME.muted]);
+  });
+
   it('draws no stripes behind the empty cells', () => {
     const opt = buildMetricChartOption({ type: 'heatmap', series: bands }, THEME);
     expect((opt.xAxis as any).splitArea).toBeUndefined();

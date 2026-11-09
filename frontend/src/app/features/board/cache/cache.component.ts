@@ -80,7 +80,7 @@ const FIRST_FRAME_MS = 10_000;
         type="area"
         [series]="storageSeries()"
         [categories]="storageCats()"
-        [colors]="['--gr-chart-green']"
+        [colors]="['--gr-chart-teal']"
         [valueFormatter]="bytes"
       ></gr-metric-chart>
 
@@ -91,7 +91,7 @@ const FIRST_FRAME_MS = 10_000;
           type="line"
           [series]="u.series"
           [categories]="u.categories"
-          [colors]="['--gr-chart-orange']"
+          [colors]="['--gr-chart-cyan']"
           [valueFormatter]="duration"
         ></gr-metric-chart>
       }

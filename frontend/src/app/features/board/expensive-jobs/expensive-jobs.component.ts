@@ -74,7 +74,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
           [height]="320"
           [series]="topProjectSeries()"
           [categories]="topProjectCategories()"
-          [colors]="['--gr-chart-orange']"
+          [colors]="['--gr-chart-purple']"
           [valueFormatter]="duration"
           [error]="topProjects() === null"
         ></gr-metric-chart>

@@ -55,7 +55,7 @@ export const getHourlySeriesPointsWithoutCurrentBucket = (points: SeriesPoint[],
         type="bar"
         [series]="diskSeries()"
         [categories]="workerCats()"
-        [colors]="['--gr-chart-orange']"
+        [colors]="['--gr-chart-cyan']"
         [valueFormatter]="mbps"
       ></gr-metric-chart>
 

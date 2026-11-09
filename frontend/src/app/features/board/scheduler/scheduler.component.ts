@@ -36,7 +36,7 @@ const WHOLE_NUMBER = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
         type="line"
         [series]="waitChart().series"
         [categories]="waitChart().categories"
-        [colors]="['--gr-chart-cyan', '--gr-chart-orange']"
+        [colors]="['--gr-chart-cyan', '--gr-chart-purple']"
         [valueFormatter]="duration"
         [error]="wait() === null || deps() === null"
       ></gr-metric-chart>

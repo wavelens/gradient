@@ -12,11 +12,12 @@ import { BadgeComponent } from '@gradient/ui/ui';
   standalone: true,
   imports: [BadgeComponent],
   template: `
-    <span role="status">
+    @let description = connected() ? 'Live updates connected' : 'Live updates disconnected. Reconnecting. Values can be stale.';
+    <span role="status" [attr.aria-label]="description" [title]="description">
       @if (connected()) {
-        <gr-badge>Live</gr-badge>
+        <gr-badge severity="success">Live</gr-badge>
       } @else {
-        <gr-badge severity="warning" title="Live connection dropped. Displayed values can be stale until reconnection.">Reconnecting</gr-badge>
+        <gr-badge severity="warning">Reconnecting</gr-badge>
       }
     </span>
   `,

@@ -39,7 +39,7 @@ const formatJobCountWithHiddenJobs = (shown: number, hidden: number): number | s
         type="area"
         [series]="completedChart().series"
         [categories]="completedChart().categories"
-        [colors]="['--gr-chart-green']"
+        [colors]="['--gr-graph-success']"
         [error]="completed() === null"
       ></gr-metric-chart>
     </gr-load-state>

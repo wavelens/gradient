@@ -51,7 +51,7 @@ const buildHourlyChartAxisAndSeries = (named: [string, MetricPoint[]][]) =>
         type="bar"
         [series]="workerSeries() ?? []"
         [categories]="workerCategories()"
-        [colors]="['--gr-chart-orange']"
+        [colors]="['--gr-chart-cyan']"
         [error]="workerSeries() === null"
       ></gr-metric-chart>
     </gr-load-state>

@@ -80,7 +80,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         type="area"
         [series]="fleetChart().series"
         [categories]="fleetChart().categories"
-        [colors]="['--gr-chart-green', '--gr-chart-orange']"
+        [colors]="['--gr-graph-success', '--gr-graph-warning']"
         [error]="fleet() === null"
       ></gr-metric-chart>
 
@@ -108,7 +108,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
           [height]="300"
           [series]="archLoad().series"
           [categories]="archLoad().cats"
-          [colors]="['--gr-chart-green']"
+          [colors]="['--gr-chart-purple']"
           [valueFormatter]="percent"
           [loading]="isAverageLoadForSelectedRangeLoading()"
           [error]="selectedRangeLoadFailed()"
