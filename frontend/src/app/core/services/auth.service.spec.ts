@@ -100,11 +100,19 @@ describe('AuthService session probe', () => {
   });
 
   it('sends a visitor without a session to sign in without claiming it expired', () => {
-    boot(() => httpMock.expectOne(userUrl).flush({ error: true, message: 'no' }, { status: 401, statusText: 'Unauthorized' }));
+    boot(() => httpMock.expectOne(userUrl).flush({ error: true, message: 'no' }, { status: 403, statusText: 'Forbidden' }));
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     service.sessionLost('/settings/keys');
     httpMock.expectNone(`${environment.apiUrl}/auth/logout`);
     expect(navigate).toHaveBeenCalledWith(['/account/login'], { queryParams: { next: '/settings/keys' } });
+  });
+
+  it('marks the sign-in page as expired when a cookie rejected on page load fails again later', () => {
+    boot(() => httpMock.expectOne(userUrl).flush({ error: true, message: 'no' }, { status: 401, statusText: 'Unauthorized' }));
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    service.sessionLost('/project/p');
+    httpMock.expectNone(`${environment.apiUrl}/auth/logout`);
+    expect(navigate).toHaveBeenCalledWith(['/account/login'], { queryParams: { next: '/project/p', reason: 'expired' } });
   });
 
   it('marks the sign-in link as expired only when the server rejected a token on page load', () => {

@@ -6,8 +6,8 @@
 
 use crate::audit::Audit;
 use crate::authorization::{
-    cookie_value, create_session_and_token, oidc_login_create, oidc_login_verify, session_claims,
-    update_last_login,
+    clear_jwt_token_cookie, cookie_value, create_session_and_token, oidc_login_create,
+    oidc_login_verify, session_claims, update_last_login,
 };
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -606,15 +606,7 @@ pub async fn post_logout(
     audit: Audit,
     headers: HeaderMap,
 ) -> WebResult<Response> {
-    let secure = if state.config.server.use_tls {
-        "; Secure"
-    } else {
-        ""
-    };
-    let clear_cookie = format!(
-        "jwt_token=; HttpOnly{}; SameSite=Strict; Path=/; Max-Age=0",
-        secure
-    );
+    let clear_cookie = clear_jwt_token_cookie(state.config.server.use_tls);
 
     if let Some(claims) = session_claims(&state.jwt_secret, &headers) {
         let session_id = claims.jti;

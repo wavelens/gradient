@@ -121,9 +121,10 @@ export class AuthService {
 
   private clearStoredUserAndTokenAndReturnExpiredReason(): 'expired' | undefined {
     const wasSignedIn = this.isAuthenticated();
+    const expired = wasSignedIn || this.tokenRejectedOnStartup;
     this.forget();
     if (wasSignedIn) this.api.post('auth/logout', {}, asSessionProbe()).subscribe({ error: () => undefined });
-    return wasSignedIn ? 'expired' : undefined;
+    return expired ? 'expired' : undefined;
   }
 
   stillSignedIn(): Observable<boolean> {

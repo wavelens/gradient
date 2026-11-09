@@ -44,7 +44,7 @@ export function denyOnRefusal<T>(target: DeniedTarget, from: string): OperatorFu
         }),
       );
     }
-    if (error instanceof ApiError && error.unreachable) return EMPTY;
+    if (error instanceof ApiError && (error.unreachable || error.status === 401)) return EMPTY;
     const failed = router.createUrlTree(['/error/500'], { queryParams: { from } });
     return of(new RedirectCommand(failed, { browserUrl: from }));
   });

@@ -101,19 +101,13 @@ async fn deactivated_member_cannot_read_commit_in_private_project() {
     };
 
     let (db, auth) = signed_in_as(deactivated);
-    let db = db
-        .append_query_results([vec![commit_row()]])
-        .append_query_results([vec![eval_at(eval_id(), 0)]])
-        .append_query_results([vec![task()]])
-        .append_query_results([vec![project()]])
-        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]]);
     let server = make_test_server(db.into_connection());
 
     let res = server
         .get(&commit_url())
         .add_header("authorization", auth)
         .await;
-    res.assert_status_not_found();
+    res.assert_status_forbidden();
 }
 
 #[tokio::test]

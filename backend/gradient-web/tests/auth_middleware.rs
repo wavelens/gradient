@@ -58,3 +58,28 @@ async fn undecodable_token_returns_401_envelope() {
     res.assert_status_unauthorized();
     assert_envelope(&res.json::<Value>(), "Unable to decode token");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invalid_jwt_token_cookie_on_optional_auth_route_returns_401_and_clears_cookie() {
+    let s = server();
+    let res = s
+        .get("/api/v1/projects/x")
+        .add_header("cookie", "jwt_token=not-a-real-jwt")
+        .await;
+    res.assert_status_unauthorized();
+    let set_cookie = res.header("set-cookie");
+    let set_cookie = set_cookie.to_str().expect("ascii set-cookie");
+    assert!(set_cookie.starts_with("jwt_token=;"), "{set_cookie}");
+    assert!(set_cookie.contains("Max-Age=0"), "{set_cookie}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invalid_bearer_token_on_optionally_authenticated_route_returns_401_without_set_cookie() {
+    let s = server();
+    let res = s
+        .get("/api/v1/projects/x")
+        .add_header("authorization", "Bearer not-a-real-jwt")
+        .await;
+    res.assert_status_unauthorized();
+    assert!(res.maybe_header("set-cookie").is_none());
+}

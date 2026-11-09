@@ -19,8 +19,9 @@ pub use self::external_login::{PasswordLogin, sign_in_external};
 pub use self::identity_connect::{ConnectRefusal, can_disconnect, connect_identity};
 pub use self::job_scope::{JobScopeRefusal, job_mask};
 pub use self::jwt::{
-    Cliams, DownloadClaims, cookie_value, create_session_and_token, decode_download_token,
-    decode_jwt, encode_download_token, generate_api_key, hash_api_key, session_claims,
+    Cliams, DownloadClaims, clear_jwt_token_cookie, cookie_value, create_session_and_token,
+    decode_download_token, decode_jwt, encode_download_token, generate_api_key, hash_api_key,
+    session_claims,
 };
 pub use self::middleware::{
     MaybeUser, authorize, authorize_optional, require_session_authentication, update_last_login,

@@ -81,6 +81,16 @@ describe('projectAccessResolver', () => {
     expect(TestBed.inject(Router).serializeUrl(result.redirectTo)).toContain('/error/404?kind=project&name=missing&back=%2Fprojects');
   });
 
+  it('leaves a rejected token to the sign-in redirect of the error interceptor', async () => {
+    getProject.mockReturnValue(throwError(() => new ApiError('Unable to decode token', 401)));
+    const result = TestBed.runInInjectionContext(() =>
+      projectAccessResolver(snap({ project: 'wavelens' }), { url: '/project/wavelens' } as never),
+    ) as Observable<ProjectAccessData>;
+    const emitted = vi.fn();
+    result.subscribe({ next: emitted });
+    expect(emitted).not.toHaveBeenCalled();
+  });
+
   it('sends a user whose session expired to sign-in and back to the project', async () => {
     getProject.mockReturnValue(throwError(() => new ApiError('Project not found', 404)));
     auth.stillSignedIn.mockReturnValue(of(false));

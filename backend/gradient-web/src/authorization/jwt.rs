@@ -71,6 +71,11 @@ pub fn extract_bearer_or_cookie(headers: &HeaderMap) -> Option<&str> {
     bearer_token(headers).or_else(|| session_cookie_token(headers))
 }
 
+pub fn clear_jwt_token_cookie(use_tls: bool) -> String {
+    let secure = if use_tls { "; Secure" } else { "" };
+    format!("jwt_token=; HttpOnly{secure}; SameSite=Strict; Path=/; Max-Age=0")
+}
+
 pub(super) fn sign_claims<T: Serialize>(
     jwt_secret: &SecretString,
     claims: &T,

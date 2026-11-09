@@ -7,8 +7,9 @@
 use anyhow::{Context, Result};
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
+use axum::http::header::SET_COOKIE;
+use axum::http::{HeaderMap, HeaderValue};
 use axum::middleware::Next;
 use axum::response::Response;
 use gradient_db::WebDb;
@@ -23,7 +24,10 @@ use std::sync::Arc;
 
 use super::api_key::{DecodedRequest, MaybeApiKey};
 use super::job_scope::{JobScopeRefusal, job_scope_of_request};
-use super::jwt::{bearer_token, decode_jwt, extract_bearer_or_cookie, session_cookie_token};
+use super::jwt::{
+    bearer_token, clear_jwt_token_cookie, decode_jwt, extract_bearer_or_cookie,
+    session_cookie_token,
+};
 use crate::audit::{Audit, RequestInfo};
 use crate::client_ip::{ClientIp, resolve_client_ip};
 use crate::error::{WebError, WebResult};
@@ -185,26 +189,45 @@ async fn optional_caller(
     last_used_stamps: &Debounce<Uuid>,
     headers: &HeaderMap,
     client_ip: IpAddr,
-) -> Option<(MUser, DecodedRequest)> {
-    let token = extract_bearer_or_cookie(headers)?.to_owned();
-    let decoded = decode_jwt(db, jwt_secret, last_used_stamps, token)
+) -> WebResult<Option<(MUser, DecodedRequest)>> {
+    let Some(token) = extract_bearer_or_cookie(headers) else {
+        return Ok(None);
+    };
+    let decoded = decode_jwt(db, jwt_secret, last_used_stamps, token.to_owned())
         .await
-        .ok()?;
+        .map_err(|_| Denial::UndecodableToken)?;
     let allowed_from_here = decoded
         .api_key_context()
         .is_none_or(|context| ip_allowed(client_ip, &context.allowed_ips));
 
     if !allowed_from_here {
-        return None;
+        return Err(SharedRefusal::SourceIpNotAllowed.into());
     }
 
     let user = by_id::<EUser, _>(db, decoded.user_id())
-        .await
-        .ok()
-        .flatten()
-        .filter(|user| user.active)?;
+        .await?
+        .ok_or(Denial::UnknownUser)?;
+    if !user.active {
+        return Err(SharedRefusal::AccountDeactivated.into());
+    }
 
-    Some((user, decoded))
+    Ok(Some((user, decoded)))
+}
+
+fn optional_auth_error_to_response_and_delete_session_cookie(
+    error: WebError,
+    headers: &HeaderMap,
+    use_tls: bool,
+) -> Response<Body> {
+    let from_cookie = bearer_token(headers).is_none();
+    let mut response = error.into_response();
+    if from_cookie
+        && response.status() == axum::http::StatusCode::UNAUTHORIZED
+        && let Ok(cookie) = HeaderValue::from_str(&clear_jwt_token_cookie(use_tls))
+    {
+        response.headers_mut().insert(SET_COOKIE, cookie);
+    }
+    response
 }
 
 pub async fn authorize_optional(
@@ -227,6 +250,16 @@ pub async fn authorize_optional(
         client_ip,
     )
     .await;
+    let caller = match caller {
+        Ok(caller) => caller,
+        Err(error) => {
+            return optional_auth_error_to_response_and_delete_session_cookie(
+                error,
+                req.headers(),
+                state.config.server.use_tls,
+            );
+        }
+    };
 
     let (mut parts, body) = req.into_parts();
     match caller {
