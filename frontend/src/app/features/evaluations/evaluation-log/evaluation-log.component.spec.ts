@@ -19,7 +19,7 @@ import { EMPTY, NEVER, type Observable, Subject, map, of, throwError } from 'rxj
 import { ApiError } from '@core/services/api.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { NotifyService } from '@core/services/notify.service';
-import { UserInfoResponse, BuildItem, EvaluationResponse, EvaluationStatus } from '@core/models';
+import { UserInfoResponse, BuildItem, EvaluationResponse, EvaluationStatus, ExecJobSummary } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import type { LogViewerComponent } from '@shared/log';
 
@@ -931,14 +931,19 @@ describe('EvaluationLogComponent', () => {
       started.destroy();
     });
 
-    it('explains a Building evaluation whose builds are done by the waiting exec job', () => {
-      const fixture = setupEvaluationLogPageFixture([build('ok', 'hash-zlib.drv')], undefined, { status: 'Building' });
-      fixture.componentInstance.execJobWaitingWithReason.set({
+    it('explains a Building evaluation with one notice per waiting exec job, each naming and linking its job', () => {
+      const fixture = setupEvaluationLogPageFixture([build('ok', 'hash-zlib.drv')], undefined, { status: 'Building', task_name: 'ci' });
+      const job = {
         id: 'j1', entry_point: 'apps.x86_64-linux.train', status: 'created', waiting_reason: { kind: 'manual_start' },
         nodes: 1, labels: [], devices: [], autostart: false, keep_vm_running: false,
-      });
+      } as ExecJobSummary;
+      fixture.componentInstance.execJobsWaitingWithReason.set([job, { ...job, id: 'j2', entry_point: 'apps.x86_64-linux.deploy' }]);
       fixture.detectChanges();
-      expect((fixture.nativeElement as HTMLElement).querySelector('.log-area gr-waiting-notice')?.textContent).toContain('Waiting for manual start');
+      const notices = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.log-area gr-waiting-notice'));
+      expect(notices.map((notice) => notice.querySelector('a.waiting-subject')?.getAttribute('href')))
+        .toEqual(['/project/proj/task/ci/exec/j1', '/project/proj/task/ci/exec/j2']);
+      expect(notices[1].textContent).toContain('apps.x86_64-linux.deploy');
+      expect(notices[0].textContent).toContain('Waiting for manual start');
       fixture.destroy();
     });
 

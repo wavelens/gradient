@@ -151,8 +151,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return evaluation ? formatDuration(evaluationDuration(evaluation, this.clock.currentTimeMilliseconds())) : '';
   });
   activeBuildsCount = signal(0);
-  execJobWaitingWithReason = signal<ExecJobSummary | null>(null);
-  execJobStartRequestIsRunning = signal(false);
+  execJobsWaitingWithReason = signal<ExecJobSummary[]>([]);
+  execJobStartingId = signal<string | null>(null);
 
   projectName = '';
   evaluationLogBuildOrigin(): BuildOrigin {
@@ -1197,15 +1197,15 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   runWaitingExecJob(job: ExecJobSummary): void {
-    this.execJobStartRequestIsRunning.set(true);
+    this.execJobStartingId.set(job.id);
     this.execJobs.run(job.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
-        this.execJobStartRequestIsRunning.set(false);
-        this.execJobWaitingWithReason.set(null);
+        this.execJobStartingId.set(null);
+        this.execJobsWaitingWithReason.update((jobs) => jobs.filter((waiting) => waiting.id !== job.id));
         this.notify.success('Exec job added to queue');
       },
       error: (error: unknown) => {
-        this.execJobStartRequestIsRunning.set(false);
+        this.execJobStartingId.set(null);
         this.notify.failure("Couldn't start exec job", error);
       },
     });

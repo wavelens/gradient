@@ -59,24 +59,25 @@ describe('ExecJobListComponent', () => {
     expect(host.querySelector('.entry-kebab')?.getAttribute('aria-label')).toBe('Actions for apps.x86_64-linux.train');
   });
 
-  it('reports the first open job that waits with a reason', () => {
+  it('reports every open job that waits with a reason', () => {
     const done: ExecJobSummary = { ...queuedJob(), id: 'j0', status: 'completed' };
+    const second: ExecJobSummary = { ...queuedJob(), id: 'j2', status: 'created', waiting_reason: { kind: 'manual_start' } };
     TestBed.configureTestingModule({
       imports: [ExecJobListComponent],
       providers: [
         provideRouter([]),
-        { provide: ExecJobsService, useValue: { forEvaluation: () => of([done, queuedJob()]) } },
+        { provide: ExecJobsService, useValue: { forEvaluation: () => of([done, queuedJob(), second]) } },
       ],
     });
     const fixture = TestBed.createComponent(ExecJobListComponent);
-    const reported: (ExecJobSummary | null)[] = [];
-    fixture.componentInstance.firstOpenExecJobWaitingWithReason.subscribe((job) => reported.push(job));
+    const reported: string[][] = [];
+    fixture.componentInstance.openExecJobsWaitingWithReason.subscribe((jobs) => reported.push(jobs.map((job) => job.id)));
     fixture.componentRef.setInput('evaluation', 'e1');
     fixture.componentRef.setInput('project', 'acme');
     fixture.componentRef.setInput('task', 'demo');
     fixture.detectChanges();
 
-    expect(reported.map((job) => job?.id ?? null)).toEqual(['j1']);
+    expect(reported).toEqual([['j1', 'j2']]);
     fixture.destroy();
   });
 

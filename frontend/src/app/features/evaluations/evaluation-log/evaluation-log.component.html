@@ -52,7 +52,7 @@
 
       @if (ev.task_name; as task) {
         <app-exec-job-list isCompact [evaluation]="ev.id" [evaluationRunning]="isRunning()" [project]="projectName" [task]="task" [canTrigger]="triggerAccess().canEdit"
-                           (firstOpenExecJobWaitingWithReason)="execJobWaitingWithReason.set($event)" />
+                           (openExecJobsWaitingWithReason)="execJobsWaitingWithReason.set($event)" />
       }
 
       <gr-menu #buildMenu [model]="buildMenuModel()" />
@@ -188,9 +188,12 @@
         @if (ev.status === 'Waiting' && selectedSection() !== 'messages' && selectedBuildId()) {
           <gr-waiting-notice banner [reason]="ev.waiting_reason" [project]="projectName" [access]="waitingAccess()" />
         }
-        @if (ev.status === 'Building' && activeBuildsCount() === 0 && execJobWaitingWithReason(); as job) {
-          <gr-waiting-notice banner [reason]="job.waiting_reason" [project]="projectName" [access]="waitingAccess()"
-                             [busy]="execJobStartRequestIsRunning()" (start)="runWaitingExecJob(job)" />
+        @if (ev.status === 'Building' && activeBuildsCount() === 0 && ev.task_name; as task) {
+          @for (job of execJobsWaitingWithReason(); track job.id) {
+            <gr-waiting-notice banner [reason]="job.waiting_reason" [project]="projectName" [access]="waitingAccess()"
+                               [subjectLabel]="job.entry_point" [subjectLink]="links.execJob(projectName, task, job.id)"
+                               [busy]="execJobStartingId() === job.id" (start)="runWaitingExecJob(job)" />
+          }
         }
         @if (selectedSection() === 'messages') {
           <div class="messages-panel">

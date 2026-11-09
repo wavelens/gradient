@@ -6,7 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, booleanAttribute, computed, input, output } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { RouterLink, type UrlTree } from '@angular/router';
 import { ButtonComponent, EmptyStateComponent, MessageBannerComponent } from '@gradient/ui/ui';
 import type { WaitingReason } from '@core/models';
 import { type WaitingAccess, explainWaiting } from '@shared/evaluation';
@@ -19,6 +19,9 @@ import { type WaitingAccess, explainWaiting } from '@shared/evaluation';
     @let e = explanation();
     @if (banner()) {
       <gr-message-banner type="warning" icon="pause_circle">
+        @if (subjectLabel(); as label) {
+          @if (subjectLink(); as link) { <a class="waiting-subject" [routerLink]="link">{{ label }}</a> } @else { <span class="waiting-subject">{{ label }}</span> }
+        }
         <strong>{{ e.title }}</strong> {{ e.detail }}
         <ng-container *ngTemplateOutlet="details" />
       </gr-message-banner>
@@ -55,6 +58,8 @@ export class WaitingNoticeComponent {
   project = input.required<string>();
   access = input.required<WaitingAccess>();
   banner = input(false, { transform: booleanAttribute });
+  subjectLabel = input<string | null>(null);
+  subjectLink = input<UrlTree | null>(null);
   busy = input(false, { transform: booleanAttribute });
   start = output<void>();
 

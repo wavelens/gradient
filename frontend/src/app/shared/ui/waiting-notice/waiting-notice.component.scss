@@ -10,6 +10,14 @@
   display: block;
 }
 
+.waiting-subject {
+  margin-right: $spacing-xs;
+  font-family: $font-family-mono;
+  overflow-wrap: anywhere;
+
+  &::after { content: ':'; }
+}
+
 .waiting-requirements {
   margin: $spacing-xs 0 0;
   padding: 0;
