@@ -328,7 +328,7 @@ impl BuildStatusCounts {
     }
 
     pub fn total(&self) -> i64 {
-        self.completed + self.failed + self.building + self.queued + self.aborted
+        self.completed + self.failed + self.building + self.queued + self.substituted + self.aborted
     }
 }
 
@@ -366,7 +366,7 @@ mod rollup_tests {
     }
 
     #[test]
-    fn total_counts_completed_failed_building_queued_and_aborted_not_substituted() {
+    fn total_counts_every_segment_including_substituted() {
         let mut c = BuildStatusCounts::default();
         c.add(BuildStatus::Completed, 3);
         c.add(BuildStatus::FailedPermanent, 2);
@@ -380,7 +380,7 @@ mod rollup_tests {
         assert_eq!(c.queued, 4);
         assert_eq!(c.substituted, 9000);
         assert_eq!(c.aborted, 5);
-        assert_eq!(c.total(), 15);
+        assert_eq!(c.total(), 9015);
     }
 }
 
