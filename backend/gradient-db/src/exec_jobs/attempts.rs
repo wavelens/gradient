@@ -32,10 +32,12 @@ static OPEN_SQL: LazyLock<String> = LazyLock::new(|| {
 
 static PROGRAM_STARTED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "UPDATE exec_job r SET status = {running}, \
+        "WITH a AS (UPDATE exec_job_attempt \
+              SET program_started_at = COALESCE(program_started_at, (now() AT TIME ZONE 'UTC')) \
+              WHERE id = $1 AND ended_at IS NULL RETURNING exec_job) \
+         UPDATE exec_job r SET status = {running}, \
          started_at = COALESCE(r.started_at, (now() AT TIME ZONE 'UTC')) \
-         FROM exec_job_attempt a \
-         WHERE a.id = $1 AND a.ended_at IS NULL AND r.id = a.exec_job AND r.status = {starting} \
+         FROM a WHERE r.id = a.exec_job AND r.status = {starting} \
          RETURNING r.*",
         running = exec(ExecJobStatus::Running),
         starting = exec(ExecJobStatus::Starting),

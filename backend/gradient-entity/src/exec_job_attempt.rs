@@ -52,6 +52,7 @@ pub struct Model {
     pub worker: String,
     pub number: i32,
     pub started_at: NaiveDateTime,
+    pub program_started_at: Option<NaiveDateTime>,
     pub ended_at: Option<NaiveDateTime>,
     pub end_reason: Option<AttemptEndReason>,
     pub message: Option<String>,

@@ -55,20 +55,47 @@ pub(crate) fn with_reported_phases(
     attempt: &MExecJobAttempt,
     phases: &[ExecJobPhaseRow],
 ) -> Vec<JobPhaseView> {
-    let first_seq = timeline.iter().map(|span| span.seq + 1).max().unwrap_or(0);
+    let mut next_seq = timeline.iter().map(|span| span.seq + 1).max().unwrap_or(0);
     let reported: Vec<&ExecJobPhaseRow> = phases
         .iter()
         .filter(|phase| phase.attempt == attempt.id)
         .collect();
     let end = attempt.ended_at.unwrap_or_else(gradient_types::now);
+    if let Some(program_started_at) = attempt.program_started_at {
+        timeline.push(program_span(
+            next_seq,
+            attempt.started_at,
+            program_started_at,
+            end,
+        ));
+        next_seq += 1;
+    }
     timeline.extend(reported_phase_spans(
         &reported,
         attempt.started_at,
         end,
-        first_seq,
+        next_seq,
     ));
 
     timeline
+}
+
+fn program_span(
+    seq: i32,
+    origin: NaiveDateTime,
+    program_started_at: NaiveDateTime,
+    end: NaiveDateTime,
+) -> JobPhaseView {
+    let offset = |at: NaiveDateTime| (at - origin).num_milliseconds().max(0);
+    JobPhaseView {
+        seq,
+        parent_seq: None,
+        phase: "program".into(),
+        start_ms: offset(program_started_at),
+        end_ms: offset(end.max(program_started_at)),
+        paths: 0,
+        bytes: 0,
+    }
 }
 
 #[cfg(test)]
@@ -139,6 +166,33 @@ mod tests {
         let shape: Vec<(i32, &str)> = timeline.iter().map(|s| (s.seq, s.phase.as_str())).collect();
         assert_eq!(shape, [(7, "download"), (8, "vm")]);
         assert_eq!(timeline[1].end_ms, 4_000);
+    }
+
+    #[test]
+    fn the_program_run_spans_from_its_start_to_the_attempt_end() {
+        let origin = gradient_types::now();
+        let attempt = MExecJobAttempt {
+            id: ExecJobAttemptId::now_v7(),
+            started_at: origin,
+            program_started_at: Some(at(origin, 16)),
+            ended_at: Some(at(origin, 21)),
+            ..Default::default()
+        };
+        let ours = ExecJobPhaseRow {
+            attempt: attempt.id,
+            ..phase("test", at(origin, 18))
+        };
+
+        let timeline = with_reported_phases(Vec::new(), &attempt, &[ours]);
+
+        let shape: Vec<(i32, &str, i64, i64)> = timeline
+            .iter()
+            .map(|s| (s.seq, s.phase.as_str(), s.start_ms, s.end_ms))
+            .collect();
+        assert_eq!(
+            shape,
+            [(0, "program", 16_000, 21_000), (1, "test", 18_000, 21_000)]
+        );
     }
 
     #[test]
