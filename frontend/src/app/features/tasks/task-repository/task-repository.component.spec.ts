@@ -5,13 +5,15 @@
  */
 
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ApiError } from '@core/services/api.service';
 import { TaskRepositoryComponent } from './task-repository.component';
+import { RepositoryAccessComponent } from './repository-access.component';
 import { taskAccessData } from '@core/resolvers/access-route.testing';
 
 const state: TaskRepositoryResponse = {
@@ -69,5 +71,17 @@ describe('TaskRepositoryComponent', () => {
     expect(getRepository).not.toHaveBeenCalled();
     expect(el.textContent).toContain('Only the members of this project can view this.');
     expect(el.textContent).not.toContain('Try Again');
+  });
+
+  it('asks before leaving with an unsaved repository URL', () => {
+    const fixture = render(() => of(state));
+    const access = fixture.debugElement.query(By.directive(RepositoryAccessComponent)).componentInstance as RepositoryAccessComponent;
+    expect(fixture.componentInstance.canDeactivate()).toBe(true);
+    access.startEdit();
+    expect(fixture.componentInstance.canDeactivate()).toBe(true);
+    access.draftUrl.set('ssh://git@forgejo.example.com/acme/other.git');
+    expect(fixture.componentInstance.canDeactivate()).toBeInstanceOf(Observable);
+    access.cancelEdit();
+    expect(fixture.componentInstance.canDeactivate()).toBe(true);
   });
 });

@@ -20,7 +20,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { RepositoryFetchBannerComponent, gitHostSettingsLinks, repositoryHost } from '@shared/git';
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { RelativeTimePipe } from '@shared/text';
-import { fieldChecks, firstFieldError } from '@shared/forms';
+import { fieldChecks, firstFieldError, unsavedChanges } from '@shared/forms';
 import { provisioningIntegration } from './provisioning';
 
 @Component({
@@ -56,6 +56,7 @@ export class RepositoryAccessComponent {
   testError = signal<string | null>(null);
   unsavedRepositoryUrlAccessTestPassed = signal(false);
   installingKey = signal(false);
+  readonly unsaved = unsavedChanges(() => this.editing() && this.draftUrl().trim() !== this.state().repository, 'Repository');
 
   urlError = computed(() => {
     const url = this.draftUrl().trim();
@@ -75,6 +76,7 @@ export class RepositoryAccessComponent {
     this.editing.set(true);
     this.testError.set(null);
     this.unsavedRepositoryUrlAccessTestPassed.set(false);
+    this.unsaved.mark();
   }
 
   cancelEdit(): void {

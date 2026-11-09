@@ -177,10 +177,6 @@ export class RepositoryEventsComponent {
     return this.unsaved.changed();
   }
 
-  canLeave() {
-    return this.unsaved.canLeave();
-  }
-
   patch(change: Partial<EventsForm>): void {
     this.form.update((f) => {
       const next = { ...f, ...change };

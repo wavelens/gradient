@@ -42,6 +42,7 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
   private crumbs = inject(BreadcrumbsService);
   private taskAccess = injectTaskAccessData();
 
+  private access = viewChild(RepositoryAccessComponent);
   private events = viewChild(RepositoryEventsComponent);
 
   projectName = '';
@@ -81,6 +82,7 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
   }
 
   canDeactivate() {
-    return this.events()?.canLeave() ?? true;
+    const pending = [this.access()?.unsaved, this.events()?.unsaved].find((unsaved) => unsaved?.changed());
+    return pending?.canLeave() ?? true;
   }
 }
