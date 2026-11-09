@@ -85,6 +85,29 @@ describe('MenuComponent', () => {
     expect(items()[1].disabled).toBe(true);
   });
 
+  it('keeps an item with a disabled reason focusable, describes it with the reason and ignores clicks', async () => {
+    const { fixture, anchor } = render();
+    const opened = vi.fn();
+    fixture.componentInstance.model.set([
+      { label: 'Edit', command: () => undefined },
+      { label: 'Artefacts', routerLink: ['/artefacts'], command: opened, disabledReason: 'Needs a finished build' },
+    ]);
+    anchor().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const blocked = items()[1];
+    expect(blocked.tagName).toBe('BUTTON');
+    expect(blocked.disabled).toBe(false);
+    expect(blocked.getAttribute('aria-disabled')).toBe('true');
+    expect(document.getElementById(blocked.getAttribute('aria-describedby')!)?.textContent).toBe('Needs a finished build');
+    press('ArrowDown');
+    expect(document.activeElement).toBe(blocked);
+    blocked.click();
+    fixture.detectChanges();
+    expect(opened).not.toHaveBeenCalled();
+    expect(items()).toHaveLength(2);
+  });
+
   /// A middle click opens the link in a new tab; the menu has done its job.
   it('renders links as anchors and closes after a middle click', () => {
     const { fixture, anchor } = render();

@@ -14,6 +14,7 @@ export interface MenuItem {
   label?: string;
   icon?: string;
   disabled?: boolean;
+  disabledReason?: string | null;
   danger?: boolean;
   separator?: boolean;
   command?: () => void;

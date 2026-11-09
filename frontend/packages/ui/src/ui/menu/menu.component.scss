@@ -37,9 +37,19 @@
   text-align: left;
   cursor: pointer;
 
-  &:hover:not(:disabled) { background: var(--gr-surface-hover); }
-  &:disabled { opacity: 0.5; cursor: not-allowed; }
+  &:hover:not(:disabled, [aria-disabled='true']) { background: var(--gr-surface-hover); }
+  &:disabled, &[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
 }
+
+.gr-menu__reason {
+  display: none;
+  max-width: 16rem;
+  padding: 0 0.6rem 0.35rem;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-xs;
+}
+
+.gr-menu__item:is(:hover, :focus) + .gr-menu__reason { display: block; }
 
 .gr-menu__icon { color: var(--gr-text-secondary); font-size: 1.125rem; }
 

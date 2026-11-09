@@ -44,6 +44,8 @@ const CONTEXT_POSITIONS: ConnectedPosition[] = [
   { originX: 'end', originY: 'top', overlayX: 'end', overlayY: 'bottom' },
 ];
 
+let disabledReasonMenuSeq = 0;
+
 @Component({
   selector: 'gr-menu',
   standalone: true,
@@ -56,7 +58,7 @@ const CONTEXT_POSITIONS: ConnectedPosition[] = [
             <li class="gr-menu__separator" role="separator"></li>
           } @else {
             <li role="none">
-              @if (item.routerLink && !item.disabled) {
+              @if (item.routerLink && !item.disabled && !item.disabledReason) {
                 <a
                   role="menuitem"
                   class="gr-menu__item"
@@ -78,6 +80,8 @@ const CONTEXT_POSITIONS: ConnectedPosition[] = [
                   class="gr-menu__item"
                   [class.gr-menu__item--danger]="item.danger"
                   [disabled]="item.disabled"
+                  [attr.aria-disabled]="item.disabledReason ? 'true' : null"
+                  [attr.aria-describedby]="item.disabledReason ? disabledReasonId + '-' + $index : null"
                   (click)="run(item)"
                 >
                   @if (item.icon) {
@@ -85,6 +89,9 @@ const CONTEXT_POSITIONS: ConnectedPosition[] = [
                   }
                   <span>{{ item.label }}</span>
                 </button>
+                @if (item.disabledReason) {
+                  <span class="gr-menu__reason" [id]="disabledReasonId + '-' + $index">{{ item.disabledReason }}</span>
+                }
               }
             </li>
           }
@@ -98,6 +105,7 @@ const CONTEXT_POSITIONS: ConnectedPosition[] = [
 export class MenuComponent implements OnDestroy {
   model = input<readonly MenuItem[]>([]);
 
+  protected disabledReasonId = `gr-menu-disabled-reason-${disabledReasonMenuSeq++}`;
   private panel = viewChild.required<TemplateRef<unknown>>('panel');
   private overlay = inject(Overlay);
   private vcr = inject(ViewContainerRef);
@@ -190,6 +198,7 @@ export class MenuComponent implements OnDestroy {
   }
 
   protected run(item: MenuItem): void {
+    if (item.disabledReason) return;
     this.close();
     item.command?.();
   }
