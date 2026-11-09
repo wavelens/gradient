@@ -76,10 +76,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
   projectName = '';
   buildId = '';
-  private from: BuildOrigin = {};
-  private rootBuildEvaluationId?: string | null;
-  breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from, this.buildId, 'Dependency graph'));
-  back = computed(() => buildOriginLink(this.projectName, this.from, this.buildId));
+  private from = signal<BuildOrigin>({});
+  breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from(), this.buildId, 'Dependency graph'));
+  back = computed(() => buildOriginLink(this.projectName, this.from(), this.buildId));
   rootId = signal('');
   nodeCount = signal(0);
   edgeCount = signal(0);
@@ -123,8 +122,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     document.body.style.overflow = 'hidden';
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.buildId = this.route.snapshot.paramMap.get('buildId') || '';
-    this.from = readBuildOrigin(this.route.snapshot.queryParamMap);
-    this.rootBuildEvaluationId = this.from.evaluation;
+    this.from.set(readBuildOrigin(this.route.snapshot.queryParamMap));
     this.loadGraph();
   }
 
@@ -147,9 +145,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
         this.rootName.set(root?.name ?? '');
         this.rootStatus.set(root?.status ?? '');
 
-        if (!this.rootBuildEvaluationId) {
+        if (!this.from().evaluation) {
           this.evalService.getBuild(this.buildId).subscribe({
-            next: (build) => (this.rootBuildEvaluationId = build.evaluation),
+            next: (build) => this.from.update((from) => ({ ...from, evaluation: build.evaluation })),
             error: () => {},
           });
         }
@@ -382,7 +380,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   }
 
   private navigateToEvaluationLogForNode(node: LayoutNode): void {
-    const evaluation = this.rootBuildEvaluationId;
+    const evaluation = this.from().evaluation;
     if (!evaluation || !node.build) return;
     this.zone.run(() => this.router.navigateByUrl(links.evaluationLog(this.projectName, evaluation, { build: node.build })));
   }

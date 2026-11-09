@@ -10,7 +10,7 @@ import { EvaluationsService, isHtmlArtefact } from '@core/services/evaluations.s
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { type BuildOrigin, readBuildOrigin } from '@shared/routing';
+import { type BuildOrigin, buildOriginLink, readBuildOrigin } from '@shared/routing';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -47,16 +47,20 @@ export class BuildArtefactsComponent implements OnInit {
 
   projectName = '';
   buildId = '';
-  private from: BuildOrigin = {};
-  breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from, this.buildId, 'Artefacts'));
+  private from = signal<BuildOrigin>({});
+  breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from(), this.buildId, 'Artefacts'));
+  back = computed(() => buildOriginLink(this.projectName, this.from(), this.buildId));
 
   ngOnInit(): void {
     this.projectName     = this.route.snapshot.paramMap.get('project') || '';
     this.buildId     = this.route.snapshot.paramMap.get('buildId') || '';
-    this.from = readBuildOrigin(this.route.snapshot.queryParamMap);
+    this.from.set(readBuildOrigin(this.route.snapshot.queryParamMap));
     this.loadArtefacts();
     this.evalService.getBuild(this.buildId).subscribe({
-      next: (build) => this.packageName.set(packageNameFromDerivationPath(build.derivation_path)),
+      next: (build) => {
+        this.packageName.set(packageNameFromDerivationPath(build.derivation_path));
+        this.from.update((from) => (from.task || from.evaluation ? from : { evaluation: build.evaluation }));
+      },
       error: () => this.packageName.set(this.buildId.slice(0, 8)),
     });
     if (this.authService.isAuthenticated()) {

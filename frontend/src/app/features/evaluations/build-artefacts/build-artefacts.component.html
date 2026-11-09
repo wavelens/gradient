@@ -5,6 +5,7 @@
 -->
 
 <gr-page-layout width="form" title="Build Artefacts" [subtitle]="packageName()" [breadcrumb]="breadcrumb()">
+  <a slot="actions" grButton size="small" severity="secondary" icon="arrow_back" label="Back" [routerLink]="back()"></a>
 
   <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="artefacts().length === 0"
                  loadingMessage="Loading artefacts..." errorTitle="Failed to load artefacts" (retry)="loadArtefacts()">

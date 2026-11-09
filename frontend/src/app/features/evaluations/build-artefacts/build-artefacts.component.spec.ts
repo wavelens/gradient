@@ -55,4 +55,9 @@ describe('BuildArtefactsComponent', () => {
     const { root } = render(() => of([]));
     expect(root.textContent).toContain('hello-2.12');
   });
+
+  it('leads back to the log of the build evaluation when opened without an origin', () => {
+    const { root } = render(() => of([]), () => of({ evaluation: 'e1', derivation_path: '/nix/store/abc-hello-2.12.drv' }));
+    expect(root.querySelector('[slot=actions]')?.getAttribute('href')).toBe('/project/p/log/e1?build=b1');
+  });
 });

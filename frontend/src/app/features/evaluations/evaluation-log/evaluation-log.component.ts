@@ -150,14 +150,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   projectName = '';
   evaluationLogBuildOrigin(): BuildOrigin {
-    return { task: this.evaluation()?.task_name, evaluation: this.evaluationId };
+    return { evaluation: this.evaluationId };
   }
 
   projectAndTaskCrumbs = computed(() => {
     const task = this.evaluation()?.task_name;
-    const trail = task ? this.crumbs.taskAt(this.projectName, task, this.evaluationId) : this.crumbs.project(this.projectName);
-
-    return trail.slice(1);
+    return task ? this.crumbs.taskAt(this.projectName, task, this.evaluationId) : this.crumbs.project(this.projectName);
   });
   evaluationId = '';
   private initialBuildId: string | null = null;
@@ -209,9 +207,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         routerLink: links.dependencyGraph(this.projectName, build.id, from),
       },
       {
-        label: 'Show Job',
+        label: 'Show job',
         icon: 'work',
-        disabled: !job,
+        disabled: !job || !this.authService.isAuthenticated(),
         routerLink: job ? links.boardJob(job) : undefined,
       },
       {

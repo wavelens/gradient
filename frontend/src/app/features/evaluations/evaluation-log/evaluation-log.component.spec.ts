@@ -334,26 +334,33 @@ describe('EvaluationLogComponent', () => {
       return new Map(labelled.map((i) => [i.label, i]));
     }
 
-    it('passes the task to the graph so its breadcrumb leads back through the task', () => {
+    it('passes only the evaluation to the graph so its way back leads to this log', () => {
       const { cmp } = setup();
       cmp.evaluation.set({ id: 'eval-1', task_name: 'ci' } as EvaluationResponse);
       const items = open(cmp, target({ dispatched_job: 'job-1' }));
-      expect(String(items.get('Graph')!.routerLink)).toBe('/project/proj/graph/b1?task=ci&eval=eval-1');
+      expect(String(items.get('Graph')!.routerLink)).toBe('/project/proj/graph/b1?eval=eval-1');
     });
 
     it('offers graph, job, artefacts and log download for an assigned build', () => {
       const { cmp } = setup();
+      vi.spyOn(TestBed.inject(AuthService), 'isAuthenticated').mockReturnValue(true);
       const items = open(cmp, target({ dispatched_job: 'job-1', has_artefacts: true }));
-      expect([...items.keys()]).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log', 'SBOM']);
+      expect([...items.keys()]).toEqual(['Graph', 'Show job', 'Artefacts', 'Download Log', 'SBOM']);
       expect(String(items.get('Graph')!.routerLink)).toBe('/project/proj/graph/b1?eval=eval-1');
-      expect(String(items.get('Show Job')!.routerLink)).toBe('/board/jobs/job-1');
+      expect(String(items.get('Show job')!.routerLink)).toBe('/board/jobs/job-1');
       expect(String(items.get('Artefacts')!.routerLink)).toBe('/project/proj/artefacts/b1?eval=eval-1');
       expect([...items.values()].some((i) => i.disabled)).toBe(false);
     });
 
     it('disables the job entry for a build that was never assigned', () => {
       const { cmp } = setup();
-      expect(open(cmp, target({ dispatched_job: null })).get('Show Job')!.disabled).toBe(true);
+      expect(open(cmp, target({ dispatched_job: null })).get('Show job')!.disabled).toBe(true);
+    });
+
+    it('disables the job entry for a signed-out visitor, since the job page needs a sign-in', () => {
+      const { cmp } = setup();
+      vi.spyOn(TestBed.inject(AuthService), 'isAuthenticated').mockReturnValue(false);
+      expect(open(cmp, target({ dispatched_job: 'job-1' })).get('Show job')!.disabled).toBe(true);
     });
 
     it('disables artefacts for a build that published none', () => {
@@ -410,7 +417,7 @@ describe('EvaluationLogComponent', () => {
 
       expect(cmp.contextBuild()!.id).toBe('b2');
       const labels = Array.from(document.querySelectorAll('.gr-menu__item span:last-child')).map((e) => e.textContent);
-      expect(labels).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log', 'SBOM']);
+      expect(labels).toEqual(['Graph', 'Show job', 'Artefacts', 'Download Log', 'SBOM']);
     });
 
     it('opens the same menu from the row\'s three dots, without selecting the row', () => {
@@ -1274,11 +1281,11 @@ describe('EvaluationLogComponent', () => {
       const crumbs = Array.from(
         (fixture.nativeElement as HTMLElement).querySelectorAll('.sidebar-breadcrumb .breadcrumb-link, .sidebar-breadcrumb .breadcrumb-current'),
       );
-      expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['MyProject', 'Nightly', 'Evaluation']);
+      expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Projects', 'MyProject', 'Nightly']);
       expect(crumbs.map((crumb) => crumb.getAttribute('href'))).toEqual([
+        '/projects',
         '/project/proj',
         '/project/proj/task/nightly?eval=eval-1',
-        null,
       ]);
       fixture.destroy();
     });

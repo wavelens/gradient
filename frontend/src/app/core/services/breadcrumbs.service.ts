@@ -26,6 +26,7 @@ export class BreadcrumbsService {
   private teams = inject(TeamsService);
   private names = new Map<string, WritableSignal<string | null>>();
   private evaluations = new Map<string, string>();
+  private taskSettingsAccessByTaskKey = new Map<string, boolean>();
 
   project(project: string, ...tail: Crumb[]): Crumb[] {
     const name = this.name(`project/${project}`, project, () => this.projects.getProject(project));
@@ -48,7 +49,9 @@ export class BreadcrumbsService {
   }
 
   taskSettings(project: string, task: string, ...tail: Crumb[]): Crumb[] {
-    return this.task(project, task, { label: 'Settings', link: links.taskPage(project, task, 'settings') }, ...tail);
+    const canOpen = this.taskSettingsAccessByTaskKey.get(`${project}/${task}`) ?? true;
+
+    return this.task(project, task, { label: 'Settings', link: canOpen ? links.taskPage(project, task, 'settings') : undefined }, ...tail);
   }
 
   buildPage(project: string, from: BuildOrigin, build: string, label: string): Crumb[] {
@@ -76,7 +79,7 @@ export class BreadcrumbsService {
   }
 
   admin(...tail: Crumb[]): Crumb[] {
-    return [{ label: 'Admin', link: links.board('health') }, ...tail];
+    return [{ label: 'Admin' }, ...tail];
   }
 
   rememberProject(project: string, displayName: string): void {
@@ -89,6 +92,10 @@ export class BreadcrumbsService {
 
   rememberEvaluation(project: string, task: string, evaluation: string): void {
     this.evaluations.set(`${project}/${task}`, evaluation);
+  }
+
+  rememberTaskSettingsAccess(project: string, task: string, canOpen: boolean): void {
+    this.taskSettingsAccessByTaskKey.set(`${project}/${task}`, canOpen);
   }
 
   rememberCache(cache: string, displayName: string): void {

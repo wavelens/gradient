@@ -246,6 +246,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       this.taskSig = sig;
       this.task.set(task);
       this.crumbs.rememberTask(this.projectName, this.taskName, task.display_name);
+      this.crumbs.rememberTaskSettingsAccess(this.projectName, this.taskName, canOpenTaskSettings(task));
     }
     const shown = this.selected();
     if (shown && shown.id !== this.selectedId()) this.selectedId.set(shown.id);
@@ -660,7 +661,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const selected = this.selected();
     const job = links.boardJobOrCluster(selected?.dispatched_job, selected?.cluster_job);
     return [
-      { label: 'Show job', icon: 'work', disabled: !job, routerLink: job },
+      { label: 'Show job', icon: 'work', disabled: !job || !this.authService.isAuthenticated(), routerLink: job },
     ];
   });
 

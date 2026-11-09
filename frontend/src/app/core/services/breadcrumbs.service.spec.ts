@@ -45,6 +45,21 @@ describe('BreadcrumbsService', () => {
     ]);
   });
 
+  it('keeps the settings crumb unlinked for a user who cannot open the task settings', () => {
+    const { crumbs } = setup();
+    crumbs.rememberTaskSettingsAccess('acme', 'build', false);
+
+    const settings = crumbs.taskSettings('acme', 'build', { label: 'Triggers' })[3];
+
+    expect(settings).toEqual({ label: 'Settings', link: undefined });
+  });
+
+  it('shows the admin crumb without a link, since there is no admin overview page', () => {
+    const { crumbs } = setup();
+
+    expect(crumbs.admin({ label: 'Webhooks' })).toEqual([{ label: 'Admin' }, { label: 'Webhooks' }]);
+  });
+
   it('starts cache and team trails at the list pages', () => {
     const { crumbs } = setup();
 
