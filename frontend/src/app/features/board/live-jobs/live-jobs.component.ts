@@ -167,7 +167,7 @@ interface DecisionRow {
         <gr-table class="jobs pending">
           <thead><tr><th>Kind</th><th>Project / task</th><th>Derivation / Evaluation / Exec</th><th>Waiting for</th><th>Age</th></tr></thead>
           <tbody>
-            @for (row of pendingRows(); track pendingKey(row.job)) {
+            @for (row of visiblePendingRows(); track pendingKey(row.job)) {
               @let p = row.job;
               @let subject = rowSubject(row);
               <tr class="clickable" (click)="router.navigateByUrl(links.boardPendingJob(p))">
@@ -200,6 +200,8 @@ interface DecisionRow {
             }
           </tbody>
         </gr-table>
+        <gr-load-more [shown]="visiblePendingRows().length" [total]="pendingRows().length"
+                      (more)="visiblePendingJobRowCount.set(visiblePendingJobRowCount() + boardTableLoadMoreRowCount)" />
         }
       </gr-load-state>
     }
@@ -276,6 +278,8 @@ export class BoardLiveJobsComponent implements OnInit {
   });
   pendingRows = computed(() =>
     collapseClusters([...this.pendingJobs()].sort((a, b) => serverTime(a.queued_at).getTime() - serverTime(b.queued_at).getTime())));
+  visiblePendingJobRowCount = signal(boardTableLoadMoreRowCount);
+  visiblePendingRows = computed(() => this.pendingRows().slice(0, this.visiblePendingJobRowCount()));
   pendingJobsCount = computed(() =>
     jobCountLine(this.pendingRows().length, this.pendingRows().length, this.otherPending(), 'pending'));
 

@@ -24,6 +24,8 @@ export function subscribeToBoardSocketWithReload(
     }, RELOAD_THROTTLE_MS);
   };
   inject(DestroyRef).onDestroy(() => clearTimeout(timer));
+  const ignoreFirstLiveBoardEventUntilMs = Date.now() + RELOAD_THROTTLE_MS;
+  let hasReceivedLiveEvent = false;
 
   inject(BoardLiveService)
     .connect((open) => {
@@ -33,7 +35,9 @@ export function subscribeToBoardSocketWithReload(
     .pipe(takeUntilDestroyed())
     .subscribe((event) => {
       onEvent(event);
-      scheduleReload();
+      const isFirstEventDuringInitialLoad = !hasReceivedLiveEvent && Date.now() < ignoreFirstLiveBoardEventUntilMs;
+      hasReceivedLiveEvent = true;
+      if (!isFirstEventDuringInitialLoad) scheduleReload();
     });
 
   return connected.asReadonly();

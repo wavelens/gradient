@@ -14,6 +14,9 @@ import { subscribeToBoardSocketWithReload } from '../board-socket';
 import { MetricPoint } from '@core/models';
 import { metricPointsTo24HourChartSeries } from '../hourly-metric-points-to-24-hour-slots';
 
+const formatJobCountWithHiddenJobs = (shown: number, hidden: number): number | string =>
+  hidden > 0 ? `${shown} (${hidden} hidden)` : shown;
+
 @Component({
   selector: 'app-board-overview',
   standalone: true,
@@ -52,8 +55,8 @@ export class BoardOverviewComponent implements OnInit {
   protected readonly failed = requestFailedText;
 
   workers = signal<number | null>(null);
-  pending = signal<number | null>(null);
-  active = signal<number | null>(null);
+  pending = signal<number | string | null>(null);
+  active = signal<number | string | null>(null);
   completed = signal<MetricPoint[] | null>(null);
   completedChart = computed(() =>
     metricPointsTo24HourChartSeries([{ name: 'completed', points: this.completed() ?? [], pick: (p) => p.count, missing: 0 }]),
@@ -78,7 +81,7 @@ export class BoardOverviewComponent implements OnInit {
 
   private loadCounts(): void {
     this.board.getWorkers().pipe(this.first.track()).subscribe((w) => this.workers.set(w.length));
-    this.board.getPendingJobs().pipe(this.first.track()).subscribe((r) => this.pending.set(r.jobs.length + r.other_pending));
-    this.board.getAssignedJobs().pipe(this.first.track()).subscribe((r) => this.active.set(r.jobs.length + r.other_running));
+    this.board.getPendingJobs().pipe(this.first.track()).subscribe((r) => this.pending.set(formatJobCountWithHiddenJobs(r.jobs.length, r.other_pending)));
+    this.board.getAssignedJobs().pipe(this.first.track()).subscribe((r) => this.active.set(formatJobCountWithHiddenJobs(r.jobs.length, r.other_running)));
   }
 }

@@ -481,6 +481,18 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     expect(row.querySelector('td.waiting .hint')?.textContent).toContain('Ask a project admin');
   });
 
+  it('shows 50 pending jobs at a time with Load more', () => {
+    const jobs = Array.from({ length: 60 }, (_, i) => ({ ...PENDING, build_id: `b${i}` }));
+    const fixture = setup({ view: 'pending' }, () => of({ jobs, other_pending: 0 }));
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelectorAll('gr-table.pending tbody tr')).toHaveLength(50);
+    expect(el.querySelector('gr-load-more')?.textContent).toContain('Showing 50 of 60');
+
+    (el.querySelector('gr-load-more button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(el.querySelectorAll('gr-table.pending tbody tr')).toHaveLength(60);
+  });
+
   it('lists pending jobs oldest first', () => {
     TestBed.configureTestingModule({
       imports: [BoardLiveJobsComponent],

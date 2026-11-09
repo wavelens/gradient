@@ -46,6 +46,29 @@ describe('subscribeToBoardSocketWithReload', () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
+  it('skips the first event that arrives right after the initial load', () => {
+    const reload = vi.fn();
+    TestBed.runInInjectionContext(() => subscribeToBoardSocketWithReload(reload));
+    const event = { event: 'worker.job_dispatched', at: '', content: {} } as BoardLiveEvent;
+
+    events.next(event);
+    vi.advanceTimersByTime(1500);
+    expect(reload).not.toHaveBeenCalled();
+    events.next(event);
+    vi.advanceTimersByTime(1500);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads on the first event once the initial load is older than the throttle window', () => {
+    const reload = vi.fn();
+    TestBed.runInInjectionContext(() => subscribeToBoardSocketWithReload(reload));
+    vi.advanceTimersByTime(1500);
+
+    events.next({ event: 'worker.job_dispatched', at: '', content: {} } as BoardLiveEvent);
+    vi.advanceTimersByTime(1500);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
   it('reloads at most once per burst of events', () => {
     const reload = vi.fn();
     TestBed.runInInjectionContext(() => subscribeToBoardSocketWithReload(reload));

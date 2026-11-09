@@ -36,7 +36,7 @@ describe('BoardOverviewComponent', () => {
     const cards = Array.from(setup().querySelectorAll('.kpis gr-stat-card')).map((c) => c.textContent?.trim());
     expect(cards[0]).toContain("Couldn't load");
     expect(cards[1]).toContain('0');
-    expect(cards[2]).toContain('2');
+    expect(cards[2]).toContain('1 (1 hidden)');
   });
 
   it('says the completed builds chart failed instead of No data', () => {
