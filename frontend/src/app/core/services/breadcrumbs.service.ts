@@ -106,6 +106,10 @@ export class BreadcrumbsService {
     this.remember(`team/${team}`, displayName);
   }
 
+  getLastKnownDisplayNameSignal(kind: 'project' | 'task' | 'cache' | 'team', ...urlNames: string[]): Signal<string | null> | undefined {
+    return this.names.get([kind, ...urlNames].join('/'));
+  }
+
   private remember(key: string, displayName: string): void {
     const known = this.names.get(key);
     if (known) known.set(displayName);
