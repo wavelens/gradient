@@ -13,7 +13,7 @@ import { AccessState } from '@core/models/access.model';
   standalone: true,
   imports: [MessageBannerComponent],
   template: `
-    @if (access()?.managed) {
+    @if (access()?.managed && access()?.canEdit) {
       <gr-message-banner type="info">This {{ kind() }} is managed by the server configuration and cannot be changed here.</gr-message-banner>
     }
   `,
