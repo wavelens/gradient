@@ -971,6 +971,28 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
+    it('opens the first entry point of a completed evaluation and counts each group in builds', () => {
+      const fixture = setupEvaluationLogPageFixture(
+        [build('dep', 'hash-zlib.drv', 'Completed', 1), build('app', 'hash-app.drv'), build('docs', 'hash-docs.drv')],
+        undefined,
+        { status: 'Completed' },
+      );
+      fixture.detectChanges();
+      expect(fixture.componentInstance.selectedBuildId()).toBe('app');
+      expect((fixture.nativeElement as HTMLElement).querySelector('.sidebar-group-count')?.textContent?.trim()).toBe('3 builds');
+      fixture.destroy();
+    });
+
+    it('marks the selected evaluation entry red only when the evaluation has errors', () => {
+      const fixture = setupEvaluationLogPageFixture([], undefined, { status: 'Completed' });
+      fixture.componentInstance.selectEvaluationSection();
+      fixture.detectChanges();
+      const item = (fixture.nativeElement as HTMLElement).querySelector('.evaluation-messages-item');
+      expect(item?.classList).toContain('selected');
+      expect(item?.classList).not.toContain('has-errors');
+      fixture.destroy();
+    });
+
     it('repeats project and task in the main column for phones, where the sidebar is off-canvas', () => {
       const fixture = setupEvaluationLogPageFixture([], undefined, { task_name: 'ci' });
       fixture.detectChanges();

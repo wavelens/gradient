@@ -39,6 +39,7 @@
       <div
         class="sidebar-item evaluation-messages-item"
         [class.selected]="selectedSection() === 'messages'"
+        [class.has-errors]="errorMessages().length > 0"
         (click)="selectEvaluationSection()"
         (keydown.enter)="selectEvaluationSection()"
         tabindex="0"
@@ -101,7 +102,7 @@
                 <gr-icon name="expand_more" size="sm" class="sidebar-group-chevron" />
                 <span class="build-dot"></span>
                 {{ group.label }}
-                <span class="sidebar-group-count">{{ group.builds.length }}</span>
+                <span class="sidebar-group-count">{{ plural(group.builds.length, 'build') }}</span>
               </button>
               @for (build of group.collapsed ? [] : group.builds; track build.id) {
                 <div

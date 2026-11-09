@@ -8,7 +8,7 @@
 
 // ── Sidebar evaluation section ──────────────────────────────────────────────
 
-.evaluation-messages-item.selected { border-left-color: var(--gr-status-danger); }
+.evaluation-messages-item.selected.has-errors { border-left-color: var(--gr-status-danger); }
 
 // ── Messages panel ──────────────────────────────────────────────────────────
 
