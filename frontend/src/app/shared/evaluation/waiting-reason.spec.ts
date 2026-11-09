@@ -114,6 +114,13 @@ describe('explainWaiting', () => {
     expect(explained.detail).toBe('14 builds wait for an answer from the upstream caches. Not answering: https://attic.example/lantian.');
     expect(explained.hint).toContain('cache admin');
   });
+
+  it('counts the exec jobs an evaluation waits for after its builds', () => {
+    const explained = explainWaiting({ kind: 'exec_jobs', waiting_exec_jobs: 2 }, 'acme', ADMIN);
+    expect(explained.title).toBe('Waiting for exec jobs');
+    expect(explained.detail).toBe('The builds are done. Exec jobs waiting to start: 2.');
+    expect(explained.action).toBeNull();
+  });
 });
 
 describe('waitingReasonText', () => {

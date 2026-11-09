@@ -866,6 +866,10 @@ export interface DispatchedJobSummary {
   subject?: string | null;
   exec_job?: BoardExecJob | null;
   cluster_job?: string | null;
+  project_name?: string | null;
+  project_display_name?: string | null;
+  task?: string | null;
+  task_display_name?: string | null;
 }
 
 export interface DispatchedJobsResponse {
@@ -1058,6 +1062,12 @@ export interface ExecJobAttemptView {
 
 export type ExecJobId = string;
 
+export interface ExecJobLog {
+  offset: number;
+  log: string;
+  total_bytes: number;
+}
+
 export interface ExecJobNode {
   node: number;
   id: ExecJobId;
@@ -1186,6 +1196,9 @@ export interface ExpensiveBuild {
   build_id: string;
   project: string;
   project_slug: string;
+  project_display_name: string;
+  task_name: string;
+  task_display_name: string;
   evaluation: string;
   name: string;
   build_time_ms: number;
@@ -2927,6 +2940,9 @@ export type WaitingReason = {
   kind: "exec_workers";
 } | {
   kind: "manual_start";
+} | {
+  waiting_exec_jobs: number;
+  kind: "exec_jobs";
 };
 
 export type WalkMode = "pruned" | "full";

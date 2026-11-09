@@ -5,10 +5,10 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import { environment } from '@environments/environment';
 import { ApiService } from './api.service';
-import { ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary } from '@core/models';
+import { ExecJobLog, ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary } from '@core/models';
 
 function query(params: Record<string, number | undefined>): string {
   const defined = Object.entries(params).filter((entry): entry is [string, number] => entry[1] !== undefined);
@@ -28,7 +28,11 @@ export class ExecJobsService {
   }
 
   log(job: string, attempt?: number, node?: number): Observable<string> {
-    return this.api.get<string>(`exec/${job}/log${query({ attempt, node })}`);
+    return this.logAfter(job, undefined, attempt, node).pipe(map((chunk) => chunk.log));
+  }
+
+  logAfter(job: string, offset?: number, attempt?: number, node?: number): Observable<ExecJobLog> {
+    return this.api.get<ExecJobLog>(`exec/${job}/log${query({ attempt, node, offset })}`);
   }
 
   outputs(job: string, node?: number): Observable<ExecJobOutputView[]> {

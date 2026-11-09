@@ -6238,7 +6238,7 @@ paths:
       - exec-jobs
       summary: Get exec job log
       description: |-
-        Returns the program output of one attempt as a single string, the latest attempt unless `attempt` names its number. `node` picks the node of a multi-node job by its index, node 0 by default. Empty string before the first attempt. Answers 404 for an attempt number the node does not have and for a node index the job does not have.
+        Returns the program output of one attempt, the latest attempt unless `attempt` names its number. `node` picks the node of a multi-node job by its index, node 0 by default. `offset` is the number of bytes the caller already holds: the answer then carries only the bytes after it and `offset` in the answer says where `log` starts (0 when the requested offset is past the end or inside a character, so the caller replaces its copy). `total_bytes` is the full log size to pass as the next `offset`. Empty log before the first attempt. Answers 404 for an attempt number the node does not have and for a node index the job does not have.
 
         **Access:** Public projects, or members of the project.
       operationId: getExecJobLog
@@ -6261,6 +6261,12 @@ paths:
           type: integer
           format: int32
           minimum: 0
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
       responses:
         '200':
           description: Exec job log
@@ -6275,7 +6281,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    type: string
+                    $ref: '#/components/schemas/ExecJobLog'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -16604,6 +16610,22 @@ components:
           - string
           - 'null'
           format: uuid
+        project_name:
+          type:
+          - string
+          - 'null'
+        project_display_name:
+          type:
+          - string
+          - 'null'
+        task:
+          type:
+          - string
+          - 'null'
+        task_display_name:
+          type:
+          - string
+          - 'null'
     DispatchedJobsResponse:
       type: object
       required:
@@ -17186,6 +17208,21 @@ components:
     ExecJobId:
       type: string
       format: uuid
+    ExecJobLog:
+      type: object
+      required:
+      - offset
+      - log
+      - total_bytes
+      properties:
+        offset:
+          type: integer
+          minimum: 0
+        log:
+          type: string
+        total_bytes:
+          type: integer
+          minimum: 0
     ExecJobNode:
       type: object
       required:
@@ -17625,6 +17662,9 @@ components:
       - build_id
       - project
       - project_slug
+      - project_display_name
+      - task_name
+      - task_display_name
       - evaluation
       - name
       - build_time_ms
@@ -17636,6 +17676,12 @@ components:
           type: string
           format: uuid
         project_slug:
+          type: string
+        project_display_name:
+          type: string
+        task_name:
+          type: string
+        task_display_name:
           type: string
         evaluation:
           type: string
@@ -22581,6 +22627,19 @@ components:
             type: string
             enum:
             - manual_start
+      - type: object
+        required:
+        - waiting_exec_jobs
+        - kind
+        properties:
+          waiting_exec_jobs:
+            type: integer
+            format: int32
+            minimum: 0
+          kind:
+            type: string
+            enum:
+            - exec_jobs
     WalkMode:
       type: string
       enum:

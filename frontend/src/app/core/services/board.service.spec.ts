@@ -38,6 +38,9 @@ const sampleEval: ExpensiveEval = {
 const sampleBuild: ExpensiveBuild = {
   build_id: 'build-1',
   project_slug: 'nixpkgs',
+  project_display_name: 'Nixpkgs',
+  task_name: 'ci',
+  task_display_name: 'CI',
   evaluation: 'eval-1',
   project: 'project-1',
   name: 'nixos.conf',

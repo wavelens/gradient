@@ -194,5 +194,13 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
         ...step(access.trigger, { kind: 'start', label: 'Run', icon: 'play_arrow' },
           'Ask a project member with permission to start runs to start the job.'),
       };
+    case 'exec_jobs':
+      return {
+        title: 'Waiting for exec jobs',
+        detail: `The builds are done. Exec jobs waiting to start: ${reason.waiting_exec_jobs}.`,
+        requirements: [],
+        action: null,
+        hint: null,
+      };
   }
 }
