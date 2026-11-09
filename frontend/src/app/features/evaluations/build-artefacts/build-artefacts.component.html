@@ -23,25 +23,26 @@
               slot="actions"
               grButton
               severity="secondary"
-              [href]="openArtefactInBrowserUrl(artefact)"
+              [href]="getBuildArtefactFileUrl(artefact)"
               target="_blank"
               rel="noopener noreferrer"
               [title]="'Open ' + artefact.name"
+              [attr.aria-label]="'Open ' + artefact.name"
               icon="open_in_new"
               label="Open"
             ></a>
           } @else {
-            <button
+            <a
               slot="actions"
               grButton
-              type="button"
               severity="secondary"
+              [href]="getBuildArtefactFileUrl(artefact)"
+              [attr.download]="artefact.name"
               [title]="'Download ' + artefact.name"
+              [attr.aria-label]="'Download ' + artefact.name"
               icon="download"
               label="Download"
-              [loading]="artefactNameBeingDownloaded() === artefact.name"
-              (click)="downloadBuildArtefactFile(artefact)"
-            ></button>
+            ></a>
           }
         </gr-row>
       }

@@ -98,6 +98,19 @@
     gap: $spacing-xs;
     flex-shrink: 0;
   }
+
+  @media (max-width: $breakpoint-sm) {
+    flex-wrap: wrap;
+
+    .header-left {
+      flex-basis: 100%;
+    }
+
+    .header-name {
+      max-width: none;
+      min-width: 0;
+    }
+  }
 }
 
 .ctrl-btn {

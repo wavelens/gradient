@@ -11,26 +11,22 @@ import { AuthService } from '@core/services/auth.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { ApiError } from '@core/services/api.service';
-import { NotifyService } from '@core/services/notify.service';
 import { formatBytes } from '@shared/text';
 import { BuildArtefactsComponent } from './build-artefacts.component';
 
 function render(
   getBuildDownloads: () => unknown,
   getBuild: () => unknown = () => of({ derivation_path: '/nix/store/abc-hello-2.12.drv' }),
-  downloadBuildArtefactFile: () => unknown = () => of(),
 ) {
   TestBed.configureTestingModule({
     imports: [BuildArtefactsComponent],
     providers: [
       provideRouter([]),
       { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ project: 'p', buildId: 'b1' }), queryParamMap: convertToParamMap({}) } } },
-      { provide: EvaluationsService, useValue: { getBuildDownloads, getBuild, downloadBuildArtefactFile } },
+      { provide: EvaluationsService, useValue: { getBuildDownloads, getBuild } },
       { provide: AuthService, useValue: { isAuthenticated: () => false } },
       { provide: ProjectsService, useValue: {} },
       { provide: BreadcrumbsService, useValue: { buildPage: vi.fn(() => []) } },
-      { provide: NotifyService, useValue: { failure: vi.fn() } },
     ],
   });
   const fixture = TestBed.createComponent(BuildArtefactsComponent);
@@ -87,17 +83,11 @@ describe('BuildArtefactsComponent', () => {
     expect([...root.querySelectorAll('[slot=meta]')].map((meta) => meta.textContent?.trim())).toEqual([formatBytes(2048)]);
   });
 
-  it('downloads a file inside the app and reports a failed download in a toast', () => {
-    const downloadBuildArtefactFile = vi.fn().mockReturnValue(throwError(() => new ApiError('artefact missing', 404)));
-    const { fixture, root } = render(() => of([{ name: 'a b.tar', path: 'a b.tar', file_type: 'file', subtype: 'binary-dist' }]), undefined, downloadBuildArtefactFile);
-    const { failure } = TestBed.inject(NotifyService);
-
-    root.querySelector<HTMLButtonElement>('button[title="Download a b.tar"]')!.click();
-    fixture.detectChanges();
-
-    expect(downloadBuildArtefactFile).toHaveBeenCalledWith('b1', 'a b.tar');
-    expect(failure).toHaveBeenCalledWith("Couldn't download a b.tar", expect.any(ApiError));
-    expect(root.querySelector('a[href*="/download/"]')).toBeNull();
+  it('hands a file to the download manager of the browser through a direct link named after the file', () => {
+    const { root } = render(() => of([{ name: 'a b.tar', path: 'a b.tar', file_type: 'file', subtype: 'binary-dist' }]));
+    const link = root.querySelector<HTMLAnchorElement>('a[aria-label="Download a b.tar"]')!;
+    expect(link.getAttribute('href')).toContain('/builds/b1/download/a%20b.tar');
+    expect(link.getAttribute('download')).toBe('a b.tar');
   });
 
   it('opens HTML artefacts in a new tab', () => {

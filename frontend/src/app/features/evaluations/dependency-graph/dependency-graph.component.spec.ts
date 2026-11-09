@@ -129,6 +129,24 @@ describe('DependencyGraphComponent live updates', () => {
     fixture.destroy();
   });
 
+  it('opens a wide graph at a readable zoom centred on the root instead of shrinking every card', () => {
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 800, 600));
+    const leaves = Array.from({ length: 12 }, (_, i) => node(`lib${i}`, 'Completed'));
+    const wide = setup({
+      root: 'root',
+      nodes: [node('root', 'Completed'), ...leaves],
+      edges: leaves.map((leaf) => ({ source: leaf.id, target: 'root' })),
+    });
+    expect(wide.fixture.componentInstance.scale()).toBe(0.6);
+    wide.fixture.destroy();
+
+    TestBed.resetTestingModule();
+    const single = setup({ root: 'root', nodes: [node('root', 'Completed')], edges: [] });
+    expect(single.fixture.componentInstance.scale()).toBeGreaterThan(0.6);
+    single.fixture.destroy();
+    rect.mockRestore();
+  });
+
   it('opens the log from a focused node with Enter, also when the link carries no evaluation', () => {
     const { fixture } = setup({ root: 'root', nodes: [node('root', 'FailedPermanent')], edges: [] });
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);

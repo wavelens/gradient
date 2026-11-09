@@ -11,8 +11,6 @@ import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { type BuildOrigin, readBuildOrigin } from '@shared/routing';
-import { saveResponse } from '@shared/download';
-import { NotifyService } from '@core/services/notify.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -25,7 +23,6 @@ import {
 import { environment } from '@environments/environment';
 import { formatBytes, packageNameFromDerivationPath } from '@shared/text';
 import { BuildProduct } from '@core/models';
-import { finalize } from 'rxjs';
 
 /** Readable labels for product types and subtypes from Hydra. A more specific subtype can take priority. */
 const ARTEFACT_TYPE_LABELS: Record<string, string> = {
@@ -55,14 +52,12 @@ export class BuildArtefactsComponent implements OnInit {
   private evalService = inject(EvaluationsService);
   private authService = inject(AuthService);
   private projectsService = inject(ProjectsService);
-  private notify = inject(NotifyService);
 
   loading = signal(true);
   loadError = signal<unknown>(null);
   artefacts = signal<BuildProduct[]>([]);
   packageName = signal('');
   private downloadToken = signal<string | null>(null);
-  artefactNameBeingDownloaded = signal<string | null>(null);
 
   projectName = '';
   buildId = '';
@@ -109,20 +104,10 @@ export class BuildArtefactsComponent implements OnInit {
     });
   }
 
-  openArtefactInBrowserUrl(artefact: BuildProduct): string {
+  getBuildArtefactFileUrl(artefact: BuildProduct): string {
     const base = `${environment.apiUrl}/builds/${this.buildId}/download/${encodeURIComponent(artefact.name)}`;
     const token = this.downloadToken();
     return token ? `${base}?token=${encodeURIComponent(token)}` : base;
-  }
-
-  downloadBuildArtefactFile(artefact: BuildProduct): void {
-    this.artefactNameBeingDownloaded.set(artefact.name);
-    this.evalService.downloadBuildArtefactFile(this.buildId, artefact.name)
-      .pipe(finalize(() => this.artefactNameBeingDownloaded.set(null)))
-      .subscribe({
-        next: (response) => saveResponse(response, artefact.name),
-        error: (error: unknown) => this.notify.failure(`Couldn't download ${artefact.name}`, error),
-      });
   }
 
   readonly formatBytes = formatBytes;

@@ -45,6 +45,7 @@ const paint = (el: SVGElement, property: 'fill' | 'stroke', role: string) => el.
 const CARD_H = 66;
 const H_GAP = 32;
 const V_GAP = 90;
+const minOpeningZoomScale = 0.6;
 const ACTIVE_STATUSES = ['Building', 'Queued', 'Created'];
 
 interface LayoutNode extends DependencyGraphNode {
@@ -450,6 +451,13 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const gw = maxX - minX + pad * 2;
     const gh = maxY - minY + pad * 2;
     const s = Math.min(rect.width / gw, visibleHeight / gh, 1.6);
+    const root = this.layoutNodes.find((n) => n.id === this.rootId());
+    if (s < minOpeningZoomScale && root) {
+      this.scale.set(minOpeningZoomScale);
+      this.tx.set(rect.width / 2 - (root.x + CARD_W / 2) * minOpeningZoomScale);
+      this.ty.set(visibleHeight / 2 - (root.y + CARD_H / 2) * minOpeningZoomScale);
+      return;
+    }
     this.scale.set(s);
     this.tx.set(rect.width / 2 - ((minX + maxX) / 2) * s);
     this.ty.set(visibleHeight / 2 - ((minY + maxY) / 2) * s);
