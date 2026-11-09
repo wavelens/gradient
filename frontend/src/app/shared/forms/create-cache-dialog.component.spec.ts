@@ -8,6 +8,7 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject, of, throwError } from 'rxjs';
 import { CachesService } from '@core/services/caches.service';
+import { ApiError } from '@core/services/api.service';
 import { CreateCacheDialogComponent } from './create-cache-dialog.component';
 
 @Component({
@@ -66,7 +67,7 @@ describe('CreateCacheDialogComponent', () => {
   });
 
   it('stays open with the error when creation fails', async () => {
-    const { host, type, submit } = await setup(() => throwError(() => new Error('Name taken')));
+    const { host, type, submit } = await setup(() => throwError(() => new ApiError('Name taken', 409)));
     await type('#cache-display-name', 'Team Cache');
     await submit();
     expect(host.created).toEqual([]);

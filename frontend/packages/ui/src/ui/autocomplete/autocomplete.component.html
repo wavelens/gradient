@@ -30,7 +30,7 @@ SPDX-License-Identifier: AGPL-3.0-only
   (detach)="close()"
 >
   <ul class="gr-autocomplete__panel" role="listbox">
-    @for (suggestion of suggestions(); track suggestion) {
+    @for (suggestion of suggestions(); track $index) {
       <li role="option" class="gr-autocomplete__option" (click)="pick(suggestion)">{{ suggestion }}</li>
     }
   </ul>

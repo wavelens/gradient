@@ -66,8 +66,8 @@ export class CreateTeamDialogComponent {
     this.teams.create(this.form.name, this.form.displayName).subscribe({
       next: () => {
         this.creating.set(false);
-        this.created.emit(this.form.name);
         this.visible.set(false);
+        this.created.emit(this.form.name);
       },
       error: (err: unknown) => {
         this.error.set(apiErrorMessage(err, 'Failed to create the team.'));

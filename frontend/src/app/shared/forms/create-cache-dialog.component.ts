@@ -14,6 +14,7 @@ import {
   SelectComponent,
 } from '@gradient/ui/ui';
 import { CachesService } from '@core/services/caches.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import type { MakeCacheRequest } from '@core/models';
 import { nameAvailability } from './name-availability';
 import { NameFieldsComponent } from './name-fields.component';
@@ -99,11 +100,11 @@ export class CreateCacheDialogComponent {
     this.caches.createCache(this.cache).subscribe({
       next: () => {
         this.creating.set(false);
-        this.created.emit(this.cache.name);
         this.visible.set(false);
+        this.created.emit(this.cache.name);
       },
-      error: (error: Error) => {
-        this.error.set(error?.message || 'Failed to create cache.');
+      error: (error: unknown) => {
+        this.error.set(apiErrorMessage(error, 'Failed to create cache.'));
         this.creating.set(false);
       },
     });
