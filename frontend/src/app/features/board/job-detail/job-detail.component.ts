@@ -7,7 +7,7 @@
 import { Component, OnInit, DestroyRef, inject, signal, computed, effect, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, Location } from '@angular/common';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule, type UrlTree } from '@angular/router';
 import { BoardService, AssignedJobDetail, InstanceContextView, Windowed } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
@@ -103,8 +103,8 @@ interface RuleRow {
   imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LoadStateComponent, BadgeComponent, LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent],
   template: `
     <div class="top-row phone-icon-buttons">
-      <a [routerLink]="links.board('live')" class="back" (click)="goBack($event)">
-        <gr-icon name="arrow_back" size="sm" />Live Jobs
+      <a [routerLink]="boardJobBackLink.href" class="back" (click)="goBack($event)">
+        <gr-icon name="arrow_back" size="sm" />{{ boardJobBackLink.label }}
       </a>
       @if (canAbort()) {
         <button grButton label="Abort" icon="stop_circle" severity="danger" size="small"
@@ -499,8 +499,18 @@ export class BoardJobDetailComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private location = inject(Location);
 
+  private router = inject(Router);
+
   protected readonly previousNavigationWasLiveJobsList =
-    inject(Router).currentNavigation()?.previousNavigation?.finalUrl?.toString().startsWith('/board/live') === true;
+    this.router.currentNavigation()?.previousNavigation?.finalUrl?.toString().startsWith('/board/live') === true;
+
+  protected readonly boardJobBackLink: { href: UrlTree; label: string } =
+    this.route.snapshot.data['pending'] === true
+      ? {
+        href: this.router.createUrlTree([String(links.board('live'))], { queryParams: { view: 'pending' } }),
+        label: 'Pending jobs',
+      }
+      : { href: links.board('live'), label: 'Live Jobs' };
 
   job = signal<AssignedJobDetail | null>(null);
   pending = signal<PendingJobSummary | null>(null);

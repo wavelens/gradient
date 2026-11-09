@@ -342,6 +342,14 @@ describe('BoardJobDetailComponent - structured context panels', () => {
   });
 });
 
+describe('BoardJobDetailComponent - back link', () => {
+  it('leads an assigned job back to the live jobs list', () => {
+    const back = (setup().nativeElement as HTMLElement).querySelector('a.back');
+    expect(back?.textContent).toContain('Live Jobs');
+    expect(back?.getAttribute('href')).toBe('/board/live');
+  });
+});
+
 describe('BoardJobDetailComponent - pending route', () => {
   it('renders a limited pending view from the pending list without asking for an assigned job', () => {
     const getJob = vi.fn(() => of(DETAIL));
@@ -350,8 +358,8 @@ describe('BoardJobDetailComponent - pending route', () => {
     expect(getJob).not.toHaveBeenCalled();
     expect(el.querySelector('h1')?.textContent).toBe('hello-2.12.1');
     const back = el.querySelector('a.back');
-    expect(back?.textContent).toContain('Live Jobs');
-    expect(back?.getAttribute('href')).toBe('/board/live');
+    expect(back?.textContent).toContain('Pending jobs');
+    expect(back?.getAttribute('href')).toBe('/board/live?view=pending');
     expect(el.textContent).not.toContain('Score breakdown');
     expect(el.querySelector('section.timeline')?.textContent).toContain('Dependencies');
   });
