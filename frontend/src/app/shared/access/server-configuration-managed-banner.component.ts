@@ -7,21 +7,21 @@
 import { ChangeDetectionStrategy, Component, booleanAttribute, computed, input } from '@angular/core';
 import { MessageBannerComponent } from '@gradient/ui/ui';
 import { AccessState } from '@core/models/access.model';
+import type { CachePermission, Permission } from '@core/models';
+import { getMembersWithPermissionPhrase } from './missing-permission';
 
 @Component({
   selector: 'app-server-configuration-managed-banner',
   standalone: true,
   imports: [MessageBannerComponent],
   template: `
-    @if (access()?.managed) {
-      @if (access()?.canEdit) {
-        <gr-message-banner type="info">
-          Settings for this {{ kind() }} come from the server configuration.
-          @if (kind() === 'cache') { Deactivating the cache still works here.}
-        </gr-message-banner>
-      }
+    @if (access()?.managed && access()?.canEdit) {
+      <gr-message-banner type="info">
+        Settings for this {{ kind() }} come from the server configuration.
+        @if (kind() === 'cache') { Deactivating the cache still works here.}
+      </gr-message-banner>
     } @else if (showReadOnlyNote() && access() && !access()?.canEdit) {
-      <gr-message-banner type="info">Only the admins of this {{ settingsAdminEntityKind() }} can change these settings.</gr-message-banner>
+      <gr-message-banner type="info">Only the {{ settingsEditors() }} can change these settings.</gr-message-banner>
     }
   `,
   styles: ':host { display: contents; }',
@@ -31,6 +31,10 @@ export class ServerConfigurationManagedBannerComponent {
   access = input.required<AccessState | null | undefined>();
   kind = input.required<'project' | 'cache' | 'team' | 'task'>();
   showReadOnlyNote = input(false, { transform: booleanAttribute });
+  permission = input<Permission | CachePermission>();
 
-  protected settingsAdminEntityKind = computed(() => (this.kind() === 'task' ? 'project' : this.kind()));
+  protected settingsEditors = computed(() => {
+    const kind = this.kind();
+    return getMembersWithPermissionPhrase(kind === 'task' ? 'project' : kind, this.permission());
+  });
 }

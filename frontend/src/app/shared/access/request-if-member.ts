@@ -29,7 +29,7 @@ export function requestIfCacheMember<T>(
 ): Observable<T> {
   if (!cache || !isViewerCacheMember(cache)) return throwError(() => createNoAccessLoadStateError('cache', 'members'));
   if (permission && !cache.permissions.includes(permission)) {
-    return throwError(() => createMissingPermissionLoadStateError('cache'));
+    return throwError(() => createMissingPermissionLoadStateError('cache', true, permission));
   }
   return request();
 }

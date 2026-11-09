@@ -40,8 +40,18 @@ describe('ServerConfigurationManagedBannerComponent', () => {
     expect(text).not.toContain('members');
   });
 
-  it('leaves out the read-only note on managed settings', () => {
-    expect(bannerText({ managed: true, canEdit: false, canTrigger: false }, true)).toBe('');
+  it('shows the read-only note on managed settings to a read-only viewer', () => {
+    expect(bannerText({ managed: true, canEdit: false, canTrigger: false }, true)).toContain('Only the admins of this project can change these settings.');
+  });
+
+  it('names the lowest built-in role that grants the required permission', () => {
+    const fixture = TestBed.createComponent(ServerConfigurationManagedBannerComponent);
+    fixture.componentRef.setInput('access', { managed: false, canEdit: false, canTrigger: false });
+    fixture.componentRef.setInput('kind', 'task');
+    fixture.componentRef.setInput('showReadOnlyNote', true);
+    fixture.componentRef.setInput('permission', 'editTask');
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Only the members with Write or Admin on this project can change these settings.');
   });
 
   it('names the owning project admins to a read-only settings viewer', () => {
