@@ -427,8 +427,8 @@ interface RuleRow {
         }
       </section>
     } @else {
-      <gr-load-state [loading]="loadError() === null" [error]="loadError()" empty
-                     loadingMessage="Loading job..." errorTitle="Couldn't load job" (retry)="reload()" />
+      <gr-load-state [loading]="loadError() === null && !pendingJobIsNoLongerInSchedulerQueue()" [error]="loadError()" empty
+                     loadingMessage="Loading job..." errorTitle="Couldn't load job" emptyTitle="This job is no longer pending" (retry)="reload()" />
     }
 
     <gr-dialog
@@ -485,6 +485,7 @@ export class BoardJobDetailComponent implements OnInit {
   job = signal<AssignedJobDetail | null>(null);
   pending = signal<PendingJobSummary | null>(null);
   loadError = signal<unknown>(null);
+  pendingJobIsNoLongerInSchedulerQueue = signal(false);
   private jobId: string | null = null;
   private descriptions = signal<Map<string, string>>(new Map());
   activeRule = signal<RuleDescription | null>(null);
@@ -619,6 +620,7 @@ export class BoardJobDetailComponent implements OnInit {
     this.job.set(null);
     this.pending.set(null);
     this.loadError.set(null);
+    this.pendingJobIsNoLongerInSchedulerQueue.set(false);
     this.build.set(null);
     this.buildDialog.set(false);
     if (this.route.snapshot.data['pending'] === true) {
@@ -641,7 +643,7 @@ export class BoardJobDetailComponent implements OnInit {
       next: (r) => {
         const match = r.jobs.find((p) => p.exec_job?.id === id || (!p.exec_job && (p.evaluation_id === id || p.build_id === id)));
         if (match) this.pending.set(match);
-        else this.loadError.set({ status: 404, message: 'Job not in queue' });
+        else this.pendingJobIsNoLongerInSchedulerQueue.set(true);
       },
       error: (error: unknown) => this.loadError.set(error),
     });

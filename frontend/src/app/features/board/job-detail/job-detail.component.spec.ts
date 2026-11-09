@@ -403,7 +403,8 @@ describe('BoardJobDetailComponent - pending route', () => {
   it('says the job left the queue when it is no longer pending', () => {
     const el = setup({ getPendingJobs: () => of({ jobs: [], other_pending: 0 }) }, 'missing', true)
       .nativeElement as HTMLElement;
-    expect(el.textContent).toContain('Job not in queue');
+    expect(el.textContent).toContain('This job is no longer pending');
+    expect(el.textContent).not.toContain('Not found or access denied');
   });
 });
 
