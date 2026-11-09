@@ -281,8 +281,10 @@ export class LogViewerComponent implements OnDestroy {
   }
 
   async jumpToLine(line: number): Promise<void> {
-    const { start, end } = windowAround(this.totalLines(), line, this.WINDOW_PAGE);
-    await this.loadWindow(start, end, 'replace');
+    if (line < this.windowStart || line >= this.windowStart + this.windowLines().length) {
+      const { start, end } = windowAround(this.totalLines(), line, this.WINDOW_PAGE);
+      await this.loadWindow(start, end, 'replace');
+    }
     this.highlightLine.set(line);
     this.autoScroll.set(false);
     setTimeout(() => {

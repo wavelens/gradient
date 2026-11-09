@@ -229,6 +229,19 @@ describe('LogViewerComponent', () => {
       expect(viewer.highlightLine()).toBe(40);
     });
 
+    it('jumps to the next hit without fetching lines it already shows', async () => {
+      const log = serverLog(5000, [hit(40), hit(90)]);
+      const { fixture, viewer } = setup({ serverLog: log });
+      await settle(fixture);
+      viewer.searchQuery.set('error');
+      await viewer.runSearch();
+      await settle(fixture);
+      const calls = log.lines.mock.calls.length;
+      await viewer.jumpToLine(90);
+      expect(log.lines).toHaveBeenCalledTimes(calls);
+      expect(viewer.highlightLine()).toBe(90);
+    });
+
     it('sends one search request when Enter follows the typing', async () => {
       vi.useFakeTimers();
       try {
@@ -381,6 +394,13 @@ describe('LogViewerComponent', () => {
     gutter.click();
     expect(viewer.highlightLine()).toBe(2);
     expect(navigate.mock.calls[0][1]).toMatchObject({ fragment: 'L2' });
+  });
+
+  it('keeps the gutter buttons out of the tab order', async () => {
+    const { fixture } = setup();
+    await show(fixture, ['a', 'b']);
+    const gutters = Array.from(fixture.nativeElement.querySelectorAll('.log-gutter')) as HTMLElement[];
+    expect(gutters.every((g) => g.tabIndex === -1)).toBe(true);
   });
 
   it('renders a marker line as a separator carrying its name', async () => {
