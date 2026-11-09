@@ -44,6 +44,10 @@ export class NameFieldComponent implements ControlValueAccessor {
   protected value = signal('');
   protected isDisabled = signal(false);
 
+  protected shownHint = computed(() => {
+    const maxLength = this.maxLength();
+    return maxLength ? `${this.hint()}. Max ${maxLength} characters` : this.hint();
+  });
   protected error = computed(() => this.requiredEmptyErrorText() ?? MESSAGES[this.state()] ?? '');
   protected invalid = computed(() => !!MESSAGES[this.state()]);
 

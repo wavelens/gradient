@@ -78,6 +78,14 @@ describe('ThemeService', () => {
     expect(TestBed.inject(ThemeService).preference()).toBe('light');
   });
 
+  it('follows a theme chosen in another tab', () => {
+    const svc = TestBed.inject(ThemeService);
+    localStorage.setItem('gradient.theme', 'light');
+    window.dispatchEvent(new StorageEvent('storage', { key: 'gradient.theme', newValue: 'light' }));
+    expect(svc.preference()).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
+
   it('clears the attribute when returning to system', () => {
     const svc = TestBed.inject(ThemeService);
     svc.set('dark');

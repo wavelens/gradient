@@ -41,4 +41,9 @@ SPDX-License-Identifier: AGPL-3.0-only
     [attr.aria-label]="copied() ? copiedLabel() : copyLabel()"
     (click)="copy()"
   ></button>
+  <span class="copy-field__status" aria-live="polite">
+    @if (copied()) {
+      {{ copiedLabel() }}
+    }
+  </span>
 </div>

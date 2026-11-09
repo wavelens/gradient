@@ -94,4 +94,14 @@ describe('CopyFieldComponent', () => {
     expect(writeText).toHaveBeenCalledWith(value);
     expect(fixture.componentInstance.copied()).toBe(true);
   });
+
+  it('shows and announces Copied after copying', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn().mockResolvedValue(undefined) }, configurable: true });
+    const { fixture } = await render({ value });
+    const status = (fixture.nativeElement as HTMLElement).querySelector('[aria-live="polite"]')!;
+    expect(status.textContent?.trim()).toBe('');
+    await fixture.componentInstance.copy();
+    fixture.detectChanges();
+    expect(status.textContent?.trim()).toBe('Copied');
+  });
 });

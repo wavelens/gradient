@@ -55,6 +55,19 @@
     transform: none;
   }
 
+  &__status {
+    position: absolute;
+    right: $spacing-xs;
+    bottom: calc(100% + 2px);
+    color: var(--gr-text-secondary);
+    font-size: $font-size-xs;
+    pointer-events: none;
+  }
+
+  &--inline &__status {
+    position: static;
+  }
+
   &__code {
     font-family: $font-family-mono;
     font-size: $font-size-md;

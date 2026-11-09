@@ -96,6 +96,7 @@ describe('gr-name-field', () => {
     fixture.componentInstance.maxLength.set(64);
     fixture.detectChanges();
     expect(root().querySelector('input')?.getAttribute('maxlength')).toBe('64');
+    expect(root().textContent).toContain('Max 64 characters');
   });
 
   it('writes typed text back through ngModel', async () => {

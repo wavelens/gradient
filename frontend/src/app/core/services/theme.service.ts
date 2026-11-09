@@ -28,6 +28,12 @@ export class ThemeService {
   constructor() {
     this.stamp(this.pref());
     this.query?.addEventListener?.('change', (e) => this.systemLight.set(e.matches));
+    window.addEventListener('storage', (e) => {
+      if (e.key !== STORAGE_KEY && e.key !== null) return;
+      const pref = this.restore();
+      this.pref.set(pref);
+      this.stamp(pref);
+    });
   }
 
   set(pref: ThemePreference): void {

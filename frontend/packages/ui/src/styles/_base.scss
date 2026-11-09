@@ -39,6 +39,7 @@ body {
   background-color: var(--gr-surface-base);
   color: var(--gr-text-primary);
   font-family: $font-family-base;
+  font-feature-settings: 'calt' 0;
   line-height: $line-height-base;
   margin: 0;
   padding: 0;
