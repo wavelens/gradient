@@ -4,6 +4,15 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
+<div class="log-header">
+  <ng-content select="[logTitle]" />
+  @if (lineCount() > 0) {
+    <span class="log-line-count">{{ lineCount() | number }} {{ lineCount() === 1 ? 'line' : 'lines' }}</span>
+  }
+  <button type="button" grButton text size="small" severity="secondary" icon="search" class="log-search-toggle"
+          aria-label="Search logs" title="Search logs" [attr.aria-pressed]="searchOpen()"
+          (click)="searchOpen() ? closeSearch() : openSearch()"></button>
+</div>
 <ng-content />
 @if (searchOpen()) {
   <div class="log-search-bar">

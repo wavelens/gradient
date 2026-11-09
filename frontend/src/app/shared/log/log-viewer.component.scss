@@ -5,6 +5,7 @@
  */
 
 @use '@gradient/ui/styles/variables' as *;
+@use 'log-header';
 
 :host {
   position: relative;

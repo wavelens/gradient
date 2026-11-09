@@ -23,7 +23,8 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs';
 import type { LogSearchHit } from '@core/models';
-import { IconComponent, InputDirective, LoadStateComponent, ScrollRegionDirective } from '@gradient/ui/ui';
+import { DecimalPipe } from '@angular/common';
+import { ButtonComponent, IconComponent, InputDirective, LoadStateComponent, ScrollRegionDirective } from '@gradient/ui/ui';
 import { ansiToHtml } from './ansi';
 import { parseLineFragment, searchLines, windowAround } from './log-window';
 
@@ -60,7 +61,7 @@ function extendsLog(shown: readonly string[], next: readonly string[]): boolean 
 @Component({
   selector: 'gr-log-viewer',
   standalone: true,
-  imports: [IconComponent, InputDirective, LoadStateComponent, ScrollRegionDirective],
+  imports: [ButtonComponent, DecimalPipe, IconComponent, InputDirective, LoadStateComponent, ScrollRegionDirective],
   templateUrl: './log-viewer.component.html',
   styleUrl: './log-viewer.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,

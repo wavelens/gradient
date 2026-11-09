@@ -359,6 +359,18 @@ describe('LogViewerComponent', () => {
     });
   });
 
+  it('opens and closes the search from the header button, with the line count beside it', async () => {
+    const { fixture, viewer } = setup();
+    await show(fixture, numbered(1200));
+    const header = (fixture.nativeElement as HTMLElement).querySelector('.log-header')!;
+    expect(header.textContent).toContain('1,200 lines');
+    const toggle = header.querySelector<HTMLButtonElement>('button[aria-label="Search logs"]')!;
+    toggle.click();
+    expect(viewer.searchOpen()).toBe(true);
+    toggle.click();
+    expect(viewer.searchOpen()).toBe(false);
+  });
+
   it('links to a line from its gutter button', async () => {
     const { fixture, viewer } = setup();
     await show(fixture, ['a', 'b']);
