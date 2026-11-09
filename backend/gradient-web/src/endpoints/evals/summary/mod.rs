@@ -92,7 +92,7 @@ struct LoadedEvaluation {
     operation_id = "getEvaluationSummary",
     tag = "evals",
     summary = "Summarise what went wrong in an evaluation",
-    description = "Returns the builds that failed themselves, each with the packages it\nblocks, the attributes that failed to evaluate, and the packages fixed\nsince the previous evaluation. A build that only failed because a\ndependency failed is not listed; it is counted under the build that\ncaused it.\n\n`newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present.",
+    description = "Returns the builds that failed themselves, each with the packages it\nblocks, the attributes that failed to evaluate, and the packages fixed\nsince the previous evaluation. A build that only failed because a\ndependency failed is not listed; it is counted under the build that\ncaused it.\n\n`newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present. Exec entry points don't count as packages. Exec jobs report them.",
     params(("evaluation" = EvaluationId, Path)),
     responses((status = OK, description = "Failure summary of the evaluation.", body = EvaluationFailureSummary), WebError)
 )]
@@ -139,7 +139,7 @@ impl LoadedEvaluation {
         let packages = gradient_db::entry_points::of_evaluation(db, evaluation)
             .await?
             .into_iter()
-            .filter(|e| statuses.contains_key(&e.derivation))
+            .filter(|e| e.exec.is_none() && statuses.contains_key(&e.derivation))
             .map(|e| Package {
                 attr: e.eval,
                 derivation: e.derivation,
