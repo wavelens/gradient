@@ -905,6 +905,17 @@ describe('EvaluationLogComponent', () => {
       started.destroy();
     });
 
+    it('explains a Building evaluation whose builds are done by the waiting exec job', () => {
+      const fixture = setupEvaluationLogPageFixture([build('ok', 'hash-zlib.drv')], undefined, { status: 'Building' });
+      fixture.componentInstance.execJobWaitingWithReason.set({
+        id: 'j1', entry_point: 'apps.x86_64-linux.train', status: 'created', waiting_reason: { kind: 'manual_start' },
+        nodes: 1, labels: [], devices: [], autostart: false, keep_vm_running: false,
+      });
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).querySelector('.log-area gr-waiting-notice')?.textContent).toContain('Waiting for manual start');
+      fixture.destroy();
+    });
+
     it.each([
       ['Aborted', 'Aborted before any builds started'],
       ['Completed', 'No builds'],

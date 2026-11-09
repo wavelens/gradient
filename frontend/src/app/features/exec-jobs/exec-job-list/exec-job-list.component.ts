@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, SimpleChanges, booleanAttribute, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, SimpleChanges, booleanAttribute, inject, input, output, signal } from '@angular/core';
 import { RouterModule, type UrlTree } from '@angular/router';
 import { Subscription, catchError, interval, of, startWith, switchMap, takeWhile } from 'rxjs';
 import { BadgeComponent, IconComponent, MenuComponent, type MenuItem } from '@gradient/ui/ui';
@@ -38,6 +38,7 @@ export class ExecJobListComponent implements OnChanges {
   task = input.required<string>();
   canTrigger = input(false);
   isCompact = input(false, { transform: booleanAttribute });
+  firstOpenExecJobWaitingWithReason = output<ExecJobSummary | null>();
 
   jobs = signal<ExecJobSummary[]>([]);
   menuModel = signal<MenuItem[]>([]);
@@ -70,7 +71,9 @@ export class ExecJobListComponent implements OnChanges {
       takeWhile((jobs) => jobs !== 'refused'
         && (this.evaluationRunning() || jobs === null || jobs.some((job) => isOpenExecJob(job.status))), true),
     ).subscribe((jobs) => {
-      if (Array.isArray(jobs)) this.jobs.set(jobs);
+      if (!Array.isArray(jobs)) return;
+      this.jobs.set(jobs);
+      this.firstOpenExecJobWaitingWithReason.emit(jobs.find((job) => isOpenExecJob(job.status) && !!job.waiting_reason) ?? null);
     });
   }
 

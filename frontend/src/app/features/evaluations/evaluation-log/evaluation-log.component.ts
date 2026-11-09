@@ -32,6 +32,7 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
+import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { ConfirmService } from '@shared/confirm';
 import { AccessService, WritableDirective } from '@shared/access';
@@ -50,6 +51,7 @@ import {
   EvaluationStatus,
   BuildWithOutputs,
   DependencyGraphNode,
+  ExecJobSummary,
   TriggerType,
   Permission,
 } from '@core/models';
@@ -101,6 +103,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private messageService = inject(MessageService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private execJobs = inject(ExecJobsService);
   protected authService = inject(AuthService);
   private sanitizer = inject(DomSanitizer);
   private destroyRef = inject(DestroyRef);
@@ -148,6 +151,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return evaluation ? formatDuration(evaluationDuration(evaluation, this.clock.currentTimeMilliseconds())) : '';
   });
   activeBuildsCount = signal(0);
+  execJobWaitingWithReason = signal<ExecJobSummary | null>(null);
+  execJobStartRequestIsRunning = signal(false);
 
   projectName = '';
   evaluationLogBuildOrigin(): BuildOrigin {
@@ -1181,6 +1186,21 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private buildActionDone(summary: string, build: BuildItem): void {
     this.messageService.add({ severity: 'success', summary, detail: this.buildDisplayName(build.name) });
     this.refreshEvaluation();
+  }
+
+  runWaitingExecJob(job: ExecJobSummary): void {
+    this.execJobStartRequestIsRunning.set(true);
+    this.execJobs.run(job.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.execJobStartRequestIsRunning.set(false);
+        this.execJobWaitingWithReason.set(null);
+        this.notify.success('Exec job added to queue');
+      },
+      error: (error: unknown) => {
+        this.execJobStartRequestIsRunning.set(false);
+        this.notify.failure("Couldn't start exec job", error);
+      },
+    });
   }
 
   // ── Abort ───────────────────────────────────────────────────────────────────
