@@ -256,19 +256,29 @@ describe('DashboardTaskTableComponent', () => {
     expect(list.querySelector('gr-skeleton')).not.toBeNull();
   });
 
-  it('leaves a failed load to the page banner and shows the rows after a new load', () => {
+  it('shows a failed load under the heading with Try Again and the rows after the retry', () => {
     let calls = 0;
-    const { f, root } = render(null, () => (++calls === 1 ? throwError(() => ({ status: 500 })) : of(PAGE)));
-    expect(f.componentInstance.failed()).toBe(true);
-    expect(root.textContent!.trim()).toBe('');
-    f.componentInstance.load();
+    const { f, root } = render(null, () => (++calls === 1 ? throwError(() => ({ status: 500, message: 'database is down' })) : of(PAGE)));
+    expect(root.querySelector('h2')?.textContent).toBe('Tasks');
+    expect(root.querySelector('.gr-load-state__error')?.textContent).toContain('Failed to load tasks');
+    expect(root.querySelector('.gr-load-state__error')?.textContent).toContain('database is down');
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     f.detectChanges();
+    expect(root.querySelector('.gr-load-state__error')).toBeNull();
     expect(root.querySelectorAll('gr-row').length).toBe(1);
   });
 
-  it('hides the whole block when the user sees no task at all', () => {
+  it('keeps the heading and says so when the user sees no task at all', () => {
     const { root } = render(null, () => of({ ...PAGE, counts: { all: 0, failing: 0, starred: 0 }, total: 0, tasks: [] }));
-    expect(root.textContent!.trim()).toBe('');
+    expect(root.querySelector('h2')?.textContent).toBe('Tasks');
+    expect(root.querySelector('gr-empty-state')?.textContent).toContain('No tasks yet');
+    expect(root.querySelector('gr-tab-switch')).toBeNull();
+  });
+
+  it('moves a page in the url past the last page to the last page', () => {
+    const navigate = vi.spyOn(Router.prototype, 'navigate').mockResolvedValue(true);
+    render(null, () => of({ ...PAGE, total: 30 }), { page: '5' });
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { page: 2 }, replaceUrl: true }));
   });
 
   it('drops the column captions over a filter without tasks and names the empty filter', () => {

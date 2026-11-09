@@ -4,102 +4,112 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-@if (!hidden() && !failed() && data()?.counts?.all !== 0) {
+@if (!hidden()) {
   <section class="section">
     <h2>Tasks</h2>
-    <gr-tab-switch
-      ariaLabel="Filter tasks"
-      [style.visibility]="data() ? null : 'hidden'"
-      [options]="chips()"
-      [ngModel]="selected()"
-      (ngModelChange)="select($event)"
-    />
+    <gr-load-state
+      flat
+      [error]="error()"
+      [empty]="data()?.counts?.all === 0"
+      errorTitle="Failed to load tasks"
+      emptyIcon="folder"
+      emptyTitle="No tasks yet"
+      (retry)="load()"
+    >
+      <gr-tab-switch
+        ariaLabel="Filter tasks"
+        [style.visibility]="data() ? null : 'hidden'"
+        [options]="chips()"
+        [ngModel]="selected()"
+        (ngModelChange)="select($event)"
+      />
 
-    @if (data(); as d) {
-      <gr-row-list>
-        @if (d.tasks.length) {
-          <div class="columns" aria-hidden="true">
-            <span></span>
-            <span>passed</span>
-            <span>average time</span>
-          </div>
-        }
-        @for (t of taskRowsWithNewestHistoryBarsThatFit(); track t.project + '/' + t.task) {
-          @let waitingReason = t.latest?.status === 'Waiting' ? newestEvaluationWaitingReasonTitle(t.project, t.latest!) : null;
-          @let label = t.project_display_name + ' / ' + t.task_display_name;
-          <gr-row [link]="links.task(t.project, t.task)" [linkLabel]="label">
-            @if (t.latest; as l) {
-              <gr-status-icon slot="icon" size="sm" [phase]="phase(l.status)" [label]="waitingReason ?? l.status" />
-            } @else {
-              <gr-icon slot="icon" class="never-run" name="radio_button_unchecked" size="sm" label="Never run" />
-            }
-            <span class="name" [title]="label"><span class="project">{{ t.project_display_name }}</span><span class="separator">&nbsp;/&nbsp;</span><span class="task">{{ t.task_display_name }}</span></span>
-            <span slot="meta" class="meta">
-              @if (t.latest; as l) {
-                @if (waitingReason) {
-                  <span class="waiting" [title]="waitingReason">{{ waitingReason }}</span>
-                } @else {
-                  <code [title]="l.commit">{{ l.commit.slice(0, 7) }}</code>
-                }
-                <span class="latest-evaluation-relative-time">&nbsp;· {{ l.created_at | relativeTime }}</span>
-                @if (t.evaluationNoNumbersText === null && t.entryPointsPassedCountText) {
-                  <span class="passed-on-phone" [class.failing]="t.failedEntryPointCountText">&nbsp;· {{ t.entryPointsPassedCountText }}</span>
-                }
-              } @else {
-                No evaluations yet
-              }
-            </span>
-            <div slot="actions" class="cells">
-              <app-evaluation-history [bars]="t.history" [project]="t.project" [task]="t.task" />
-              @if (t.evaluationNoNumbersText !== null) {
-                <span class="value"><b>{{ t.evaluationNoNumbersText }}</b></span>
-                <span class="value"></span>
-              } @else {
-                <span class="value" [class.failing]="t.failedEntryPointCountText">
-                  <b>{{ t.entryPointsPassedCountText }}</b>
-                  <small class="sr-only">Entry points passed</small>
-                </span>
-                <span class="value">
-                  <b>{{ duration(t.speed_ms) }}</b>
-                  <small class="sr-only">average time</small>
-                </span>
-              }
+      @if (data(); as d) {
+        <gr-row-list>
+          @if (d.tasks.length) {
+            <div class="columns" aria-hidden="true">
+              <span></span>
+              <span>passed</span>
+              <span>average time</span>
             </div>
-          </gr-row>
-        }
-      </gr-row-list>
-
-      @if (!d.tasks.length) {
-        <gr-empty-state flat icon="check_circle" [title]="emptyFilteredTasksTitle()" />
-      }
-
-      @if (!expanded() && d.total > d.tasks.length) {
-        <button grButton class="show-all" severity="secondary" size="small" [label]="'View all ' + d.total" (click)="go(1)"></button>
-      } @else if (expanded()) {
-        <nav class="pager" aria-label="Task pages">
-          @if (pages() > 1) {
-            <button grButton severity="secondary" size="small" label="Previous" [disabled]="page() === 1" (click)="go(page() - 1)"></button>
-            <span>{{ page() }} / {{ pages() }}</span>
-            <button grButton severity="secondary" size="small" label="Next" [disabled]="page() === pages()" (click)="go(page() + 1)"></button>
           }
-          <button grButton class="show-less" severity="secondary" size="small" [text]="true" label="Show less" (click)="go(null)"></button>
-        </nav>
-      }
-    } @else {
-      <gr-row-list aria-busy="true">
-        @for (_ of placeholders; track $index) {
-          <gr-row>
-            <gr-skeleton width="12rem" />
-            <gr-skeleton slot="meta" width="7rem" />
-            <div slot="actions" class="cells">
-              <gr-skeleton height="26px" />
-              @for (_ of [1, 2]; track $index) {
-                <gr-skeleton class="value" height="2lh" />
+          @for (t of taskRowsWithNewestHistoryBarsThatFit(); track t.project + '/' + t.task) {
+            @let waitingReason = t.latest?.status === 'Waiting' ? newestEvaluationWaitingReasonTitle(t.project, t.latest!) : null;
+            @let label = t.project_display_name + ' / ' + t.task_display_name;
+            <gr-row [link]="links.task(t.project, t.task)" [linkLabel]="label">
+              @if (t.latest; as l) {
+                <gr-status-icon slot="icon" size="sm" [phase]="phase(l.status)" [label]="waitingReason ?? l.status" />
+              } @else {
+                <gr-icon slot="icon" class="never-run" name="radio_button_unchecked" size="sm" label="Never run" />
               }
-            </div>
-          </gr-row>
+              <span class="name" [title]="label"><span class="project">{{ t.project_display_name }}</span><span class="separator">&nbsp;/&nbsp;</span><span class="task">{{ t.task_display_name }}</span></span>
+              <span slot="meta" class="meta">
+                @if (t.latest; as l) {
+                  @if (waitingReason) {
+                    <span class="waiting" [title]="waitingReason">{{ waitingReason }}</span>
+                  } @else {
+                    <code [title]="l.commit">{{ l.commit.slice(0, 7) }}</code>
+                  }
+                  <span class="latest-evaluation-relative-time">&nbsp;· {{ l.created_at | relativeTime }}</span>
+                  @if (t.evaluationNoNumbersText === null && t.entryPointsPassedCountText) {
+                    <span class="passed-on-phone" [class.failing]="t.failedEntryPointCountText">&nbsp;· {{ t.entryPointsPassedCountText }}</span>
+                  }
+                } @else {
+                  No evaluations yet
+                }
+              </span>
+              <div slot="actions" class="cells">
+                <app-evaluation-history [bars]="t.history" [project]="t.project" [task]="t.task" />
+                @if (t.evaluationNoNumbersText !== null) {
+                  <span class="value"><b>{{ t.evaluationNoNumbersText }}</b></span>
+                  <span class="value"></span>
+                } @else {
+                  <span class="value" [class.failing]="t.failedEntryPointCountText">
+                    <b>{{ t.entryPointsPassedCountText }}</b>
+                    <small class="sr-only">Entry points passed</small>
+                  </span>
+                  <span class="value">
+                    <b>{{ duration(t.speed_ms) }}</b>
+                    <small class="sr-only">average time</small>
+                  </span>
+                }
+              </div>
+            </gr-row>
+          }
+        </gr-row-list>
+
+        @if (!d.tasks.length) {
+          <gr-empty-state flat icon="check_circle" [title]="emptyFilteredTasksTitle()" />
         }
-      </gr-row-list>
-    }
+
+        @if (!expanded() && d.total > d.tasks.length) {
+          <button grButton class="show-all" severity="secondary" size="small" [label]="'View all ' + d.total" (click)="go(1)"></button>
+        } @else if (expanded()) {
+          <nav class="pager" aria-label="Task pages">
+            @if (pages() > 1) {
+              <button grButton severity="secondary" size="small" label="Previous" [disabled]="page() === 1" (click)="go(page() - 1)"></button>
+              <span>{{ page() }} / {{ pages() }}</span>
+              <button grButton severity="secondary" size="small" label="Next" [disabled]="page() === pages()" (click)="go(page() + 1)"></button>
+            }
+            <button grButton class="show-less" severity="secondary" size="small" [text]="true" label="Show less" (click)="go(null)"></button>
+          </nav>
+        }
+      } @else {
+        <gr-row-list aria-busy="true">
+          @for (_ of placeholders; track $index) {
+            <gr-row>
+              <gr-skeleton width="12rem" />
+              <gr-skeleton slot="meta" width="7rem" />
+              <div slot="actions" class="cells">
+                <gr-skeleton height="26px" />
+                @for (_ of [1, 2]; track $index) {
+                  <gr-skeleton class="value" height="2lh" />
+                }
+              </div>
+            </gr-row>
+          }
+        </gr-row-list>
+      }
+    </gr-load-state>
   </section>
 }

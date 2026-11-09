@@ -11,6 +11,12 @@ $linked-list-row-chevron-icon-width: 20px;
 
 .section {
   container-type: inline-size;
+
+  > gr-load-state {
+    display: flex;
+    flex-direction: column;
+    gap: $space-block;
+  }
 }
 
 // The header and row cells match in position. The row border, padding, chevron and flex gap sit to the right of the value cells.

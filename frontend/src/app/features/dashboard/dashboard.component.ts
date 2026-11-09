@@ -44,10 +44,9 @@ export class DashboardComponent {
     [this.stats(), this.tasks(), this.rail()].filter((section) => section !== undefined),
   );
   private dashboardSectionComponentsWithErrorBannerNames = computed(() => [
-    { component: this.stats(), name: 'Statistics' },
-    { component: this.tasks(), name: 'Tasks' },
-    { component: this.activity(), name: 'Activity' },
-    { component: this.rail(), name: 'Projects and Caches' },
+    { component: this.stats(), name: 'statistics' },
+    { component: this.activity(), name: 'activity' },
+    { component: this.rail(), name: 'projects and caches' },
   ]);
   protected failedDashboardSectionComponents = computed(() =>
     this.dashboardSectionComponentsWithErrorBannerNames().filter((section) => section.component?.failed()),

@@ -27,6 +27,7 @@ import {
   ButtonComponent,
   EmptyStateComponent,
   IconComponent,
+  LoadStateComponent,
   RowComponent,
   RowListComponent,
   SkeletonComponent,
@@ -89,6 +90,7 @@ function areDashboardTaskListRequestParametersEqual(a: DashboardTaskListRequestP
     ButtonComponent,
     EmptyStateComponent,
     IconComponent,
+    LoadStateComponent,
     RowComponent,
     RowListComponent,
     SkeletonComponent,
@@ -116,7 +118,7 @@ export class DashboardTaskTableComponent implements OnInit {
   expanded = signal(false);
   history = signal(barsThatFit(HISTORY_COLUMN_PX));
   data = signal<TasksPage | null>(null);
-  failed = signal(false);
+  error = signal<unknown>(null);
   hidden = signal(false);
   selected = computed(() => this.filter() ?? this.data()?.filter ?? null);
   taskRowsWithNewestHistoryBarsThatFit = computed(() =>
@@ -154,6 +156,7 @@ export class DashboardTaskTableComponent implements OnInit {
       .subscribe((d) => {
         this.data.set(d);
         this.leaveFilterWithoutChip(d);
+        this.moveToLastPageWhenPageIsPastTheEnd();
         afterNextRender(() => this.fitHistory(), { injector: this.injector });
       });
     this.route.queryParamMap
@@ -194,6 +197,16 @@ export class DashboardTaskTableComponent implements OnInit {
     this.requests.next();
   }
 
+  private moveToLastPageWhenPageIsPastTheEnd(): void {
+    if (!this.expanded() || this.page() <= this.pages()) return;
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { page: this.pages() },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
   private leaveFilterWithoutChip(d: TasksPage): void {
     if (d.filter !== 'starred' || d.counts.starred) return;
     this.router.navigate([], {
@@ -210,7 +223,7 @@ export class DashboardTaskTableComponent implements OnInit {
       filter(() => areDashboardTaskListRequestParametersEqual(shown, this.getCurrentTaskListRequestParameters())),
       tap((d) => {
         this.data.set(d);
-        this.failed.set(false);
+        this.error.set(null);
       }),
     );
   }
@@ -224,11 +237,11 @@ export class DashboardTaskTableComponent implements OnInit {
   }
 
   private fetch(): Observable<TasksPage> {
-    this.failed.set(false);
+    this.error.set(null);
     return this.requestDashboardTaskListWithFullEvaluationHistory(this.getCurrentTaskListRequestParameters()).pipe(
       catchError((e: { status?: number }) => {
         this.hidden.set(e?.status === 403);
-        this.failed.set(e?.status !== 403);
+        this.error.set(e?.status === 403 ? null : e);
         return EMPTY;
       }),
     );
