@@ -92,10 +92,10 @@ describe('DashboardComponent', () => {
     }
   });
 
-  it('shows one page banner for failed sections and loads only those again on retry', () => {
+  it('names the failed sections in one page banner and loads only those again on retry', () => {
     const root = render(throwError(() => ({ status: 503 })));
     expect(root.querySelectorAll('gr-message-banner').length).toBe(1);
-    expect(root.querySelector('gr-message-banner')?.textContent).toContain("Couldn't load the dashboard.");
+    expect(root.querySelector('gr-message-banner')?.textContent).toContain("Couldn't load Projects and Caches.");
     (root.querySelector('gr-message-banner button') as HTMLElement).click();
     expect(service.rail).toHaveBeenCalledTimes(2);
     expect(service.stats).toHaveBeenCalledTimes(1);

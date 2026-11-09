@@ -14,7 +14,7 @@
   }
   @if (failedDashboardSectionComponents().length) {
     <gr-message-banner type="error">
-      Couldn't load the dashboard.
+      Couldn't load {{ failedSectionNamesForErrorBanner() }}.
       <button grButton size="small" [text]="true" label="Retry" (click)="retryFailedSections()"></button>
     </gr-message-banner>
   }

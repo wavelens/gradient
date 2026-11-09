@@ -48,12 +48,21 @@ export class DashboardComponent {
   private reloadableRenderedDashboardSections = computed(() =>
     [this.stats(), this.tasks(), this.rail()].filter((section) => section !== undefined),
   );
+  private dashboardSectionComponentsWithErrorBannerNames = computed(() => [
+    { component: this.stats(), name: 'Statistics' },
+    { component: this.tasks(), name: 'Tasks' },
+    { component: this.activity(), name: 'Activity' },
+    { component: this.rail(), name: 'Projects and Caches' },
+  ]);
   protected failedDashboardSectionComponents = computed(() =>
-    [this.stats(), this.tasks(), this.activity(), this.rail()].filter((section) => section?.failed()),
+    this.dashboardSectionComponentsWithErrorBannerNames().filter((section) => section.component?.failed()),
+  );
+  protected failedSectionNamesForErrorBanner = computed(() =>
+    new Intl.ListFormat('en', { type: 'conjunction' }).format(this.failedDashboardSectionComponents().map((section) => section.name)),
   );
 
   protected retryFailedSections(): void {
-    for (const section of this.failedDashboardSectionComponents()) section?.load();
+    for (const section of this.failedDashboardSectionComponents()) section.component?.load();
   }
 
   constructor() {
