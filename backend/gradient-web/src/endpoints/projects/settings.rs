@@ -46,6 +46,7 @@ pub enum SubscriptionStatus {
 pub struct CacheSubscriptionItem {
     pub id: CacheId,
     pub name: String,
+    pub display_name: String,
     pub mode: CacheSubscriptionMode,
     pub status: SubscriptionStatus,
 }
@@ -110,11 +111,7 @@ pub async fn get_project_subscribe(
         .map(|oc| oc.cache)
         .chain(pending.iter().map(|r| r.cache))
         .collect();
-    let names: HashMap<CacheId, String> = by_ids::<ECache, _>(&db.web_db, &cache_ids)
-        .await?
-        .into_iter()
-        .map(|(id, c)| (id, c.name))
-        .collect();
+    let caches: HashMap<CacheId, MCache> = by_ids::<ECache, _>(&db.web_db, &cache_ids).await?;
 
     let active = project_caches.into_iter().map(|subscription| {
         (
@@ -129,9 +126,11 @@ pub async fn get_project_subscribe(
     let subscribed: Vec<CacheSubscriptionItem> = active
         .chain(requested)
         .filter_map(|(id, mode, status)| {
+            let cache = caches.get(&id)?;
             Some(CacheSubscriptionItem {
                 id,
-                name: names.get(&id)?.clone(),
+                name: cache.name.clone(),
+                display_name: cache.display_name.clone(),
                 mode,
                 status,
             })

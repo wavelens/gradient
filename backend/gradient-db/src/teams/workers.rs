@@ -61,18 +61,18 @@ pub async fn teams_granting_workers<C: ConnectionTrait>(
 pub async fn team_workers_for_project<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
-) -> Result<Vec<(String, MTeamWorker)>, DbErr> {
+) -> Result<Vec<(MTeam, MTeamWorker)>, DbErr> {
     let teams = teams_granting_workers(db, project).await?;
     if teams.is_empty() {
         return Ok(Vec::new());
     }
 
-    let names: HashMap<TeamId, String> = ETeam::find()
+    let granting: HashMap<TeamId, MTeam> = ETeam::find()
         .filter(CTeam::Id.is_in(teams.clone()))
         .all(db)
         .await?
         .into_iter()
-        .map(|team| (team.id, team.name))
+        .map(|team| (team.id, team))
         .collect();
 
     Ok(ETeamWorker::find()
@@ -80,7 +80,12 @@ pub async fn team_workers_for_project<C: ConnectionTrait>(
         .all(db)
         .await?
         .into_iter()
-        .filter_map(|worker| names.get(&worker.team).cloned().map(|name| (name, worker)))
+        .filter_map(|worker| {
+            granting
+                .get(&worker.team)
+                .cloned()
+                .map(|team| (team, worker))
+        })
         .collect())
 }
 

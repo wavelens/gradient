@@ -83,11 +83,7 @@ pub async fn get_user_invites(
         .chain(cache_rows.iter().map(|r| r.invited_by))
         .chain(team_rows.iter().map(|r| r.invited_by))
         .collect();
-    let inviters: HashMap<UserId, String> = by_ids::<EUser, _>(&state.web_db, &inviter_ids)
-        .await?
-        .into_iter()
-        .map(|(id, u)| (id, u.username))
-        .collect();
+    let inviters: HashMap<UserId, MUser> = by_ids::<EUser, _>(&state.web_db, &inviter_ids).await?;
 
     let projects: HashMap<ProjectId, MProject> = by_ids::<EProject, _>(
         &state.web_db,
@@ -162,16 +158,17 @@ pub async fn get_user_invites(
                 }
             };
             let invited_by = invitation.invited_by();
+            let inviter = inviters.get(&invited_by);
             Some(InviteItem {
                 kind,
                 token: invitation.token().to_string(),
                 scope: scope.clone(),
                 scope_display_name: scope_display_name.clone(),
                 role,
-                invited_by: inviters
-                    .get(&invited_by)
-                    .cloned()
+                invited_by: inviter
+                    .map(|u| u.username.clone())
                     .unwrap_or_else(|| invited_by.to_string()),
+                invited_by_display_name: inviter.map(|u| u.name.clone()),
                 created_at: invitation.created_at(),
                 expires_at: invitation.expires_at(),
             })

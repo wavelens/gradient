@@ -21,7 +21,7 @@ use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::{ConnectionFailure, ConnectionFailures};
 use gradient_types::ids::*;
 use gradient_types::permissions::Permission;
-use gradient_types::{BaseResponse, MTeamWorker};
+use gradient_types::{BaseResponse, MTeam, MTeamWorker};
 use gradient_wire::types::GradientCapabilities;
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
@@ -79,6 +79,8 @@ pub struct ProjectWorkerEntry {
     pub enable_build: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub team: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team_display_name: Option<String>,
     pub gradient_ci: bool,
     #[serde(flatten)]
     pub connection: WorkerConnection,
@@ -105,6 +107,7 @@ impl ProjectWorkerEntry {
             enable_eval: registration.enable_eval,
             enable_build: registration.enable_build,
             team: None,
+            team_display_name: None,
             gradient_ci: registration.gradient_ci,
             connection,
             live,
@@ -112,7 +115,7 @@ impl ProjectWorkerEntry {
     }
 
     fn of_team_worker(
-        team: String,
+        team: MTeam,
         worker: MTeamWorker,
         connection: WorkerConnection,
         live: Option<WorkerLiveInfo>,
@@ -129,7 +132,8 @@ impl ProjectWorkerEntry {
             enable_exec: worker.enable_exec,
             enable_eval: worker.enable_eval,
             enable_build: worker.enable_build,
-            team: Some(team),
+            team: Some(team.name),
+            team_display_name: Some(team.display_name),
             gradient_ci: worker.gradient_ci,
             connection,
             live,
@@ -790,6 +794,7 @@ mod tests {
             enable_eval: true,
             enable_build: true,
             team: None,
+            team_display_name: None,
             gradient_ci: false,
             connection: WorkerConnection {
                 connected: false,

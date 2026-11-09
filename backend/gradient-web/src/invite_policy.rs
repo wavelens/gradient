@@ -55,6 +55,7 @@ pub struct InviteItem {
     pub scope_display_name: String,
     pub role: String,
     pub invited_by: String,
+    pub invited_by_display_name: Option<String>,
     pub created_at: NaiveDateTime,
     pub expires_at: NaiveDateTime,
 }
@@ -130,6 +131,7 @@ mod tests {
             scope_display_name: scope.to_string(),
             role: "Admin".to_string(),
             invited_by: "alice".to_string(),
+            invited_by_display_name: Some("Alice".to_string()),
             created_at: at(created),
             expires_at: at(created + 100),
         }
