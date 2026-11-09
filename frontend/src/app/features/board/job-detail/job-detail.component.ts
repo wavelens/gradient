@@ -37,7 +37,7 @@ import { LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent } from
 import { Title } from '@angular/platform-browser';
 import { composeTitle } from '@core/title/gradient-title-strategy';
 import { JobTimelineComponent } from './job-timeline.component';
-import { BUILD_KIND, EXEC_KIND, jobKindName, jobSubjectLabel } from '../job-kind';
+import { BUILD_KIND, EXEC_KIND, jobKindName, jobSubjectLabel, pendingJobPageId } from '../job-kind';
 import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
 import { scoringRuleClassNameToReadableLabel, schedulerScoreDecimalPipeDigitsFormat } from '../scoring-rule-label';
 import { abortExecJobConfirm } from '@features/exec-jobs/exec-job-status';
@@ -61,7 +61,9 @@ import {
 import { links } from '@shared/routing';
 import { removeAnsiEscapeSequences } from '@shared/log';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
-import { EMPTY, Observable, tap } from 'rxjs';
+import { EMPTY, Observable, switchMap, tap } from 'rxjs';
+
+type PendingLookup = 'pending' | 'left' | 'not-found';
 
 const JOB_OUTCOME_BADGES: Record<string, { phase: StatusPhase; label: string }> = {
   completed: { phase: 'success', label: 'Completed' },
@@ -401,11 +403,16 @@ interface RuleRow {
           <gr-badge class="kind">{{ jobKindName(p.kind) }}</gr-badge>
           <h1>{{ getPendingJobName(p) }}</h1>
         </div>
+        @if (pendingLookup() === 'left') {
+          <gr-badge class="left-queue">Left the queue</gr-badge>
+        }
       </header>
-      @if (p.waiting_reason && p.project_name) {
-        <gr-waiting-notice banner [reason]="p.waiting_reason" [project]="p.project_name" [access]="pendingAccess()" />
-      } @else {
-        <p class="muted">A job can wait in the queue until a matching worker can take it. Worker details appear after assignment.</p>
+      @if (pendingLookup() === 'pending') {
+        @if (p.waiting_reason && p.project_name) {
+          <gr-waiting-notice banner [reason]="p.waiting_reason" [project]="p.project_name" [access]="pendingAccess()" />
+        } @else {
+          <p class="muted">A job can wait in the queue until a matching worker can take it. Worker details appear after assignment.</p>
+        }
       }
       <section class="ids">
         @if (p.project_name; as project) {
@@ -446,9 +453,12 @@ interface RuleRow {
           <div class="step"><span class="label">Dependencies</span><span>{{ p.dependency_count }}</span></div>
         }
       </section>
+    } @else if (pendingLookup() === 'not-found') {
+      <header class="head"><h1>Job not found</h1></header>
+      <p class="muted">No pending or running job has this ID.</p>
     } @else {
-      <gr-load-state [loading]="loadError() === null && !pendingJobIsNoLongerInSchedulerQueue()" [error]="loadError()" empty
-                     loadingMessage="Loading job..." errorTitle="Couldn't load job" emptyTitle="This job is no longer pending" (retry)="reload()" />
+      <gr-load-state [loading]="loadError() === null" [error]="loadError()" empty
+                     loadingMessage="Loading job..." errorTitle="Couldn't load job" (retry)="reload()" />
     }
 
     <gr-dialog
@@ -516,7 +526,7 @@ export class BoardJobDetailComponent implements OnInit {
   job = signal<AssignedJobDetail | null>(null);
   pending = signal<PendingJobSummary | null>(null);
   loadError = signal<unknown>(null);
-  pendingJobIsNoLongerInSchedulerQueue = signal(false);
+  pendingLookup = signal<PendingLookup | null>(null);
   private jobId: string | null = null;
   private descriptions = signal<Map<string, string>>(new Map());
   activeRule = signal<RuleDescription | null>(null);
@@ -622,6 +632,7 @@ export class BoardJobDetailComponent implements OnInit {
   }
 
   private refetchJobWhileUnfinished(): Observable<unknown> {
+    if (this.pendingLookup() === 'pending' && this.jobId) return this.lookUpPendingJob(this.jobId);
     const current = this.job();
     if (!current || current.finished_at || current.passed_over) return EMPTY;
     return this.board.getJob(current.id).pipe(
@@ -654,7 +665,7 @@ export class BoardJobDetailComponent implements OnInit {
     this.job.set(null);
     this.pending.set(null);
     this.loadError.set(null);
-    this.pendingJobIsNoLongerInSchedulerQueue.set(false);
+    this.pendingLookup.set(null);
     this.build.set(null);
     this.buildDialog.set(false);
     if (this.route.snapshot.data['pending'] === true) {
@@ -673,14 +684,29 @@ export class BoardJobDetailComponent implements OnInit {
   }
 
   private loadPending(id: string): void {
-    this.board.getPendingJobs().subscribe({
-      next: (r) => {
-        const match = r.jobs.find((p) => p.exec_job?.id === id || (!p.exec_job && (p.evaluation_id === id || p.build_id === id)));
-        if (match) this.pending.set(match);
-        else this.pendingJobIsNoLongerInSchedulerQueue.set(true);
-      },
-      error: (error: unknown) => this.loadError.set(error),
-    });
+    this.lookUpPendingJob(id).subscribe({ error: (error: unknown) => this.loadError.set(error) });
+  }
+
+  private lookUpPendingJob(id: string): Observable<unknown> {
+    return this.board.getPendingJobs().pipe(
+      switchMap((r) => {
+        if (this.jobId !== id) return EMPTY;
+        const match = r.jobs.find((p) => pendingJobPageId(p) === id);
+        if (match) {
+          this.pending.set(match);
+          this.pendingLookup.set('pending');
+          return EMPTY;
+        }
+        return this.board.getAssignedJobs().pipe(
+          tap((assigned) => {
+            if (this.jobId !== id) return;
+            const running = assigned.jobs.find((j) => pendingJobPageId(j) === id);
+            if (running) void this.router.navigateByUrl(links.boardJob(running.id), { replaceUrl: true });
+            else this.pendingLookup.set(this.pending() ? 'left' : 'not-found');
+          }),
+        );
+      }),
+    );
   }
 
   private abortConfirm(j: AssignedJobDetail): ConfirmRequest<unknown> {

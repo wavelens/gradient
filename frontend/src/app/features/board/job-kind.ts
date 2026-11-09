@@ -23,6 +23,10 @@ export function jobSubjectLabel(subject?: string | null, exec?: BoardExecJob | n
   return `${exec.entry_point}${node}`;
 }
 
+export function pendingJobPageId(row: { exec_job?: { id: string } | null; build_id?: string | null; evaluation_id: string }): string {
+  return row.exec_job?.id ?? row.build_id ?? row.evaluation_id;
+}
+
 export interface BoardRow<T> {
   job: T;
   subJobs: number;

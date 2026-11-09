@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter, RouterLink } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter, Router, RouterLink } from '@angular/router';
 import { By, Title } from '@angular/platform-browser';
 import { EMPTY, type Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
@@ -167,6 +167,7 @@ function setup(board: Partial<BoardService> = {}, id = 'job-1', pending = false)
         useValue: {
           getJob: () => of(DETAIL),
           getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
+          getAssignedJobs: () => of({ jobs: [], other_running: 0 }),
           getScoringRules: () => of([]),
           ...board,
         },
@@ -353,7 +354,7 @@ describe('BoardJobDetailComponent - back link', () => {
 describe('BoardJobDetailComponent - pending route', () => {
   it('renders a limited pending view from the pending list without asking for an assigned job', () => {
     const getJob = vi.fn(() => of(DETAIL));
-    const el = setup({ getJob, getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1', true)
+    const el = setup({ getJob, getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'b9', true)
       .nativeElement as HTMLElement;
     expect(getJob).not.toHaveBeenCalled();
     expect(el.querySelector('h1')?.textContent).toBe('hello-2.12.1');
@@ -365,7 +366,7 @@ describe('BoardJobDetailComponent - pending route', () => {
   });
 
   it('leaves out the dependency step when nothing has to build first', () => {
-    const el = setup({ getPendingJobs: () => of({ jobs: [{ ...PENDING, dependency_count: 0 }], other_pending: 0 }) }, 'e1', true)
+    const el = setup({ getPendingJobs: () => of({ jobs: [{ ...PENDING, dependency_count: 0 }], other_pending: 0 }) }, 'b9', true)
       .nativeElement as HTMLElement;
     expect(el.querySelector('section.timeline')?.textContent).not.toContain('Dependencies');
   });
@@ -415,11 +416,55 @@ describe('BoardJobDetailComponent - pending route', () => {
     ]));
   });
 
-  it('says the job left the queue when it is no longer pending', () => {
+  it('names an id that is neither pending nor running as not found, with a heading', () => {
     const el = setup({ getPendingJobs: () => of({ jobs: [], other_pending: 0 }) }, 'missing', true)
       .nativeElement as HTMLElement;
-    expect(el.textContent).toContain('This job is no longer pending');
+    expect(el.querySelector('h1')?.textContent).toBe('Job not found');
     expect(el.textContent).not.toContain('Not found or access denied');
+  });
+
+  it('opens the running job when a worker has already taken it', () => {
+    const fixture = setup({
+      getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
+      getAssignedJobs: () => of({ jobs: [{ id: 'job-7', kind: 1, project: 'o1', worker_id: 'w1', dispatched_at: '2026-06-08T00:01:00Z', evaluation_id: 'e1', build_id: 'b9' }], other_running: 0 }),
+    }, 'b9', true);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
+    fixture.componentInstance.reload();
+    expect(String(navigate.mock.calls[0]?.[0])).toBe('/board/jobs/job-7');
+    expect(navigate.mock.calls[0]?.[1]).toEqual({ replaceUrl: true });
+  });
+
+  it('does not match a pending build of the same evaluation for an evaluation id', () => {
+    const el = setup({ getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1', true)
+      .nativeElement as HTMLElement;
+    expect(el.querySelector('h1')?.textContent).toBe('Job not found');
+  });
+});
+
+describe('BoardJobDetailComponent - pending refresh', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('keeps asking while the job waits and marks it once it left the queue', () => {
+    vi.useFakeTimers();
+    const waiting: PendingJobSummary = { ...PENDING, project_name: 'sandbox', waiting_reason: { kind: 'no_cache' } };
+    const getPendingJobs = vi.fn(() => of({ jobs: [waiting], other_pending: 0 }));
+    const fixture = setup({ getPendingJobs }, 'b9', true);
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('gr-waiting-notice')).toBeTruthy();
+
+    vi.advanceTimersByTime(5_000);
+    expect(getPendingJobs).toHaveBeenCalledTimes(2);
+
+    getPendingJobs.mockReturnValue(of({ jobs: [], other_pending: 0 }));
+    vi.advanceTimersByTime(5_000);
+    fixture.detectChanges();
+    expect(el.querySelector('.head .left-queue')?.textContent?.trim()).toBe('Left the queue');
+    expect(el.querySelector('gr-waiting-notice')).toBeNull();
+    expect(el.querySelector('h1')?.textContent).toBe('hello-2.12.1');
+    expect(Array.from(el.querySelectorAll('section.ids a')).map((a) => a.getAttribute('href'))).toContain('/project/sandbox/log/e1');
+
+    vi.advanceTimersByTime(15_000);
+    expect(getPendingJobs).toHaveBeenCalledTimes(3);
   });
 });
 
@@ -800,7 +845,7 @@ describe('BoardJobDetailComponent - #636', () => {
   });
 
   it('names the pending job by what it works on', () => {
-    const el = setup({ getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1', true).nativeElement as HTMLElement;
+    const el = setup({ getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'b9', true).nativeElement as HTMLElement;
     expect(el.textContent).toContain('hello-2.12.1');
   });
 });
