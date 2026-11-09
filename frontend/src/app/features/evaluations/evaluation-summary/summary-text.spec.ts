@@ -51,10 +51,10 @@ describe('evaluation summary text', () => {
     expect(headline(summary({ total: 0 }), 'EvaluatingFlake')).toBe('Still evaluating');
   });
 
-  it('shows a tile for every non-zero count the headline does not already give, labelled by count', () => {
+  it('splits the headline counts into failed, blocked, built and unbuilt tiles, labelled by count', () => {
     const tiles = (s: EvaluationFailureSummary, status: EvaluationStatus = 'Completed') =>
       getEvaluationSummaryCountTiles(s, status).map((t) => `${t.label} ${t.value}`);
-    expect(tiles(summary({ built: 1, failed: 1, blocked: 1, unfinished: 1 }, 2))).toEqual(['Built package 1', 'Unbuilt package 1', 'Failed to evaluate 2']);
+    expect(tiles(summary({ built: 1, failed: 1, blocked: 1, unfinished: 1 }, 2))).toEqual(['Failed package 1', 'Blocked package 1', 'Built package 1', 'Unbuilt package 1']);
     expect(tiles(summary({ built: 5, unfinished: 15 }))).toEqual(['Built packages 5', 'Unbuilt packages 15']);
     expect(tiles(summary({ built: 5, unfinished: 15 }), 'Building')).toEqual(['Built packages 5']);
     expect(tiles(summary({ built: 5 }), 'Waiting')).toEqual([]);

@@ -29,8 +29,8 @@ describe('getExecJobStatusBadgeLabel', () => {
     expect(getExecJobStatusBadgeLabel({ status: 'created', waiting_reason: { kind: 'manual_start' } })).toBe('Manual');
   });
 
-  it('keeps the status of a job that waits for its builds', () => {
-    expect(getExecJobStatusBadgeLabel({ status: 'created', waiting_reason: null })).toBe('created');
+  it('names the status of a job that waits for its builds', () => {
+    expect(getExecJobStatusBadgeLabel({ status: 'created', waiting_reason: null })).toBe('Waiting for builds');
   });
 });
 

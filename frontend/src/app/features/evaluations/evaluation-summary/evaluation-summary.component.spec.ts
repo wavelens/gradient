@@ -108,6 +108,19 @@ describe('EvaluationSummaryComponent', () => {
     expect(text(fixture)).not.toContain('previous evaluation at');
   });
 
+  it('leaves out the comparison when nothing changed since the previous evaluation', () => {
+    const unchanged = {
+      ...SUMMARY,
+      failures: SUMMARY.failures.map((f) => ({ ...f, newly_failing: false })),
+      failed_attributes: SUMMARY.failed_attributes.map((a) => ({ ...a, newly_failing: false })),
+      fixed: [],
+      fixed_total: 0,
+    };
+    const fixture = setup(unchanged);
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('.compared')).toBeNull();
+  });
+
   it('names a failed build once, without the system or the derivation under its attribute', () => {
     const fixture = setup(SUMMARY);
 

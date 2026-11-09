@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { DeviceRequest, ExecJobStatus, ExecJobSummary, ExecUnmet, GuestSize, WaitingReason } from '@core/models';
+import type { DeviceRequest, EvaluationStatus, ExecJobStatus, ExecJobSummary, ExecUnmet, GuestSize, WaitingReason } from '@core/models';
 import type { MenuItem } from '@gradient/ui/ui';
 import type { ConfirmRequest } from '@shared/confirm';
 import type { Observable } from 'rxjs';
@@ -22,8 +22,24 @@ export function abortExecJobConfirm<T>(target: string, action: () => Observable<
   };
 }
 
+export const EXEC_JOB_STATUS_LABEL: Record<ExecJobStatus, string> = {
+  created: 'Waiting for builds',
+  queued: 'Queued',
+  starting: 'Starting',
+  running: 'Running',
+  completed: 'Completed',
+  failed: 'Failed',
+  aborted: 'Aborted',
+};
+
 export function getExecJobStatusBadgeLabel(job: Pick<ExecJobSummary, 'status' | 'waiting_reason'>): string {
-  return job.waiting_reason?.kind === 'manual_start' ? 'Manual' : job.status;
+  return job.waiting_reason?.kind === 'manual_start' ? 'Manual' : EXEC_JOB_STATUS_LABEL[job.status];
+}
+
+const STATUSES_BEFORE_EXEC_JOBS_EXIST = new Set<EvaluationStatus>(['Queued', 'Waiting', 'Fetching', 'EvaluatingFlake', 'EvaluatingDerivation']);
+
+export function execJobsMayStillAppear(status: EvaluationStatus | null): boolean {
+  return status !== null && STATUSES_BEFORE_EXEC_JOBS_EXIST.has(status);
 }
 
 export function isExecJobWaitingToStart(status: ExecJobStatus): boolean {

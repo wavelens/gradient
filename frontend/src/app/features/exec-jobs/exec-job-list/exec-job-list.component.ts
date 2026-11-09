@@ -10,13 +10,13 @@ import { Subscription, catchError, interval, of, startWith, switchMap, takeWhile
 import { BadgeComponent, IconComponent, MenuComponent, type MenuItem } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
 import { execJobPhase } from '@shared/evaluation';
-import type { ExecJobSummary } from '@core/models';
+import type { EvaluationStatus, ExecJobSummary } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
-import { abortExecJobConfirm, deviceLabel, execJobMenu, getExecJobStatusBadgeLabel, isOpenExecJob, waitingReasonText } from '../exec-job-status';
+import { EXEC_JOB_STATUS_LABEL, abortExecJobConfirm, deviceLabel, execJobMenu, execJobsMayStillAppear, getExecJobStatusBadgeLabel, isOpenExecJob, waitingReasonText } from '../exec-job-status';
 
 const POLL_MS = 4000;
 
@@ -34,7 +34,7 @@ export class ExecJobListComponent implements OnChanges {
   private confirm = inject(ConfirmService);
 
   evaluation = input.required<string>();
-  evaluationRunning = input(false);
+  evaluationStatus = input<EvaluationStatus | null>(null);
   project = input.required<string>();
   task = input.required<string>();
   canTrigger = input(false);
@@ -73,7 +73,7 @@ export class ExecJobListComponent implements OnChanges {
         catchError((error: unknown) => of(error instanceof ApiError && !error.unreachable ? 'refused' as const : null)),
       )),
       takeWhile((jobs) => jobs !== 'refused'
-        && (this.evaluationRunning() || jobs === null || jobs.some((job) => isOpenExecJob(job.status))), true),
+        && (jobs === null || jobs.some((job) => isOpenExecJob(job.status)) || (jobs.length === 0 && execJobsMayStillAppear(this.evaluationStatus()))), true),
     ).subscribe((jobs) => {
       if (!Array.isArray(jobs)) return;
       this.jobs.set(jobs);
@@ -114,15 +114,14 @@ export class ExecJobListComponent implements OnChanges {
   }
 
   detail(job: ExecJobSummary): string {
-    const reason = waitingReasonText(job.waiting_reason);
+    const label = EXEC_JOB_STATUS_LABEL[job.status];
     switch (job.status) {
-      case 'created': return reason ?? 'waiting for its builds';
-      case 'queued': return reason ?? 'queued';
-      case 'starting': return 'starting';
-      case 'running': return job.last_phase ? `running, phase ${job.last_phase}` : 'running';
-      case 'completed': return job.last_phase ? `completed, phase ${job.last_phase}` : 'completed';
-      case 'failed': return job.message ?? 'failed';
-      case 'aborted': return 'aborted';
+      case 'created':
+      case 'queued': return waitingReasonText(job.waiting_reason) ?? label;
+      case 'running':
+      case 'completed': return job.last_phase ? `${label}, phase ${job.last_phase}` : label;
+      case 'failed': return job.message ?? label;
+      default: return label;
     }
   }
 }

@@ -386,9 +386,10 @@ describe('EvaluationLogComponent', () => {
       expect(open(cmp, target({ has_artefacts: false })).get('Artefacts')!.disabled).toBe(true);
     });
 
-    it('disables the log download while the build is still queued', () => {
+    it('disables the log download while the build is still queued or never ran', () => {
       const { cmp } = setup();
       expect(open(cmp, target({ status: 'Queued' })).get('Download Log')!.disabled).toBe(true);
+      expect(open(cmp, target({ status: 'DependencyFailed' })).get('Download Log')!.disabled).toBe(true);
     });
 
     it('greys out the sbom until the build has outputs', () => {
@@ -738,7 +739,7 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
-    function setupScoped(query: Record<string, string>, buildEvaluation: Observable<string> = of('eval-1'), listed: BuildItem[] = []) {
+    function setupScoped(query: Record<string, string>, buildEvaluation: Observable<string> = of('eval-1'), listed: BuildItem[] = [], evaluationStatus = 'Completed') {
       const getBuild = vi.fn((id: string) => buildEvaluation.pipe(map((evaluation) => ({
         id, evaluation, status: 'Completed', derivation_path: `hash-${id}.drv`,
         architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, prioritized: false, ifd: false, created_at: '', updated_at: '',
@@ -756,7 +757,7 @@ describe('EvaluationLogComponent', () => {
             },
           } },
           { provide: EvaluationsService, useValue: {
-            getEvaluation: () => of({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null }),
+            getEvaluation: () => of({ id: 'eval-1', status: evaluationStatus, created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null }),
             getBuild,
             getBuilds,
             getEvaluationMessages: () => of([]),
@@ -769,6 +770,13 @@ describe('EvaluationLogComponent', () => {
       fixture.componentInstance.ngOnInit();
       return { cmp: fixture.componentInstance, fixture, getBuild, getBuilds, navigate };
     }
+
+    it('opens the evaluation messages of an aborted evaluation without a failed or running build', () => {
+      const aborted = { id: 'b1', status: 'Aborted', name: 'hello', derivation_path: 'hash-b1.drv', architecture: 'x86_64-linux', prioritized: false } as unknown as BuildItem;
+      const { cmp, fixture } = setupScoped({}, of('eval-1'), [aborted], 'Aborted');
+      expect(cmp.selectedSection()).toBe('messages');
+      fixture.destroy();
+    });
 
     it('selects the linked build without narrowing the list', () => {
       const { cmp, fixture, getBuilds } = setupScoped({ build: 'b1' });

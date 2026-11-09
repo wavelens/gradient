@@ -37,7 +37,7 @@
         </gr-card-grid>
       }
 
-      @if (!running() && s.compared_with; as before) {
+      @if (!running() && (newlyFailing() > 0 || s.fixed_total > 0) && s.compared_with; as before) {
         <p class="compared">
           {{ plural(newlyFailing(), 'new failure') }} and {{ plural(s.fixed_total, 'fix', 'fixes') }} since the
           <a [routerLink]="links.evaluationSummary(project, before.id)">previous evaluation</a>@if (before.commit !== ev.commit) { at <span class="mono" [title]="before.commit">{{ commitLabel(before.commit) }}</span>}

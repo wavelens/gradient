@@ -51,7 +51,7 @@
       </div>
 
       @if (ev.task_name; as task) {
-        <app-exec-job-list isCompact [evaluation]="ev.id" [evaluationRunning]="isRunning()" [project]="projectName" [task]="task" [canTrigger]="triggerAccess().canEdit"
+        <app-exec-job-list isCompact [evaluation]="ev.id" [evaluationStatus]="ev.status" [project]="projectName" [task]="task" [canTrigger]="triggerAccess().canEdit"
                            (openExecJobsWaitingWithReason)="execJobsWaitingWithReason.set($event)" />
       }
 

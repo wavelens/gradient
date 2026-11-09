@@ -228,7 +228,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       {
         label: 'Download Log',
         icon: 'download',
-        disabled: ['Created', 'Queued'].includes(build.status),
+        disabled: ['Created', 'Queued', 'DependencyFailed'].includes(build.status),
         command: () => void this.downloadLog(build),
       },
       {
@@ -541,6 +541,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             const firstFailed = this.builds().find(b => this.statusClass(b.status) === 'failed');
             const first = firstBuilding ?? firstFailed;
             if (first) this.selectBuild(first);
+            else if (evalStatus === 'Aborted' && result.total > 0) this.selectEvaluationSection();
             if (!firstBuilding) this.autoFollowBuilding = true;
           }
         } else if (!isEvaluating) {

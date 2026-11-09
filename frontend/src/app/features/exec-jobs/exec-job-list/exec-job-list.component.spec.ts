@@ -117,7 +117,7 @@ describe('ExecJobListComponent', () => {
       });
       const fixture = TestBed.createComponent(ExecJobListComponent);
       fixture.componentRef.setInput('evaluation', 'e1');
-      fixture.componentRef.setInput('evaluationRunning', true);
+      fixture.componentRef.setInput('evaluationStatus', 'EvaluatingDerivation');
       fixture.componentRef.setInput('project', 'acme');
       fixture.componentRef.setInput('task', 'demo');
       fixture.detectChanges();
@@ -126,6 +126,29 @@ describe('ExecJobListComponent', () => {
       fixture.detectChanges();
 
       expect((fixture.nativeElement as HTMLElement).textContent).toContain('apps.x86_64-linux.train');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops polling a building evaluation that has no exec jobs', () => {
+    vi.useFakeTimers();
+    try {
+      const forEvaluation = vi.fn(() => of([]));
+      TestBed.configureTestingModule({
+        imports: [ExecJobListComponent],
+        providers: [provideRouter([]), { provide: ExecJobsService, useValue: { forEvaluation } }],
+      });
+      const fixture = TestBed.createComponent(ExecJobListComponent);
+      fixture.componentRef.setInput('evaluation', 'e1');
+      fixture.componentRef.setInput('evaluationStatus', 'Building');
+      fixture.componentRef.setInput('project', 'acme');
+      fixture.componentRef.setInput('task', 'demo');
+      fixture.detectChanges();
+
+      vi.advanceTimersByTime(12000);
+
+      expect(forEvaluation).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }

@@ -23,13 +23,13 @@ function singularOrPluralLabelForCount(count: number, singular: string, pluralLa
 
 export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary, status: EvaluationStatus): SummaryCountTile[] {
   if (isEvaluationNotStartedStatus(status)) return [];
-  const { built } = summary.packages;
+  const { failed, blocked, built } = summary.packages;
   const unfinished = isRunningEvaluationStatus(status) ? 0 : summary.packages.unfinished;
   const tiles = [
+    { label: singularOrPluralLabelForCount(failed, 'Failed package', 'Failed packages'), value: failed },
+    { label: singularOrPluralLabelForCount(blocked, 'Blocked package', 'Blocked packages'), value: blocked },
     { label: singularOrPluralLabelForCount(built, 'Built package', 'Built packages'), value: built },
     { label: singularOrPluralLabelForCount(unfinished, 'Unbuilt package', 'Unbuilt packages'), value: unfinished },
-    { label: 'Failed to evaluate', value: summary.failed_attributes.length },
-    { label: 'Fixed', value: summary.compared_with ? summary.fixed_total : 0 },
   ];
   return tiles.filter((tile) => tile.value > 0);
 }
