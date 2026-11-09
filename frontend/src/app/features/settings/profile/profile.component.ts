@@ -4,14 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subject, of, switchMap } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
 import { ThemeService, ThemePreference } from '@core/services/theme.service';
-import { apiErrorMessage } from '@core/services/api.service';
+import { ApiError, apiErrorMessage } from '@core/services/api.service';
+import { apiErrorCodeToFormFieldName, checkUsernameAvailability } from '@core/services/account-form-api-checks';
 import { NotifyService } from '@core/services/notify.service';
 import { environment } from '@environments/environment';
 import {
@@ -29,10 +32,9 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { unsavedChanges } from '@shared/forms';
+import { injectRevealFirstInvalid, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { ConnectedLoginProvider, PatchUserSettingsRequest } from '@core/models';
-import { links } from '@shared/routing';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
 interface ProfileForm {
@@ -91,19 +93,15 @@ const CONNECT_ERRORS: Record<string, string> = {
   ],
   templateUrl: './profile.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: `
-    .save-hint {
-      align-self: center;
-    }
-  `,
 })
 export class ProfileComponent implements OnInit, CanComponentDeactivate {
-  protected readonly links = links;
   private userService = inject(UserService);
   private authService = inject(AuthService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private notify = inject(NotifyService);
+  private host = inject(ElementRef<HTMLElement>);
+  private revealFirstInvalid = injectRevealFirstInvalid();
   theme = inject(ThemeService);
 
   loading = signal(true);
@@ -129,6 +127,24 @@ export class ProfileComponent implements OnInit, CanComponentDeactivate {
   formData: ProfileForm = { username: '', name: '', email: '' };
   private saved: ProfileForm = { ...this.formData };
   readonly unsaved = unsavedChanges(() => this.formData, 'Profile settings');
+  readonly serverErrorMessagesByField = signal<Partial<Record<keyof ProfileForm, string>>>({});
+  private trimmedUsernameInputSubject = new Subject<string>();
+
+  constructor() {
+    this.trimmedUsernameInputSubject
+      .pipe(
+        switchMap((username) =>
+          FIELD_CHECKS.username(username) || username.toLowerCase() === this.saved.username.toLowerCase()
+            ? of(null)
+            : checkUsernameAvailability(this.authService, username),
+        ),
+        takeUntilDestroyed(),
+      )
+      .subscribe((errors) => {
+        const message: unknown = errors?.['usernameRefused'];
+        if (typeof message === 'string') this.serverErrorMessagesByField.update((messages) => ({ ...messages, username: message }));
+      });
+  }
 
   themeOptions: readonly { label: string; value: ThemePreference }[] = [
     { label: 'System', value: 'system' },
@@ -205,7 +221,13 @@ export class ProfileComponent implements OnInit, CanComponentDeactivate {
 
   fieldError(field: keyof ProfileForm): string | null {
     const value = this.formData[field].trim();
-    return value === this.saved[field] ? null : FIELD_CHECKS[field](value);
+    if (value === this.saved[field]) return null;
+    return FIELD_CHECKS[field](value) ?? this.serverErrorMessagesByField()[field] ?? null;
+  }
+
+  clearFieldServerErrorAndStartUsernameCheck(field: keyof ProfileForm): void {
+    this.serverErrorMessagesByField.update(({ [field]: _, ...rest }) => rest);
+    if (field === 'username') this.trimmedUsernameInputSubject.next(this.formData.username.trim());
   }
 
   canSave(): boolean {
@@ -242,6 +264,12 @@ export class ProfileComponent implements OnInit, CanComponentDeactivate {
       },
       error: (error: unknown) => {
         this.saving.set(false);
+        const field = error instanceof ApiError && error.code ? apiErrorCodeToFormFieldName[error.code] : undefined;
+        if (field && error instanceof ApiError) {
+          this.serverErrorMessagesByField.update((messages) => ({ ...messages, [field]: error.message }));
+          this.revealFirstInvalid(() => this.host.nativeElement);
+          return;
+        }
         this.notify.failure('Failed to save profile', error);
       },
     });

@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'Profile' }]" title="Profile" subtitle="Manage your personal information">
+<gr-page-layout width="settings" title="Profile" subtitle="Manage your personal information">
   <app-settings-nav slot="banner" />
   @if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading profile..."
@@ -30,15 +30,15 @@
     } @else {
       <gr-settings-section title="Personal Information">
         <gr-form-field label="Username" for="username" [invalid]="!!fieldError('username')" [error]="fieldError('username') ?? ''">
-          <input grInput id="username" [(ngModel)]="formData.username" (keyup.enter)="saveSettings()" />
+          <input grInput id="username" [(ngModel)]="formData.username" (ngModelChange)="clearFieldServerErrorAndStartUsernameCheck('username')" (keyup.enter)="saveSettings()" />
         </gr-form-field>
 
         <gr-form-field label="Full Name" for="name" [invalid]="!!fieldError('name')" [error]="fieldError('name') ?? ''">
-          <input grInput id="name" [(ngModel)]="formData.name" (keyup.enter)="saveSettings()" />
+          <input grInput id="name" [(ngModel)]="formData.name" (ngModelChange)="clearFieldServerErrorAndStartUsernameCheck('name')" (keyup.enter)="saveSettings()" />
         </gr-form-field>
 
         <gr-form-field label="Email" for="email" [invalid]="!!fieldError('email')" [error]="fieldError('email') ?? ''">
-          <input grInput id="email" type="email" [(ngModel)]="formData.email" (keyup.enter)="saveSettings()" />
+          <input grInput id="email" type="email" [(ngModel)]="formData.email" (ngModelChange)="clearFieldServerErrorAndStartUsernameCheck('email')" (keyup.enter)="saveSettings()" />
         </gr-form-field>
 
         <div class="gr-form-actions">
@@ -50,9 +50,6 @@
             [loading]="saving()"
             [disabled]="!unsaved.changed()"
           ></button>
-          @if (!unsaved.changed()) {
-            <small class="text-secondary save-hint">No changes to save.</small>
-          }
         </div>
       </gr-settings-section>
     }

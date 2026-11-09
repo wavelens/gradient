@@ -81,7 +81,14 @@ function setup(opts: SetupOptions): ComponentFixture<ProfileComponent> {
         provide: ActivatedRoute,
         useValue: { snapshot: { queryParamMap: convertToParamMap(opts.query ?? {}) } },
       },
-      { provide: AuthService, useValue: { reloadUser: () => undefined, isAuthenticated: () => false } },
+      {
+        provide: AuthService,
+        useValue: {
+          reloadUser: () => undefined,
+          isAuthenticated: () => false,
+          checkUsername: () => throwError(() => new ApiError('Username is already taken', 400)),
+        },
+      },
       { provide: ConfigService, useValue: { sshEnabled: false } },
     ],
   });
@@ -130,6 +137,22 @@ describe('ProfileComponent - edits', () => {
     expect(profileWrites).toEqual([]);
   });
 
+  it('shows a taken username under the field while typing, but never checks the saved one', async () => {
+    const fixture = setup({ managed: false, oidc: false });
+    const usernameField = () => (fixture.nativeElement as HTMLElement).querySelector('#username')!.closest('gr-form-field')!;
+    edit(fixture, { username: 'Alice' });
+    fixture.componentInstance.clearFieldServerErrorAndStartUsernameCheck('username');
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.serverErrorMessagesByField()).toEqual({});
+
+    edit(fixture, { username: 'bob' });
+    fixture.componentInstance.clearFieldServerErrorAndStartUsernameCheck('username');
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    fixture.detectChanges();
+    expect(usernameField().textContent).toContain('Username is already taken');
+  });
+
   it('saves on Enter in a field', () => {
     const fixture = setup({ managed: false, oidc: false });
     edit(fixture, { email: 'alice@example.org' });
@@ -165,7 +188,6 @@ describe('ProfileComponent - access gating', () => {
     const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
     expect(save).not.toBeNull();
     expect(save!.disabled).toBe(true);
-    expect(fixture.nativeElement.textContent).toContain('No changes to save.');
     edit(fixture, { name: 'Alice Liddell' });
     expect(save!.disabled).toBe(false);
   });
@@ -309,6 +331,22 @@ describe('ProfileComponent - connected accounts', () => {
     fixture.detectChanges();
     expect(disconnects).toEqual(['example']);
     expect(notify.success).toHaveBeenCalledWith('Account disconnected');
+  });
+
+  it('shows an email taken by another account under the field until it changes', () => {
+    const writeFailure = new ApiError('Email already exists', 409, 'email_address_already_in_use');
+    const fixture = setup({ managed: false, oidc: false, writeFailure });
+    edit(fixture, { email: 'bob@example.org' });
+    (findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const emailField = () => (fixture.nativeElement as HTMLElement).querySelector('#email')!.closest('gr-form-field')!;
+    expect(emailField().textContent).toContain('Email already exists');
+    expect(notify.failure).not.toHaveBeenCalled();
+
+    edit(fixture, { email: 'carol@example.org' });
+    fixture.componentInstance.clearFieldServerErrorAndStartUsernameCheck('email');
+    fixture.detectChanges();
+    expect(emailField().textContent).not.toContain('Email already exists');
   });
 
   it('reports a failed save as a toast with the server reason', () => {
