@@ -36,18 +36,25 @@
             @if (t.latest; as l) {
               <gr-status-icon slot="icon" size="sm" [phase]="phase(l.status)" [label]="waitingReason ?? l.status" />
             }
-            <span class="name" [title]="label"><span class="project">{{ t.project_display_name }}</span><span class="project">&nbsp;/&nbsp;</span><span class="task">{{ t.task_display_name }}</span></span>
+            <span class="name" [title]="label"><span class="project">{{ t.project_display_name }}</span><span class="separator">&nbsp;/&nbsp;</span><span class="task">{{ t.task_display_name }}</span></span>
             <span slot="meta" class="meta">
               @if (t.latest; as l) {
-                <code>{{ l.commit.slice(0, 7) }}</code><span class="latest-evaluation-relative-time">&nbsp;· {{ l.created_at | relativeTime }}</span>
+                @if (waitingReason) {
+                  <span class="waiting" [title]="waitingReason">{{ waitingReason }}</span>
+                } @else {
+                  <code>{{ l.commit.slice(0, 7) }}</code>
+                }
+                <span class="latest-evaluation-relative-time">&nbsp;· {{ l.created_at | relativeTime }}</span>
               } @else {
                 No evaluations yet
               }
             </span>
             <div slot="actions" class="cells">
               <app-evaluation-history [bars]="t.history" [project]="t.project" [task]="t.task" />
-              @if (waitingReason) {
-                <span class="waiting" [title]="waitingReason">{{ waitingReason }}</span>
+              @let newestEvaluationFailedBeforeEntryPoints = t.latest?.status === 'Failed' && !t.entry_points?.total;
+              @if (newestEvaluationFailedBeforeEntryPoints) {
+                <span class="value"><b>Eval error</b></span>
+                <span class="value"></span>
               } @else {
                 <span class="value">
                   <b>{{ t.entry_points?.total ? t.entry_points!.ok + '/' + t.entry_points!.total : '-' }}</b>

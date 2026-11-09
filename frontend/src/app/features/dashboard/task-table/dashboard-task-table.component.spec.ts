@@ -73,14 +73,23 @@ describe('DashboardTaskTableComponent', () => {
     waiting.latest = { ...waiting.latest!, status: 'Waiting', waiting_reason: { kind: 'no_cache' } };
     const { f, root } = render(null, () => of({ ...PAGE, tasks: [waiting] }));
     await settle(f);
-    expect(root.querySelector('.waiting')?.textContent).toContain('Cache not configured');
-    expect(root.querySelector('.meta')?.textContent).not.toContain('Cache not configured');
-    expect(root.querySelectorAll('gr-row .value').length).toBe(0);
+    expect(root.querySelector('.meta .waiting')?.textContent).toContain('Cache not configured');
+    expect(root.querySelector('.meta code')).toBeNull();
+    expect(root.querySelector('.cells')?.textContent).not.toContain('Cache not configured');
   });
 
-  it('shows "-" for entry points when the evaluation failed before it produced entry points', async () => {
+  it('names an evaluation error in place of the passed count and average time', async () => {
     const evaluationError = { ...row('hosts'), entry_points: { ok: 0, failing: 0, total: 0 }, delta: 0 };
     const { f, root } = render(null, () => of({ ...PAGE, tasks: [evaluationError] }));
+    await settle(f);
+    const values = Array.from(root.querySelectorAll('gr-row .value')).map((c) => c.textContent?.trim());
+    expect(values).toEqual(['Eval error', '']);
+  });
+
+  it('shows "-" for entry points of an aborted evaluation without entry points', async () => {
+    const aborted = { ...row('hosts'), entry_points: { ok: 0, failing: 0, total: 0 } };
+    aborted.latest = { ...aborted.latest!, status: 'Aborted' };
+    const { f, root } = render(null, () => of({ ...PAGE, tasks: [aborted] }));
     await settle(f);
     expect(root.querySelector('gr-row .value b')?.textContent?.trim()).toBe('-');
   });
