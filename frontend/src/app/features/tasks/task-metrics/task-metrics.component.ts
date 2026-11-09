@@ -79,7 +79,7 @@ export class TaskMetricsComponent implements OnInit {
   ]);
   closureSizeSeries = computed(() => [
     { name: 'Build closure', data: this.metrics().map((p) => p.closure_size_bytes ?? null) },
-    { name: 'Runtime closure', data: this.metrics().map((p) => p.runtime_closure_size_bytes ?? null) },
+    { name: 'Runtime closure', data: this.metrics().map((p) => p.runtime_closure_size_bytes ?? null), isLineDashed: true },
   ]);
   depsSeries = computed(() => [
     { name: 'Dependencies', data: this.metrics().map((p) => p.dependencies_count) },

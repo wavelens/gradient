@@ -17,6 +17,7 @@ export type MetricSeries = {
   data: (number | null)[] | MetricPointXY[];
   axis?: MetricAxis;
   type?: MetricSeriesType;
+  isLineDashed?: boolean;
 };
 
 export interface MetricChartConfig {
@@ -166,7 +167,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
         type: kind,
         data,
         ...(secondary ? { yAxisIndex: axisOf(s) } : {}),
-        ...(kind === 'bar' ? { barMaxWidth: 28 } : { showSymbol, lineStyle: { width: 2 } }),
+        ...(kind === 'bar' ? { barMaxWidth: 28 } : { showSymbol, lineStyle: { width: 2, ...(s.isLineDashed ? { type: 'dashed' as const } : {}) } }),
         ...(cfg.type === 'area' && kind === 'line' ? { areaStyle: { opacity: 0.25 } } : {}),
       };
     }),

@@ -85,6 +85,13 @@ describe('buildMetricChartOption cartesian types', () => {
     expect((vertical.xAxis as any).inverse).toBeFalsy();
   });
 
+  it('dashes only the series that ask for it, so an equal series stays visible', () => {
+    const opt = buildMetricChartOption({ type: 'area', series: [two[0], { ...two[1], isLineDashed: true }], categories: cats }, THEME);
+    const [solid, dashed] = opt.series as any[];
+    expect(solid.lineStyle.type).toBeUndefined();
+    expect(dashed.lineStyle).toEqual({ width: 2, type: 'dashed' });
+  });
+
   it('keeps null gaps in the data instead of coercing them to zero', () => {
     const opt = buildMetricChartOption({ type: 'line', series: [{ name: 'a', data: [1, null, 3] }], categories: cats }, THEME);
     expect((opt.series as any[])[0].data).toEqual([1, null, 3]);

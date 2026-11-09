@@ -95,7 +95,7 @@ export class EntryPointMetricsComponent implements OnInit {
   ]);
   closureSizeSeries = computed(() => [
     { name: 'Build closure', data: this.points().map((p) => p.closure_size_bytes ?? null) },
-    { name: 'Runtime closure', data: this.points().map((p) => p.runtime_closure_size_bytes ?? null) },
+    { name: 'Runtime closure', data: this.points().map((p) => p.runtime_closure_size_bytes ?? null), isLineDashed: true },
   ]);
   depsSeries = computed(() => [
     { name: 'Dependencies', data: this.points().map((p) => p.dependencies_count) },
