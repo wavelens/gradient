@@ -12,9 +12,9 @@ import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { links } from '@shared/routing';
-import type { InviteItem, TeamRole } from '@core/models';
+import type { InviteItem } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
-import { teamRoleDisplayLabels } from '@shared/access';
+import { teamRoleValueToDisplayLabel } from '@shared/access';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -102,7 +102,7 @@ export class InvitesComponent implements OnInit {
   }
 
   getInviteRoleDisplayText(invite: InviteItem): string {
-    return invite.kind === 'team' ? (teamRoleDisplayLabels[invite.role as TeamRole] ?? invite.role) : invite.role;
+    return invite.kind === 'team' ? teamRoleValueToDisplayLabel(invite.role) : invite.role;
   }
 
   joinedLink(invite: InviteItem): UrlTree {

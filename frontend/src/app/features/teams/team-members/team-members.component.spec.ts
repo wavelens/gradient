@@ -107,7 +107,7 @@ describe('TeamMembersComponent', () => {
     const invitation = { user: 'carol', name: 'Carol Doe', role: 'member', expires_at: '2026-09-12T12:00:00' } as PendingInvitationItem;
     const row = (setup(undefined, false, undefined, [invitation]).fixture.nativeElement as HTMLElement).querySelector('gr-row[icon="mail"]')!;
     expect(row.querySelector('.mono')?.textContent).toBe('carol');
-    expect(row.querySelector('[slot="meta"]')?.textContent).toContain('Carol Doe · Role member');
+    expect(row.querySelector('[slot="meta"]')?.textContent).toContain('Carol Doe · Role Member');
   });
 
   it('suggests users to invite by display name and fills in the username', () => {

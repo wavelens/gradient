@@ -8,6 +8,10 @@ import type { UserInfoResponse, TeamResponse, TeamRole, TeamSummary } from '@cor
 
 export const teamRoleDisplayLabels: Record<TeamRole, string> = { member: 'Member', admin: 'Admin' };
 
+export function teamRoleValueToDisplayLabel(role: string): string {
+  return teamRoleDisplayLabels[role as TeamRole] ?? role;
+}
+
 export function canOpenTeam(user: UserInfoResponse | null | undefined, memberOf: readonly TeamSummary[], team: string): boolean {
   return user?.superuser === true || memberOf.some((mine) => mine.name === team);
 }

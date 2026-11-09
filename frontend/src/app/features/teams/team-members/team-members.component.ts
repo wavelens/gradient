@@ -20,6 +20,7 @@ import {
   injectSaveMemberRoleChangeWithOwnRoleConfirmation,
   teamRoleDisplayLabels,
   formatMemberNameForAutocompleteSuggestion,
+  teamRoleValueToDisplayLabel,
 } from '@shared/access';
 import { EMPTY, finalize, merge, tap } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -75,6 +76,7 @@ export class TeamMembersComponent implements OnInit {
   private saveMemberRoleChange = injectSaveMemberRoleChangeWithOwnRoleConfirmation();
 
   protected readonly teamRoleDisplayLabels = teamRoleDisplayLabels;
+  protected readonly teamRoleValueToDisplayLabel = teamRoleValueToDisplayLabel;
   readonly roles = (Object.keys(teamRoleDisplayLabels) as TeamRole[]).map((value) => ({ label: teamRoleDisplayLabels[value], value }));
 
   team = input.required<TeamResponse>();

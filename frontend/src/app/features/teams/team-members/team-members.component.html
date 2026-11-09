@@ -54,7 +54,7 @@
       @for (invitation of invitations(); track invitation.user) {
         <gr-row icon="mail">
           <span class="mono">{{ invitation.user }}</span>
-          <span slot="meta">@if (invitation.name !== invitation.user) { {{ invitation.name }} · }Role {{ invitation.role }} · Expires {{ invitation.expires_at | serverDate }}</span>
+          <span slot="meta">@if (invitation.name !== invitation.user) { {{ invitation.name }} · }Role {{ teamRoleValueToDisplayLabel(invitation.role) }} · Expires {{ invitation.expires_at | serverDate }}</span>
           <div slot="actions">
             <button grButton label="Revoke" icon="close" severity="danger"
               (click)="revokeInvitation(invitation.user)"></button>
