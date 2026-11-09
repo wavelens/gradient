@@ -31,7 +31,9 @@ crate::sql! {
         tier = Hot;
 
     SEARCH_NAMES = concat!("SELECT kind, project, project_display_name, name, display_name, starred FROM ( \
-        SELECT hits.*, row_number() OVER (PARTITION BY kind ORDER BY starred DESC, name) AS rank FROM ( \
+        SELECT matched.*, row_number() OVER (PARTITION BY kind ORDER BY starred DESC, match_rank, name COLLATE \"C\") AS rank FROM ( \
+        SELECT hits.*, CASE WHEN lower(name) = $5 OR lower(display_name) = $5 THEN 0 \
+            WHEN starts_with(lower(name), $5) OR starts_with(lower(display_name), $5) THEN 1 ELSE 2 END AS match_rank FROM ( \
             SELECT 'project' AS kind, NULL::text AS project, NULL::text AS project_display_name, p.name, p.display_name, \
                 EXISTS (SELECT 1 FROM user_project_star s WHERE s.\"user\" = $1 AND s.project = p.id) AS starred \
                 FROM project p WHERE (p.name ILIKE $2 OR p.display_name ILIKE $2) AND ", project_readable!("$4"), " \
@@ -43,8 +45,8 @@ crate::sql! {
             UNION ALL SELECT 'cache', NULL, NULL, c.name, c.display_name, \
                 EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id) \
                 FROM cache c WHERE (c.name ILIKE $2 OR c.display_name ILIKE $2) AND ", cache_readable!("$4"), " \
-        ) hits) ranked WHERE rank <= $3 ORDER BY starred DESC, kind, name"),
-        params = [UserId, Text("%a%"), Int(5), Bool(true)],
+        ) hits) matched) ranked WHERE rank <= $3 ORDER BY starred DESC, kind, match_rank, name COLLATE \"C\""),
+        params = [UserId, Text("%a%"), Int(5), Bool(true), Text("a")],
         tier = Bulk;
 }
 
@@ -204,6 +206,7 @@ pub async fn search_names<C: ConnectionTrait>(
         ilike_contains(text).into(),
         Value::BigInt(Some(per_kind as i64)),
         viewer.listing_value(),
+        text.to_lowercase().into(),
     ]);
     db.query_all_raw(stmt)
         .await?
@@ -229,5 +232,41 @@ mod tests {
             sql.contains("ORDER BY c.hash, t.id, e.created_at DESC"),
             "{sql}"
         );
+    }
+
+    #[tokio::test]
+    async fn name_search_lists_exact_then_prefix_then_other_matches() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        let user = crate::rows::insert::<EUser, _>(&conn, gradient_fixtures::rows::user())
+            .await
+            .expect("the user is written");
+        for name in ["my-tools", "tools-extra", "atools", "Tools"] {
+            crate::rows::insert::<EProject, _>(
+                &conn,
+                MProject {
+                    public: true,
+                    ..gradient_fixtures::rows::project_with_id(ProjectId::now_v7(), name)
+                },
+            )
+            .await
+            .expect("the project is written");
+        }
+
+        let hits = search_names(
+            &conn,
+            "tools",
+            5,
+            Viewer {
+                user: user.id,
+                public_listing: true,
+            },
+        )
+        .await
+        .expect("the search runs");
+
+        let names: Vec<&str> = hits.iter().map(|hit| hit.name.as_str()).collect();
+        assert_eq!(names, ["Tools", "tools-extra", "atools", "my-tools"]);
+        db.finish().await;
     }
 }
