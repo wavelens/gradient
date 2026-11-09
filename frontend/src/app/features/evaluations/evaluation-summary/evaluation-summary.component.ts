@@ -93,6 +93,7 @@ export class EvaluationSummaryComponent implements OnInit {
   evaluationId = '';
   evaluation = signal<EvaluationResponse | null>(null);
   summary = signal<EvaluationFailureSummary | null>(null);
+  totalBuildCount = signal<number | null>(null);
   loading = signal(true);
   loadError = signal<unknown>(null);
   private taskWithUserPermissionsSignal = signal<TaskDetailsResponse | null>(null);
@@ -198,11 +199,13 @@ export class EvaluationSummaryComponent implements OnInit {
     return forkJoin({
       evaluation: resolvedEvaluation ? of(resolvedEvaluation) : this.evaluations.getEvaluation(this.evaluationId),
       summary: this.evaluations.getEvaluationSummary(this.evaluationId),
+      builds: this.evaluations.getBuilds(this.evaluationId, 1).pipe(catchError(() => of(null))),
     }).pipe(
-      tap(({ evaluation, summary }) => {
+      tap(({ evaluation, summary, builds }) => {
         this.rememberTaskName(evaluation);
         this.evaluation.set(evaluation);
         this.summary.set(summary);
+        this.totalBuildCount.set(builds?.total ?? null);
         if (!this.running()) this.stopFollowing();
       }),
     );

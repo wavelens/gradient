@@ -72,6 +72,7 @@ function setup(summary: EvaluationFailureSummary | null, evaluation = EVALUATION
         useValue: {
           getEvaluation: () => of(evaluation),
           getEvaluationSummary: () => (summary ? of(summary) : throwError(() => new Error('not found'))),
+          getBuilds: () => of({ builds: [], total: 57, active_count: 0 }),
         },
       },
     ],
@@ -99,6 +100,20 @@ describe('EvaluationSummaryComponent', () => {
     expect(sections(fixture)).toEqual(['Newly failing 1', 'Still failing 1', 'Failed to evaluate 1', 'Fixed 1']);
     expect(text(fixture)).toContain('2 new failures and 1 fix since the previous evaluation at aaaaaaaa');
     expect((fixture.nativeElement as HTMLElement).querySelector('.compared a')?.getAttribute('href')).toBe('/project/testproject/summary/e1');
+  });
+
+  it('counts packages as entry points and links the count of builds to the log', () => {
+    const facts = (setup(SUMMARY).nativeElement as HTMLElement).querySelector('.facts');
+    expect(facts?.textContent?.replace(/\s+/g, ' ')).toContain('20 packages (entry points) · 57 builds');
+    const link = Array.from(facts?.querySelectorAll('a') ?? []).find((a) => a.textContent?.includes('57 builds'));
+    expect(link?.getAttribute('href')).toBe('/project/testproject/log/e2');
+  });
+
+  it('keeps the live state next to the status badge', () => {
+    const fixture = setup(SUMMARY, { ...EVALUATION, status: 'Building', finished_at: null });
+    fixture.componentInstance.liveConnectionOpen.set(true);
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.facts .status gr-eval-status-badge + gr-live-status')).not.toBeNull();
   });
 
   it('names no commit in the comparison when the previous evaluation built the same one', () => {

@@ -8,7 +8,17 @@
   @if (summary(); as s) {
     <gr-page-layout [breadcrumb]="breadcrumb()" [title]="headline()">
       <div slot="meta" class="facts">
-        <gr-eval-status-badge [status]="ev.status" />
+        <span class="status">
+          <gr-eval-status-badge [status]="ev.status" />
+          @if (liveConnectionOpen() !== null) { <gr-live-status [connected]="!!liveConnectionOpen()" /> }
+        </span>
+        @if (s.packages.total) {
+          <span>
+            {{ plural(s.packages.total, 'package') }} (entry points)@if (totalBuildCount(); as builds) {
+              · <a [routerLink]="links.evaluationLog(project, ev.id)">{{ plural(builds, 'build') }}</a>
+            }
+          </span>
+        }
         @if (repositoryWebUrl(ev.repository); as repositoryUrl) {
           <a [href]="repositoryUrl" target="_blank" rel="noopener noreferrer">{{ ev.repository }}</a>
         } @else {
@@ -21,7 +31,6 @@
         }
         <span>{{ ev.created_at | serverDate }}</span>
         @if (ev.started_at) { <span>{{ duration() }}</span> }
-        @if (liveConnectionOpen() !== null) { <gr-live-status [connected]="!!liveConnectionOpen()" /> }
       </div>
       <a slot="actions" grButton label="Full log" icon="article" severity="secondary"
          [routerLink]="links.evaluationLog(project, ev.id)"></a>
@@ -32,7 +41,7 @@
       @if (countTiles().length) {
         <gr-card-grid min="150px">
           @for (tile of countTiles(); track tile.label) {
-            <gr-stat-card [label]="tile.label" [value]="tile.value" />
+            <gr-stat-card [class.zero]="tile.isValueZero" [label]="tile.label" [value]="tile.value" />
           }
         </gr-card-grid>
       }

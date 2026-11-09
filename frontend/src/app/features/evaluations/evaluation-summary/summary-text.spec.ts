@@ -55,9 +55,14 @@ describe('evaluation summary text', () => {
     const tiles = (s: EvaluationFailureSummary, status: EvaluationStatus = 'Completed') =>
       getEvaluationSummaryCountTiles(s, status).map((t) => `${t.label} ${t.value}`);
     expect(tiles(summary({ built: 1, failed: 1, blocked: 1, unfinished: 1 }, 2))).toEqual(['Failed package 1', 'Blocked package 1', 'Built package 1', 'Unbuilt package 1']);
-    expect(tiles(summary({ built: 5, unfinished: 15 }))).toEqual(['Built packages 5', 'Unbuilt packages 15']);
-    expect(tiles(summary({ built: 5, unfinished: 15 }), 'Building')).toEqual(['Built packages 5']);
+    expect(tiles(summary({ built: 5, unfinished: 15 }))).toEqual(['Failed packages 0', 'Blocked packages 0', 'Built packages 5', 'Unbuilt packages 15']);
+    expect(tiles(summary({ built: 5, unfinished: 15 }), 'Building')).toEqual(['Failed packages 0', 'Blocked packages 0', 'Built packages 5', 'Remaining packages 15']);
     expect(tiles(summary({ built: 5 }), 'Waiting')).toEqual([]);
+  });
+
+  it('keeps zero tiles in place and marks them for dimming', () => {
+    const zero = getEvaluationSummaryCountTiles(summary({ built: 20 }), 'Completed').map((t) => t.isValueZero);
+    expect(zero).toEqual([true, true, false, true]);
   });
 
   it('reports a clean evaluation', () => {

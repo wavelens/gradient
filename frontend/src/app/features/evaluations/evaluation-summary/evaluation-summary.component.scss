@@ -15,6 +15,16 @@
   font-size: $font-size-sm;
 }
 
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+}
+
+gr-stat-card.zero {
+  opacity: 0.55;
+}
+
 .facts a,
 .compared a {
   padding: 0;

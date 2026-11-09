@@ -15,23 +15,24 @@ const BLOCKED_NAMED = 5;
 export interface SummaryCountTile {
   label: string;
   value: number;
+  isValueZero: boolean;
 }
 
-function singularOrPluralLabelForCount(count: number, singular: string, pluralLabel: string): string {
-  return count === 1 ? singular : pluralLabel;
+function countTile(value: number, singular: string, pluralLabel: string): SummaryCountTile {
+  return { label: value === 1 ? singular : pluralLabel, value, isValueZero: value === 0 };
 }
 
 export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary, status: EvaluationStatus): SummaryCountTile[] {
   if (isEvaluationNotStartedStatus(status)) return [];
-  const { failed, blocked, built } = summary.packages;
-  const unfinished = isRunningEvaluationStatus(status) ? 0 : summary.packages.unfinished;
-  const tiles = [
-    { label: singularOrPluralLabelForCount(failed, 'Failed package', 'Failed packages'), value: failed },
-    { label: singularOrPluralLabelForCount(blocked, 'Blocked package', 'Blocked packages'), value: blocked },
-    { label: singularOrPluralLabelForCount(built, 'Built package', 'Built packages'), value: built },
-    { label: singularOrPluralLabelForCount(unfinished, 'Unbuilt package', 'Unbuilt packages'), value: unfinished },
+  const { failed, blocked, built, unfinished } = summary.packages;
+  return [
+    countTile(failed, 'Failed package', 'Failed packages'),
+    countTile(blocked, 'Blocked package', 'Blocked packages'),
+    countTile(built, 'Built package', 'Built packages'),
+    isRunningEvaluationStatus(status)
+      ? countTile(unfinished, 'Remaining package', 'Remaining packages')
+      : countTile(unfinished, 'Unbuilt package', 'Unbuilt packages'),
   ];
-  return tiles.filter((tile) => tile.value > 0);
 }
 
 export function headline(summary: EvaluationFailureSummary, status: EvaluationStatus): string {
