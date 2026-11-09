@@ -230,6 +230,12 @@ describe('TeamMembersComponent', () => {
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('User not found');
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('User not found');
+
+    const input = document.querySelector('#invite-member-user') as HTMLInputElement;
+    input.value = 'alice';
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog')?.textContent).not.toContain('User not found');
   });
 
   it('keeps the add dialog open and sends one request while the addition runs', () => {

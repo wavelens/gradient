@@ -48,6 +48,7 @@ import {
   formatMemberNameForAutocompleteSuggestion,
 } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
+import { PENDING_INVITATION_REVOKE_FAILURE, getPendingInvitationRevocationConsequenceSentence } from '@shared/access/pending-invitation-revoke-dialog-texts';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, finalize, merge, tap } from 'rxjs';
 import { injectCacheAccessData } from '@core/resolvers/inject-access';
@@ -210,9 +211,9 @@ export class CacheMembersRolesComponent implements OnInit {
       .confirm({
         title: 'Revoke invitation',
         target: formatMemberNameForConfirmDialog(this.invitations().find((invitation) => invitation.user === username)?.name, username),
-        consequence: `The invitation to ${username} can no longer grant access. Another invitation can follow later.`,
+        consequence: getPendingInvitationRevocationConsequenceSentence(username),
         confirmLabel: 'Revoke',
-        failure: 'Failed to revoke the invitation.',
+        failure: PENDING_INVITATION_REVOKE_FAILURE,
         action: () => this.cachesService.revokeInvitation(this.cacheName, username),
       })
       .subscribe(() => {

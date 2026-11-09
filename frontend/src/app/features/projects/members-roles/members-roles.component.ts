@@ -46,6 +46,7 @@ import {
   formatMemberNameForAutocompleteSuggestion,
 } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
+import { PENDING_INVITATION_REVOKE_FAILURE, getPendingInvitationRevocationConsequenceSentence } from '@shared/access/pending-invitation-revoke-dialog-texts';
 import {
   accessTo,
   MemberItem,
@@ -186,9 +187,9 @@ export class MembersRolesComponent implements OnInit {
       .confirm({
         title: 'Revoke invitation',
         target: formatMemberNameForConfirmDialog(this.invitations().find((invitation) => invitation.user === username)?.name, username),
-        consequence: `The invitation to ${username} no longer works. You can invite them again later.`,
+        consequence: getPendingInvitationRevocationConsequenceSentence(username),
         confirmLabel: 'Revoke',
-        failure: 'Failed to revoke the invitation.',
+        failure: PENDING_INVITATION_REVOKE_FAILURE,
         action: () => this.projectsService.revokeInvitation(this.projectName, username),
       })
       .subscribe(() => {

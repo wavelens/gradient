@@ -67,7 +67,7 @@
 
 <gr-dialog header="Invite Member" [(visible)]="showAdd" width="420px" [error]="addError()" [busy]="busy() === 'add'">
   <gr-form-field label="Username" for="invite-member-user" [invalid]="!!userError()" [error]="userError() ?? ''">
-    <gr-autocomplete inputId="invite-member-user" [(ngModel)]="newMember.user" [suggestions]="suggestions()" (completeMethod)="search($event)"
+    <gr-autocomplete inputId="invite-member-user" [(ngModel)]="newMember.user" (ngModelChange)="addError.set(null)" [suggestions]="suggestions()" (completeMethod)="search($event)"
       [forceSelection]="false" (enter)="addMember()" />
   </gr-form-field>
   <gr-form-field label="Role" for="invite-member-role">

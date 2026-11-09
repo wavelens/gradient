@@ -11,7 +11,7 @@
     <a slot="actions" grButton label="Sign in" icon="login" [routerLink]="links.login(links.projects().toString())"></a>
   }
   @if (authService.isAuthenticated()) {
-    <app-pending-invitations-banner />
+    <app-pending-invitations-banner kind="project" />
     <gr-load-state
       [loading]="projects.loading()"
       [error]="projects.error()"

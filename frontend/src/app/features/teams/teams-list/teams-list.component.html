@@ -8,7 +8,7 @@
   @if (canCreateTeam() && items().length) {
     <button slot="actions" grButton label="Create Team" icon="add" (click)="openCreate()"></button>
   }
-  <app-pending-invitations-banner />
+  <app-pending-invitations-banner kind="team" />
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

@@ -16,13 +16,13 @@
         <gr-form-field hint="Applies to projects created from now on.">
           <gr-checkbox inputId="new-project-users" [(ngModel)]="form.new_project_users" [binary]="true"
             (ngModelChange)="setDefaultNewProjectRoleIfNoneChosen($event)"
-            label="New projects grant the team's users" [appManagedDisable]="access()" />
+            label="Give the team's users a role on new projects that team members create." [appManagedDisable]="access()" />
         </gr-form-field>
         <gr-form-field label="Role of the team's users in new projects" for="new-project-role">
           <gr-select inputId="new-project-role" [(ngModel)]="form.new_project_role" [options]="roleOptions" optionLabel="label"
             optionValue="value" [appManagedDisable]="access()" [disabled]="!form.new_project_users" />
         </gr-form-field>
-        <gr-form-field hint="Applies to projects created from now on.">
+        <gr-form-field hint="All projects created from now on get this setting. Projects that people outside the team create also get this setting.">
           <gr-checkbox inputId="new-project-workers" [(ngModel)]="form.new_project_workers" [binary]="true"
             label="New projects grant the team's workers" [appManagedDisable]="access()" />
         </gr-form-field>

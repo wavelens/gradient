@@ -9,7 +9,7 @@
     <app-create-cache-button slot="actions" (create)="openCreateDialog()" />
   }
   @if (authService.isAuthenticated()) {
-    <app-pending-invitations-banner />
+    <app-pending-invitations-banner kind="cache" />
     <gr-load-state
       [loading]="caches.loading()"
       [error]="caches.error()"

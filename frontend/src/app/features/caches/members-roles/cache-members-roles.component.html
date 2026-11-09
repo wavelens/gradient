@@ -189,6 +189,7 @@
       <gr-autocomplete
         inputId="member-name"
         [(ngModel)]="newMember.user"
+        (ngModelChange)="memberError.set(null)"
         [suggestions]="userSuggestions()"
         (completeMethod)="onUserSearch($event)"
         placeholder="Enter username"

@@ -13,6 +13,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfirmService } from '@shared/confirm';
+import { PENDING_INVITATION_REVOKE_FAILURE, getPendingInvitationRevocationConsequenceSentence } from '@shared/access/pending-invitation-revoke-dialog-texts';
 import {
   canManageTeam,
   formatMemberNameForConfirmDialog,
@@ -241,9 +242,9 @@ export class TeamMembersComponent implements OnInit {
       .confirm({
         title: 'Revoke invitation',
         target: formatMemberNameForConfirmDialog(this.invitations().find((invitation) => invitation.user === user)?.name, user),
-        consequence: `The invitation to ${user} becomes invalid. You can invite them again later.`,
+        consequence: getPendingInvitationRevocationConsequenceSentence(user),
         confirmLabel: 'Revoke',
-        failure: 'Failed to revoke the invitation.',
+        failure: PENDING_INVITATION_REVOKE_FAILURE,
         action: () => this.teams.revokeInvitation(this.teamName, user),
       })
       .subscribe(() => {

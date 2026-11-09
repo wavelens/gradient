@@ -28,7 +28,7 @@ function render(
     imports: [ProjectListComponent],
     providers: [
       provideRouter([]),
-      { provide: PendingInvitesService, useValue: { count: signal(invitationCount) } },
+      { provide: PendingInvitesService, useValue: { count: signal(invitationCount), all: signal([...Array(invitationCount).fill({ kind: 'project' }), { kind: 'cache' }]) } },
       { provide: AuthService, useValue: { isAuthenticated: () => signedIn, user: () => (signedIn ? { superuser: false } : null) } },
       { provide: ConfigService, useValue: { publicListing: true, createProject: 'everyone', canCreate: () => true } },
       {
@@ -125,7 +125,7 @@ describe('ProjectListComponent', () => {
 
   it('points a signed-in user with invitations to them above the list', () => {
     const { root } = render(() => of(EMPTY_PAGE), undefined, true, 2);
-    expect(root.querySelector('app-pending-invitations-banner')?.textContent).toContain('2 pending invitations');
+    expect(root.querySelector('app-pending-invitations-banner')?.textContent).toContain('2 pending project invitations');
   });
 
   it('tells anonymous visitors when nothing is public', () => {
