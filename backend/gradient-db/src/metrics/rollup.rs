@@ -96,8 +96,8 @@ fn eval_counts() -> Vec<EvalCount> {
         EvalCount {
             name: metric::EVALS_FAILED,
             filter: format!(
-                "e.status IN ({})",
-                crate::sql::status::eval_in(&[EvaluationStatus::Failed, EvaluationStatus::Aborted])
+                "e.status = {}",
+                crate::sql::status::eval(EvaluationStatus::Failed)
             ),
         },
     ]
@@ -320,7 +320,7 @@ fn build_count_sql(m: &BuildCount) -> String {
          SELECT uuidv7(), '{name}', 0, date_trunc('minute', b.{col}), \
                 jsonb_build_object('project', pr.project::text), \
                 hashtextextended(pr.project::text, 0), \
-                count(*)::bigint, 0, 0, 0, 0, NULL \
+                count(DISTINCT b.id)::bigint, 0, 0, 0, 0, NULL \
          FROM build_job bj \
          JOIN derivation_build b ON b.id = bj.derivation_build \
          JOIN evaluation ev ON ev.id = bj.evaluation \
@@ -493,7 +493,7 @@ fn cascade_sql(target: RollupGranularity, source: RollupGranularity, window: &st
                 sum(count)::bigint, sum(sum), min(min), max(max), sum(sum_sq), NULL \
          FROM metric_rollup \
          WHERE granularity = {source} \
-           AND bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+           AND bucket_start >= date_trunc('{unit}', (now() AT TIME ZONE 'UTC') - interval '{window}') \
          GROUP BY metric, scope_hash, date_trunc('{unit}', bucket_start) \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
          DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
@@ -589,6 +589,28 @@ mod tests {
     fn cascade_carries_the_newest_scope() {
         let sql = cascade_sql(RollupGranularity::Day, RollupGranularity::Hour, "2 days");
         assert!(sql.contains("(array_agg(scope ORDER BY bucket_start DESC))[1]"));
+    }
+
+    #[test]
+    fn rollup_rebuilds_whole_target_buckets_from_truncated_bucket_start() {
+        let sql = cascade_sql(
+            RollupGranularity::Hour,
+            RollupGranularity::Minute,
+            "3 hours",
+        );
+        assert!(
+            sql.contains(
+                "bucket_start >= date_trunc('hour', (now() AT TIME ZONE 'UTC') - interval '3 hours')"
+            ),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn test_build_count_counts_each_shared_build_once_for_multiple_evaluations() {
+        for sql in build_counts().iter().map(build_count_sql) {
+            assert!(sql.contains("count(DISTINCT b.id)::bigint"), "{sql}");
+        }
     }
 
     #[test]
