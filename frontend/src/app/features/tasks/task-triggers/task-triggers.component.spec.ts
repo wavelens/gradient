@@ -181,10 +181,9 @@ describe('TaskTriggersComponent - access gating', () => {
 });
 
 describe('TaskTriggersComponent - default trigger', () => {
-  it('disables Delete and hides Make Default on the default trigger', () => {
+  it('hides Delete and Make Default on the default trigger', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [{ ...trigger, is_default: true }]);
-    const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
-    expect(deleteBtn!.disabled).toBe(true);
+    expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
     expect(findByText(fixture.nativeElement, 'make default')).toBeNull();
   });
 

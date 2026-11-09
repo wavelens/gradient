@@ -97,17 +97,18 @@
                 [disabled]="rowDisabled()"
                 (click)="startEdit(trigger)"
               ></button>
-              <button
-                *appWritable="access()"
-                grButton
-                label="Delete"
-                icon="delete"
-                severity="danger"
-                size="small"
-                [disabled]="rowDisabled() || trigger.is_default"
-                [grTooltip]="trigger.is_default ? 'Make another trigger the default first' : ''"
-                (click)="deleteTrigger(trigger)"
-              ></button>
+              @if (!trigger.is_default) {
+                <button
+                  *appWritable="access()"
+                  grButton
+                  label="Delete"
+                  icon="delete"
+                  severity="danger"
+                  size="small"
+                  [disabled]="rowDisabled()"
+                  (click)="deleteTrigger(trigger)"
+                ></button>
+              }
             </div>
           </div>
         </div>
