@@ -37,6 +37,7 @@ use gradient_types::*;
 pub(super) struct EvalAccessContext {
     pub evaluation: MEvaluation,
     pub project_id: ProjectId,
+    pub project_name: String,
     pub task_name: Option<String>,
     pub task_display_name: Option<String>,
 }
@@ -94,6 +95,7 @@ impl EvalAccessContext {
         let ctx = Self {
             evaluation,
             project_id,
+            project_name: project.name.clone(),
             task_name: Some(task.name),
             task_display_name: Some(task.display_name),
         };

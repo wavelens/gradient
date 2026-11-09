@@ -142,6 +142,7 @@ pub async fn get_evaluation(
         message: EvaluationResponse {
             id: evaluation.id,
             task: evaluation.task,
+            project_name: ctx.project_name,
             task_name: ctx.task_name,
             task_display_name: ctx.task_display_name,
             repository: state

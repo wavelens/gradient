@@ -48,6 +48,7 @@ pub struct BuildsQuery {
 pub struct EvaluationResponse {
     pub id: EvaluationId,
     pub task: Option<TaskId>,
+    pub project_name: String,
     pub task_name: Option<String>,
     pub task_display_name: Option<String>,
     pub repository: String,
@@ -126,6 +127,7 @@ mod tests {
         serde_json::to_value(EvaluationResponse {
             id: EvaluationId::nil(),
             task: None,
+            project_name: String::new(),
             task_name: None,
             task_display_name: None,
             repository: String::new(),
