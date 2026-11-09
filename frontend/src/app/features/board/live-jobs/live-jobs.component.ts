@@ -15,6 +15,7 @@ import { ButtonComponent, LoadStateComponent, TabSwitchComponent, TableComponent
 import { firstLoad } from '../first-load';
 import { subscribeToBoardSocketWithReload } from '../board-socket';
 import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
+import { schedulerScoreDecimalPipeDigitsFormat } from '../scoring-rule-label';
 import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel } from '../job-kind';
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 import { links, oneOf, queryParamSignal } from '@shared/routing';
@@ -99,7 +100,7 @@ interface DecisionRow {
                     <a [routerLink]="detail" (click)="$event.stopPropagation()">{{ subject }}</a>
                   </td>
                   @if (superuser()) {
-                    <td>{{ j.score | number: '1.1-1' }}</td>
+                    <td>{{ j.score | number: scoreDigits }}</td>
                   }
                   <td>{{ j.dispatched_at | serverDate }}</td>
                   <td>›</td>
@@ -123,7 +124,7 @@ interface DecisionRow {
                   <td class="mono subject" [title]="r.subject">
                     <a [routerLink]="links.boardJob(r.id)" (click)="$event.stopPropagation()">{{ r.subject }}</a>
                   </td>
-                  <td>{{ r.score | number: '1.1-1' }}</td>
+                  <td>{{ r.score | number: scoreDigits }}</td>
                   <td>{{ r.at | serverDate }}</td>
                   <td>›</td>
                 </tr>
@@ -200,6 +201,7 @@ export class BoardLiveJobsComponent implements OnInit {
   protected connected = subscribeToBoardSocketWithReload(() => this.load());
   protected readonly jobKindName = jobKindName;
   protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
+  protected readonly scoreDigits = schedulerScoreDecimalPipeDigitsFormat;
   protected readonly jobSubjectLabel = jobSubjectLabel;
   protected readonly collapseClusters = collapseClusters;
 

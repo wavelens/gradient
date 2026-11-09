@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+export const schedulerScoreDecimalPipeDigitsFormat = '1.1-1';
+
 const scoringRuleLabelByClassName: Record<string, string> = {
   QosRule: 'Service quality',
 };

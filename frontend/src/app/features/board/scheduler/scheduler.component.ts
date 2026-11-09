@@ -10,7 +10,7 @@ import { BoardService } from '@core/services/board.service';
 import { CardGridComponent, LoadStateComponent, PopoverComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
-import { scoringRuleClassNameToReadableLabel } from '../scoring-rule-label';
+import { scoringRuleClassNameToReadableLabel, schedulerScoreDecimalPipeDigitsFormat } from '../scoring-rule-label';
 import { clockTime, formatDuration } from '@shared/text';
 import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
 
@@ -23,7 +23,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
                    loadingMessage="Loading scheduler stats..." errorTitle="Failed to load scheduler stats" (retry)="retry()">
       <gr-card-grid class="kpis" min="180px">
         <gr-stat-card compact label="Scored assignments (24h)" [value]="summary()?.sample_size ?? 0" />
-        <gr-stat-card compact label="Avg score" [value]="summary()?.score_avg | number: '1.2-2'" />
+        <gr-stat-card compact label="Avg score" [value]="summary()?.score_avg | number: scoreDigits" />
         <gr-stat-card compact label="Min / Max" [value]="(summary()?.score_min | number: '1.0-0') + ' / ' + (summary()?.score_max | number: '1.0-0')" />
       </gr-card-grid>
 
@@ -48,7 +48,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
 
       <h2>Per-rule mean contribution <gr-label-help doc="reference/scheduler-policies/" title="About the scoring rules" /></h2>
       <gr-table class="rules">
-        <thead><tr><th>Rule</th><th class="num">Avg</th><th class="num">Min</th><th class="num">Max</th><th>Weight</th></tr></thead>
+        <thead><tr><th>Rule</th><th class="num">Avg</th><th class="num">Min</th><th class="num">Max</th><th>Share</th></tr></thead>
         <tbody>
           @for (r of ruleRows(); track r.rule) {
             <tr>
@@ -58,9 +58,9 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
                   <button type="button" class="help" [attr.aria-label]="'Explain ' + r.label" (click)="showHelp($event, r, rulePop)">?</button>
                 }
               </td>
-              <td class="num">{{ r.avg | number: '1.2-2' }}</td>
-              <td class="num">{{ r.min | number: '1.2-2' }}</td>
-              <td class="num">{{ r.max | number: '1.2-2' }}</td>
+              <td class="num">{{ r.avg | number: scoreDigits }}</td>
+              <td class="num">{{ r.min | number: scoreDigits }}</td>
+              <td class="num">{{ r.max | number: scoreDigits }}</td>
               <td class="bar-cell"><div class="bar" [class.neg]="r.avg < 0" [style.width.%]="r.share"></div></td>
             </tr>
           } @empty {
@@ -108,6 +108,7 @@ export class BoardSchedulerComponent implements OnInit {
   ]);
 
   protected readonly ruleLabel = scoringRuleClassNameToReadableLabel;
+  protected readonly scoreDigits = schedulerScoreDecimalPipeDigitsFormat;
 
   ruleRows = computed(() => {
     const rules = this.summary()?.rules ?? [];

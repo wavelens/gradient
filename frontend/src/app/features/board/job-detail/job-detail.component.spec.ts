@@ -534,7 +534,7 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     const fixture = setup({ getJob: () => of(EXEC_DETAIL) });
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('.head .kind')?.textContent?.trim()).toBe('exec');
-    expect(el.querySelector('details.scheduler tr.total .num')?.textContent?.trim()).toBe('3.75');
+    expect(el.querySelector('details.scheduler tr.total .num')?.textContent?.trim()).toBe('3.8');
     const section = el.querySelector('section.exec') as HTMLElement;
     expect(section.textContent).toContain('nightly');
     expect(section.textContent).toContain('1 of 2 nodes');

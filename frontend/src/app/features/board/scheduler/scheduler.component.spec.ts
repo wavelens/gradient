@@ -38,4 +38,11 @@ describe('BoardSchedulerComponent', () => {
   it('shows whole numbers in the Min / Max tile so it fits a narrow screen', () => {
     expect(setup().querySelector('.kpis')?.textContent).toContain('902 / 7,600');
   });
+
+  it('prints scores with one decimal and calls the bar column Share like the job page', () => {
+    const el = setup();
+    expect(el.querySelector('.kpis')?.textContent).toContain('1,234.6');
+    expect(el.querySelector('.rules tbody td.num')?.textContent?.trim()).toBe('1.2');
+    expect(el.querySelector('.rules thead')?.textContent).toContain('Share');
+  });
 });

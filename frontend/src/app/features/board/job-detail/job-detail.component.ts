@@ -37,7 +37,7 @@ import { composeTitle } from '@core/title/gradient-title-strategy';
 import { JobTimelineComponent } from './job-timeline.component';
 import { BUILD_KIND, EXEC_KIND, jobKindName, jobSubjectLabel } from '../job-kind';
 import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
-import { scoringRuleClassNameToReadableLabel } from '../scoring-rule-label';
+import { scoringRuleClassNameToReadableLabel, schedulerScoreDecimalPipeDigitsFormat } from '../scoring-rule-label';
 import { abortExecJobConfirm } from '@features/exec-jobs/exec-job-status';
 import {
   abortBuildConfirm,
@@ -250,7 +250,7 @@ interface RuleRow {
                       <button type="button" class="help" [attr.aria-label]="'Explain ' + r.label" (click)="showHelp($event, r, rulePop)">?</button>
                     }
                   </td>
-                  <td class="num">{{ r.value | number: '1.2-2' }}</td>
+                  <td class="num">{{ r.value | number: scoreDigits }}</td>
                   <td class="bar-cell">
                     <div class="bar" [class.neg]="!r.positive" [style.width.%]="r.share"></div>
                   </td>
@@ -259,7 +259,7 @@ interface RuleRow {
                 <tr><td colspan="3" class="muted">No per-rule breakdown recorded.</td></tr>
               }
             </tbody>
-            <tfoot><tr class="total"><td>Total</td><td class="num">{{ s.score | number: '1.2-2' }}</td><td></td></tr></tfoot>
+            <tfoot><tr class="total"><td>Total</td><td class="num">{{ s.score | number: scoreDigits }}</td><td></td></tr></tfoot>
           </gr-table>
 
           <gr-popover #rulePop>
@@ -507,6 +507,7 @@ export class BoardJobDetailComponent implements OnInit {
   protected readonly EXEC_KIND = EXEC_KIND;
   protected readonly jobSubjectLabel = jobSubjectLabel;
   protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
+  protected readonly scoreDigits = schedulerScoreDecimalPipeDigitsFormat;
   protected readonly formatBytes = formatBytes;
   protected readonly formatMegabytes = formatMegabytes;
   protected readonly formatDuration = formatDuration;
