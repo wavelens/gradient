@@ -110,10 +110,7 @@ export class EntryPointMetricsComponent implements OnInit {
   readonly formatBytes = formatBytes;
   readonly formatDeps = (v: number) => `${formatCount(v)} deps`;
 
-  latestBuildId = computed(() => {
-    const pts = this.points();
-    return pts.length ? pts[pts.length - 1].build_id : '';
-  });
+  newestBuildHistoryMetricPoint = computed(() => this.points().at(-1));
 
   buildStatusCounts = computed(() => {
     const counts = new Map<BuildStatus, number>();

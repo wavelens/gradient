@@ -12,7 +12,6 @@ import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { type BuildOrigin, readBuildOrigin } from '@shared/routing';
 import { saveResponse } from '@shared/download';
-import { ApiService } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import {
   BadgeComponent,
@@ -56,7 +55,6 @@ export class BuildArtefactsComponent implements OnInit {
   private evalService = inject(EvaluationsService);
   private authService = inject(AuthService);
   private projectsService = inject(ProjectsService);
-  private api = inject(ApiService);
   private notify = inject(NotifyService);
 
   loading = signal(true);
@@ -119,7 +117,7 @@ export class BuildArtefactsComponent implements OnInit {
 
   downloadBuildArtefactFile(artefact: BuildProduct): void {
     this.artefactNameBeingDownloaded.set(artefact.name);
-    this.api.getBlob(`builds/${this.buildId}/download/${encodeURIComponent(artefact.name)}`)
+    this.evalService.downloadBuildArtefactFile(this.buildId, artefact.name)
       .pipe(finalize(() => this.artefactNameBeingDownloaded.set(null)))
       .subscribe({
         next: (response) => saveResponse(response, artefact.name),
