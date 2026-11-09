@@ -45,19 +45,26 @@ impl Scheduler {
         }
     }
 
-    pub async fn persist_flake_source(&self, job_id: &str, flake_source: Option<String>) {
+    pub async fn persist_fetch_result(&self, job_id: &str, flake_source: Option<String>) {
         use sea_orm::ActiveModelTrait;
         use sea_orm::Set;
 
-        let Some(path) = flake_source else { return };
         let Some(PendingJob::Eval(PendingEvalJob {
             evaluation_id,
+            task_id,
             continuation: None,
             ..
         })) = self.active_job(job_id).await
         else {
             return;
         };
+        if let Some(task) = task_id
+            && let Err(e) =
+                gradient_db::tasks::record_fetch(&self.db.worker_db, task, now(), None).await
+        {
+            warn!(error = %e, %task, "failed to record repository fetch");
+        }
+        let Some(path) = flake_source else { return };
         let am = gradient_entity::evaluation::ActiveModel {
             id: Set(evaluation_id),
             flake_source: Set(Some(path)),

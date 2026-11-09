@@ -414,6 +414,11 @@ pub async fn patch_task(
     }
 
     atask.force_evaluation = Set(true);
+    if repository_changed {
+        atask.last_fetch_at = Set(None);
+        atask.last_fetch_ok_at = Set(None);
+        atask.last_fetch_error = Set(None);
+    }
     let updated = gradient_db::tasks::update(&state.web_db, atask)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;

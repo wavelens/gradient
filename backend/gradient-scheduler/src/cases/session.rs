@@ -476,7 +476,7 @@ impl SchedulerCase {
             return;
         }
         self.scheduler
-            .persist_flake_source(key, Some(path.to_owned()))
+            .persist_fetch_result(key, Some(path.to_owned()))
             .await;
     }
 

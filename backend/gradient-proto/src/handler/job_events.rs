@@ -321,7 +321,7 @@ impl SchedulerJobEvents {
             }
             JobUpdateKind::FetchResult { flake_source } => {
                 debug!(%peer_id, %job_id, ?flake_source, "FetchResult");
-                scheduler.persist_flake_source(&job_id, flake_source).await;
+                scheduler.persist_fetch_result(&job_id, flake_source).await;
             }
             JobUpdateKind::EvaluatingFlake => {
                 scheduler

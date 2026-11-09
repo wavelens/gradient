@@ -11,7 +11,7 @@
 
 use gradient_entity::{ids::*, integration, task, task_trigger};
 use gradient_fixtures::ids::{project_id, task_id, user_id};
-use gradient_fixtures::mock::mock_db;
+use gradient_fixtures::mock::{all_statements, mock_db};
 use gradient_fixtures::rows::{admin_role, project, project_member, task};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
@@ -457,6 +457,32 @@ async fn patch_task_concurrency_to_skip() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["error"], false);
+}
+
+#[tokio::test]
+async fn changing_the_repository_clears_the_fetch_status() {
+    let session_id = SessionId::now_v7();
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![task()]])
+        .into_connection();
+
+    let res = make_test_server(db.clone())
+        .patch("/api/v1/tasks/test-project/test-task")
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&serde_json::json!({"repository": "https://github.com/test/other"}))
+        .await;
+
+    res.assert_status_ok();
+    let update = all_statements(db.into_transaction_log())
+        .into_iter()
+        .find(|s| s.sql.starts_with(r#"UPDATE "task""#))
+        .expect("the task row is updated");
+    for column in ["last_fetch_at", "last_fetch_ok_at", "last_fetch_error"] {
+        assert!(update.sql.contains(column), "{column} in {}", update.sql);
+    }
 }
 
 #[tokio::test]
