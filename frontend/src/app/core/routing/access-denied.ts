@@ -18,7 +18,7 @@ export type DeniedKind = 'project' | 'task' | 'cache' | 'team' | 'evaluation' | 
 
 export interface DeniedTarget {
   kind: DeniedKind;
-  name: string;
+  name?: string;
   back: string;
 }
 
@@ -38,23 +38,29 @@ export function adminOnlyPage(router: Router, from: string): RedirectCommand {
   return new RedirectCommand(router.createUrlTree(['/error/403'], { queryParams: { only: 'admin', from } }), { browserUrl: from });
 }
 
-export function denyOnRefusal<T>(target: DeniedTarget, from: string, owningProject?: string): OperatorFunction<T, T | RedirectCommand> {
+export function notFoundPageRedirect(target: DeniedTarget, from: string, owningProject?: string): () => Observable<RedirectCommand> {
   const router = inject(Router);
-  const auth = inject(AuthService);
   const projects = inject(ProjectsService);
-  const backToReadableProject = (): Observable<DeniedTarget> =>
-    owningProject
+  return () =>
+    (owningProject
       ? projects.getProject(owningProject).pipe(
           map(() => ({ ...target, back: String(links.project(owningProject)) })),
           catchError(() => of(target)),
         )
-      : of(target);
+      : of(target)
+    ).pipe(map((denied) => deniedPage(router, denied, from)));
+}
+
+export function denyOnRefusal<T>(target: DeniedTarget, from: string, owningProject?: string): OperatorFunction<T, T | RedirectCommand> {
+  const router = inject(Router);
+  const auth = inject(AuthService);
+  const notFoundPage = notFoundPageRedirect(target, from, owningProject);
   return catchError((error: unknown): Observable<RedirectCommand> => {
     if (error instanceof ApiError && entityLookupNotFoundOrForbiddenStatusCodes.has(error.status)) {
       return auth.initialized$.pipe(
         switchMap(() => (auth.isAuthenticated() ? auth.stillSignedIn() : of(false))),
         switchMap((signedIn) => {
-          if (signedIn) return backToReadableProject().pipe(map((denied) => deniedPage(router, denied, from)));
+          if (signedIn) return notFoundPage();
           if (auth.isAuthenticated()) return of(new RedirectCommand(auth.forgetRejectedSessionAndGetSignInPageUrl(from)));
           return of(new RedirectCommand(auth.getSignInPageUrl(from)));
         }),

@@ -86,7 +86,7 @@ const DENIED_KINDS: Record<DeniedKind, { label: string; back: string }> = {
   team: { label: 'Team', back: 'Back to Teams' },
   evaluation: { label: 'Evaluation', back: 'Back to Projects' },
   build: { label: 'Build', back: 'Back to Projects' },
-  execJob: { label: 'Exec job', back: 'Back to Task' },
+  execJob: { label: 'Exec job', back: 'Back to Projects' },
   job: { label: 'Job', back: 'Back to Job Board' },
   clusterJob: { label: 'Cluster job', back: 'Back to Job Board' },
   worker: { label: 'Worker', back: 'Back to Workers' },
@@ -131,8 +131,9 @@ export class ErrorPageComponent {
     const kind = DENIED_KINDS[this.query.get('kind') as DeniedKind];
     if (this.code() !== 404 || !kind) return null;
     const back = this.query.get('back') ?? '/';
+    const name = this.query.get('name');
     return {
-      description: deniedDescription(`${kind.label} "${this.query.get('name') ?? ''}" not found.`, this.user()),
+      description: deniedDescription(name ? `${kind.label} "${name}" not found.` : `${kind.label} not found.`, this.user()),
       backLabel: PROJECT_PAGE.test(back) ? 'Back to Project' : kind.back,
       backLink: back,
     };

@@ -6,24 +6,25 @@
 
 import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
-import { Observable, map, switchMap } from 'rxjs';
+import { Observable, map, of, switchMap } from 'rxjs';
+import { MessageService } from '@gradient/ui/ui';
 import { EvaluationResponse } from '@core/models';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { WorkersService } from '@core/services/workers.service';
-import { DeniedTarget, deniedPage, denyOnRefusal } from '@core/routing/access-denied';
+import { DeniedTarget, deniedPage, denyOnRefusal, notFoundPageRedirect } from '@core/routing/access-denied';
 import { redirectToCorrectProjectSlug } from '@core/resolvers/evaluation-access.resolver';
 import { links } from '@shared/routing';
 
 export const execJobInTaskGuard: CanActivateFn = (route, state) => {
-  const router = inject(Router);
   const project = route.paramMap.get('project') ?? '';
   const task = route.paramMap.get('task') ?? '';
   const id = route.paramMap.get('job') ?? '';
-  const target: DeniedTarget = { kind: 'execJob', name: id, back: String(links.task(project, task)) };
+  const target: DeniedTarget = { kind: 'execJob', back: String(links.projects()) };
+  const notFoundPage = notFoundPageRedirect(target, state.url, project);
   return inject(ExecJobsService).get(id).pipe(
-    map((job) => (job.project === project && job.task === task) || deniedPage(router, target, state.url)),
-    denyOnRefusal(target, state.url),
+    switchMap((job) => (job.project === project && job.task === task ? of(true) : notFoundPage())),
+    denyOnRefusal(target, state.url, project),
   );
 };
 
@@ -33,7 +34,7 @@ export const buildOrEvaluationAccessGuard: CanActivateFn = (route, state) => {
   const project = route.paramMap.get('project') ?? '';
   const id = route.paramMap.get('buildId') ?? route.paramMap.get('id') ?? '';
   const isEvaluation = route.paramMap.get('kind') === 'eval';
-  const target: DeniedTarget = { kind: isEvaluation ? 'evaluation' : 'build', name: id, back: String(links.projects()) };
+  const target: DeniedTarget = { kind: isEvaluation ? 'evaluation' : 'build', back: String(links.projects()) };
   const evaluation$: Observable<EvaluationResponse> = isEvaluation
     ? evaluations.getEvaluation(id)
     : evaluations.getBuild(id).pipe(switchMap((build) => evaluations.getEvaluation(build.evaluation)));
@@ -54,5 +55,8 @@ export const workerInProjectGuard: CanActivateFn = (route, state) => {
   );
 };
 
-export const entryPointEvalQueryParameterMissingGuard: CanActivateFn = (route) =>
-  !!route.queryParamMap.get('eval') || links.taskPage(route.paramMap.get('project') ?? '', route.paramMap.get('task') ?? '', 'metrics');
+export const entryPointEvalQueryParameterMissingGuard: CanActivateFn = (route) => {
+  if (route.queryParamMap.get('eval')) return true;
+  inject(MessageService).add({ severity: 'info', summary: 'Select an entry point to view metrics for that entry point.' });
+  return links.taskPage(route.paramMap.get('project') ?? '', route.paramMap.get('task') ?? '', 'metrics');
+};

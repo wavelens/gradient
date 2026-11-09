@@ -101,6 +101,12 @@ describe('ErrorPageComponent', () => {
     expect(links).toContainEqual({ text: 'Back to Project', href: '/project/infra' });
   });
 
+  it('names an item without a readable name by its kind only', () => {
+    const { text, links } = render(404, { kind: 'execJob', back: '/projects', from: '/project/infra/task/hosts/exec/[uuid1]' }, { username: 'carol' });
+    expect(text).toContain("Exec job not found. It doesn't exist, or you don't have access to it.");
+    expect(links).toContainEqual({ text: 'Back to Projects', href: '/projects' });
+  });
+
   it('tells a superuser only that the item is missing and offers no Switch Account', () => {
     const { text, links } = render(404, DENIED, { username: 'root', superuser: true });
     expect(text).toContain('Cache "researchcache" not found.');

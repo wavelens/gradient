@@ -16,6 +16,7 @@ import {
   provideRouter,
 } from '@angular/router';
 import { Observable, firstValueFrom, isObservable, of, throwError } from 'rxjs';
+import { MessageService } from '@gradient/ui/ui';
 import { ApiError } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 import { links } from '@shared/routing';
@@ -140,7 +141,7 @@ describe('not-found or no-access page', () => {
 
   it('replaces an evaluation that belongs to another project', async () => {
     configure({ tasks: { getTask: () => of({ id: 'other-task' }) } });
-    expect(page(await outcome(evaluationAccessResolver as unknown as CanActivateFn, { project: 'acme', evaluationId: 'e1' }))).toContain('kind=evaluation&name=e1&back=%2Fproject%2Facme&');
+    expect(page(await outcome(evaluationAccessResolver as unknown as CanActivateFn, { project: 'acme', evaluationId: 'e1' }))).toContain('kind=evaluation&back=%2Fproject%2Facme&');
   });
 
   it('hands an evaluation of the project and its task to the page', async () => {
@@ -154,7 +155,14 @@ describe('not-found or no-access page', () => {
   it('replaces an exec job opened under another task', async () => {
     configure({ execJobs: { get: () => of({ project: 'acme', task: 'other' }) } });
     expect(page(await outcome(execJobInTaskGuard, { project: 'acme', task: 'demo', job: 'j1' }))).toContain(
-      'kind=execJob&name=j1&back=%2Fproject%2Facme%2Ftask%2Fdemo',
+      'kind=execJob&back=%2Fproject%2Facme&',
+    );
+  });
+
+  it('names no raw id and leads back to the projects when the exec job and its project are hidden', async () => {
+    configure({ execJobs: { get: () => refused(404) }, projects: { getProject: () => refused(404) } });
+    expect(page(await outcome(execJobInTaskGuard, { project: 'acme', task: 'demo', job: 'j1' }))).toBe(
+      `/error/404?kind=execJob&back=%2Fprojects&from=${encodeURIComponent(URL)}`,
     );
   });
 
@@ -164,7 +172,7 @@ describe('not-found or no-access page', () => {
     { path: 'evaluation closure', params: { project: 'acme', kind: 'eval', id: 'b9' }, kind: 'evaluation' },
   ])('replaces a missing id on the $path page', async ({ params, kind }) => {
     configure({ evaluations: { getEvaluation: () => refused(404), getBuild: () => refused(404) } });
-    expect(page(await outcome(buildOrEvaluationAccessGuard, params))).toContain(`kind=${kind}&name=b9&back=%2Fproject%2Facme&`);
+    expect(page(await outcome(buildOrEvaluationAccessGuard, params))).toContain(`kind=${kind}&back=%2Fproject%2Facme&`);
   });
 
   it.each<{ path: string; params: Record<string, string> }>([
@@ -235,8 +243,10 @@ describe('entryPointEvalQueryParameterMissingGuard', () => {
     expect(run({ eval: 'packages.x86_64-linux.hello' })).toBe(true);
   });
 
-  it('sends a link without an entry point to the task metrics', () => {
+  it('sends a link without an entry point to the task metrics and says why', () => {
     configure({});
+    const add = vi.spyOn(TestBed.inject(MessageService), 'add');
     expect(TestBed.inject(Router).serializeUrl(run({}) as UrlTree)).toBe('/project/acme/task/demo/metrics');
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ summary: 'Select an entry point to view metrics for that entry point.' }));
   });
 });
