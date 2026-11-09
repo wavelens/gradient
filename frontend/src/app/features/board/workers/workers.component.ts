@@ -82,15 +82,6 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         [colors]="['--gr-chart-green', '--gr-chart-orange']"
       ></gr-metric-chart>
 
-      <gr-metric-chart
-        title="Capability over time"
-        doc="ui/job-board/#workers"
-        type="line"
-        [series]="capOverTime()"
-        [categories]="fleetCats()"
-        [colors]="['--gr-chart-cyan', '--gr-chart-purple', '--gr-chart-pink']"
-      ></gr-metric-chart>
-
       <gr-load-state [error]="averageError()" errorTitle="Failed to load worker load" (retry)="loadAverage()" />
       <div class="row">
         <gr-metric-chart
@@ -165,11 +156,6 @@ export class BoardWorkersComponent implements OnInit {
   fleetSeries = computed(() => [
     { name: 'connected', data: this.fleet().map((p) => p.connected) },
     { name: 'draining', data: this.fleet().map((p) => p.draining) },
-  ]);
-  capOverTime = computed(() => [
-    { name: 'eval', data: this.fleet().map((p) => p.eval) },
-    { name: 'network', data: this.fleet().map((p) => p.network) },
-    { name: 'build', data: this.fleet().map((p) => p.build) },
   ]);
 
   private radar(buckets: { key: string; in_flight: number; capacity: number }[]) {
