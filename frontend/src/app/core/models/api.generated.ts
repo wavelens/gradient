@@ -1551,6 +1551,12 @@ export interface Latest {
   waiting_reason?: WaitingReason | null;
 }
 
+export interface LatestAssignmentForEvaluationResponse {
+  dispatched_job_id?: string | null;
+  evaluation_id: string;
+  project_name: string;
+}
+
 export interface ListResponse_GroupResource {
   schemas: string[];
   totalResults: number;
@@ -2039,6 +2045,8 @@ export interface PendingJobSummary {
   project_display_name?: string | null;
   task?: string | null;
   task_display_name?: string | null;
+  commit?: string | null;
+  commit_message?: string | null;
   waiting_reason?: WaitingReason | null;
   permissions: Permission[];
 }

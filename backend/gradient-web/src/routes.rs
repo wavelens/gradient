@@ -406,6 +406,9 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(tasks::metrics::task_entry_point_metrics))
                 .routes(routes!(board::get_dispatched_jobs))
                 .routes(routes!(board::get_pending_jobs))
+                .routes(routes!(
+                    board::get_latest_dispatched_job_for_pending_job_page
+                ))
                 .routes(routes!(board::get_expensive_jobs))
                 .routes(routes!(board::get_expensive_by_resource))
                 .routes(routes!(board::get_expensive_evals_by_resource))

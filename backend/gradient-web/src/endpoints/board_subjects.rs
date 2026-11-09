@@ -234,6 +234,8 @@ pub struct BoardEvaluation {
     pub task: Option<String>,
     pub task_display_name: Option<String>,
     pub waiting_reason: Option<WaitingReason>,
+    pub commit: Option<String>,
+    pub commit_message: Option<String>,
 }
 
 pub async fn board_evaluations<C: ConnectionTrait>(
@@ -246,11 +248,14 @@ pub async fn board_evaluations<C: ConnectionTrait>(
     let evaluations = by_ids::<EEvaluation, _>(db, evaluations).await?;
     let task_ids: Vec<TaskId> = evaluations.values().filter_map(|e| e.task).collect();
     let tasks = by_ids::<ETask, _>(db, &task_ids).await?;
+    let commit_ids: Vec<CommitId> = evaluations.values().map(|e| e.commit).collect();
+    let commits = by_ids::<ECommit, _>(db, &commit_ids).await?;
 
     Ok(evaluations
         .into_iter()
         .map(|(id, evaluation)| {
             let task = evaluation.task.and_then(|task| tasks.get(&task));
+            let commit = commits.get(&evaluation.commit);
             let waiting_reason = WaitingReason::from_status_and_json_if_waiting(
                 evaluation.status,
                 evaluation.waiting_reason.as_ref(),
@@ -261,6 +266,9 @@ pub async fn board_evaluations<C: ConnectionTrait>(
                     task: task.map(|t| t.name.clone()),
                     task_display_name: task.map(|t| t.display_name.clone()),
                     waiting_reason,
+                    commit: commit.map(|c| vec_to_hex(&c.hash)),
+                    commit_message: commit
+                        .and_then(|c| c.message.lines().next().map(str::to_string)),
                 },
             )
         })
@@ -440,9 +448,16 @@ mod tests {
             display_name: "Nightly".into(),
             ..Default::default()
         };
+        let commit = MCommit {
+            id: CommitId::now_v7(),
+            message: "Bump inputs\n\nDetails".into(),
+            hash: vec![0xab, 0xcd],
+            ..Default::default()
+        };
         let waiting = MEvaluation {
             id: EvaluationId::now_v7(),
             task: Some(task.id),
+            commit: commit.id,
             status: EvaluationStatus::Waiting,
             waiting_reason: Some(WaitingReason::NoCache.to_json()),
             ..Default::default()
@@ -456,6 +471,7 @@ mod tests {
         let db = mock_db()
             .append_query_results([vec![waiting.clone(), queued.clone()]])
             .append_query_results([vec![task]])
+            .append_query_results([vec![commit]])
             .into_connection();
 
         let pending = board_evaluations(&db, &[waiting.id, queued.id])
@@ -468,6 +484,8 @@ mod tests {
                 task: Some("nightly".into()),
                 task_display_name: Some("Nightly".into()),
                 waiting_reason: Some(WaitingReason::NoCache),
+                commit: Some("abcd".into()),
+                commit_message: Some("Bump inputs".into()),
             }
         );
         assert_eq!(pending[&queued.id], BoardEvaluation::default());

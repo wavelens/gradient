@@ -14,7 +14,9 @@ use gradient_entity::dispatched_job::{
 };
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
-use gradient_entity::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ExecJobId};
+use gradient_entity::ids::{
+    DerivationBuildId, DispatchedJobId, EvaluationId, ExecJobId, ProjectId,
+};
 use gradient_types::{CDerivationBuild, CEvaluation, CExecJob};
 use sea_orm::sea_query::{Expr, InsertStatement, OnConflict, Query, Value};
 use sea_orm::{
@@ -175,6 +177,22 @@ pub async fn latest_eval_jobs<C: ConnectionTrait>(
     .await?;
 
     Ok(rows.into_iter().collect())
+}
+
+pub async fn latest_assignment_id_for_job_keys<C: ConnectionTrait>(
+    db: &C,
+    job_keys: Vec<String>,
+) -> Result<Option<(DispatchedJobId, EvaluationId, ProjectId)>, DbErr> {
+    EDispatchedJob::find()
+        .select_only()
+        .column(CDispatchedJob::Id)
+        .column(CDispatchedJob::EvaluationId)
+        .column(CDispatchedJob::Project)
+        .filter(CDispatchedJob::JobId.is_in(job_keys))
+        .order_by_desc(CDispatchedJob::DispatchedAt)
+        .into_tuple()
+        .one(db)
+        .await
 }
 
 pub async fn find_next_dispatched_job_id_for_job_key_after<C: ConnectionTrait>(

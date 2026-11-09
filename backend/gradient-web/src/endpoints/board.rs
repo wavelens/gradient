@@ -138,6 +138,8 @@ pub struct PendingJobSummary {
     pub project_display_name: Option<String>,
     pub task: Option<String>,
     pub task_display_name: Option<String>,
+    pub commit: Option<String>,
+    pub commit_message: Option<String>,
     pub waiting_reason: Option<WaitingReason>,
     pub permissions: Vec<Permission>,
 }
@@ -154,7 +156,7 @@ pub struct PendingJobsResponse {
     operation_id = "getBoardPendingJobs",
     tag = "board",
     summary = "Pending (unassigned) jobs",
-    description = "Callers see queued jobs without a worker assignment yet, plus waiting evaluations not yet in the scheduler queue. Jobs outside the range go into one aggregate count, `other_pending`. Subjobs carry the cluster job name in `cluster_job`. The values of `project_name` and `task` and their display names come from the job evaluation. The sources for `waiting_reason` are the exec job for an exec job and the evaluation otherwise. Permissions in the caller's project appear in `permissions`.",
+    description = "Callers see queued jobs without a worker assignment yet, plus waiting evaluations not yet in the scheduler queue. Jobs outside the range go into one aggregate count, `other_pending`. Subjobs carry the cluster job name in `cluster_job`. The values of `project_name` and `task` and their display names come from the job evaluation. The values of `commit` (full hash) and `commit_message` (first line) also come from the job evaluation. The sources for `waiting_reason` are the exec job for an exec job and the evaluation otherwise. Permissions in the caller's project appear in `permissions`.",
     responses((status = OK, description = "Pending jobs plus other_pending count", body = PendingJobsResponse), WebError)
 )]
 pub async fn get_pending_jobs(
@@ -225,6 +227,8 @@ pub async fn get_pending_jobs(
                 project_display_name: project.map(|p| p.display_name.clone()),
                 task: evaluation.task,
                 task_display_name: evaluation.task_display_name,
+                commit: evaluation.commit,
+                commit_message: evaluation.commit_message,
                 waiting_reason: subjects
                     .waiting_reason_for_pending_job(pending, evaluation.waiting_reason),
                 permissions: mask_to_vec(permissions),
@@ -244,6 +248,57 @@ pub async fn get_pending_jobs(
     Ok(ok_json(PendingJobsResponse {
         jobs,
         other_pending,
+    }))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct LatestAssignmentForEvaluationResponse {
+    pub dispatched_job_id: Option<Uuid>,
+    pub evaluation_id: Uuid,
+    pub project_name: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/board/jobs/pending/{id}",
+    operation_id = "getBoardPendingJobAssignment",
+    tag = "board",
+    summary = "Latest assignment of a pending job",
+    description = "Resolve the ID of the pending job page (for an exec job, a shared build, or an evaluation) after the job left the pending list. Use `dispatched_job_id` for the latest assignment of that job, or null when the job was never assigned. `evaluation_id` and `project_name` identify that evaluation. Return `404` for a job outside the caller's project.",
+    params(("id" = Uuid, Path)),
+    responses((status = OK, description = "Latest Allocation and Evaluation", body = LatestAssignmentForEvaluationResponse), WebError)
+)]
+pub async fn get_latest_dispatched_job_for_pending_job_page(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Path(id): Path<Uuid>,
+) -> WebResult<Json<BaseResponse<LatestAssignmentForEvaluationResponse>>> {
+    use gradient_db::scheduling::assignment_record::{
+        BUILD_KEY_PREFIX, EVAL_KEY_PREFIX, EXEC_KEY_PREFIX, latest_assignment_id_for_job_keys,
+    };
+
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let job_keys = [EVAL_KEY_PREFIX, BUILD_KEY_PREFIX, EXEC_KEY_PREFIX]
+        .map(|prefix| format!("{prefix}{id}"))
+        .to_vec();
+    let latest = latest_assignment_id_for_job_keys(&state.web_db, job_keys).await?;
+    let evaluation = match latest {
+        Some((_, evaluation, _)) => evaluation,
+        None => by_id::<gradient_entity::exec_job::Entity, _>(&state.web_db, ExecJobId::from(id))
+            .await?
+            .map_or(EvaluationId::from(id), |exec| exec.evaluation),
+    };
+    let context = EvalAccessContext::load_unguarded(&state.web_db, evaluation)
+        .await
+        .map_err(|_| WebError::not_found(Resource::Job))?;
+    if !scope.allows(&Uuid::from(context.project_id)) {
+        return Err(WebError::not_found(Resource::Job));
+    }
+
+    Ok(ok_json(LatestAssignmentForEvaluationResponse {
+        dispatched_job_id: latest.map(|(job, _, _)| job.into()),
+        evaluation_id: evaluation.into(),
+        project_name: context.project_name,
     }))
 }
 

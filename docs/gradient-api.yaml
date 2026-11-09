@@ -1727,7 +1727,7 @@ paths:
       tags:
       - board
       summary: Pending (unassigned) jobs
-      description: Callers see queued jobs without a worker assignment yet, plus waiting evaluations not yet in the scheduler queue. Jobs outside the range go into one aggregate count, `other_pending`. Subjobs carry the cluster job name in `cluster_job`. The values of `project_name` and `task` and their display names come from the job evaluation. The sources for `waiting_reason` are the exec job for an exec job and the evaluation otherwise. Permissions in the caller's project appear in `permissions`.
+      description: Callers see queued jobs without a worker assignment yet, plus waiting evaluations not yet in the scheduler queue. Jobs outside the range go into one aggregate count, `other_pending`. Subjobs carry the cluster job name in `cluster_job`. The values of `project_name` and `task` and their display names come from the job evaluation. The values of `commit` (full hash) and `commit_message` (first line) also come from the job evaluation. The sources for `waiting_reason` are the exec job for an exec job and the evaluation otherwise. Permissions in the caller's project appear in `permissions`.
       operationId: getBoardPendingJobs
       responses:
         '200':
@@ -1744,6 +1744,40 @@ paths:
                     type: boolean
                   message:
                     $ref: '#/components/schemas/PendingJobsResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
+  /api/v1/board/jobs/pending/{id}:
+    get:
+      tags:
+      - board
+      summary: Latest assignment of a pending job
+      description: Resolve the ID of the pending job page (for an exec job, a shared build, or an evaluation) after the job left the pending list. Use `dispatched_job_id` for the latest assignment of that job, or null when the job was never assigned. `evaluation_id` and `project_name` identify that evaluation. Return `404` for a job outside the caller's project.
+      operationId: getBoardPendingJobAssignment
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Latest Allocation and Evaluation
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/LatestAssignmentForEvaluationResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -18669,6 +18703,22 @@ components:
           oneOf:
           - $ref: '#/components/schemas/WaitingReason'
           - type: 'null'
+    LatestAssignmentForEvaluationResponse:
+      type: object
+      required:
+      - evaluation_id
+      - project_name
+      properties:
+        dispatched_job_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        evaluation_id:
+          type: string
+          format: uuid
+        project_name:
+          type: string
     ListResponse_GroupResource:
       type: object
       required:
@@ -20110,6 +20160,14 @@ components:
           - string
           - 'null'
         task_display_name:
+          type:
+          - string
+          - 'null'
+        commit:
+          type:
+          - string
+          - 'null'
+        commit_message:
           type:
           - string
           - 'null'

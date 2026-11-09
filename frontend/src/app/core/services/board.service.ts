@@ -12,6 +12,7 @@ import {
   RuleDescription,
   DispatchedJobsResponse,
   PendingJobsResponse,
+  LatestAssignmentForEvaluationResponse,
   AssignDecisionView,
   BoardWorker,
   WorkerLoad,
@@ -124,6 +125,10 @@ export class BoardService {
 
   getPendingJobs(): Observable<PendingJobsResponse> {
     return this.api.get<PendingJobsResponse>('board/jobs/pending');
+  }
+
+  getLatestAssignmentForEvaluation(id: string): Observable<LatestAssignmentForEvaluationResponse> {
+    return this.api.get<LatestAssignmentForEvaluationResponse>(`board/jobs/pending/${id}`);
   }
 
   /// Recent assignment decisions with every candidate's score, including the

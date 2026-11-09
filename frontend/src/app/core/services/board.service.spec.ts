@@ -105,6 +105,18 @@ describe('BoardService', () => {
     expect(result).toEqual([sampleEval]);
   });
 
+  it('getLatestAssignmentForEvaluation() GETs the pending job lookup and unwraps it', () => {
+    const lookup = { dispatched_job_id: 'job-2', evaluation_id: 'eval-1', project_name: 'acme' };
+    let result: unknown;
+    service.getLatestAssignmentForEvaluation('build-1').subscribe((v) => (result = v));
+
+    const req = httpMock.expectOne(`${apiUrl}/board/jobs/pending/build-1`);
+    expect(req.request.method).toBe('GET');
+    req.flush({ error: false, message: lookup });
+
+    expect(result).toEqual(lookup);
+  });
+
   it('getExpensive() GETs the jobs endpoint with the window and keeps worker names', () => {
     let result: ExpensiveBuild[] | undefined;
     service.getExpensive(7).subscribe((v) => (result = v));
