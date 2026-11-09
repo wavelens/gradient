@@ -131,6 +131,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   logLoading = signal(true);
   logRequestError = signal<unknown>(null);
   buildListError = signal<unknown>(null);
+  hasLoadedFirstBuildPage = signal(false);
   aborting = signal(false);
   liveConnectionOpen = signal<boolean | null>(null);
   // The log page is reachable without the task route's access resolver, so the
@@ -492,6 +493,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.evalService.getBuilds(this.evaluationId, limit, 0, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.buildListError.set(null);
+        this.hasLoadedFirstBuildPage.set(true);
         this.totalBuilds = result.total;
         this.activeBuildsCount.set(result.active_count);
         if (!this.isRunning() && result.active_count === 0) this.stopLiveUpdates();

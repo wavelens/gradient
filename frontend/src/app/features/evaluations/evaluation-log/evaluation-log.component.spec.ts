@@ -905,10 +905,16 @@ describe('EvaluationLogComponent', () => {
       started.destroy();
     });
 
-    it('says "No builds" without "yet" for a finished evaluation', () => {
-      const fixture = setupEvaluationLogPageFixture([]);
+    it.each([
+      ['Aborted', 'Aborted before any builds started'],
+      ['Completed', 'No builds'],
+    ] as const)('shows one main message and no sidebar list for a %s evaluation without builds', (status, message) => {
+      const fixture = setupEvaluationLogPageFixture([], undefined, { status });
       fixture.detectChanges();
-      expect((fixture.nativeElement as HTMLElement).querySelector('.no-builds')?.textContent?.trim()).toBe('No builds');
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.querySelector('.no-builds')).toBeNull();
+      expect(root.querySelector('.builds-list')).toBeNull();
+      expect(root.querySelector('.log-area .hint-text')?.textContent?.trim()).toBe(message);
       fixture.destroy();
     });
   });
