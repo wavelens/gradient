@@ -80,6 +80,7 @@
       @if (buildListError() && visibleBuilds().length === 0) {
         <gr-load-state flat [error]="buildListError()" errorTitle="Failed to load builds" (retry)="loadBuilds()" />
       } @else if (visibleBuilds().length > 0) {
+        <h2 class="sidebar-builds-heading">Builds</h2>
         <div class="builds-list" (scroll)="onBuildsViewportScroll($event)">
           @for (group of groupedBuilds(); track group.key) {
             <div class="build-group">

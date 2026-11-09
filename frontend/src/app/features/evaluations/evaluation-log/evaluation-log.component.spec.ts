@@ -427,6 +427,7 @@ describe('EvaluationLogComponent', () => {
       cmp.visibleBuilds.set([target({ id: 'b1' }), target({ id: 'b2', dispatched_job: 'job-2' })]);
       fixture.detectChanges();
 
+      expect(fixture.nativeElement.querySelector('.sidebar-builds-heading')?.textContent).toBe('Builds');
       const rows = fixture.nativeElement.querySelectorAll('.build-item') as NodeListOf<HTMLElement>;
       rows[1].dispatchEvent(new MouseEvent('contextmenu', { clientX: 9, clientY: 9, bubbles: true, cancelable: true }));
       fixture.detectChanges();

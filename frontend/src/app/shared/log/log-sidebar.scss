@@ -68,6 +68,17 @@
   &.collapsed .sidebar-group-chevron { transform: rotate(-90deg); }
 }
 
+.sidebar-builds-heading {
+  margin: 0;
+  padding: $spacing-sm $spacing-md $spacing-xs;
+  border-top: 1px solid var(--gr-border-subtle);
+  font-size: $font-size-xs;
+  font-weight: 600;
+  color: var(--gr-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 button.sidebar-group-header {
   cursor: pointer;
 
