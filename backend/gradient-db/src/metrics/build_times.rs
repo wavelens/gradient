@@ -15,6 +15,9 @@ pub struct ExpensiveBuild {
     pub build_id: Uuid,
     pub project: Uuid,
     pub project_slug: String,
+    pub project_display_name: String,
+    pub task_name: String,
+    pub task_display_name: String,
     pub evaluation: Uuid,
     pub name: String,
     pub build_time_ms: i64,
@@ -28,6 +31,9 @@ impl From<QueryResult> for ExpensiveBuild {
             build_id: r.try_get("", "id").unwrap_or_default(),
             project: r.try_get("", "project").unwrap_or_default(),
             project_slug: r.try_get("", "project_slug").unwrap_or_default(),
+            project_display_name: r.try_get("", "project_display_name").unwrap_or_default(),
+            task_name: r.try_get("", "task_name").unwrap_or_default(),
+            task_display_name: r.try_get("", "task_display_name").unwrap_or_default(),
             evaluation: r.try_get("", "evaluation").unwrap_or_default(),
             name: r.try_get("", "name").unwrap_or_default(),
             build_time_ms: r.try_get("", "build_time_ms").unwrap_or(0),
@@ -89,7 +95,8 @@ fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String 
 
     format!(
         "WITH {metric}, shared_build AS ( \
-           SELECT DISTINCT ON (b.id) bj.id, bj.evaluation, pr.project, d.name, b.id AS derivation_build, b.derivation \
+           SELECT DISTINCT ON (b.id) bj.id, bj.evaluation, pr.project, pr.name AS task_name, \
+           pr.display_name AS task_display_name, d.name, b.id AS derivation_build, b.derivation \
            FROM build_job bj \
            JOIN derivation_build b ON b.id = bj.derivation_build \
            JOIN derivation d ON d.id = b.derivation \
@@ -98,14 +105,16 @@ fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String 
            WHERE {clauses} \
            ORDER BY b.id, bj.created_at DESC \
          ), ranked AS ( \
-           SELECT a.id, a.evaluation, a.project, a.name, {BUILD_TIME_MS} AS build_time_ms, \
+           SELECT a.id, a.evaluation, a.project, a.task_name, a.task_display_name, a.name, \
+           {BUILD_TIME_MS} AS build_time_ms, \
            coalesce(m.worker_id, dj.worker_id) AS worker \
            FROM shared_build a {timing} \
            LEFT JOIN dispatched_job dj ON dj.id = ba.dispatched_job \
            WHERE {BUILD_IS_TIMED} \
            ORDER BY build_time_ms DESC LIMIT 20 \
          ) \
-         SELECT r.id, r.evaluation, r.project, p.name AS project_slug, r.name, r.build_time_ms, \
+         SELECT r.id, r.evaluation, r.project, p.name AS project_slug, \
+         p.display_name AS project_display_name, r.task_name, r.task_display_name, r.name, r.build_time_ms, \
          r.worker, wn.display_name AS worker_name \
          FROM ranked r \
          JOIN project p ON p.id = r.project {worker_name} \
@@ -310,6 +319,12 @@ mod tests {
         let sql = expensive_jobs_sql(30, None);
         assert!(sql.contains("p.name AS project_slug"), "sql = {sql}");
         assert!(sql.contains("r.evaluation"), "sql = {sql}");
+        assert!(
+            sql.contains(
+                "p.display_name AS project_display_name, r.task_name, r.task_display_name"
+            ),
+            "sql = {sql}"
+        );
     }
 
     #[test]

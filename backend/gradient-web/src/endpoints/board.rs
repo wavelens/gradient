@@ -5,8 +5,8 @@
  */
 
 use super::board_subjects::{
-    BoardExecJob, BoardProject, JobEvaluationView, JobSubject, JobSubjects, WorkerNames,
-    board_projects, job_evaluation, pending_evaluations,
+    BoardEvaluation, BoardExecJob, BoardProject, JobEvaluationView, JobSubject, JobSubjects,
+    WorkerNames, board_evaluations, board_projects, job_evaluation,
 };
 use super::exec_jobs::query::{ExecJobAttemptView, attempt_view};
 use super::exec_jobs::timeline::with_reported_phases;
@@ -60,6 +60,10 @@ pub struct DispatchedJobSummary {
     pub subject: Option<String>,
     pub exec_job: Option<BoardExecJob>,
     pub cluster_job: Option<Uuid>,
+    pub project_name: Option<String>,
+    pub project_display_name: Option<String>,
+    pub task: Option<String>,
+    pub task_display_name: Option<String>,
 }
 
 impl DispatchedJobSummary {
@@ -69,9 +73,15 @@ impl DispatchedJobSummary {
         subjects: &JobSubjects,
         clusters: &HashMap<DispatchedJobId, ClusterJobId>,
         scope: &MetricsScope,
+        project: Option<&BoardProject>,
+        evaluation: Option<&BoardEvaluation>,
     ) -> Self {
         let subject = subject_of(&job);
         Self {
+            project_name: project.map(|p| p.name.clone()),
+            project_display_name: project.map(|p| p.display_name.clone()),
+            task: evaluation.and_then(|e| e.task.clone()),
+            task_display_name: evaluation.and_then(|e| e.task_display_name.clone()),
             cluster_job: clusters.get(&job.id).copied().map(Into::into),
             id: job.id.into(),
             kind: i16::from(job.kind),
@@ -177,7 +187,7 @@ pub async fn get_pending_jobs(
     let other_pending = hidden.len() as u64;
     let subjects = JobSubjects::load(&state.web_db, snapshot.iter().map(pending_subject)).await?;
     let evaluation_ids: Vec<EvaluationId> = snapshot.iter().map(|j| j.evaluation_id).collect();
-    let evaluations = pending_evaluations(&state.web_db, &evaluation_ids).await?;
+    let evaluations = board_evaluations(&state.web_db, &evaluation_ids).await?;
     let project_ids: Vec<ProjectId> = snapshot.iter().map(|j| j.project).collect();
     let projects = board_projects(
         &state.web_db,
@@ -265,12 +275,26 @@ pub async fn get_dispatched_jobs(
         visible.iter().map(|j| j.worker_id.clone()),
     )
     .await?;
+    let evaluation_ids: Vec<EvaluationId> = visible.iter().map(|j| j.evaluation_id).collect();
+    let evaluations = board_evaluations(&state.web_db, &evaluation_ids).await?;
+    let project_ids: Vec<Uuid> = visible.iter().map(|j| Uuid::from(j.project)).collect();
+    let projects = board_projects(&state.web_db, &project_ids).await?;
 
     let jobs = visible
         .into_iter()
         .map(|j| {
             let worker_name = worker_names.name(&j.worker_id);
-            DispatchedJobSummary::new(j, worker_name, &subjects, &clusters, &scope)
+            let project = projects.get(&Uuid::from(j.project));
+            let evaluation = evaluations.get(&j.evaluation_id);
+            DispatchedJobSummary::new(
+                j,
+                worker_name,
+                &subjects,
+                &clusters,
+                &scope,
+                project,
+                evaluation,
+            )
         })
         .collect();
 

@@ -229,16 +229,16 @@ pub async fn board_projects<C: ConnectionTrait>(
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct PendingEvaluation {
+pub struct BoardEvaluation {
     pub task: Option<String>,
     pub task_display_name: Option<String>,
     pub waiting_reason: Option<WaitingReason>,
 }
 
-pub async fn pending_evaluations<C: ConnectionTrait>(
+pub async fn board_evaluations<C: ConnectionTrait>(
     db: &C,
     evaluations: &[EvaluationId],
-) -> Result<HashMap<EvaluationId, PendingEvaluation>, DbErr> {
+) -> Result<HashMap<EvaluationId, BoardEvaluation>, DbErr> {
     if evaluations.is_empty() {
         return Ok(HashMap::new());
     }
@@ -256,7 +256,7 @@ pub async fn pending_evaluations<C: ConnectionTrait>(
             );
             (
                 id,
-                PendingEvaluation {
+                BoardEvaluation {
                     task: task.map(|t| t.name.clone()),
                     task_display_name: task.map(|t| t.display_name.clone()),
                     waiting_reason,
@@ -455,21 +455,21 @@ mod tests {
             .append_query_results([vec![task]])
             .into_connection();
 
-        let pending = pending_evaluations(&db, &[waiting.id, queued.id])
+        let pending = board_evaluations(&db, &[waiting.id, queued.id])
             .await
             .unwrap();
 
         assert_eq!(
             pending[&waiting.id],
-            PendingEvaluation {
+            BoardEvaluation {
                 task: Some("nightly".into()),
                 task_display_name: Some("Nightly".into()),
                 waiting_reason: Some(WaitingReason::NoCache),
             }
         );
-        assert_eq!(pending[&queued.id], PendingEvaluation::default());
+        assert_eq!(pending[&queued.id], BoardEvaluation::default());
         assert!(
-            pending_evaluations(&empty_db(), &[])
+            board_evaluations(&empty_db(), &[])
                 .await
                 .unwrap()
                 .is_empty()
