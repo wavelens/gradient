@@ -206,7 +206,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
       case 'max_storage_gb':
         return isWholeNumber(value, 0, MAX_STORAGE_GB)
           ? null
-          : 'Enter 0 for no limit, otherwise a whole number of GB from 1 to 2147483647.';
+          : 'Enter 0 for unlimited. Otherwise, enter an integer from 1 to 2147483647 in GB.';
     }
   }
 
