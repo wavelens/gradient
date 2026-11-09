@@ -46,10 +46,10 @@ export class DashboardStatsComponent implements OnInit {
   cards = computed(() => {
     const s = this.stats();
     return [
-      { label: 'CPU time', value: s && formatCpuTime(s.cpu_time_ms) },
-      { label: 'Builds', value: s && formatCount(s.builds_completed) },
+      ...(s?.cpu_time_ms == null ? [] : [{ label: 'CPU time', value: formatCpuTime(s.cpu_time_ms) }]),
+      { label: 'Completed build count (all time)', value: s && formatCount(s.builds_completed) },
       { label: 'Cache size', value: s && formatBytes(s.cache_size_bytes) },
-      { label: 'Workers busy', value: s && (s.workers.online ? `${s.workers.busy_pct}%` : '-') },
+      { label: 'Worker load', value: s && (s.workers.online ? `${s.workers.busy_pct}%` : '-') },
       { label: 'Median queue wait time', value: s && formatDuration(s.queue_wait_p50_ms) },
     ];
   });
