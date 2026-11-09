@@ -50,6 +50,10 @@
         }
       </div>
 
+      @if (ev.task_name; as task) {
+        <app-exec-job-list isCompact [evaluation]="ev.id" [evaluationRunning]="isRunning()" [project]="projectName" [task]="task" [canTrigger]="triggerAccess().canEdit" />
+      }
+
       <gr-menu #buildMenu [model]="buildMenuModel()" />
 
       @if (scopeBuildId()) {
@@ -213,9 +217,6 @@
                 }
               </div>
             </gr-load-state>
-            @if (ev.task_name; as task) {
-              <app-exec-job-list [evaluation]="ev.id" [evaluationRunning]="isRunning()" [project]="projectName" [task]="task" [canTrigger]="triggerAccess().canEdit" />
-            }
           </div>
         } @else if (!selectedBuildId()) {
           @if (ev.status === 'Fetching') {

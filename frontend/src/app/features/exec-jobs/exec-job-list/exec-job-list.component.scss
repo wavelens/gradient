@@ -22,6 +22,28 @@
   .job-needs { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: $spacing-xs; }
 }
 
+.exec-jobs-compact {
+  display: block;
+  flex-shrink: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.exec-job-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.exec-job-detail {
+  overflow: hidden;
+  color: var(--gr-text-muted);
+  font-size: $font-size-xs;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: $breakpoint-sm) {
   .job {
     grid-template-areas:

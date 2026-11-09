@@ -1349,14 +1349,18 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
-    it('lists the exec jobs of an exec task in the evaluation section', () => {
+    it('lists the exec jobs of an exec task in the sidebar of the default view, linked to their page', () => {
       TestBed.overrideProvider(ExecJobsService, { useValue: {
-        forEvaluation: () => of([{ id: 'job-1', entry_point: 'deploy', status: 'completed', nodes: 1, labels: [], devices: [] }]),
+        forEvaluation: () => of([{ id: 'job-1', entry_point: 'deploy', status: 'created', waiting_reason: { kind: 'manual_start' }, nodes: 1, labels: [], devices: [] }]),
       } });
       const { fixture, root } = render({ getEvaluation: () => of({ ...EVALUATION, task_name: 'exec' }) });
+      const sidebarJobs = root.querySelector('.log-sidebar app-exec-job-list');
+      expect(sidebarJobs?.textContent).toContain('deploy');
+      expect(sidebarJobs?.textContent).toContain('waits for a manual start');
+      expect(sidebarJobs?.querySelector('a.sidebar-row-link')?.getAttribute('href')).toContain('/exec/job-1');
       fixture.componentInstance.selectEvaluationSection();
       fixture.detectChanges();
-      expect(root.querySelector('app-exec-job-list')?.textContent).toContain('deploy');
+      expect(root.querySelectorAll('app-exec-job-list').length).toBe(1);
       fixture.destroy();
     });
 

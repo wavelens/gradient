@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, SimpleChanges, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, SimpleChanges, booleanAttribute, inject, input, signal } from '@angular/core';
 import { RouterModule, type UrlTree } from '@angular/router';
 import { Subscription, catchError, interval, of, startWith, switchMap, takeWhile } from 'rxjs';
 import { BadgeComponent, IconComponent, MenuComponent, type MenuItem } from '@gradient/ui/ui';
@@ -26,7 +26,7 @@ const POLL_MS = 4000;
   imports: [RouterModule, BadgeComponent, IconComponent, MenuComponent, StatusIconComponent],
   templateUrl: './exec-job-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrls: ['../../../shared/evaluation/entry-rows.scss', './exec-job-list.component.scss'],
+  styleUrls: ['../../../shared/evaluation/entry-rows.scss', '../../../shared/log/log-sidebar.scss', './exec-job-list.component.scss'],
 })
 export class ExecJobListComponent implements OnChanges {
   private execJobs = inject(ExecJobsService);
@@ -38,6 +38,7 @@ export class ExecJobListComponent implements OnChanges {
   project = input.required<string>();
   task = input.required<string>();
   canTrigger = input(false);
+  isCompact = input(false, { transform: booleanAttribute });
 
   jobs = signal<ExecJobSummary[]>([]);
   menuModel = signal<MenuItem[]>([]);
