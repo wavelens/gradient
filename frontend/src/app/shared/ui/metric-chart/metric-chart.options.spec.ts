@@ -508,4 +508,17 @@ describe('category labels', () => {
     expect(label).toMatchObject({ hideOverlap: true, overflow: 'truncate' });
     expect(label.width).toBeGreaterThan(0);
   });
+
+  it('keep full names on a narrow horizontal chart, so no name loses its start', () => {
+    const label = (buildMetricChartOption({ type: 'bar', series: one, categories: cats, horizontal: true, compact: true }, THEME).yAxis as any).axisLabel;
+    expect(label.overflow).toBeUndefined();
+    expect(label.width).toBeUndefined();
+  });
+});
+
+describe('value labels', () => {
+  it('hide overlapping ticks such as long durations on a narrow chart', () => {
+    const horizontal = buildMetricChartOption({ type: 'bar', series: one, categories: cats, horizontal: true, compact: true }, THEME);
+    expect((horizontal.xAxis as any).axisLabel.hideOverlap).toBe(true);
+  });
 });

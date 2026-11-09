@@ -65,7 +65,7 @@ export const getHourlySeriesPointsWithoutCurrentBucket = (points: SeriesPoint[],
           <thead>
             <tr>
               @for (c of httpColumns; track c.key) {
-                <th [class.num]="c.numeric" [attr.aria-sort]="ariaSort(c.key)">
+                <th [class.num]="c.numeric" [class.job-board-table-cell-hidden-on-phone]="c.hiddenOnPhone" [attr.aria-sort]="ariaSort(c.key)">
                   <button class="gr-th-sort" type="button" (click)="sortBy(c.key)">{{ c.label }}</button>
                 </th>
               }
@@ -74,9 +74,9 @@ export const getHourlySeriesPointsWithoutCurrentBucket = (points: SeriesPoint[],
           <tbody>
             @for (r of visibleSortedHttpRows(); track r.method + r.route) {
               <tr>
-                <td>{{ r.method }}</td>
+                <td class="job-board-table-cell-hidden-on-phone">{{ r.method }}</td>
                 <td class="mono">{{ r.route }}</td>
-                <td class="num">{{ count(r.count) }}</td>
+                <td class="num job-board-table-cell-hidden-on-phone">{{ count(r.count) }}</td>
                 <td class="num">{{ duration(r.avg_ms) }}</td>
                 <td class="num" [class.bad]="r.errors > 0">{{ r.errors }}</td>
               </tr>
@@ -99,10 +99,10 @@ export class BoardNetworkComponent implements OnInit {
   protected first = firstLoad();
   protected superuser = computed(() => this.auth.user()?.superuser === true);
 
-  protected readonly httpColumns: { key: HttpSortKey; label: string; numeric: boolean }[] = [
-    { key: 'method', label: 'Method', numeric: false },
+  protected readonly httpColumns: { key: HttpSortKey; label: string; numeric: boolean; hiddenOnPhone?: boolean }[] = [
+    { key: 'method', label: 'Method', numeric: false, hiddenOnPhone: true },
     { key: 'route', label: 'Route', numeric: false },
-    { key: 'count', label: 'Requests', numeric: true },
+    { key: 'count', label: 'Requests', numeric: true, hiddenOnPhone: true },
     { key: 'avg_ms', label: 'Avg time', numeric: true },
     { key: 'errors', label: 'Errors', numeric: true },
   ];

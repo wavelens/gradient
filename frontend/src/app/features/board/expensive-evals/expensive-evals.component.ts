@@ -39,18 +39,18 @@ type Tab = 'time' | 'rss' | 'thunks' | 'fncalls' | 'alloc';
       </div>
 
       <gr-table class="expensive">
-        <thead><tr><th>#</th><th>Project / task</th><th>Evaluation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
+        <thead><tr><th class="job-board-table-cell-hidden-on-phone">#</th><th>Project / task</th><th>Evaluation</th><th>{{ valueHeader() }}</th><th class="job-board-table-cell-hidden-on-phone">Worker</th></tr></thead>
         <tbody>
           @for (r of rows(); track r.evaluation; let i = $index) {
             <tr>
-              <td>{{ i + 1 }}</td>
+              <td class="job-board-table-cell-hidden-on-phone">{{ i + 1 }}</td>
               <td>
                 <app-board-project-task-links [project]="r.project_name" [projectDisplayName]="r.project_display_name"
                                               [task]="r.task_name" [taskDisplayName]="r.task_display_name" />
               </td>
               <td><a class="evaluation-link" [routerLink]="links.evaluationLog(r.project_name, r.evaluation)">Open log</a></td>
               <td>{{ quantity(r.value, r.unit) }}</td>
-              <td class="mono">{{ r.worker_name ?? (r.worker || '-') }}</td>
+              <td class="mono job-board-table-cell-hidden-on-phone">{{ r.worker_name ?? (r.worker || '-') }}</td>
             </tr>
           } @empty {
             <tr><td colspan="5" class="muted">No evaluation metrics recorded in this window.</td></tr>

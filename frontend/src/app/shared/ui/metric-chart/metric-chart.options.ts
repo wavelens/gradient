@@ -123,7 +123,8 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   const inset = cfg.horizontal ? undefined : cfg.inset;
   const boundaryGap = hasBars || !!inset;
   const edgeLabels = cfg.compact && !boundaryGap ? { alignMinLabel: 'left' as const, alignMaxLabel: 'right' as const } : {};
-  const categoryLabel = { ...axisLabel(theme), hideOverlap: true, overflow: 'truncate' as const, width: MAX_CATEGORY_AXIS_LABEL_WIDTH_PIXELS, ...edgeLabels };
+  const categoryLabelTruncationOptions = cfg.compact && cfg.horizontal ? {} : { overflow: 'truncate' as const, width: MAX_CATEGORY_AXIS_LABEL_WIDTH_PIXELS };
+  const categoryLabel = { ...axisLabel(theme), hideOverlap: true, ...categoryLabelTruncationOptions, ...edgeLabels };
   const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], inverse: !!cfg.horizontal, boundaryGap, axisLabel: categoryLabel, axisLine: axisLine(theme) };
   // Two value axes tick independently, so each draws its own grid: one set of
   // lines, and a shared tick count so the right-hand labels land on them.
@@ -139,7 +140,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
       ...(areAllSeriesValuesWholeNumbers(axisSeries) ? { minInterval: 1 } : {}),
       ...(byteTicks ? { interval: byteTicks.interval } : {}),
       nameTextStyle: { color: theme.text },
-      axisLabel: { ...axisLabel(theme), formatter: (v: number) => fmt(v) },
+      axisLabel: { ...axisLabel(theme), hideOverlap: true, formatter: (v: number) => fmt(v) },
       axisLine: axisLine(theme),
       splitNumber: cfg.compact ? COMPACT_AXIS_TICKS : AXIS_TICKS,
       splitLine: opposite ? { show: false } : splitLine(theme),

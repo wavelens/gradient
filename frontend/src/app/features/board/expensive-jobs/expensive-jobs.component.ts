@@ -41,13 +41,13 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 
       @if (tab() === 'time') {
         <gr-table class="expensive">
-          <thead><tr><th>#</th><th>Project / task</th><th>Derivation</th><th>Build time</th><th>Worker</th></tr></thead>
+          <thead><tr><th class="job-board-table-cell-hidden-on-phone">#</th><th>Project / task</th><th>Derivation</th><th>Build time</th><th class="job-board-table-cell-hidden-on-phone">Worker</th></tr></thead>
           <tbody>
             @for (b of builds() ?? []; track b.build_id; let i = $index) {
-              <tr><td>{{ i + 1 }}</td>
+              <tr><td class="job-board-table-cell-hidden-on-phone">{{ i + 1 }}</td>
                 <td><app-board-project-task-links [project]="b.project_slug" [projectDisplayName]="b.project_display_name"
                                                   [task]="b.task_name" [taskDisplayName]="b.task_display_name" [evaluation]="b.evaluation" /></td>
-                <td class="mono"><a class="build-link" [routerLink]="links.evaluationLog(b.project_slug, b.evaluation, { build: b.build_id })">{{ b.name }}</a></td><td>{{ duration(b.build_time_ms) }}</td><td class="mono">{{ b.worker_name ?? b.worker ?? '-' }}</td></tr>
+                <td class="mono"><a class="build-link" [routerLink]="links.evaluationLog(b.project_slug, b.evaluation, { build: b.build_id })">{{ b.name }}</a></td><td>{{ duration(b.build_time_ms) }}</td><td class="mono job-board-table-cell-hidden-on-phone">{{ b.worker_name ?? b.worker ?? '-' }}</td></tr>
             } @empty {
               <tr><td colspan="5" class="muted">{{ builds() === null ? failed : 'No builds in this window.' }}</td></tr>
             }
@@ -55,10 +55,10 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
         </gr-table>
       } @else {
         <gr-table class="expensive">
-          <thead><tr><th>#</th><th>Derivation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
+          <thead><tr><th class="job-board-table-cell-hidden-on-phone">#</th><th>Derivation</th><th>{{ valueHeader() }}</th><th class="job-board-table-cell-hidden-on-phone">Worker</th></tr></thead>
           <tbody>
             @for (r of resources(); track r.derivation; let i = $index) {
-              <tr><td>{{ i + 1 }}</td><td class="mono"><a class="build-link" [routerLink]="links.evaluationLog(r.project_slug, r.evaluation)">{{ r.name }}</a></td><td>{{ quantity(r.value, r.unit) }}</td><td class="mono">{{ r.worker_name ?? (r.worker || '-') }}</td></tr>
+              <tr><td class="job-board-table-cell-hidden-on-phone">{{ i + 1 }}</td><td class="mono"><a class="build-link" [routerLink]="links.evaluationLog(r.project_slug, r.evaluation)">{{ r.name }}</a></td><td>{{ quantity(r.value, r.unit) }}</td><td class="mono job-board-table-cell-hidden-on-phone">{{ r.worker_name ?? (r.worker || '-') }}</td></tr>
             } @empty {
               <tr><td colspan="4" class="muted">No per-build metrics recorded in this window (needs build metrics enabled on workers).</td></tr>
             }

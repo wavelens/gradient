@@ -36,24 +36,24 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
                    loadingMessage="Loading workers..." errorTitle="Failed to load workers" (retry)="retry()">
       <gr-table class="workers">
         <thead>
-          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Jobs</th><th>CPU load</th><th>Free RAM</th><th>Arch</th>@if (anyWorkerHasExecLabelsOrDevices()) {<th>Exec</th>}</tr>
+          <tr><th>Worker</th><th class="job-board-table-cell-hidden-on-phone">Projects</th><th>State</th><th>Jobs</th><th class="job-board-table-cell-hidden-on-phone">CPU load</th><th class="job-board-table-cell-hidden-on-phone">Free RAM</th><th class="job-board-table-cell-hidden-on-phone">Arch</th>@if (anyWorkerHasExecLabelsOrDevices()) {<th class="job-board-table-cell-hidden-on-phone">Exec</th>}</tr>
         </thead>
         <tbody>
           @for (w of workers() ?? []; track $index) {
             <tr>
               <td class="mono">{{ w.name ?? w.id ?? '-' }}</td>
-              <td class="projects">
+              <td class="projects job-board-table-cell-hidden-on-phone">
                 @for (p of w.projects; track p.id; let last = $last) {
                   <a [routerLink]="links.project(p.name)">{{ p.display_name || p.name }}</a>@if (!last) {, }
                 } @empty { - }
               </td>
               <td>{{ w.draining ? 'draining' : 'active' }}</td>
               <td>{{ w.assigned_jobs }}/{{ w.max_concurrent_builds }}</td>
-              <td>{{ w.cpu_usage_pct != null ? percent(w.cpu_usage_pct) : '-' }}</td>
-              <td>{{ megabytes(w.ram_free_mb) }}</td>
-              <td class="mono">{{ w.architectures.join(', ') || '-' }}</td>
+              <td class="job-board-table-cell-hidden-on-phone">{{ w.cpu_usage_pct != null ? percent(w.cpu_usage_pct) : '-' }}</td>
+              <td class="job-board-table-cell-hidden-on-phone">{{ megabytes(w.ram_free_mb) }}</td>
+              <td class="mono job-board-table-cell-hidden-on-phone">{{ w.architectures.join(', ') || '-' }}</td>
               @if (anyWorkerHasExecLabelsOrDevices()) {
-              <td class="exec">
+              <td class="exec job-board-table-cell-hidden-on-phone">
                 @if (w.exec; as exec) {
                   <span class="labels">
                     @for (label of getExecLabelsWithoutWorkerId(w); track label) { <gr-badge>{{ label }}</gr-badge> }

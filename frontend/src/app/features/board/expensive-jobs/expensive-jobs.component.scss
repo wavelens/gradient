@@ -5,6 +5,9 @@
  */
 
 @use '@gradient/ui/styles/variables' as *;
+@use '../phone-width-hide-cells' as phone;
+
+@include phone.hide-cell-below-small-breakpoint;
 
 .ranking { margin-bottom: 1rem; }
 .controls { display: flex; gap: 1.5rem; margin-bottom: 1rem; color: var(--gr-text-secondary); align-items: center; }

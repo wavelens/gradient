@@ -5,6 +5,9 @@
  */
 
 @use '@gradient/ui/styles/variables' as *;
+@use '../phone-width-hide-cells' as phone;
+
+@include phone.hide-cell-below-small-breakpoint;
 
 gr-metric-chart { margin-bottom: 1rem; }
 .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 1rem; }
