@@ -7,6 +7,8 @@
 import { TestBed } from '@angular/core/testing';
 import { NEVER, of, throwError } from 'rxjs';
 import { DashboardActivityComponent } from './dashboard-activity.component';
+import { signal } from '@angular/core';
+import { AuthService } from '@core/services/auth.service';
 import { DashboardService } from '@core/services/dashboard.service';
 import { ActivityDay } from '@core/models';
 
@@ -14,7 +16,7 @@ function render(activity: () => ReturnType<DashboardService['activity']>) {
   const spy = vi.fn(activity);
   TestBed.configureTestingModule({
     imports: [DashboardActivityComponent],
-    providers: [{ provide: DashboardService, useValue: { activity: spy } }],
+    providers: [{ provide: DashboardService, useValue: { activity: spy } }, { provide: AuthService, useValue: { user: signal(null) } }],
   });
   const f = TestBed.createComponent(DashboardActivityComponent);
   f.detectChanges();

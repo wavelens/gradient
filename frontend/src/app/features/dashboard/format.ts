@@ -17,6 +17,12 @@ export function formatCpuTime(ms: number | null | undefined): string {
   return ms >= YEAR ? `${(ms / YEAR).toFixed(1)} y` : `${Math.round(ms / HOUR)} h`;
 }
 
+export function getDashboardScopePhrases(superuser: boolean): { projects: string; caches: string } {
+  return superuser
+    ? { projects: 'all projects', caches: 'all caches' }
+    : { projects: 'projects you can see', caches: 'your caches' };
+}
+
 export function barsThatFit(width: number): number {
   return Math.min(MAX_BARS, Math.max(1, Math.floor(width / BAR_PITCH_PX)));
 }

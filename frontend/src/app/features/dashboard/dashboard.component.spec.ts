@@ -9,6 +9,8 @@ import { provideRouter } from '@angular/router';
 import { NEVER, Observable, of, throwError } from 'rxjs';
 import type { Mock } from 'vitest';
 import { DashboardComponent } from './dashboard.component';
+import { signal } from '@angular/core';
+import { AuthService } from '@core/services/auth.service';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
@@ -31,6 +33,7 @@ function render(rail: RailStub | Observable<RailStub>, pendingInvites = 0) {
       { provide: PendingInvitesService, useValue: { count: () => pendingInvites } },
       { provide: StarsService, useValue: { set: () => of(true), changed$: NEVER } },
       { provide: DashboardService, useValue: service },
+      { provide: AuthService, useValue: { user: signal(null) } },
     ],
   });
   const f = TestBed.createComponent(DashboardComponent);

@@ -6,6 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Observable, tap } from 'rxjs';
+import { AuthService } from '@core/services/auth.service';
 import { DashboardService } from '@core/services/dashboard.service';
 import { DashboardStats } from '@core/models';
 import {
@@ -13,7 +14,7 @@ import {
   StatCardComponent,
 } from '@gradient/ui/ui';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
-import { formatCpuTime } from '../format';
+import { formatCpuTime, getDashboardScopePhrases } from '../format';
 
 @Component({
   selector: 'app-dashboard-stats',
@@ -32,16 +33,18 @@ import { formatCpuTime } from '../format';
 })
 export class DashboardStatsComponent implements OnInit {
   private dashboard = inject(DashboardService);
+  private auth = inject(AuthService);
   stats = signal<DashboardStats | null>(null);
   failed = signal(false);
   hidden = signal(false);
 
   cards = computed(() => {
     const s = this.stats();
+    const scope = getDashboardScopePhrases(this.auth.user()?.superuser === true);
     return [
       ...(s?.cpu_time_ms == null ? [] : [{ label: 'CPU time', value: formatCpuTime(s.cpu_time_ms) }]),
-      { label: 'Completed build count (all time)', value: s && formatCount(s.builds_completed) },
-      { label: 'Cache size', value: s && formatBytes(s.cache_size_bytes) },
+      { label: `Completed builds - ${scope.projects}`, value: s && formatCount(s.builds_completed) },
+      { label: `Size of ${scope.caches}`, value: s && formatBytes(s.cache_size_bytes) },
       { label: 'Worker load', value: s && (s.workers.online ? `${s.workers.busy_pct}%` : '-') },
       { label: 'Median queue wait (24 h)', value: s && formatDuration(s.queue_wait_p50_ms) },
     ];

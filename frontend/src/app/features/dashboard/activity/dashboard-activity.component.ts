@@ -5,6 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { AuthService } from '@core/services/auth.service';
 import { DashboardService } from '@core/services/dashboard.service';
 import { ActivityDay } from '@core/models';
 import { FormsModule } from '@angular/forms';
@@ -14,6 +15,7 @@ import {
   TabSwitchComponent,
 } from '@gradient/ui/ui';
 import { plural } from '@shared/text';
+import { getDashboardScopePhrases } from '../format';
 
 type Mode = 'evaluations' | 'failed';
 const STEP = 13;
@@ -27,7 +29,7 @@ const LEVELS = 4;
   template: `
     @if (!hidden() && !failed()) {
       <section class="section" [attr.aria-busy]="!days()">
-        <h2>Activity</h2>
+        <h2>Activity in {{ scope().projects }}</h2>
         <div class="toolbar">
           <gr-tab-switch ariaLabel="Activity measure" [options]="modes" [ngModel]="mode()" (ngModelChange)="mode.set($event)" />
           @if (days()) {
@@ -66,6 +68,8 @@ const LEVELS = 4;
 })
 export class DashboardActivityComponent implements OnInit {
   private dashboard = inject(DashboardService);
+  private auth = inject(AuthService);
+  protected scope = computed(() => getDashboardScopePhrases(this.auth.user()?.superuser === true));
   readonly STEP = STEP;
   readonly modes: { label: string; value: Mode }[] = [
     { label: 'Evaluations', value: 'evaluations' },
