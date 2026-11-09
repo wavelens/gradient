@@ -226,8 +226,10 @@ describe('TaskTriggersComponent - flake inputs', () => {
     const component = fixture.componentInstance;
     component.startEdit(pushTrigger as any);
     component.form.branches = 'main';
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
     component.saveEdit();
     expect(update.mock.calls[0][3].config.include_flake_inputs).toBe(true);
+    expect(success).toHaveBeenCalledWith('Trigger saved');
   });
 
   it('keeps the edit dialog open on Escape while the save runs', () => {
@@ -414,8 +416,10 @@ describe('TaskTriggersComponent - validation', () => {
     const { fixture, component, create } = withCreate();
     component.startCreate();
     fixture.detectChanges();
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
     document.querySelector('#trig-branch')!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
     expect(create).toHaveBeenCalledOnce();
+    expect(success).toHaveBeenCalledWith('Trigger created');
   });
 
   it('closes the edit dialog without a request when nothing changed', () => {

@@ -354,6 +354,7 @@ export class TaskTriggersComponent implements OnInit {
       next: () => {
         this.saving.set(false);
         this.showCreateDialog.set(false);
+        this.notify.success('Trigger created');
         this.loadTriggers();
       },
       error: (err) => {
@@ -383,6 +384,7 @@ export class TaskTriggersComponent implements OnInit {
         this.saving.set(false);
         this.showEditDialog.set(false);
         this.editingTrigger.set(null);
+        this.notify.success('Trigger saved');
         this.loadTriggers();
       },
       error: (err) => {
