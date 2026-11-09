@@ -79,20 +79,6 @@
   .header-controls { display: flex; gap: $spacing-xs; flex-shrink: 0; }
 }
 
-.icon-btn {
-  background: none;
-  border: none;
-  color: var(--gr-text-secondary);
-  cursor: pointer;
-  padding: 6px;
-  border-radius: $border-radius-sm;
-  display: flex;
-  align-items: center;
-  transition: color $transition-fast, background $transition-fast;
-
-  &:hover { color: var(--gr-text-primary); background: var(--gr-surface-hover); }
-}
-
 .ctrl-btn {
   background: var(--gr-surface-hover);
   border: 1px solid var(--gr-border-subtle);
