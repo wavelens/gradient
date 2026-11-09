@@ -33,6 +33,17 @@ function createScoreFilterQueryParamSignal(name: string) {
   });
 }
 
+function jobCountLine(shown: number, total: number, hidden: number, state: 'running' | 'pending'): string {
+  const noun = `${state} job`;
+  const count =
+    total === 0
+      ? `No ${noun}s${hidden > 0 ? ' you can see' : ''}`
+      : shown === total
+        ? plural(total, noun)
+        : `${shown} of ${plural(total, noun)}`;
+  return hidden > 0 ? `${count} (${hidden} on projects you can't view)` : count;
+}
+
 interface DecisionRow {
   id: string;
   at: string;
@@ -57,12 +68,7 @@ interface DecisionRow {
       <gr-load-state [loading]="assignedJobsPanelFirstLoad.loading()" [error]="assignedJobsPanelFirstLoad.error()" [empty]="!assignedJobsPanelFirstLoad.received()"
                      loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retryAssigned()">
         @if (!showDecisions()) {
-          <div class="banner">
-            {{ runningJobsCount() }}
-            @if (otherRunning() > 0) {
-              <span class="muted">Running on projects that this account can't view: {{ otherRunning() }}.</span>
-            }
-          </div>
+          <div class="banner">{{ runningJobsCount() }}</div>
         }
 
         <div class="filters">
@@ -93,6 +99,7 @@ interface DecisionRow {
         </div>
 
         @if (!showDecisions()) {
+          @if (assignedRows().length || assignedEmptyText()) {
           <gr-table class="jobs">
             <thead>
               <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th>@if (superuser()) {<th>Score</th>}<th>Assigned</th><th><span class="sr-only">Details</span></th></tr>
@@ -119,6 +126,7 @@ interface DecisionRow {
               }
             </tbody>
           </gr-table>
+          }
         } @else {
           <gr-table class="jobs">
             <thead>
@@ -147,10 +155,8 @@ interface DecisionRow {
     } @else {
       <gr-load-state [loading]="pendingJobsFirstLoad.loading()" [error]="pendingJobsFirstLoad.error()" [empty]="!pendingJobsFirstLoad.received()"
                      loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retryPending()">
-        <div class="banner">
-          {{ plural(pendingRows().length, 'pending job') }}
-          @if (otherPending() > 0) { <span class="muted">Pending in projects this account can't view: {{ otherPending() }}.</span> }
-        </div>
+        <div class="banner">{{ pendingJobsCount() }}</div>
+        @if (pendingRows().length) {
         <gr-table class="jobs pending">
           <thead><tr><th>Kind</th><th>Project / task</th><th>Derivation / Evaluation / Exec</th><th>Waiting for</th><th>Age</th></tr></thead>
           <tbody>
@@ -190,11 +196,10 @@ interface DecisionRow {
                 </td>
                 <td class="age" [title]="p.queued_at | serverDate">{{ p.queued_at | relativeTime }}</td>
               </tr>
-            } @empty {
-              <tr><td colspan="5" class="muted">No pending jobs.</td></tr>
             }
           </tbody>
         </gr-table>
+        }
       </gr-load-state>
     }
   `,
@@ -260,18 +265,17 @@ export class BoardLiveJobsComponent implements OnInit {
   runningJobsFilterIsSet = computed(() =>
     this.kindFilter() !== 'all' || (this.superuser() && (this.scoreMin() !== null || this.scoreMax() !== null)));
 
-  runningJobsCount = computed(() => {
-    const total = collapseClusters(this.jobs()).length;
-    const shown = this.assignedRows().length;
-    return shown === total ? plural(total, 'running job') : `${shown} of ${plural(total, 'running job')}`;
-  });
+  runningJobsCount = computed(() =>
+    jobCountLine(this.assignedRows().length, collapseClusters(this.jobs()).length, this.otherRunning(), 'running'));
 
   assignedEmptyText = computed(() => {
     if (this.scoreFilterMinimumExceedsMaximum()) return 'Score min is above Score max.';
-    return this.runningJobsFilterIsSet() ? 'No matching running jobs.' : 'No running jobs.';
+    return this.runningJobsFilterIsSet() && this.jobs().length ? 'No matching running jobs.' : '';
   });
   pendingRows = computed(() =>
     collapseClusters([...this.pendingJobs()].sort((a, b) => serverTime(a.queued_at).getTime() - serverTime(b.queued_at).getTime())));
+  pendingJobsCount = computed(() =>
+    jobCountLine(this.pendingRows().length, this.pendingRows().length, this.otherPending(), 'pending'));
 
   rowSubject({ job, subJobs }: BoardRow<DispatchedJobSummary | PendingJobSummary>): string {
     if (!job.cluster_job) return jobSubjectLabel(job.subject, job.exec_job);

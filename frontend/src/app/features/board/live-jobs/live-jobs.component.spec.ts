@@ -72,7 +72,7 @@ const ASSIGNED: DispatchedJobSummary = {
   subject: 'hello-2.12.1',
 };
 
-function setupWithAssigned(assigned: DispatchedJobSummary[], superuser = false): ComponentFixture<BoardLiveJobsComponent> {
+function setupWithAssigned(assigned: DispatchedJobSummary[], superuser = false, otherRunning = 0): ComponentFixture<BoardLiveJobsComponent> {
   TestBed.configureTestingModule({
     imports: [BoardLiveJobsComponent],
     providers: [
@@ -80,7 +80,7 @@ function setupWithAssigned(assigned: DispatchedJobSummary[], superuser = false):
       {
         provide: BoardService,
         useValue: {
-          getAssignedJobs: () => of({ jobs: assigned, other_running: 0 }),
+          getAssignedJobs: () => of({ jobs: assigned, other_running: otherRunning }),
           getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
         },
       },
@@ -198,13 +198,27 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     expect(banner()).toBe('1 of 2 running jobs');
   });
 
-  it('says no job runs when no filter is set and that none matches when one is', () => {
+  it('says once that no job runs, also with a filter set', () => {
     const fixture = setupWithAssigned([]);
-    const empty = () => (fixture.nativeElement as HTMLElement).querySelector('tbody td.muted')?.textContent?.trim();
-    expect(empty()).toBe('No running jobs.');
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.banner')?.textContent?.trim()).toBe('No running jobs');
+    expect(root.querySelector('gr-table')).toBeNull();
     fixture.componentInstance.kindFilter.set('exec');
     fixture.detectChanges();
-    expect(empty()).toBe('No matching running jobs.');
+    expect(root.querySelector('gr-table')).toBeNull();
+  });
+
+  it('says when a filter hides every running job', () => {
+    const fixture = setupWithAssigned([ASSIGNED]);
+    fixture.componentInstance.kindFilter.set('exec');
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('tbody td.muted')?.textContent?.trim()).toBe('No matching running jobs.');
+  });
+
+  it('counts the jobs on projects the user cannot view in the same line', () => {
+    const fixture = setupWithAssigned([], false, 1);
+    expect((fixture.nativeElement as HTMLElement).querySelector('.banner')?.textContent?.trim())
+      .toBe("No running jobs you can see (1 on projects you can't view)");
   });
 
   it('shows how long ago a job was assigned, with the exact time as its title', () => {
@@ -293,7 +307,7 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
 
     expect(text).not.toContain('incl. passed over');
     expect(text).not.toContain('superuser');
-    expect(text).toContain('No running jobs.');
+    expect(text).toContain('No running jobs');
     expect(getAssignmentDecisions).not.toHaveBeenCalled();
   });
 });
@@ -487,6 +501,6 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     cmp.setView('pending');
     fixture.detectChanges();
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('1 pending job');
+    expect(text).toContain("1 pending job (2 on projects you can't view)");
   });
 });
