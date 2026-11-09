@@ -18,9 +18,7 @@
       @if (newUser()) {
         <app-dashboard-start />
       } @else {
-        @if (hasAnyProject() !== false) {
-          <app-dashboard-stats />
-        }
+        <app-dashboard-stats />
         <app-dashboard-task-table />
         <app-dashboard-activity />
       }
@@ -28,7 +26,6 @@
     <app-dashboard-rail
       [class.hidden]="newUser()"
       (empty)="newUser.set($event)"
-      (hasProjectsOrLoadFailed)="hasAnyProject.set($event)"
     />
   </div>
 </div>

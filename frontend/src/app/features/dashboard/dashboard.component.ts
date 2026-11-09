@@ -35,7 +35,6 @@ import { DashboardStartComponent } from './start/dashboard-start.component';
 export class DashboardComponent {
   // null until the rail answers; the router blocks load alongside it and give way if it reports first steps.
   newUser = signal<boolean | null>(null);
-  hasAnyProject = signal<boolean | null>(null);
 
   private stats = viewChild(DashboardStatsComponent);
   private tasks = viewChild(DashboardTaskTableComponent);

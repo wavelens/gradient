@@ -14,6 +14,7 @@ import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { links } from '@shared/routing';
 import type { InviteItem, TeamRole } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
+import { teamRoleDisplayLabels } from '@shared/access';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -23,8 +24,6 @@ import {
   RowListComponent,
 } from '@gradient/ui/ui';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
-
-const teamRoleDisplayLabels: Record<TeamRole, string> = { member: 'Member', admin: 'Admin' };
 
 @Component({
   selector: 'app-invites',

@@ -58,7 +58,7 @@ import {
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhaseWithExecJob, evaluationDuration, evaluationPhase, evaluationTitle, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhaseWithExecJob, evaluationDuration, evaluationPhase, evaluationTitle, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -603,16 +603,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return evaluationTitle(e);
   }
 
-  triggerLabel(e: EvaluationSummary): string {
-    if (e.triggered_by) return e.triggered_by;
-    switch (e.trigger?.type) {
-      case 'polling': return 'Polling';
-      case 'reporter_push': return 'Push';
-      case 'reporter_pull_request': return e.pr_number ? `PR #${e.pr_number}` : 'PR';
-      case 'time': return 'Schedule';
-      default: return 'Manual';
-    }
-  }
+  readonly triggerLabel = getEvaluationTriggerLabel;
 
   getFailedAttributeTooltipText(failure: FailedAttributeSummary): string {
     return `${failure.eval} - ${removeAnsiEscapeSequences(failure.message)}`;

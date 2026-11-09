@@ -1000,13 +1000,14 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
   });
 
-  it('labels a pull-request trigger as "PR #<n>" (#391)', () => {
+  it('labels a pull-request trigger as "PR #<n>" and a manual run with the user who started it (#391)', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true });
     const component = fixture.componentInstance;
     const pr = { ...evalSummary('pr1'), trigger: { id: 't', type: 'reporter_pull_request' as const }, pr_number: 42 };
     expect(component.triggerLabel(pr)).toBe('PR #42');
     const noNum = { ...pr, pr_number: null };
     expect(component.triggerLabel(noNum)).toBe('PR');
+    expect(component.triggerLabel({ ...evalSummary('m1'), triggered_by: 'dave' })).toBe('Manual · dave');
   });
 
   it('preserves an explicit non-newest selection across a live refetch', () => {
