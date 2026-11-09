@@ -41,7 +41,7 @@ export class DashboardComponent {
   private activity = viewChild(DashboardActivityComponent);
   private rail = viewChild(DashboardRailComponent);
   private reloadableRenderedDashboardSections = computed(() =>
-    [this.stats(), this.tasks(), this.rail()].filter((section) => section !== undefined),
+    [this.stats(), this.tasks(), this.activity(), this.rail()].filter((section) => section !== undefined),
   );
   private dashboardSectionComponentsWithErrorBannerNames = computed(() => [
     { component: this.stats(), name: 'statistics' },

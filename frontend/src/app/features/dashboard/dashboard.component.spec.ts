@@ -81,7 +81,7 @@ describe('DashboardComponent', () => {
     expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/settings/invites');
   });
 
-  it('reloads stats, tasks and rail while the tab stays open', () => {
+  it('reloads stats, tasks, activity and rail while the tab stays open', () => {
     vi.useFakeTimers();
     try {
       render({ projects: [{ name: 'p', display_name: 'P', starred: false, tier: 'member', status: null, task_count: 1 }], caches: [] });
@@ -89,7 +89,7 @@ describe('DashboardComponent', () => {
       expect(service.stats).toHaveBeenCalledTimes(2);
       expect(service.tasks).toHaveBeenCalledTimes(2);
       expect(service.rail).toHaveBeenCalledTimes(2);
-      expect(service.activity).toHaveBeenCalledTimes(1);
+      expect(service.activity).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }

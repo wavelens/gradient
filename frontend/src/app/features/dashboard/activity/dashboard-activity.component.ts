@@ -7,7 +7,8 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { AuthService } from '@core/services/auth.service';
 import { DashboardService } from '@core/services/dashboard.service';
-import { ActivityDay } from '@core/models';
+import { Activity, ActivityDay } from '@core/models';
+import { Observable, tap } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import {
   ScrollRegionDirective,
@@ -116,10 +117,18 @@ export class DashboardActivityComponent implements OnInit {
     this.load();
   }
 
+  reloadSilentlyKeepingContentOnError(): Observable<Activity> {
+    return this.dashboard.activity().pipe(
+      tap((a) => {
+        this.days.set(a.days);
+        this.failed.set(false);
+      }),
+    );
+  }
+
   load(): void {
     this.failed.set(false);
-    this.dashboard.activity().subscribe({
-      next: (a) => this.days.set(a.days),
+    this.reloadSilentlyKeepingContentOnError().subscribe({
       error: (e: { status?: number }) => {
         this.hidden.set(e?.status === 403);
         this.failed.set(e?.status !== 403);

@@ -49,6 +49,7 @@ describe('DashboardRailComponent', () => {
     expect(hrefs(root)).toContain('/project/infra/task/hosts');
     expect(root.querySelector('.tasks .n')?.textContent).toBe('Hosts');
     expect(hrefs(root)).toContain('/caches/main');
+    expect(Array.from(root.querySelectorAll('.n')).map((n) => n.getAttribute('title'))).toEqual(['Infra', 'Hosts', 'Main']);
   });
 
   it('keeps the order it received and counts tasks only when not nested', () => {

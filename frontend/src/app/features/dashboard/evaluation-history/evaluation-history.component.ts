@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, linkedSignal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { HistoryBar } from '@core/models';
 import { PHASE_COLOR, evaluationPhase } from '@shared/evaluation';
@@ -20,13 +20,13 @@ const MIN_HEIGHT_PCT = 15;
   imports: [RouterLink, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    <div class="history">
-      @for (b of view(); track b.id) {
+    <div class="history" (keydown)="onHistoryBarKeydown($event)">
+      @for (b of view(); track b.id; let i = $index) {
         <a
           class="bar"
           [style.background]="b.color"
           [style.height]="b.height"
-          tabindex="-1"
+          [tabindex]="i === evaluationHistoryBarIndexInTabOrder() ? 0 : -1"
           [routerLink]="links.task(project(), task(), b.id)"
           [grTooltip]="b.title"
           [attr.aria-label]="b.title"
@@ -41,6 +41,22 @@ export class EvaluationHistoryComponent {
   bars = input.required<HistoryBar[]>();
   project = input.required<string>();
   task = input.required<string>();
+
+  protected evaluationHistoryBarIndexInTabOrder = linkedSignal<HistoryBar[], number>({
+    source: this.bars,
+    computation: (bars, previous) => Math.min(previous?.value ?? bars.length - 1, bars.length - 1),
+  });
+
+  protected onHistoryBarKeydown(event: KeyboardEvent): void {
+    const last = this.bars().length - 1;
+    const current = this.evaluationHistoryBarIndexInTabOrder();
+    const next = { ArrowLeft: current - 1, ArrowRight: current + 1, Home: 0, End: last }[event.key];
+    if (next === undefined || last < 0) return;
+    event.preventDefault();
+    const index = Math.max(0, Math.min(last, next));
+    this.evaluationHistoryBarIndexInTabOrder.set(index);
+    (event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('a.bar')[index]?.focus();
+  }
 
   view = computed(() => {
     const bars = this.bars();
