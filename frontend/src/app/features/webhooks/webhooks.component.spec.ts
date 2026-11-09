@@ -387,7 +387,7 @@ describe('WebhooksComponent', () => {
     );
     expect(service.deliveries).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1', 1, 0);
     expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe('Failing');
-    expect(root.querySelector('.newest-delivery')?.textContent).toContain('Connection refused');
+    expect(root.querySelector('.newest-delivery')?.textContent).toContain('connection refused');
   });
 
   it('shows a failed test as the newest delivery with its reason', () => {

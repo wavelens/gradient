@@ -9,6 +9,6 @@ import { getLastErrorCause } from './error-cause';
 describe('getLastErrorCause', () => {
   it('Keep the last cause in an error chain', () => {
     expect(getLastErrorCause('send HTTP request: client error (Connect): dns error: Name or service not known')).toBe('Name or service not known');
-    expect(getLastErrorCause('timed out')).toBe('Timed out');
+    expect(getLastErrorCause('dns error: failed to lookup address: gradient.local')).toBe('gradient.local');
   });
 });

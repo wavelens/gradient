@@ -46,7 +46,7 @@ const footerButton = (label: string) =>
 describe('getDeliveryResultReason', () => {
   it('names the HTTP status, else the last cause of the error', () => {
     expect(getDeliveryResultReason({ ...failed, response_status: 500 })).toBe('HTTP 500');
-    expect(getDeliveryResultReason(failed)).toBe('Connection refused');
+    expect(getDeliveryResultReason(failed)).toBe('connection refused');
     expect(getDeliveryResultReason({ ...failed, error_message: null })).toBeNull();
   });
 });
@@ -56,7 +56,7 @@ describe('OutgoingWebhookDeliveryListDialog', () => {
     render(() => of([failed, delivered]));
     const [first, second] = rows();
     expect(first.textContent).toContain('Failure');
-    expect(first.textContent).toContain('Connection refused');
+    expect(first.textContent).toContain('connection refused');
     expect(first.querySelector('.reason')?.getAttribute('title')).toBe(failed.error_message);
     expect(second.textContent).toContain('Delivered');
     expect(second.textContent).toContain('HTTP 200');
