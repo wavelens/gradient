@@ -18,7 +18,7 @@ import {
   TableComponent,
 } from '@gradient/ui/ui';
 import { MetricChartComponent, type MetricChartType } from '@shared/ui';
-import { clockTime, formatMegabytes, formatPercent, formatQuantity, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { clockTime, formatMebibytes, formatPercent, formatQuantity, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { WorkerSamplePoint, WorkerConnectionEntry, WorkerMetricsResponse } from '@core/models';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { tap } from 'rxjs';
@@ -121,7 +121,7 @@ export class WorkerMetricsComponent implements OnInit {
   ));
 
   readonly percent = (value: number) => formatPercent(value / 100);
-  readonly megabytes = formatMegabytes;
+  readonly megabytes = formatMebibytes;
   readonly mbps = (value: number) => formatQuantity(value, 'Mbps');
 
   times = computed(() => this.samples().map((s) => clockTime(s.at)));

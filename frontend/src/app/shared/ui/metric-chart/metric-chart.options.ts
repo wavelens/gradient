@@ -130,7 +130,6 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
     const axisSeries = cfg.series.filter((s) => (s.axis === 'right') === opposite);
     const bytesPerValue = bytesPerFormatterInput.get(fmt);
     const byteTicks = bytesPerValue === undefined ? undefined : getByteAxisIntervalAndMax(axisSeries.flatMap(valuesOf), max, bytesPerValue);
-    const allValuesOnValueAxisAreZeroOrMissing = max === undefined && axisSeries.every((s) => valuesOf(s).every((v) => v === null || v === 0));
     return {
       type: 'value' as const,
       name: (!cfg.compact && title) || undefined,
@@ -139,7 +138,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
       ...(areAllSeriesValuesWholeNumbers(axisSeries) ? { minInterval: 1 } : {}),
       ...(byteTicks ? { interval: byteTicks.interval } : {}),
       nameTextStyle: { color: theme.text },
-      axisLabel: { ...axisLabel(theme), formatter: (v: number) => (allValuesOnValueAxisAreZeroOrMissing && v !== 0 ? '' : fmt(v)) },
+      axisLabel: { ...axisLabel(theme), formatter: (v: number) => fmt(v) },
       axisLine: axisLine(theme),
       splitNumber: cfg.compact ? COMPACT_AXIS_TICKS : AXIS_TICKS,
       splitLine: opposite ? { show: false } : splitLine(theme),

@@ -62,6 +62,15 @@ describe('BoardWorkersComponent - load range', () => {
     expect(cmp.capLoad().series[0].data).toEqual([0.3]);
   });
 
+  it('shows a feature no worker offers as no data instead of an idle 0 %', () => {
+    const { cmp, fixture } = setup();
+    cmp.load.set({ ...NOW, by_feature: [bucket('kvm', 0, 0), bucket('benchmark', 0, 0)] });
+    fixture.detectChanges();
+    expect(cmp.featLoad().series[0].data).toEqual([null, null]);
+    const chart = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-metric-chart')).at(-1)!;
+    expect(chart.textContent).toContain('No data');
+  });
+
   it('says the average failed instead of drawing empty radars like an idle fleet', () => {
     const { cmp, fixture } = setup(() => throwError(() => new Error('Internal server error')));
     cmp.setLoadRange('24h');

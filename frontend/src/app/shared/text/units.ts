@@ -21,13 +21,13 @@ export function formatBytes(bytes: Maybe): string {
   return `${significant(bytes / 1024 ** exp)} ${BYTE_UNITS[exp]}`;
 }
 
-export function formatMegabytes(mb: Maybe): string {
-  return mb == null ? '-' : formatBytes(mb * 1024 * 1024);
+export function formatMebibytes(mebibytes: Maybe): string {
+  return mebibytes == null ? '-' : formatBytes(mebibytes * 1024 * 1024);
 }
 
 export const bytesPerFormatterInput: ReadonlyMap<(value: number) => string, number> = new Map([
   [formatBytes, 1],
-  [formatMegabytes, 1024 * 1024],
+  [formatMebibytes, 1024 * 1024],
 ]);
 
 const pad = (n: number) => n.toString().padStart(2, '0');
@@ -66,7 +66,8 @@ export function formatQuantity(value: Maybe, unit: string): string {
     case 'bytes':
       return formatBytes(value);
     case 'MB':
-      return formatMegabytes(value);
+    case 'MiB':
+      return formatMebibytes(value);
     case 'ms':
       return formatDuration(value);
     case 'count':

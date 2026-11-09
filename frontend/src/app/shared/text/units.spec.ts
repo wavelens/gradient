@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { formatBytes, formatCount, formatDuration, formatMegabytes, formatPercent, formatQuantity } from './units';
+import { formatBytes, formatCount, formatDuration, formatMebibytes, formatPercent, formatQuantity } from './units';
 
 describe('formatBytes', () => {
   it('picks the largest binary unit that keeps the number readable', () => {
@@ -25,10 +25,10 @@ describe('formatBytes', () => {
   });
 });
 
-describe('formatMegabytes', () => {
+describe('formatMebibytes', () => {
   it('reads a worker RAM figure in the unit that fits', () => {
-    expect(formatMegabytes(64_000)).toBe('62.5 GiB');
-    expect(formatMegabytes(512)).toBe('512 MiB');
+    expect(formatMebibytes(64_000)).toBe('62.5 GiB');
+    expect(formatMebibytes(512)).toBe('512 MiB');
   });
 });
 
@@ -72,6 +72,7 @@ describe('formatQuantity', () => {
   it('routes each reported unit to its formatter', () => {
     expect(formatQuantity(2 * 1024 ** 3, 'bytes')).toBe('2.0 GiB');
     expect(formatQuantity(2048, 'MB')).toBe('2.0 GiB');
+    expect(formatQuantity(2048, 'MiB')).toBe('2.0 GiB');
     expect(formatQuantity(90_000, 'ms')).toBe('1m 30s');
     expect(formatQuantity(12_300, 'count')).toBe('12.3k');
   });

@@ -10,7 +10,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { BoardService } from '@core/services/board.service';
 import { firstLoad, requestFailedText } from '../first-load';
-import { clockTime, formatMegabytes, formatPercent } from '@shared/text';
+import { clockTime, formatMebibytes, formatPercent } from '@shared/text';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { BadgeComponent, LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent, SegmentedBarComponent, ratioSegments } from '@shared/ui';
@@ -155,7 +155,7 @@ export class BoardWorkersComponent implements OnInit {
   protected isAverageLoadForSelectedRangeLoading = computed(() =>
     this.loadRange() !== 'now' && this.averageLoad() === null && this.averageError() === null);
 
-  readonly megabytes = formatMegabytes;
+  readonly megabytes = formatMebibytes;
   readonly heldSegments = (d: DeviceClass) => ratioSegments(d.total - d.free, d.total);
   readonly getExecLabelsWithoutWorkerId = (w: BoardWorker) => (w.exec?.labels ?? []).filter((label) => label !== w.id);
   readonly percent = (value: number) => formatPercent(value / 100);
@@ -175,7 +175,7 @@ export class BoardWorkersComponent implements OnInit {
         {
           name: 'busy %',
           data: buckets.map((b) =>
-            b.capacity > 0 ? busyPercent(b.in_flight, b.capacity) : 0
+            b.capacity > 0 ? busyPercent(b.in_flight, b.capacity) : null
           ),
         },
       ],

@@ -27,7 +27,7 @@ import {
   formatBytes,
   formatCount,
   formatDuration,
-  formatMegabytes,
+  formatMebibytes,
   formatPercent,
   formatQuantity,
   serverTime,
@@ -315,11 +315,11 @@ interface RuleRow {
                 <tr><td class="label">CPU count</td><td class="mono">{{ s.worker_context.cpu_count }}</td></tr>
                 <tr><td class="label">CPU core score</td><td class="mono">{{ s.worker_context.cpu_core_score | number: '1.0-2' }}</td></tr>
                 <tr><td class="label">CPU usage</td><td class="mono">{{ s.worker_context.cpu_usage_pct != null ? (s.worker_context.cpu_usage_pct | number: '1.0-1') + ' %' : '-' }}</td></tr>
-                <tr><td class="label">RAM total</td><td class="mono">{{ formatMegabytes(s.worker_context.ram_total_mb) }}</td></tr>
-                <tr><td class="label">RAM free</td><td class="mono">{{ formatMegabytes(s.worker_context.ram_free_mb) }}</td></tr>
-                <tr><td class="label">RAM reserved</td><td class="mono">{{ formatMegabytes(s.worker_context.ram_reserved_mb) }}</td></tr>
-                <tr><td class="label">RAM reserved, unused</td><td class="mono">{{ formatMegabytes(s.worker_context.ram_reserved_unused_mb) }}</td></tr>
-                <tr><td class="label">RAM kept for held build</td><td class="mono">{{ formatMegabytes(s.worker_context.ram_reserved_for_waiting_build_mb) }}</td></tr>
+                <tr><td class="label">RAM total</td><td class="mono">{{ formatMebibytes(s.worker_context.ram_total_mb) }}</td></tr>
+                <tr><td class="label">RAM free</td><td class="mono">{{ formatMebibytes(s.worker_context.ram_free_mb) }}</td></tr>
+                <tr><td class="label">RAM reserved</td><td class="mono">{{ formatMebibytes(s.worker_context.ram_reserved_mb) }}</td></tr>
+                <tr><td class="label">RAM reserved, unused</td><td class="mono">{{ formatMebibytes(s.worker_context.ram_reserved_unused_mb) }}</td></tr>
+                <tr><td class="label">RAM kept for held build</td><td class="mono">{{ formatMebibytes(s.worker_context.ram_reserved_for_waiting_build_mb) }}</td></tr>
                 <tr><td class="label">Disk speed</td><td class="mono">{{ s.worker_context.disk_speed_mbps != null ? (s.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
                 <tr><td class="label">Upload speed</td><td class="mono">{{ s.worker_context.upload_speed_mbps != null ? (s.worker_context.upload_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
                 <tr><td class="label">Download speed</td><td class="mono">{{ s.worker_context.download_speed_mbps != null ? (s.worker_context.download_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
@@ -360,7 +360,7 @@ interface RuleRow {
               <gr-table class="kv">
                 <tbody>
                   <tr><td class="label">Cores</td><td class="mono">{{ e.cores }}</td></tr>
-                  <tr><td class="label">Peak RAM</td><td class="mono">{{ formatMegabytes(e.ram_mb) }}</td></tr>
+                  <tr><td class="label">Peak RAM</td><td class="mono">{{ formatMebibytes(e.ram_mb) }}</td></tr>
                   <tr><td class="label">Build time</td><td class="mono">{{ formatDuration(e.build_ms) }}</td></tr>
                   <tr><td class="label">Output size</td><td class="mono">{{ formatBytes(e.output_nar_bytes) }}</td></tr>
                   <tr><td class="label">Own builds</td><td class="mono">{{ e.own_samples }}</td></tr>
@@ -563,7 +563,7 @@ export class BoardJobDetailComponent implements OnInit {
   protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
   protected readonly scoreDigits = schedulerScoreDecimalPipeDigitsFormat;
   protected readonly formatBytes = formatBytes;
-  protected readonly formatMegabytes = formatMegabytes;
+  protected readonly formatMebibytes = formatMebibytes;
   protected readonly formatDuration = formatDuration;
   protected readonly removeAnsiEscapeSequences = removeAnsiEscapeSequences;
 
@@ -767,13 +767,13 @@ export class BoardJobDetailComponent implements OnInit {
     const rows: [string, Windowed, (v: number) => string][] = [
       ['Wait', inst.wait_secs, (v) => formatDuration(v * 1000)],
       ['Build time', inst.build_time_ms, formatDuration],
-      ['Peak RAM', inst.peak_ram_mb, formatMegabytes],
+      ['Peak RAM', inst.peak_ram_mb, formatMebibytes],
       ['CPU time', inst.cpu_time_ms, formatDuration],
       ['Avg CPU', inst.avg_cpu_pct, (v) => formatQuantity(v, '%')],
       ['Disk usage', inst.disk_bytes, formatBytes],
       ['OOM rate', inst.oom_rate, formatPercent],
       ['Closure size', inst.closure_size, formatBytes],
-      ['NAR size', inst.nar_size_mb, formatMegabytes],
+      ['NAR size', inst.nar_size_mb, formatMebibytes],
       ['Missing paths', inst.missing_paths, formatCount],
       ['Dependency count', inst.dependency_cnt, formatCount],
       ['Completed', inst.completed, formatCount],

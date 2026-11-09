@@ -5,7 +5,7 @@
  */
 
 import { buildMetricChartOption } from './metric-chart.options';
-import { formatBytes, formatMegabytes } from '@shared/text';
+import { formatBytes, formatMebibytes } from '@shared/text';
 
 const cats = ['10:00', '11:00', '12:00'];
 const one = [{ name: 'build', data: [1, 2, 3] }];
@@ -143,12 +143,10 @@ describe('buildMetricChartOption presentation', () => {
     expect((fractions.yAxis as any).minInterval).toBeUndefined();
   });
 
-  it('labels only the zero tick when every value on the axis is zero', () => {
+  it('labels every tick, also when every value on the axis is zero, so a named axis keeps its scale', () => {
     const zeros = buildMetricChartOption({ type: 'line', series: [{ name: 'deps', data: [0, 0, null] }], categories: cats }, THEME);
     const label = (zeros.yAxis as any).axisLabel.formatter;
-    expect([label(0), label(1)]).toEqual(['0', '']);
-    const counts = buildMetricChartOption({ type: 'line', series: [{ name: 'deps', data: [0, 1, null] }], categories: cats }, THEME);
-    expect((counts.yAxis as any).axisLabel.formatter(1)).toBe('1');
+    expect([label(0), label(1)]).toEqual(['0', '1']);
   });
 
   it('decides whole steps per axis on a dual-axis chart', () => {
@@ -197,7 +195,7 @@ describe('byte axes', () => {
   });
 
   it('measures megabyte values in bytes', () => {
-    const axis = axisFor([300, 700], formatMegabytes);
+    const axis = axisFor([300, 700], formatMebibytes);
     expect(axis.interval).toBe(200);
     expect(axis.max).toBe(800);
   });
