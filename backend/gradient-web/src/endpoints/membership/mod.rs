@@ -254,7 +254,7 @@ pub async fn insert_unique_row<T: Table>(
         .map_err(|e| WebError::from_db_err(e, taken))
 }
 
-pub async fn update_row<T: Table>(db: &WebDb, row: T::Active) -> WebResult<T::Row> {
+pub async fn update_row<T: Table>(db: &impl ConnectionTrait, row: T::Active) -> WebResult<T::Row> {
     Ok(gradient_db::rows::update::<T, _>(db, row).await?)
 }
 

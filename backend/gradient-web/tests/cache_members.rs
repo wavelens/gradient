@@ -243,6 +243,7 @@ async fn update_member_changes_role() {
         .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![other_user_row()]])
+        .append_query_results([vec![cache_row(false)]])
         .append_query_results([vec![target_member]])
         .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![updated_member]])
@@ -259,6 +260,30 @@ async fn update_member_changes_role() {
         .await;
 
     res.assert_status_ok();
+}
+
+#[tokio::test]
+async fn update_member_blocks_demoting_last_admin() {
+    let (db, auth) = signed_in();
+
+    let db = db
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
+        .append_query_results([vec![user()]])
+        .append_query_results([vec![cache_row(false)]])
+        .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_view_role()]])
+        .append_query_results([vec![count_row(1)]]);
+
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .patch("/api/v1/caches/test-cache/members")
+        .add_header("authorization", auth)
+        .json(&json!({"user": "testuser", "role": "View"}))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::CONFLICT);
 }
 
 #[tokio::test]

@@ -76,7 +76,7 @@ async fn find_membership<T: MemberTable>(
 }
 
 async fn find_role<T: RoleTable>(
-    db: &WebDb,
+    db: &impl ConnectionTrait,
     owner: T::Id,
     name: &str,
 ) -> WebResult<RoleFields<T::Id>> {
@@ -222,18 +222,25 @@ pub async fn change_role<O: Owner>(
     let db = &scope.db().web_db;
     let target_user = find_user_by_username(db, &body.user).await?;
 
-    let membership = find_membership::<O::Members>(db, owner, target_user.id)
+    let tx = db.inner().begin().await?;
+    O::lock_for_admin_change(&tx, owner).await?;
+    let membership = find_membership::<O::Members>(&tx, owner, target_user.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(O::RESOURCE))?;
 
     let previous_role_id = <O::Members as MemberTable>::fields(&membership).role;
-    let role = find_role::<O::Roles>(db, owner, &body.role).await?;
+    let role = find_role::<O::Roles>(&tx, owner, &body.role).await?;
+
+    if role.id != previous_role_id {
+        O::ensure_member_removable(&tx, owner, &membership).await?;
+    }
 
     update_row::<O::Members>(
-        db,
+        &tx,
         <O::Members as MemberTable>::assign_role(membership, role.id),
     )
     .await?;
+    tx.commit().await?;
 
     audit.write(O::ACTIONS.member_role_change, O::event_owner(owner), serde_json::json!({ (O::ID_KEY): owner.to_string(), "target_user_id": target_user.id.to_string(), "previous_role_id": previous_role_id.to_string(), "new_role": role.name, }))
     .await;
