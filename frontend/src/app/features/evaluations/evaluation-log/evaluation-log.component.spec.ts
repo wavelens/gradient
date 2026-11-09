@@ -802,7 +802,10 @@ describe('EvaluationLogComponent', () => {
   });
 
   describe('opened without a build', () => {
-    function setupEvaluationLogPageFixture(builds: BuildItem[]) {
+    function setupEvaluationLogPageFixture(
+      builds: BuildItem[],
+      getBuilds: () => Observable<unknown> = () => of({ builds, total: builds.length, active_count: 0 }),
+    ) {
       TestBed.configureTestingModule({
         imports: [EvaluationLogComponent],
         providers: [
@@ -816,7 +819,7 @@ describe('EvaluationLogComponent', () => {
           } },
           { provide: EvaluationsService, useValue: {
             getEvaluation: () => of({ id: 'eval-1', status: 'Failed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null }),
-            getBuilds: () => of({ builds, total: builds.length, active_count: 0 }),
+            getBuilds,
             getEvaluationMessages: () => of([]),
           } },
         ],
@@ -827,6 +830,36 @@ describe('EvaluationLogComponent', () => {
       fixture.componentInstance.ngOnInit();
       return fixture;
     }
+
+    it('shows a failed build list as an error with retry, never as "No builds"', () => {
+      const getBuilds = vi.fn(() => throwError(() => new ApiError('database is down', 500)));
+      const fixture = setupEvaluationLogPageFixture([], getBuilds);
+      fixture.detectChanges();
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.querySelector('.no-builds')).toBeNull();
+      expect(root.querySelector('.log-sidebar')?.textContent).toContain('Failed to load builds');
+      expect(root.querySelector('.log-sidebar')?.textContent).toContain('database is down');
+      getBuilds.mockReturnValue(of({ builds: [build('ok', 'hash-zlib.drv')], total: 1, active_count: 0 }) as never);
+      (Array.from(root.querySelectorAll('.log-sidebar button')) as HTMLButtonElement[])
+        .find((b) => b.textContent?.includes('Try Again'))?.click();
+      fixture.detectChanges();
+      expect(root.querySelector('.log-sidebar')?.textContent).toContain('zlib');
+      fixture.destroy();
+    });
+
+    it('shows a failed log request as an error with retry, not as an empty log', async () => {
+      const fixture = setupEvaluationLogPageFixture([build('bad', 'hash-openssl.drv', 'Building')]);
+      vi.mocked(globalThis.fetch).mockResolvedValue(new Response('{"message":"log store is down"}', { status: 500 }));
+      fixture.componentInstance.retryLog();
+      await new Promise((resolve) => setTimeout(resolve));
+      fixture.detectChanges();
+      const root = fixture.nativeElement as HTMLElement;
+      expect(fixture.componentInstance.logRequestError()).toBeInstanceOf(ApiError);
+      expect(root.querySelector('.log-area')?.textContent).toContain('Failed to load log');
+      expect(root.querySelector('.log-area')?.textContent).toContain('log store is down');
+      expect(root.querySelector('gr-log-viewer')).toBeNull();
+      fixture.destroy();
+    });
 
     it('Open the first failed build when no build is in progress.', () => {
       const fixture = setupEvaluationLogPageFixture([

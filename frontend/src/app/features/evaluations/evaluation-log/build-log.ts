@@ -5,15 +5,32 @@
  */
 
 import type { LogSearchHit } from '@core/models';
+import { ApiError } from '@core/services/api.service';
 import { type ServerLog, splitLogLines } from '@shared/log';
 import { environment } from '@environments/environment';
 
+async function serverReason(res: Response): Promise<string | null> {
+  try {
+    const message = (await res.json())?.message;
+    return typeof message === 'string' && message ? message : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchBuildLogResponseWithCookiesOrThrow(path: string): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetch(`${environment.apiUrl}/${path}`, { method: 'GET', credentials: 'include' });
+  } catch {
+    throw new ApiError('Failed to connect to the server. Check the connection and try again.', 0);
+  }
+  if (!res.ok) throw new ApiError((await serverReason(res)) ?? 'The server failed to send the log. Try again later.', res.status);
+  return res;
+}
+
 async function fetchLines(buildId: string, start: number, end: number): Promise<string[]> {
-  const res = await fetch(
-    `${environment.apiUrl}/builds/${buildId}/log/lines?start=${start}&end=${end}`,
-    { method: 'GET', credentials: 'include' },
-  );
-  if (!res.ok) return [];
+  const res = await fetchBuildLogResponseWithCookiesOrThrow(`builds/${buildId}/log/lines?start=${start}&end=${end}`);
   return splitLogLines(await res.text());
 }
 

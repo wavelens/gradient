@@ -19,7 +19,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, removeAnsiEscapeSequences, splitLogLines } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
-import { buildLog } from './build-log';
+import { buildLog, fetchBuildLogResponseWithCookiesOrThrow } from './build-log';
 import { lastRateLimitNote, rateLimitMarker } from './log-rate-limit';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -129,6 +129,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   buildsOpen = signal(false);
   logLineCount = signal(0);
   logLoading = signal(true);
+  logRequestError = signal<unknown>(null);
+  buildListError = signal<unknown>(null);
   aborting = signal(false);
   liveConnectionOpen = signal<boolean | null>(null);
   // The log page is reachable without the task route's access resolver, so the
@@ -498,6 +500,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       : Math.max(this.PAGE_SIZE, this.totalBuilds, this.activeBuildsCount());
     this.evalService.getBuilds(this.evaluationId, limit, 0, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
+        this.buildListError.set(null);
         this.totalBuilds = result.total;
         this.activeBuildsCount.set(result.active_count);
         if (!this.isRunning() && result.active_count === 0) this.stopLiveUpdates();
@@ -597,6 +600,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           this.doLoadMore();
         }
       },
+      error: (error: unknown) => this.buildListError.set(error),
     });
   }
 
@@ -805,6 +809,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     });
   }
 
+  retryLog(): void {
+    const buildId = this.selectedBuildId();
+    if (!buildId) return;
+    this.logLoading.set(true);
+    void this.fetchInitialLogs(buildId);
+  }
+
   private async fetchInitialLogs(buildId: string): Promise<void> {
     this.resetLogState();
     const selected = this.builds().find(b => b.id === buildId);
@@ -815,22 +826,18 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
 
     try {
-      const response = await fetch(`${environment.apiUrl}/builds/${buildId}/log`, {
-        method: 'GET',
-        credentials: 'include',
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (!data.error && typeof data.message === 'string' && data.message !== '') {
-          const lines = splitLogLines(data.message);
-          this.logLines.set(lines);
-          this.logLineCount.set(lines.length);
-          this.trackRateLimit(lines);
-        }
+      const data = await (await fetchBuildLogResponseWithCookiesOrThrow(`builds/${buildId}/log`)).json();
+      if (this.selectedBuildId() === buildId && !data.error && typeof data.message === 'string' && data.message !== '') {
+        const lines = splitLogLines(data.message);
+        this.logLines.set(lines);
+        this.logLineCount.set(lines.length);
+        this.trackRateLimit(lines);
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      if (this.selectedBuildId() !== buildId) return;
+      this.logRequestError.set(error);
+      this.logLoading.set(false);
+      return;
     }
 
     this.logLoading.set(false);
@@ -922,6 +929,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private resetLogState(): void {
+    this.logRequestError.set(null);
     this.logLines.set([]);
     this.serverLog.set(null);
     this.logLineCount.set(0);
@@ -931,12 +939,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private async fetchChunkedLog(buildId: string): Promise<boolean> {
     let index: LogChunkIndex;
     try {
-      const res = await fetch(`${environment.apiUrl}/builds/${buildId}/log/chunks`, {
-        method: 'GET',
-        credentials: 'include',
-      });
-      if (!res.ok) return false;
-      const data = await res.json();
+      const data = await (await fetchBuildLogResponseWithCookiesOrThrow(`builds/${buildId}/log/chunks`)).json();
       index = data.message as LogChunkIndex;
     } catch {
       return false;

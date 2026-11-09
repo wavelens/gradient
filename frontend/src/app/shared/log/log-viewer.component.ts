@@ -23,7 +23,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs';
 import type { LogSearchHit } from '@core/models';
-import { IconComponent, InputDirective, ScrollRegionDirective } from '@gradient/ui/ui';
+import { IconComponent, InputDirective, LoadStateComponent, ScrollRegionDirective } from '@gradient/ui/ui';
 import { ansiToHtml } from './ansi';
 import { parseLineFragment, searchLines, windowAround } from './log-window';
 
@@ -60,7 +60,7 @@ function extendsLog(shown: readonly string[], next: readonly string[]): boolean 
 @Component({
   selector: 'gr-log-viewer',
   standalone: true,
-  imports: [IconComponent, InputDirective, ScrollRegionDirective],
+  imports: [IconComponent, InputDirective, LoadStateComponent, ScrollRegionDirective],
   templateUrl: './log-viewer.component.html',
   styleUrl: './log-viewer.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -92,6 +92,7 @@ export class LogViewerComponent implements OnDestroy {
   searchTotal = signal(0);
   currentHit = signal(-1);
   searchLoading = signal(false);
+  logLinesRequestError = signal<unknown>(null);
 
   private memory: readonly string[] = [];
   private server: ServerLog | null = null;
@@ -159,6 +160,7 @@ export class LogViewerComponent implements OnDestroy {
     this.lineCount.set(0);
     this.windowStart = 1;
     this.windowLines.set([]);
+    this.logLinesRequestError.set(null);
     this.topSpacerPx.set(0);
     this.bottomSpacerPx.set(0);
     this.highlightLine.set(null);
@@ -220,10 +222,18 @@ export class LogViewerComponent implements OnDestroy {
         this.windowStart = start;
         this.windowLines.set([...rendered, ...this.windowLines()].slice(0, this.MAX_WINDOW));
       }
+      this.logLinesRequestError.set(null);
       this.updateSpacers();
+    } catch (error) {
+      this.logLinesRequestError.set(error);
     } finally {
       this.loadingWindow = false;
     }
+  }
+
+  retryLogLines(): void {
+    this.logLinesRequestError.set(null);
+    void this.showTailOrInitialLine();
   }
 
   private setWindowTrimmingTop(next: RenderedLine[]): void {

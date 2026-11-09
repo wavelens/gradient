@@ -63,6 +63,22 @@ describe('LogViewerComponent', () => {
     Element.prototype.scrollTo = vi.fn() as unknown as typeof Element.prototype.scrollTo;
   });
 
+  it('shows a failed line request as an error and loads the tail again on retry', async () => {
+    const log = serverLog(50);
+    const lines = log.lines.getMockImplementation()!;
+    log.lines.mockRejectedValue(new Error('database is down'));
+    const { fixture, viewer } = setup({ serverLog: log });
+    await settle(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load log');
+    expect(root.textContent).toContain('database is down');
+    log.lines.mockImplementation(lines);
+    (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).find((b) => b.textContent?.includes('Try Again'))?.click();
+    await settle(fixture);
+    expect(viewer.logLinesRequestError()).toBeNull();
+    expect(viewer.windowLines().at(-1)?.n).toBe(50);
+  });
+
   // Per-tick cost of a streaming log must stay O(new lines), never O(total lines).
   describe('streaming virtualization', () => {
     it('renders only the newly streamed lines, not the whole log', async () => {

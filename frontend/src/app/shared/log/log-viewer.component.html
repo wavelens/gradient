@@ -37,7 +37,9 @@
 }
 <div class="log-container" #logContainer grScrollRegion (scroll)="onLogScroll($event)"
      (wheel)="onLogWheel($event)" (pointerdown)="stopFollowScroll()" (keydown)="stopFollowScroll()">
-  @if (lineCount() > 0) {
+  @if (logLinesRequestError(); as error) {
+    <gr-load-state flat [error]="error" errorTitle="Failed to load log" (retry)="retryLogLines()" />
+  } @else if (lineCount() > 0) {
     <div class="log-spacer" [style.height.px]="topSpacerPx()"></div>
     <div class="log-lines">
       @for (ln of windowLines(); track ln.n) {
