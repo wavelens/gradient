@@ -67,12 +67,23 @@ describe('ConnectRepositoryComponent', () => {
   it('follows later URL edits until the user names the task', () => {
     const comp = render({}, {}).componentInstance;
     comp.repositoryChanged('file:///etc');
+    expect(comp.form.display_name).toBe('');
     comp.repositoryChanged('git://gradient.local/states');
     expect(comp.form.name).toBe('states');
     comp.form.display_name = 'My States';
     comp.repositoryChanged('git://gradient.local/other');
     expect(comp.form.display_name).toBe('My States');
     expect(comp.form.name).toBe('states');
+  });
+
+  it('refuses an invalid wildcard before asking the server', () => {
+    const createTask = vi.fn(() => of('id'));
+    const comp = render({}, { createTask }).componentInstance;
+    comp.repositoryChanged('ssh://git@forgejo.example.com/acme/my-app.git');
+    comp.form.wildcard = 'packages.#';
+    comp.createTask();
+    expect(comp.wildcardError).toContain('#');
+    expect(createTask).not.toHaveBeenCalled();
   });
 
   it('keeps the form and shows the reason when creating fails', () => {

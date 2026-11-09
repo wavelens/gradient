@@ -277,7 +277,7 @@
   }
 
   @if (type() !== 'open_pr') {
-    <gr-form-field label="Events">
+    <gr-form-field label="Events" [required]="!eventsHardwired()" [invalid]="!eventsHardwired() && showError('events')" [error]="errors().events ?? ''">
       <gr-label-help slot="label" doc="reference/events/#event-families" title="Event families" />
       @if (type() === 'git_host_status_report') {
         <app-action-events [selected]="displayedEvents()" [disabled]="true" [eventNamePrefixes]="taskFamilies" />
@@ -286,7 +286,7 @@
         <app-action-events
           [selected]="events()"
           [eventNamePrefixes]="taskFamilies"
-          (selectedChange)="events.set($event)"
+          (selectedChange)="events.set($event); touch('events')"
         />
       }
     </gr-form-field>

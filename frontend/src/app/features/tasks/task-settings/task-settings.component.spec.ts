@@ -34,7 +34,7 @@ function taskFor(c: AccessCase) {
     display_name: 'Demo',
     description: '',
     repository: 'git@example.org:demo.git',
-    wildcard: '',
+    wildcard: 'packages.x86_64-linux.**',
     active: true,
     force_evaluation: false,
     keep_evaluations: 30,
@@ -188,6 +188,19 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
     expect(fieldError(fixture)).toContain('number of evaluations');
     fixture.componentInstance.saveSettings();
     expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('marks an invalid wildcard on the field and focuses it instead of saving', async () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, undefined, updateTask);
+    Element.prototype.scrollIntoView = vi.fn();
+    await typeInto(fixture, '#task-wildcard', 'packages.#');
+    expect(fieldError(fixture)).toContain('`#`');
+    fixture.componentInstance.saveSettings();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(document.activeElement?.id).toBe('task-wildcard');
   });
 
   it('refuses an empty display name', async () => {

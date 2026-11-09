@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { links } from '@shared/routing';
@@ -28,7 +28,8 @@ import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError, apiErrorMessage } from '@core/services/api.service';
-import { NameFieldsComponent, fieldChecks, firstFieldError, nameAvailability } from '@shared/forms';
+import { NameFieldsComponent, fieldChecks, firstFieldError, injectRevealFirstInvalid, nameAvailability } from '@shared/forms';
+import { wildcardError } from '../wildcard-error';
 import { LabelHelpComponent } from '@shared/ui';
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { slugify } from '@shared/text';
@@ -81,6 +82,8 @@ export class ConnectRepositoryComponent implements OnInit {
   private projects = inject(ProjectsService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private revealFirstInvalid = injectRevealFirstInvalid();
   private project = injectProject();
 
   readonly steps = STEPS;
@@ -96,6 +99,7 @@ export class ConnectRepositoryComponent implements OnInit {
     RESERVED_TASK_NAMES,
   );
   form = { repository: '', display_name: '', name: '', wildcard: DEFAULT_WILDCARD };
+  private autofilledDisplayName = '';
   attempted = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
@@ -123,11 +127,17 @@ export class ConnectRepositoryComponent implements OnInit {
     }
   }
 
+  get wildcardError(): string | null {
+    const wildcard = this.form.wildcard.trim();
+    return wildcard ? wildcardError(wildcard) : null;
+  }
+
   repositoryChanged(url: string): void {
-    const previous = repositoryName(this.form.repository);
     this.form.repository = url;
+    const previous = this.autofilledDisplayName;
     if (this.form.display_name !== previous || this.form.name !== slugify(previous)) return;
-    const name = repositoryName(url);
+    const name = this.repositoryError ? '' : repositoryName(url);
+    this.autofilledDisplayName = name;
     this.form.display_name = name;
     this.form.name = slugify(name);
   }
@@ -135,7 +145,10 @@ export class ConnectRepositoryComponent implements OnInit {
   createTask(): void {
     if (this.creating() || this.names.blocksSubmit()) return;
     this.attempted.set(true);
-    if (!this.form.name || !this.form.display_name || this.repositoryError) return;
+    if (!this.form.name || !this.form.display_name || this.repositoryError || this.wildcardError) {
+      this.revealFirstInvalid(() => this.host.nativeElement);
+      return;
+    }
     this.creating.set(true);
     this.createError.set(null);
     this.tasks

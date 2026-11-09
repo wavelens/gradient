@@ -25,7 +25,7 @@
       <textarea grInput id="task-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
     </gr-form-field>
 
-    <gr-form-field label="Evaluation Wildcard" for="task-wildcard">
+    <gr-form-field label="Evaluation Wildcard" for="task-wildcard" required [invalid]="!!wildcardError" [error]="wildcardError ?? ''">
       <gr-label-help slot="label" doc="reference/wildcards/" title="Pattern for selecting which outputs to evaluate" />
       <input grInput id="task-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>

@@ -33,7 +33,8 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canOpenProjectSettings } from '@shared/access';
-import { fieldChecks, maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
+import { fieldChecks, injectRevealFirstInvalid, maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
+import { wildcardError } from '../wildcard-error';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { TaskResponse, ConcurrencyPolicy, PatchTaskRequest } from '@core/models';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
@@ -95,6 +96,8 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   private confirm = inject(ConfirmService);
   protected accessService = inject(AccessService);
   private injector = inject(Injector);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private revealFirstInvalid = injectRevealFirstInvalid();
   private saveArea = viewChild<ElementRef<HTMLElement>>('saveArea');
 
   access = injectTaskAccess();
@@ -146,8 +149,12 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     return fieldChecks.positiveInteger(keep) ?? (aboveServerLimit ? `This server can keep at most ${max} evaluations per task.` : null);
   }
 
+  get wildcardError(): string | null {
+    return wildcardError(this.formData.wildcard);
+  }
+
   get saveBlockedReason(): string | null {
-    return this.displayNameError || this.keepEvaluationsError ? 'Fix the marked fields to save.' : null;
+    return this.displayNameError || this.wildcardError || this.keepEvaluationsError ? 'Fix the marked fields to save.' : null;
   }
 
   canDeactivate(): boolean | Observable<boolean> {
@@ -204,7 +211,11 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   }
 
   saveSettings(): void {
-    if (this.saving() || !this.accessService.isWritable(this.access()) || this.saveBlockedReason) return;
+    if (this.saving() || !this.accessService.isWritable(this.access())) return;
+    if (this.saveBlockedReason) {
+      this.revealFirstInvalid(() => this.host.nativeElement);
+      return;
+    }
     const saved = this.savedForm;
     const patch: PatchTaskRequest = Object.fromEntries(
       Object.entries(this.formData).filter(([key, value]) => saved[key as keyof TaskForm] !== value),

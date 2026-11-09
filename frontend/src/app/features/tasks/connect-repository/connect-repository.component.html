@@ -41,7 +41,8 @@
               placeholder="ssh://git@forgejo.example.com/acme/app.git" (keyup.enter)="createTask()" />
           </gr-form-field>
           <app-name-fields noun="task" [names]="names" [submitAttempted]="attempted()" [(displayName)]="form.display_name" [(name)]="form.name" (submitted)="createTask()" />
-          <gr-form-field label="Evaluation Wildcard" for="connect-wildcard" hint="Output pattern to evaluate">
+          <gr-form-field label="Evaluation Wildcard" for="connect-wildcard" hint="Output pattern to evaluate"
+            [invalid]="!!wildcardError" [error]="wildcardError ?? ''">
             <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" />
             <input grInput id="connect-wildcard" [(ngModel)]="form.wildcard" (keyup.enter)="createTask()" />
           </gr-form-field>

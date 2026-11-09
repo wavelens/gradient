@@ -296,7 +296,7 @@ describe('ActionFormComponent - validation', () => {
     const fixture = createFixture(true);
     fixture.detectChanges();
     const { emitted, errors } = submitAndCollect(fixture);
-    expect(errors).toEqual(['Enter a name for the action.', 'Enter at least one recipient.']);
+    expect(errors).toEqual(['Enter a name for the action.', 'Enter at least one recipient.', 'Select at least one event.']);
     expect(emitted).toEqual([]);
   });
 
@@ -306,6 +306,7 @@ describe('ActionFormComponent - validation', () => {
     const c = fixture.componentInstance;
     c.name.set('Mail');
     c.recipientsRaw.set('ops@example.com, ops, team:platform');
+    c.events.set(['build.failed']);
     const { emitted, errors } = submitAndCollect(fixture);
     expect(errors).toEqual(['Not an email address or team:<name> entry: ops']);
     expect(emitted).toEqual([]);
@@ -318,6 +319,7 @@ describe('ActionFormComponent - validation', () => {
     c.name.set('Webhook');
     c.onTypeChange('send_web_request');
     c.url.set('not-a-url');
+    c.events.set(['build.failed']);
     const { emitted, errors } = submitAndCollect(fixture);
     expect(errors).toEqual([expect.stringContaining('https://')]);
     expect(emitted).toEqual([]);
@@ -332,6 +334,7 @@ describe('ActionFormComponent - validation', () => {
     c.homeserver.set('https://matrix.example.org');
     c.roomId.set('#ops:example.org');
     c.secretValue.set('syt_abc');
+    c.events.set(['build.failed']);
     const { emitted, errors } = submitAndCollect(fixture);
     expect(errors).toEqual([expect.stringContaining('Start the room ID with !')]);
     expect(emitted).toEqual([]);

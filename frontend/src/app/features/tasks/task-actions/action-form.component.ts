@@ -65,16 +65,17 @@ type ActionField =
   | 'slackUrl'
   | 'integration'
   | 'branchPattern'
-  | 'startTask';
+  | 'startTask'
+  | 'events';
 
 const FIELDS_OF_TYPE: Record<ActionType, ActionField[]> = {
-  send_mail: ['name', 'recipients'],
-  send_web_request: ['name', 'url'],
-  send_matrix_message: ['name', 'homeserver', 'roomId', 'matrixToken'],
-  send_slack_message: ['name', 'slackUrl'],
+  send_mail: ['name', 'recipients', 'events'],
+  send_web_request: ['name', 'url', 'events'],
+  send_matrix_message: ['name', 'homeserver', 'roomId', 'matrixToken', 'events'],
+  send_slack_message: ['name', 'slackUrl', 'events'],
   git_host_status_report: ['name', 'integration'],
   open_pr: ['name', 'integration', 'branchPattern'],
-  start_evaluation: ['name', 'startTask'],
+  start_evaluation: ['name', 'startTask', 'events'],
 };
 
 const required = (value: string, message: string): string | null => (value.trim() ? null : message);
@@ -236,6 +237,7 @@ export class ActionFormComponent implements OnChanges {
       integration: this.integrationId() ? null : 'Select an outbound integration.',
       branchPattern: this.branchPatternError(),
       startTask: this.startTask() ? null : 'Select a task.',
+      events: this.events().length ? null : 'Select at least one event.',
     };
   });
 

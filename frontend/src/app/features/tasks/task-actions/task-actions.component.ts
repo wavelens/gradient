@@ -225,6 +225,7 @@ export class TaskActionsComponent implements OnInit {
         this.saving.set(false);
         this.showEditDialog.set(false);
         this.editingAction.set(null);
+        this.notify.success('Action saved');
         this.loadActions();
       },
       error: (err) => {

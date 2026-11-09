@@ -21,7 +21,9 @@ import { TasksService } from '@core/services/tasks.service';
 import { TeamsService } from '@core/services/teams.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
-import type { ActionResponse, TaskDetailsResponse } from '@core/models';
+import type { ActionResponse, TaskDetailsResponse, UpdateActionRequest } from '@core/models';
+import { By } from '@angular/platform-browser';
+import { ActionFormComponent } from './action-form.component';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 
 function activatedRouteStub(access: AccessState, task: Partial<TaskDetailsResponse>): ActivatedRoute {
@@ -234,6 +236,14 @@ describe('TaskActionsComponent - write failures', () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
+  it('confirms a saved edit with a toast', () => {
+    const fixture = setup(writer);
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+    fixture.componentInstance.editingAction.set(action);
+    fixture.componentInstance.onEditSaved({ name: 'Renamed' } as UpdateActionRequest);
+    expect(success).toHaveBeenCalledWith('Action saved');
+  });
+
   it('sends one create when Create is clicked twice', () => {
     const fixture = setup(writer);
     const create = vi.fn(() => NEVER);
@@ -250,6 +260,7 @@ describe('TaskActionsComponent - write failures', () => {
     fill('#action-name', 'Notify');
     fill('#action-recipients', 'ops@example.com');
     fill('#action-url', 'https://example.com/hook');
+    fixture.debugElement.query(By.directive(ActionFormComponent)).componentInstance.events.set(['build.failed']);
     fixture.detectChanges();
     const submit = Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.includes('Create'))!;
     submit.click();
