@@ -11,10 +11,10 @@ pub mod workers;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::Query;
+use sea_orm::sea_query::{LockType, Query};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Select, Value,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, Select, Value,
 };
 use std::collections::HashMap;
 
@@ -165,6 +165,28 @@ pub async fn members_with_role<C: ConnectionTrait>(
         .filter(CProjectUser::Project.eq(project))
         .filter(CProjectUser::Role.eq(role))
         .all(db)
+        .await
+}
+
+pub async fn count_members_with_role<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+    role: RoleId,
+) -> Result<u64, DbErr> {
+    EProjectUser::find()
+        .filter(CProjectUser::Project.eq(project))
+        .filter(CProjectUser::Role.eq(role))
+        .count(db)
+        .await
+}
+
+pub async fn lock_for_admin_change<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+) -> Result<Option<MProject>, DbErr> {
+    EProject::find_by_id(project)
+        .lock(LockType::NoKeyUpdate)
+        .one(db)
         .await
 }
 

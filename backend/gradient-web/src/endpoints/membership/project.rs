@@ -13,6 +13,7 @@ use crate::permissions::{
     PermissionEntry, PermissionMask, available_permissions, is_builtin_role, mask_to_vec,
     parse_permission_list,
 };
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Readable, Requires, RequiresUnmanaged, can};
 use gradient_notify::InviteScope;
@@ -231,15 +232,25 @@ impl Owner for ProjectOwner {
         Ok(gradient_db::teams::grants::project_role_granted_to_a_team(db, role).await?)
     }
 
-    async fn lock_for_admin_change(_db: &impl ConnectionTrait, _owner: ProjectId) -> WebResult<()> {
+    async fn lock_for_admin_change(db: &impl ConnectionTrait, owner: ProjectId) -> WebResult<()> {
+        gradient_db::projects::lock_for_admin_change(db, owner).await?;
         Ok(())
     }
 
     async fn ensure_member_removable(
-        _db: &impl ConnectionTrait,
-        _owner: ProjectId,
-        _member: &MProjectUser,
+        db: &impl ConnectionTrait,
+        owner: ProjectId,
+        member: &MProjectUser,
     ) -> WebResult<()> {
+        if member.role == BASE_ROLE_ADMIN_ID {
+            let admin_count =
+                gradient_db::projects::count_members_with_role(db, owner, BASE_ROLE_ADMIN_ID)
+                    .await?;
+            if admin_count <= 1 {
+                return Err(SharedRefusal::LastAdmin(Resource::Project).into());
+            }
+        }
+
         Ok(())
     }
 }
