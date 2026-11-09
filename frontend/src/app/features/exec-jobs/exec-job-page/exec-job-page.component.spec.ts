@@ -282,6 +282,14 @@ describe('ExecJobPageComponent', () => {
     expect(fixture.componentInstance.logLines()).toEqual([]);
   });
 
+  it('labels the creation date apart from the CREATED status', () => {
+    const { fixture } = setup('created');
+    const labels = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.info-bar .metric-label'))
+      .map((label) => label.textContent?.trim());
+    expect(labels).toContain('Queued at');
+    expect(labels).not.toContain('Created');
+  });
+
   it('names the worker and keeps its id on hover', () => {
     const { fixture } = setup('running', SSH, {}, { ...job('running'), worker_name: 'gpu-box' });
     const worker = (fixture.nativeElement as HTMLElement).querySelector('.info-bar .worker');

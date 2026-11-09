@@ -117,7 +117,7 @@
             <span class="metric-value">{{ duration() }}</span>
           </div>
           <div class="info-metric">
-            <span class="metric-label">Created</span>
+            <span class="metric-label">Queued at</span>
             <span class="metric-value">{{ job.created_at | serverDate }}</span>
           </div>
           @if (job.worker) {
