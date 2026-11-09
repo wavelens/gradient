@@ -17,8 +17,8 @@ pub mod watchdog;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter, QueryOrder, QuerySelect,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, FromQueryResult,
+    IntoActiveModel, JoinType, QueryFilter, QueryOrder, QuerySelect, RelationTrait,
 };
 
 pub async fn by_id_in_task<C: ConnectionTrait>(
@@ -29,6 +29,32 @@ pub async fn by_id_in_task<C: ConnectionTrait>(
     EEvaluation::find_by_id(id)
         .filter(CEvaluation::Task.eq(task))
         .one(db)
+        .await
+}
+
+#[derive(Clone, Debug, FromQueryResult)]
+pub struct WaitingEvaluationListItem {
+    pub id: EvaluationId,
+    pub project: ProjectId,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+pub async fn list_waiting_evaluations_with_a_task<C: ConnectionTrait>(
+    db: &C,
+) -> Result<Vec<WaitingEvaluationListItem>, DbErr> {
+    EEvaluation::find()
+        .select_only()
+        .column(CEvaluation::Id)
+        .column(CEvaluation::CreatedAt)
+        .column_as(CTask::Project, "project")
+        .join(
+            JoinType::InnerJoin,
+            gradient_entity::evaluation::Relation::Task.def(),
+        )
+        .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
+        .order_by_asc(CEvaluation::CreatedAt)
+        .into_model::<WaitingEvaluationListItem>()
+        .all(db)
         .await
 }
 

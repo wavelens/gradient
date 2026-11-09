@@ -42,7 +42,7 @@ use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
 use sea_orm::ConnectionTrait;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -142,7 +142,7 @@ pub struct PendingJobsResponse {
     operation_id = "getBoardPendingJobs",
     tag = "board",
     summary = "Pending (unassigned) jobs",
-    description = "Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job. The values `project_name`, `task` and their display names come from the job evaluation. `waiting_reason` comes from the exec job for exec jobs and from the evaluation otherwise. `permissions` are the caller's permissions in its project.",
+    description = "Callers see queued jobs without a worker assignment yet, plus waiting evaluations not yet in the scheduler queue. Jobs outside the range go into one aggregate count, `other_pending`. Subjobs carry the cluster job name in `cluster_job`. The values of `project_name` and `task` and their display names come from the job evaluation. The sources for `waiting_reason` are the exec job for an exec job and the evaluation otherwise. Permissions in the caller's project appear in `permissions`.",
     responses((status = OK, description = "Pending jobs plus other_pending count", body = PendingJobsResponse), WebError)
 )]
 pub async fn get_pending_jobs(
@@ -152,9 +152,26 @@ pub async fn get_pending_jobs(
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<PendingJobsResponse>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
-    let (snapshot, hidden): (Vec<_>, Vec<_>) = scheduler
-        .pending_jobs_snapshot()
-        .await
+    let mut tracked = scheduler.pending_jobs_snapshot().await;
+    let tracked_evaluations: HashSet<EvaluationId> =
+        tracked.iter().map(|j| j.evaluation_id).collect();
+    let waiting = gradient_db::evaluations::list_waiting_evaluations_with_a_task(&state.web_db)
+        .await?
+        .into_iter()
+        .filter(|e| !tracked_evaluations.contains(&e.id))
+        .map(|e| PendingJobInfo {
+            kind: DispatchedJobKind::Eval,
+            evaluation_id: e.id,
+            derivation_build: None,
+            exec_job: None,
+            cluster_job: None,
+            project: e.project,
+            queued_at: e.created_at,
+            dependency_count: 0,
+            pname: None,
+        });
+    tracked.extend(waiting);
+    let (snapshot, hidden): (Vec<_>, Vec<_>) = tracked
         .into_iter()
         .partition(|j| scope.allows(&Uuid::from(j.project)));
     let other_pending = hidden.len() as u64;

@@ -59,7 +59,8 @@ async fn assign_decisions_superuser_returns_empty_ring() {
 async fn pending_jobs_of_an_idle_scheduler_are_empty() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
-    let db = with_user(mock_db(), session_id, superuser());
+    let db = with_user(mock_db(), session_id, superuser())
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
     let res = server

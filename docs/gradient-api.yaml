@@ -1727,7 +1727,7 @@ paths:
       tags:
       - board
       summary: Pending (unassigned) jobs
-      description: Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job. The values `project_name`, `task` and their display names come from the job evaluation. `waiting_reason` comes from the exec job for exec jobs and from the evaluation otherwise. `permissions` are the caller's permissions in its project.
+      description: Callers see queued jobs without a worker assignment yet, plus waiting evaluations not yet in the scheduler queue. Jobs outside the range go into one aggregate count, `other_pending`. Subjobs carry the cluster job name in `cluster_job`. The values of `project_name` and `task` and their display names come from the job evaluation. The sources for `waiting_reason` are the exec job for an exec job and the evaluation otherwise. Permissions in the caller's project appear in `permissions`.
       operationId: getBoardPendingJobs
       responses:
         '200':
