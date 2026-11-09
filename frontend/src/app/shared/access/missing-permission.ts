@@ -39,8 +39,12 @@ const minimumBuiltInRoleByPermissionWireName: Record<Permission | CachePermissio
   manageCacheWebhooks: 'Admin',
 };
 
+export function getLowestBuiltInRoleForPermissionWireName(permission: string): 'View' | 'Write' | 'Admin' {
+  return minimumBuiltInRoleByPermissionWireName[permission as Permission | CachePermission] ?? 'Admin';
+}
+
 export function getMembersWithPermissionPhrase(owner: Owner, permission?: Permission | CachePermission): string {
-  switch (permission ? minimumBuiltInRoleByPermissionWireName[permission] : 'Admin') {
+  switch (permission ? getLowestBuiltInRoleForPermissionWireName(permission) : 'Admin') {
     case 'View':
       return `members of this ${owner}`;
     case 'Write':

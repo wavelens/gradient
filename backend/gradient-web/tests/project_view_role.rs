@@ -10,6 +10,7 @@ use gradient_entity::ids::RoleId;
 use gradient_entity::role;
 use gradient_fixtures::ids::project_id;
 use gradient_fixtures::rows::{project, project_member, user, view_role, write_role};
+use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, signed_in_as};
 use gradient_types::permissions::{Permission, mask_from};
 use sea_orm::MockDatabase;
@@ -66,11 +67,22 @@ async fn a_view_member_cannot_change_integrations_ssh_key_or_subscriptions() {
 }
 
 #[tokio::test]
-async fn a_write_member_cannot_regenerate_the_ssh_key() {
+async fn a_write_member_regenerates_the_ssh_key() {
     let (db, auth) = member_with(&write_role());
-    let server = make_test_server(db.into_connection());
+    let db = db.append_query_results([vec![project()]]);
+    let crypt_file = std::env::temp_dir().join(format!("gradient-test-crypt-{}", Uuid::now_v7()));
+    std::fs::write(&crypt_file, "this-is-a-32-byte-crypt-key!!!!").expect("write temp secret");
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = crypt_file.to_string_lossy().into_owned())
+        .server();
 
-    assert_forbidden(&server, auth, "POST", &format!("{PROJECT}/ssh")).await;
+    let res = server
+        .post(&format!("{PROJECT}/ssh"))
+        .add_header("authorization", auth)
+        .await;
+
+    res.assert_status_ok();
 }
 
 #[tokio::test]

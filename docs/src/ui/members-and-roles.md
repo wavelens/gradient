@@ -44,7 +44,7 @@ Roles map to individual permissions. Each permission covers one area of the proj
 | `manageMembers`, `manageRoles` | Inviting members, editing custom roles |
 | `manageIntegrations`, `manageWebhooks` | Git host integrations and webhooks |
 | `manageWorkers`, `manageSubscriptions` | Workers and cache subscriptions |
-| `manageSshKey` | Regenerate the SSH key (with `manageProjectSettings`) |
+| `manageSshKey` | Regenerate the SSH key |
 | `createTask`, `editTask` | Creating and editing tasks |
 | `manageTriggers`, `manageActions` | Triggers and actions on tasks |
 | `triggerEvaluation` | Starting and aborting evaluations |
@@ -75,6 +75,7 @@ Each role combines the permissions below.
 
 - Edit and delete of built-in roles: not possible.
 - Delete a custom role only after removal of all member assignments.
+- Custom roles each contain `viewProject` or `viewCache`. Roles that leave one out get the missing one from the server.
 - Keep at least one Admin per cache. Removal of the last Admin fails.
 - Identity provider groups can supply roles. See [Set Up Single Sign-On](../guides/sso.md#3-map-groups-to-roles) for the group-to-role mapping.
 
