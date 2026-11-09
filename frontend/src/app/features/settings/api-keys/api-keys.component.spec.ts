@@ -288,6 +288,21 @@ describe('ApiKeysComponent - create errors', () => {
     expect(document.querySelector('.gr-dialog')?.textContent).toContain(reason);
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain(reason);
   });
+
+  it('shows a taken key name under the name field until the name changes', () => {
+    const reason = 'API key already exists';
+    const fixture = setup([], { createApiKey: () => throwError(() => new ApiError(reason, 409, 'already_exists')) });
+    const component = fixture.componentInstance;
+    component.openCreateDialog();
+    component.formName = 'deploy';
+    component.formPermissions = { viewProject: true };
+    component.saveKey();
+    fixture.detectChanges();
+    expect(component.nameError()).toBe(reason);
+    expect(component.errorMessage()).toBeNull();
+    component.formName = 'deploy-2';
+    expect(component.nameError()).toBeNull();
+  });
 });
 
 describe('ApiKeysComponent - dialogs', () => {

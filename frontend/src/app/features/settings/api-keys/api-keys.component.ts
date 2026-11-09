@@ -11,7 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
-import { apiErrorMessage } from '@core/services/api.service';
+import { ApiError, apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import {
   BadgeComponent,
@@ -35,7 +35,6 @@ import { AccessState, ApiKeyInfo, PatchApiKeyRequest, PermissionEntry } from '@c
 import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
 import { CreateCacheDialogComponent, fieldChecks, injectCanCreateCache, injectRevealFirstInvalid, isIpNetwork, splitLines } from '@shared/forms';
-import { links } from '@shared/routing';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
 type ScopeType = 'none' | 'project' | 'cache';
@@ -95,7 +94,6 @@ interface SelectOption {
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class ApiKeysComponent implements OnInit {
-  protected readonly links = links;
   private userService = inject(UserService);
   private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);
@@ -117,7 +115,7 @@ export class ApiKeysComponent implements OnInit {
   cacheOptions = signal<SelectOption[]>([]);
 
   scopeOptions: { label: string; value: ScopeType }[] = [
-    { label: 'None', value: 'none' },
+    { label: 'Any project', value: 'none' },
     { label: 'Project', value: 'project' },
     { label: 'Cache', value: 'cache' },
   ];
@@ -128,6 +126,7 @@ export class ApiKeysComponent implements OnInit {
   createdKeyValue = signal('');
   errorMessage = signal<string | null>(null);
   attempted = signal(false);
+  keyNameConflictError = signal<{ name: string; message: string } | null>(null);
   allowedIpsTouched = signal(false);
   private keyForm = viewChild<ElementRef<HTMLElement>>('keyForm');
   private revealFirstInvalid = injectRevealFirstInvalid();
@@ -217,6 +216,7 @@ export class ApiKeysComponent implements OnInit {
     this.formAllowedIps = '';
     this.errorMessage.set(null);
     this.attempted.set(false);
+    this.keyNameConflictError.set(null);
     this.allowedIpsTouched.set(false);
     this.showDialog.set(true);
   }
@@ -236,6 +236,7 @@ export class ApiKeysComponent implements OnInit {
     this.formAllowedIps = (key.allowed_ips ?? []).join('\n');
     this.errorMessage.set(null);
     this.attempted.set(false);
+    this.keyNameConflictError.set(null);
     this.allowedIpsTouched.set(false);
     this.showDialog.set(true);
   }
@@ -285,6 +286,8 @@ export class ApiKeysComponent implements OnInit {
   }
 
   nameError(): string | null {
+    const conflict = this.keyNameConflictError();
+    if (conflict && conflict.name === this.formName.trim()) return conflict.message;
     return this.attempted() && !this.formName.trim() ? 'Enter a name.' : null;
   }
 
@@ -331,7 +334,7 @@ export class ApiKeysComponent implements OnInit {
             this.loadKeys();
           },
           error: (err: unknown) => {
-            this.errorMessage.set(apiErrorMessage(err, 'Failed to save key.'));
+            this.showApiKeyNameConflictOrErrorMessage(err, name, 'Failed to save key.');
             this.saving.set(false);
           },
         });
@@ -348,11 +351,20 @@ export class ApiKeysComponent implements OnInit {
             this.loadKeys();
           },
           error: (err: unknown) => {
-            this.errorMessage.set(apiErrorMessage(err, 'Failed to create key.'));
+            this.showApiKeyNameConflictOrErrorMessage(err, name, 'Failed to create key.');
             this.creating.set(false);
           },
         });
     }
+  }
+
+  private showApiKeyNameConflictOrErrorMessage(err: unknown, name: string, fallback: string): void {
+    if (err instanceof ApiError && err.code === 'already_exists') {
+      this.keyNameConflictError.set({ name, message: err.message });
+      this.revealFirstInvalid(() => this.keyForm()?.nativeElement);
+      return;
+    }
+    this.errorMessage.set(apiErrorMessage(err, fallback));
   }
 
   revokeKey(key: ApiKeyInfo): void {
