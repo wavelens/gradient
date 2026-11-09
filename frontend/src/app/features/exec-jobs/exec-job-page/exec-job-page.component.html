@@ -129,7 +129,8 @@
             <a grButton label="Show job" icon="work" severity="secondary" size="small" [routerLink]="jobLink"></a>
           }
           @if (keepVmRunningToggleIsApplicable()) {
-            <button *appWritable="triggerAccess()" grButton label="Keep VM running" icon="push_pin" size="small"
+            <button *appWritable="triggerAccess()" grButton icon="push_pin" size="small"
+                    [label]="keepVmRunning() ? 'VM left running' : 'Keep VM running'"
                     [severity]="keepVmRunning() ? 'primary' : 'secondary'" [attr.aria-pressed]="keepVmRunning()"
                     [loading]="switchingKeep()" [disabled]="switchingKeep()" (click)="toggleKeepVmRunning()"></button>
           }

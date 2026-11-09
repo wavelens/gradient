@@ -164,7 +164,7 @@ function toasts() {
 }
 
 function keepButton(root: HTMLElement): HTMLButtonElement | undefined {
-  return Array.from(root.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Keep VM running'));
+  return root.querySelector<HTMLButtonElement>('.info-bar-right button[aria-pressed]') ?? undefined;
 }
 
 function nodeItem(root: HTMLElement, node: number): HTMLElement | undefined {
@@ -211,8 +211,10 @@ describe('ExecJobPageComponent', () => {
       const { fixture, keepVmRunning } = setup('running');
       const button = keepButton((fixture.nativeElement as HTMLElement).querySelector('.info-bar-right') as HTMLElement);
       expect(button?.getAttribute('aria-pressed')).toBe('false');
+      expect(button?.textContent).toContain('Keep VM running');
       button?.click();
       expect(keepVmRunning).toHaveBeenCalledWith('j1');
+      expect(toasts()).toContainEqual(expect.objectContaining({ severity: 'success', summary: 'VM running after program exit' }));
     });
 
     it('switches off again while the program runs, without a notice', () => {
@@ -221,8 +223,10 @@ describe('ExecJobPageComponent', () => {
       expect(root.querySelector('.kept-vm')).toBeNull();
       const button = keepButton(root);
       expect(button?.getAttribute('aria-pressed')).toBe('true');
+      expect(button?.textContent).toContain('VM left running');
       button?.click();
       expect(letVmStop).toHaveBeenCalledWith('j1');
+      expect(toasts()).toContainEqual(expect.objectContaining({ severity: 'success', summary: 'VM shutdown at program end' }));
     });
 
     it('shows the exit code of a kept VM and lets the VM stop', () => {

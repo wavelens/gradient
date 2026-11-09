@@ -286,6 +286,7 @@ export class ExecJobPageComponent implements OnInit {
     request.subscribe({
       next: () => {
         this.switchingKeep.set(false);
+        this.notify.success(keep ? 'VM running after program exit' : 'VM shutdown at program end');
         this.watch();
       },
       error: (error: unknown) => {
