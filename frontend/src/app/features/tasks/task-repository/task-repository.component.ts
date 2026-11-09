@@ -14,17 +14,18 @@ import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { RepositoryAccessComponent } from './repository-access.component';
 import { RepositoryEventsComponent } from './repository-events.component';
 import { repositoryHost } from '@shared/git';
-import { requestIfProjectMember } from '@shared/access';
+import { ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccessData } from '@core/resolvers/inject-access';
 
 @Component({
   selector: 'app-task-repository',
   standalone: true,
-  imports: [LoadStateComponent, PageLayoutComponent, RepositoryAccessComponent, RepositoryEventsComponent],
+  imports: [LoadStateComponent, PageLayoutComponent, RepositoryAccessComponent, RepositoryEventsComponent, ServerConfigurationManagedBannerComponent],
   template: `
     <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Repository"
       subtitle="Connect this task to the Git host for access, push-triggered builds and commit status.">
       @if (state(); as repo) {
+        <app-server-configuration-managed-banner [access]="taskAccess()?.access" kind="task" showReadOnlyNote />
         <app-repository-access [project]="projectName" [task]="taskName" [state]="repo"
           [gitHost]="gitHost()" (changed)="load()" />
         <app-repository-events [project]="projectName" [task]="taskName" [state]="repo" (saved)="state.set($event)" />
@@ -40,7 +41,7 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
   private route = inject(ActivatedRoute);
   private tasks = inject(TasksService);
   private crumbs = inject(BreadcrumbsService);
-  private taskAccess = injectTaskAccessData();
+  protected taskAccess = injectTaskAccessData();
 
   private access = viewChild(RepositoryAccessComponent);
   private events = viewChild(RepositoryEventsComponent);

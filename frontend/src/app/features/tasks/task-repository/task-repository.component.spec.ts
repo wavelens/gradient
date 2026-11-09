@@ -30,8 +30,8 @@ const state: TaskRepositoryResponse = {
   can_manage_integrations: true,
 };
 
-function render(getRepository: () => unknown, member = true) {
-  const data = taskAccessData({ managed: false, canEdit: member, canTrigger: member });
+function render(getRepository: () => unknown, member = true, canEdit = member) {
+  const data = taskAccessData({ managed: false, canEdit, canTrigger: canEdit });
   if (!member) data.taskAccess.task.permissions = [];
   TestBed.configureTestingModule({
     imports: [TaskRepositoryComponent],
@@ -71,6 +71,14 @@ describe('TaskRepositoryComponent', () => {
     expect(getRepository).not.toHaveBeenCalled();
     expect(el.textContent).toContain('Only the members of this project can view this.');
     expect(el.textContent).not.toContain('Try Again');
+  });
+
+  it('tells a view-only member once at the top that the page is read-only', () => {
+    const el = render(() => of({ ...state, can_edit: false, can_manage_integrations: false }), true, false).nativeElement as HTMLElement;
+    const banners = el.querySelectorAll('gr-message-banner');
+    expect(banners.length).toBe(1);
+    expect(banners[0].textContent).toContain("you can't change them");
+    expect(el.querySelector('[data-testid="read-only"]')).toBeNull();
   });
 
   it('asks before leaving with an unsaved repository URL', () => {

@@ -106,13 +106,7 @@ describe('RepositoryEventsComponent', () => {
 
   it('shows view-only members the state without a save button', () => {
     const el = render(repo({ can_edit: false, can_manage_integrations: false, integrations: [inbound] })).nativeElement as HTMLElement;
-    expect(el.querySelector('[data-testid="read-only"]')).not.toBeNull();
     expect(el.textContent).not.toContain('Save');
-  });
-
-  it('names the server configuration as the reason a managed task is read-only, not a missing role', () => {
-    const el = render(repo({ can_edit: false, integrations: [inbound] }), {}, true).nativeElement as HTMLElement;
-    expect(el.querySelector('[data-testid="read-only"]')?.textContent).toContain('managed by the server configuration');
   });
 
   it('turns on push and pull request builds when a connection is picked and saves them', () => {

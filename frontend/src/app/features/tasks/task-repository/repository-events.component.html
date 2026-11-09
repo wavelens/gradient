@@ -118,8 +118,6 @@
   @if (formError() ?? saveError(); as message) {
     <p class="text-secondary" role="alert">{{ message }}</p>
   }
-} @else {
-  <p class="text-secondary" data-testid="read-only">{{ repositoryEventSettingsReadOnlyReason() }}</p>
 }
 
 <gr-dialog [header]="'Connect ' + (host() ?? 'Git host')" [(visible)]="showConnect" [busy]="connecting()" [error]="connectError()" width="520px">
