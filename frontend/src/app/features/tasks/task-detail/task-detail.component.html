@@ -213,7 +213,7 @@
                       @let depTally = buildTally(counts);
                       <span class="pkg-deps" [title]="'Builds in total, including substituted ones: ' + depTally.overall">{{ depTally.done }} / {{ plural(depTally.total, 'build') }}@if (depTally.failed > 0) { · <span class="tally-failed">{{ depTally.failed }} failed</span> }</span>
                       <span class="pkg-time">
-                        {{ pkgDuration(ep) }}
+                        {{ pkgDuration(sel, ep) }}
                         @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }
                       </span>
                     }

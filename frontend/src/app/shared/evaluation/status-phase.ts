@@ -12,6 +12,7 @@ import type {
   ExecJobStatus,
 } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
+import { isRunningEvaluationStatus } from './duration';
 
 export type StatusPhase = 'queued' | 'waiting' | 'running' | 'success' | 'failure' | 'aborted';
 
@@ -119,6 +120,12 @@ export function entryPointPhaseWithExecJob(
 ): StatusPhase {
   const phase = entryPointPhase(ep);
   return phase === 'success' && execJobStatus ? execJobPhase(execJobStatus) : phase;
+}
+
+/// A finished evaluation stopped waiting for its unfinished work, even when another evaluation still builds the same package.
+export function phaseInFinishedEvaluation(phase: StatusPhase, evaluationStatus: EvaluationStatus): StatusPhase {
+  const unfinished = phase === 'queued' || phase === 'waiting' || phase === 'running';
+  return unfinished && !isRunningEvaluationStatus(evaluationStatus) ? 'aborted' : phase;
 }
 
 const PENDING_BUILD_STATUSES: ReadonlySet<string> = new Set<BuildStatus>(['Created', 'Queued', 'Building']);

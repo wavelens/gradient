@@ -7,8 +7,20 @@
 import type { BuildStatus, EvaluationStatus, ExecJobStatus } from '@core/models';
 import {
   buildPhase, entryPointPhase, entryPointPhaseWithExecJob, evaluationPhase, execJobPhase, isEvaluationNotStartedStatus, isPendingBuildStatus,
-  PHASE_COLOR, PHASE_SEVERITY, type StatusPhase,
+  PHASE_COLOR, PHASE_SEVERITY, phaseInFinishedEvaluation, type StatusPhase,
 } from './status-phase';
+
+describe('phaseInFinishedEvaluation', () => {
+  it.each<[StatusPhase, EvaluationStatus, StatusPhase]>([
+    ['running', 'Aborted', 'aborted'],
+    ['queued', 'Failed', 'aborted'],
+    ['waiting', 'Completed', 'aborted'],
+    ['failure', 'Aborted', 'failure'],
+    ['running', 'Building', 'running'],
+  ])('shows %s in a %s evaluation as %s', (phase, status, expected) => {
+    expect(phaseInFinishedEvaluation(phase, status)).toBe(expected);
+  });
+});
 
 describe('evaluationPhase', () => {
   it.each<[EvaluationStatus, StatusPhase]>([

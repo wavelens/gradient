@@ -58,7 +58,7 @@ import {
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhaseWithExecJob, evaluationDuration, evaluationPhase, evaluationTitle, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -589,7 +589,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return formatDuration(evaluationDuration(evaluation, isRunningEvaluationStatus(evaluation.status) ? this.tick() : 0));
   }
 
-  pkgDuration(ep: EntryPointSummary): string {
+  pkgDuration(evaluation: EvaluationSummary, ep: EntryPointSummary): string {
+    if (ep.build_status === 'Building' && !isRunningEvaluationStatus(evaluation.status)) return '';
     const ms = buildDuration({ status: ep.build_status, ...ep }, ep.build_status === 'Building' ? this.tick() : 0);
     return ms == null ? '' : formatDuration(ms);
   }
@@ -628,7 +629,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   protected readonly inputFetchPhase = inputFetchPhase;
 
   protected packagePhase(evaluation: EvaluationSummary, entry: EntryPointSummary): StatusPhase {
-    return evaluation.only_evaluate ? 'success' : entryPointPhaseWithExecJob(entry, this.execJobStatusByEntryPointAttributePath().get(entry.eval));
+    if (evaluation.only_evaluate) return 'success';
+    return phaseInFinishedEvaluation(entryPointPhaseWithExecJob(entry, this.execJobStatusByEntryPointAttributePath().get(entry.eval)), evaluation.status);
   }
 
   pkgMenuModel = signal<MenuItem[]>([]);
