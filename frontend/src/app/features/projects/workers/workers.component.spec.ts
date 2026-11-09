@@ -245,11 +245,12 @@ describe('WorkersComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'fire test')).toBeNull();
   });
 
-  it('disables Test worker until the worker is connected', async () => {
+  it('disables Test worker with a reason until the worker is connected', async () => {
     const online = { ...workerUnmanaged, worker_id: 'online', connected: true };
     const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [workerUnmanaged, online], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);
-    expect(itemOf(menuOf(fixture, workerUnmanaged), 'Test worker')?.disabled).toBe(true);
+    expect(itemOf(menuOf(fixture, workerUnmanaged), 'Test worker')?.disabledReason).toBe('Worker is offline');
+    expect(itemOf(menuOf(fixture, online), 'Test worker')?.disabledReason).toBeUndefined();
     expect(itemOf(menuOf(fixture, online), 'Test worker')?.disabled).toBe(false);
   });
 });

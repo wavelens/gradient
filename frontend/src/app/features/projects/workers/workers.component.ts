@@ -163,11 +163,18 @@ export class WorkersComponent implements OnInit {
     const busy = this.deletingId() !== null || this.togglingId() !== null || this.testingId() !== null;
     const canEdit = this.access().canEdit;
     const rowLocked = this.access().managed;
+    const testWorker: MenuItem = {
+      label: 'Test worker',
+      icon: 'bolt',
+      disabled: busy,
+      disabledReason: worker.connected ? undefined : 'Worker is offline',
+      command: () => this.fireTest(worker),
+    };
     if (worker.team) {
       const teamLink = this.teamGrants()?.teamLink(worker.team);
       return [
         ...(teamLink ? [{ label: 'Manage on team', icon: 'groups', routerLink: teamLink }] : []),
-        ...(canEdit ? [{ label: 'Test worker', icon: 'bolt', disabled: busy || !worker.connected, command: () => this.fireTest(worker) }] : []),
+        ...(canEdit ? [testWorker] : []),
       ];
     }
     if (!canEdit) return [];
@@ -179,7 +186,7 @@ export class WorkersComponent implements OnInit {
         disabled: busy,
         command: () => this.requestToggleWorker(worker),
       },
-      { label: 'Test worker', icon: 'bolt', disabled: busy || !worker.connected, command: () => this.fireTest(worker) },
+      testWorker,
       { separator: true },
       { label: 'Delete', icon: 'delete', danger: true, disabled: busy || rowLocked, command: () => this.deleteWorker(worker) },
     ];

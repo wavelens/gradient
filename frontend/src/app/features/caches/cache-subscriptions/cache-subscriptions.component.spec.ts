@@ -76,6 +76,13 @@ describe('CacheSubscriptionRequestsComponent', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Wavelens');
   });
 
+  it('names the requester by display name, falling back to the username', () => {
+    const { fixture } = setup([{ ...request, requested_by_display_name: 'Alice Doe' }, { ...request, project: 'docs' }]);
+    const meta = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('[slot="meta"]')).map((m) => m.textContent ?? '');
+    expect(meta[0]).toContain('Requested by Alice Doe');
+    expect(meta[1]).toContain('Requested by alice');
+  });
+
   it('shows the requested access mode so push access stands out from read-only', () => {
     const { fixture } = setup([request, { ...request, project: 'docs', project_display_name: 'Docs', mode: 'ReadOnly' }]);
     const badges = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-badge')).map((b) => b.textContent?.trim());
