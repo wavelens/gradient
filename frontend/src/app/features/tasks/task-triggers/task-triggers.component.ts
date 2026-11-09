@@ -42,6 +42,7 @@ import { RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 import { splitList } from '@shared/forms';
 import { gitHostLabel } from '@shared/git';
+import { getCiTriggerTypeLabel } from '@shared/evaluation';
 import { cronExpressionToPlainEnglish } from './cron-expression-description';
 
 interface Option<T> {
@@ -165,12 +166,9 @@ export class TaskTriggersComponent implements OnInit {
       : links.projectPage(this.projectName, 'integrations');
   });
 
-  typeOptions: Option<TriggerType>[] = [
-    { label: 'Polling', value: 'polling' },
-    { label: 'Push (reporter)', value: 'reporter_push' },
-    { label: 'Pull Request (reporter)', value: 'reporter_pull_request' },
-    { label: 'Time (cron)', value: 'time' },
-  ];
+  readonly typeLabel = getCiTriggerTypeLabel;
+  typeOptions: Option<TriggerType>[] = (['polling', 'reporter_push', 'reporter_pull_request', 'time'] as const)
+    .map((value) => ({ label: getCiTriggerTypeLabel(value), value }));
   readonly createTypeOptions = this.typeOptions.filter((o) => o.value === 'polling' || o.value === 'time');
 
   integrationOptions = computed<Option<string>[]>(() => {
@@ -434,15 +432,6 @@ export class TaskTriggersComponent implements OnInit {
         this.notify.failure('Failed to fire trigger', error);
       },
     });
-  }
-
-  typeLabel(type: TriggerType): string {
-    switch (type) {
-      case 'polling': return 'Polling';
-      case 'reporter_push': return 'Push';
-      case 'reporter_pull_request': return 'Pull Request';
-      case 'time': return 'Cron';
-    }
   }
 
   configSummary(trigger: TriggerOut): string {

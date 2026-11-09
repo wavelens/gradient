@@ -294,7 +294,7 @@ describe('TaskSettingsComponent - write failures', () => {
     tasks()['deleteTask'] = deleteTask;
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     findByText(fixture.nativeElement, 'delete task')!.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete Task', target: 'Demo' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete task', target: 'Demo' }));
     expect(deleteTask).toHaveBeenCalledWith('acme', 'demo');
     expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/project/acme');
   });

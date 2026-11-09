@@ -300,9 +300,9 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
 
   deleteTask(): void {
     this.confirm.confirm({
-      title: 'Delete Task',
+      title: 'Delete task',
       target: this.task()?.display_name || this.taskName,
-      consequence: 'The task and all of its evaluations get removed.',
+      consequence: 'All evaluations, triggers, actions, and overrides for flake inputs disappear along with the task.',
       isIrreversible: true,
       confirmLabel: 'Delete',
       failure: 'Failed to delete the task.',
