@@ -1287,7 +1287,7 @@ describe('EvaluationLogComponent', () => {
       fixture.detectChanges();
 
       const crumbs = Array.from(
-        (fixture.nativeElement as HTMLElement).querySelectorAll('.sidebar-breadcrumb .breadcrumb-link, .sidebar-breadcrumb .breadcrumb-current'),
+        (fixture.nativeElement as HTMLElement).querySelectorAll('nav[aria-label="Breadcrumb"] .breadcrumb-link, nav[aria-label="Breadcrumb"] .breadcrumb-current'),
       );
       expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Projects', 'MyProject', 'Nightly']);
       expect(crumbs.map((crumb) => crumb.getAttribute('href'))).toEqual([
