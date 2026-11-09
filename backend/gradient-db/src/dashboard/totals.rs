@@ -7,6 +7,7 @@
 use super::NON_PR;
 use super::stars::user_value;
 use chrono::NaiveDate;
+use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr, QueryResult};
@@ -48,11 +49,15 @@ pub fn totals_sql(filter: Option<&str>) -> String {
         "SELECT \
             sum(dm.cpu_time_ms)::bigint AS cpu_time_ms, \
             (sum(dm.cpu_time_ms) FILTER (WHERE dm.created_at > now() - interval '7 days'))::bigint AS cpu_time_ms_7d, \
-            count(*)::bigint AS builds_completed, \
+            (SELECT count(DISTINCT b.id) FROM build_job bj JOIN derivation_build b ON b.id = bj.derivation_build \
+                JOIN evaluation e ON e.id = bj.evaluation JOIN task t ON t.id = e.task \
+                WHERE b.status = {completed}{builds})::bigint AS builds_completed, \
             (SELECT coalesce((percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM (j.dispatched_at - j.queued_at)))) * 1000, 0)::bigint \
                 FROM dispatched_job j WHERE j.dispatched_at > now() - interval '24 hours'{jobs}) AS queue_wait_p50_ms \
         FROM derivation_metric dm \
         WHERE true{metrics}",
+        completed = crate::sql::status::build(BuildStatus::Completed),
+        builds = in_projects("t.project", filter),
         jobs = in_projects("j.project", filter),
         metrics = metrics_in_projects(filter),
     )
