@@ -115,6 +115,18 @@ describe('DashboardTaskTableComponent', () => {
     expect(values).toEqual(['Aborted', '']);
   });
 
+  it('puts a neutral icon in the status slot of a task that never ran', async () => {
+    const neverRun = { ...row('hosts'), latest: null, entry_points: null };
+    const { f, root } = render(null, () => of({ ...PAGE, tasks: [neverRun, row('docs')] }));
+    await settle(f);
+    const [first, second] = Array.from(root.querySelectorAll('gr-row'));
+    expect(first.querySelector('gr-status-icon')).toBeNull();
+    expect(first.querySelector('gr-icon.never-run [role="img"]')?.getAttribute('aria-label')).toBe('Never run');
+    expect(first.querySelector('.meta')?.textContent).toContain('No evaluations yet');
+    expect(second.querySelector('gr-status-icon')).not.toBeNull();
+    expect(second.querySelector('gr-icon.never-run')).toBeNull();
+  });
+
   it('leaves the filter to the server when the url has no filter and puts Starred first for a user with starred tasks', async () => {
     const { f, tasks, root } = render(null, () => of(STARRED));
     await settle(f);

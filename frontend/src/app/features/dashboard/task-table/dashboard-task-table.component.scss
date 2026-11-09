@@ -6,7 +6,7 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-$task-table-value-cell-grid-template-columns: 24cqi 8rem 5rem;
+$task-table-value-cell-grid-template-columns: min(24cqi, 14rem) 8rem 5rem;
 $linked-list-row-chevron-icon-width: 20px;
 
 .section {
@@ -27,7 +27,9 @@ $linked-list-row-chevron-icon-width: 20px;
 }
 
 .name {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto minmax(0, max-content);
+  justify-content: start;
   min-width: 0;
   white-space: nowrap;
 }
@@ -46,8 +48,8 @@ $linked-list-row-chevron-icon-width: 20px;
   color: var(--gr-text-muted);
 }
 
-.task {
-  min-width: min(6rem, 100%);
+.never-run {
+  color: var(--gr-text-muted);
 }
 
 .meta {
@@ -109,9 +111,17 @@ code {
 }
 
 @media (max-width: $breakpoint-md) {
+  .name {
+    display: flex;
+  }
+
   .name,
   .meta {
     flex-wrap: wrap;
+  }
+
+  .waiting {
+    white-space: normal;
   }
 
   .passed-on-phone {
