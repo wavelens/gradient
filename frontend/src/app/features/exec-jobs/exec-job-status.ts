@@ -5,7 +5,6 @@
  */
 
 import type { DeviceRequest, ExecJobStatus, ExecJobSummary, ExecUnmet, GuestSize, WaitingReason } from '@core/models';
-import type { StatusPhase } from '@shared/evaluation';
 import type { MenuItem } from '@gradient/ui/ui';
 import type { ConfirmRequest } from '@shared/confirm';
 import type { Observable } from 'rxjs';
@@ -21,18 +20,6 @@ export function abortExecJobConfirm<T>(target: string, action: () => Observable<
     severity: 'danger',
     action,
   };
-}
-
-export function execJobPhase(status: ExecJobStatus): StatusPhase {
-  switch (status) {
-    case 'created': return 'waiting';
-    case 'queued': return 'queued';
-    case 'starting':
-    case 'running': return 'running';
-    case 'completed': return 'success';
-    case 'failed': return 'failure';
-    case 'aborted': return 'aborted';
-  }
 }
 
 export function getExecJobStatusBadgeLabel(job: Pick<ExecJobSummary, 'status' | 'waiting_reason'>): string {

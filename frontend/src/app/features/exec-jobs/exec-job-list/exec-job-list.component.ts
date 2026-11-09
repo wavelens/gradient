@@ -9,13 +9,14 @@ import { RouterModule, type UrlTree } from '@angular/router';
 import { Subscription, catchError, interval, of, startWith, switchMap, takeWhile } from 'rxjs';
 import { BadgeComponent, IconComponent, MenuComponent, type MenuItem } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
+import { execJobPhase } from '@shared/evaluation';
 import type { ExecJobSummary } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
-import { abortExecJobConfirm, deviceLabel, execJobMenu, getExecJobStatusBadgeLabel, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
+import { abortExecJobConfirm, deviceLabel, execJobMenu, getExecJobStatusBadgeLabel, isOpenExecJob, waitingReasonText } from '../exec-job-status';
 
 const POLL_MS = 4000;
 

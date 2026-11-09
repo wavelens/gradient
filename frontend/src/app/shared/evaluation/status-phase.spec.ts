@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { BuildStatus, EvaluationStatus } from '@core/models';
-import { buildPhase, entryPointPhase, evaluationPhase, isEvaluationNotStartedStatus, isPendingBuildStatus, PHASE_COLOR, PHASE_SEVERITY, type StatusPhase } from './status-phase';
+import type { BuildStatus, EvaluationStatus, ExecJobStatus } from '@core/models';
+import {
+  buildPhase, entryPointPhase, entryPointPhaseWithExecJob, evaluationPhase, execJobPhase, isEvaluationNotStartedStatus, isPendingBuildStatus,
+  PHASE_COLOR, PHASE_SEVERITY, type StatusPhase,
+} from './status-phase';
 
 describe('evaluationPhase', () => {
   it.each<[EvaluationStatus, StatusPhase]>([
@@ -79,6 +82,36 @@ describe('entryPointPhase', () => {
     ['DependencyFailed', 1, 'failure'],
   ])('maps %s with %i building deps to %s', (build_status, building, phase) => {
     expect(entryPointPhase({ build_status, deps: deps(building) })).toBe(phase);
+  });
+});
+
+describe('execJobPhase', () => {
+  it.each<[ExecJobStatus, StatusPhase]>([
+    ['created', 'waiting'],
+    ['queued', 'queued'],
+    ['starting', 'running'],
+    ['running', 'running'],
+    ['completed', 'success'],
+    ['failed', 'failure'],
+    ['aborted', 'aborted'],
+  ])('maps %s to %s', (status, phase) => {
+    expect(execJobPhase(status)).toBe(phase);
+  });
+});
+
+describe('entryPointPhaseWithExecJob', () => {
+  const deps = { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0 };
+
+  it.each<[BuildStatus, ExecJobStatus | null, StatusPhase]>([
+    ['Completed', 'queued', 'queued'],
+    ['Substituted', 'created', 'waiting'],
+    ['Completed', 'running', 'running'],
+    ['Completed', 'failed', 'failure'],
+    ['Completed', null, 'success'],
+    ['Building', 'created', 'running'],
+    ['FailedPermanent', 'aborted', 'failure'],
+  ])('maps a %s build with a %s exec job to %s', (build_status, execJob, phase) => {
+    expect(entryPointPhaseWithExecJob({ build_status, deps }, execJob)).toBe(phase);
   });
 });
 

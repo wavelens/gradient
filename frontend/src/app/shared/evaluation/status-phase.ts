@@ -9,6 +9,7 @@ import type {
   EvaluationStatus,
   InputFetchState,
   EntryPointSummary,
+  ExecJobStatus,
 } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
 
@@ -98,6 +99,26 @@ export function inputFetchPhase(state: InputFetchState): StatusPhase {
 export function entryPointPhase(ep: Pick<EntryPointSummary, 'build_status' | 'deps'>): StatusPhase {
   const phase = buildPhase(ep.build_status);
   return phase === 'queued' && ep.deps.building > 0 ? 'running' : phase;
+}
+
+export function execJobPhase(status: ExecJobStatus): StatusPhase {
+  switch (status) {
+    case 'created': return 'waiting';
+    case 'queued': return 'queued';
+    case 'starting':
+    case 'running': return 'running';
+    case 'completed': return 'success';
+    case 'failed': return 'failure';
+    case 'aborted': return 'aborted';
+  }
+}
+
+export function entryPointPhaseWithExecJob(
+  ep: Pick<EntryPointSummary, 'build_status' | 'deps'>,
+  execJobStatus: ExecJobStatus | null | undefined,
+): StatusPhase {
+  const phase = entryPointPhase(ep);
+  return phase === 'success' && execJobStatus ? execJobPhase(execJobStatus) : phase;
 }
 
 const PENDING_BUILD_STATUSES: ReadonlySet<string> = new Set<BuildStatus>(['Created', 'Queued', 'Building']);

@@ -28,7 +28,7 @@ import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/
 import { LogViewerComponent, splitLogLines } from '@shared/log';
 import { WritableDirective, AccessService } from '@shared/access';
 import { formatDuration, plural, RelativeTimePipe, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { evaluationPhase, waitingAccessFrom } from '@shared/evaluation';
+import { evaluationPhase, execJobPhase, waitingAccessFrom } from '@shared/evaluation';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
@@ -37,7 +37,7 @@ import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import type { ExecJobAttemptView, ExecJobPullRequestView, ExecJobResponse } from '@core/models';
 import {
-  abortExecJobConfirm, execJobPhase, getExecJobStatusBadgeLabel, hasExecTerminal, isExecJobWaitingToStart, isOpenExecJob,
+  abortExecJobConfirm, getExecJobStatusBadgeLabel, hasExecTerminal, isExecJobWaitingToStart, isOpenExecJob,
 } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';

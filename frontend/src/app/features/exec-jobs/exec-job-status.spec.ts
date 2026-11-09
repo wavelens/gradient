@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { ExecJobStatus, WaitingReason } from '@core/models';
-import type { StatusPhase } from '@shared/evaluation';
+import type { WaitingReason } from '@core/models';
 import { EMPTY } from 'rxjs';
 import {
-  abortExecJobConfirm, deviceLabel, getExecJobStatusBadgeLabel, guestSizeLabel, isOpenExecJob, execJobPhase, waitingReasonText,
+  abortExecJobConfirm, deviceLabel, getExecJobStatusBadgeLabel, guestSizeLabel, isOpenExecJob, waitingReasonText,
 } from './exec-job-status';
 
 describe('abortExecJobConfirm', () => {
@@ -17,19 +16,7 @@ describe('abortExecJobConfirm', () => {
   });
 });
 
-describe('execJobPhase', () => {
-  it.each<[ExecJobStatus, StatusPhase]>([
-    ['created', 'waiting'],
-    ['queued', 'queued'],
-    ['starting', 'running'],
-    ['running', 'running'],
-    ['completed', 'success'],
-    ['failed', 'failure'],
-    ['aborted', 'aborted'],
-  ])('maps %s to %s', (status, phase) => {
-    expect(execJobPhase(status)).toBe(phase);
-  });
-
+describe('isOpenExecJob', () => {
   it('treats only completed, failed and aborted as finished', () => {
     expect(isOpenExecJob('created')).toBe(true);
     expect(isOpenExecJob('starting')).toBe(true);
