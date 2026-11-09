@@ -86,12 +86,13 @@ describe('DashboardTaskTableComponent', () => {
     expect(values).toEqual(['Eval error', '']);
   });
 
-  it('shows "-" for entry points of an aborted evaluation without entry points', async () => {
-    const aborted = { ...row('hosts'), entry_points: { ok: 0, failing: 0, total: 0 } };
+  it('shows only the status for an aborted newest evaluation, not its partial ratio and time', async () => {
+    const aborted = { ...row('hosts'), entry_points: { ok: 1, failing: 0, total: 3 } };
     aborted.latest = { ...aborted.latest!, status: 'Aborted' };
     const { f, root } = render(null, () => of({ ...PAGE, tasks: [aborted] }));
     await settle(f);
-    expect(root.querySelector('gr-row .value b')?.textContent?.trim()).toBe('-');
+    const values = Array.from(root.querySelectorAll('gr-row .value')).map((c) => c.textContent?.trim());
+    expect(values).toEqual(['Aborted', '']);
   });
 
   it('leaves the filter to the server when the url has no filter and puts Starred first for a user with starred tasks', async () => {

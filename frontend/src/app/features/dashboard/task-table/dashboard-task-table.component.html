@@ -46,9 +46,10 @@
             </span>
             <div slot="actions" class="cells">
               <app-evaluation-history [bars]="t.history" [project]="t.project" [task]="t.task" />
-              @let newestEvaluationFailedBeforeEntryPoints = t.latest?.status === 'Failed' && !t.entry_points?.total;
-              @if (newestEvaluationFailedBeforeEntryPoints) {
-                <span class="value"><b>Eval error</b></span>
+              @let latestEvaluationNoNumbersText =
+                t.latest?.status === 'Aborted' ? 'Aborted' : t.latest?.status === 'Failed' && !t.entry_points?.total ? 'Eval error' : null;
+              @if (latestEvaluationNoNumbersText) {
+                <span class="value"><b>{{ latestEvaluationNoNumbersText }}</b></span>
                 <span class="value"></span>
               } @else {
                 <span class="value">
