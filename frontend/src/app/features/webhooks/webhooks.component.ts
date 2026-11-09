@@ -77,6 +77,7 @@ export class WebhooksComponent implements OnInit {
 
   scope!: WebhookScopeRef;
   eventNamePrefixes: readonly string[] | undefined;
+  eventGlobsExamplesHint = '';
   title = '';
   breadcrumb = computed(() => this.trail());
 
@@ -139,6 +140,8 @@ export class WebhooksComponent implements OnInit {
         this.title = 'Instance event notifications';
     }
     this.eventNamePrefixes = this.scope.kind === 'instance' ? undefined : eventNamePrefixesByNotificationScope[this.scope.kind];
+    const examples = this.eventNamePrefixes ? this.eventNamePrefixes.slice(0, 2).map((prefix) => `${prefix}.*`) : ['build.*', 'cache.nar.*'];
+    this.eventGlobsExamplesHint = 'Comma-separated, e.g. ' + examples.join(', ');
     this.denied.set(this.missingPermission());
     this.load();
   }

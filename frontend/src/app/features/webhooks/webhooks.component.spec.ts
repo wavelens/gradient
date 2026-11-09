@@ -161,6 +161,19 @@ describe('WebhooksComponent', () => {
   });
 
   it.each([
+    { scope: 'project', hint: 'e.g. build.*, evaluation.*' },
+    { scope: 'cache', hint: 'e.g. cache.*, team.grant.*' },
+    { scope: 'team', hint: 'e.g. team.*' },
+    { scope: 'instance', hint: 'e.g. build.*, cache.nar.*' },
+  ])('suggests globs the $scope scope can receive', ({ scope, hint }) => {
+    const { fixture, component } = setup({ webhookScope: scope }, { [scope]: 'main' });
+    component.startCreate();
+    fixture.detectChanges();
+    const field = document.querySelector('#webhook-globs')!.closest('gr-form-field')!;
+    expect(field.textContent).toContain(hint);
+  });
+
+  it.each([
     { scope: 'project', groups: ['Build', 'Project', 'Cache'] },
     { scope: 'cache', groups: ['Cache'] },
     { scope: 'team', groups: ['Team'] },

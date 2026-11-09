@@ -77,7 +77,7 @@
       (selectedChange)="events.set($event)"
     />
   </gr-form-field>
-  <gr-form-field label="Event globs (optional)" for="webhook-globs" hint="Comma-separated, e.g. build.*, cache.nar.*">
+  <gr-form-field label="Event globs (optional)" for="webhook-globs" [hint]="eventGlobsExamplesHint">
     <input grInput id="webhook-globs" [ngModel]="globs()" (ngModelChange)="globs.set($event)" (keyup.enter)="save()" />
   </gr-form-field>
   <gr-checkbox label="Active" [ngModel]="active()" (ngModelChange)="active.set($event)" />
