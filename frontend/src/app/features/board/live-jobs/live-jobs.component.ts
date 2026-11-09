@@ -185,7 +185,7 @@ interface DecisionRow {
                   } @else if (p.dependency_count > 0) {
                     <span class="muted">Waiting for {{ plural(p.dependency_count, 'dependency', 'dependencies') }}</span>
                   } @else {
-                    <span class="muted">Waiting</span>
+                    <span class="muted">Queued, waiting for the scheduler</span>
                   }
                 </td>
                 <td class="age" [title]="p.queued_at | serverDate">{{ p.queued_at | relativeTime }}</td>

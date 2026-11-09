@@ -422,7 +422,7 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     TestBed.resetTestingModule();
     expect(pendingRow({ ...PENDING, dependency_count: 1 }).querySelector('td.waiting')?.textContent?.trim()).toBe('Waiting for 1 dependency');
     TestBed.resetTestingModule();
-    expect(pendingRow({ ...PENDING, dependency_count: 0 }).querySelector('td.waiting')?.textContent?.trim()).toBe('Waiting');
+    expect(pendingRow({ ...PENDING, dependency_count: 0 }).querySelector('td.waiting')?.textContent?.trim()).toBe('Queued, waiting for the scheduler');
   });
 
   it('names the project and task of a pending row by their display names', () => {
