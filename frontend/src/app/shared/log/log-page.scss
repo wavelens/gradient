@@ -100,6 +100,13 @@
   white-space: nowrap;
 }
 
+.metric-sep {
+  font-size: $font-size-xs;
+  color: var(--gr-text-muted);
+  margin: 0 2px;
+  white-space: nowrap;
+}
+
 .metric-value {
   min-width: 0;
   overflow: hidden;

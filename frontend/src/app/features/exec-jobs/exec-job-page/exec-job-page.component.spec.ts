@@ -348,7 +348,8 @@ describe('ExecJobPageComponent', () => {
     const metrics = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.info-bar .info-metric'))
       .map((metric) => Array.from(metric.querySelectorAll('.metric-label, .metric-value')).map((part) => part.textContent?.trim()).join(': '));
     expect(metrics).toContain('Program run: 3.0 s');
-    expect(metrics.some((metric) => metric.startsWith('Started: '))).toBe(true);
+    expect(metrics.some((metric) => metric.startsWith('First start: '))).toBe(true);
+    expect((fixture.nativeElement as HTMLElement).querySelector('.info-bar .metric-sep')?.textContent?.trim()).toBe('Attempt 2');
     expect(fixture.componentInstance.firstAttemptStartedAt()).toBe('2026-01-01T00:00:01');
   });
 

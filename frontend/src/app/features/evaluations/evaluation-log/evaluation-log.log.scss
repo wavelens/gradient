@@ -8,12 +8,6 @@
 
 // ── Log area ────────────────────────────────────────────────────────────────
 
-.metric-sep {
-  font-size: $font-size-xs;
-  color: var(--gr-text-muted);
-  margin: 0 2px;
-}
-
 .queued-hint {
   display: flex;
   flex-direction: column;

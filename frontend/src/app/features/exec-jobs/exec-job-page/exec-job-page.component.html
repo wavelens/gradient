@@ -116,15 +116,18 @@
               <span class="metric-value retries-left">{{ plural(job.retries_left, 'retry', 'retries') }} left</span>
             }
           </div>
+          @let attempt = highestNumberedAttempt();
+          @let laterAttempt = attempt && attempt.number > 1 ? attempt.number : null;
           @if (formattedProgramRunTime(); as programRun) {
             <div class="info-metric">
               <span class="metric-label">Program run</span>
               <span class="metric-value">{{ programRun }}</span>
+              @if (laterAttempt) { <span class="metric-sep">Attempt {{ laterAttempt }}</span> }
             </div>
           }
           @if (firstAttemptStartedAt(); as startedAt) {
             <div class="info-metric">
-              <span class="metric-label">Started</span>
+              <span class="metric-label">{{ laterAttempt ? 'First start' : 'Started' }}</span>
               <span class="metric-value">{{ startedAt | serverDate }}</span>
             </div>
           }
@@ -205,6 +208,7 @@
         } @else if (view() === 'timeline') {
           <div class="log-header">
             <span class="log-header-title">Worker timeline</span>
+            @if (laterAttempt) { <span class="metric-sep">Attempt {{ laterAttempt }}</span> }
             <gr-label-help doc="ui/job-board/#job-inspection" title="About the worker timeline" />
           </div>
           <div class="timeline">
