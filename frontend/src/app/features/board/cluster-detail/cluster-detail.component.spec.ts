@@ -79,6 +79,7 @@ describe('BoardClusterDetailComponent', () => {
     expect(rows.length).toBe(3);
     expect(root.querySelectorAll('tbody tr.clickable').length).toBe(2);
     expect(rows[2].textContent).toContain('Waiting for a worker');
+    expect(root.querySelector('a.project-link[href*="exec"]')?.textContent?.trim()).toBe('Nightly: apps.x86_64-linux.train');
   });
 
   it('tells a server failure apart from a missing cluster job', () => {

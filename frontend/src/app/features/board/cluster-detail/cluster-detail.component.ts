@@ -74,7 +74,7 @@ export function subJobRows(cluster: ClusterJobDetail): SubJobRow[] {
         @if (execJob(); as ex) {
           <div>
             <span class="label">Exec job</span>
-            <a class="mono project-link" [routerLink]="links.boardExecJob(ex)">{{ ex.task }}: {{ ex.entry_point }}</a>
+            <a class="project-link" [routerLink]="links.boardExecJob(ex)">{{ ex.task_display_name || ex.task }}: <span class="mono">{{ ex.entry_point }}</span></a>
           </div>
         } @else if (c.subject) {
           <div><span class="label">Subject</span><span class="mono">{{ c.subject }}</span></div>
