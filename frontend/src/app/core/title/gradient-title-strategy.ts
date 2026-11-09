@@ -12,6 +12,7 @@ import { TaskAccessData } from '@core/resolvers/task-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { TeamAccessData } from '@core/resolvers/team-access.resolver';
+import { EvaluationWithOptionalTask } from '@core/resolvers/evaluation-access.resolver';
 
 const BRAND = 'Gradient';
 const ENTITY_ONLY_ROUTE_TITLES = new Set(['Project', 'Task', 'Cache', 'Team']);
@@ -60,10 +61,15 @@ export function findFirstResolvedEntityInRouterSnapshotTree(snapshot: ActivatedR
       cacheAccess?: CacheAccessData;
       projectAccess?: ProjectAccessData;
       teamAccess?: TeamAccessData;
+      evaluationAccess?: EvaluationWithOptionalTask;
     };
     const param = (name: string) => s.paramMap.get(name) ?? '';
     if (data.taskAccess) {
       return { kind: 'task', urlNames: [param('project'), param('task')], displayName: data.taskAccess.task.display_name };
+    }
+    const evaluationTask = data.evaluationAccess?.task;
+    if (evaluationTask) {
+      return { kind: 'task', urlNames: [param('project'), evaluationTask.name], displayName: evaluationTask.display_name };
     }
     if (data.cacheAccess) return { kind: 'cache', urlNames: [param('cache')], displayName: data.cacheAccess.cache.display_name };
     if (data.projectAccess?.project) {

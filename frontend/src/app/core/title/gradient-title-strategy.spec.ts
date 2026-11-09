@@ -125,6 +125,18 @@ describe('findFirstResolvedEntityInRouterSnapshotTree', () => {
     expect(composeTitle(find(tree), 'Team Settings')).toBe('Research · Team Settings · Gradient');
   });
 
+  it('names the task of an evaluation log page', () => {
+    const tree = snap({}, [
+      snap({ evaluationAccess: { evaluation: {}, task: { name: 'build', display_name: 'Build' } } }, [], { project: 'alpha', evaluationId: 'e1' }),
+    ]);
+    expect(findFirstResolvedEntityInRouterSnapshotTree(tree as unknown as ActivatedRouteSnapshot)).toEqual({
+      kind: 'task',
+      urlNames: ['alpha', 'build'],
+      displayName: 'Build',
+    });
+    expect(composeTitle(find(tree), 'Evaluation log')).toBe('Build · Evaluation log · Gradient');
+  });
+
   it('returns undefined when no entity data is in the tree', () => {
     expect(find(snap())).toBeUndefined();
   });
