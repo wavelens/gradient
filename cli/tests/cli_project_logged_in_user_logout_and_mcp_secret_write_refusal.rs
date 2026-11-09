@@ -230,6 +230,11 @@ async fn mcp_refuses_secret_writes_even_with_flags_before_the_subcommand() {
         .expect(0)
         .mount(&server)
         .await;
+    Mock::given(method("POST"))
+        .respond_with(ok(json!({})))
+        .expect(0)
+        .mount(&server)
+        .await;
     let home = temp_home_with_wiremock_gradient_config_token_and_project(&server);
 
     for args in [
@@ -244,6 +249,21 @@ async fn mcp_refuses_secret_writes_even_with_flags_before_the_subcommand() {
             "v"
         ]),
         json!(["project", "secret", "delete", "K"]),
+        json!([
+            "webhook",
+            "create",
+            "--name",
+            "hook",
+            "--url",
+            "https://example.com"
+        ]),
+        json!([
+            "webhook",
+            "--team",
+            "ops",
+            "rotate-signing-secret",
+            "00000000-0000-0000-0000-000000000001"
+        ]),
     ] {
         run_gradient_with_temp_home_stdin_and_args(&home, &build_mcp_stdin_json_rpc_frames_for_initialize_initialized_and_run_gradient_command_call(args), &["mcp", "--control"])
             .success()

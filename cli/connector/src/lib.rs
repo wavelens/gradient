@@ -21,7 +21,9 @@ pub mod server;
 pub mod task_event_actions;
 pub mod task_repository;
 pub mod tasks;
+pub mod teams;
 pub mod user;
+pub mod webhooks;
 pub mod workers;
 
 mod http;
@@ -115,8 +117,14 @@ impl Client {
     pub fn server(&self) -> server::ServerApi<'_> {
         server::ServerApi(self)
     }
+    pub fn teams(&self) -> teams::TeamsApi<'_> {
+        teams::TeamsApi(self)
+    }
     pub fn user(&self) -> user::UserApi<'_> {
         user::UserApi(self)
+    }
+    pub fn webhooks(&self) -> webhooks::WebhooksApi<'_> {
+        webhooks::WebhooksApi(self)
     }
     pub fn workers(&self) -> workers::WorkersApi<'_> {
         workers::WorkersApi(self)

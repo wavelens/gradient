@@ -116,6 +116,13 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: cache::Commands,
     },
+    /// Manage a team and its members, invitations, grants and workers.
+    Team {
+        #[command(subcommand)]
+        cmd: team::Commands,
+    },
+    /// Manage webhooks for the selected project, or for the team set with --team.
+    Webhook(webhook::WebhookArgs),
     /// Submit a build request from the current git repository
     Build {
         /// Eval target attribute path (default: task's wildcard)
@@ -502,6 +509,8 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         MainCommands::Search { query, limit } => {
             search_command::run_gradient_search_command(query, limit, out).await
         }
+        MainCommands::Team { cmd } => team::handle(cmd, out).await,
+        MainCommands::Webhook(args) => webhook::handle(args, out).await,
         MainCommands::Builds { cmd } => builds::handle(cmd, out).await,
         MainCommands::Evaluation { cmd } => evaluation::handle(cmd, out).await,
         MainCommands::Generate { cmd } => generate::handle(cmd, out).await,

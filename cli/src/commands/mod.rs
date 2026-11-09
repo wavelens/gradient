@@ -38,5 +38,7 @@ pub mod saved_account_commands;
 pub mod search_command;
 pub mod task;
 pub mod task_subcommands;
+pub mod team;
 pub mod watch;
+pub mod webhook;
 pub mod worker;

@@ -38,8 +38,8 @@ Gradient CLI configuration.";
 
 const CONTROL_INSTRUCTIONS: &str = "The control tools are enabled. `start_evaluation` can queue an \
 evaluation and return its UUID. `watch_evaluation` can block until completion or timeout and return \
-the build status for each entry point. `abort_evaluation` can cancel one evaluation. Everything else \
-(creating or editing projects, tasks, caches, workers, etc.) can go through `run_gradient_command`. \
+the build status for each entry point. `abort_evaluation` can cancel one evaluation. Create and edit \
+everything else through `run_gradient_command` - projects, tasks, caches, workers, teams, webhooks and more. \
 Pass CLI arguments for `gradient`. An example is [\"task\", \"create\", \"--name\", \"web\", ...]. \
 The command [\"task\", \"--help\"] can list the subcommands and flags of a command group. \
 `--project` and `--task` can select targets without changing the current selection.";
@@ -49,6 +49,8 @@ const ALLOWED_GRADIENT_SUBCOMMANDS: &[&str] = &[
     "task",
     "cache",
     "worker",
+    "team",
+    "webhook",
     "builds",
     "evaluation",
     "logs",
@@ -60,6 +62,8 @@ const DENIED_GRADIENT_SUBCOMMANDS: &[&[&str]] = &[
     &["project", "secret", "set"],
     &["project", "secret", "delete"],
     &["task", "action", "create"],
+    &["webhook", "create"],
+    &["webhook", "rotate-signing-secret"],
 ];
 const GRADIENT_COMMAND_TIMEOUT_SECONDS: Duration = Duration::from_secs(600);
 const CLI_OUTPUT_SIZE_BEFORE_TEMP_FILE_BYTES: usize = 16 * 1024;
@@ -401,8 +405,8 @@ impl GradientMcp {
 
     #[tool(
         description = "Run a `gradient` CLI command with `--json` and return its output. The first \
-                       argument is the command group (project, task, cache, worker, builds, \
-                       evaluation, logs, search, status, info)."
+                       argument is the command group (project, task, cache, worker, team, \
+                       webhook, builds, evaluation, logs, search, status, info)."
     )]
     async fn run_gradient_command(
         &self,

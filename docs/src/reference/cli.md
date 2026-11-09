@@ -240,6 +240,49 @@ gradient account switch work
 | `gradient worker list` | - | Show every worker in the selected project |
 | `gradient worker delete <WORKER_ID>` | - | Remove a worker from the selected project |
 
+## Teams
+
+| Command | Options | Description |
+|---|---|---|
+| `gradient team list` | - | List your teams with your role in each |
+| `gradient team show <TEAM>` | - | Display the settings of a team |
+| `gradient team create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>` | Create a team and become its admin. Fields left empty open in `$EDITOR` |
+| `gradient team edit <TEAM>` | `--display-name <DISPLAY_NAME>`, `--new-project-users <BOOL>`, `--new-project-workers <BOOL>`, `--new-project-role <ROLE>`, `--oidc-group <GROUP>`, `--scim-group <GROUP>` | Change the settings of a team. Only superusers change the groups and the new project settings |
+| `gradient team delete <TEAM>` | - | Remove a team with its grants, grant requests, invitations and workers |
+| `gradient team members list <TEAM>` | - | Show the members of a team |
+| `gradient team members add <TEAM> <USER>` | `--role <ROLE>` | Invite a user, `member` by default. A superuser adds the user right away |
+| `gradient team members edit <TEAM> <USER>` | `--role <ROLE>` | Change the role of a member |
+| `gradient team members remove <TEAM> <USER>` | - | Remove a member |
+| `gradient team pending-invitations list <TEAM>` | - | Show the invitations not accepted yet |
+| `gradient team pending-invitations withdraw <TEAM> <USER>` | - | Withdraw the invitation of a user |
+| `gradient team grant-requests list <TEAM>` | - | Show the projects and caches asking to grant the team access |
+| `gradient team grant-requests approve <TEAM> <REQUEST_ID>` | - | Approve a grant request |
+| `gradient team grant-requests reject <TEAM> <REQUEST_ID>` | - | Reject a grant request |
+| `gradient team projects-and-caches <TEAM>` | - | Show the projects and caches that grant the team access |
+| `gradient team worker list <TEAM>` | - | Show the workers of a team |
+| `gradient team worker register <TEAM> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--url <URL>`, `--token <TOKEN>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Add a worker that builds for every project granting the team its workers |
+| `gradient team worker edit <TEAM> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--active <BOOL>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Change a team worker. Deactivating aborts its running jobs |
+| `gradient team worker delete <TEAM> <WORKER_ID>` | - | Remove a team worker |
+| `gradient team worker missing-worker-capabilities <TEAM>` | `--projects <PROJECTS>` | Show what waiting evaluations need that no connected worker offers |
+
+## Webhooks
+
+Webhook commands target the selected project. Pass `--team <TEAM>` to manage a team's webhooks instead.
+
+| Command | Options | Description |
+|---|---|---|
+| `gradient webhook list` | `--team <TEAM>` | List the webhooks with the result of their last delivery |
+| `gradient webhook show <ID>` | `--team <TEAM>` | Display one webhook |
+| `gradient webhook create` | `--name <NAME>`, `--url <URL>`, `--event <PATTERN>`, `--active <BOOL>`, `--team <TEAM>` | Create a webhook and print its signing secret once. Without `--event`, every event is sent |
+| `gradient webhook edit <ID>` | `--name <NAME>`, `--url <URL>`, `--event <PATTERN>`, `--all-events`, `--active <BOOL>`, `--team <TEAM>` | Change a webhook. `--event` replaces all event patterns |
+| `gradient webhook delete <ID>` | `--team <TEAM>` | Remove a webhook |
+| `gradient webhook rotate-signing-secret <ID>` | `--team <TEAM>` | Replace the signing secret and print the new one once |
+| `gradient webhook send-test-ping <ID>` | `--team <TEAM>` | Send a `webhook.ping` event right away and print the delivery attempt |
+| `gradient webhook delivery-attempts list <ID>` | `--limit <LIMIT>`, `--offset <OFFSET>`, `--team <TEAM>` | List the delivery attempts of a webhook |
+| `gradient webhook delivery-attempts show <ID> <DELIVERY_ID>` | `--team <TEAM>` | Print one delivery attempt with its request and response body |
+
+- The agent can run `team` and `webhook` commands through `gradient mcp --control`, except `webhook create` and `webhook rotate-signing-secret`. Those two commands output a signing secret, so the MCP server cannot accept them.
+
 ## Tools
 
 | Command | Options | Description |
