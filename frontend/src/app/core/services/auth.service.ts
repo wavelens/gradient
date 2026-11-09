@@ -112,10 +112,18 @@ export class AuthService {
   }
 
   sessionLost(returnUrl: string): void {
+    this.toLogin(returnUrl, this.clearStoredUserAndTokenAndReturnExpiredReason());
+  }
+
+  forgetRejectedSessionAndGetSignInPageUrl(returnUrl: string): UrlTree {
+    return links.login(returnUrl, this.clearStoredUserAndTokenAndReturnExpiredReason());
+  }
+
+  private clearStoredUserAndTokenAndReturnExpiredReason(): 'expired' | undefined {
     const wasSignedIn = this.isAuthenticated();
     this.forget();
     if (wasSignedIn) this.api.post('auth/logout', {}, asSessionProbe()).subscribe({ error: () => undefined });
-    this.toLogin(returnUrl, wasSignedIn ? 'expired' : undefined);
+    return wasSignedIn ? 'expired' : undefined;
   }
 
   stillSignedIn(): Observable<boolean> {

@@ -31,7 +31,7 @@ describe('evaluationAccessResolver', () => {
         provideRouter([]),
         { provide: EvaluationsService, useValue: { getEvaluation: () => of(evaluation) } },
         { provide: TasksService, useValue: { getTask } },
-        { provide: AuthService, useValue: { initialized$: of(true), isAuthenticated: () => true } },
+        { provide: AuthService, useValue: { initialized$: of(true), isAuthenticated: () => true, stillSignedIn: () => of(true) } },
       ],
     });
   });

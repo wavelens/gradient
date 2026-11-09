@@ -6,7 +6,7 @@
 
 import { inject } from '@angular/core';
 import { RedirectCommand, Router } from '@angular/router';
-import { EMPTY, Observable, OperatorFunction, catchError, map, of } from 'rxjs';
+import { EMPTY, Observable, OperatorFunction, catchError, map, of, switchMap } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 
@@ -36,7 +36,12 @@ export function denyOnRefusal<T>(target: DeniedTarget, from: string): OperatorFu
   return catchError((error: unknown): Observable<RedirectCommand> => {
     if (error instanceof ApiError && entityLookupNotFoundOrForbiddenStatusCodes.has(error.status)) {
       return auth.initialized$.pipe(
-        map(() => (auth.isAuthenticated() ? deniedPage(router, target, from) : new RedirectCommand(auth.getSignInPageUrl(from)))),
+        switchMap(() => (auth.isAuthenticated() ? auth.stillSignedIn() : of(false))),
+        map((signedIn) => {
+          if (signedIn) return deniedPage(router, target, from);
+          if (auth.isAuthenticated()) return new RedirectCommand(auth.forgetRejectedSessionAndGetSignInPageUrl(from));
+          return new RedirectCommand(auth.getSignInPageUrl(from));
+        }),
       );
     }
     if (error instanceof ApiError && error.unreachable) return EMPTY;

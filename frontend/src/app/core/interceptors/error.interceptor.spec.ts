@@ -64,6 +64,13 @@ describe('errorInterceptor on a lost session', () => {
     expect(auth.sessionLost).toHaveBeenCalledWith('/caches');
   });
 
+  it('hands a 401 on an error page to the session with the page the error page stands in for', async () => {
+    const { router, auth } = setup();
+    vi.spyOn(router, 'url', 'get').mockReturnValue('/error/404?kind=task&name=app&from=%2Fproject%2Facme%2Ftask%2Fapp');
+    await send(failWith(401)).catch(() => undefined);
+    expect(auth.sessionLost).toHaveBeenCalledWith('/project/acme/task/app');
+  });
+
   it('leaves a rejected session probe to the route guards', async () => {
     const { auth } = setup();
     await send(failWith(401), asSessionProbe()).catch(() => undefined);

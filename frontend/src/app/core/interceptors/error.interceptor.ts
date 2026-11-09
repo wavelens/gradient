@@ -6,7 +6,7 @@
 
 import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { Injector, inject } from '@angular/core';
-import { Router } from '@angular/router';
+import { PRIMARY_OUTLET, Router } from '@angular/router';
 import { MessageService } from '@gradient/ui/ui';
 import { Observable, catchError, retry, throwError, timer } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
@@ -28,8 +28,10 @@ export function throttleWaitMs(error: HttpErrorResponse): number {
 }
 
 function pageUrl(router: Router): string {
-  const pending = router.currentNavigation()?.finalUrl;
-  return pending ? router.serializeUrl(pending) : router.url;
+  const tree = router.currentNavigation()?.finalUrl ?? router.parseUrl(router.url);
+  if (tree.root.children[PRIMARY_OUTLET]?.segments[0]?.path !== 'error') return router.serializeUrl(tree);
+  const from = tree.queryParamMap.get('from');
+  return from?.startsWith('/') && !from.startsWith('/error/') ? from : '/';
 }
 
 /// Only reads that render the page can replace the page with an error page or show the throttle notice. The interceptor can retry reads after a rate limit. Writes have no retry. The server can apply a resent write twice. The interceptor can rethrow later reads (polling, retry, search in the command palette) to the inline error state on the page.

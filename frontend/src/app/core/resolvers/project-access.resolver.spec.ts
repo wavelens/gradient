@@ -12,6 +12,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { projectAccessResolver, ProjectAccessData } from './project-access.resolver';
 import { ProjectResponse } from '@core/models';
+import { links } from '@shared/routing';
 
 function snap(params: Record<string, string>): ActivatedRouteSnapshot {
   return { paramMap: convertToParamMap(params) } as ActivatedRouteSnapshot;
@@ -42,13 +43,26 @@ describe('projectAccessResolver', () => {
     permissions: [],
   };
 
+  let auth: {
+    initialized$: Observable<boolean>;
+    isAuthenticated: () => boolean;
+    stillSignedIn: ReturnType<typeof vi.fn>;
+    forgetRejectedSessionAndGetSignInPageUrl: ReturnType<typeof vi.fn>;
+  };
+
   beforeEach(() => {
     getProject = vi.fn(() => of(baseProject));
+    auth = {
+      initialized$: of(true),
+      isAuthenticated: () => true,
+      stillSignedIn: vi.fn(() => of(true)),
+      forgetRejectedSessionAndGetSignInPageUrl: vi.fn((next: string) => links.login(next, 'expired')),
+    };
     TestBed.configureTestingModule({
       providers: [
         provideRouter([]),
         { provide: ProjectsService, useValue: { getProject } },
-        { provide: AuthService, useValue: { initialized$: of(true), isAuthenticated: () => true } },
+        { provide: AuthService, useValue: auth },
       ],
     });
   });
@@ -65,5 +79,13 @@ describe('projectAccessResolver', () => {
     expect(result).toBeInstanceOf(RedirectCommand);
     expect(result.navigationBehaviorOptions?.browserUrl).toBe('/project/missing');
     expect(TestBed.inject(Router).serializeUrl(result.redirectTo)).toContain('/error/404?kind=project&name=missing&back=%2Fprojects');
+  });
+
+  it('sends a user whose session expired to sign-in and back to the project', async () => {
+    getProject.mockReturnValue(throwError(() => new ApiError('Project not found', 404)));
+    auth.stillSignedIn.mockReturnValue(of(false));
+    const result = (await runResolver(snap({ project: 'missing' }))) as unknown as RedirectCommand;
+    expect(auth.forgetRejectedSessionAndGetSignInPageUrl).toHaveBeenCalledWith('/project/missing');
+    expect(TestBed.inject(Router).serializeUrl(result.redirectTo)).toBe('/account/login?next=%2Fproject%2Fmissing&reason=expired');
   });
 });
