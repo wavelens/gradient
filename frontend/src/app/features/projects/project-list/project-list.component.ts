@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, OnInit, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -27,7 +27,7 @@ import {
   PageLayoutComponent,
   SelectComponent,
 } from '@gradient/ui/ui';
-import { NameFieldsComponent, nameAvailability, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
+import { NameFieldsComponent, injectRevealFirstInvalid, nameAvailability, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
 import { ProjectSummary, PublicProjectSummary } from '@core/models';
 import { links } from '@shared/routing';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -72,6 +72,8 @@ export class ProjectListComponent implements OnInit {
   private notify = inject(NotifyService);
   private router = inject(Router);
   protected names = nameAvailability((name) => this.projectsService.checkProjectNameAvailable(name));
+  private revealFirstInvalid = injectRevealFirstInvalid();
+  private createForm = viewChild<ElementRef<HTMLElement>>('createForm');
 
   get canCreateProject(): boolean {
     if (!this.authService.isAuthenticated()) return false;
@@ -119,23 +121,19 @@ export class ProjectListComponent implements OnInit {
     return this.publicProjects.items().filter((o) => !ownedIds.has(o.id));
   }
 
-  get missingNamesError(): string | null {
-    const missing = !this.newProject.name || !this.newProject.display_name;
-    return this.createAttempted() && missing ? 'Enter a display name and a name.' : null;
-  }
-
   createProject(): void {
     if (this.creating() || this.names.blocksSubmit()) return;
     this.createAttempted.set(true);
-    if (this.missingNamesError) return;
+    if (!this.newProject.name || !this.newProject.display_name) {
+      this.revealFirstInvalid(() => this.createForm()?.nativeElement);
+      return;
+    }
 
     this.creating.set(true);
     this.createError.set(null);
     const created = this.newProject.name;
     this.projectsService.createProject(this.newProject).subscribe({
       next: () => {
-        this.creating.set(false);
-        this.showCreateDialog.set(false);
         this.notify.success('Project created');
         this.router.navigateByUrl(links.project(created));
       },

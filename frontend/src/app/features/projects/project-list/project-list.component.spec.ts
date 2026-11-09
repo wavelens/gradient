@@ -145,6 +145,7 @@ describe('ProjectListComponent', () => {
     cmp.newProject.display_name = 'Acme';
     cmp.createProject();
     expect(String(navigate.mock.calls[0][0])).toBe('/project/acme');
+    expect(cmp.showCreateDialog()).toBe(true);
   });
 
   it('ignores Enter while the project name is still being checked', () => {
@@ -188,7 +189,9 @@ describe('ProjectListComponent', () => {
     const dialog = document.querySelector('.gr-dialog')!;
     Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Create')!.click();
     fixture.detectChanges();
-    expect(dialog.querySelector('gr-message-banner')?.textContent).toContain('Enter a display name and a name.');
+    expect(dialog.querySelector('gr-message-banner')).toBeNull();
+    expect(dialog.textContent).toContain('Enter a Display Name.');
+    expect(dialog.textContent).toContain('Enter a name.');
     expect(createProject).not.toHaveBeenCalled();
   });
 });

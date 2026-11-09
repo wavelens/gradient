@@ -34,9 +34,9 @@
 </gr-settings-section>
 
 <gr-dialog header="Grant Team" [(visible)]="showGrant" width="420px" [error]="grantError()" [busy]="granting()">
-  <gr-form-field label="Team" hint="A team you are not Admin of receives a request to approve."
+  <gr-form-field label="Team" for="grant-team" hint="A team you are not Admin of receives a request to approve."
     [invalid]="!!teamError()" [error]="teamError() ?? ''">
-    <gr-autocomplete [(ngModel)]="form.team" [suggestions]="suggestions()" (completeMethod)="search($event)"
+    <gr-autocomplete inputId="grant-team" [(ngModel)]="form.team" [suggestions]="suggestions()" (completeMethod)="search($event)"
       [forceSelection]="false" (enter)="grant()" />
   </gr-form-field>
   @if (canCreateTeam()) {
@@ -46,8 +46,8 @@
     </p>
   }
   @if (part() === 'users') {
-    <gr-form-field label="Role">
-      <gr-select [(ngModel)]="form.role" [options]="roleOptions()" optionLabel="label" optionValue="value" />
+    <gr-form-field label="Role" for="grant-team-role">
+      <gr-select inputId="grant-team-role" [(ngModel)]="form.role" [options]="roleOptions()" optionLabel="label" optionValue="value" />
     </gr-form-field>
   }
   <div grDialogFooter>

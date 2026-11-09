@@ -97,14 +97,15 @@
 <gr-dialog
   header="Create Project"
   [(visible)]="showCreateDialog"
-  [error]="createError() ?? missingNamesError"
+  [error]="createError()"
   [busy]="creating()"
   width="500px"
 >
-  <div>
+  <div #createForm>
     <app-name-fields
       noun="project"
       [names]="names"
+      [submitAttempted]="createAttempted()"
       [(displayName)]="newProject.display_name"
       [(name)]="newProject.name"
       (submitted)="createProject()"
