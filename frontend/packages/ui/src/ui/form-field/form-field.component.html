@@ -18,6 +18,8 @@ SPDX-License-Identifier: AGPL-3.0-only
   <ng-content></ng-content>
   @if (showError()) {
     <small class="field-error" [id]="messageId()" role="alert">{{ errorText() }}</small>
+  } @else if (warning()) {
+    <small class="field-warning" [id]="messageId()" role="status">{{ warning() }}</small>
   } @else {
     <small class="hint" [id]="messageId()"
       >{{ hint() }}<ng-content select="[slot=hint]"></ng-content

@@ -37,6 +37,7 @@
   .hint:empty { display: none; }
 
   .hint,
+  .field-warning,
   .field-error {
     display: block;
     margin-top: $spacing-xs;
@@ -44,6 +45,8 @@
   }
 
   .hint { color: var(--gr-text-secondary); }
+
+  .field-warning { color: var(--gr-status-warning-text); }
 
   .field-error { color: var(--gr-status-danger); }
 }

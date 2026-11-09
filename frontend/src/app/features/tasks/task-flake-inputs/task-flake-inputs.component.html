@@ -140,7 +140,8 @@
   />
 
   @if (!form.keepUrl) {
-    <gr-form-field label="URL" for="fi-url" required hint="Nix flake URL for this input. Pin the URL to a commit (for example, github:NixOS/nixpkgs/<commit> or ?rev=<commit>). Unpinned URLs cause evaluation to fail."
+    <gr-form-field label="URL" for="fi-url" required hint="URL for the Nix flake of this input, pinned to a commit (e.g. github:NixOS/nixpkgs/<commit> or ?rev=<commit>)."
+      [warning]="unpinnedUrlWarning"
       [invalid]="(submitAttempted() || urlModel.touched) && !!urlError" [error]="urlError ?? ''">
       <input
         grInput

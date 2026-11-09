@@ -39,6 +39,7 @@ interface FlakeInputFormState {
 const INPUT_NAME_CHARS = /^[A-Za-z0-9_\-*?[\]]+$/;
 const INPUT_NAME_START = /^[A-Za-z_]/;
 const GLOB = /[*?[]/;
+const pinnedNixFlakeUrlRegExp = /[?&](?:rev|narHash)=|^path:\/nix\/store\/|^(?:github|gitlab|sourcehut):[^/?]+\/[^/?]+\/[0-9a-f]{40}(?:[?#]|$)/;
 
 const DEFAULT_FORM: FlakeInputFormState = {
   input_name: '',
@@ -115,6 +116,12 @@ export class TaskFlakeInputsComponent implements OnInit {
     if (this.form.keepUrl) return null;
     if (!this.form.url.trim()) return 'Enter a flake URL, or turn on the option above to use the URL from flake.nix.';
     return fieldChecks.remoteFetchableFlakeUrl(this.form.url);
+  }
+
+  get unpinnedUrlWarning(): string | null {
+    const url = this.form.url.trim();
+    if (this.form.keepUrl || !url || this.urlError || pinnedNixFlakeUrlRegExp.test(url)) return null;
+    return "The URL doesn't name a commit, so the next evaluation cannot run. Add a commit (e.g. github:NixOS/nixpkgs/<commit> or ?rev=<commit>).";
   }
 
   submitForm(): void {

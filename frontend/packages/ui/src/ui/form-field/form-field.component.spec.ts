@@ -66,6 +66,24 @@ describe('gr-form-field', () => {
     expect(root.querySelector('.hint')).toBeNull();
   });
 
+  it('shows a warning in place of the hint and the error over both', async () => {
+    const fixture = TestBed.createComponent(FormFieldComponent);
+    fixture.componentRef.setInput('hint', 'Lowercase only');
+    fixture.componentRef.setInput('warning', 'Not pinned');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.field-warning')?.textContent).toContain('Not pinned');
+    expect(root.querySelector('.hint')).toBeNull();
+
+    fixture.componentRef.setInput('invalid', true);
+    fixture.componentRef.setInput('error', 'Required');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(root.querySelector('.field-error')?.textContent).toContain('Required');
+    expect(root.querySelector('.field-warning')).toBeNull();
+  });
+
   it('still derives errors from a reactive control', async () => {
     const fixture = TestBed.createComponent(FormFieldComponent);
     const ctrl = new FormControl('', Validators.required);

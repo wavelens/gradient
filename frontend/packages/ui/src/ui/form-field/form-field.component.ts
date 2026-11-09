@@ -23,6 +23,7 @@ export class FormFieldComponent {
   label = input<string>();
   for = input<string>();
   hint = input<string>();
+  warning = input<string | null>(null);
   required = input(false, { transform: booleanAttribute });
   control = input<FieldControl>(null);
   invalid = input<boolean | null>(null);

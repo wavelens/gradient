@@ -293,6 +293,24 @@ describe('TaskFlakeInputsComponent - validation', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['github:NixOS/nixpkgs', true],
+    ['github:NixOS/nixpkgs/nixos-unstable', true],
+    ['git+https://host/repo?ref=main', true],
+    ['github:NixOS/nixpkgs/0123456789abcdef0123456789abcdef01234567', false],
+    ['git+https://host/repo?ref=main&rev=abc', false],
+    ['https://host/x.tar.gz?narHash=sha256-abc', false],
+    ['path:/nix/store/abc-source', false],
+  ])('warns inline that %s is unpinned: %s and still saves it', (url, warns) => {
+    const { fixture, component, create } = withWrites();
+    component.startCreate();
+    component.form = { input_name: 'nixpkgs', url, keepUrl: false };
+    fixture.detectChanges();
+    expect(!!document.querySelector('.gr-dialog .field-warning')).toBe(warns);
+    component.saveCreate();
+    expect(create).toHaveBeenCalledWith('acme', 'demo', { input_name: 'nixpkgs', url });
+  });
+
   it('creates on Enter in the input name field', () => {
     const { fixture, component, create } = withWrites();
     component.startCreate();
