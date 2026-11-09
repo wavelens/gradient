@@ -58,6 +58,7 @@ mod m20261122_000000_task_repository_fetch;
 mod m20261123_000000_incoming_webhook_delivery;
 mod m20261124_000000_case_insensitive_username_unique_index;
 mod m20261125_000000_add_program_started_at_to_exec_job_attempt;
+mod m20261126_000000_delete_pending_requests_for_granted_access;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -141,6 +142,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261123_000000_incoming_webhook_delivery::Migration),
             Box::new(m20261124_000000_case_insensitive_username_unique_index::Migration),
             Box::new(m20261125_000000_add_program_started_at_to_exec_job_attempt::Migration),
+            Box::new(m20261126_000000_delete_pending_requests_for_granted_access::Migration),
         ]
     }
 }

@@ -321,9 +321,6 @@ pub async fn post_approve_team_request(
         )
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TeamGrant))?;
-        if !gradient_db::teams::requests::remove_project_request(&tx, request).await? {
-            return Err(WebError::not_found(Resource::Request));
-        }
         tx.commit().await?;
 
         if workers {
@@ -356,9 +353,6 @@ pub async fn post_approve_team_request(
     )
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::TeamGrant))?;
-    if !gradient_db::teams::requests::remove_cache_request(&tx, request).await? {
-        return Err(WebError::not_found(Resource::Request));
-    }
     tx.commit().await?;
 
     audit

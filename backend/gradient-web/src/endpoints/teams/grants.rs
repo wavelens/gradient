@@ -26,6 +26,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -306,8 +307,9 @@ pub async fn post_project_team(
         return Ok(ok_json("Request sent".to_string()));
     }
 
+    let tx = state.web_db.inner().begin().await?;
     gradient_db::teams::grants::grant_project(
-        &state.web_db,
+        &tx,
         MTeamProject {
             id: TeamProjectId::now_v7(),
             team: team.id,
@@ -321,6 +323,7 @@ pub async fn post_project_team(
     )
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::TeamGrant))?;
+    tx.commit().await?;
     if body.workers {
         grant_workers(&state.web_db, &scheduler, team.id, project.id).await?;
     }
@@ -579,8 +582,9 @@ pub async fn post_cache_team(
         return Ok(ok_json("Request sent".to_string()));
     }
 
+    let tx = db.web_db.inner().begin().await?;
     gradient_db::teams::grants::grant_cache(
-        &db.web_db,
+        &tx,
         MTeamCache {
             id: TeamCacheId::now_v7(),
             team: team.id,
@@ -592,6 +596,7 @@ pub async fn post_cache_team(
     )
     .await
     .map_err(|e| WebError::from_db_err(e, Resource::TeamGrant))?;
+    tx.commit().await?;
 
     audit.write(Action::TeamGrantCreate, owner, payload).await;
     Ok(ok_json("Team granted".to_string()))

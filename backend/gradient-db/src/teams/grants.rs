@@ -131,6 +131,11 @@ pub async fn grant_project<C: ConnectionTrait>(
     db: &C,
     grant: MTeamProject,
 ) -> Result<MTeamProject, DbErr> {
+    ETeamProjectRequest::delete_many()
+        .filter(CTeamProjectRequest::Team.eq(grant.team))
+        .filter(CTeamProjectRequest::Project.eq(grant.project))
+        .exec(db)
+        .await?;
     grant.into_active_model().insert(db).await
 }
 
@@ -198,6 +203,11 @@ pub async fn grant_cache<C: ConnectionTrait>(
     db: &C,
     grant: MTeamCache,
 ) -> Result<MTeamCache, DbErr> {
+    ETeamCacheRequest::delete_many()
+        .filter(CTeamCacheRequest::Team.eq(grant.team))
+        .filter(CTeamCacheRequest::Cache.eq(grant.cache))
+        .exec(db)
+        .await?;
     grant.into_active_model().insert(db).await
 }
 
@@ -263,6 +273,33 @@ mod tests {
             .expect("grants");
 
         assert_eq!(granted, vec![granting.id]);
+    }
+
+    #[tokio::test]
+    async fn a_grant_replaces_the_pending_request_of_its_team() {
+        let grant = MTeamProject {
+            team: TeamId::now_v7(),
+            project: ProjectId::now_v7(),
+            includes_workers: true,
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![grant.clone()]])
+            .into_connection();
+
+        grant_project(&db, grant).await.expect("grant");
+
+        let log = gradient_fixtures::mock::raw_statements(db.into_transaction_log());
+        assert!(
+            log[0]
+                .sql
+                .starts_with("DELETE FROM \"team_project_request\"")
+        );
+        assert!(log[1].sql.starts_with("INSERT INTO \"team_project\""));
     }
 
     #[tokio::test]
