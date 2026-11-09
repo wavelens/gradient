@@ -173,7 +173,7 @@ describe('CacheMembersRolesComponent - pending invitations', () => {
     const fixture = setup(true);
     await settled(fixture);
     (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'bob' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Bob (bob)' }));
     expect(revokeInvitation).toHaveBeenCalledWith('my-cache', 'bob');
     expect(notify.success).toHaveBeenCalledWith('Invitation revoked');
   });

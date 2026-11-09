@@ -256,7 +256,7 @@ describe('TeamMembersComponent', () => {
     const { fixture, notify, removeMember, confirm } = setup();
     removeButton(fixture.nativeElement, 'bob').click();
     expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Remove member', target: 'bob', consequence: 'bob can no longer access this team.' }),
+      expect.objectContaining({ title: 'Remove member', target: 'Bob (bob)', consequence: 'bob can no longer access this team.' }),
     );
     expect(removeMember).toHaveBeenCalledWith('platform', 'bob');
     expect(notify.success).toHaveBeenCalledWith('Member removed');
@@ -267,7 +267,7 @@ describe('TeamMembersComponent', () => {
     const { fixture, confirm } = setup(undefined, false, vi.fn().mockReturnValue(of([...members, secondAdmin])));
     removeButton(fixture.nativeElement, 'alice').click();
     expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ target: 'alice', consequence: 'You lose access to this team and its settings.' }),
+      expect.objectContaining({ target: 'Alice (alice)', consequence: 'You lose access to this team and its settings.' }),
     );
   });
 
@@ -285,7 +285,7 @@ describe('TeamMembersComponent', () => {
       (b) => b.querySelector('.gr-button__label')?.textContent?.trim() === 'Revoke',
     )!;
     revoke.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Revoke invitation', target: 'carol' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Revoke invitation', target: 'Carol (carol)' }));
     expect(revokeInvitation).toHaveBeenCalledWith('platform', 'carol');
   });
 });

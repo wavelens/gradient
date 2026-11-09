@@ -37,6 +37,7 @@ import {
   ServerConfigurationManagedBannerComponent,
   compareRoleNamesByBuiltInAccessThenName,
   countMembersByRoleName,
+  formatMemberNameForConfirmDialog,
   createNoAccessLoadStateError,
   isViewerCacheMember,
   requestIfCacheMember,
@@ -192,8 +193,8 @@ export class CacheMembersRolesComponent implements OnInit {
   revokeInvitation(username: string): void {
     this.confirm
       .confirm({
-        title: 'Revoke Invitation',
-        target: username,
+        title: 'Revoke invitation',
+        target: formatMemberNameForConfirmDialog(this.invitations().find((invitation) => invitation.user === username)?.name, username),
         consequence: `The invitation to ${username} can no longer grant access. Another invitation can follow later.`,
         confirmLabel: 'Revoke',
         failure: 'Failed to revoke the invitation.',
@@ -279,7 +280,7 @@ export class CacheMembersRolesComponent implements OnInit {
     this.confirm
       .confirm({
         title: 'Remove member',
-        target: username,
+        target: formatMemberNameForConfirmDialog(this.members().find((member) => member.id === username)?.user_display_name, username),
         consequence: `${username} loses their role on this cache.`,
         confirmLabel: 'Remove',
         failure: 'Failed to remove member.',

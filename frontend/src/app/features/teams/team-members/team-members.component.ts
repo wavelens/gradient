@@ -13,7 +13,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfirmService } from '@shared/confirm';
-import { canManageTeam } from '@shared/access';
+import { canManageTeam, formatMemberNameForConfirmDialog } from '@shared/access';
 import { EMPTY, merge, tap } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import {
@@ -209,7 +209,7 @@ export class TeamMembersComponent implements OnInit {
     this.confirm
       .confirm({
         title: 'Remove member',
-        target: user,
+        target: formatMemberNameForConfirmDialog(this.members().find((member) => member.user === user)?.name, user),
         consequence: self ? 'You lose access to this team and its settings.' : `${user} can no longer access this team.`,
         confirmLabel: 'Remove',
         failure: 'Failed to remove the member.',
@@ -226,7 +226,7 @@ export class TeamMembersComponent implements OnInit {
     this.confirm
       .confirm({
         title: 'Revoke invitation',
-        target: user,
+        target: formatMemberNameForConfirmDialog(this.invitations().find((invitation) => invitation.user === user)?.name, user),
         consequence: `The invitation to ${user} becomes invalid. You can invite them again later.`,
         confirmLabel: 'Revoke',
         failure: 'Failed to revoke the invitation.',

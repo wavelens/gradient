@@ -188,7 +188,7 @@ describe('MembersRolesComponent - pending invitations', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
     (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'bob' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Bob (bob)' }));
     expect(revokeInvitation).toHaveBeenCalledWith('acme', 'bob');
     expect(notify.success).toHaveBeenCalledWith('Invitation revoked');
   });
@@ -203,11 +203,12 @@ describe('MembersRolesComponent - pending invitations', () => {
 });
 
 describe('MembersRolesComponent - writes', () => {
-  it('asks before removing a member, naming the member', async () => {
+  it('asks before removing a member, naming the member by display name and username', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    getMembers.mockReturnValue(of([{ id: 'alice', user_display_name: 'Alice Admin', name: 'Admin' }]));
     await settled(fixture);
     (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('gr-row-list button.gr-button--danger')!.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Remove member', target: 'alice' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Remove member', target: 'Alice Admin (alice)' }));
     expect(removeMember).toHaveBeenCalledWith('acme', 'alice');
     expect(notify.success).toHaveBeenCalledWith('Member removed');
   });

@@ -38,6 +38,7 @@ import {
   ServerConfigurationManagedBannerComponent,
   compareRoleNamesByBuiltInAccessThenName,
   countMembersByRoleName,
+  formatMemberNameForConfirmDialog,
   requestIfProjectMember,
 } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
@@ -173,7 +174,7 @@ export class MembersRolesComponent implements OnInit {
     this.confirm
       .confirm({
         title: 'Revoke invitation',
-        target: username,
+        target: formatMemberNameForConfirmDialog(this.invitations().find((invitation) => invitation.user === username)?.name, username),
         consequence: `The invitation to ${username} no longer works. You can invite them again later.`,
         confirmLabel: 'Revoke',
         failure: 'Failed to revoke the invitation.',
@@ -263,7 +264,7 @@ export class MembersRolesComponent implements OnInit {
     this.confirm
       .confirm({
         title: 'Remove member',
-        target: username,
+        target: formatMemberNameForConfirmDialog(this.members().find((member) => member.id === username)?.user_display_name, username),
         consequence: `${username} loses their role in this project.`,
         confirmLabel: 'Remove',
         failure: 'Failed to remove the member.',
