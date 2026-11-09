@@ -407,6 +407,23 @@ describe('ExecJobPageComponent', () => {
     expect(fixture.componentInstance.view()).toBe('info');
   });
 
+  it('keeps the chosen view in the URL and opens it again from there', () => {
+    const { fixture, navigate } = setup('completed');
+    fixture.componentInstance.showView('timeline');
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { view: 'timeline' } }));
+    fixture.componentInstance.showView('log');
+    expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { view: null } }));
+
+    TestBed.resetTestingModule();
+    const reopened = setup('completed', undefined, { view: 'info' });
+    expect(reopened.fixture.componentInstance.view()).toBe('info');
+  });
+
+  it('starts the breadcrumb at the project list', () => {
+    const { fixture } = setup('completed');
+    expect(fixture.componentInstance.crumbs()[0].label).toBe('Projects');
+  });
+
   function showJobLink(root: HTMLElement): HTMLAnchorElement | undefined {
     return Array.from(root.querySelectorAll<HTMLAnchorElement>('.info-bar-right a')).find((a) => a.textContent?.includes('Show job'));
   }

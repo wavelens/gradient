@@ -161,7 +161,7 @@ export class ExecJobPageComponent implements OnInit {
   });
   crumbs = computed(() => {
     const job = this.job();
-    return this.breadcrumbs.taskAt(this.projectName, this.taskName, job?.evaluation, { label: job?.entry_point ?? 'Exec job' }).slice(1);
+    return this.breadcrumbs.taskAt(this.projectName, this.taskName, job?.evaluation, { label: job?.entry_point ?? 'Exec job' });
   });
   projectAndTaskCrumbs = computed(() => this.crumbs().slice(-3, -1));
   highestNumberedAttempt = computed(() => {
@@ -188,7 +188,9 @@ export class ExecJobPageComponent implements OnInit {
     this.projectName = params.get('project') ?? '';
     this.taskName = params.get('task') ?? '';
     this.jobId = params.get('job') ?? '';
-    this.wantsTerminal = this.route.snapshot.queryParamMap?.get('view') === 'terminal';
+    const view = this.route.snapshot.queryParamMap?.get('view');
+    this.wantsTerminal = view === 'terminal';
+    if (view === INFO_VIEW.value || view === TIMELINE_VIEW.value) this.view.set(view);
     this.node.set(nodeFromQuery(this.route.snapshot.queryParamMap?.get('node')));
     this.watch();
   }
@@ -253,6 +255,12 @@ export class ExecJobPageComponent implements OnInit {
   showView(view: JobView): void {
     this.view.set(view);
     this.sidebarOpen.set(false);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { view: view === LOG_VIEW.value ? null : view },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
     if (view === 'terminal') this.openTerminal(this.terminalMode());
     else this.terminal.set(null);
   }
