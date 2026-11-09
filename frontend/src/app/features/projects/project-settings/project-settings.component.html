@@ -136,7 +136,7 @@
       @if (sshKey()) {
         <gr-form-field label="Public Key">
           <gr-label-help slot="label" doc="concepts/projects-and-tasks/#project" title="Project SSH key" />
-          <gr-copy-field multiline [rows]="4" [value]="sshKey()" />
+          <gr-copy-field multiline [value]="sshKey()" />
         </gr-form-field>
       } @else {
         <p class="text-secondary">No SSH key generated yet.</p>

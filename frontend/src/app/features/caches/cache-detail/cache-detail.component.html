@@ -29,14 +29,14 @@
   >
     <gr-form-field label="nix.conf snippet" for="cache-conf">
       <gr-label-help slot="label" doc="concepts/caches/#using-a-cache" title="Using a cache" />
-      <gr-copy-field inputId="cache-conf" multiline [rows]="2" [value]="nixConfSnippet()" />
+      <gr-copy-field inputId="cache-conf" multiline [value]="nixConfSnippet()" />
     </gr-form-field>
 
     @if (!c.public) {
       <gr-divider />
       <gr-form-field label="Install netrc" for="cache-netrc">
         <gr-label-help slot="label" doc="guides/share-a-cache/#1-use-the-cache-on-a-machine" title="Cache authentication docs" />
-        <gr-copy-field inputId="cache-netrc" multiline [rows]="2" [value]="installNetrcCommand" />
+        <gr-copy-field inputId="cache-netrc" multiline [value]="installNetrcCommand" />
         <span slot="hint">
           This cache is private. Run the command as root, replacing <code>&lt;YOUR_TOKEN&gt;</code> with your
           API key or login token. It writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon

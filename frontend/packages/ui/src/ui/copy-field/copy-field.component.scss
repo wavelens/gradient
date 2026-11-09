@@ -40,6 +40,7 @@
 
   &--multiline &__input {
     scrollbar-width: none;
+    field-sizing: content;
   }
 
   &--inline {

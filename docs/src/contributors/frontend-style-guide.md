@@ -29,7 +29,7 @@ flowchart LR
 
 ## Rules
 
-- Wrap every store path, hash, key, ID and URL in a `gr-copy-field`. A bare code span is not enough.
+- Wrap every store path, hash, key, ID and URL in a `gr-copy-field`. A bare code span is not enough. A multi-line `gr-copy-field` can grow with content, so omit `[rows]`.
 - Take all colours from semantic roles. Hex values belong only in the palette, and components read roles rather than palette tokens.
 - Put new shared classes in the design system. Component stylesheets take none.
 - Build content layouts from `gr-row-list` or `gr-card-grid`. Avoid entity-specific names.
@@ -138,7 +138,7 @@ import { MetricChartComponent } from '@shared/ui';
 | Overlays | `gr-dialog`, `gr-popover`, `[grTooltip]` |
 | Layout | `gr-page-layout`, `gr-breadcrumb`, `gr-link-tabs`, `gr-settings-section`, `gr-row-list` / `gr-row`, `gr-card-grid`, `gr-nav-card`, `gr-tab-switch`, `[grInView]`, `[grScrollRegion]`, `[grDrawer]` |
 
-- `gr-page-layout`: a header with title and subtitle, a breadcrumb, optional `[slot=actions]` buttons and an optional `[slot=banner]`, then the content.
+- `gr-page-layout`: a header with title and subtitle, a breadcrumb, optional `[slot=actions]` buttons and an optional `[slot=banner]`, then the content. Actions move to a dedicated row below the title on smartphones. Labels stay unchanged. The current breadcrumb item and the title of `gr-nav-card` shorten long names with an ellipsis. A tooltip shows the full name.
 - `gr-settings-section`: a titled section with an optional description. A card contains it by default. Set `[card]="false"` to drop the card.
 - `gr-load-state`: a wrapper for any content that can load its own data. The inputs `loading`, `error` and `empty` pick one of four states (a spinner, an error with a Try Again button, an empty state, or content). Errors always take precedence over the empty state. A failed request can never show the "nothing here yet" text. 403 or 404 responses show the inaccessible state without Retry. Keep the data visible on reload. Skip the spinner with data on screen. Put write errors (save, delete) outside `error`. Those errors belong next to the failed action.
 - Board tabs load requests through `firstLoad()`. Board tabs can show an error state only when no requests in a load round respond. Some requests respond. Board tabs keep the content that did load and show the failure with a toast. Tabs with independent panels (Assigned and Pending in Live Jobs) give each panel its own `firstLoad()`. Keep panel switching outside load state. A failure in one panel can never remove the other panel from view.

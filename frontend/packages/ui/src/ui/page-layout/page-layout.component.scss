@@ -83,10 +83,18 @@ gr-breadcrumb {
 
 @media (max-width: $breakpoint-sm) {
   .page-layout__header {
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
-      'crumbs crumbs'
-      'title actions'
-      'subtitle subtitle'
-      'meta meta';
+      'crumbs'
+      'title'
+      'subtitle'
+      'meta'
+      'actions';
+  }
+
+  .page-layout__actions {
+    justify-content: flex-start;
+
+    &:empty { display: none; }
   }
 }

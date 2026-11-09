@@ -90,6 +90,13 @@ a {
     min-width: 0;
     overflow-wrap: anywhere;
   }
+
+  > [aria-current='page'] {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .breadcrumb-link,
