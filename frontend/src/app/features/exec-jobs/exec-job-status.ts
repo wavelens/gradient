@@ -25,7 +25,7 @@ export function abortExecJobConfirm<T>(target: string, action: () => Observable<
 
 export function execJobPhase(status: ExecJobStatus): StatusPhase {
   switch (status) {
-    case 'created':
+    case 'created': return 'waiting';
     case 'queued': return 'queued';
     case 'starting':
     case 'running': return 'running';
@@ -35,8 +35,16 @@ export function execJobPhase(status: ExecJobStatus): StatusPhase {
   }
 }
 
+export function getExecJobStatusBadgeLabel(job: Pick<ExecJobSummary, 'status' | 'waiting_reason'>): string {
+  return job.waiting_reason?.kind === 'manual_start' ? 'Manual' : job.status;
+}
+
+export function isExecJobWaitingToStart(status: ExecJobStatus): boolean {
+  return status === 'created' || status === 'queued';
+}
+
 export function isOpenExecJob(status: ExecJobStatus): boolean {
-  return execJobPhase(status) === 'queued' || execJobPhase(status) === 'running';
+  return isExecJobWaitingToStart(status) || hasExecTerminal(status);
 }
 
 export function hasExecTerminal(status: ExecJobStatus): boolean {

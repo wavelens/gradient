@@ -14,7 +14,7 @@
       @for (job of jobs(); track job.id) {
         <div class="sidebar-item exec-job-item" [title]="job.entry_point" (contextmenu)="openContextMenu($event, job, jobMenu)">
           <a class="sidebar-row-link" [routerLink]="link(job)" [attr.aria-label]="job.entry_point + ', ' + detail(job)"></a>
-          <gr-status-icon [phase]="phase(job.status)" [label]="job.status" size="sm" />
+          <gr-status-icon [phase]="phase(job.status)" [label]="statusLabel(job)" size="sm" />
           <span class="exec-job-text">
             <span class="sidebar-item-label">{{ job.entry_point }}</span>
             <span class="exec-job-detail">{{ detail(job) }}</span>
@@ -32,7 +32,7 @@
         @for (job of jobs(); track job.id) {
           <div class="entry-row job" [attr.data-phase]="phase(job.status)" (contextmenu)="openContextMenu($event, job, jobMenu)">
             <a class="entry-link" [routerLink]="link(job)" [attr.aria-label]="job.entry_point"></a>
-            <gr-status-icon class="phase-swatch" [phase]="phase(job.status)" [label]="job.status" size="sm" />
+            <gr-status-icon class="phase-swatch" [phase]="phase(job.status)" [label]="statusLabel(job)" size="sm" />
             <span class="entry-name">{{ job.entry_point }}</span>
             <span class="job-detail">{{ detail(job) }}</span>
             <span class="job-needs">

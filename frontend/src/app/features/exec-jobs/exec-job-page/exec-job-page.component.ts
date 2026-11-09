@@ -37,7 +37,9 @@ import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import type { ExecJobAttemptView, ExecJobPullRequestView, ExecJobResponse } from '@core/models';
-import { abortExecJobConfirm, getShowJobMenuItemForExecJob, hasExecTerminal, isOpenExecJob, execJobPhase } from '../exec-job-status';
+import {
+  abortExecJobConfirm, execJobPhase, getExecJobStatusBadgeLabel, getShowJobMenuItemForExecJob, hasExecTerminal, isExecJobWaitingToStart, isOpenExecJob,
+} from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 import { ExecJobInfoComponent } from '../exec-job-info/exec-job-info.component';
@@ -164,7 +166,7 @@ export class ExecJobPageComponent implements OnInit {
   });
   highestNumberedAttempt = computed(() => {
     const job = this.job();
-    if (!job || execJobPhase(job.status) === 'queued') return null;
+    if (!job || isExecJobWaitingToStart(job.status)) return null;
     return job.attempts.reduce<ExecJobAttemptView | null>((latest, a) => (!latest || a.number > latest.number ? a : latest), null);
   });
   formattedProgramRunTime = computed(() => {
@@ -175,6 +177,7 @@ export class ExecJobPageComponent implements OnInit {
   });
 
   protected readonly phase = execJobPhase;
+  protected readonly statusLabel = getExecJobStatusBadgeLabel;
   protected readonly links = links;
   protected readonly plural = plural;
   protected readonly evaluationPhase = evaluationPhase;
@@ -230,7 +233,7 @@ export class ExecJobPageComponent implements OnInit {
       this.errorMessage.set(null);
       this.now.set(Date.now());
       this.job.set(job);
-      this.showLog(execJobPhase(job.status) === 'queued' ? '' : log);
+      this.showLog(isExecJobWaitingToStart(job.status) ? '' : log);
       this.pullRequests.set(pullRequests);
       if (this.terminalReachable()) {
         if (this.wantsTerminal) this.showView('terminal');

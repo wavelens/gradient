@@ -15,7 +15,7 @@ import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
-import { abortExecJobConfirm, deviceLabel, execJobMenu, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
+import { abortExecJobConfirm, deviceLabel, execJobMenu, getExecJobStatusBadgeLabel, isOpenExecJob, execJobPhase, waitingReasonText } from '../exec-job-status';
 
 const POLL_MS = 4000;
 
@@ -45,6 +45,7 @@ export class ExecJobListComponent implements OnChanges {
   private poll?: Subscription;
 
   protected readonly phase = execJobPhase;
+  protected readonly statusLabel = getExecJobStatusBadgeLabel;
   protected readonly device = deviceLabel;
 
   constructor() {

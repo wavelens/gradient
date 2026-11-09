@@ -7,7 +7,9 @@
 import type { ExecJobStatus, WaitingReason } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
 import { EMPTY } from 'rxjs';
-import { abortExecJobConfirm, deviceLabel, guestSizeLabel, isOpenExecJob, execJobPhase, waitingReasonText } from './exec-job-status';
+import {
+  abortExecJobConfirm, deviceLabel, getExecJobStatusBadgeLabel, guestSizeLabel, isOpenExecJob, execJobPhase, waitingReasonText,
+} from './exec-job-status';
 
 describe('abortExecJobConfirm', () => {
   it('says how the evaluation ends', () => {
@@ -17,7 +19,7 @@ describe('abortExecJobConfirm', () => {
 
 describe('execJobPhase', () => {
   it.each<[ExecJobStatus, StatusPhase]>([
-    ['created', 'queued'],
+    ['created', 'waiting'],
     ['queued', 'queued'],
     ['starting', 'running'],
     ['running', 'running'],
@@ -29,8 +31,19 @@ describe('execJobPhase', () => {
   });
 
   it('treats only completed, failed and aborted as finished', () => {
+    expect(isOpenExecJob('created')).toBe(true);
     expect(isOpenExecJob('starting')).toBe(true);
     expect(isOpenExecJob('aborted')).toBe(false);
+  });
+});
+
+describe('getExecJobStatusBadgeLabel', () => {
+  it('names a job that waits for a manual start', () => {
+    expect(getExecJobStatusBadgeLabel({ status: 'created', waiting_reason: { kind: 'manual_start' } })).toBe('Manual');
+  });
+
+  it('keeps the status of a job that waits for its builds', () => {
+    expect(getExecJobStatusBadgeLabel({ status: 'created', waiting_reason: null })).toBe('created');
   });
 });
 
