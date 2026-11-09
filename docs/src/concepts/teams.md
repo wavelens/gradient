@@ -59,7 +59,7 @@ Register a team worker once in the **Workers** section of the team page. The wor
 
 ## New Projects
 
-Team settings can assign a role to every new project for each team user, add the team's workers, or do both. Only superusers can edit these fields. The [local worker](workers.md#access) is a worker of the team `server`, declared in the system state. Every new project receives this worker through the mechanism above.
+Team settings offer two options. Assign a role to each team user on every new project that team members create. Add team workers to all new projects. Choose one option or both. Only superusers can edit these fields. The [local worker](workers.md#access) is a worker of the team `server`, declared in the system state. Every new project receives this worker through the mechanism above.
 
 ## Single Sign-On
 

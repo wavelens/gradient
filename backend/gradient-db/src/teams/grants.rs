@@ -10,6 +10,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
+use std::collections::HashSet;
 
 pub async fn project_role_granted_to_a_team<C: ConnectionTrait>(
     db: &C,
@@ -46,6 +47,7 @@ pub async fn cache_role_granted_to_a_team<C: ConnectionTrait>(
 pub async fn apply_new_project_grants<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
+    creator: UserId,
 ) -> Result<Vec<TeamId>, DbErr> {
     let teams = ETeam::find()
         .filter(
@@ -55,10 +57,23 @@ pub async fn apply_new_project_grants<C: ConnectionTrait>(
         )
         .all(db)
         .await?;
+    let creator_teams: HashSet<TeamId> = if teams.iter().any(|team| team.new_project_users) {
+        ETeamUser::find()
+            .filter(CTeamUser::User.eq(creator))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|membership| membership.team)
+            .collect()
+    } else {
+        HashSet::new()
+    };
 
     let mut granted = Vec::new();
     for team in teams {
-        let users = team.new_project_users && team.new_project_role.is_some();
+        let users = team.new_project_users
+            && team.new_project_role.is_some()
+            && creator_teams.contains(&team.id);
         if !users && !team.new_project_workers {
             continue;
         }
@@ -222,8 +237,14 @@ mod tests {
             new_project_users: true,
             ..Default::default()
         };
+        let creator = UserId::now_v7();
         let db = mock_db()
             .append_query_results([vec![granting.clone(), users_without_role]])
+            .append_query_results([vec![MTeamUser {
+                team: granting.id,
+                user: creator,
+                ..Default::default()
+            }]])
             .append_query_results([vec![MTeamProject {
                 team: granting.id,
                 includes_users: true,
@@ -237,10 +258,46 @@ mod tests {
             }])
             .into_connection();
 
-        let granted = apply_new_project_grants(&db, ProjectId::now_v7())
+        let granted = apply_new_project_grants(&db, ProjectId::now_v7(), creator)
             .await
             .expect("grants");
 
         assert_eq!(granted, vec![granting.id]);
+    }
+
+    #[tokio::test]
+    async fn a_creator_outside_the_team_gets_its_workers_but_not_its_role() {
+        let granting = MTeam {
+            id: TeamId::now_v7(),
+            new_project_users: true,
+            new_project_workers: true,
+            new_project_role: Some(BASE_ROLE_WRITE_ID),
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![granting.clone()]])
+            .append_query_results([Vec::<MTeamUser>::new()])
+            .append_query_results([vec![MTeamProject {
+                team: granting.id,
+                includes_workers: true,
+                ..Default::default()
+            }]])
+            .into_connection();
+
+        let granted = apply_new_project_grants(&db, ProjectId::now_v7(), UserId::now_v7())
+            .await
+            .expect("grants");
+
+        assert_eq!(granted, vec![granting.id]);
+        let log = gradient_fixtures::mock::raw_statements(db.into_transaction_log());
+        let insert = log
+            .iter()
+            .find(|s| s.sql.starts_with("INSERT INTO \"team_project\""))
+            .expect("the grant is written");
+        let values = format!("{:?}", insert.values);
+        assert!(
+            values.contains("Bool(Some(false)), Bool(Some(true))"),
+            "users off, workers on: {values}"
+        );
     }
 }

@@ -830,7 +830,7 @@
         users = mkOption {
           type = types.bool;
           default = false;
-          description = "Whether every new project grants this team's users `new_projects.role`.";
+          description = "Whether new projects that members of this team create grant `new_projects.role` to the users of this team.";
         };
         workers = mkOption {
           type = types.bool;

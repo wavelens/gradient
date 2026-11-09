@@ -308,7 +308,7 @@ pub async fn put(
     .await?;
 
     let granted_teams =
-        gradient_db::teams::grants::apply_new_project_grants(&tx, project.id).await?;
+        gradient_db::teams::grants::apply_new_project_grants(&tx, project.id, user.id).await?;
 
     tx.commit().await?;
 

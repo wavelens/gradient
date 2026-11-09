@@ -181,7 +181,7 @@ services.gradient.state = {
 | `members.*.user` | string | - | Name of the user, resolved at state apply time. |
 | `name` | string | attribute name | Name of the team. A team managed here has its settings locked in the API, while other members and workers can still join through the API. |
 | `new_projects.role` | null or one of `Admin` `Write` `View` | `null` | Project role given to the team's users on new projects. |
-| `new_projects.users` | bool | `false` | Grants the team's users `new_projects.role` on new projects when enabled. |
+| `new_projects.users` | bool | `false` | Grants the team's users `new_projects.role` on new projects that team members create when enabled. |
 | `new_projects.workers` | bool | `false` | Grants the team's workers on new projects when enabled. |
 | `oidc_group` | null or string | `null` | OIDC group whose members join the team at sign-in. They leave the team once the group no longer appears in their `groups` claim. The `groups` scope must be enabled. |
 | `scim_group` | null or string | `null` | SCIM group mapped to the team's members. |

@@ -102,7 +102,12 @@ impl<'a> StateApplicator<'a> {
                 project.insert(self.db).await?;
                 // No worker can be connected yet. State is applied before the proto endpoint is
                 // serving, and no re-auth request is needed.
-                gradient_db::teams::grants::apply_new_project_grants(self.db, project_id).await?;
+                gradient_db::teams::grants::apply_new_project_grants(
+                    self.db,
+                    project_id,
+                    created_by_id,
+                )
+                .await?;
                 tracing::info!(name = %state_project.name, "Created managed project");
                 project_id
             };
