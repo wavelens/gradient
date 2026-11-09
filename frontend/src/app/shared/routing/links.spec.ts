@@ -55,7 +55,7 @@ const every: UrlTree[] = [
   links.teamPage('t', 'settings'),
   links.teamPage('t', 'webhooks'),
   ...(['overview', 'live', 'scheduler', 'throughput', 'durations', 'workers', 'cache', 'network', 'health', 'storage',
-    'expensive', 'expensive-evals'] as const).map((tab) => links.board(tab)),
+    'expensive'] as const).map((tab) => links.board(tab)),
   links.boardJob('j'),
   links.boardCluster('c'),
   links.boardPendingJob({ evaluation_id: 'e', build_id: 'b' }),

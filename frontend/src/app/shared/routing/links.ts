@@ -13,7 +13,7 @@ export type TeamPage = 'settings' | 'webhooks';
 export type SettingsPage = 'profile' | 'keys' | 'ssh-keys' | 'sessions' | 'invites';
 export type BoardTab =
   | 'overview' | 'live' | 'scheduler' | 'throughput' | 'durations' | 'workers' | 'cache'
-  | 'network' | 'health' | 'storage' | 'expensive' | 'expensive-evals';
+  | 'network' | 'health' | 'storage' | 'expensive';
 export type AdminPage = 'webhooks' | 'github-app';
 export type ClosureKind = 'build' | 'eval';
 

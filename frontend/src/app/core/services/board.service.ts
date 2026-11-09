@@ -210,7 +210,7 @@ export class BoardService {
   }
 
   getExpensiveEvalsByResource(
-    metric: 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc',
+    metric: 'time' | 'rss' | 'thunks' | 'fncalls' | 'alloc',
     windowDays = 30
   ): Observable<ExpensiveEval[]> {
     return this.api.get<ExpensiveEval[]>(
