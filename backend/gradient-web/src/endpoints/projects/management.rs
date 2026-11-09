@@ -457,12 +457,13 @@ pub async fn patch_project(
             body.allow_exec_in_build_requests.is_some(),
         ),
     ]);
+    let project_id = project.id;
     let mut aproject: AProject = project.into();
 
     if let Some(name) = body.name {
         let existing_project = gradient_db::projects::by_name(&db.web_db, name.as_str()).await?;
 
-        if existing_project.is_some() {
+        if existing_project.is_some_and(|existing| existing.id != project_id) {
             return Err(WebError::already_exists(Resource::ProjectName));
         }
 

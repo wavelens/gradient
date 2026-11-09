@@ -445,7 +445,7 @@ impl<'a> TaskPatcher<'a> {
     async fn apply_name(&mut self, project: &MProject, name: TaskName) -> WebResult<()> {
         let existing =
             gradient_db::tasks::by_name(&self.state.web_db, project.id, name.as_str()).await?;
-        if existing.is_some() {
+        if existing.is_some_and(|existing| &existing.id != self.atask.id.as_ref()) {
             return Err(WebError::already_exists(Resource::TaskName));
         }
         self.atask.name = Set(name.into_inner());
