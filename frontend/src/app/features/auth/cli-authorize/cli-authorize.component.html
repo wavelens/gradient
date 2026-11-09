@@ -41,18 +41,16 @@
           <dt>Confirmation code</dt>
           <dd class="code">{{ info()!.user_code }}</dd>
           <dt>Expires in</dt>
-          <dd data-testid="cli-code-expiration">
-            @if (cliConfirmationCodeRemainingTimeText(); as remaining) {
-              {{ remaining }}
-            } @else {
-              Expired. Run <code>gradient login</code> again.
-            }
-          </dd>
+          <dd data-testid="cli-code-expiration">{{ cliConfirmationCodeRemainingTimeText() }}</dd>
           <dt>Origin IP</dt>
           <dd>{{ info()!.ip || 'unknown' }}</dd>
           <dt>User agent</dt>
           <dd>{{ info()!.user_agent || 'unknown' }}</dd>
         </dl>
+        <p data-testid="cli-session-grant">
+          The CLI can receive a session with full access to the account. Revoke that session in
+          <a [routerLink]="links.settings('sessions')">Settings > Sessions</a>.
+        </p>
         <p class="text-secondary">
           Only authorize if you started this <code>gradient login</code> yourself
           and the confirmation code matches what your terminal displays.
@@ -64,7 +62,7 @@
             class="w-full"
             label="Authorize"
             [loading]="submitting()"
-            [disabled]="submitting() || !cliConfirmationCodeRemainingTimeText()"
+            [disabled]="submitting()"
             (click)="authorize()"
           ></button>
           <button

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal, untracked, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormBuilder,
@@ -12,8 +12,8 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
-import { ApiService, apiErrorMessage } from '@core/services/api.service';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ApiError, ApiService, apiErrorMessage } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { CliDeviceInfoResponse } from '@core/models';
@@ -37,7 +37,7 @@ export function formatCliConfirmationCode(raw: string): string {
 @Component({
   selector: 'app-cli-authorize',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, IconComponent, FormFieldComponent, InputDirective, MessageBannerComponent, LogoComponent],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink, ButtonComponent, IconComponent, FormFieldComponent, InputDirective, MessageBannerComponent, LogoComponent],
   templateUrl: './cli-authorize.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cli-authorize.component.scss',
@@ -65,10 +65,16 @@ export class CliAuthorizeComponent implements OnInit {
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   });
   get logoUrl() { return this.config.logoUrl; }
+  protected readonly links = links;
 
   constructor() {
     this.form = this.fb.group({
       userCode: ['', [Validators.required]],
+    });
+    effect(() => {
+      if (this.info() && this.status() === 'pending' && !this.cliConfirmationCodeRemainingTimeText()) {
+        untracked(() => this.showRequestFailureAndReturnToCodeForm('The code has expired. Run gradient login again.'));
+      }
     });
   }
 
@@ -103,8 +109,10 @@ export class CliAuthorizeComponent implements OnInit {
           this.info.set(info);
           this.loading.set(false);
         },
-        error: (e) => {
-          this.errorMessage.set(e.message || 'Invalid or expired code.');
+        error: (e: unknown) => {
+          this.errorMessage.set(
+            e instanceof ApiError && e.status === 404 ? 'Unknown or expired code. Run gradient login again.' : apiErrorMessage(e, 'Invalid or expired code.'),
+          );
           this.loading.set(false);
         },
       });
@@ -114,6 +122,7 @@ export class CliAuthorizeComponent implements OnInit {
     const code = formatCliConfirmationCode(this.form.value.userCode ?? '');
     if (code) {
       this.form.patchValue({ userCode: code });
+      void this.router.navigate([], { relativeTo: this.route, queryParams: { code }, queryParamsHandling: 'merge', replaceUrl: true });
       this.lookup(code);
     }
   }

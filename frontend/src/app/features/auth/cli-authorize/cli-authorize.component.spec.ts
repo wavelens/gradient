@@ -6,7 +6,7 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
 import { ApiError, ApiService } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
@@ -71,20 +71,38 @@ describe('CliAuthorizeComponent', () => {
     expect(component.status()).toBe('authorized');
   });
 
-  it('counts down to the code expiry and blocks Authorize once it passed', () => {
-    const expiration = (fixture: ReturnType<typeof setup>['fixture']) =>
-      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="cli-code-expiration"]')?.textContent?.trim();
-    const authorizeButton = (fixture: ReturnType<typeof setup>['fixture']) =>
-      Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find((b) => b.textContent?.includes('Authorize'))!;
+  it('counts down to the code expiry and returns to the code form once it passed', () => {
+    const root = (fixture: ReturnType<typeof setup>['fixture']) => fixture.nativeElement as HTMLElement;
+    const buttonLabels = (fixture: ReturnType<typeof setup>['fixture']) => Array.from(root(fixture).querySelectorAll('button')).map((b) => b.textContent?.trim());
 
     const pending = setup('ABCD-EF23').fixture;
-    expect(expiration(pending)).toBe('9:05');
-    expect(authorizeButton(pending).disabled).toBe(false);
+    expect(root(pending).querySelector('[data-testid="cli-code-expiration"]')?.textContent?.trim()).toBe('9:05');
+    expect(root(pending).querySelector('[data-testid="cli-session-grant"]')?.textContent).toContain('full access');
+    expect(buttonLabels(pending)).toEqual(expect.arrayContaining(['Authorize', 'Deny']));
 
     TestBed.resetTestingModule();
     const expired = setup('ABCD-EF23', Date.parse('2026-11-08T12:10:00Z')).fixture;
-    expect(expiration(expired)).toContain('Expired');
-    expect(authorizeButton(expired).disabled).toBe(true);
+    expired.detectChanges();
+    expect(expired.componentInstance.info()).toBeNull();
+    expect(root(expired).textContent).toContain('The code has expired. Run gradient login again.');
+    expect(buttonLabels(expired)).not.toContain('Deny');
+  });
+
+  it('names an unknown code instead of showing the raw server reason', () => {
+    const { fixture, get } = setup('ABCD-EF23');
+    get.mockReturnValueOnce(throwError(() => new ApiError('Device authorization not found', 404)));
+    fixture.componentInstance.clearCodeLookupAndShowCodeForm();
+    fixture.componentInstance.form.patchValue({ userCode: 'wxyz2345' });
+    fixture.componentInstance.onLookup();
+    expect(fixture.componentInstance.errorMessage()).toBe('Unknown or expired code. Run gradient login again.');
+  });
+
+  it('writes the typed code into the address so a reload keeps it', () => {
+    const { fixture } = setup('');
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    fixture.componentInstance.form.patchValue({ userCode: 'wxyz2345' });
+    fixture.componentInstance.onLookup();
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { code: 'WXYZ-2345' }, replaceUrl: true }));
   });
 
   it('returns to an empty code form for another code', () => {
