@@ -55,6 +55,7 @@ describe('ExecJobListComponent', () => {
     expect(host.textContent).toContain('lab-a');
     expect(host.textContent).toContain('gpu:h100:8');
     expect(host.querySelector('a.entry-link')?.getAttribute('href')).toBe('/project/acme/task/demo/exec/j1');
+    expect(host.querySelector('.entry-kebab')?.getAttribute('aria-label')).toBe('Actions for apps.x86_64-linux.train');
   });
 
   it('shows a job that waits for its manual start by its wait reason', () => {
