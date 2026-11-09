@@ -321,7 +321,12 @@ async fn commit_metadata(
     .await
     {
         Ok(Ok(commit)) => (commit.message, commit.author_name),
-        _ => (String::new(), String::new()),
+        _ => gradient_db::commits::latest_with_message(&sources.worker_db, commit_hash.to_vec())
+            .await
+            .ok()
+            .flatten()
+            .map(|commit| (commit.message, commit.author_name))
+            .unwrap_or_default(),
     }
 }
 
