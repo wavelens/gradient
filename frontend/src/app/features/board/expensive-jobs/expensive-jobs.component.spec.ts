@@ -93,6 +93,13 @@ describe('BoardExpensiveJobsComponent', () => {
     expect(heading).not.toContain('superuser');
   });
 
+  it('leaves the build time chart out of the resource rankings', () => {
+    const fixture = setup(true);
+    fixture.componentInstance.setTab('ram');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('h2')).toBeNull();
+  });
+
   it('neither asks for nor shows the top projects to a non-superuser', () => {
     const fixture = setup();
     expect(getTopProjects).not.toHaveBeenCalled();

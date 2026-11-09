@@ -62,7 +62,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
         </gr-table>
       }
 
-      @if (topProjects().length) {
+      @if (tab() === 'time' && topProjects().length) {
         <h2>Top projects by build time <gr-label-help doc="ui/job-board/" title="About the Job Board" /></h2>
         <gr-metric-chart
           type="bar"
@@ -118,14 +118,15 @@ export class BoardExpensiveJobsComponent implements OnInit {
   private load(): void {
     if (this.tab() === 'time') {
       this.board.getExpensive(this.windowDays()).pipe(this.first.track()).subscribe((b) => this.builds.set(b));
+      if (this.auth.user()?.superuser === true) {
+        this.board.getTopProjects(this.windowDays()).pipe(this.first.track()).subscribe((o) => this.topProjects.set(o));
+      }
     } else {
       this.board
         .getExpensiveByResource(this.tab() as 'ram' | 'cpu' | 'disk', this.windowDays())
         .pipe(this.first.track())
         .subscribe((r) => this.resources.set(r));
     }
-    if (this.auth.user()?.superuser !== true) return;
-    this.board.getTopProjects(this.windowDays()).pipe(this.first.track()).subscribe((o) => this.topProjects.set(o));
   }
 
   setTab(t: Tab): void {
