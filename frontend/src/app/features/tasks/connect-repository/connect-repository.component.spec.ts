@@ -90,6 +90,15 @@ describe('ConnectRepositoryComponent', () => {
     expect(fixture.componentInstance.state()).toEqual(repo);
   });
 
+  it('starts over at the repository step when the task in the link does not exist', () => {
+    const fixture = render({ task: 'does-not-exist', step: 'access' }, { getRepository: () => throwError(() => new ApiError('Task not found', 404)) });
+    const comp = fixture.componentInstance;
+    fixture.detectChanges();
+    expect(comp.step()).toBe('repository');
+    expect(comp.taskName()).toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('#connect-repo')).not.toBeNull();
+  });
+
   it('marks the empty display name and name fields on submit', () => {
     const createTask = vi.fn();
     const fixture = render({}, { createTask });

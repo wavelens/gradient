@@ -26,7 +26,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
-import { apiErrorMessage } from '@core/services/api.service';
+import { ApiError, apiErrorMessage } from '@core/services/api.service';
 import { NameFieldsComponent, fieldChecks, firstFieldError, nameAvailability } from '@shared/forms';
 import { LabelHelpComponent } from '@shared/ui';
 import { repositoryUrlError } from '@shared/text/repository-url';
@@ -183,7 +183,14 @@ export class ConnectRepositoryComponent implements OnInit {
     if (!task) return;
     this.tasks.getRepository(this.projectName, task).subscribe({
       next: (state) => this.state.set(state),
-      error: (error: unknown) => this.notify.failure('Failed to load repository', error),
+      error: (error: unknown) => {
+        if (!(error instanceof ApiError && error.status === 404)) return this.notify.failure('Failed to load repository', error);
+        this.notify.failure(`Task ${task} not found`, null);
+        this.taskName.set(null);
+        this.step.set('repository');
+        this.router.navigate([], { relativeTo: this.route, queryParams: {}, replaceUrl: true });
+        this.loadCaches();
+      },
     });
   }
 
