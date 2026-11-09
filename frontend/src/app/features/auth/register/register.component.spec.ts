@@ -117,4 +117,23 @@ describe('RegisterComponent - submit', () => {
     expect(root.textContent).toContain('Password is required');
     expect(register).not.toHaveBeenCalled();
   });
+
+  it('shows an email taken by another account under the email field, not as a banner', async () => {
+    const { fixture, root, register } = setup(() => of('Username is available'));
+    register.mockReturnValueOnce(throwError(() => new ApiError('Email already exists', 409, 'email_address_already_in_use')));
+    const component = fixture.componentInstance;
+    component.registerForm.setValue({
+      username: 'alice',
+      name: 'Alice',
+      email: 'alice@example.com',
+      password: 'Zebra7kq_x',
+      confirmPassword: 'Zebra7kq_x',
+    });
+    await new Promise((resolve) => setTimeout(resolve, CHECK_DELAY_MS));
+    component.onSubmit();
+    fixture.detectChanges();
+    expect(register).toHaveBeenCalledOnce();
+    expect(root.querySelector('#email')!.closest('gr-form-field')!.textContent).toContain('Email already exists');
+    expect(component.errorMessage()).toBeNull();
+  });
 });

@@ -18,6 +18,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -46,13 +47,18 @@ function statusMessage(status: number): string {
   return status >= 500 ? 'The server failed to process the request. Try again later.' : 'The server rejected the request.';
 }
 
+function readErrorCode(body: unknown): string | undefined {
+  const code = (body as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && code ? code : undefined;
+}
+
 function serverMessage(body: unknown): string | undefined {
   const message = (body as { message?: unknown } | null)?.message;
   return typeof message === 'string' && message ? message : undefined;
 }
 
 function toApiError(error: HttpErrorResponse, body: unknown = error.error): ApiError {
-  return new ApiError(serverMessage(body) ?? statusMessage(error.status), error.status);
+  return new ApiError(serverMessage(body) ?? statusMessage(error.status), error.status, readErrorCode(body));
 }
 
 function parseJson(text: string): unknown {
@@ -102,7 +108,7 @@ export class ApiService {
             throw new ApiError(EMPTY_RESPONSE, response.status);
           }
           if (envelope.error) {
-            throw new ApiError(serverMessage(envelope) ?? statusMessage(response.status), response.status);
+            throw new ApiError(serverMessage(envelope) ?? statusMessage(response.status), response.status, readErrorCode(envelope));
           }
           return envelope.message as T;
         }),

@@ -14,7 +14,7 @@ import { ConfigService } from '@core/services/config.service';
 const EXAMPLE = { id: 'example', label: 'Example' };
 
 function setup(
-  config: { loginProviders: { id: string; label: string }[]; passwordLoginEnabled: boolean },
+  config: { loginProviders: { id: string; label: string }[]; passwordLoginEnabled: boolean; registrationDisabled?: boolean },
   query: Record<string, string> = {},
 ): ComponentFixture<LoginComponent> {
   TestBed.configureTestingModule({
@@ -59,6 +59,18 @@ describe('LoginComponent', () => {
     const fixture = setup({ loginProviders: [], passwordLoginEnabled: true }, { registered: 'dora' });
     expect(fixture.nativeElement.textContent).toContain('Account created');
     expect(fixture.componentInstance.loginForm.value.username).toBe('dora');
+  });
+
+  it('keeps the page to return to on the Sign up link, but drops an outside address', () => {
+    const signUpLink = (query: Record<string, string>) => {
+      TestBed.resetTestingModule();
+      const fixture = setup({ loginProviders: [], passwordLoginEnabled: true, registrationDisabled: false }, query);
+      return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a'))
+        .find((a) => a.textContent?.includes('Sign up'))!
+        .getAttribute('href');
+    };
+    expect(signUpLink({ next: '/project/alpha' })).toBe('/account/register?next=%2Fproject%2Falpha');
+    expect(signUpLink({ next: 'https://example.com' })).toBe('/account/register');
   });
 
   it('falls back to a generic message for unknown errors', () => {

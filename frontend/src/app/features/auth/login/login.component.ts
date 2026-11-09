@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -21,7 +21,8 @@ import {
   MessageBannerComponent,
   PasswordInputComponent,
 } from '@gradient/ui/ui';
-import { links } from '@shared/routing';
+import { links, readInAppNextPathFromRouteSnapshot } from '@shared/routing';
+import { injectRevealFirstInvalid } from '@shared/forms';
 
 const LOGIN_ERRORS: Record<string, string> = {
   deactivated: 'This account is deactivated.',
@@ -47,11 +48,14 @@ export class LoginComponent {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private config = inject(ConfigService);
+  private host = inject(ElementRef<HTMLElement>);
+  private revealFirstInvalid = injectRevealFirstInvalid();
 
   loginForm: FormGroup;
   errorMessage = signal<string | null>(null);
   readonly sessionExpired = this.route.snapshot.queryParamMap.get('reason') === 'expired';
   readonly usernameFromRegistration = this.route.snapshot.queryParamMap.get('registered');
+  protected readonly nextPagePathAfterSignIn = readInAppNextPathFromRouteSnapshot(this.route.snapshot);
   loading = signal(false);
   showPassword = signal(false);
   get oidcEnabled() { return this.config.oidcEnabled; }
@@ -80,18 +84,14 @@ export class LoginComponent {
   }
 
   private navigateAfterLogin(): void {
-    const next = this.route.snapshot.queryParamMap.get('next');
-    if (next && next.startsWith('/')) {
-      this.router.navigateByUrl(next);
-    } else {
-      this.router.navigateByUrl(links.dashboard());
-    }
+    this.router.navigateByUrl(this.nextPagePathAfterSignIn ?? links.dashboard());
   }
 
   onSubmit(): void {
     if (this.loading()) return;
     if (this.loginForm.invalid) {
       this.loginForm.markAllAsTouched();
+      this.revealFirstInvalid(() => this.host.nativeElement);
       return;
     }
     this.loading.set(true);
@@ -120,10 +120,7 @@ export class LoginComponent {
   }
 
   private redirectTo(path: string): void {
-    const next = this.route.snapshot.queryParamMap.get('next');
-    if (next && next.startsWith('/')) {
-      sessionStorage.setItem('oidc_next', next);
-    }
+    if (this.nextPagePathAfterSignIn) sessionStorage.setItem('oidc_next', this.nextPagePathAfterSignIn);
     window.location.href = `${environment.apiUrl}/${path}`;
   }
 }

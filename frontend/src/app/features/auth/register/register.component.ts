@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormBuilder,
@@ -14,13 +14,13 @@ import {
   AbstractControl,
   ValidationErrors,
 } from '@angular/forms';
-import { Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { environment } from '@environments/environment';
-import { ApiError } from '@core/services/api.service';
-import { catchError, switchMap, map } from 'rxjs/operators';
-import { Observable, of, timer } from 'rxjs';
+import { ApiError, apiErrorMessage } from '@core/services/api.service';
+import { apiErrorCodeToFormFieldName, checkUsernameAvailability } from '@core/services/account-form-api-checks';
+import { Observable } from 'rxjs';
 import {
   ButtonComponent,
   FormFieldComponent,
@@ -30,7 +30,8 @@ import {
   MessageBannerComponent,
   PasswordInputComponent,
 } from '@gradient/ui/ui';
-import { links } from '@shared/routing';
+import { links, readInAppNextPathFromRouteSnapshot } from '@shared/routing';
+import { injectRevealFirstInvalid } from '@shared/forms';
 
 const PASSWORD_SPECIAL_CHARACTERS = '!@#$%^&*()_+-=[]{}|;:,.<>?';
 
@@ -47,8 +48,12 @@ export class RegisterComponent {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
   private config = inject(ConfigService);
+  private host = inject(ElementRef<HTMLElement>);
+  private revealFirstInvalid = injectRevealFirstInvalid();
   protected readonly specialCharacters = PASSWORD_SPECIAL_CHARACTERS;
+  protected readonly nextPagePathAfterSignIn = readInAppNextPathFromRouteSnapshot(this.route.snapshot);
 
   registerForm: FormGroup;
   errorMessage = signal<string | null>(null);
@@ -134,21 +139,7 @@ export class RegisterComponent {
   }
 
   private usernameValidator(control: AbstractControl): Observable<ValidationErrors | null> {
-    if (!control.value) {
-      return of(null);
-    }
-
-    return timer(500).pipe(
-      switchMap(() => this.authService.checkUsername(control.value)),
-      map(() => null),
-      catchError((error: unknown) =>
-        of(
-          error instanceof ApiError && !error.unreachable && error.status < 500
-            ? { usernameRefused: error.message }
-            : { usernameCheckFailed: true },
-        ),
-      ),
-    );
+    return checkUsernameAvailability(this.authService, control.value);
   }
 
   get usernameInvalid(): boolean {
@@ -161,6 +152,10 @@ export class RegisterComponent {
     return this.username?.getError('usernameRefused') ?? '';
   }
 
+  get emailRefusal(): string {
+    return this.email?.getError('emailRefused') ?? '';
+  }
+
   recheckUsername(): void {
     this.username?.updateValueAndValidity();
   }
@@ -169,6 +164,7 @@ export class RegisterComponent {
     if (this.loading() || this.registerForm.pending) return;
     if (this.registerForm.invalid) {
       this.registerForm.markAllAsTouched();
+      this.revealFirstInvalid(() => this.host.nativeElement);
       return;
     }
     this.loading.set(true);
@@ -185,12 +181,20 @@ export class RegisterComponent {
             'Registration successful! Please check your email to verify your account before signing in.'
           );
         } else {
-          this.router.navigateByUrl(links.loginAfterRegister(username));
+          this.router.navigateByUrl(links.loginAfterRegister(username, this.nextPagePathAfterSignIn));
         }
       },
-      error: (error) => {
+      error: (error: unknown) => {
         this.loading.set(false);
-        this.errorMessage.set(error.message || 'Registration failed. Please try again.');
+        const field = error instanceof ApiError && error.code ? apiErrorCodeToFormFieldName[error.code] : undefined;
+        if (field && error instanceof ApiError) {
+          const control = this.registerForm.get(field);
+          control?.setErrors({ [`${field}Refused`]: error.message });
+          control?.markAsTouched();
+          this.revealFirstInvalid(() => this.host.nativeElement);
+          return;
+        }
+        this.errorMessage.set(apiErrorMessage(error, 'Registration failed. Please try again.'));
       },
     });
   }
