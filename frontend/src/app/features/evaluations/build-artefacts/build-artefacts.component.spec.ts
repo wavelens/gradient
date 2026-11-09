@@ -51,9 +51,18 @@ describe('BuildArtefactsComponent', () => {
     expect(root.textContent).toContain('hydra-build-products');
   });
 
-  it('names the package instead of the build id', () => {
+  it('heads the page with the package name instead of the build id', () => {
     const { root } = render(() => of([]));
-    expect(root.textContent).toContain('hello-2.12');
+    expect(root.querySelector('h1')?.textContent?.trim()).toBe('hello-2.12');
+  });
+
+  it('names artefact types in words instead of the raw product type', () => {
+    const { root } = render(() => of([
+      { name: 'hello.tar.gz', path: 'hello.tar.gz', file_type: 'file', subtype: 'binary-dist' },
+      { name: 'manual', path: 'manual', file_type: 'doc', subtype: 'manual' },
+      { name: 'out', path: 'out', file_type: 'nix-build', subtype: 'out' },
+    ]));
+    expect([...root.querySelectorAll('gr-row gr-badge')].map((badge) => badge.textContent?.trim())).toEqual(['Binary', 'Manual', 'Nix build']);
   });
 
   it('leads back to the log of the build evaluation when opened without an origin', () => {

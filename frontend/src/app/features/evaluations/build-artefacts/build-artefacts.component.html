@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="form" title="Build Artefacts" [subtitle]="packageName()" [breadcrumb]="breadcrumb()">
+<gr-page-layout width="form" [title]="packageName() || 'Artefacts'" [breadcrumb]="breadcrumb()">
   <a slot="actions" grButton size="small" severity="secondary" icon="arrow_back" label="Back" [routerLink]="back()"></a>
 
   <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="artefacts().length === 0"

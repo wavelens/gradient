@@ -24,6 +24,20 @@ import { environment } from '@environments/environment';
 import { formatBytes, packageNameFromDerivationPath } from '@shared/text';
 import { BuildProduct } from '@core/models';
 
+/** Readable labels for product types and subtypes from Hydra. A more specific subtype can take priority. */
+const ARTEFACT_TYPE_LABELS: Record<string, string> = {
+  'binary-dist': 'Binary',
+  'source-dist': 'Source',
+  manual: 'Manual',
+  readme: 'Readme',
+  pdf: 'PDF',
+  report: 'Report',
+  coverage: 'Coverage',
+  'nix-build': 'Nix build',
+  doc: 'Document',
+  file: 'File',
+};
+
 @Component({
   selector: 'app-build-artefacts',
   standalone: true,
@@ -104,16 +118,9 @@ export class BuildArtefactsComponent implements OnInit {
     return isHtmlArtefact(p);
   }
 
-  /**
-   * Display label combining Hydra type and subtype. Falls back to whichever
-   * field is populated.  Examples: `file html` → `HTML`, `doc readme` → `DOC/README`,
-   * `nix-build out` → `NIX-BUILD`.
-   */
   fileTypeLabel(p: BuildProduct): string {
     if (this.isHtml(p)) return 'HTML';
-    const t = p.file_type?.toUpperCase() ?? '';
-    const s = p.subtype?.toUpperCase() ?? '';
-    if (t && s && s !== 'OUT') return `${t}/${s}`;
-    return t || s || 'FILE';
+    const subtype = p.subtype && p.subtype !== 'out' ? p.subtype : '';
+    return ARTEFACT_TYPE_LABELS[subtype] ?? ARTEFACT_TYPE_LABELS[p.file_type ?? ''] ?? (subtype || p.file_type || 'File');
   }
 }
