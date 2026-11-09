@@ -128,9 +128,10 @@ fn explicit_attr_set(wildcards: &[String]) -> HashSet<String> {
         .collect()
 }
 
-fn unmatched_target_errors(wildcards: &[String]) -> Vec<String> {
+fn unmatched_target_errors(wildcards: &[String], failed: &[AttrError]) -> Vec<String> {
     let mut errors: Vec<String> = explicit_attr_set(wildcards)
         .into_iter()
+        .filter(|attr| !failed.iter().any(|error| &error.attr == attr))
         .map(|attr| format!("target '{attr}' matched no derivations in the flake"))
         .collect();
     errors.sort_unstable();
@@ -1150,7 +1151,7 @@ async fn finish_evaluation(
     failed.extend(found.failed);
     let errors = if found.attrs == 0 {
         warn!("no derivations found for evaluation");
-        unmatched_target_errors(&job.wildcards)
+        unmatched_target_errors(&job.wildcards, &failed)
     } else {
         if found.roots.is_empty() {
             warn!("all attr resolutions failed");
@@ -1312,16 +1313,28 @@ mod tests {
     #[test]
     fn unmatched_explicit_target_errors_but_wildcard_is_silent() {
         assert_eq!(
-            unmatched_target_errors(&["packages.x86_64-linux.uxc".to_string()]),
+            unmatched_target_errors(&["packages.x86_64-linux.uxc".to_string()], &[]),
             vec![
                 "target 'packages.x86_64-linux.uxc' matched no derivations in the flake"
                     .to_string()
             ]
         );
-        assert!(unmatched_target_errors(&["packages.x86_64-linux.*".to_string()]).is_empty());
-        assert!(unmatched_target_errors(&["packages.x86_64-linux.**".to_string()]).is_empty());
-        assert!(unmatched_target_errors(&["packages.x86_64-*.hello".to_string()]).is_empty());
-        assert!(unmatched_target_errors(&["!nixosConfigurations.foo".to_string()]).is_empty());
+        assert!(unmatched_target_errors(&["packages.x86_64-linux.*".to_string()], &[]).is_empty());
+        assert!(unmatched_target_errors(&["packages.x86_64-linux.**".to_string()], &[]).is_empty());
+        assert!(unmatched_target_errors(&["packages.x86_64-*.hello".to_string()], &[]).is_empty());
+        assert!(unmatched_target_errors(&["!nixosConfigurations.foo".to_string()], &[]).is_empty());
+    }
+
+    #[test]
+    fn a_target_that_failed_to_evaluate_is_not_also_reported_unmatched() {
+        let failed = [AttrError {
+            attr: "packages.x86_64-linux.broken".into(),
+            message: "error: undefined variable".into(),
+        }];
+        assert!(
+            unmatched_target_errors(&["packages.x86_64-linux.broken".to_string()], &failed)
+                .is_empty()
+        );
     }
 
     fn make_flake_job(repo: &str) -> FlakeJob {
