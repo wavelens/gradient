@@ -23,6 +23,7 @@ function service(graph: ClosureGraph) {
     getEvalClosure: vi.fn(() => of(graph)),
     getBuildRuntimeClosure: vi.fn(() => of(graph)),
     getEvalRuntimeClosure: vi.fn(() => of(graph)),
+    getEvaluation: vi.fn(() => of({ commit: 'abcdef1234567890' })),
   };
 }
 
@@ -87,7 +88,17 @@ describe('ClosureGraphComponent - diagram', () => {
     }
     expect(Number(rect.getAttribute('width'))).toBeGreaterThan(0);
     expect(Number(root.querySelector('svg text')?.getAttribute('x'))).not.toBeNaN();
-    expect(root.querySelector('.header-meta')?.textContent).toContain('1 package in closure');
+    expect(root.querySelector('.header-meta')?.textContent).toMatch(/1 package in closure\s*·\s*120 B/);
+    fixture.destroy();
+  });
+
+  it('titles an evaluation closure by the evaluation, not by one of its roots', () => {
+    const { fixture } = setup('eval', undefined, {
+      ...emptyGraph, roots: ['deployment', 'docs'], total_size_bytes: 120, node_count: 2,
+      nodes: [{ id: 'deployment', name: 'deployment', path: '/nix/store/hash-deployment', nar_size: 60 }, { id: 'docs', name: 'docs', path: '/nix/store/hash-docs', nar_size: 60 }],
+    });
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent?.trim()).toBe('abcdef12');
     fixture.destroy();
   });
 

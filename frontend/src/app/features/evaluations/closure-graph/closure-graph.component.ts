@@ -23,6 +23,7 @@ import {
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
 import { formatBytes, plural } from '@shared/text';
+import { evaluationTitle } from '@shared/evaluation';
 import { buildClosureSankey, contributesTo, SankeyNode, SankeyLink } from './closure-aggregate';
 import { ClosureGraph } from '@core/models';
 
@@ -112,13 +113,15 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     const req = this.closureType === 'build'
       ? (isEval ? this.evalService.getEvalClosure(this.id) : this.evalService.getBuildClosure(this.id))
       : (isEval ? this.evalService.getEvalRuntimeClosure(this.id) : this.evalService.getBuildRuntimeClosure(this.id));
+    if (isEval) {
+      this.evalService.getEvaluation(this.id).subscribe({ next: (evaluation) => this.rootName.set(evaluationTitle(evaluation)) });
+    }
     req.subscribe({
       next: (g) => {
         this.nodeCount.set(g.node_count);
         this.truncated.set(g.truncated);
         this.totalLabel.set(formatBytes(g.total_size_bytes ?? 0));
-        const rootNode = g.nodes.find((n) => g.roots.includes(n.id));
-        this.rootName.set(rootNode?.name ?? '');
+        if (!isEval) this.rootName.set(g.nodes.find((n) => g.roots.includes(n.id))?.name ?? '');
         this.loading.set(false);
         this.cdr.detectChanges();
         setTimeout(() => this.render(g), 0);

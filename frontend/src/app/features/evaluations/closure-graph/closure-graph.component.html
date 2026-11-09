@@ -27,10 +27,11 @@
             <div class="header-title">
               <h1 class="header-name">{{ rootName() }}</h1>
               <gr-badge severity="info">{{ typeLabel() }}</gr-badge>
-              <gr-badge>{{ totalLabel() }}</gr-badge>
             </div>
             <div class="header-meta">
               <span>{{ plural(nodeCount(), 'package') }} in closure</span>
+              <span class="sep">·</span>
+              <span>{{ totalLabel() }}</span>
               @if (truncated()) {
                 <span class="sep">·</span>
                 <span class="warn">large closure - node list truncated</span>
