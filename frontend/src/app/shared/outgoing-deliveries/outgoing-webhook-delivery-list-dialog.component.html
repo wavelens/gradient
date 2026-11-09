@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-dialog header="Delivery history" width="860px" [(visible)]="visible" (hide)="closed.emit()">
+<gr-dialog [header]="'Deliveries · ' + webhookOrTaskActionDisplayName()" width="860px" [(visible)]="visible" (hide)="closed.emit()">
   <gr-load-state flat [loading]="loading()" [error]="loadError()" [empty]="deliveries().length === 0"
                  loadingMessage="Loading deliveries..." errorTitle="Failed to load deliveries"
                  emptyIcon="send" emptyTitle="No deliveries yet" (retry)="loadPage()">

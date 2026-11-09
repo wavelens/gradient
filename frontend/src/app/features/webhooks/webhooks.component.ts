@@ -127,6 +127,7 @@ export class WebhooksComponent implements OnInit {
     const hook = this.deliveriesFor();
     if (!hook) return null;
     return {
+      name: hook.name,
       page: (limit: number, offset: number) => this.service.deliveries(this.scope, hook.id, limit, offset),
       detail: (deliveryId: string) => this.service.delivery(this.scope, hook.id, deliveryId),
     };

@@ -128,6 +128,7 @@ export class TaskActionsComponent implements OnInit {
     const actionId = this.deliveriesActionId();
     if (!actionId) return null;
     return {
+      name: this.actions().find((action) => action.id === actionId)?.name ?? '',
       page: (limit: number, offset: number) => this.actionsService.listDeliveries(this.projectName, this.taskName, actionId, limit, offset),
       detail: (deliveryId: string) => this.actionsService.getDelivery(this.projectName, this.taskName, actionId, deliveryId),
     };

@@ -33,6 +33,7 @@ function render(
   const loadDeliveryDetail = vi.fn(detail);
   TestBed.configureTestingModule({ imports: [OutgoingWebhookDeliveryListDialog] });
   const fixture: ComponentFixture<OutgoingWebhookDeliveryListDialog> = TestBed.createComponent(OutgoingWebhookDeliveryListDialog);
+  fixture.componentRef.setInput('webhookOrTaskActionDisplayName', 'ci');
   fixture.componentRef.setInput('loadDeliveryPage', loadDeliveryPage);
   fixture.componentRef.setInput('loadDeliveryDetail', loadDeliveryDetail);
   fixture.detectChanges();
@@ -54,6 +55,7 @@ describe('getDeliveryResultReason', () => {
 describe('OutgoingWebhookDeliveryListDialog', () => {
   it('names the result, the reason and the event on each row', () => {
     render(() => of([failed, delivered]));
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Deliveries · ci');
     const [first, second] = rows();
     expect(first.textContent).toContain('Failed');
     expect(first.textContent).toContain('connection refused');

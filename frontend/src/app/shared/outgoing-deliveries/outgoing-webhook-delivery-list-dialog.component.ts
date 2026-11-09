@@ -46,6 +46,7 @@ const DELIVERIES_PER_PAGE = 50;
 export class OutgoingWebhookDeliveryListDialog implements OnInit {
   private destroyRef = inject(DestroyRef);
 
+  webhookOrTaskActionDisplayName = input.required<string>();
   loadDeliveryPage = input.required<(limit: number, offset: number) => Observable<RecordedOutgoingDeliveryListRow[]>>();
   loadDeliveryDetail = input.required<(deliveryId: string) => Observable<RecordedOutgoingDelivery>>();
   closed = output<void>();

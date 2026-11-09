@@ -95,6 +95,7 @@
 
 @if (openWebhookDeliveryHistoryLoadFunctions(); as load) {
   <app-outgoing-webhook-delivery-list-dialog
+    [webhookOrTaskActionDisplayName]="load.name"
     [loadDeliveryPage]="load.page"
     [loadDeliveryDetail]="load.detail"
     (closed)="deliveriesFor.set(null)"
