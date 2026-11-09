@@ -13,11 +13,10 @@ import { deviceLabel, guestSizeLabel } from '../exec-job-status';
 interface RequestedField {
   label: string;
   values: string[];
-  unset: string;
 }
 
-function field(label: string, values: (string | null | undefined)[], unset = 'None'): RequestedField {
-  return { label, values: values.filter((value): value is string => !!value), unset };
+function field(label: string, values: (string | null | undefined)[]): RequestedField {
+  return { label, values: values.filter((value): value is string => !!value) };
 }
 
 function seconds(secs: number | null | undefined): string | null {
@@ -30,8 +29,8 @@ function yesNo(value: boolean): string {
 
 function requestedFields(job: ExecJobResponse): RequestedField[] {
   return [
-    field('Architecture', [job.architecture], 'Any'),
-    field('Guest', [guestSizeLabel(job.guest)], 'Worker default'),
+    field('Architecture', [job.architecture]),
+    field('Guest', [guestSizeLabel(job.guest)]),
     field('Nodes', [String(job.nodes)]),
     field('Labels', job.labels),
     field('Devices', job.devices.map(deviceLabel)),
@@ -40,11 +39,11 @@ function requestedFields(job: ExecJobResponse): RequestedField[] {
     field('Network', [yesNo(job.network)]),
     field('SSH', [yesNo(job.ssh)]),
     field('Ports', job.ports.map(String)),
-    field('Image', [job.image], 'Default'),
-    field('Timeout', [seconds(job.timeout_secs)], 'Worker limit'),
-    field('Time without output', [seconds(job.max_silent_secs)], 'Worker limit'),
+    field('Image', [job.image]),
+    field('Timeout', [seconds(job.timeout_secs)]),
+    field('Time without output', [seconds(job.max_silent_secs)]),
     field('Retries', [String(job.retries)]),
-  ];
+  ].filter((requested) => requested.values.length > 0);
 }
 
 @Component({

@@ -48,21 +48,18 @@ function rows(root: HTMLElement): Record<string, string> {
 }
 
 describe('ExecJobInfoComponent', () => {
-  it('lists every requested field and names unset ones', () => {
+  it('lists the requested fields and leaves out unset ones', () => {
     expect(rows(render(JOB))).toEqual({
       Architecture: 'x86_64-linux',
       Guest: '4 CPUs · 2048 MB memory',
       Nodes: '1',
       Labels: '3d-printer',
       Devices: 'nvidia:2',
-      Mounts: 'None',
       Secrets: 'lab-key',
       Network: 'Yes',
       SSH: 'Yes',
       Ports: '6006, 8080',
-      Image: 'Default',
       Timeout: '1h 30m',
-      'Time without output': 'Worker limit',
       Retries: '1',
     });
   });

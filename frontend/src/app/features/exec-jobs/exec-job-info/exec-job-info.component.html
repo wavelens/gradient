@@ -13,8 +13,6 @@
           <div class="values">
             @for (value of field.values; track value) {
               <span class="mono">{{ value }}</span>
-            } @empty {
-              <span class="unset">{{ field.unset }}</span>
             }
           </div>
         </td>
