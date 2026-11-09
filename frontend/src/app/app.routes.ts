@@ -12,11 +12,11 @@ import { authGuard, redirectSignedInUserToDashboardGuard } from '@core/guards/au
 import { adminGuard } from '@core/guards/admin.guard';
 import { publicListingGuard } from '@core/guards/public-listing.guard';
 import {
+  assignedJobDetailGuard,
   buildOrEvaluationAccessGuard,
   clusterJobBoardGuard,
   entryPointEvalQueryParameterMissingGuard,
   execJobInTaskGuard,
-  jobAssignedOrPendingGuard,
   workerInProjectGuard,
 } from '@core/guards/entity.guards';
 import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
@@ -358,7 +358,7 @@ export const routes: Routes = [
       // Job Board
       {
         path: 'board/jobs/:id',
-        canActivate: [jobAssignedOrPendingGuard],
+        canActivate: [assignedJobDetailGuard],
         title: 'Assigned job',
         loadComponent: () =>
           import('./features/board/job-detail/job-detail.component').then(
@@ -367,7 +367,6 @@ export const routes: Routes = [
       },
       {
         path: 'board/pending/:id',
-        canActivate: [jobAssignedOrPendingGuard],
         title: 'Pending job',
         data: { pending: true },
         loadComponent: () =>

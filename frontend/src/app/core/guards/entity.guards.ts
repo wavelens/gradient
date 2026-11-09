@@ -36,17 +36,11 @@ export const buildOrEvaluationAccessGuard: CanActivateFn = (route, state) => {
   return lookup.pipe(map(() => true as const), denyOnRefusal(target, state.url));
 };
 
-export const jobAssignedOrPendingGuard: CanActivateFn = (route, state) => {
-  const router = inject(Router);
-  const board = inject(BoardService);
+export const assignedJobDetailGuard: CanActivateFn = (route, state) => {
   const id = route.paramMap.get('id') ?? '';
-  const target: DeniedTarget = { kind: 'job', name: id, back: String(links.board()) };
-  if (route.data['pending'] !== true) {
-    return board.getJob(id).pipe(map(() => true as const), denyOnRefusal(target, state.url));
-  }
-  return board.getPendingJobs().pipe(
-    map(({ jobs }) => jobs.some((p) => p.exec_job?.id === id || (!p.exec_job && (p.evaluation_id === id || p.build_id === id))) || deniedPage(router, target, state.url)),
-    denyOnRefusal(target, state.url),
+  return inject(BoardService).getJob(id).pipe(
+    map(() => true as const),
+    denyOnRefusal({ kind: 'job', name: id, back: String(links.board()) }, state.url),
   );
 };
 

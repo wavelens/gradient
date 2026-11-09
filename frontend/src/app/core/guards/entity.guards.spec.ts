@@ -32,11 +32,11 @@ import { teamAccessResolver } from '@core/resolvers/team-access.resolver';
 import { CachesService } from '@core/services/caches.service';
 import { adminGuard } from './admin.guard';
 import {
+  assignedJobDetailGuard,
   buildOrEvaluationAccessGuard,
   clusterJobBoardGuard,
   entryPointEvalQueryParameterMissingGuard,
   execJobInTaskGuard,
-  jobAssignedOrPendingGuard,
   workerInProjectGuard,
 } from './entity.guards';
 import { BoardService } from '@core/services/board.service';
@@ -161,24 +161,14 @@ describe('not-found or no-access page', () => {
     expect(page(await outcome(buildOrEvaluationAccessGuard, params))).toContain(`kind=${kind}&name=b9&back=%2Fproject%2Facme`);
   });
 
-  it('Route a waiting job to the pending job page', async () => {
-    configure({ board: { getPendingJobs: () => of({ jobs: [{ evaluation_id: 'e1', build_id: 'b1' }] }) } });
-    expect(await outcome(jobAssignedOrPendingGuard, { id: 'b1' }, { pending: true })).toBe(true);
-  });
-
-  it('Replace a job no longer waiting on the pending jobs page', async () => {
-    configure({ board: { getPendingJobs: () => of({ jobs: [] }) } });
-    expect(page(await outcome(jobAssignedOrPendingGuard, { id: 'gone' }, { pending: true }))).toContain('kind=job&name=gone&back=%2Fboard%2Foverview');
-  });
-
   it('Replace a nonexistent job on the assigned job page', async () => {
     configure({ board: { getJob: () => refused(404) } });
-    expect(page(await outcome(jobAssignedOrPendingGuard, { id: 'gone' }))).toContain('kind=job&name=gone&back=%2Fboard%2Foverview');
+    expect(page(await outcome(assignedJobDetailGuard, { id: 'gone' }))).toContain('kind=job&name=gone&back=%2Fboard%2Foverview');
   });
 
   it('replaces a malformed id the server rejects with the not-found page', async () => {
     configure({ board: { getJob: () => refused(400), getClusterJob: () => refused(400) } });
-    expect(page(await outcome(jobAssignedOrPendingGuard, { id: 'notauuid' }))).toContain('/error/404?kind=job&name=notauuid');
+    expect(page(await outcome(assignedJobDetailGuard, { id: 'notauuid' }))).toContain('/error/404?kind=job&name=notauuid');
     expect(page(await outcome(clusterJobBoardGuard, { id: 'notauuid' }))).toContain('/error/404?kind=clusterJob&name=notauuid');
   });
 
