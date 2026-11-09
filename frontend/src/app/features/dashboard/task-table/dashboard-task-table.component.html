@@ -31,11 +31,12 @@
         }
         @for (t of taskRowsWithNewestHistoryBarsThatFit(); track t.project + '/' + t.task) {
           @let waitingReason = t.latest?.status === 'Waiting' ? newestEvaluationWaitingReasonTitle(t.project, t.latest!) : null;
-          <gr-row [link]="links.task(t.project, t.task)" [linkLabel]="t.project + ' / ' + t.task">
+          @let label = t.project_display_name + ' / ' + t.task_display_name;
+          <gr-row [link]="links.task(t.project, t.task)" [linkLabel]="label">
             @if (t.latest; as l) {
               <gr-status-icon slot="icon" size="sm" [phase]="phase(l.status)" [label]="waitingReason ?? l.status" />
             }
-            <span class="name" [title]="t.project + ' / ' + t.task"><span class="project">{{ t.project }} /</span> {{ t.task }}</span>
+            <span class="name" [title]="label"><span class="project">{{ t.project_display_name }}</span><span class="project">&nbsp;/&nbsp;</span><span class="task">{{ t.task_display_name }}</span></span>
             <span slot="meta" class="meta">
               @if (t.latest; as l) {
                 <code>{{ l.commit.slice(0, 7) }}</code><span class="latest-evaluation-relative-time">&nbsp;· {{ l.created_at | relativeTime }}</span>

@@ -25,7 +25,7 @@
                   <li>
                     <a class="row" [routerLink]="links.task(p.name, t.name)">
                       <span class="dot" [style.background]="evaluationStatusDotColor(t.status)"></span>
-                      <span class="n">{{ t.name }}</span>
+                      <span class="n">{{ t.display_name }}</span>
                     </a>
                   </li>
                 }

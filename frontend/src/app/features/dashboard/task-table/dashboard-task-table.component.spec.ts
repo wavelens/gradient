@@ -153,9 +153,11 @@ describe('DashboardTaskTableComponent', () => {
     expect(values).toEqual([['41/45', 'Entry points passed'], ['14m 00s', 'average time']]);
   });
 
-  it('names the full project and task on a truncated task name', () => {
-    const link = render(null, () => of(PAGE)).root.querySelector<HTMLElement>('gr-row .name')!;
-    expect(link.title).toBe('infra / hosts');
+  it('names the project and task by display name and keeps slugs in the link only', () => {
+    const row = render(null, () => of(PAGE)).root.querySelector<HTMLElement>('gr-row')!;
+    expect(row.querySelector<HTMLElement>('.name')!.title).toBe('Infrastructure / hosts build');
+    expect(row.querySelector('.name')!.textContent).not.toContain('infra ');
+    expect(row.querySelector('a.row-link')!.getAttribute('href')).toBe('/project/infra/task/hosts');
   });
 
   it('stretches one link over the row that opens the task', () => {

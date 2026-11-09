@@ -47,6 +47,7 @@ describe('DashboardRailComponent', () => {
     });
     expect(hrefs(root)).toContain('/project/infra');
     expect(hrefs(root)).toContain('/project/infra/task/hosts');
+    expect(root.querySelector('.tasks .n')?.textContent).toBe('Hosts');
     expect(hrefs(root)).toContain('/caches/main');
   });
 
