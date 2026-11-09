@@ -9,6 +9,7 @@ use super::stars::user_value;
 use chrono::NaiveDateTime;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::exec_job::ExecJobStatus;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr, QueryResult, Value};
 use std::collections::HashMap;
@@ -53,14 +54,20 @@ fn task_facts_sql() -> String {
 fn outcomes_sql() -> String {
     use BuildStatus::*;
     format!(
-        "SELECT ep.evaluation AS id, \
-            count(*) FILTER (WHERE db.status IN ({ok}))::bigint AS ok, \
-            count(*) FILTER (WHERE db.status IN ({failing}))::bigint AS failing, \
+        "SELECT o.evaluation AS id, \
+            count(*) FILTER (WHERE o.ok)::bigint AS ok, \
+            count(*) FILTER (WHERE o.failing)::bigint AS failing, \
             count(*)::bigint AS total \
-        FROM entry_point ep \
-        LEFT JOIN build_job bj ON bj.evaluation = ep.evaluation AND bj.derivation = ep.derivation \
-        LEFT JOIN derivation_build db ON db.id = bj.derivation_build \
-        WHERE ep.evaluation = ANY($1::uuid[]) GROUP BY ep.evaluation",
+        FROM (SELECT ep.evaluation, coalesce(db.status IN ({ok}), false) AS ok, \
+                coalesce(db.status IN ({failing}), false) AS failing \
+            FROM entry_point ep \
+            LEFT JOIN build_job bj ON bj.evaluation = ep.evaluation AND bj.derivation = ep.derivation \
+            LEFT JOIN derivation_build db ON db.id = bj.derivation_build \
+            WHERE ep.evaluation = ANY($1::uuid[]) \
+            UNION ALL \
+            SELECT x.evaluation, x.status = {exec_ok}, x.status IN ({exec_failing}) \
+            FROM exec_job x WHERE x.evaluation = ANY($1::uuid[])) o \
+        GROUP BY o.evaluation",
         ok = crate::sql::status::build_in(&[Completed, Substituted]),
         failing = crate::sql::status::build_in(&[
             FailedPermanent,
@@ -68,6 +75,9 @@ fn outcomes_sql() -> String {
             DependencyFailed,
             FailedTimeout
         ]),
+        exec_ok = crate::sql::status::exec(ExecJobStatus::Completed),
+        exec_failing =
+            crate::sql::status::exec_in(&[ExecJobStatus::Failed, ExecJobStatus::Aborted]),
     )
 }
 
