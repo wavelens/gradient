@@ -31,10 +31,9 @@ import { evaluationAccessResolver } from '@core/resolvers/evaluation-access.reso
 import { teamAccessResolver } from '@core/resolvers/team-access.resolver';
 import { CachesService } from '@core/services/caches.service';
 import { adminGuard } from './admin.guard';
+import { assignedJobDetailGuard, clusterJobBoardGuard } from '../../features/board/board.routes';
 import {
-  assignedJobDetailGuard,
   buildOrEvaluationAccessGuard,
-  clusterJobBoardGuard,
   entryPointEvalQueryParameterMissingGuard,
   execJobInTaskGuard,
   workerInProjectGuard,

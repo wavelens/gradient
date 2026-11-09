@@ -8,7 +8,6 @@ import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
 import { Observable, map, switchMap } from 'rxjs';
 import { EvaluationResponse } from '@core/models';
-import { BoardService } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { WorkersService } from '@core/services/workers.service';
@@ -41,22 +40,6 @@ export const buildOrEvaluationAccessGuard: CanActivateFn = (route, state) => {
   return evaluation$.pipe(
     map((evaluation) => evaluation.project_name === project || redirectToCorrectProjectSlug(router, state.url, evaluation.project_name)),
     denyOnRefusal(target, state.url, project),
-  );
-};
-
-export const assignedJobDetailGuard: CanActivateFn = (route, state) => {
-  const id = route.paramMap.get('id') ?? '';
-  return inject(BoardService).getJob(id).pipe(
-    map(() => true as const),
-    denyOnRefusal({ kind: 'job', name: id, back: String(links.board()) }, state.url),
-  );
-};
-
-export const clusterJobBoardGuard: CanActivateFn = (route, state) => {
-  const id = route.paramMap.get('id') ?? '';
-  return inject(BoardService).getClusterJob(id).pipe(
-    map(() => true as const),
-    denyOnRefusal({ kind: 'clusterJob', name: id, back: String(links.board()) }, state.url),
   );
 };
 

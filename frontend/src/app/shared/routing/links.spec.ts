@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ActivatedRouteSnapshot, Route, UrlTree, convertToParamMap } from '@angular/router';
+import { ActivatedRouteSnapshot, Route, Routes, UrlTree, convertToParamMap } from '@angular/router';
 import { routes } from '../../app.routes';
 import { links,readBuildOrigin, readInAppNextPathFromRouteSnapshot } from './links';
 
@@ -19,6 +19,13 @@ function matches(config: readonly Route[], segments: readonly string[]): boolean
     if (route.children) return matches(route.children, rest);
     return rest.length === 0;
   });
+}
+
+async function awaitLoadChildrenCallbacksAndReturnRoutesWithPlainChildren(config: readonly Route[]): Promise<Route[]> {
+  return Promise.all(config.map(async (route) => {
+    const children = route.loadChildren ? ((await route.loadChildren()) as Routes) : route.children;
+    return children ? { ...route, children: await awaitLoadChildrenCallbacksAndReturnRoutesWithPlainChildren(children) } : route;
+  }));
 }
 
 function path(tree: UrlTree): string[] {
@@ -66,8 +73,9 @@ const every: UrlTree[] = [
 ];
 
 describe('links', () => {
-  it('points every link at a route that exists', () => {
-    const missing = every.map(String).filter((_, i) => !matches(routes, path(every[i])));
+  it('points every link at a route that exists', async () => {
+    const config = await awaitLoadChildrenCallbacksAndReturnRoutesWithPlainChildren(routes);
+    const missing = every.map(String).filter((_, i) => !matches(config, path(every[i])));
     expect(missing).toEqual([]);
   });
 

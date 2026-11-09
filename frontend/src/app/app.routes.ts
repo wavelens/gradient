@@ -13,9 +13,7 @@ import { authGuard, redirectSignedInUserToDashboardGuard } from '@core/guards/au
 import { adminGuard } from '@core/guards/admin.guard';
 import { publicListingGuard } from '@core/guards/public-listing.guard';
 import {
-  assignedJobDetailGuard,
   buildOrEvaluationAccessGuard,
-  clusterJobBoardGuard,
   entryPointEvalQueryParameterMissingGuard,
   execJobInTaskGuard,
   workerInProjectGuard,
@@ -355,133 +353,9 @@ export const routes: Routes = [
           import('./features/dashboard/dashboard.component').then((m) => m.DashboardComponent),
       },
 
-      // Job Board
-      {
-        path: 'board/jobs/:id',
-        canActivate: [assignedJobDetailGuard],
-        title: 'Assigned job',
-        loadComponent: () =>
-          import('./features/board/job-detail/job-detail.component').then(
-            (m) => m.BoardJobDetailComponent
-          ),
-      },
-      {
-        path: 'board/pending/:id',
-        title: 'Pending job',
-        data: { pending: true },
-        loadComponent: () =>
-          import('./features/board/job-detail/job-detail.component').then(
-            (m) => m.BoardJobDetailComponent
-          ),
-      },
-      {
-        path: 'board/clusters/:id',
-        canActivate: [clusterJobBoardGuard],
-        title: 'Cluster Job',
-        loadComponent: () =>
-          import('./features/board/cluster-detail/cluster-detail.component').then(
-            (m) => m.BoardClusterDetailComponent
-          ),
-      },
       {
         path: 'board',
-        title: 'Job Board',
-        loadComponent: () =>
-          import('./features/board/board-layout.component').then((m) => m.BoardLayoutComponent),
-        children: [
-          { path: '', pathMatch: 'full', redirectTo: 'overview' },
-          {
-            path: 'overview',
-            title: 'Overview · Job Board',
-            loadComponent: () =>
-              import('./features/board/overview/overview.component').then(
-                (m) => m.BoardOverviewComponent
-              ),
-          },
-          {
-            path: 'live',
-            title: 'Live Jobs · Job Board',
-            loadComponent: () =>
-              import('./features/board/live-jobs/live-jobs.component').then(
-                (m) => m.BoardLiveJobsComponent
-              ),
-          },
-          {
-            path: 'scheduler',
-            title: 'Scheduler · Job Board',
-            canActivate: [adminGuard],
-            loadComponent: () =>
-              import('./features/board/scheduler/scheduler.component').then(
-                (m) => m.BoardSchedulerComponent
-              ),
-          },
-          {
-            path: 'throughput',
-            title: 'Throughput · Job Board',
-            loadComponent: () =>
-              import('./features/board/throughput/throughput.component').then(
-                (m) => m.BoardThroughputComponent
-              ),
-          },
-          {
-            path: 'durations',
-            title: 'Durations · Job Board',
-            loadComponent: () =>
-              import('./features/board/durations/durations.component').then(
-                (m) => m.BoardDurationsComponent
-              ),
-          },
-          {
-            path: 'workers',
-            title: 'Workers · Job Board',
-            loadComponent: () =>
-              import('./features/board/workers/workers.component').then(
-                (m) => m.BoardWorkersComponent
-              ),
-          },
-          {
-            path: 'cache',
-            title: 'Cache · Job Board',
-            loadComponent: () =>
-              import('./features/board/cache/cache.component').then((m) => m.BoardCacheComponent),
-          },
-          {
-            path: 'network',
-            title: 'Network · Job Board',
-            loadComponent: () =>
-              import('./features/board/network/network.component').then(
-                (m) => m.BoardNetworkComponent
-              ),
-          },
-          {
-            path: 'health',
-            title: 'System Health · Job Board',
-            canActivate: [adminGuard],
-            loadComponent: () =>
-              import('./features/board/health/health.component').then(
-                (m) => m.BoardHealthComponent
-              ),
-          },
-          {
-            path: 'storage',
-            title: 'Storage · Job Board',
-            canActivate: [adminGuard],
-            loadComponent: () =>
-              import('./features/board/storage/storage.component').then(
-                (m) => m.BoardStorageComponent
-              ),
-          },
-          {
-            path: 'expensive',
-            title: 'High Cost · Job Board',
-            loadComponent: () =>
-              import('./features/board/high-cost/high-cost.component').then((m) => m.BoardHighCostComponent),
-          },
-          {
-            path: 'expensive-evals',
-            redirectTo: '/board/expensive?highCostRanking=evaluations',
-          },
-        ],
+        loadChildren: () => import('./features/board/board.routes').then((m) => m.BOARD_ROUTES),
       },
 
       // Projects
