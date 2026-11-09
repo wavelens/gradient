@@ -14,6 +14,31 @@
 
 a.sidebar-item { text-decoration: none; }
 
+.phone-breadcrumb-and-view-tabs-row { display: none; }
+
+@media (max-width: $breakpoint-md) {
+  .phone-breadcrumb-and-view-tabs-row {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    gap: $spacing-xs;
+    padding: $spacing-sm $spacing-md;
+    background: var(--gr-surface-raised);
+    border-bottom: 1px solid var(--gr-border-subtle);
+
+    .breadcrumb-current {
+      overflow: hidden;
+      font-size: $font-size-sm;
+      font-weight: 500;
+      color: var(--gr-text-primary);
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+  }
+
+  .sidebar-view-switch-row { display: none; }
+}
+
 .item-meta {
   flex-shrink: 0;
   font-size: $font-size-xs;

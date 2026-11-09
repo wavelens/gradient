@@ -396,6 +396,17 @@ describe('ExecJobPageComponent', () => {
     expect(root.querySelector('app-exec-job-info')?.textContent).toContain('2 CPUs · 500 MB memory · 2048 MB disk');
   });
 
+  it('keeps the entry point and the views outside the drawer for phones', () => {
+    const { fixture } = setup('running');
+    const row = (fixture.nativeElement as HTMLElement).querySelector('.phone-breadcrumb-and-view-tabs-row') as HTMLElement;
+    expect(row.querySelector('.breadcrumb-current')?.textContent?.trim()).toBe('apps.x86_64-linux.train');
+    const tabs = Array.from(row.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual(['Log', 'Info', 'Timeline', 'Terminal']);
+    tabs[1].click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.view()).toBe('info');
+  });
+
   function showJobLink(root: HTMLElement): HTMLAnchorElement | undefined {
     return Array.from(root.querySelectorAll<HTMLAnchorElement>('.info-bar-right a')).find((a) => a.textContent?.includes('Show job'));
   }

@@ -19,6 +19,7 @@ import {
   MessageBannerComponent,
   DrawerDirective,
   SelectButtonComponent,
+  TabSwitchComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, StatusBadgeComponent, StatusIconComponent, WaitingNoticeComponent } from '@shared/ui';
 import { AuthService } from '@core/services/auth.service';
@@ -69,7 +70,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
   imports: [
     RouterModule, FormsModule, ButtonComponent, CopyFieldComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MessageBannerComponent,
-    SelectButtonComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
+    SelectButtonComponent, TabSwitchComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
     LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, WaitingNoticeComponent, DrawerDirective, RelativeTimePipe,
     ServerTimestampToLocalDateTimePipe,
   ],
