@@ -10,7 +10,7 @@ import { By, Title } from '@angular/platform-browser';
 import { EMPTY, type Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
-import { BoardJobDetailComponent } from './job-detail.component';
+import { BoardJobDetailComponent, getPendingJobName } from './job-detail.component';
 import { BoardService, AssignedJobDetail } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
@@ -341,7 +341,10 @@ describe('BoardJobDetailComponent - pending route', () => {
     const el = setup({ getJob, getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1', true)
       .nativeElement as HTMLElement;
     expect(getJob).not.toHaveBeenCalled();
-    expect(el.textContent).toContain('Pending job');
+    expect(el.querySelector('h1')?.textContent).toBe('hello-2.12.1');
+    const back = el.querySelector('a.back');
+    expect(back?.textContent).toContain('Live Jobs');
+    expect(back?.getAttribute('href')).toBe('/board/live');
     expect(el.textContent).not.toContain('Score breakdown');
     expect(el.querySelector('section.timeline')?.textContent).toContain('Dependencies');
   });
@@ -744,5 +747,14 @@ describe('BoardJobDetailComponent - #636', () => {
   it('names the pending job by what it works on', () => {
     const el = setup({ getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1', true).nativeElement as HTMLElement;
     expect(el.textContent).toContain('hello-2.12.1');
+  });
+});
+
+describe('getPendingJobName', () => {
+  it('names a pending job like the page of the assigned job', () => {
+    const exec = { id: 'x1', project: 'o1', entry_point: 'deploy', task: 'nightly', node_index: 0, nodes: 1 };
+    expect(getPendingJobName({ ...PENDING, kind: 2, exec_job: exec })).toBe('nightly: deploy');
+    expect(getPendingJobName(PENDING)).toBe('hello-2.12.1');
+    expect(getPendingJobName({ ...PENDING, kind: 0, task: 'oktask', project_name: 'sandbox' })).toBe('oktask');
   });
 });

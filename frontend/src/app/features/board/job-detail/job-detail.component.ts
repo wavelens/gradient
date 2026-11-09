@@ -71,6 +71,12 @@ export function getAssignedJobName(j: AssignedJobDetail): string {
   return j.evaluation?.task ?? (j.project_display_name || j.project_name);
 }
 
+export function getPendingJobName(p: PendingJobSummary): string {
+  if (p.exec_job) return `${p.exec_job.task}: ${jobSubjectLabel(null, p.exec_job)}`;
+  if (p.kind === BUILD_KIND) return p.subject ?? p.build_id ?? p.evaluation_id;
+  return p.task ?? p.project_name ?? p.evaluation_id;
+}
+
 interface RuleRow {
   name: string;
   label: string;
@@ -87,7 +93,7 @@ interface RuleRow {
   template: `
     <div class="top-row phone-icon-buttons">
       <a [routerLink]="links.board('live')" class="back" (click)="goBack($event)">
-        <gr-icon name="arrow_back" size="sm" />{{ cameFromApp ? 'Back' : 'Live Jobs' }}
+        <gr-icon name="arrow_back" size="sm" />Live Jobs
       </a>
       @if (canAbort()) {
         <button grButton label="Abort" icon="close" severity="danger" size="small"
@@ -373,7 +379,7 @@ interface RuleRow {
       <header class="head">
         <div>
           <span class="kind" [class.build]="p.kind === 1">{{ jobKindName(p.kind) }}</span>
-          <h1>Pending job</h1>
+          <h1>{{ getPendingJobName(p) }}</h1>
         </div>
       </header>
       @if (p.waiting_reason && p.project_name) {
@@ -473,7 +479,8 @@ export class BoardJobDetailComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private location = inject(Location);
 
-  protected readonly cameFromApp = !!inject(Router).currentNavigation()?.previousNavigation;
+  protected readonly previousNavigationWasLiveJobsList =
+    inject(Router).currentNavigation()?.previousNavigation?.finalUrl?.toString().startsWith('/board/live') === true;
 
   job = signal<AssignedJobDetail | null>(null);
   pending = signal<PendingJobSummary | null>(null);
@@ -487,7 +494,7 @@ export class BoardJobDetailComponent implements OnInit {
   buildError = signal<string | null>(null);
 
   goBack(event: MouseEvent): void {
-    if (!this.cameFromApp || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (!this.previousNavigationWasLiveJobsList || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
     event.preventDefault();
     this.location.back();
   }
@@ -522,6 +529,7 @@ export class BoardJobDetailComponent implements OnInit {
   ];
 
   protected readonly getAssignedJobName = getAssignedJobName;
+  protected readonly getPendingJobName = getPendingJobName;
   protected readonly ruleLabel = scoringRuleClassNameToReadableLabel;
 
   jobStatusBadge = computed<{ phase: StatusPhase; label: string }>(() => {
