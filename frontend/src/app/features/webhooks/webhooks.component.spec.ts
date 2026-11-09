@@ -429,12 +429,13 @@ describe('WebhooksComponent', () => {
   });
 
   it.each([
-    { state: 'delivered', webhook: hook, newest: [newestDelivery], chip: 'Active', line: 'Last delivery' },
-    { state: 'never delivered', webhook: hook, newest: [], chip: 'Active', line: 'No deliveries yet' },
-    { state: 'inactive', webhook: { ...hook, active: false }, newest: [{ ...newestDelivery, success: false }], chip: 'Inactive', line: 'Last delivery' },
-  ])('shows the $state webhook as $chip', ({ webhook, newest, chip, line }) => {
-    const { root } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([webhook]), [], () => of(newest));
+    { state: 'delivered', webhook: hook, newest: [newestDelivery], chip: 'Active', severity: 'success', line: 'Last delivery' },
+    { state: 'never delivered', webhook: hook, newest: [], chip: 'Active', severity: 'success', line: 'No deliveries yet' },
+    { state: 'inactive', webhook: { ...hook, active: false }, newest: [{ ...newestDelivery, success: false }], chip: 'Inactive', severity: 'neutral', line: 'Last delivery' },
+  ])('shows the $state webhook as $chip', ({ webhook, newest, chip, severity, line }) => {
+    const { root, component } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([webhook]), [], () => of(newest));
     expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe(chip);
+    expect(component.getWebhookCardStatusChip(webhook).severity).toBe(severity);
     expect(root.querySelector('.webhook-meta')?.textContent).toContain(line);
   });
 });

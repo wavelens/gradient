@@ -212,7 +212,7 @@ export class WebhooksComponent implements OnInit {
   }
 
   getWebhookCardStatusChip(hook: WebhookResponse): { label: string; severity: BadgeSeverity } {
-    if (!hook.active) return { label: 'Inactive', severity: 'warning' };
+    if (!hook.active) return { label: 'Inactive', severity: 'neutral' };
     return this.newestDeliveryByWebhookId().get(hook.id)?.success === false
       ? { label: 'Failing', severity: 'danger' }
       : { label: 'Active', severity: 'success' };
