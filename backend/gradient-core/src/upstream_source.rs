@@ -170,13 +170,10 @@ async fn fetch_cache_info(
         .timeout(PROTOCOL_PROBE_TIMEOUT)
         .send()
         .await
-        .map_err(|e| (None, error_chain(&e)))?;
+        .map_err(|e| (None, send_failure_reason(&e)))?;
     let status = response.status();
     if !status.is_success() {
-        return Err((
-            Some(status.as_u16()),
-            format!("nix-cache-info answered {status}"),
-        ));
+        return Err((Some(status.as_u16()), format!("HTTP {status}")));
     }
     let body = response
         .text()
@@ -189,6 +186,34 @@ async fn fetch_cache_info(
         ));
     }
     Ok(())
+}
+
+fn send_failure_reason(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        return "timed out".into();
+    }
+    let causes: Vec<&(dyn std::error::Error + 'static)> =
+        std::iter::successors(Some(error as &(dyn std::error::Error + 'static)), |e| {
+            e.source()
+        })
+        .collect();
+    for cause in &causes {
+        match cause
+            .downcast_ref::<std::io::Error>()
+            .map(std::io::Error::kind)
+        {
+            Some(std::io::ErrorKind::ConnectionRefused) => return "connection refused".into(),
+            Some(std::io::ErrorKind::TimedOut) => return "timed out".into(),
+            _ if cause.to_string().starts_with("dns error") => {
+                return "DNS lookup failed".into();
+            }
+            _ => {}
+        }
+    }
+    match causes.last() {
+        Some(cause) if error.is_connect() => format!("connection failed: {cause}"),
+        _ => error_chain(error),
+    }
 }
 
 #[cfg(test)]
@@ -371,5 +396,18 @@ mod tests {
         let probe = probe_protocol(&missing.uri(), HttpVersion::Http1).await;
         assert!(!probe.ok);
         assert_eq!(probe.status, Some(404));
+        assert_eq!(probe.error.as_deref(), Some("HTTP 404 Not Found"));
+    }
+
+    #[tokio::test]
+    async fn probe_names_a_refused_connection_and_an_unknown_host_briefly() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+        let port = closed.local_addr().expect("a bound address").port();
+        drop(closed);
+        let refused = probe_protocol(&format!("http://127.0.0.1:{port}"), HttpVersion::Http1).await;
+        assert_eq!(refused.error.as_deref(), Some("connection refused"));
+
+        let unknown = probe_protocol("http://no-such-host.invalid", HttpVersion::Http1).await;
+        assert_eq!(unknown.error.as_deref(), Some("DNS lookup failed"));
     }
 }

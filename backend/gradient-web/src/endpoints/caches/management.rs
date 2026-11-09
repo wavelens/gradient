@@ -44,7 +44,7 @@ pub struct MakeCacheRequest {
     #[serde(default)]
     pub local_priority: Option<i32>,
     #[serde(default)]
-    pub max_storage_gb: Option<i32>,
+    pub max_storage_gb: Option<i64>,
     #[serde(default)]
     pub pull_through: Option<bool>,
 }
@@ -100,15 +100,15 @@ pub struct PatchCacheRequest {
     pub description: Option<String>,
     pub priority: Option<i32>,
     pub local_priority: Option<i32>,
-    pub max_storage_gb: Option<i32>,
+    pub max_storage_gb: Option<i64>,
     pub pull_through: Option<bool>,
 }
 
-fn validate_max_storage_gb(value: i32) -> WebResult<()> {
-    if value < 0 {
-        return Err(CacheRefusal::NegativeMaxStorage.into());
-    }
-    Ok(())
+fn validate_max_storage_gb(value: i64) -> WebResult<i32> {
+    i32::try_from(value)
+        .ok()
+        .filter(|gb| *gb >= 0)
+        .ok_or_else(|| CacheRefusal::MaxStorageOutOfRange.into())
 }
 
 #[utoipa::path(
@@ -195,8 +195,7 @@ pub async fn put(
         return Err(CacheRefusal::CacheLimitReached.into());
     }
 
-    let max_storage_gb = body.max_storage_gb.unwrap_or(0);
-    validate_max_storage_gb(max_storage_gb)?;
+    let max_storage_gb = validate_max_storage_gb(body.max_storage_gb.unwrap_or(0))?;
 
     let existing_cache = gradient_db::caches::by_name(&state.web_db, body.name.as_str()).await?;
 
@@ -388,7 +387,7 @@ pub async fn patch_cache(
 
     let mut raised_limit = false;
     if let Some(max_storage_gb) = body.max_storage_gb {
-        validate_max_storage_gb(max_storage_gb)?;
+        let max_storage_gb = validate_max_storage_gb(max_storage_gb)?;
         raised_limit = max_storage_gb == 0 || max_storage_gb > prev_max_storage_gb;
         acache.max_storage_gb = Set(max_storage_gb);
     }
@@ -534,13 +533,17 @@ mod tests {
 
     #[test]
     fn validate_max_storage_gb_accepts_zero_and_positive() {
-        assert!(validate_max_storage_gb(0).is_ok());
-        assert!(validate_max_storage_gb(1).is_ok());
-        assert!(validate_max_storage_gb(500).is_ok());
+        assert_eq!(validate_max_storage_gb(0).ok(), Some(0));
+        assert_eq!(validate_max_storage_gb(500).ok(), Some(500));
+        assert_eq!(
+            validate_max_storage_gb(i64::from(i32::MAX)).ok(),
+            Some(i32::MAX)
+        );
     }
 
     #[test]
-    fn validate_max_storage_gb_rejects_negative() {
+    fn validate_max_storage_gb_rejects_negative_and_too_large() {
         assert!(validate_max_storage_gb(-1).is_err());
+        assert!(validate_max_storage_gb(i64::from(i32::MAX) + 1).is_err());
     }
 }

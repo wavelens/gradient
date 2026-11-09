@@ -320,9 +320,9 @@ pub async fn handle(cmd: Commands, out: Output) {
     }
 }
 
-fn parse_max_storage_gb(raw: &str, out: Output) -> i32 {
+fn parse_max_storage_gb(raw: &str, out: Output) -> i64 {
     match raw.trim().parse::<i32>() {
-        Ok(v) if v >= 0 => v,
+        Ok(v) if v >= 0 => v.into(),
         Ok(_) => out.err(
             ExitKind::Usage,
             "Max storage must be 0 (unlimited) or at least 1.",
