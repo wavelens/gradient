@@ -12,7 +12,7 @@
         slot="actions"
           *appWritable="access()"
           grButton
-          label="Add Member"
+          label="Invite Member"
           icon="add"
           severity="secondary"
           (click)="openAddMemberDialog()"
@@ -169,9 +169,9 @@
   }
 </gr-page-layout>
 
-<!-- Add Member Dialog -->
+<!-- Invite Member Dialog -->
 <gr-dialog
-  header="Add Member"
+  header="Invite Member"
   [(visible)]="showAddMemberDialog"
   [error]="memberError()"
   [busy]="addingMember()"
@@ -210,7 +210,7 @@
     ></button>
     <button
       grButton
-      label="Add"
+      label="Invite"
       (click)="addMember()"
       [disabled]="!newMember.user || !newMember.role || addingMember()"
       [loading]="addingMember()"

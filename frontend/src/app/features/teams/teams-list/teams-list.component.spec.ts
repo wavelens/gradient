@@ -67,9 +67,9 @@ describe('TeamsListComponent', () => {
     expect(String(navigate.mock.calls[0][0])).toBe('/team/ops');
   });
 
-  it('hides New Team when the server does not allow creating teams', () => {
+  it('hides Create Team when the server does not allow creating teams', () => {
     const { fixture } = setup(false);
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
-    expect(text).not.toContain('New Team');
+    expect(text).not.toContain('Create Team');
   });
 });

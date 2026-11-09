@@ -270,7 +270,7 @@ export class CacheMembersRolesComponent implements OnInit {
       .confirm({
         title: 'Remove member',
         target: username,
-        consequence: `${username} can no longer access this cache.`,
+        consequence: `${username} loses their role on this cache.`,
         confirmLabel: 'Remove',
         failure: 'Failed to remove member.',
         action: () => this.cachesService.removeMember(this.cacheName, username),
@@ -367,7 +367,8 @@ export class CacheMembersRolesComponent implements OnInit {
       .confirm({
         title: 'Delete role',
         target: role.name,
-        consequence: `Complete removal of ${role.name} from the cache.`,
+        consequence: '',
+        isIrreversible: true,
         confirmLabel: 'Delete',
         failure: 'Failed to delete role.',
         action: () => {

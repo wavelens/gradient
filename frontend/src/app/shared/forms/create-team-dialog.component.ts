@@ -17,7 +17,7 @@ import { NameFieldsComponent } from './name-fields.component';
   imports: [ButtonComponent, DialogComponent, NameFieldsComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    <gr-dialog header="New Team" [(visible)]="visible" width="420px" [error]="error()" [busy]="creating()">
+    <gr-dialog header="Create Team" [(visible)]="visible" width="420px" [error]="error()" [busy]="creating()">
       <app-name-fields
         noun="team"
         [names]="names"

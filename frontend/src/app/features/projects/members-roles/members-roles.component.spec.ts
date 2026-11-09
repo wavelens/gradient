@@ -96,17 +96,17 @@ async function settled(fixture: ComponentFixture<MembersRolesComponent>) {
 }
 
 describe('MembersRolesComponent - access gating', () => {
-  it('hides Add Member, New Role, per-row Remove under read-only access', async () => {
+  it('hides Invite Member, New Role, per-row Remove under read-only access', async () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     await settled(fixture);
-    expect(findByText(fixture.nativeElement, 'add member')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'invite member')).toBeNull();
     expect(findByText(fixture.nativeElement, 'new role')).toBeNull();
   });
 
-  it('shows but disables Add Member / New Role under state-managed access', async () => {
+  it('shows but disables Invite Member / New Role under state-managed access', async () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     await settled(fixture);
-    const addBtn = findByText(fixture.nativeElement, 'add member') as HTMLButtonElement | null;
+    const addBtn = findByText(fixture.nativeElement, 'invite member') as HTMLButtonElement | null;
     const newRoleBtn = findByText(fixture.nativeElement, 'new role') as HTMLButtonElement | null;
     expect(addBtn).not.toBeNull();
     expect(addBtn!.disabled).toBe(true);
@@ -160,7 +160,7 @@ describe('MembersRolesComponent - permissions', () => {
   it('offers member writes but no role writes without the manage roles permission', async () => {
     const fixture = setup(writable, ['viewProject', 'manageMembers']);
     await settled(fixture);
-    expect(findByText(fixture.nativeElement, 'add member')).not.toBeNull();
+    expect(findByText(fixture.nativeElement, 'invite member')).not.toBeNull();
     expect(findByText(fixture.nativeElement, 'new role')).toBeNull();
   });
 
@@ -168,7 +168,7 @@ describe('MembersRolesComponent - permissions', () => {
     const fixture = setup(writable, ['viewProject', 'manageRoles']);
     await settled(fixture);
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(findByText(fixture.nativeElement, 'add member')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'invite member')).toBeNull();
     expect(findByText(fixture.nativeElement, 'new role')).not.toBeNull();
     expect(text).not.toContain('Pending Invitations');
   });
@@ -227,11 +227,11 @@ describe('MembersRolesComponent - writes', () => {
     expect(deleteRole).toHaveBeenCalledWith('acme', 'r2');
   });
 
-  it('keeps a failed add inside the open Add Member dialog', async () => {
+  it('keeps a failed add inside the open Invite Member dialog', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     addMember.mockReturnValue(throwError(() => new ApiError('User carol does not exist', 404)));
     await settled(fixture);
-    (findByText(fixture.nativeElement, 'add member') as HTMLButtonElement).click();
+    (findByText(fixture.nativeElement, 'invite member') as HTMLButtonElement).click();
     fixture.detectChanges();
     fixture.componentInstance.newMember = { user: 'carol', role: 'Admin' };
     fixture.componentInstance.addMember();
@@ -241,11 +241,11 @@ describe('MembersRolesComponent - writes', () => {
     expect(fixture.componentInstance.showAddMemberDialog()).toBe(true);
   });
 
-  it('sends one add and keeps the Add Member dialog open while it runs', async () => {
+  it('sends one add and keeps the Invite Member dialog open while it runs', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     addMember.mockReturnValue(new Subject<string>());
     await settled(fixture);
-    (findByText(fixture.nativeElement, 'add member') as HTMLButtonElement).click();
+    (findByText(fixture.nativeElement, 'invite member') as HTMLButtonElement).click();
     fixture.detectChanges();
     fixture.componentInstance.newMember = { user: 'carol', role: 'Admin' };
     fixture.componentInstance.addMember();
@@ -278,7 +278,7 @@ describe('MembersRolesComponent - writes', () => {
     fixture.detectChanges();
 
     expect(fixture.componentInstance.newMember.role).toBe('');
-    const add = Array.from(document.querySelectorAll<HTMLButtonElement>('.gr-dialog button')).find((b) => b.textContent?.trim() === 'Add');
+    const add = Array.from(document.querySelectorAll<HTMLButtonElement>('.gr-dialog button')).find((b) => b.textContent?.trim() === 'Invite');
     expect(add?.disabled).toBe(true);
   });
 });

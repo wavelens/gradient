@@ -18,7 +18,7 @@ function setup() {
   const panel = () => document.querySelector<HTMLElement>('.gr-dialog');
   const button = (label: string) =>
     Array.from(panel()?.querySelectorAll<HTMLButtonElement>('button') ?? []).find((b) => b.textContent?.trim() === label);
-  const ask = <T>(action: ConfirmRequest<T>['action']) => {
+  const ask = <T>(action: ConfirmRequest<T>['action'], isIrreversible = false) => {
     const results: T[] = [];
     let completed = false;
     confirm
@@ -28,6 +28,7 @@ function setup() {
         consequence: 'alice loses access to this project.',
         confirmLabel: 'Remove',
         failure: 'Failed to remove the member.',
+        isIrreversible,
         action,
       })
       .subscribe({ next: (value) => results.push(value), complete: () => (completed = true) });
@@ -45,7 +46,14 @@ describe('ConfirmDialogComponent', () => {
     expect(panel()?.textContent).toContain('Remove member');
     expect(panel()?.textContent).toContain('alice');
     expect(panel()?.textContent).toContain('alice loses access to this project.');
+    expect(panel()?.textContent).not.toContain('permanent');
     expect(action).not.toHaveBeenCalled();
+  });
+
+  it('ends a permanent action with one fixed sentence', () => {
+    const { panel, ask } = setup();
+    ask(() => of('removed'), true);
+    expect(panel()?.querySelectorAll('p')[1]?.textContent).toBe('alice loses access to this project. This action is permanent.');
   });
 
   it('sends nothing and completes empty when cancelled', () => {

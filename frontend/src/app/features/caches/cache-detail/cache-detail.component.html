@@ -82,7 +82,7 @@
   <div class="section">
     <h2>Traffic</h2>
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
-      <gr-stat-card label="Requests (last hour)" [value]="statsLoading() ? null : formatCount((stats()?.hours ?? []).at(-1)?.requests ?? 0)" />
+      <gr-stat-card label="Requests in this hour" [value]="statsLoading() ? null : formatCount((stats()?.hours ?? []).at(-1)?.requests ?? 0)" />
       <gr-stat-card label="Traffic (last hour)" [value]="statsLoading() ? null : formatBytes((stats()?.hours ?? []).at(-1)?.bytes ?? 0)" />
     </gr-card-grid>
 

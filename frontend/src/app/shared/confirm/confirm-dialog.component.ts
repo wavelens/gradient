@@ -26,7 +26,7 @@ import { ConfirmService } from './confirm.service';
     >
       @if (current; as pending) {
         <p><strong>{{ pending.request.target }}</strong></p>
-        <p>{{ pending.request.consequence }}</p>
+        <p>{{ pending.request.consequence }}@if (pending.request.isIrreversible) { This action is permanent.}</p>
       }
       <div grDialogFooter>
         <button grButton label="Cancel" severity="secondary" [disabled]="running()" (click)="cancel()"></button>

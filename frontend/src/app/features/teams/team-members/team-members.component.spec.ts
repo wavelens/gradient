@@ -139,7 +139,7 @@ describe('TeamMembersComponent', () => {
     const { fixture } = setup(undefined, true);
     const element = fixture.nativeElement as HTMLElement;
     const row = (user: string) => Array.from(element.querySelectorAll('gr-row')).find((r) => r.textContent?.includes(user))!;
-    expect(element.textContent).toContain('Add Member');
+    expect(element.textContent).toContain('Invite Member');
     expect(row('alice').querySelector('gr-select')).not.toBeNull();
     expect(row('dave').querySelector('gr-select')).toBeNull();
     expect(row('dave').querySelector('button')).toBeNull();
@@ -147,13 +147,13 @@ describe('TeamMembersComponent', () => {
 
   it('lets a superuser outside the team add members', () => {
     const { fixture } = setup(undefined, false, undefined, [], { role: null, superuser: true });
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Add Member');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Invite Member');
   });
 
   it('shows a team member the members without asking for the invitations only admins may see', () => {
     const { fixture, listInvitations } = setup(undefined, false, undefined, [], { role: 'member', superuser: false });
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('alice');
-    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Add Member');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Invite Member');
     expect(listInvitations).not.toHaveBeenCalled();
   });
 
@@ -172,7 +172,7 @@ describe('TeamMembersComponent', () => {
     fixture.detectChanges();
     const dialog = document.querySelector('.gr-dialog')!;
     Array.from(dialog.querySelectorAll<HTMLButtonElement>('.gr-dialog__footer button'))
-      .find((b) => b.textContent?.trim() === 'Add')!
+      .find((b) => b.textContent?.trim() === 'Invite')!
       .click();
     fixture.detectChanges();
     expect(dialog.textContent).toContain('Enter a username.');

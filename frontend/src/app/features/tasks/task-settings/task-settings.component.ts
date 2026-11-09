@@ -295,7 +295,8 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     this.confirm.confirm({
       title: 'Delete Task',
       target: this.task()?.display_name || this.taskName,
-      consequence: "The task and all of its evaluations get removed. This action can't be undone.",
+      consequence: 'The task and all of its evaluations get removed.',
+      isIrreversible: true,
       confirmLabel: 'Delete',
       failure: 'Failed to delete the task.',
       action: () => this.tasksService.deleteTask(this.projectName, this.taskName),

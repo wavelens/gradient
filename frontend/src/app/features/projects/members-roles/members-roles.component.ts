@@ -260,7 +260,7 @@ export class MembersRolesComponent implements OnInit {
       .confirm({
         title: 'Remove member',
         target: username,
-        consequence: `${username} can no longer access this project.`,
+        consequence: `${username} loses their role in this project.`,
         confirmLabel: 'Remove',
         failure: 'Failed to remove the member.',
         action: () => this.projectsService.removeMember(this.projectName, username),
@@ -381,7 +381,8 @@ export class MembersRolesComponent implements OnInit {
       .confirm({
         title: 'Delete role',
         target: role.name,
-        consequence: `${role.name} is gone for good.`,
+        consequence: '',
+        isIrreversible: true,
         confirmLabel: 'Delete',
         failure: 'Failed to delete the role.',
         action: () => {

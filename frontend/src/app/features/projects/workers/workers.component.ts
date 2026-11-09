@@ -107,7 +107,7 @@ export class WorkersComponent implements OnInit {
   access = computed(() => accessTo(this.resolvedProject(), 'manageWorkers'));
   private teamGrants = viewChild(TeamGrantsComponent);
 
-  // Activate/Deactivate and Fire Test stay available on state-managed workers:
+  // Activate/Deactivate and Test worker stay available on state-managed workers:
   // state restores `active` on restart and a test changes nothing.
   actionAccess(): AccessState {
     return { ...this.access(), managed: false };
@@ -146,8 +146,6 @@ export class WorkersComponent implements OnInit {
   newName = '';
   editAllowed: AllowedCapabilities = ALL_ALLOWED;
   lastRegistration = signal<RegisterWorkerResponse | null>(null);
-  tokenCopied = signal(false);
-  peerIdCopied = signal(false);
 
   gradientCi = computed(() => gradientCiEntry(this.config.gradientCiEnabled, this.workers()));
   otherWorkers = computed(() => listedWorkers(this.workers(), this.gradientCi()));
@@ -161,7 +159,7 @@ export class WorkersComponent implements OnInit {
       const teamLink = this.teamGrants()?.teamLink(worker.team);
       return [
         ...(teamLink ? [{ label: 'Manage on team', icon: 'groups', routerLink: teamLink }] : []),
-        ...(canEdit ? [{ label: 'Fire Test', icon: 'bolt', disabled: busy, command: () => this.fireTest(worker) }] : []),
+        ...(canEdit ? [{ label: 'Test worker', icon: 'bolt', disabled: busy, command: () => this.fireTest(worker) }] : []),
       ];
     }
     if (!canEdit) return [];
@@ -173,7 +171,7 @@ export class WorkersComponent implements OnInit {
         disabled: busy,
         command: () => this.requestToggleWorker(worker),
       },
-      { label: 'Fire Test', icon: 'bolt', disabled: busy, command: () => this.fireTest(worker) },
+      { label: 'Test worker', icon: 'bolt', disabled: busy, command: () => this.fireTest(worker) },
       { separator: true },
       { label: 'Delete', icon: 'delete', danger: true, disabled: busy || rowLocked, command: () => this.deleteWorker(worker) },
     ];
@@ -289,7 +287,6 @@ export class WorkersComponent implements OnInit {
         // Only show the token dialog when there is something to display.
         if (reg.token || this.newWorkerToken.trim()) {
           this.lastRegistration.set(reg);
-          this.tokenCopied.set(false);
           this.showTokenDialog.set(true);
         } else {
           this.notify.success('Worker registered');
@@ -421,26 +418,6 @@ export class WorkersComponent implements OnInit {
         this.notify.failure('Worker test failed', error);
       },
     });
-  }
-
-  copyToken(): void {
-    const token = this.lastRegistration()?.token;
-    if (token) {
-      navigator.clipboard.writeText(token).then(() => {
-        this.tokenCopied.set(true);
-        setTimeout(() => this.tokenCopied.set(false), 2000);
-      });
-    }
-  }
-
-  copyPeerId(): void {
-    const peerId = this.projectId();
-    if (peerId) {
-      navigator.clipboard.writeText(peerId).then(() => {
-        this.peerIdCopied.set(true);
-        setTimeout(() => this.peerIdCopied.set(false), 2000);
-      });
-    }
   }
 
   openGradientCiDisconnect(): void {

@@ -6,7 +6,7 @@
 
 <gr-settings-section title="Members" [description]="countLabel()" [card]="false">
   @if (canEdit()) {
-    <button slot="actions" grButton severity="secondary" label="Add Member" icon="person_add" (click)="openAdd()"></button>
+    <button slot="actions" grButton severity="secondary" label="Invite Member" icon="person_add" (click)="openAdd()"></button>
   }
   <gr-load-state
     [loading]="loading()"
@@ -62,7 +62,7 @@
   </gr-settings-section>
 }
 
-<gr-dialog header="Add Member" [(visible)]="showAdd" width="420px" [error]="addError()" [busy]="busy() === 'add'">
+<gr-dialog header="Invite Member" [(visible)]="showAdd" width="420px" [error]="addError()" [busy]="busy() === 'add'">
   <gr-form-field label="Username" [invalid]="!!userError()" [error]="userError() ?? ''">
     <gr-autocomplete [(ngModel)]="newMember.user" [suggestions]="suggestions()" (completeMethod)="search($event)"
       [forceSelection]="false" (enter)="addMember()" />
@@ -72,6 +72,6 @@
   </gr-form-field>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" [disabled]="busy() === 'add'" (click)="showAdd.set(false)"></button>
-    <button grButton label="Add" [loading]="busy() === 'add'" (click)="addMember()"></button>
+    <button grButton label="Invite" [loading]="busy() === 'add'" (click)="addMember()"></button>
   </div>
 </gr-dialog>

@@ -149,7 +149,8 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
         title: 'Delete team',
         target: this.team()?.display_name ?? this.teamName,
         consequence:
-          'Delete the pending requests and invitations of the team, the access of the team to projects and caches, and the team workers. Connected team workers stop builds in those projects. Nothing can undo this action.',
+          'Delete the pending requests and invitations of the team, the access of the team to projects and caches, and the team workers. Connected team workers stop builds in those projects.',
+        isIrreversible: true,
         confirmLabel: 'Delete',
         failure: 'Failed to delete the team.',
         action: () => this.teams.remove(this.teamName),

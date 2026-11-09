@@ -37,13 +37,11 @@ import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { links } from '@shared/routing';
 import { plural } from '@shared/text';
 
-const NO_UNDO = 'Nothing can undo this action.';
-
 export function buildCacheDeleteConsequenceText({ projects, hidden }: CacheSubscribersResponse): string {
   const users = projects.map((project) => project.project_display_name);
   if (hidden) users.push(plural(hidden, 'other project', 'other projects'));
-  if (!users.length) return NO_UNDO;
-  return `Used by ${users.join(', ')}. Builds for these projects wait until they subscribe to another cache. ${NO_UNDO}`;
+  if (!users.length) return '';
+  return `Used by ${users.join(', ')}. Builds for these projects wait until they subscribe to another cache.`;
 }
 
 interface CacheForm {
@@ -299,7 +297,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
       .getSubscribers(this.cacheName)
       .pipe(
         map(buildCacheDeleteConsequenceText),
-        catchError(() => of(NO_UNDO)),
+        catchError(() => of('')),
         switchMap((consequence) =>
           this.confirm.confirm({
             title: 'Delete cache',
@@ -307,6 +305,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
             consequence,
             confirmLabel: 'Delete',
             failure: 'Cache deletion failed.',
+            isIrreversible: true,
             action: () => this.cachesService.deleteCache(this.cacheName),
           }),
         ),

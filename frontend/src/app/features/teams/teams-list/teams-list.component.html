@@ -6,7 +6,7 @@
 
 <gr-page-layout title="Teams" subtitle="Manage teams">
   @if (canCreateTeam() && items().length) {
-    <button slot="actions" grButton label="New Team" icon="add" (click)="openCreate()"></button>
+    <button slot="actions" grButton label="Create Team" icon="add" (click)="openCreate()"></button>
   }
   <gr-load-state
     [loading]="loading()"
@@ -20,7 +20,7 @@
     (retry)="load()"
   >
     @if (canCreateTeam()) {
-      <button slot="empty-action" grButton label="New Team" icon="add" (click)="openCreate()"></button>
+      <button slot="empty-action" grButton label="Create Team" icon="add" (click)="openCreate()"></button>
     }
     <gr-row-list>
       @for (team of items(); track team.name) {

@@ -15,6 +15,7 @@ export interface ConfirmRequest<T = unknown> {
   confirmLabel: string;
   failure: string;
   severity?: ButtonSeverity;
+  isIrreversible?: boolean;
   action: () => Observable<T>;
 }
 

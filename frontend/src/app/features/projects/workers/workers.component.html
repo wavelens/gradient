@@ -22,13 +22,6 @@
     </gr-message-banner>
   }
 
-  @if (projectId() && access().canEdit) {
-    <gr-form-field label="Project Peer ID">
-      <span slot="hint">Use this as <code>peer_id</code> in your worker's peers file alongside the token issued during registration.</span>
-      <gr-copy-field [value]="projectId()!" />
-    </gr-form-field>
-  }
-
   @if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading workers..." errorTitle="Failed to load workers" (retry)="loadWorkers()" />
   } @else {
@@ -250,6 +243,12 @@
       (keyup.enter)="registerWorker()"
     />
   </gr-form-field>
+  @if (projectId()) {
+    <gr-form-field label="Project Peer ID">
+      <span slot="hint">Use this as <code>peer_id</code> in your worker's peers file alongside the token issued during registration.</span>
+      <gr-copy-field [value]="projectId()" />
+    </gr-form-field>
+  }
   <gr-form-field label="Allowed">
     <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities" />
     <gr-allowed-capabilities editable [(value)]="newAllowed" />

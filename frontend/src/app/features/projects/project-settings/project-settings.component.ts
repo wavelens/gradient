@@ -224,7 +224,8 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
         title: 'Delete project',
         target: this.project()?.display_name ?? this.projectName,
         consequence:
-          "Delete all tasks in the project along with their evaluations, builds, and logs. Delete the project's secrets, workers, and members. Nothing can undo this action.",
+          "Delete all tasks in the project along with their evaluations, builds, and logs. Delete the project's secrets, workers, and members.",
+        isIrreversible: true,
         confirmLabel: 'Delete',
         failure: 'Project deletion failed.',
         action: () => this.projectsService.deleteProject(this.projectName),

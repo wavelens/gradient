@@ -214,7 +214,7 @@ describe('WorkersComponent - access gating', () => {
     expect(btn!.disabled).toBe(true);
   });
 
-  it('keeps Edit, Fire Test and Delete in the row menu, each running its action', async () => {
+  it('keeps Edit, Test worker and Delete in the row menu, each running its action', async () => {
     const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [workerUnmanaged], caches: [{ id: 'c', name: 'c' }] });
     await settled(fixture);
     const cmp = fixture.componentInstance;
@@ -224,7 +224,7 @@ describe('WorkersComponent - access gating', () => {
     const menu = menuOf(fixture, workerUnmanaged);
 
     itemOf(menu, 'Edit')?.command?.();
-    itemOf(menu, 'Fire Test')?.command?.();
+    itemOf(menu, 'Test worker')?.command?.();
     itemOf(menu, 'Delete')?.command?.();
 
     expect(rename).toHaveBeenCalledWith(workerUnmanaged);

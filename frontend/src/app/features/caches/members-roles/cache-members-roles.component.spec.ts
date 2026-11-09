@@ -119,10 +119,10 @@ describe('CacheMembersRolesComponent', () => {
     expect(element.textContent).toContain('alice');
   });
 
-  it('hides Add Member and New Role buttons under read-only access (no writable)', async () => {
+  it('hides Invite Member and New Role buttons under read-only access (no writable)', async () => {
     const fixture = setup();
     await settled(fixture);
-    expect(findByText(fixture.nativeElement, 'add member')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'invite member')).toBeNull();
     expect(findByText(fixture.nativeElement, 'new role')).toBeNull();
   });
 
@@ -189,7 +189,7 @@ describe('CacheMembersRolesComponent - pending invitations', () => {
 });
 
 describe('CacheMembersRolesComponent - busy dialogs', () => {
-  it('keeps Add Member open and sends one request while adding', async () => {
+  it('keeps Invite Member open and sends one request while adding', async () => {
     const fixture = setup(true);
     const service = TestBed.inject(CachesService) as unknown as { addMember: () => unknown };
     service.addMember = vi.fn(() => new Subject<string>());

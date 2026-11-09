@@ -399,7 +399,8 @@ export class IntegrationsComponent implements OnInit {
       .confirm({
         title: 'Delete integration',
         target: integration.display_name,
-        consequence: `The result of this action is deletion of ${integration.display_name}. Events can no longer go in or out. This action is permanent.`,
+        consequence: `The result of this action is deletion of ${integration.display_name}. Events can no longer go in or out.`,
+        isIrreversible: true,
         confirmLabel: 'Delete',
         failure: 'Integration deletion failed.',
         action: () => this.integrationsService.deleteProjectIntegration(this.projectName, integration.id),
