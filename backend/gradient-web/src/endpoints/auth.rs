@@ -160,12 +160,18 @@ pub async fn post_basic_register(
         return Err(WebError::invalid_password(e.to_string()));
     }
 
-    let existing_user =
-        gradient_db::users::by_username_or_email(&state.web_db, &body.username, &body.email)
-            .await?;
+    if gradient_db::users::by_username(&state.web_db, &body.username)
+        .await?
+        .is_some()
+    {
+        return Err(WebError::already_exists(Resource::Username));
+    }
 
-    if existing_user.is_some() {
-        return Err(WebError::already_exists(Resource::User));
+    if gradient_db::users::by_email(&state.web_db, &body.email)
+        .await?
+        .is_some()
+    {
+        return Err(WebError::already_exists(Resource::Email));
     }
 
     let (email_verified, verification_token, verification_expires) = if state
@@ -198,7 +204,7 @@ pub async fn post_basic_register(
 
     let user = gradient_db::rows::insert::<EUser, _>(&state.web_db, user)
         .await
-        .map_err(|e| WebError::from_db_err(e, Resource::User))?;
+        .map_err(|e| WebError::from_db_err(e, Resource::Username))?;
 
     if let Err(e) = gradient_state::apply_pending_project_memberships(
         &state.web_db,

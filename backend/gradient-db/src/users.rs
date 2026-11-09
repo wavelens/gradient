@@ -7,7 +7,7 @@
 use chrono::NaiveDateTime;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{Expr, ExprTrait, Func};
+use sea_orm::sea_query::{Expr, ExprTrait, Func, SimpleExpr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     PaginatorTrait, QueryFilter, QuerySelect, Select,
@@ -18,7 +18,7 @@ pub async fn by_username<C: ConnectionTrait>(
     username: &str,
 ) -> Result<Option<MUser>, DbErr> {
     EUser::find()
-        .filter(CUser::Username.eq(username))
+        .filter(username_equals_ignoring_case_sql_filter(username))
         .one(db)
         .await
 }
@@ -31,11 +31,16 @@ pub async fn by_username_or_email<C: ConnectionTrait>(
     EUser::find()
         .filter(
             Condition::any()
-                .add(CUser::Username.eq(username))
+                .add(username_equals_ignoring_case_sql_filter(username))
                 .add(CUser::Email.eq(email)),
         )
         .one(db)
         .await
+}
+
+fn username_equals_ignoring_case_sql_filter(username: &str) -> SimpleExpr {
+    Expr::expr(Func::lower(Expr::col((EUser::default(), CUser::Username))))
+        .eq(username.to_lowercase())
 }
 
 pub async fn by_email<C: ConnectionTrait>(db: &C, email: &str) -> Result<Option<MUser>, DbErr> {
@@ -198,5 +203,33 @@ mod tests {
         );
         let values = format!("{:?}", select.values);
         assert!(values.contains("\"alice@example.com\""), "{values}");
+    }
+
+    #[tokio::test]
+    async fn usernames_differing_only_in_case_are_one_name() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let account = |username: &str, email: &str| MUser {
+            id: UserId::now_v7(),
+            username: username.into(),
+            name: username.into(),
+            email: email.into(),
+            active: true,
+            ..Default::default()
+        };
+        crate::rows::insert::<EUser, _>(&db.connection(), account("alice", "a@example.com"))
+            .await
+            .expect("the first account is written");
+
+        let found = by_username(&db.connection(), "ALICE")
+            .await
+            .expect("the lookup runs")
+            .map(|user| user.username);
+        let second =
+            crate::rows::insert::<EUser, _>(&db.connection(), account("Alice", "b@example.com"))
+                .await;
+
+        assert_eq!(found.as_deref(), Some("alice"), "the lookup ignores case");
+        assert!(second.is_err(), "the index refuses a case variant");
+        db.finish().await;
     }
 }

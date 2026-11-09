@@ -54,6 +54,8 @@ impl ErrorCode {
 
     pub const CONFLICT: Self = Self("conflict");
     pub const ALREADY_EXISTS: Self = Self("already_exists");
+    pub const USERNAME_ALREADY_IN_USE: Self = Self("username_already_in_use");
+    pub const EMAIL_ADDRESS_ALREADY_IN_USE: Self = Self("email_address_already_in_use");
 
     pub const GONE: Self = Self("gone");
 
@@ -276,10 +278,12 @@ impl IntoResponse for WebError {
 
 impl WebError {
     pub fn already_exists(resource: Resource) -> Self {
-        Self::Conflict(
-            ErrorCode::ALREADY_EXISTS,
-            format!("{} already exists", resource),
-        )
+        let code = match resource {
+            Resource::Username => ErrorCode::USERNAME_ALREADY_IN_USE,
+            Resource::Email => ErrorCode::EMAIL_ADDRESS_ALREADY_IN_USE,
+            _ => ErrorCode::ALREADY_EXISTS,
+        };
+        Self::Conflict(code, format!("{} already exists", resource))
     }
 
     pub fn not_found(resource: Resource) -> Self {

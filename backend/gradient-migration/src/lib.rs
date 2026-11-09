@@ -56,6 +56,7 @@ mod m20261120_000000_task_flake_input_source;
 mod m20261121_000000_gradient_run;
 mod m20261122_000000_task_repository_fetch;
 mod m20261123_000000_incoming_webhook_delivery;
+mod m20261124_000000_case_insensitive_username_unique_index;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -137,6 +138,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261121_000000_gradient_run::Migration),
             Box::new(m20261122_000000_task_repository_fetch::Migration),
             Box::new(m20261123_000000_incoming_webhook_delivery::Migration),
+            Box::new(m20261124_000000_case_insensitive_username_unique_index::Migration),
         ]
     }
 }
