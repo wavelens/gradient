@@ -565,6 +565,16 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     expect(link.injector.get(RouterLink).urlTree?.toString()).toBe('/project/project-one/task/nightly/exec/x1?node=1');
   });
 
+  it('links the log of the evaluation the exec job runs in, without the evaluation table', () => {
+    const live = { ...EXEC_DETAIL, evaluation: EVAL_DETAIL.evaluation };
+    const fixture = setup({ getJob: () => of(live) });
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('.ids')?.textContent).not.toContain('Evaluation deleted');
+    const link = fixture.debugElement.query(By.css('section.ids a.log-link'));
+    expect(link.injector.get(RouterLink).urlTree?.toString()).toBe('/project/project-one/log/e1');
+    expect(el.querySelector('section.evaluation')).toBeNull();
+  });
+
   it('shows the queue time and the wait without repeating the same timestamp', () => {
     const el = setup({ getJob: () => of(EXEC_DETAIL) }).nativeElement as HTMLElement;
     const labels = Array.from(el.querySelectorAll('section.timeline .step .label')).map((s) => s.textContent?.trim());

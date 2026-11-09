@@ -141,7 +141,7 @@ interface RuleRow {
         }
       </section>
 
-      @if (j.evaluation; as ev) {
+      @if (j.kind !== EXEC_KIND && j.evaluation; as ev) {
         <section class="ctx evaluation">
           <h2>Evaluation</h2>
           <gr-table class="kv">
