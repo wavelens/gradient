@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 
 export interface CheckGroup {
   label: string;
-  items: readonly { value: string; label: string }[];
+  items: readonly { value: string; label: string; disabled?: boolean }[];
 }
 
 @Component({
@@ -23,6 +23,7 @@ export interface CheckGroup {
             <label>
               <input type="checkbox"
                      [checked]="selected().includes(item.value)"
+                     [disabled]="item.disabled"
                      (change)="toggle(item.value, $any($event.target).checked)" />
               {{ item.label }}
             </label>

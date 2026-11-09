@@ -33,8 +33,9 @@
               <gr-badge severity="danger">Revoked</gr-badge>
             }
             <div slot="meta">
+              @let effectivePermissionCount = getApiKeyPermissionsLimitedToOwnerOnPinnedProject(key).length;
               <span [grTooltip]="permissionTooltip(key)" tooltipPosition="top">
-                {{ key.permissions.length }} permission{{ key.permissions.length === 1 ? '' : 's' }}
+                {{ effectivePermissionCount }} permission{{ effectivePermissionCount === 1 ? '' : 's' }}
               </span>
               <span>
                 · Last used: {{ key.last_used_at ? (key.last_used_at | serverDate) : 'never' }}
@@ -124,14 +125,14 @@
     </gr-form-field>
 
     @if (formScope === 'project') {
-      <gr-form-field label="Project" for="key-project">
+      <gr-form-field label="Project" for="key-project" [invalid]="!!projectError()" [error]="projectError() ?? ''">
         <gr-select
           inputId="key-project"
           [options]="projectOptions()"
           optionLabel="label"
           optionValue="value"
           [(ngModel)]="formProject"
-          placeholder="Any project"
+          placeholder="Select a project"
         />
       </gr-form-field>
     }
@@ -170,8 +171,8 @@
 
     <gr-divider />
 
-    <gr-form-field label="Permissions" [invalid]="!!permissionsError()" [error]="permissionsError() ?? ''">
-      <app-permission-picker [permissions]="activePermissions()" [(selection)]="formPermissions" />
+    <gr-form-field label="Permissions" hint="A key can never have more permissions than its owner's account." [invalid]="!!permissionsError()" [error]="permissionsError() ?? ''">
+      <app-permission-picker [permissions]="activePermissions()" [selectablePermissionIds]="getPermissionIdsUserCanGrantForKeyBeingEdited()" [(selection)]="formPermissions" />
     </gr-form-field>
   </div>
 

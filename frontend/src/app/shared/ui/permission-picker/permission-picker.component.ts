@@ -19,17 +19,22 @@ import { CheckGroupsComponent, type CheckGroup } from '../check-groups/check-gro
 export class PermissionPickerComponent {
   permissions = input.required<readonly PermissionEntry[]>();
   selection = model<Record<string, boolean>>({});
+  selectablePermissionIds = input<readonly string[] | null>(null);
+
+  private selectable(id: string): boolean {
+    return this.selectablePermissionIds()?.includes(id) ?? true;
+  }
 
   protected groups = computed<CheckGroup[]>(() => {
     const group = (label: string, mutating: boolean): CheckGroup => ({
       label,
       items: this.permissions()
         .filter((p) => p.mutating === mutating)
-        .map((p) => ({ value: p.id, label: permissionLabelWithCapitalizedFirstLetter(p.id) })),
+        .map((p) => ({ value: p.id, label: permissionLabelWithCapitalizedFirstLetter(p.id), disabled: !this.selectable(p.id) })),
     });
     return [group('Read', false), group('Write', true)].filter((g) => g.items.length > 0);
   });
-  protected selected = computed(() => Object.keys(this.selection()).filter((id) => this.selection()[id]));
+  protected selected = computed(() => Object.keys(this.selection()).filter((id) => this.selection()[id] && this.selectable(id)));
 
   protected select(ids: string[]): void {
     this.selection.set(Object.fromEntries(this.permissions().map((p) => [p.id, ids.includes(p.id)])));

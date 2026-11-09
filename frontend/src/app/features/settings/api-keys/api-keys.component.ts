@@ -111,7 +111,8 @@ export class ApiKeysComponent implements OnInit {
   keys = signal<ApiKeyInfo[]>([]);
   availablePermissions = signal<PermissionEntry[]>([]);
   availableCachePermissions = signal<PermissionEntry[]>([]);
-  projectOptions = signal<SelectOption[]>([{ label: 'Any project', value: null }]);
+  projectOptions = signal<SelectOption[]>([]);
+  signedInUserProjectPermissionsByProjectName = signal<ReadonlyMap<string, readonly string[]>>(new Map());
   cacheOptions = signal<SelectOption[]>([]);
 
   scopeOptions: { label: string; value: ScopeType }[] = [
@@ -150,11 +151,8 @@ export class ApiKeysComponent implements OnInit {
     });
     this.projectsService.getProjects(1, 100).subscribe({
       next: (paginated) => {
-        const options: SelectOption[] = [
-          { label: 'Any project', value: null },
-          ...paginated.items.map((o) => ({ label: o.display_name || o.name, value: o.name })),
-        ];
-        this.projectOptions.set(options);
+        this.projectOptions.set(paginated.items.map((o) => ({ label: o.display_name || o.name, value: o.name })));
+        this.signedInUserProjectPermissionsByProjectName.set(new Map(paginated.items.map((o) => [o.name, o.permissions])));
       },
       error: () => {},
     });
@@ -231,6 +229,9 @@ export class ApiKeysComponent implements OnInit {
     if (key.cache && !this.cacheOptions().some((option) => option.value === key.cache)) {
       this.cacheOptions.update((options) => [{ label: key.cache!, value: key.cache! }, ...options]);
     }
+    if (key.project && !this.projectOptions().some((option) => option.value === key.project)) {
+      this.projectOptions.update((options) => [{ label: key.project!, value: key.project! }, ...options]);
+    }
     this.formPermissions = this.permissionTemplate(false);
     for (const p of key.permissions) this.formPermissions[p] = true;
     this.formAllowedIps = (key.allowed_ips ?? []).join('\n');
@@ -279,10 +280,21 @@ export class ApiKeysComponent implements OnInit {
     return out;
   }
 
+  getPermissionIdsUserCanGrantForKeyBeingEdited(): readonly string[] | null {
+    if (this.formScope !== 'project' || !this.formProject) return null;
+    return this.signedInUserProjectPermissionsByProjectName().get(this.formProject) ?? null;
+  }
+
   selectedPermissions(): string[] {
+    const grantable = this.getPermissionIdsUserCanGrantForKeyBeingEdited();
     return Object.entries(this.formPermissions)
-      .filter(([, on]) => on)
+      .filter(([id, on]) => on && (grantable?.includes(id) ?? true))
       .map(([id]) => id);
+  }
+
+  getApiKeyPermissionsLimitedToOwnerOnPinnedProject(key: ApiKeyInfo): string[] {
+    const held = key.project ? this.signedInUserProjectPermissionsByProjectName().get(key.project) : undefined;
+    return held ? key.permissions.filter((permission) => held.includes(permission)) : key.permissions;
   }
 
   nameError(): string | null {
@@ -293,6 +305,10 @@ export class ApiKeysComponent implements OnInit {
 
   expiryError(): string | null {
     return this.editingKey() ? null : fieldChecks.positiveInteger(this.formExpiresInDays);
+  }
+
+  projectError(): string | null {
+    return this.attempted() && this.formScope === 'project' && !this.formProject ? 'Select a project.' : null;
   }
 
   cacheError(): string | null {
@@ -306,7 +322,7 @@ export class ApiKeysComponent implements OnInit {
   saveKey(): void {
     if (this.creating() || this.saving()) return;
     this.attempted.set(true);
-    if (this.nameError() || this.expiryError() || this.cacheError() || this.permissionsError() || this.allowedIpsError()) {
+    if (this.nameError() || this.expiryError() || this.projectError() || this.cacheError() || this.permissionsError() || this.allowedIpsError()) {
       this.revealFirstInvalid(() => this.keyForm()?.nativeElement);
       return;
     }
@@ -401,8 +417,9 @@ export class ApiKeysComponent implements OnInit {
   }
 
   permissionTooltip(key: ApiKeyInfo): string {
-    if (key.permissions.length === 0) return 'No permissions';
-    return key.permissions.map(permissionLabel).join(', ');
+    const permissions = this.getApiKeyPermissionsLimitedToOwnerOnPinnedProject(key);
+    if (permissions.length === 0) return 'No permissions';
+    return permissions.map(permissionLabel).join(', ');
   }
 
   scopeBadge(key: ApiKeyInfo): string {

@@ -190,8 +190,37 @@ describe('ApiKeysComponent - field checks', () => {
     const pinned = { ...unmanagedKey, project: 'web' };
     const fixture = setup([pinned], {}, [{ name: 'web', display_name: 'Web Shop' }]);
     const component = fixture.componentInstance;
-    expect(component.projectOptions().map((option) => option.label)).toEqual(['Any project', 'Web Shop']);
+    expect(component.projectOptions().map((option) => option.label)).toEqual(['Web Shop']);
     expect(component.scopeBadge(pinned)).toBe('Web Shop');
+  });
+
+  it('asks for a project under the Project scope instead of sending a key for any project', () => {
+    const { fixture, component, createApiKey, field } = openCreate();
+    component.formScope = 'project';
+    component.onScopeChange();
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    component.saveKey();
+    fixture.detectChanges();
+    expect(field('key-project')).toContain('Select a project.');
+    expect(createApiKey).not.toHaveBeenCalled();
+  });
+
+  it('offers and counts only the permissions the owner holds on the pinned project', () => {
+    const pinned = { ...unmanagedKey, project: 'web', permissions: ['viewProject', 'deleteProject'] };
+    const fixture = setup([pinned], {
+      getApiKeyPermissions: () => of({ available_permissions: [{ id: 'viewProject', mutating: false }, { id: 'deleteProject', mutating: true }], availableCache: [] }),
+    }, [{ name: 'web', display_name: 'Web Shop', permissions: ['viewProject'] }]);
+    const component = fixture.componentInstance;
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('gr-row [slot="meta"]')?.textContent).toContain('1 permission ');
+    expect(component.permissionTooltip(pinned)).toBe('view project');
+
+    component.openEditDialog(pinned);
+    fixture.detectChanges();
+    const deleteBox = Array.from(document.querySelectorAll<HTMLLabelElement>('app-permission-picker label')).find((label) => label.textContent?.includes('Delete project'))!;
+    expect(deleteBox.querySelector('input')!.disabled).toBe(true);
+    expect(component.selectedPermissions()).toEqual(['viewProject']);
   });
 
   it('shows an empty name under its field and sends nothing', () => {
