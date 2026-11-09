@@ -32,7 +32,7 @@
 
     <gr-form-field label="Keep Evaluations" for="task-keep" required [invalid]="!!keepEvaluationsError" [error]="keepEvaluationsError ?? ''">
       <gr-label-help slot="label" doc="concepts/projects-and-tasks/#task" title="Number of completed evaluations to retain for metrics and history" />
-      <input grInput id="task-keep" type="number" min="1" step="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
+      <input grInput id="task-keep" type="number" min="1" step="1" [attr.max]="config.maxKeepEvaluationsPerTask" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
 
     <gr-form-field label="Trigger Concurrency" for="task-concurrency">

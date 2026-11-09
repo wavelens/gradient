@@ -169,6 +169,16 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
     expect(updateTask).not.toHaveBeenCalled();
   });
 
+  it('marks a number above the server limit on the field without sending it', async () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup(editor, undefined, updateTask);
+    TestBed.inject(ConfigService).maxKeepEvaluationsPerTask = 30;
+    await typeInto(fixture, '#task-keep', '100000');
+    expect(fieldError(fixture)).toBe('This server can keep at most 30 evaluations per task.');
+    fixture.componentInstance.saveSettings();
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
   it('refuses an empty number of evaluations instead of saving null', async () => {
     const updateTask = vi.fn(() => of('ok'));
     const fixture = setup(editor, undefined, updateTask);

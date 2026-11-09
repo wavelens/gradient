@@ -34,6 +34,7 @@ export class ConfigService {
   logoUrl: string | null = null;
   execEnabled = false;
   publicListing = true;
+  maxKeepEvaluationsPerTask: number | null = null;
 
   canCreate(permission: CreatePermission, isSuperuser: boolean): boolean {
     switch (permission) {
@@ -73,6 +74,7 @@ export class ConfigService {
           this.logoUrl = res.message.logo_url ?? null;
           this.execEnabled = res.message.exec_enabled;
           this.publicListing = res.message.public_listing;
+          this.maxKeepEvaluationsPerTask = res.message.max_keep_evaluations_per_task ?? null;
         }
       })
       .catch(() => {

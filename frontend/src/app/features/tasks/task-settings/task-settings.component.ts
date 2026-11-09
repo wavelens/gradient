@@ -142,7 +142,9 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   get keepEvaluationsError(): string | null {
     const keep = this.formData.keep_evaluations;
     if (keep === null || String(keep).trim() === '') return 'Enter the number of evaluations to keep.';
-    return fieldChecks.positiveInteger(keep);
+    const max = this.config.maxKeepEvaluationsPerTask;
+    const aboveServerLimit = max !== null && Number(keep) > max;
+    return fieldChecks.positiveInteger(keep) ?? (aboveServerLimit ? `This server can keep at most ${max} evaluations per task.` : null);
   }
 
   get saveBlockedReason(): string | null {
