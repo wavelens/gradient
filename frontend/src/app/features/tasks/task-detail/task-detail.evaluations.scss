@@ -26,13 +26,15 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: $spacing-md;
   padding-top: $spacing-lg;
   margin-bottom: $space-block;
 
-  > :first-child { min-width: 0; }
+  > :first-child { min-width: 0; flex: 1 1 auto; }
 }
 h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
-.head-actions { display: flex; gap: $space-pair; flex-wrap: wrap; }
+.head-actions { display: flex; gap: $space-pair; flex-wrap: wrap; margin-left: auto; }
 
 .task-info { margin-bottom: $space-block; }
 
@@ -283,12 +285,13 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
     max-width: none;
   }
 
-  .pp-head {
-    gap: $spacing-md;
+  .pp-head > :first-child {
+    flex-basis: 100%;
   }
 
   .head-actions {
     flex-wrap: nowrap;
+    margin-left: 0;
   }
 
   .chip {
