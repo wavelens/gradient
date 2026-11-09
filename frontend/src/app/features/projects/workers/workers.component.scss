@@ -19,11 +19,6 @@
   @media (max-width: $breakpoint-sm) { min-width: 0; }
 }
 
-.worker-id {
-  font-family: $font-family-mono;
-  font-size: $font-size-sm;
-}
-
 .worker-url,
 .worker-archs,
 .worker-stats {

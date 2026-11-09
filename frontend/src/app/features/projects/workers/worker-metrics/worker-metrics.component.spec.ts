@@ -61,10 +61,29 @@ describe('WorkerMetricsComponent', () => {
     expect((fixture.nativeElement.querySelector('h1') as HTMLElement).textContent).toContain('builder-1');
   });
 
-  it('keeps the id visible, since jobs and samples are recorded against it', async () => {
-    const fixture = setup('builder-1');
+  it('leaves the id in the URL only and marks open sessions with a dash', async () => {
+    const fixture = setup('builder-1', () => of({
+      worker_id: WORKER_ID, display_name: 'builder-1', samples: [], jobs_dispatched: 0,
+      connections: [{ connected_at: '2026-11-08T10:00:00', disconnected_at: null }],
+    }));
     await settled(fixture);
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain(WORKER_ID);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).not.toContain(WORKER_ID);
+    expect(fixture.nativeElement.querySelector('tbody td:last-child').textContent.trim()).toBe('-');
+  });
+
+  it('hides charts without reported values and keeps missing samples as gaps', async () => {
+    const fixture = setup('builder-1', () => of({
+      worker_id: WORKER_ID, display_name: 'builder-1', connections: [], jobs_dispatched: 0,
+      samples: [
+        { at: '2026-11-08T10:00:00', cpu_usage_pct: 40, assigned_jobs: 1 },
+        { at: '2026-11-08T10:01:00', cpu_usage_pct: null, assigned_jobs: 0 },
+      ],
+    }));
+    await settled(fixture);
+    const charts = fixture.componentInstance.charts();
+    expect(charts.map((chart) => chart.title)).toEqual(['CPU usage', 'Assigned jobs']);
+    expect(charts[0].series[0].data).toEqual([40, null]);
   });
 
   it('walks back through breadcrumbs rather than a lone back arrow', async () => {

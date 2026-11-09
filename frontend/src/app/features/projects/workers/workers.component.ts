@@ -60,6 +60,7 @@ import { ConfirmService } from '@shared/confirm';
 import { fieldChecks } from '@shared/forms';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { links } from '@shared/routing';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 
 @Component({
   selector: 'app-workers',
@@ -213,10 +214,21 @@ export class WorkersComponent implements OnInit {
     return canOpenTeam(this.authService.user(), this.myTeams(), team);
   }
 
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => this.fetchWorkers().pipe(tap((workers) => {
+      this.workers.set(workers);
+      this.loadError.set(null);
+    })));
+  }
+
+  private fetchWorkers(): Observable<ProjectWorkerEntry[]> {
+    return requestIfProjectMember(this.resolvedProject(), () => this.workersService.getWorkers(this.projectName));
+  }
+
   loadWorkers(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    requestIfProjectMember(this.resolvedProject(), () => this.workersService.getWorkers(this.projectName)).subscribe({
+    this.fetchWorkers().subscribe({
       next: (workers) => {
         this.workers.set(workers);
         this.loading.set(false);

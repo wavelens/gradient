@@ -17,7 +17,7 @@
   @if (hasNoCacheSubscribed()) {
     <gr-message-banner type="warning" data-testid="no-cache-banner">
       <strong>No cache subscribed</strong>
-      Workers cannot connect to this project until you subscribe a cache.
+      Evaluations wait for a cache subscription.
       <a [routerLink]="links.projectPage(projectName, 'caches')">Manage cache subscriptions</a>
     </gr-message-banner>
   }
@@ -38,7 +38,6 @@
           Gradient.CI Servers
           <div slot="meta">
             @if (gradientCi().worker; as w) {
-              <div class="worker-id">{{ w.worker_id }}</div>
               <gr-allowed-capabilities [value]="w" [workerReportedCapabilities]="w.live?.capabilities" />
               @if (!w.connected && w.last_error && access().canEdit) {
                 <div class="worker-last-error text-secondary">{{ w.last_error.reason }}</div>
@@ -94,7 +93,6 @@
           <gr-row icon="construction">
             {{ worker.display_name }}
             <div slot="meta">
-                <div class="worker-id">{{ worker.worker_id }}</div>
                 @if (worker.url) {
                   <div class="worker-url text-secondary">{{ worker.url }}</div>
                 }

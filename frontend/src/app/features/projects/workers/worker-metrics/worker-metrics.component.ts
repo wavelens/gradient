@@ -17,12 +17,21 @@ import {
   StatCardComponent,
   TableComponent,
 } from '@gradient/ui/ui';
-import { MetricChartComponent } from '@shared/ui';
+import { MetricChartComponent, type MetricChartType } from '@shared/ui';
 import { clockTime, formatMegabytes, formatPercent, formatQuantity, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { WorkerSamplePoint, WorkerConnectionEntry, WorkerMetricsResponse } from '@core/models';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { tap } from 'rxjs';
 import { links } from '@shared/routing';
+
+interface WorkerMetricChart {
+  title: string;
+  type: MetricChartType;
+  series: { name: string; data: (number | null)[] }[];
+  colors: string[];
+  valueFormatter?: (value: number) => string;
+  yAxisMax?: number;
+}
 
 @Component({
   selector: 'app-worker-metrics',
@@ -45,8 +54,6 @@ import { links } from '@shared/routing';
       [title]="workerName()"
       subtitle="Live metrics, connection history and assigned jobs for this worker"
     >
-      <span slot="meta" class="mono">{{ workerId }}</span>
-
       <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!loaded()" errorTitle="Failed to load worker stats" (retry)="load()">
       @if (samples().length === 0) {
         <gr-empty-state icon="monitoring" title="No metrics yet" message="Connected workers send CPU, memory, network, and disk samples. Graphs appear with the first sample." />
@@ -58,11 +65,10 @@ import { links } from '@shared/routing';
         </gr-card-grid>
 
         <gr-card-grid min="380px">
-          <gr-metric-chart title="CPU usage" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['--gr-chart-cyan']" [valueFormatter]="percent" [yAxisMax]="100"></gr-metric-chart>
-          <gr-metric-chart title="RAM free" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['--gr-chart-green']" [valueFormatter]="megabytes"></gr-metric-chart>
-          <gr-metric-chart title="Upload and download speed" type="line" [series]="transferSeries()" [categories]="times()" [colors]="['--gr-chart-purple', '--gr-chart-teal']" [valueFormatter]="mbps"></gr-metric-chart>
-          <gr-metric-chart title="Disk speed" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['--gr-chart-orange']" [valueFormatter]="mbps"></gr-metric-chart>
-          <gr-metric-chart title="Assigned jobs" type="area" [series]="loadSeries()" [categories]="times()" [colors]="['--gr-chart-pink']"></gr-metric-chart>
+          @for (chart of charts(); track chart.title) {
+            <gr-metric-chart [title]="chart.title" [type]="chart.type" [series]="chart.series" [categories]="times()" [colors]="chart.colors"
+              [valueFormatter]="chart.valueFormatter" [yAxisMax]="chart.yAxisMax"></gr-metric-chart>
+          }
         </gr-card-grid>
       }
 
@@ -71,7 +77,7 @@ import { links } from '@shared/routing';
         <thead><tr><th>Connected</th><th>Disconnected</th></tr></thead>
         <tbody>
           @for (c of connections(); track $index) {
-            <tr><td>{{ c.connected_at | serverDate }}</td><td>{{ c.disconnected_at ? (c.disconnected_at | serverDate) : 'connected' }}</td></tr>
+            <tr><td>{{ c.connected_at | serverDate }}</td><td>{{ c.disconnected_at ? (c.disconnected_at | serverDate) : '-' }}</td></tr>
           } @empty {
             <tr><td colspan="2" class="muted">No sessions recorded.</td></tr>
           }
@@ -111,14 +117,26 @@ export class WorkerMetricsComponent implements OnInit {
   readonly mbps = (value: number) => formatQuantity(value, 'Mbps');
 
   times = computed(() => this.samples().map((s) => clockTime(s.at)));
-  cpuSeries = computed(() => [{ name: 'cpu', data: this.samples().map((s) => s.cpu_usage_pct ?? 0) }]);
-  ramSeries = computed(() => [{ name: 'ram free', data: this.samples().map((s) => s.ram_free_mb ?? 0) }]);
-  transferSeries = computed(() => [
-    { name: 'upload', data: this.samples().map((s) => s.upload_speed_mbps ?? 0) },
-    { name: 'download', data: this.samples().map((s) => s.download_speed_mbps ?? 0) },
-  ]);
-  diskSeries = computed(() => [{ name: 'disk', data: this.samples().map((s) => s.disk_speed_mbps ?? 0) }]);
-  loadSeries = computed(() => [{ name: 'assigned', data: this.samples().map((s) => s.assigned_jobs) }]);
+  charts = computed(() => {
+    const values = (pick: (sample: WorkerSamplePoint) => number | null | undefined) => this.samples().map((s) => pick(s) ?? null);
+    const charts: WorkerMetricChart[] = [
+      { title: 'CPU usage', type: 'line', series: [{ name: 'cpu', data: values((s) => s.cpu_usage_pct) }], colors: ['--gr-chart-cyan'], valueFormatter: this.percent, yAxisMax: 100 },
+      { title: 'RAM free', type: 'area', series: [{ name: 'ram free', data: values((s) => s.ram_free_mb) }], colors: ['--gr-chart-green'], valueFormatter: this.megabytes },
+      {
+        title: 'Upload and download speed',
+        type: 'line',
+        series: [
+          { name: 'upload', data: values((s) => s.upload_speed_mbps) },
+          { name: 'download', data: values((s) => s.download_speed_mbps) },
+        ],
+        colors: ['--gr-chart-purple', '--gr-chart-teal'],
+        valueFormatter: this.mbps,
+      },
+      { title: 'Disk speed', type: 'line', series: [{ name: 'disk', data: values((s) => s.disk_speed_mbps) }], colors: ['--gr-chart-orange'], valueFormatter: this.mbps },
+      { title: 'Assigned jobs', type: 'area', series: [{ name: 'assigned', data: values((s) => s.assigned_jobs) }], colors: ['--gr-chart-pink'] },
+    ];
+    return charts.filter((chart) => chart.series.some((s) => s.data.some((value) => value !== null)));
+  });
 
   constructor() {
     runReloadIntervalWhileTabVisible(() =>

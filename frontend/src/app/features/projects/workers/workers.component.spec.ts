@@ -144,6 +144,22 @@ function itemOf(menu: MenuItem[], label: string): MenuItem | undefined {
   return menu.find((i) => i.label === label);
 }
 
+describe('WorkersComponent - live state', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('reloads the workers while the page is open', () => {
+    vi.useFakeTimers();
+    const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [workerUnmanaged], caches: [] });
+    fixture.detectChanges();
+    const getWorkers = TestBed.inject(WorkersService).getWorkers as ReturnType<typeof vi.fn>;
+    getWorkers.mockReturnValue(of([{ ...workerUnmanaged, display_name: 'Renamed' }]));
+    vi.advanceTimersByTime(15_000);
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Renamed');
+  });
+});
+
 describe('WorkersComponent - no-cache banner (existing)', () => {
   it('shows the banner when the project has no subscribed caches', async () => {
     const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [], caches: [] });
