@@ -17,8 +17,9 @@
           } @else {
             <gr-badge class="inactive-badge" severity="warning" grTooltip="A paused task does not start evaluation automatically.">Inactive</gr-badge>
           }
-        } @else if (liveConnectionOpen() !== null) {
-          <gr-live-status [connected]="!!liveConnectionOpen()" />
+        }
+        @if (liveConnectionOpen() === false) {
+          <gr-live-status [connected]="false" />
         }
       </div>
     </div>

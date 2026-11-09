@@ -304,11 +304,13 @@ describe('TaskDetailComponent - loading', () => {
     expect(root.querySelector('.eval-card')).not.toBeNull();
   });
 
-  it('reloads the task after the live socket reconnects and shows the connection state', () => {
+  it('reloads the task after the live socket reconnects and shows only the reconnecting state', () => {
     const getTask = vi.fn(() => of(resolvedTask(access, {})));
     const { fixture, liveConnectionChange } = setup(access, { getTask });
     const root = fixture.nativeElement as HTMLElement;
     liveConnectionChange.fn?.(true);
+    fixture.detectChanges();
+    expect(root.querySelector('gr-live-status')).toBeNull();
     liveConnectionChange.fn?.(false);
     fixture.detectChanges();
     expect(root.querySelector('gr-live-status')?.textContent).toContain('Reconnecting');
@@ -316,7 +318,7 @@ describe('TaskDetailComponent - loading', () => {
     liveConnectionChange.fn?.(true);
     fixture.detectChanges();
     expect(getTask).toHaveBeenCalledTimes(callsBeforeReconnect + 1);
-    expect(root.querySelector('gr-live-status')?.textContent).toContain('Live');
+    expect(root.querySelector('gr-live-status')).toBeNull();
   });
 
   it('marks a paused task as inactive with a link to its settings in place of the live badge', () => {
