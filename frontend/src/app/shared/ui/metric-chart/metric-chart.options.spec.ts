@@ -143,6 +143,14 @@ describe('buildMetricChartOption presentation', () => {
     expect((fractions.yAxis as any).minInterval).toBeUndefined();
   });
 
+  it('labels only the zero tick when every value on the axis is zero', () => {
+    const zeros = buildMetricChartOption({ type: 'line', series: [{ name: 'deps', data: [0, 0, null] }], categories: cats }, THEME);
+    const label = (zeros.yAxis as any).axisLabel.formatter;
+    expect([label(0), label(1)]).toEqual(['0', '']);
+    const counts = buildMetricChartOption({ type: 'line', series: [{ name: 'deps', data: [0, 1, null] }], categories: cats }, THEME);
+    expect((counts.yAxis as any).axisLabel.formatter(1)).toBe('1');
+  });
+
   it('decides whole steps per axis on a dual-axis chart', () => {
     const opt = buildMetricChartOption({
       type: 'line',

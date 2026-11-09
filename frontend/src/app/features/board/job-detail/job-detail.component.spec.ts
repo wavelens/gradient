@@ -643,16 +643,17 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     expect(success).toHaveBeenLastCalledWith('Evaluation aborted');
   });
 
-  it('aborts a running build or eval job on the board, naming the package or the task and commit', () => {
+  it('aborts a running build or eval job on the board, naming the package and task or the task and commit', () => {
     const aborted: string[] = [];
     const confirm = fakeConfirm();
     TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: true }) } });
     const abortJob = (id: string) => { aborted.push(id); return of('Success'); };
-    const fixture = setup({ getJob: () => of({ ...DETAIL, build_id: null }), abortJob });
+    const build: AssignedJobDetail = { ...DETAIL, build_id: null, evaluation: { ...EVAL_DETAIL.evaluation!, task_display_name: 'Continuous Integration' } };
+    const fixture = setup({ getJob: () => of(build), abortJob });
     const cmp = fixture.componentInstance;
     expect(cmp.canAbort()).toBe(true);
     cmp.abort();
-    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Abort Build', target: 'foo' }));
+    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Abort Build', target: 'foo · Continuous Integration' }));
     cmp.job.set({ ...EVAL_DETAIL, id: 'job-2', finished_at: null });
     cmp.abort();
     expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Abort Evaluation', target: 'ci · abc1234d' }));

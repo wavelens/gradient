@@ -44,6 +44,7 @@ import { abortExecJobConfirm } from '@features/exec-jobs/exec-job-status';
 import {
   abortBuildConfirm,
   abortEvaluationConfirm,
+  buildAbortTargetLine,
   buildPhase,
   buildStatusLabel,
   evaluationAbortTarget,
@@ -688,7 +689,10 @@ export class BoardJobDetailComponent implements OnInit {
       return abortExecJobConfirm(getAssignedJobName(j), () => this.execJobs.abort(exec.id));
     }
     const action = () => this.board.abortJob(j.id);
-    if (j.kind === BUILD_KIND) return abortBuildConfirm(getAssignedJobName(j), action);
+    if (j.kind === BUILD_KIND) {
+      const task = j.evaluation?.task_display_name || j.evaluation?.task || j.project_display_name || j.project_name;
+      return abortBuildConfirm(buildAbortTargetLine(getAssignedJobName(j), task), action);
+    }
     return abortEvaluationConfirm(evaluationAbortTarget(getAssignedJobName(j), j.evaluation?.commit), action);
   }
 
