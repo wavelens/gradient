@@ -52,6 +52,16 @@ describe('EntryPointMetricsComponent', () => {
     expect(cards).toEqual([['2', 'Completed'], ['1', 'Dependency failed'], ['1', 'Worker fault'], ['1', 'Aborted'], ['5', 'Total evaluations']]);
   });
 
+  it('offers View Closure only when the newest build succeeded', () => {
+    const point = (build_status: string) => ({ evaluation_id: 'e', build_id: 'b', created_at: '2026-01-01 00:00:00', build_status, dependencies_count: 0 });
+    const closureButton = (root: HTMLElement) => [...root.querySelectorAll('a')].find((a) => a.textContent?.includes('View Closure'))!;
+    const failed = render(() => of({ points: [point('Completed'), point('FailedPermanent')], keep_evaluations: 30 }));
+    expect(closureButton(failed.root).getAttribute('aria-disabled')).toBe('true');
+    TestBed.resetTestingModule();
+    const built = render(() => of({ points: [point('FailedPermanent'), point('Substituted')], keep_evaluations: 30 }));
+    expect(closureButton(built.root).getAttribute('aria-disabled')).toBeNull();
+  });
+
   it('loads the metrics again on Try Again with the same entry point', () => {
     const { root, metrics, fixture } = render(() => throwError(() => new Error('down')));
     metrics.mockImplementation(() => of({ points: [], keep_evaluations: 30 }));

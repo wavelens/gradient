@@ -56,6 +56,8 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
   font-size: $font-size-xs;
   color: var(--gr-text-secondary);
 
+  &--wildcard { max-width: 100%; overflow-wrap: anywhere; }
+
   &--link {
     text-decoration: none;
     cursor: pointer;
@@ -90,8 +92,9 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
   z-index: 6;
   transform: translateY(-50%);
 
-  &--start { left: -sm; }
-  &--end { right: -sm; }
+  &--start { left: -$spacing-sm; }
+  &--end { right: -$spacing-sm; }
+  &--at-edge { opacity: 0; pointer-events: none; }
 
   @media (hover: none) { display: none; }
 }

@@ -111,6 +111,10 @@ export class EntryPointMetricsComponent implements OnInit {
   readonly formatDeps = (v: number) => `${formatCount(v)} deps`;
 
   newestBuildHistoryMetricPoint = computed(() => this.points().at(-1));
+  newestBuildSucceeded = computed(() => {
+    const newest = this.newestBuildHistoryMetricPoint();
+    return !!newest && buildPhase(newest.build_status) === 'success';
+  });
 
   buildStatusCounts = computed(() => {
     const counts = new Map<BuildStatus, number>();

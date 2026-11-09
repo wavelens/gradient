@@ -5,6 +5,8 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Flake Inputs" subtitle="Override flake inputs to pin or redirect dependencies for the next evaluation">
+  <a slot="actions" *appWritable="access()" grButton label="Open the Repository page" icon="hub" severity="secondary"
+     [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
   @if (overrides().length) {
     <button slot="actions"
         *appWritable="access()"

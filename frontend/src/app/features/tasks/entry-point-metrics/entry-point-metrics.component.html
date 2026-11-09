@@ -7,6 +7,7 @@
 <gr-page-layout [breadcrumb]="breadcrumb()" [title]="shortEntryPointName()" [subtitle]="'Build history for the last ' + (keepEvaluations()) + ' evaluations that completed or failed.'">
   @if (newestBuildHistoryMetricPoint(); as newest) {
     <a slot="actions" grButton label="View Closure" icon="account_tree" severity="secondary"
+      [disabledReason]="newestBuildSucceeded() ? null : 'The closure is available after the build succeeds.'"
       [routerLink]="links.closure(projectName, 'build', newest.build_id, { task: taskName, evaluation: newest.evaluation_id })"></a>
   }
   <gr-load-state

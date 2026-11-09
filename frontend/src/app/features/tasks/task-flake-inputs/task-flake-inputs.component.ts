@@ -28,6 +28,7 @@ import { LabelHelpComponent } from '@shared/ui';
 import { fieldChecks } from '@shared/forms';
 import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
+import { links } from '@shared/routing';
 import { FlakeInputOverrideOut, CreateFlakeInputOverrideRequest } from '@core/models';
 
 interface FlakeInputFormState {
@@ -72,6 +73,7 @@ const DEFAULT_FORM: FlakeInputFormState = {
   styleUrl: './task-flake-inputs.component.scss',
 })
 export class TaskFlakeInputsComponent implements OnInit {
+  protected readonly links = links;
   private route = inject(ActivatedRoute);
   private overridesService = inject(FlakeInputOverridesService);
   private crumbs = inject(BreadcrumbsService);

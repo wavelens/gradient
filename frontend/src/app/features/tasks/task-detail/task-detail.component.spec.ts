@@ -1317,7 +1317,8 @@ describe('TaskDetailComponent - #636 eval page', () => {
     Object.defineProperties(strip, { clientWidth: { value: 500 }, scrollWidth: { value: 1200 } });
     window.dispatchEvent(new Event('resize'));
     fixture.detectChanges();
-    expect(root.querySelector('.strip-arrow--start')).toBeNull();
+    expect(root.querySelector('.strip-arrow--start')?.classList).toContain('strip-arrow--at-edge');
+    expect(root.querySelector('.strip-arrow--end')?.classList).not.toContain('strip-arrow--at-edge');
     root.querySelector<HTMLButtonElement>('.strip-arrow--end')!.click();
     expect(scrollBy).toHaveBeenCalledWith({ left: 400, behavior: 'smooth' });
   });
@@ -1655,12 +1656,25 @@ describe('TaskDetailComponent - eval query param', () => {
     const getEntryPoints = vi.fn(() => of({ entry_points: [epSummary('pkg')], total: 1, failed_attributes: [] }));
     const { fixture } = setup(
       { managed: false, canEdit: true, canTrigger: true },
-      { primaryStatus: 'Completed', getEntryPoints } as SetupOverrides,
+      { primaryStatus: 'Completed', getEntryPoints, getEvaluation: () => throwError(() => new Error('404')) } as SetupOverrides,
       'member',
       { eval: 'gone' },
     );
+    fixture.detectChanges();
     expect(fixture.componentInstance.selected()?.id).toBe('e1');
     expect(fixture.componentInstance.entryPoints().map((e) => e.id)).toEqual(['pkg']);
+    expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain('Evaluation not found');
+  });
+
+  it('keeps quiet about an older ?eval= evaluation of this task', () => {
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEvaluation: () => of({ project_name: 'acme', task_name: 'demo', error: null }) },
+      'member',
+      { eval: 'older' },
+    );
+    fixture.detectChanges();
+    expect(fixture.componentInstance.requestedEvaluationNotFound()).toBe(false);
   });
 });
 

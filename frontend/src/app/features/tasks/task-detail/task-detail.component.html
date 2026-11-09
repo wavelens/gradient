@@ -61,19 +61,23 @@
       @if (repo.flakeDir; as flakeDir) {
         <span class="chip mono" title="Flake directory"><gr-icon name="folder" size="sm" />dir {{ flakeDir }}</span>
       }
-      <span class="chip mono" [title]="proj.wildcard">{{ truncate(proj.wildcard) }}</span>
+      <span class="chip chip--wildcard mono">{{ proj.wildcard }}</span>
       @if (proj.last_check_at) {
         <span class="chip">checked {{ proj.last_check_at | serverDate }}</span>
       }
     </div>
   </div>
 
+  @if (requestedEvaluationNotFound()) {
+    <gr-message-banner class="pad" type="warning">Evaluation not found. Showing the latest evaluation.</gr-message-banner>
+  }
+
   @if (evaluations().length > 0) {
     <div class="strip-row">
-      @if (isEvaluationTabStripScrolledAwayFromStart()) {
-        <button grButton class="strip-arrow strip-arrow--start" icon="chevron_left" severity="secondary" size="small" tabindex="-1"
-                aria-label="Show new evaluations" (click)="scrollEvaluationTabStripByDirection(-1)"></button>
-      }
+      <button grButton class="strip-arrow strip-arrow--start" icon="chevron_left" severity="secondary" size="small" tabindex="-1"
+              [class.strip-arrow--at-edge]="!isEvaluationTabStripScrolledAwayFromStart()"
+              [attr.aria-disabled]="!isEvaluationTabStripScrolledAwayFromStart() || null"
+              aria-label="Show new evaluations" (click)="scrollEvaluationTabStripByDirection(-1)"></button>
       <div class="strip-wrap pad gr-scroll-fade-row" #evaluationTabsScrollElement (scroll)="updateEvaluationTabScrollArrows()">
         <div class="eval-strip" role="tablist" aria-label="Evaluation">
           @for (e of evaluations(); track e.id) {
@@ -97,10 +101,10 @@
         </div>
         <gr-menu #evalMenu [model]="evalMenuModel()" />
       </div>
-      @if (hasHiddenOlderEvaluationTabs()) {
-        <button grButton class="strip-arrow strip-arrow--end" icon="chevron_right" severity="secondary" size="small" tabindex="-1"
-                aria-label="Show older evaluations" (click)="scrollEvaluationTabStripByDirection(1)"></button>
-      }
+      <button grButton class="strip-arrow strip-arrow--end" icon="chevron_right" severity="secondary" size="small" tabindex="-1"
+              [class.strip-arrow--at-edge]="!hasHiddenOlderEvaluationTabs()"
+              [attr.aria-disabled]="!hasHiddenOlderEvaluationTabs() || null"
+              aria-label="Show older evaluations" (click)="scrollEvaluationTabStripByDirection(1)"></button>
     </div>
 
     <div class="panel pad" id="evaluation-detail-panel" role="tabpanel" [attr.aria-labelledby]="'evaluation-tab-' + selected()?.id">

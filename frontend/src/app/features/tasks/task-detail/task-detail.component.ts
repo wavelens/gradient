@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { catchError, finalize, map, Observable, of, Subject, Subscription, switchMap } from 'rxjs';
-import { auditTime, debounceTime, filter, share } from 'rxjs/operators';
+import { auditTime, debounceTime, distinctUntilChanged, filter, share } from 'rxjs/operators';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { LiveEvent, LiveService, createResyncOnLiveSocketReconnectCallback } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
@@ -33,6 +33,7 @@ import {
   LoadStateComponent,
   MenuComponent,
   MenuItem,
+  MessageBannerComponent,
   SkeletonComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
@@ -65,7 +66,7 @@ import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evalua
   standalone: true,
   imports: [
     CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, BadgeComponent, BreadcrumbComponent, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
-    SkeletonComponent, EmptyStateComponent, LoadStateComponent, WritableDirective,
+    SkeletonComponent, EmptyStateComponent, LoadStateComponent, MessageBannerComponent, WritableDirective,
     SegmentedBarComponent, ThunkProgressComponent, EvalStatusBadgeComponent,
     IconComponent, InViewDirective, StatusIconComponent, StarButtonComponent,
     ExecJobListComponent, WaitingNoticeComponent,
@@ -187,6 +188,19 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     ) : of(null))),
   ), { initialValue: null });
 
+  private requestedEvaluationIdMissingFromStrip = computed(() => {
+    const id = this.selectedId();
+    if (!id || !this.task()) return null;
+    return this.evaluations().some(e => e.id === id) ? null : id;
+  });
+  requestedEvaluationNotFound = toSignal(toObservable(this.requestedEvaluationIdMissingFromStrip).pipe(
+    distinctUntilChanged(),
+    switchMap((id) => (id ? this.evaluationsService.getEvaluation(id).pipe(
+      map((evaluation) => evaluation.project_name !== this.projectName || evaluation.task_name !== this.taskName),
+      catchError(() => of(true)),
+    ) : of(false))),
+  ), { initialValue: false });
+
   latestEvaluation = computed<EvaluationSummary | null>(() => this.evaluations()[0] ?? null);
   evaluationInProgress = computed(() => {
     const e = this.latestEvaluation();
@@ -275,10 +289,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       .join('|');
     return [p.active, p.can_edit, p.can_trigger, p.display_name, p.description, p.repository,
       p.wildcard, p.last_check_at, evals].join('§');
-  }
-
-  truncate(value: string, max = 42): string {
-    return value.length > max ? value.slice(0, max) + '…' : value;
   }
 
   select(evaluation: EvaluationSummary): void {
