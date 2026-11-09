@@ -420,10 +420,12 @@ describe('ProfileComponent - delete confirmation', () => {
     const fixture = setup({ managed: false, oidc: false, writeFailure: new ApiError('Wrong password', 403) });
     const component = fixture.componentInstance;
     component.openDeleteDialog();
+    fixture.detectChanges();
     component.deletePassword = 'nope';
     component.deleteAccount();
     fixture.detectChanges();
     expect(component.showDeleteDialog()).toBe(true);
+    expect(document.activeElement?.id).toBe('confirm-password');
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('Wrong password');
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Wrong password');
   });

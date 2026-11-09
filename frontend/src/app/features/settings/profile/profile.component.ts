@@ -7,7 +7,7 @@
 import { Component, ElementRef, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, of, switchMap } from 'rxjs';
-import { CommonModule } from '@angular/common';
+import { CommonModule, DOCUMENT } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
@@ -101,6 +101,7 @@ export class ProfileComponent implements OnInit, CanComponentDeactivate {
   private route = inject(ActivatedRoute);
   private notify = inject(NotifyService);
   private host = inject(ElementRef<HTMLElement>);
+  private document = inject(DOCUMENT);
   private revealFirstInvalid = injectRevealFirstInvalid();
   theme = inject(ThemeService);
 
@@ -296,6 +297,11 @@ export class ProfileComponent implements OnInit, CanComponentDeactivate {
       error: (error: unknown) => {
         this.deleting.set(false);
         this.deleteError.set(apiErrorMessage(error, 'Failed to delete account.'));
+        const confirmation = this.document.querySelector<HTMLInputElement>(
+          this.hasPassword() ? '#confirm-password' : '#confirm-username',
+        );
+        confirmation?.focus();
+        confirmation?.select();
       },
     });
   }

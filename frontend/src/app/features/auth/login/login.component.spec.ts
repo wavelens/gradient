@@ -6,7 +6,8 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
+import { ApiError } from '@core/services/api.service';
 import { LoginComponent } from './login.component';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -53,6 +54,23 @@ describe('LoginComponent', () => {
   it('explains that an expired session brought the user here', () => {
     const fixture = setup({ loginProviders: [], passwordLoginEnabled: true }, { reason: 'expired' });
     expect(fixture.nativeElement.textContent).toContain('Session expired');
+  });
+
+  it('confirms a deleted account', () => {
+    const fixture = setup({ loginProviders: [], passwordLoginEnabled: true }, { reason: 'deleted' });
+    expect(fixture.nativeElement.textContent).toContain('Account deleted.');
+    expect(fixture.nativeElement.textContent).not.toContain('Session expired');
+  });
+
+  it('selects the password for a new try after a refused sign-in', () => {
+    const fixture = setup({ loginProviders: [], passwordLoginEnabled: true });
+    const auth = TestBed.inject(AuthService) as unknown as { login: unknown };
+    auth.login = vi.fn(() => throwError(() => new ApiError('Invalid username or password', 401)));
+    fixture.componentInstance.loginForm.setValue({ username: 'alice', password: 'wrong', rememberMe: false });
+    fixture.componentInstance.onSubmit();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Invalid username or password');
+    expect(document.activeElement?.id).toBe('password');
   });
 
   it('confirms a new account and fills in its username', () => {

@@ -48,12 +48,12 @@ export class LoginComponent {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private config = inject(ConfigService);
-  private host = inject(ElementRef<HTMLElement>);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
   private revealFirstInvalid = injectRevealFirstInvalid();
 
   loginForm: FormGroup;
   errorMessage = signal<string | null>(null);
-  readonly sessionExpired = this.route.snapshot.queryParamMap.get('reason') === 'expired';
+  readonly signInReason = this.route.snapshot.queryParamMap.get('reason');
   readonly usernameFromRegistration = this.route.snapshot.queryParamMap.get('registered');
   protected readonly nextPagePathAfterSignIn = readInAppNextPathFromRouteSnapshot(this.route.snapshot);
   loading = signal(false);
@@ -107,6 +107,9 @@ export class LoginComponent {
       error: (error) => {
         this.loading.set(false);
         this.errorMessage.set(error.message || 'Login failed. Please try again.');
+        const password = this.host.nativeElement.querySelector<HTMLInputElement>('#password');
+        password?.focus();
+        password?.select();
       },
     });
   }
