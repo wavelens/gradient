@@ -8,7 +8,7 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 import { NameFieldsComponent } from './name-fields.component';
-import { nameAvailability } from './name-availability';
+import { maxDisplayNameCharacterCount, nameAvailability } from './name-availability';
 
 @Component({
   selector: 'test-host',
@@ -45,6 +45,11 @@ describe('NameFieldsComponent', () => {
     await type(displayInput, 'My Team');
     expect(host.form).toEqual({ displayName: 'My Team', name: 'my-team' });
     expect(nameInput.value).toBe('my-team');
+  });
+
+  it('stops the display name at the server limit', async () => {
+    const { displayInput } = await setup();
+    expect(displayInput.maxLength).toBe(maxDisplayNameCharacterCount);
   });
 
   it('keeps a name the user typed when the display name changes', async () => {

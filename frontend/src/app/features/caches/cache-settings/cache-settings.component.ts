@@ -33,7 +33,7 @@ import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { CacheResponse, CacheSubscribersResponse, PatchCacheRequest } from '@core/models';
 import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
-import { unsavedChanges } from '@shared/forms';
+import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { links } from '@shared/routing';
 import { plural } from '@shared/text';
 
@@ -102,6 +102,7 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
 })
 export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   protected readonly links = links;
+  protected readonly maxDisplayNameCharacterCount = maxDisplayNameCharacterCount;
   private route = inject(ActivatedRoute);
   protected accessService = inject(AccessService);
   private router = inject(Router);

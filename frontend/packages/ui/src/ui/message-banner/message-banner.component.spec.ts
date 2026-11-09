@@ -27,6 +27,13 @@ describe('MessageBannerComponent', () => {
     expect(banner()?.hasAttribute('role')).toBe(false);
   });
 
+  it('announces an error banner right away as an alert', () => {
+    const fixture = TestBed.createComponent(MessageBannerComponent);
+    fixture.componentRef.setInput('type', 'error');
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.message-banner')?.getAttribute('role')).toBe('alert');
+  });
+
   it('applies the type modifier class', async () => {
     const fixture = TestBed.createComponent(MessageBannerComponent);
     fixture.componentRef.setInput('type', 'error');

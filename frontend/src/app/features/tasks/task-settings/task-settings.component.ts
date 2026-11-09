@@ -34,7 +34,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canOpenProjectSettings } from '@shared/access';
-import { fieldChecks, unsavedChanges } from '@shared/forms';
+import { fieldChecks, maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { TaskResponse, ConcurrencyPolicy, PatchTaskRequest } from '@core/models';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
@@ -86,6 +86,7 @@ interface TaskForm {
 })
 export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   protected readonly links = links;
+  protected readonly maxDisplayNameCharacterCount = maxDisplayNameCharacterCount;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private tasksService = inject(TasksService);

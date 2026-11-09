@@ -32,7 +32,10 @@ const DEFAULT_ICONS: Record<MessageBannerType, string> = {
 export class MessageBannerComponent {
   type = input<MessageBannerType>('info');
   icon = input<string>();
-  protected role = inject(MESSAGE_BANNER_ROLE);
+  private injectedMessageBannerRole = inject(MESSAGE_BANNER_ROLE);
+  protected role = computed(() =>
+    this.injectedMessageBannerRole && this.type() === 'error' ? 'alert' : this.injectedMessageBannerRole,
+  );
 
   resolvedIcon = computed(() => this.icon() ?? DEFAULT_ICONS[this.type()]);
 }

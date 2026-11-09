@@ -15,7 +15,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { AccessState, TeamResponse, PatchTeamRequest } from '@core/models';
 import { AccessService, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canManageTeam } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { unsavedChanges } from '@shared/forms';
+import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import {
   ButtonComponent,
@@ -68,6 +68,7 @@ interface SettingsForm {
 })
 export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
   protected readonly links = links;
+  protected readonly maxDisplayNameCharacterCount = maxDisplayNameCharacterCount;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private teams = inject(TeamsService);

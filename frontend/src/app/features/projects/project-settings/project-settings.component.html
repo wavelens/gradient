@@ -23,6 +23,7 @@
       <input
         grInput
         id="display-name"
+        [maxlength]="maxDisplayNameCharacterCount"
         [(ngModel)]="formData.display_name"
         [appManagedDisable]="access()"
         (keyup.enter)="saveSettings()"

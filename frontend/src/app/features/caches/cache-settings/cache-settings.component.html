@@ -15,7 +15,7 @@
       </gr-form-field>
 
       <gr-form-field label="Display Name" for="display-name" [invalid]="!!fieldError('display_name')" [error]="fieldError('display_name') ?? ''">
-        <input grInput id="display-name" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
+        <input grInput id="display-name" [maxlength]="maxDisplayNameCharacterCount" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
       </gr-form-field>
 
       <gr-form-field label="Description" for="description">

@@ -32,7 +32,7 @@ import {
 import { LabelHelpComponent } from '@shared/ui';
 import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { unsavedChanges } from '@shared/forms';
+import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { ProjectResponse, accessTo } from '@core/models';
 import { injectProject } from '@core/resolvers/project-access.resolver';
@@ -76,6 +76,7 @@ interface ProjectForm {
 })
 export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate {
   protected readonly links = links;
+  protected readonly maxDisplayNameCharacterCount = maxDisplayNameCharacterCount;
   readonly visibilityOptions = [
     { label: 'Private', value: false },
     { label: 'Public', value: true },

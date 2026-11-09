@@ -18,7 +18,7 @@
     </gr-form-field>
 
     <gr-form-field label="Display Name" for="task-display" required [invalid]="!!displayNameError" [error]="displayNameError ?? ''">
-      <input grInput id="task-display" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
+      <input grInput id="task-display" [maxlength]="maxDisplayNameCharacterCount" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
 
     <gr-form-field label="Description" for="task-desc">

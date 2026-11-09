@@ -10,7 +10,7 @@
 
     <gr-settings-section title="General">
       <gr-form-field label="Display Name" for="team-display-name" [invalid]="!!displayNameError" [error]="displayNameError ?? ''">
-        <input grInput id="team-display-name" [(ngModel)]="form.display_name" [appManagedDisable]="access()" (keyup.enter)="save()" />
+        <input grInput id="team-display-name" [maxlength]="maxDisplayNameCharacterCount" [(ngModel)]="form.display_name" [appManagedDisable]="access()" (keyup.enter)="save()" />
       </gr-form-field>
       @if (isSuperuser()) {
         <gr-form-field hint="Applies to projects created from now on.">
