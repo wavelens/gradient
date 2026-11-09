@@ -59,8 +59,8 @@ function setup(access: AccessState, query: Record<string, string> = {}): Compone
           getProject: () => of({ id: 'o', display_name: 'Acme' }),
           getSubscribedCaches: () =>
             of([
-              { id: 'c', name: 'shared', mode: 'ReadWrite', status: 'active' },
-              { id: 'c2', name: 'staging', mode: 'ReadWrite', status: 'pending' },
+              { id: 'c', name: 'shared', display_name: 'Shared Cache', mode: 'ReadWrite', status: 'active' },
+              { id: 'c2', name: 'staging', display_name: 'Staging Cache', mode: 'ReadWrite', status: 'pending' },
             ]),
           subscribeCache,
           unsubscribeCache,
@@ -182,7 +182,7 @@ describe('CacheSubscriptionsComponent - pending requests', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
-    expect(text).toContain('staging');
+    expect(text).toContain('Staging Cache');
     expect(text).toContain('Pending approval');
   });
 
@@ -217,7 +217,7 @@ describe('CacheSubscriptionsComponent - unsubscribe', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
     (findByText(fixture.nativeElement, 'unsubscribe') as HTMLButtonElement).click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'shared', confirmLabel: 'Unsubscribe' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Shared Cache', confirmLabel: 'Unsubscribe' }));
     expect(unsubscribeCache).toHaveBeenCalledWith('acme', 'shared');
     expect(notify.success).toHaveBeenCalledWith('Removed cache subscription');
   });
@@ -226,7 +226,7 @@ describe('CacheSubscriptionsComponent - unsubscribe', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
     (findByText(fixture.nativeElement, 'cancel request') as HTMLButtonElement).click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'staging', confirmLabel: 'Withdraw' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Staging Cache', confirmLabel: 'Withdraw' }));
     expect(unsubscribeCache).toHaveBeenCalledWith('acme', 'staging');
   });
 

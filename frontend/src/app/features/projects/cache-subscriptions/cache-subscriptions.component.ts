@@ -194,10 +194,10 @@ export class CacheSubscriptionsComponent implements OnInit {
     this.confirm
       .confirm({
         title: pending ? 'Withdraw Subscription Request' : 'Unsubscribe from Cache',
-        target: cache.name,
+        target: cache.display_name,
         consequence: pending
-          ? `Delete the subscription request to ${cache.name}.`
-          : `Builds for this project no longer use ${cache.name}.`,
+          ? `Delete the subscription request to ${cache.display_name}.`
+          : `Builds for this project no longer use ${cache.display_name}.`,
         confirmLabel: pending ? 'Withdraw' : 'Unsubscribe',
         failure: 'Failed to delete the subscription.',
         action: () => this.projectsService.unsubscribeCache(this.projectName, cache.name),

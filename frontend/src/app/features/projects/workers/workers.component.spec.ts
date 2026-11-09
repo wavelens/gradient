@@ -55,6 +55,7 @@ const workerOfTeam: ProjectWorkerEntry = {
   registered_at: '2026-01-01T00:00:00',
   active: true,
   team: 'platform',
+  team_display_name: 'Platform Team',
   gradient_ci: false,
   connected: false,
   enable_network: true,
@@ -245,7 +246,7 @@ describe('WorkersComponent - team workers', () => {
     await settled(fixture);
 
     const badge = (Array.from(fixture.nativeElement.querySelectorAll('gr-badge')) as HTMLElement[])
-      .find((el) => (el.textContent ?? '').trim() === 'Team platform');
+      .find((el) => (el.textContent ?? '').trim() === 'Team Platform Team');
     expect(badge, 'Team badge').toBeTruthy();
     const menu = menuOf(fixture, workerOfTeam);
     expect(String(itemOf(menu, 'Manage on team')?.routerLink)).toBe('/team/platform');
@@ -382,7 +383,7 @@ const gciRegistration: ProjectWorkerEntry = {
   enable_build: true,
 };
 
-const gciTeam: ProjectWorkerEntry = { ...gciRegistration, worker_id: 'g2', team: 'platform', last_error: undefined };
+const gciTeam: ProjectWorkerEntry = { ...gciRegistration, worker_id: 'g2', team: 'platform', team_display_name: 'Platform Team', last_error: undefined };
 const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
 const caches = [{ id: 'c', name: 'c' }];
 
@@ -403,7 +404,7 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
   it('shows a connection of a granted team as coming from that team', async () => {
     const fixture = setup({ access: writable, workers: [gciTeam], caches });
     await settled(fixture);
-    expect(entry(fixture)!.textContent).toContain('Via team platform');
+    expect(entry(fixture)!.textContent).toContain('Via team Platform Team');
     expect(entry(fixture)!.textContent).toContain('Allowed:');
     expect(buttonsLabelled(entry(fixture)!, 'Disconnect').length).toBe(0);
     expect(buttonsLabelled(entry(fixture)!, 'Edit').length).toBe(0);

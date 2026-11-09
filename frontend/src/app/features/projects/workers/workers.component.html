@@ -53,7 +53,7 @@
                   <a grButton [label]="gradientCiHost" icon="open_in_new" severity="secondary" size="small" class="worker-action-btn"
                     [href]="config.gradientCiUrl" target="_blank" rel="noopener"></a>
                   @if (w.team) {
-                    <span class="text-secondary">Via team {{ w.team }}</span>
+                    <span class="text-secondary">Via team {{ w.team_display_name ?? w.team }}</span>
                   } @else {
                     <ng-container *ngTemplateOutlet="editAndToggle; context: { $implicit: w }" />
                     <button *appWritable="access()" grButton label="Disconnect" icon="link_off" severity="danger" size="small"
@@ -117,7 +117,7 @@
             </div>
             <div slot="actions" class="phone-icon-buttons">
               @if (worker.team) {
-                <gr-badge>Team {{ worker.team }}</gr-badge>
+                <gr-badge>Team {{ worker.team_display_name ?? worker.team }}</gr-badge>
               }
               @if (worker.live?.draining) {
                 <gr-badge severity="warning">Draining</gr-badge>
