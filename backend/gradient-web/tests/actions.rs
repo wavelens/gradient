@@ -660,8 +660,8 @@ async fn a_test_fire_to_an_unreachable_host_names_the_reason_as_a_bad_gateway() 
 
     assert_eq!(res["status"], 502);
     let message = res["body"]["message"].as_str().unwrap();
-    assert!(message.contains("send HTTP request"), "{res}");
-    assert_ne!(message, "Internal server error");
+    assert!(message.contains("gradient-test.invalid"), "{res}");
+    assert!(!message.contains("send HTTP request"), "{res}");
 }
 
 fn delivery_id() -> TaskActionDeliveryId {

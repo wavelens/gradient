@@ -159,14 +159,20 @@ mod tests {
         )])]
     }
 
-    fn exec_job_flags(failed: bool, aborted: bool) -> Vec<BTreeMap<String, Value>> {
+    fn mock_database_row_with_failed_and_aborted_bools(
+        failed: bool,
+        aborted: bool,
+    ) -> Vec<BTreeMap<String, Value>> {
         vec![BTreeMap::from([
             ("failed".to_owned(), Value::Bool(Some(failed))),
             ("aborted".to_owned(), Value::Bool(Some(aborted))),
         ])]
     }
 
-    async fn settled_status(exec_jobs: Vec<BTreeMap<String, Value>>) -> String {
+    async fn settled_status(
+        shared_builds: Vec<BTreeMap<String, Value>>,
+        exec_jobs: Vec<BTreeMap<String, Value>>,
+    ) -> String {
         let eval = building();
         let db = mock_db()
             .append_query_results([counters(0, 0)])
@@ -174,7 +180,7 @@ mod tests {
             .append_query_results([vec![eval.clone()]])
             .append_query_results([flag("open", false)])
             .append_query_results([flag("open", false)])
-            .append_query_results([flag("failed", false)])
+            .append_query_results([shared_builds])
             .append_query_results([exec_jobs])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
             .append_exec_results(vec![exec(1); 3])
@@ -201,7 +207,24 @@ mod tests {
 
     #[tokio::test]
     async fn an_aborted_exec_job_aborts_the_evaluation() {
-        let values = settled_status(exec_job_flags(false, true)).await;
+        let values = settled_status(
+            mock_database_row_with_failed_and_aborted_bools(false, false),
+            mock_database_row_with_failed_and_aborted_bools(false, true),
+        )
+        .await;
+        assert!(
+            values.contains(&status_value(EvaluationStatus::Aborted)),
+            "{values}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_aborted_shared_build_aborts_the_evaluation() {
+        let values = settled_status(
+            mock_database_row_with_failed_and_aborted_bools(false, true),
+            mock_database_row_with_failed_and_aborted_bools(false, false),
+        )
+        .await;
         assert!(
             values.contains(&status_value(EvaluationStatus::Aborted)),
             "{values}"
@@ -210,7 +233,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_exec_job_outranks_an_aborted_one() {
-        let values = settled_status(exec_job_flags(true, true)).await;
+        let values = settled_status(
+            mock_database_row_with_failed_and_aborted_bools(false, false),
+            mock_database_row_with_failed_and_aborted_bools(true, true),
+        )
+        .await;
         assert!(
             values.contains(&status_value(EvaluationStatus::Failed)),
             "{values}"
@@ -241,8 +268,12 @@ mod tests {
             .append_query_results([vec![eval.clone()]])
             .append_query_results([flag("open", false)])
             .append_query_results([flag("open", false)])
-            .append_query_results([flag("failed", false)])
-            .append_query_results([exec_job_flags(false, false)])
+            .append_query_results([mock_database_row_with_failed_and_aborted_bools(
+                false, false,
+            )])
+            .append_query_results([mock_database_row_with_failed_and_aborted_bools(
+                false, false,
+            )])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
             .append_exec_results(vec![
                 MockExecResult {
@@ -354,7 +385,7 @@ mod tests {
             .append_query_results([vec![eval.clone()]])
             .append_query_results([flag("open", false)])
             .append_query_results([flag("open", false)])
-            .append_query_results([flag("failed", true)])
+            .append_query_results([mock_database_row_with_failed_and_aborted_bools(true, false)])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
             .append_exec_results(vec![
                 MockExecResult {
