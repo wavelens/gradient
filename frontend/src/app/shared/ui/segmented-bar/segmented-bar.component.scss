@@ -39,7 +39,7 @@
 .seg-aborted { background: var(--gr-text-secondary); }
 .seg-building { background: var(--gr-graph-running); }
 .seg-pulsing { animation: seg-pulse 1.8s ease-in-out infinite; }
-.seg-queued { background: var(--idle, var(--gr-border-subtle)); }
+.seg-queued { background: var(--gr-graph-queued); }
 
 .tipbox {
   position: absolute;

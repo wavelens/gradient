@@ -42,7 +42,7 @@ const PAIRS: Array<[string, string, number]> = [
   // Lines and areas on a chart are graphics. They need 3:1 contrast against the card and page.
   ...[
     '--gr-chart-cyan', '--gr-chart-green', '--gr-chart-orange', '--gr-chart-purple', '--gr-chart-pink', '--gr-chart-teal',
-    '--gr-graph-success', '--gr-graph-danger', '--gr-graph-warning', '--gr-graph-running',
+    '--gr-graph-success', '--gr-graph-danger', '--gr-graph-warning', '--gr-graph-running', '--gr-graph-queued',
   ].flatMap((role): Array<[string, string, number]> => [
     [role, '--gr-surface-raised', 3],
     [role, '--gr-surface-base', 3],
