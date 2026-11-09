@@ -9,8 +9,6 @@ import { DashboardService } from '@core/services/dashboard.service';
 import { ActivityDay } from '@core/models';
 import { FormsModule } from '@angular/forms';
 import {
-  ButtonComponent,
-  MessageBannerComponent,
   ScrollRegionDirective,
   SkeletonComponent,
   TabSwitchComponent,
@@ -25,11 +23,11 @@ const LEVELS = 4;
 @Component({
   selector: 'app-dashboard-activity',
   standalone: true,
-  imports: [FormsModule, ButtonComponent, MessageBannerComponent, SkeletonComponent, TabSwitchComponent, TooltipDirective, ScrollRegionDirective],
+  imports: [FormsModule, SkeletonComponent, TabSwitchComponent, TooltipDirective, ScrollRegionDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    @if (!hidden()) {
-      <section class="section" [attr.aria-busy]="!days() && !failed()">
+    @if (!hidden() && !failed()) {
+      <section class="section" [attr.aria-busy]="!days()">
         <h2>Activity</h2>
         <div class="toolbar">
           <gr-tab-switch ariaLabel="Activity measure" [options]="modes" [ngModel]="mode()" (ngModelChange)="mode.set($event)" />
@@ -37,12 +35,7 @@ const LEVELS = 4;
             <span class="hint">{{ total() }} {{ mode() === 'evaluations' ? '' : 'failed ' }}evaluation{{ total() === 1 ? '' : 's' }} in the last year</span>
           }
         </div>
-        @if (failed()) {
-          <gr-message-banner type="error">
-            Activity unavailable.
-            <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
-          </gr-message-banner>
-        } @else if (days()) {
+        @if (days()) {
           <div class="heat-scroll" grScrollRegion>
             <svg
               role="img"

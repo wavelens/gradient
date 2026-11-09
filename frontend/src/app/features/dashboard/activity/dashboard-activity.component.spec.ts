@@ -57,9 +57,10 @@ describe('DashboardActivityComponent', () => {
     expect(root.querySelector('section')?.getAttribute('aria-busy')).toBe('true');
   });
 
-  it('shows an inline error with retry, and hides itself on 403', () => {
-    const { root } = render(() => throwError(() => ({ status: 500 })));
-    expect(root.querySelector('gr-message-banner button')).not.toBeNull();
+  it('leaves a failed load to the page banner and hides itself on 403', () => {
+    const { f, root } = render(() => throwError(() => ({ status: 500 })));
+    expect(f.componentInstance.failed()).toBe(true);
+    expect(root.textContent!.trim()).toBe('');
     TestBed.resetTestingModule();
     expect(render(() => throwError(() => ({ status: 403 }))).root.textContent!.trim()).toBe('');
   });

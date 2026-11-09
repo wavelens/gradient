@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { NEVER, Observable, of } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import type { Mock } from 'vitest';
 import { DashboardComponent } from './dashboard.component';
 import { DashboardService } from '@core/services/dashboard.service';
@@ -83,6 +83,15 @@ describe('DashboardComponent', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('shows one page banner for failed sections and loads only those again on retry', () => {
+    const root = render(throwError(() => ({ status: 503 })));
+    expect(root.querySelectorAll('gr-message-banner').length).toBe(1);
+    expect(root.querySelector('gr-message-banner')?.textContent).toContain("Couldn't load the dashboard.");
+    (root.querySelector('gr-message-banner button') as HTMLElement).click();
+    expect(service.rail).toHaveBeenCalledTimes(2);
+    expect(service.stats).toHaveBeenCalledTimes(1);
   });
 
   it('shows no invitation banner without pending invitations', () => {

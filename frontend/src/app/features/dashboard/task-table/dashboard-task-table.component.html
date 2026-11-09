@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-@if (!hidden() && data()?.counts?.all !== 0) {
+@if (!hidden() && !failed() && data()?.counts?.all !== 0) {
   <section class="section">
     <h2>Tasks</h2>
     <gr-tab-switch
@@ -15,12 +15,7 @@
       (ngModelChange)="select($event)"
     />
 
-    @if (failed()) {
-      <gr-message-banner type="error">
-        Tasks unavailable.
-        <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
-      </gr-message-banner>
-    } @else if (data(); as d) {
+    @if (data(); as d) {
       <gr-row-list>
         @if (d.tasks.length) {
           <div class="columns" aria-hidden="true">

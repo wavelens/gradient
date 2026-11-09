@@ -12,6 +12,12 @@
       <a [routerLink]="links.settings('invites')">Review invitations</a>
     </gr-message-banner>
   }
+  @if (failedDashboardSectionComponents().length) {
+    <gr-message-banner type="error">
+      Couldn't load the dashboard.
+      <button grButton size="small" [text]="true" label="Retry" (click)="retryFailedSections()"></button>
+    </gr-message-banner>
+  }
   <div class="layout" [class.layout--start]="newUser()">
     <div class="main">
       @if (newUser()) {

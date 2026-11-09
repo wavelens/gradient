@@ -54,13 +54,13 @@ describe('DashboardStatsComponent', () => {
     expect(root.querySelectorAll('.stat-value gr-skeleton').length).toBe(4);
   });
 
-  it('shows an inline error and loads again on retry', () => {
+  it('leaves a failed load to the page banner and shows the cards after a new load', () => {
     let calls = 0;
     const { f, root } = render(() => (++calls === 1 ? throwError(() => ({ status: 500 })) : of(STATS)));
-    expect(root.querySelector('gr-message-banner')).not.toBeNull();
-    (root.querySelector('gr-message-banner button') as HTMLElement).click();
+    expect(f.componentInstance.failed()).toBe(true);
+    expect(root.textContent!.trim()).toBe('');
+    f.componentInstance.load();
     f.detectChanges();
-    expect(root.querySelector('gr-message-banner')).toBeNull();
     expect(cards(root)['CPU time']).toBe('18.4 y');
   });
 

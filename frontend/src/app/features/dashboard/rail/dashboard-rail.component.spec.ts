@@ -96,14 +96,15 @@ describe('DashboardRailComponent', () => {
     expect(mount(() => of({ projects: [], caches: [] })).empty).toEqual([true]);
   });
 
-  it('shows an inline error and loads again on retry', () => {
+  it('leaves a failed load to the page banner and shows the rail after a new load', () => {
     let calls = 0;
     const rail: Rail = { projects: [], caches: [{ name: 'main', display_name: 'Main', starred: false, nar_count: 1 }] };
     const { f, root, empty } = mount(() => (++calls === 1 ? throwError(() => ({ status: 500 })) : of(rail)));
     expect(empty).toEqual([false]);
-    (root.querySelector('.error button') as HTMLElement).click();
+    expect(f.componentInstance.failed()).toBe(true);
+    expect(root.textContent!.trim()).toBe('');
+    f.componentInstance.load();
     f.detectChanges();
-    expect(root.querySelector('.error')).toBeNull();
     expect(hrefs(root)).toContain('/caches/main');
   });
 

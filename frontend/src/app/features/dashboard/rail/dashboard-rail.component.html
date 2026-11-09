@@ -53,12 +53,7 @@
       <a class="all" [routerLink]="links.caches()">All caches -></a>
     </section>
   </aside>
-} @else if (failed()) {
-  <p class="error">
-    Projects and caches unavailable.
-    <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
-  </p>
-} @else if (!hidden()) {
+} @else if (!hidden() && !failed()) {
   <aside class="rail" aria-busy="true">
     @for (title of ['Projects', 'Caches']; track title) {
       <section>

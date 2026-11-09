@@ -26,7 +26,6 @@ import { evaluationPhase, explainWaiting, waitingAccessFrom } from '@shared/eval
 import {
   ButtonComponent,
   EmptyStateComponent,
-  MessageBannerComponent,
   RowComponent,
   RowListComponent,
   SkeletonComponent,
@@ -75,7 +74,6 @@ function areDashboardTaskListRequestParametersEqual(a: DashboardTaskListRequestP
     FormsModule,
     ButtonComponent,
     EmptyStateComponent,
-    MessageBannerComponent,
     RowComponent,
     RowListComponent,
     SkeletonComponent,

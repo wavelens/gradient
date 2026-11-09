@@ -11,7 +11,7 @@ import { Observable, filter, tap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
 import { EvaluationStatus, Rail } from '@core/models';
-import { ButtonComponent, SkeletonComponent } from '@gradient/ui/ui';
+import { SkeletonComponent } from '@gradient/ui/ui';
 import { StarButtonComponent } from '@shared/ui';
 import { formatCount } from '@shared/text';
 import { PHASE_COLOR, evaluationPhase } from '@shared/evaluation';
@@ -20,7 +20,7 @@ import { links } from '@shared/routing';
 @Component({
   selector: 'app-dashboard-rail',
   standalone: true,
-  imports: [RouterLink, ButtonComponent, SkeletonComponent, StarButtonComponent],
+  imports: [RouterLink, SkeletonComponent, StarButtonComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './dashboard-rail.component.html',
   styleUrl: './dashboard-rail.component.scss',

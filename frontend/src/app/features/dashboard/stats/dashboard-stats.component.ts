@@ -9,9 +9,7 @@ import { Observable, tap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
 import { DashboardStats } from '@core/models';
 import {
-  ButtonComponent,
   CardGridComponent,
-  MessageBannerComponent,
   StatCardComponent,
 } from '@gradient/ui/ui';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
@@ -20,15 +18,10 @@ import { formatCpuTime } from '../format';
 @Component({
   selector: 'app-dashboard-stats',
   standalone: true,
-  imports: [ButtonComponent, CardGridComponent, MessageBannerComponent, StatCardComponent],
+  imports: [CardGridComponent, StatCardComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    @if (failed()) {
-      <gr-message-banner type="error">
-        Stats unavailable.
-        <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
-      </gr-message-banner>
-    } @else if (!hidden()) {
+    @if (!hidden() && !failed()) {
       <gr-card-grid min="150px" [attr.aria-busy]="!stats()">
         @for (c of cards(); track c.label) {
           <gr-stat-card compact [label]="c.label" [value]="c.value" />

@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal, viewChild
 import { RouterLink } from '@angular/router';
 import { merge } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
-import { MessageBannerComponent } from '@gradient/ui/ui';
+import { ButtonComponent, MessageBannerComponent } from '@gradient/ui/ui';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { links } from '@shared/routing';
 import { DashboardStatsComponent } from './stats/dashboard-stats.component';
@@ -22,6 +22,7 @@ import { DashboardStartComponent } from './start/dashboard-start.component';
   standalone: true,
   imports: [
     RouterLink,
+    ButtonComponent,
     MessageBannerComponent,
     DashboardStatsComponent,
     DashboardTaskTableComponent,
@@ -41,10 +42,18 @@ export class DashboardComponent {
 
   private stats = viewChild(DashboardStatsComponent);
   private tasks = viewChild(DashboardTaskTableComponent);
+  private activity = viewChild(DashboardActivityComponent);
   private rail = viewChild(DashboardRailComponent);
   private reloadableRenderedDashboardSections = computed(() =>
     [this.stats(), this.tasks(), this.rail()].filter((section) => section !== undefined),
   );
+  protected failedDashboardSectionComponents = computed(() =>
+    [this.stats(), this.tasks(), this.activity(), this.rail()].filter((section) => section?.failed()),
+  );
+
+  protected retryFailedSections(): void {
+    for (const section of this.failedDashboardSectionComponents()) section?.load();
+  }
 
   constructor() {
     runReloadIntervalWhileTabVisible(() =>

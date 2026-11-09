@@ -108,15 +108,6 @@ ul {
   background: var(--gr-text-muted);
 }
 
-.error {
-  display: flex;
-  align-items: center;
-  gap: $space-pair;
-  margin: 0;
-  color: var(--gr-text-muted);
-  font-size: $font-size-sm;
-}
-
 @media (max-width: $breakpoint-lg) {
   .rail {
     position: static;

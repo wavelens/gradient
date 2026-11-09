@@ -223,13 +223,13 @@ describe('DashboardTaskTableComponent', () => {
     expect(list.querySelector('gr-skeleton')).not.toBeNull();
   });
 
-  it('shows an inline error and loads again on retry', () => {
+  it('leaves a failed load to the page banner and shows the rows after a new load', () => {
     let calls = 0;
     const { f, root } = render(null, () => (++calls === 1 ? throwError(() => ({ status: 500 })) : of(PAGE)));
-    expect(root.querySelector('gr-row-list')).toBeNull();
-    (root.querySelector('gr-message-banner button') as HTMLElement).click();
+    expect(f.componentInstance.failed()).toBe(true);
+    expect(root.textContent!.trim()).toBe('');
+    f.componentInstance.load();
     f.detectChanges();
-    expect(root.querySelector('gr-message-banner')).toBeNull();
     expect(root.querySelectorAll('gr-row').length).toBe(1);
   });
 
