@@ -2396,6 +2396,7 @@ export interface ServerConfig {
   ssh_port?: number | null;
   gradient_ci_enabled: boolean;
   gradient_ci_url: string;
+  serve_url: string;
   logo_url?: string | null;
   exec_enabled: boolean;
   public_listing: boolean;

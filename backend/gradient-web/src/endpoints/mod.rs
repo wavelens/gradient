@@ -165,6 +165,7 @@ pub struct ServerConfig {
     pub ssh_port: Option<u16>,
     pub gradient_ci_enabled: bool,
     pub gradient_ci_url: String,
+    pub serve_url: String,
     pub logo_url: Option<String>,
     pub exec_enabled: bool,
     pub public_listing: bool,
@@ -177,7 +178,7 @@ pub struct ServerConfig {
     operation_id = "getConfig",
     tag = "general",
     summary = "Server configuration",
-    description = "Returns feature flags for the frontend (OIDC and login providers, password login, registration, email verification).",
+    description = "Return the frontend feature flags (OIDC and login providers, password login, registration, email confirmation). `serve_url` is the public base URL of this server. Snippets such as the Nix substituter URL for the cache contain that URL.",
     responses((status = OK, description = "Server configuration", body = ServerConfig), WebError)
 )]
 pub async fn get_config(
@@ -217,6 +218,7 @@ pub async fn get_config(
             ssh_port: state.config.ssh.enable.then_some(state.config.ssh.port),
             gradient_ci_enabled: state.config.gradient_ci.enable,
             gradient_ci_url: gradient_types::consts::GRADIENT_CI_URL.to_owned(),
+            serve_url: state.config.server.serve_url.clone(),
             logo_url: state.config.server.frontend_logo_url.clone(),
             exec_enabled: state.config.exec.enable,
             public_listing: state.config.server.public_listing,

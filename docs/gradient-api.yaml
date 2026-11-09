@@ -5223,7 +5223,7 @@ paths:
       tags:
       - general
       summary: Server configuration
-      description: Returns feature flags for the frontend (OIDC and login providers, password login, registration, email verification).
+      description: Return the frontend feature flags (OIDC and login providers, password login, registration, email confirmation). `serve_url` is the public base URL of this server. Snippets such as the Nix substituter URL for the cache contain that URL.
       operationId: getConfig
       responses:
         '200':
@@ -21046,6 +21046,7 @@ components:
       - ssh_enabled
       - gradient_ci_enabled
       - gradient_ci_url
+      - serve_url
       - exec_enabled
       - public_listing
       properties:
@@ -21090,6 +21091,8 @@ components:
         gradient_ci_enabled:
           type: boolean
         gradient_ci_url:
+          type: string
+        serve_url:
           type: string
         logo_url:
           type:
