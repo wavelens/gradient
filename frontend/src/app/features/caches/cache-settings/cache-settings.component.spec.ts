@@ -240,13 +240,12 @@ describe('CacheSettingsComponent - edits', () => {
   const saveButton = (fixture: ComponentFixture<CacheSettingsComponent>) =>
     findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement;
 
-  it('keeps Save Changes disabled and says why until a field changes', () => {
+  it('keeps Save Changes disabled until a field changes', () => {
     const fixture = setup(admin);
     expect(saveButton(fixture).disabled).toBe(true);
-    expect(fixture.nativeElement.textContent).toContain('No changes to save.');
+    expect(fixture.nativeElement.textContent).not.toContain('No changes to save.');
     edit(fixture, { description: 'Shared Build' });
     expect(saveButton(fixture).disabled).toBe(false);
-    expect(fixture.nativeElement.textContent).not.toContain('No changes to save.');
   });
 
   it('sends only the changed fields and skips an unchanged visibility', () => {
@@ -283,14 +282,13 @@ describe('CacheSettingsComponent - edits', () => {
     expect(updateCache).not.toHaveBeenCalled();
   });
 
-  it('drops the saved banner as soon as the form changes again', () => {
+  it('reports a save with one toast and no banner', () => {
     const fixture = setup(admin);
     stubWrites(fixture);
     edit(fixture, { priority: 40 });
     saveButton(fixture).click();
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('Changes saved.');
-    edit(fixture, { priority: 30 });
+    expect(notify.success).toHaveBeenCalledWith('Cache settings saved');
     expect(fixture.nativeElement.textContent).not.toContain('Changes saved.');
   });
 

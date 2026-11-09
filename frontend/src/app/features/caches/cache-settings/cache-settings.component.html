@@ -115,9 +115,6 @@
       @if (saveError()) {
         <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
       }
-      @if (saveSuccess() && !unsaved.changed()) {
-        <gr-message-banner type="success">Changes saved.</gr-message-banner>
-      }
 
       <div *appWritable="access()" class="gr-form-actions">
         <button
@@ -128,9 +125,6 @@
           [loading]="saving()"
           [disabled]="access().managed || !unsaved.changed()"
         ></button>
-        @if (!access().managed && !unsaved.changed()) {
-          <small class="text-secondary save-hint">No changes to save.</small>
-        }
       </div>
     </gr-settings-section>
 

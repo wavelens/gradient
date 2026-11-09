@@ -102,11 +102,11 @@ describe('ProjectSettingsComponent - validation and unsaved edits', () => {
     return writes;
   }
 
-  it('disables Save and says why while nothing changed', async () => {
+  it('disables Save without a hint while nothing changed', async () => {
     const fixture = setup(admin);
     await settled(fixture);
     expect(save(fixture).disabled).toBe(true);
-    expect((fixture.nativeElement as HTMLElement).querySelector('.save-hint')?.textContent).toContain('no changes');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.save-hint')).toBeNull();
   });
 
   it('shows an error for an empty display name and sends nothing', async () => {
@@ -141,16 +141,16 @@ describe('ProjectSettingsComponent - validation and unsaved edits', () => {
     expect(writes.setPublic).toHaveBeenCalledWith('acme');
   });
 
-  it('hides the saved banner as soon as the form changes again', async () => {
+  it('reports a save with one toast and no hint beside the disabled Save', async () => {
     const fixture = setup(admin);
     spyOnWrites();
     await typeDisplayName(fixture, 'Renamed');
     fixture.componentInstance.saveSettings();
     await settled(fixture);
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.textContent).toContain('Changes saved.');
-    await typeDisplayName(fixture, 'Renamed again');
+    expect(notify.success).toHaveBeenCalledWith('Project settings saved');
     expect(root.textContent).not.toContain('Changes saved.');
+    expect(root.textContent).not.toContain('no changes');
   });
 
   it('asks before leaving only with unsaved edits', async () => {

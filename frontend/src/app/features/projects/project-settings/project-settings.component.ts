@@ -107,7 +107,6 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   sshKey = signal<string>('');
 
   saveError = signal<string | null>(null);
-  saveSuccess = signal(false);
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.project(this.projectName, { label: 'Settings' }));
@@ -129,7 +128,6 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   get saveBlockedReason(): string | null {
     const access = this.access();
     if (access.managed || !access.canEdit) return accessDisabledReason(access);
-    if (!this.unsaved.changed()) return 'There are no changes to save.';
     if (this.displayNameError) return 'Fix the marked fields to save.';
     return null;
   }
@@ -204,11 +202,10 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
 
     this.saving.set(true);
     this.saveError.set(null);
-    this.saveSuccess.set(false);
     concat(...requests).subscribe({
       complete: () => {
         this.saving.set(false);
-        this.saveSuccess.set(true);
+        this.notify.success('Project settings saved');
         this.loadProject();
       },
       error: (message: string) => {

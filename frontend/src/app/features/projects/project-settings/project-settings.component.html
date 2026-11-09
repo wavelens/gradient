@@ -73,9 +73,6 @@
     @if (saveError()) {
       <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
     }
-    @if (saveSuccess() && !unsaved.changed()) {
-      <gr-message-banner type="success">Changes saved.</gr-message-banner>
-    }
     <div class="gr-form-actions" *appWritable="access()">
       <button
         grButton
@@ -83,7 +80,7 @@
         icon="check"
         (grSubmit)="saveSettings()"
         [loading]="saving()"
-        [disabled]="!!saveBlockedReason"
+        [disabled]="!!saveBlockedReason || !unsaved.changed()"
       ></button>
       @if (saveBlockedReason; as reason) {
         <small class="text-secondary save-hint" role="status">{{ reason }}</small>

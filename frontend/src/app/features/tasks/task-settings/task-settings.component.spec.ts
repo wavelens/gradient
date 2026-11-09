@@ -153,10 +153,10 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
   const fieldError = (fixture: ComponentFixture<TaskSettingsComponent>) =>
     (fixture.nativeElement as HTMLElement).querySelector('.field-error')?.textContent?.trim() ?? '';
 
-  it('disables Save and says why while nothing changed', () => {
+  it('disables Save without a hint while nothing changed', () => {
     const fixture = setup(editor);
     expect(save(fixture).disabled).toBe(true);
-    expect((fixture.nativeElement as HTMLElement).querySelector('.save-hint')?.textContent).toContain('no changes');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.save-hint')).toBeNull();
   });
 
   it.each(['0', '-5', '1.5'])('refuses %s evaluations to keep without sending it', async (value) => {
@@ -222,14 +222,14 @@ describe('TaskSettingsComponent - validation and unsaved edits', () => {
     expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
   });
 
-  it('hides the saved banner as soon as the form changes again', async () => {
+  it('reports a save with one toast and no banner', async () => {
     const fixture = setup(editor);
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
     await typeInto(fixture, '#task-display', 'Renamed');
     fixture.componentInstance.saveSettings();
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.textContent).toContain('Changes saved.');
-    await typeInto(fixture, '#task-display', 'Renamed again');
+    expect(success).toHaveBeenCalledWith('Task settings saved');
     expect(root.textContent).not.toContain('Changes saved.');
   });
 

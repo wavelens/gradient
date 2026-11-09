@@ -122,7 +122,7 @@ describe('TeamSettingsComponent', () => {
     fixture.detectChanges();
     expect(notify.failure).toHaveBeenCalledWith('Failed to save team', failure);
     expect(component.saving()).toBe(false);
-    expect(component.saved()).toBe(false);
+    expect(notify.success).not.toHaveBeenCalled();
   });
 
   it('sends one PATCH for two clicks on Save Changes', async () => {
@@ -147,11 +147,11 @@ describe('TeamSettingsComponent', () => {
     expect(update).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps Save Changes disabled and says why while nothing changed', () => {
+  it('keeps Save Changes disabled while nothing changed', () => {
     const { fixture, update } = setup(true);
     const save = buttonByText(fixture.nativeElement, 'Save Changes');
     expect(save.disabled).toBe(true);
-    expect(fixture.nativeElement.textContent).toContain('No changes to save.');
+    expect(fixture.nativeElement.textContent).not.toContain('No changes to save.');
     fixture.componentInstance.save();
     expect(update).not.toHaveBeenCalled();
   });
@@ -168,17 +168,14 @@ describe('TeamSettingsComponent', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('drops the saved banner as soon as the form changes again', () => {
-    const { fixture } = setup(true);
+  it('reports a save with one toast and no banner', () => {
+    const { fixture, notify } = setup(true);
     const component = fixture.componentInstance;
     component.form.display_name = 'Ops';
     component.save();
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('Changes saved.');
-    component.form.display_name = 'Ops Team';
-    fixture.componentRef.changeDetectorRef.markForCheck();
-    fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).not.toContain('Changes saved.');
+    expect(notify.success).toHaveBeenCalledWith('Team settings saved');
+    expect(fixture.nativeElement.querySelector('gr-message-banner')).toBeNull();
   });
 
   it('asks before leaving only with unsaved edits', () => {

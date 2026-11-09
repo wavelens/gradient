@@ -31,15 +31,9 @@
         <input grInput id="team-scim-group" [(ngModel)]="form.scim_group" [appManagedDisable]="superuserAccess()" (keyup.enter)="save()" />
       </gr-form-field>
 
-      @if (saved() && !unsaved.changed()) {
-        <gr-message-banner type="success">Changes saved.</gr-message-banner>
-      }
       <div *appWritable="access()" class="gr-form-actions">
         <button grButton label="Save Changes" icon="check" [loading]="saving()" (grSubmit)="save()"
           [disabled]="access().managed || !unsaved.changed()"></button>
-        @if (!access().managed && !unsaved.changed()) {
-          <small class="text-secondary save-hint">No changes to save.</small>
-        }
       </div>
     </gr-settings-section>
 

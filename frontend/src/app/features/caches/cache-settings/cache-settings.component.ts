@@ -125,7 +125,6 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
 
   cache = signal<CacheResponse | null>(null);
   saveError = signal<string | null>(null);
-  saveSuccess = signal(false);
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cache(this.cacheName, { label: 'Settings' }));
@@ -224,14 +223,13 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
     const visibilityChanged = values.public !== this.saved.public;
     this.saving.set(true);
     this.saveError.set(null);
-    this.saveSuccess.set(false);
 
     const finish = () => {
       this.saving.set(false);
       this.saved = values;
       this.formData = { ...values };
       this.unsaved.mark();
-      this.saveSuccess.set(true);
+      this.notify.success('Cache settings saved');
       this.loadCache();
     };
     const update = Object.keys(patch).length > 0 ? this.cachesService.updateCache(this.cacheName, patch) : of('');

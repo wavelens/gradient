@@ -110,7 +110,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   task = signal<TaskResponse | null>(null);
   showTransferDialog = signal(false);
   errorMessage = signal<string | null>(null);
-  saveSuccess = signal(false);
   transferProjectName = '';
   transferError = signal<string | null>(null);
   transferProjectSuggestions = signal<string[]>([]);
@@ -150,7 +149,6 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   get saveBlockedReason(): string | null {
     const access = this.access();
     if (access.managed || !access.canEdit) return accessDisabledReason(access);
-    if (!this.unsaved.changed()) return 'There are no changes to save.';
     if (this.displayNameError || this.keepEvaluationsError) return 'Fix the marked fields to save.';
     return null;
   }
@@ -216,12 +214,10 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     );
     this.saving.set(true);
     this.errorMessage.set(null);
-    this.saveSuccess.set(false);
     this.tasksService.updateTask(this.projectName, this.taskName, patch).subscribe({
       next: () => {
         this.saving.set(false);
-        this.saveSuccess.set(true);
-        this.revealSaveResult();
+        this.notify.success('Task settings saved');
         this.loadTask();
       },
       error: (error) => {

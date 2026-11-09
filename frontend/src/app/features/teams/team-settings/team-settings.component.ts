@@ -22,7 +22,6 @@ import {
   CheckboxComponent,
   FormFieldComponent,
   InputDirective,
-  MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -53,7 +52,6 @@ interface SettingsForm {
     CheckboxComponent,
     FormFieldComponent,
     InputDirective,
-    MessageBannerComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -92,7 +90,6 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
   breadcrumb = computed(() => this.crumbs.team(this.teamName, { label: 'Settings' }));
   team = linkedSignal<TeamResponse | null>(() => this.resolvedTeam() ?? null);
   saving = signal(false);
-  saved = signal(false);
   form: SettingsForm = this.formOf(null);
   readonly unsaved = unsavedChanges(() => this.form, 'Team settings');
 
@@ -128,14 +125,13 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
       return;
     }
     this.saving.set(true);
-    this.saved.set(false);
     this.teams.update(this.teamName, patch).subscribe({
       next: () => {
         this.team.set({ ...team, ...this.form });
         this.crumbs.rememberTeam(this.teamName, this.form.display_name);
         this.unsaved.mark();
         this.saving.set(false);
-        this.saved.set(true);
+        this.notify.success('Team settings saved');
       },
       error: (err: unknown) => {
         this.saving.set(false);
