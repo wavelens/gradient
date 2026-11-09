@@ -55,7 +55,7 @@ export class DashboardRailComponent implements OnInit {
       tap((r) => {
         this.rail.set(r);
         this.failed.set(false);
-        this.empty.emit(r.projects.length === 0 && r.caches.length === 0);
+        this.empty.emit(r.projects.length === 0);
         this.hasProjectsOrLoadFailed.emit(r.projects.length > 0);
       }),
     );

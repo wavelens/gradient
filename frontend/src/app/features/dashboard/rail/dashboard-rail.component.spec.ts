@@ -96,6 +96,11 @@ describe('DashboardRailComponent', () => {
     expect(mount(() => of({ projects: [], caches: [] })).empty).toEqual([true]);
   });
 
+  it('keeps onboarding for a user who only sees caches', () => {
+    const rail: Rail = { projects: [], caches: [{ name: 'main', display_name: 'Main', starred: false, nar_count: 1 }] };
+    expect(mount(() => of(rail)).empty).toEqual([true]);
+  });
+
   it('leaves a failed load to the page banner and shows the rail after a new load', () => {
     let calls = 0;
     const rail: Rail = { projects: [], caches: [{ name: 'main', display_name: 'Main', starred: false, nar_count: 1 }] };
