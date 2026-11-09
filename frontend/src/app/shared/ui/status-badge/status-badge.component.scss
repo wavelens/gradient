@@ -14,14 +14,13 @@
   font-weight: 400;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  background: color-mix(in srgb, var(--phase-color) 18%, transparent);
   transition: color $transition-base, background $transition-base;
 
-  gr-status-icon { color: inherit; }
-
-  &[data-phase='success'] { background: color-mix(in srgb, var(--gr-status-success) 18%, transparent); color: var(--gr-status-success-text); }
-  &[data-phase='failure'] { background: color-mix(in srgb, var(--gr-status-danger) 18%, transparent);  color: var(--gr-status-danger-text); }
-  &[data-phase='aborted'] { background: color-mix(in srgb, var(--gr-text-secondary) 18%, transparent); color: var(--gr-text-secondary); }
-  &[data-phase='waiting'] { background: color-mix(in srgb, var(--gr-status-warning) 18%, transparent); color: var(--gr-status-warning-text); }
-  &[data-phase='queued'] { background: color-mix(in srgb, var(--gr-text-muted) 18%, transparent); color: var(--gr-text-secondary); }
-  &[data-phase='running'] { background: color-mix(in srgb, var(--gr-status-info) 18%, transparent); color: var(--gr-status-info-text); }
+  &[data-phase='success'] { color: var(--gr-status-success-text); }
+  &[data-phase='failure'] { color: var(--gr-status-danger-text); }
+  &[data-phase='aborted'] { color: var(--gr-text-secondary); }
+  &[data-phase='waiting'] { color: var(--gr-status-warning-text); }
+  &[data-phase='queued'] { color: var(--gr-text-secondary); }
+  &[data-phase='running'] { color: var(--gr-status-info-text); }
 }

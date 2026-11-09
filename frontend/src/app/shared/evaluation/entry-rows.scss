@@ -24,7 +24,7 @@
 
   &[data-phase='success'] { --entry-stripe: var(--gr-graph-success); }
   &[data-phase='failure'] { --entry-stripe: var(--gr-graph-danger); }
-  &[data-phase='queued'],
+  &[data-phase='queued'] { --entry-stripe: var(--gr-graph-queued); }
   &[data-phase='running'] { --entry-stripe: var(--gr-graph-running); }
   &[data-phase='waiting'] { --entry-stripe: var(--gr-status-warning); }
 
@@ -69,12 +69,8 @@
   border-radius: 50%;
   transition: background $transition-slow, color $transition-slow;
 
-  &[data-phase='success'] { color: var(--gr-graph-success); background: color-mix(in srgb, var(--gr-graph-success) 14%, transparent); }
-  &[data-phase='failure'] { color: var(--gr-graph-danger); background: color-mix(in srgb, var(--gr-graph-danger) 14%, transparent); }
-  &[data-phase='queued'],
-  &[data-phase='running'] { color: var(--gr-graph-running); background: color-mix(in srgb, var(--gr-graph-running) 14%, transparent); }
-  &[data-phase='waiting'] { color: var(--gr-status-warning); background: color-mix(in srgb, var(--gr-status-warning) 14%, transparent); }
-  &[data-phase='aborted'] { color: var(--gr-text-muted); background: var(--gr-surface-hover); }
+  &[data-phase] { background: color-mix(in srgb, var(--phase-color) 14%, transparent); }
+  &[data-phase='aborted'] { background: var(--gr-surface-hover); }
 }
 
 @media (prefers-reduced-motion: reduce) {

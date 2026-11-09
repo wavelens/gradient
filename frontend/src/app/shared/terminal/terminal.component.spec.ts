@@ -7,23 +7,25 @@
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
+import { ThemeService } from '@core/services/theme.service';
 import type { TerminalClosed, TerminalSource } from './terminal-source';
 import { TerminalComponent } from './terminal.component';
 
 const terminals = vi.hoisted(() => [] as {
   write: ReturnType<typeof vi.fn>;
   typed: (data: string) => void;
-  options: { disableStdin?: boolean; fontFamily?: string };
+  options: { disableStdin?: boolean; fontFamily?: string; theme?: { background?: string } };
 }[]);
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 80;
     rows = 24;
-    options: { disableStdin?: boolean; fontFamily?: string } = {};
+    options: { disableStdin?: boolean; fontFamily?: string; theme?: { background?: string } } = {};
     write = vi.fn((_bytes: unknown, parsed?: () => void) => parsed?.());
     typed: (data: string) => void = () => undefined;
-    constructor() {
+    constructor(options: { theme?: { background?: string } } = {}) {
+      this.options.theme = options.theme;
       terminals.push(this);
     }
     loadAddon(): void {}
@@ -95,6 +97,23 @@ describe('TerminalComponent', () => {
       expect(terminals[0].options.fontFamily).toBe(appFont);
     } finally {
       delete (document as { fonts?: unknown }).fonts;
+    }
+  });
+
+  it('colours the terminal from the theme roles and follows a switch between light and dark', () => {
+    const root = document.documentElement.style;
+    root.setProperty('--gr-surface-sunken', '#050708');
+    try {
+      render(fakeSource().source);
+      expect(terminals[0].options.theme?.background).toBe('#050708');
+
+      root.setProperty('--gr-surface-sunken', '#eaeef2');
+      TestBed.inject(ThemeService).set(TestBed.inject(ThemeService).resolved() === 'dark' ? 'light' : 'dark');
+      TestBed.tick();
+      expect(terminals[0].options.theme?.background).toBe('#eaeef2');
+    } finally {
+      root.removeProperty('--gr-surface-sunken');
+      TestBed.inject(ThemeService).set('system');
     }
   });
 

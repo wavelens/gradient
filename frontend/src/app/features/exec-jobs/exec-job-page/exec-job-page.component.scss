@@ -48,6 +48,11 @@ a.sidebar-item { text-decoration: none; }
   white-space: nowrap;
 }
 
+.info-metric:has(> .worker) {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
 .worker {
   font-family: $font-family-mono;
   font-size: $font-size-xs;

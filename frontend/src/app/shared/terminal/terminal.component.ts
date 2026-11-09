@@ -16,14 +16,46 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { Terminal } from '@xterm/xterm';
+import { type ITheme, Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { ThemeService } from '@core/services/theme.service';
 import type { TerminalClosed, TerminalSource } from './terminal-source';
 
 const REPLAY_WINDOW_MS = 1000;
 const FONT_SIZE = 13;
 // eslint-disable-next-line no-control-regex -- ESC introduces the reports
 const TERMINAL_REPORT = /^\x1b\[[?>]?[\d;]*[Rcn]$/;
+
+const xtermThemeKeyToCssColorVariableName: Partial<Record<keyof ITheme, string>> = {
+  background: '--gr-surface-sunken',
+  foreground: '--gr-text-primary',
+  cursor: '--gr-text-primary',
+  cursorAccent: '--gr-surface-sunken',
+  selectionBackground: '--gr-surface-active',
+  black: '--gr-surface-active',
+  red: '--gr-status-danger',
+  green: '--gr-status-success',
+  yellow: '--gr-status-warning',
+  blue: '--gr-status-info',
+  magenta: '--gr-log-magenta',
+  cyan: '--gr-log-cyan',
+  white: '--gr-text-secondary',
+  brightBlack: '--gr-text-muted',
+  brightRed: '--gr-status-danger',
+  brightGreen: '--gr-status-success',
+  brightYellow: '--gr-status-warning',
+  brightBlue: '--gr-status-info',
+  brightMagenta: '--gr-log-magenta',
+  brightCyan: '--gr-log-cyan',
+  brightWhite: '--gr-text-primary',
+};
+
+function readTerminalThemeFromCssVariables(element: Element): ITheme {
+  const style = getComputedStyle(element);
+  return Object.fromEntries(
+    Object.entries(xtermThemeKeyToCssColorVariableName).map(([key, variable]) => [key, style.getPropertyValue(variable).trim()]),
+  );
+}
 
 function closedLine({ exitCode, message }: TerminalClosed): string {
   const text = message ?? (exitCode === null ? 'the terminal closed' : `exited with code ${exitCode}`);
@@ -46,9 +78,10 @@ export class TerminalComponent {
 
   constructor() {
     const destroyRef = inject(DestroyRef);
+    const theme = inject(ThemeService);
     afterNextRender(() => {
       const screen = this.screen().nativeElement;
-      const terminal = new Terminal({ cursorBlink: true, fontSize: FONT_SIZE });
+      const terminal = new Terminal({ cursorBlink: true, fontSize: FONT_SIZE, theme: readTerminalThemeFromCssVariables(screen) });
       const fit = new FitAddon();
       terminal.loadAddon(fit);
       terminal.open(screen);
@@ -71,6 +104,12 @@ export class TerminalComponent {
         terminal.dispose();
       });
       this.terminal.set(terminal);
+    });
+
+    effect(() => {
+      theme.resolved();
+      const terminal = this.terminal();
+      if (terminal) terminal.options.theme = readTerminalThemeFromCssVariables(this.screen().nativeElement);
     });
 
     effect((onCleanup) => {

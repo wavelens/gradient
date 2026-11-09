@@ -17,7 +17,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { injectOnScreen } from '@gradient/ui/ui';
-import type { StatusPhase } from '@shared/evaluation';
+import { PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 
 export type StatusIconSize = 'sm' | 'md';
 
@@ -40,6 +40,7 @@ function motionAllowed(): boolean {
   host: {
     '[class]': "'gr-status-icon--' + size()",
     '[attr.data-phase]': 'phase()',
+    '[style.--phase-color]': 'statusPhaseColor()',
     '[attr.data-animate]': "animate() ? '' : null",
     '[attr.data-offscreen]': "onScreen() ? null : ''",
     '[attr.role]': "label() ? 'img' : null",
@@ -86,6 +87,7 @@ export class StatusIconComponent {
   });
 
   protected readonly animate = computed(() => this.motion && this.changed());
+  protected readonly statusPhaseColor = computed(() => PHASE_COLOR[this.phase()]);
 
   constructor() {
     afterRenderEffect(() => this.syncSpin(this.phase(), this.prioritized(), this.onScreen()));

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, ChangeDetectionStrategy } from '@angular/core';
-import type { StatusPhase } from '@shared/evaluation';
+import { Component, input, computed, ChangeDetectionStrategy } from '@angular/core';
+import { PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { StatusIconComponent } from '../status-icon/status-icon.component';
 
 @Component({
@@ -13,7 +13,7 @@ import { StatusIconComponent } from '../status-icon/status-icon.component';
   standalone: true,
   imports: [StatusIconComponent],
   template: `
-    <span class="status-badge" [attr.data-phase]="phase()">
+    <span class="status-badge" [attr.data-phase]="phase()" [style.--phase-color]="statusPhaseColor()">
       <gr-status-icon [phase]="phase()" [prioritized]="prioritized()" size="sm" />
       {{ label() }}
     </span>
@@ -25,4 +25,5 @@ export class StatusBadgeComponent {
   phase = input.required<StatusPhase>();
   label = input.required<string>();
   prioritized = input(false);
+  protected readonly statusPhaseColor = computed(() => PHASE_COLOR[this.phase()]);
 }

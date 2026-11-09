@@ -5,6 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
+import { PHASE_COLOR } from '@shared/evaluation';
 import { StatusBadgeComponent } from './status-badge.component';
 
 describe('StatusBadgeComponent', () => {
@@ -18,5 +19,8 @@ describe('StatusBadgeComponent', () => {
     expect(badge?.getAttribute('data-phase')).toBe('failure');
     expect(badge?.querySelector('gr-status-icon')?.getAttribute('data-phase')).toBe('failure');
     expect(badge?.textContent?.trim()).toBe('Failed');
+    const icon = badge?.querySelector<HTMLElement>('gr-status-icon');
+    expect((badge as HTMLElement).style.getPropertyValue('--phase-color')).toBe(PHASE_COLOR.failure);
+    expect(icon?.style.getPropertyValue('--phase-color')).toBe(PHASE_COLOR.failure);
   });
 });
