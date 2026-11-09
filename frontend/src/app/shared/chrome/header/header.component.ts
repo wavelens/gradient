@@ -49,6 +49,9 @@ export class AppHeaderComponent {
   private pendingMenuOrigin = signal<HTMLElement | null>(null);
 
   get registrationDisabled() { return this.config.registrationDisabled; }
+  protected get nextPagePathAfterSignIn(): string | null {
+    return this.router.url.startsWith('/account/') ? null : this.router.url;
+  }
 
   constructor() {
     effect(() => {
