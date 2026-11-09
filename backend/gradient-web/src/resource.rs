@@ -132,7 +132,7 @@ impl Resource {
             Self::UpstreamCache => "Upstream cache",
             Self::User => "User",
             Self::Username => "Username",
-            Self::Webhook => "Webhook",
+            Self::Webhook => "Event notification",
             Self::Worker => "Worker",
             Self::WorkerRegistration => "Worker registration",
         }
