@@ -48,7 +48,7 @@ export class SelectComponent implements ControlValueAccessor {
 
   private host = inject(ElementRef<HTMLElement>);
   private field = inject(FormFieldComponent, { optional: true });
-  protected name = computed(() => this.ariaLabel() ?? (this.inputId() ? undefined : this.field?.label()));
+  protected name = computed(() => this.ariaLabel() ?? this.field?.label());
   private onChange: (value: unknown) => void = () => {};
   protected onTouched: () => void = () => {};
 

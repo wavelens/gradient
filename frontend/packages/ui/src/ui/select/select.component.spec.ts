@@ -8,6 +8,7 @@ import { Component, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TestBed } from '@angular/core/testing';
 import { SelectComponent } from './select.component';
+import { FormFieldComponent } from '../form-field/form-field.component';
 
 @Component({
   standalone: true,
@@ -35,6 +36,17 @@ class HostComponent {
   chosen = signal<string | null>(null);
   disabled = signal(false);
 }
+
+@Component({
+  standalone: true,
+  imports: [SelectComponent, FormFieldComponent],
+  template: `
+    <gr-form-field label="Team" for="team">
+      <gr-select inputId="team" [options]="['a', 'b']"></gr-select>
+    </gr-form-field>
+  `,
+})
+class LabelledHostComponent {}
 
 async function render() {
   TestBed.configureTestingModule({ imports: [HostComponent] });
@@ -124,6 +136,16 @@ describe('SelectComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     expect(fixture.componentInstance.chosen()).toBe('b');
+  });
+
+  it('keeps the field label as its name when it has an input id', async () => {
+    TestBed.configureTestingModule({ imports: [LabelledHostComponent] });
+    const fixture = TestBed.createComponent(LabelledHostComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(trigger(fixture).id).toBe('team');
+    expect(trigger(fixture).getAttribute('aria-label')).toBe('Team');
   });
 
   it('marks itself a combobox and tracks its expanded state', async () => {

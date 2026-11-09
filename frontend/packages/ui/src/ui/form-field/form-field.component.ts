@@ -10,6 +10,8 @@ import { FormErrors } from './form-errors';
 
 type FieldControl = AbstractControl | NgControl | null;
 
+let formFieldMessageSeq = 0;
+
 /// Works with template-driven forms as well as reactive ones, because most of
 /// the app binds ngModel against plain objects and has no AbstractControl to pass.
 @Component({
@@ -40,7 +42,11 @@ export class FormFieldComponent {
     return !!ctrl?.invalid && !!ctrl?.touched;
   });
 
-  messageId = computed(() => `${this.for() ?? 'gr-field'}-message`);
+  private readonly messageElementIdWhenForInputIsMissing = `gr-field-${formFieldMessageSeq++}-message`;
+  messageId = computed(() => {
+    const id = this.for();
+    return id ? `${id}-message` : this.messageElementIdWhenForInputIsMissing;
+  });
 
   /// The projected control is owned by the caller, so the error semantics are
   /// applied to it here rather than duplicated at every call site.

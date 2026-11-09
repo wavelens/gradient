@@ -139,6 +139,14 @@ describe('gr-form-field', () => {
     expect(root.querySelector('input')!.getAttribute('aria-describedby')).toBe(error.id);
   });
 
+  it('gives each field without a for id its own message id', async () => {
+    const first = (await render(TemplateDrivenHost)).nativeElement as HTMLElement;
+    const second = (await render(TemplateDrivenHost)).nativeElement as HTMLElement;
+    const firstId = first.querySelector('input')!.getAttribute('aria-describedby');
+    expect(firstId).toBeTruthy();
+    expect(second.querySelector('input')!.getAttribute('aria-describedby')).not.toBe(firstId);
+  });
+
   it('prefers an explicit invalid input over the control state', async () => {
     const fixture = TestBed.createComponent(FormFieldComponent);
     const ctrl = new FormControl('', Validators.required);
