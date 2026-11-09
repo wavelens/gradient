@@ -71,6 +71,28 @@ describe('MetricChartComponent', () => {
     expect(fixture.nativeElement.querySelector('.metric-chart__empty')?.textContent).toContain('No data');
   });
 
+  it('waits for the plot to get a size before it starts the chart', async () => {
+    let notify: (width: number, height: number) => void = () => undefined;
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: (entries: { contentRect: { width: number; height: number } }[]) => void) {
+        notify = (width, height) => callback([{ contentRect: { width, height } }]);
+      }
+      observe(): void { /* driven by notify */ }
+      disconnect(): void { /* nothing to release */ }
+    });
+    try {
+      const fixture = await render();
+      const plot = () => fixture.nativeElement.querySelector('.metric-chart__plot svg');
+      expect(plot()).toBeNull();
+      notify(0, 0);
+      expect(plot()).toBeNull();
+      notify(400, 260);
+      expect(plot()).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('disposes the chart instance on destroy', async () => {
     const fixture = await render();
     fixture.destroy();

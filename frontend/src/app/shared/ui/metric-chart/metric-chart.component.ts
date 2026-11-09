@@ -14,6 +14,7 @@ import { ThemeService } from '@core/services/theme.service';
 import { DocLink } from '@core/docs';
 import { LabelHelpComponent } from '../label-help/label-help.component';
 import { SkeletonComponent } from '@gradient/ui/ui';
+import type { EChartsOption } from 'echarts';
 
 /// Charts need concrete colours, so the semantic roles are read after each render: read during change
 /// detection, the computed styles would settle on siblings whose bindings have not landed yet.
@@ -118,6 +119,7 @@ export class MetricChartComponent implements OnDestroy {
   private host = viewChild.required<ElementRef<HTMLElement>>('host');
   private chart?: echarts.ECharts;
   private resize?: ResizeObserver;
+  private optionWaitingForHostSize?: EChartsOption;
   private width = signal(Infinity);
   protected compact = computed(() => this.width() < COMPACT_BELOW_PX);
   protected empty = computed(() =>
@@ -128,23 +130,36 @@ export class MetricChartComponent implements OnDestroy {
   constructor() {
     afterRenderEffect(() => {
       const option = this.option();
-      const first = !this.chart;
-      this.chart ??= this.createChart();
-      this.chart.setOption(option, first ? { notMerge: true } : { replaceMerge: ['series', 'xAxis', 'yAxis', 'legend'] });
+      if (this.chart) {
+        this.chart.setOption(option, { replaceMerge: ['series', 'xAxis', 'yAxis', 'legend'] });
+        return;
+      }
+      this.optionWaitingForHostSize = option;
+      this.observeHostSize();
     });
   }
 
-  private createChart(): echarts.ECharts {
+  /// Hosts without size (a hidden tab, a panel during layout) trigger an ECharts warning and no drawing. The chart can start only at the first non-zero size of the host.
+  private observeHostSize(): void {
+    if (this.resize) return;
     const el = this.host().nativeElement;
-    const chart = echarts.init(el, undefined, { renderer: 'svg' });
-    if (typeof ResizeObserver !== 'undefined') {
-      this.resize = new ResizeObserver(([entry]) => {
-        this.width.set(entry.contentRect.width);
-        chart.resize();
-      });
-      this.resize.observe(el);
+    if (typeof ResizeObserver === 'undefined') {
+      this.createChart(el);
+      return;
     }
-    return chart;
+    this.resize = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      this.width.set(width);
+      if (this.chart) this.chart.resize();
+      else if (width > 0 && height > 0) this.createChart(el);
+    });
+    this.resize.observe(el);
+  }
+
+  private createChart(el: HTMLElement): void {
+    this.chart = echarts.init(el, undefined, { renderer: 'svg' });
+    if (this.optionWaitingForHostSize) this.chart.setOption(this.optionWaitingForHostSize, { notMerge: true });
+    this.optionWaitingForHostSize = undefined;
   }
 
   ngOnDestroy(): void {
