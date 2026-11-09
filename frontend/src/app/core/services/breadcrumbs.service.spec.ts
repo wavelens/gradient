@@ -112,13 +112,19 @@ describe('BreadcrumbsService', () => {
     expect(String(crumbs.taskAt('acme', 'build', 'e2')[2].link)).toBe('/project/acme/task/build?eval=e2');
   });
 
-  it('leads a build page back to the task at its evaluation, else to the log at the build', () => {
+  it('leads a build page back through its task and its evaluation log', () => {
     const { crumbs } = setup();
 
     const fromTask = crumbs.buildPage('acme', { task: 'build', evaluation: 'e1' }, 'b1', 'Artefacts');
     const fromLog = crumbs.buildPage('acme', { evaluation: 'e1' }, 'b1', 'Artefacts');
+    const fromTaskOnly = crumbs.buildPage('acme', { task: 'build' }, 'b1', 'Artefacts');
 
+    expect(fromTask).toHaveLength(5);
+    expect(fromTask[3].label).toBe('Evaluation');
+    expect(fromTask[4].label).toBe('Artefacts');
     expect(String(fromTask[2].link)).toBe('/project/acme/task/build?eval=e1');
+    expect(String(fromTask[3].link)).toBe('/project/acme/log/e1?build=b1');
+    expect(fromTaskOnly.map((crumb) => crumb.label).slice(3)).toEqual(['Artefacts']);
     expect(labels(fromLog)).toEqual(['Projects', 'MyProject', 'Evaluation', 'Artefacts']);
     expect(String(fromLog[2].link)).toBe('/project/acme/log/e1?build=b1');
   });

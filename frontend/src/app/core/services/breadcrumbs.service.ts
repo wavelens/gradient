@@ -55,11 +55,10 @@ export class BreadcrumbsService {
   }
 
   buildPage(project: string, from: BuildOrigin, build: string, label: string): Crumb[] {
-    if (from.task) return this.taskAt(project, from.task, from.evaluation, { label });
-    if (from.evaluation) {
-      return this.project(project, { label: 'Evaluation', link: links.evaluationLog(project, from.evaluation, { build }) }, { label });
-    }
-    return this.project(project, { label });
+    const trail: Crumb[] = from.evaluation
+      ? [{ label: 'Evaluation', link: links.evaluationLog(project, from.evaluation, { build }) }, { label }]
+      : [{ label }];
+    return from.task ? this.taskAt(project, from.task, from.evaluation, ...trail) : this.project(project, ...trail);
   }
 
   cache(cache: string, ...tail: Crumb[]): Crumb[] {
