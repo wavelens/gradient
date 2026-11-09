@@ -25,9 +25,9 @@ pub(crate) enum TaskRefusal {
     InvalidRepositoryUrl(String),
     #[error("{0}")]
     InvalidWildcard(String),
-    #[error("keep_evaluations must be at least 1")]
+    #[error("Keep Evaluations must be at least 1")]
     KeepEvaluationsBelowMinimum,
-    #[error("keep_evaluations cannot exceed the server maximum of {maximum}")]
+    #[error("Keep Evaluations cannot exceed the server maximum {maximum}")]
     KeepEvaluationsAboveMaximum { maximum: i32 },
     #[error("Failed to check repository: {reason}")]
     RepositoryCheckFailed { reason: String },
