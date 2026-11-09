@@ -149,11 +149,11 @@ export class BoardNetworkComponent implements OnInit {
     (this.stats()?.workers ?? []).map((w) => workerAxisLabel(w.worker_name, w.worker_id))
   );
   transferSeries = computed(() => [
-    { name: 'upload', data: (this.stats()?.workers ?? []).map((w) => w.upload_speed_mbps ?? 0) },
-    { name: 'download', data: (this.stats()?.workers ?? []).map((w) => w.download_speed_mbps ?? 0) },
+    { name: 'upload', data: (this.stats()?.workers ?? []).map((w) => w.upload_speed_mbps ?? null) },
+    { name: 'download', data: (this.stats()?.workers ?? []).map((w) => w.download_speed_mbps ?? null) },
   ]);
   diskSeries = computed(() => [
-    { name: 'disk', data: (this.stats()?.workers ?? []).map((w) => w.disk_speed_mbps ?? 0) },
+    { name: 'disk', data: (this.stats()?.workers ?? []).map((w) => w.disk_speed_mbps ?? null) },
   ]);
 
   ngOnInit(): void {

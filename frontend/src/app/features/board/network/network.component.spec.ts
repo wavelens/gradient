@@ -19,11 +19,11 @@ const STATS: BoardNetworkStats = {
   http: Array.from({ length: 25 }, (_, i) => route(i)),
 };
 
-function setup() {
+function setup(stats: BoardNetworkStats = STATS) {
   TestBed.configureTestingModule({
     imports: [BoardNetworkComponent],
     providers: [
-      { provide: BoardService, useValue: { getNetwork: () => of(STATS) } },
+      { provide: BoardService, useValue: { getNetwork: () => of(stats) } },
       { provide: AuthService, useValue: { user: () => ({ superuser: true }) } },
     ],
   });
@@ -44,5 +44,15 @@ describe('BoardNetworkComponent - HTTP routes', () => {
     (el.querySelector('gr-load-more button') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(rows().length).toBe(20);
+  });
+});
+
+describe('BoardNetworkComponent - worker speeds', () => {
+  it('shows No data instead of zero bars when no worker reports a disk speed', () => {
+    const fixture = setup({ ...STATS, workers: [{ worker_id: 'w1', worker_name: 'w1', upload_speed_mbps: 5, disk_speed_mbps: null }] });
+    const component = fixture.componentInstance;
+    expect(component.diskSeries()[0].data).toEqual([null]);
+    expect(component.transferSeries()[1].data).toEqual([null]);
+    expect(component.transferSeries()[0].data).toEqual([5]);
   });
 });
