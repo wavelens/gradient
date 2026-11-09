@@ -27,7 +27,7 @@ import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { monthDayClockTime } from '@shared/text';
 
 function zeroCounts(): BuildStatusCounts {
-  return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0 };
+  return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, dependency_failed: 0 };
 }
 
 function epSummary(id: string, attr = `packages."x86_64-linux".${id}`): EntryPointSummary {

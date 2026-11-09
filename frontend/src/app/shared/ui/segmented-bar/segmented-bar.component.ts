@@ -15,10 +15,11 @@ interface Tip { text: string; x: number; }
 
 const ORDER: SegmentTone[] = ['completed', 'failed', 'aborted', 'building', 'queued'];
 
-function countSegments(c: BuildStatusCounts): CountSegment[] {
+function countSegments(counts: BuildStatusCounts): CountSegment[] {
+  const c: Record<SegmentTone, number> = { ...counts, aborted: counts.aborted + counts.dependency_failed };
   const total = ORDER.reduce((sum, tone) => sum + c[tone], 0);
   if (total === 0) {
-    return c.substituted > 0 ? [{ tone: 'completed', pct: 100, label: `${c.substituted} substituted` }] : [];
+    return counts.substituted > 0 ? [{ tone: 'completed', pct: 100, label: `${counts.substituted} substituted` }] : [];
   }
   return ORDER.map(tone => ({ tone, pct: (c[tone] / total) * 100, label: `${c[tone]} ${tone}` }));
 }

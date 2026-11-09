@@ -10,7 +10,7 @@ import { ratioSegments } from './ratio-segments';
 import { BuildStatusCounts } from '@core/models';
 
 function counts(p: Partial<BuildStatusCounts>): BuildStatusCounts {
-  return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, ...p };
+  return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, dependency_failed: 0, ...p };
 }
 
 describe('SegmentedBarComponent', () => {

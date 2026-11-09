@@ -50,7 +50,7 @@ import { createMissingPermissionLoadStateError } from '@shared/access';
 import { type StatusPhase, type ThunkProgress, thunkProgress } from '@shared/evaluation';
 
 function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
-  return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, ...c };
+  return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, dependency_failed: 0, ...c };
 }
 
 @Component({

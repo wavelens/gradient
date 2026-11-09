@@ -8,7 +8,7 @@ import { BuildStatusCounts } from '@core/models';
 import { buildTally } from './build-tally';
 
 const counts = (c: Partial<BuildStatusCounts>): BuildStatusCounts => ({
-  completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, ...c,
+  completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, dependency_failed: 0, ...c,
 });
 
 describe('buildTally', () => {

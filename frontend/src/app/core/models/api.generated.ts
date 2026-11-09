@@ -346,6 +346,7 @@ export interface BuildStatusCounts {
   queued: number;
   substituted: number;
   aborted: number;
+  dependency_failed: number;
 }
 
 export interface BuildWithOutputs {

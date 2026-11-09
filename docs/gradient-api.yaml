@@ -15119,6 +15119,7 @@ components:
       - queued
       - substituted
       - aborted
+      - dependency_failed
       properties:
         completed:
           type: integer
@@ -15136,6 +15137,9 @@ components:
           type: integer
           format: int64
         aborted:
+          type: integer
+          format: int64
+        dependency_failed:
           type: integer
           format: int64
     BuildWithOutputs:

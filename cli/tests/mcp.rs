@@ -475,7 +475,7 @@ fn entry_point(attr: &str, status: &str) -> Value {
         "architecture": "x86_64-linux", "build_started_at": null, "build_time_ms": null,
         "created_at": "2026-01-01T00:00:00",
         "deps": {
-            "aborted": 0, "building": 0, "completed": 0,
+            "aborted": 0, "building": 0, "completed": 0, "dependency_failed": 0,
             "failed": 0, "queued": 0, "substituted": 0
         },
         "deps_total": 0, "has_artefacts": false, "ifd": false, "outputs": {},

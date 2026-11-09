@@ -287,6 +287,7 @@ pub enum BarSegment {
     Queued,
     Substituted,
     Aborted,
+    DependencyFailed,
 }
 
 /// `Skipped` is neither pending work nor a result. Drawing it would make a task read as unfinished
@@ -299,7 +300,8 @@ pub fn bar_segment(status: BuildStatus) -> Option<BarSegment> {
         Building => BarSegment::Building,
         Queued | Created | FailedTransient => BarSegment::Queued,
         Substituted => BarSegment::Substituted,
-        Aborted | DependencyFailed => BarSegment::Aborted,
+        Aborted => BarSegment::Aborted,
+        DependencyFailed => BarSegment::DependencyFailed,
         Skipped => return None,
     })
 }
@@ -312,6 +314,7 @@ pub struct BuildStatusCounts {
     pub queued: i64,
     pub substituted: i64,
     pub aborted: i64,
+    pub dependency_failed: i64,
 }
 
 impl BuildStatusCounts {
@@ -323,12 +326,19 @@ impl BuildStatusCounts {
             Some(BarSegment::Queued) => self.queued += n,
             Some(BarSegment::Substituted) => self.substituted += n,
             Some(BarSegment::Aborted) => self.aborted += n,
+            Some(BarSegment::DependencyFailed) => self.dependency_failed += n,
             None => {}
         }
     }
 
     pub fn total(&self) -> i64 {
-        self.completed + self.failed + self.building + self.queued + self.substituted + self.aborted
+        self.completed
+            + self.failed
+            + self.building
+            + self.queued
+            + self.substituted
+            + self.aborted
+            + self.dependency_failed
     }
 }
 
@@ -355,9 +365,11 @@ mod rollup_tests {
             assert_eq!(bar_segment(s), Some(BarSegment::Queued));
         }
         assert_eq!(bar_segment(Substituted), Some(BarSegment::Substituted));
-        for s in [Aborted, DependencyFailed] {
-            assert_eq!(bar_segment(s), Some(BarSegment::Aborted));
-        }
+        assert_eq!(bar_segment(Aborted), Some(BarSegment::Aborted));
+        assert_eq!(
+            bar_segment(DependencyFailed),
+            Some(BarSegment::DependencyFailed)
+        );
         assert_eq!(
             bar_segment(Skipped),
             None,
@@ -374,13 +386,15 @@ mod rollup_tests {
         c.add(BuildStatus::Queued, 4);
         c.add(BuildStatus::Substituted, 9000);
         c.add(BuildStatus::Aborted, 5);
+        c.add(BuildStatus::DependencyFailed, 7);
         assert_eq!(c.completed, 3);
         assert_eq!(c.failed, 2);
         assert_eq!(c.building, 1);
         assert_eq!(c.queued, 4);
         assert_eq!(c.substituted, 9000);
         assert_eq!(c.aborted, 5);
-        assert_eq!(c.total(), 9015);
+        assert_eq!(c.dependency_failed, 7);
+        assert_eq!(c.total(), 9022);
     }
 }
 

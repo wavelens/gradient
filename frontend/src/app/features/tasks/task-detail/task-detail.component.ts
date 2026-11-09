@@ -752,7 +752,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private canRetryEvaluation(evaluation: EvaluationSummary): boolean {
     return this.canTrigger()
       && !this.isRunning(evaluation.status)
-      && evaluation.builds.failed + evaluation.builds.aborted > 0;
+      && evaluation.builds.failed + evaluation.builds.aborted + evaluation.builds.dependency_failed > 0;
   }
 
   private abortBuild(ep: EntryPointSummary): void {
@@ -881,7 +881,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       case 'Completed': c.completed++; break;
       case 'Substituted': c.substituted++; break;
       case 'FailedPermanent': case 'FailedTimeout': c.failed++; break;
-      case 'Aborted': case 'DependencyFailed': c.aborted++; break;
+      case 'Aborted': c.aborted++; break;
+      case 'DependencyFailed': c.dependency_failed++; break;
       case 'Building': c.building++; break;
       // Settled work with no result: it is not pending, so it draws nothing.
       case 'Skipped': break;

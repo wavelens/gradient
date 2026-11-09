@@ -94,7 +94,7 @@ describe('isPendingBuildStatus', () => {
 });
 
 describe('entryPointPhase', () => {
-  const deps = (building: number) => ({ completed: 0, failed: 0, building, queued: 0, substituted: 0, aborted: 0 });
+  const deps = (building: number) => ({ completed: 0, failed: 0, building, queued: 0, substituted: 0, aborted: 0, dependency_failed: 0 });
 
   it.each<[BuildStatus, number, StatusPhase]>([
     ['Queued', 1, 'running'],
@@ -124,7 +124,7 @@ describe('execJobPhase', () => {
 });
 
 describe('entryPointPhaseWithExecJob', () => {
-  const deps = { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0 };
+  const deps = { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0, dependency_failed: 0 };
 
   it.each<[BuildStatus, ExecJobStatus | null, StatusPhase]>([
     ['Completed', 'queued', 'queued'],
