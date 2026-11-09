@@ -42,7 +42,7 @@ describe('TeamsListComponent', () => {
     const { fixture } = setup(true);
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
     expect(text).toContain('Platform');
-    expect(text).toContain('admin');
+    expect(text).toContain('Admin');
     expect((fixture.nativeElement as HTMLElement).querySelector('.row-link')?.getAttribute('aria-label')).toBe('Open team Platform');
   });
 

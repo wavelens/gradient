@@ -43,7 +43,7 @@ const request: TeamRequestItem = {
   created_at: '2026-10-01T10:00:00',
 };
 
-function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().mockReturnValue(of('ok'))) {
+function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().mockReturnValue(of('ok')), workers: unknown[] = []) {
   const notify = { success: vi.fn(), failure: vi.fn() };
   const confirm = vi.fn((confirmRequest: ConfirmRequest): Observable<unknown> => confirmRequest.action());
   const denyRequest = vi.fn().mockReturnValue(of('ok'));
@@ -64,7 +64,7 @@ function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().m
           get: () => of({ ...team, role }),
           members: () => of([]),
           invitations: () => of([]),
-          workers: () => of([]),
+          workers: () => of(workers),
           grants: () => of({ projects: [], caches: [] }),
           requests: () => of([request]),
           approveRequest,
@@ -92,7 +92,7 @@ function headings(element: HTMLElement): string[] {
 describe('TeamOverviewComponent', () => {
   it('manages members and workers on the team page itself, workers below projects and caches', () => {
     const sections = headings(setup('admin').root).filter((heading) => !heading.startsWith('No '));
-    expect(sections).toEqual(['Requests', 'Members', 'Projects and Caches', 'Workers']);
+    expect(sections).toEqual(['Requests', 'Members', 'Team Access', 'Workers']);
   });
 
   it('picks up new grants, members and workers while the page stays open', () => {
@@ -113,12 +113,21 @@ describe('TeamOverviewComponent', () => {
     }
   });
 
-  it('explains to team admins how a team without grants gets access to a project or cache', () => {
-    const root = setup('admin').root;
-    expect(headings(root)).toContain('Projects and Caches');
+  it('shows a new team one access card with the project and cache links instead of two empty states', () => {
+    const { fixture, root } = setup('admin');
+    fixture.detectChanges();
+    expect(headings(root)).toContain('Team Access');
     expect(root.textContent).toContain('Members & Roles');
+    expect(root.textContent).not.toContain('No online workers');
     const links = Array.from(root.querySelectorAll<HTMLAnchorElement>('a[grButton]')).map((link) => link.getAttribute('href'));
     expect(links).toEqual(expect.arrayContaining(['/projects', '/caches']));
+  });
+
+  it('keeps the projects and caches empty state while the team has workers', () => {
+    const { fixture, root } = setup('admin', undefined, [{ worker_id: 'w1', display_name: 'Builder', connected: true, active: true }]);
+    fixture.detectChanges();
+    expect(headings(root)).toContain('Projects and Caches');
+    expect(root.textContent).toContain('No projects or caches');
   });
 
   it('leaves out the empty projects and caches section and the "Team" subtitle for members', () => {

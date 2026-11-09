@@ -39,7 +39,7 @@
               <button grButton label="Remove" icon="close" severity="danger" [attr.aria-label]="'Remove ' + member.user" [disabled]="pending?.user === member.user || isSoleAdmin"
                 [grTooltip]="soleAdminReason" (click)="removeMember(member.user)"></button>
             } @else {
-              <gr-badge severity="neutral">{{ member.role }}</gr-badge>
+              <gr-badge severity="neutral">{{ teamRoleDisplayLabels[member.role] }}</gr-badge>
             }
           </div>
         </gr-row>

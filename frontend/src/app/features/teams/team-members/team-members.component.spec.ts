@@ -138,8 +138,8 @@ describe('TeamMembersComponent', () => {
     const { fixture } = setup(undefined, true, vi.fn().mockReturnValue(of(declared)));
     const element = fixture.nativeElement as HTMLElement;
     expect(element.textContent).toContain('2 members from the server configuration');
-    expect(Array.from(element.querySelectorAll('gr-row gr-badge')).map((b) => b.textContent?.trim())).toEqual(['admin', 'member']);
-    expect(element.textContent?.match(/admin/g)).toHaveLength(2);
+    expect(Array.from(element.querySelectorAll('gr-row gr-badge')).map((b) => b.textContent?.trim())).toEqual(['Admin', 'Member']);
+    expect(element.textContent?.match(/admin/g)).toHaveLength(1);
   });
 
   it('lets an admin of a state-managed team change every member except the declared ones', () => {

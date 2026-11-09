@@ -31,12 +31,15 @@
     <app-team-members [team]="team" (currentUserTeamAccessChanged)="navigateToTeamListOrReloadTeam($event)" />
 
     @if (isAdmin() || grantsLoadError() || grants().projects.length + grants().caches.length > 0) {
-      <gr-settings-section title="Projects and Caches" [card]="false">
+      @let teamAccessEmpty = isTeamAccessEmptyAndGrantsLoadSucceeded();
+      <gr-settings-section [title]="teamAccessEmpty ? 'Team Access' : 'Projects and Caches'" [card]="false">
         <gr-load-state flat [loading]="grantsLoading()" [error]="grantsLoadError()"
           [empty]="grants().projects.length + grants().caches.length === 0"
           loadingMessage="Loading projects and caches..." errorTitle="Failed to load projects and caches" (retry)="loadGrants()"
-          emptyIcon="corporate_fare" emptyTitle="No projects or caches"
-          emptyMessage="The team has no access to projects or caches yet. An admin for a project or cache grants access on the 'Members & Roles' page for that project or cache.">
+          emptyIcon="corporate_fare" [emptyTitle]="teamAccessEmpty ? 'No access yet' : 'No projects or caches'"
+          [emptyMessage]="teamAccessEmpty
+            ? 'The team doesn\'t have access to projects, caches, or workers yet. A project or cache admin can grant access on the \'Members & Roles\' page for that project or cache.'
+            : 'The team has no access to projects or caches yet. An admin for a project or cache grants access on the \'Members & Roles\' page for that project or cache.'">
           <a slot="empty-action" grButton label="Projects" icon="corporate_fare" severity="secondary" [routerLink]="links.projects()"></a>
           <a slot="empty-action" grButton label="Caches" icon="storage" severity="secondary" [routerLink]="links.caches()"></a>
           <gr-row-list>
@@ -57,6 +60,7 @@
       </gr-settings-section>
     }
 
-    <app-team-workers [team]="team" />
+    <app-team-workers [team]="team" [hideNoWorkersCardWhenCombinedTeamAccessCardIsShown]="isTeamAccessEmptyAndGrantsLoadSucceeded()"
+      (allWorkerCountChange)="teamWorkerCount.set($event)" />
   }
 </gr-page-layout>

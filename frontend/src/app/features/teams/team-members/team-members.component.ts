@@ -18,6 +18,7 @@ import {
   formatMemberNameForConfirmDialog,
   getMemberRemovalConsequenceSentence,
   injectSaveMemberRoleChangeWithOwnRoleConfirmation,
+  teamRoleDisplayLabels,
 } from '@shared/access';
 import { EMPTY, finalize, merge, tap } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -71,10 +72,8 @@ export class TeamMembersComponent implements OnInit {
   private auth = inject(AuthService);
   private saveMemberRoleChange = injectSaveMemberRoleChangeWithOwnRoleConfirmation();
 
-  readonly roles: { label: string; value: TeamRole }[] = [
-    { label: 'Member', value: 'member' },
-    { label: 'Admin', value: 'admin' },
-  ];
+  protected readonly teamRoleDisplayLabels = teamRoleDisplayLabels;
+  readonly roles = (Object.keys(teamRoleDisplayLabels) as TeamRole[]).map((value) => ({ label: teamRoleDisplayLabels[value], value }));
 
   team = input.required<TeamResponse>();
   currentUserTeamAccessChanged = output<boolean>();

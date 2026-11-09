@@ -65,8 +65,13 @@ export class TeamOverviewComponent implements OnInit {
   grantsLoadError = signal<unknown>(null);
   requests = signal<TeamRequestItem[]>([]);
   busy = signal<string | null>(null);
+  teamWorkerCount = signal<number | null>(null);
 
   isAdmin = computed(() => canManageTeam(this.team(), this.authService.user()));
+  isTeamAccessEmptyAndGrantsLoadSucceeded = computed(() => {
+    const grants = this.grants();
+    return !this.grantsLoading() && this.grantsLoadError() === null && grants.projects.length + grants.caches.length === 0 && this.teamWorkerCount() === 0;
+  });
   constructor() {
     runReloadIntervalWhileTabVisible(() => merge(
       this.grantsLoadError() !== null ? EMPTY : this.teams.grants(this.teamName).pipe(tap((grants) => this.grants.set(grants))),
