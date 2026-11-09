@@ -115,6 +115,14 @@ fn sources_in_the_row(status: EvaluationStatus) -> Vec<EvaluationStatus> {
 }
 
 fn reopen_evaluation_sql() -> String {
+    reopen_sql(EvaluationStatus::REOPEN)
+}
+
+fn reopen_evaluation_for_exec_job_sql() -> String {
+    reopen_sql(EvaluationStatus::REOPEN_FOR_EXEC_JOB)
+}
+
+fn reopen_sql(reopen: Transition<EvaluationStatus>) -> String {
     format!(
         "UPDATE evaluation e \
          SET status = {building}, finished_at = NULL, waiting_reason = NULL, \
@@ -124,8 +132,8 @@ fn reopen_evaluation_sql() -> String {
              SELECT 1 FROM evaluation o \
              WHERE o.task = e.task AND o.id <> e.id \
                AND (o.created_at > e.created_at OR o.status NOT IN ({terminal})))",
-        building = crate::sql::status::to(EvaluationStatus::REOPEN),
-        reopenable = crate::sql::status::from(EvaluationStatus::REOPEN),
+        building = crate::sql::status::to(reopen),
+        reopenable = crate::sql::status::from(reopen),
         terminal = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
     )
 }
@@ -134,12 +142,31 @@ crate::sql_fn! {
     REOPEN_EVALUATION = reopen_evaluation_sql,
         params = [EvaluationId],
         status_write = StatusWrite::evaluation(EvaluationStatus::REOPEN);
+
+    REOPEN_EVALUATION_FOR_EXEC_JOB = reopen_evaluation_for_exec_job_sql,
+        params = [EvaluationId],
+        status_write = StatusWrite::evaluation(EvaluationStatus::REOPEN_FOR_EXEC_JOB);
 }
 
 pub async fn reopen_evaluation(ctx: &DbContext, evaluation: &MEvaluation) -> Result<bool, DbErr> {
+    reopen_with(ctx, evaluation, &REOPEN_EVALUATION).await
+}
+
+pub async fn reopen_evaluation_for_exec_job(
+    ctx: &DbContext,
+    evaluation: &MEvaluation,
+) -> Result<bool, DbErr> {
+    reopen_with(ctx, evaluation, &REOPEN_EVALUATION_FOR_EXEC_JOB).await
+}
+
+async fn reopen_with(
+    ctx: &DbContext,
+    evaluation: &MEvaluation,
+    query: &crate::sql::Query,
+) -> Result<bool, DbErr> {
     let reopened = ctx
         .worker_db
-        .execute_raw(REOPEN_EVALUATION.bind([evaluation.id.into_inner().into()]))
+        .execute_raw(query.bind([evaluation.id.into_inner().into()]))
         .await?;
     if reopened.rows_affected() == 0 {
         return Ok(false);

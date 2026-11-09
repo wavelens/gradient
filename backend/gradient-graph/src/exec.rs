@@ -11,7 +11,7 @@ use chrono::NaiveDateTime;
 use gradient_db::DbContext;
 use gradient_db::exec_jobs::run_again::{self, RunRefusal};
 use gradient_db::exec_jobs::{attempts, continuations, nodes, phases, reads, settle, tokens};
-use gradient_db::status::{check_evaluation_done, reopen_evaluation};
+use gradient_db::status::{check_evaluation_done, reopen_evaluation_for_exec_job};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
@@ -325,11 +325,7 @@ pub(crate) async fn run_again(ctx: &DbContext, exec_job: ExecJobId) -> Result<Op
         Ok(nodes) => {
             info!(%exec_job, nodes = nodes.len(), "exec job runs again");
             if let Some(job) = nodes.first() {
-                set_failed_or_aborted_evaluation_to_building_for_queued_exec_job(
-                    ctx,
-                    job.evaluation,
-                )
-                .await?;
+                reopen_finished_evaluation_for_queued_exec_job(ctx, job.evaluation).await?;
             }
             settle(ctx).await?;
             Ok(None)
@@ -338,7 +334,7 @@ pub(crate) async fn run_again(ctx: &DbContext, exec_job: ExecJobId) -> Result<Op
     }
 }
 
-async fn set_failed_or_aborted_evaluation_to_building_for_queued_exec_job(
+async fn reopen_finished_evaluation_for_queued_exec_job(
     ctx: &DbContext,
     evaluation: EvaluationId,
 ) -> Result<()> {
@@ -348,7 +344,8 @@ async fn set_failed_or_aborted_evaluation_to_building_for_queued_exec_job(
     else {
         return Ok(());
     };
-    if EvaluationStatus::REOPENABLE.contains(&eval.status) && !reopen_evaluation(ctx, &eval).await?
+    if EvaluationStatus::REOPENABLE_FOR_EXEC_JOB.contains(&eval.status)
+        && !reopen_evaluation_for_exec_job(ctx, &eval).await?
     {
         info!(
             %evaluation,

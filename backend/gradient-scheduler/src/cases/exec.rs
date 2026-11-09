@@ -618,6 +618,46 @@ async fn a_failed_job_runs_again_as_its_next_attempt() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn a_completed_job_run_again_and_aborted_ends_its_evaluation_aborted() {
+    let e1 = EvaluationId::now_v7();
+    let case = with_queued_job(e1, spec()).await;
+    let (key, assignment) = dispatched(&case).await;
+    let job = the_job(&case).await;
+    case.complete(W1, &key, assignment, Vec::new(), 0).await;
+
+    let evaluation_statuses = || async {
+        case.db
+            .rows::<gradient_entity::evaluation::Entity>()
+            .await
+            .iter()
+            .map(|e| e.status)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        evaluation_statuses().await,
+        vec![EvaluationStatus::Completed],
+        "after 1: the evaluation"
+    );
+
+    let ran = case.scheduler.run_exec_job(job.id).await.expect("the run");
+    assert_eq!(ran, Ok(()), "after 2: accepted");
+    assert_eq!(
+        evaluation_statuses().await,
+        vec![EvaluationStatus::Building],
+        "after 2: the evaluation reopens"
+    );
+
+    let aborted = case.scheduler.abort_exec_job(job.id).await.expect("abort");
+    assert!(aborted, "after 3: the job is aborted");
+    assert_eq!(
+        evaluation_statuses().await,
+        vec![EvaluationStatus::Aborted],
+        "after 3: the evaluation"
+    );
+    case.finish().await;
+}
+
 const EVALUATOR: &str = "we";
 const SECOND_ATTR: &str = "apps.x86_64-linux.b";
 

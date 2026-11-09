@@ -134,6 +134,13 @@ impl EvaluationStatus {
         to: Self::Building,
     };
 
+    pub const REOPENABLE_FOR_EXEC_JOB: [Self; 3] = [Self::Failed, Self::Aborted, Self::Completed];
+
+    pub const REOPEN_FOR_EXEC_JOB: Transition<Self> = Transition {
+        from: &Self::REOPENABLE_FOR_EXEC_JOB,
+        to: Self::Building,
+    };
+
     pub const PARK: Transition<Self> = Transition {
         from: &[Self::Queued],
         to: Self::Waiting,

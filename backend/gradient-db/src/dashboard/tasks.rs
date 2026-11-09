@@ -65,19 +65,13 @@ fn outcomes_sql() -> String {
             LEFT JOIN derivation_build db ON db.id = bj.derivation_build \
             WHERE ep.evaluation = ANY($1::uuid[]) \
             UNION ALL \
-            SELECT x.evaluation, x.status = {exec_ok}, x.status IN ({exec_failing}) \
+            SELECT x.evaluation, x.status = {exec_ok}, x.status = {exec_failing} \
             FROM exec_job x WHERE x.evaluation = ANY($1::uuid[])) o \
         GROUP BY o.evaluation",
         ok = crate::sql::status::build_in(&[Completed, Substituted]),
-        failing = crate::sql::status::build_in(&[
-            FailedPermanent,
-            Aborted,
-            DependencyFailed,
-            FailedTimeout
-        ]),
+        failing = crate::sql::status::build_in(&[FailedPermanent, DependencyFailed, FailedTimeout]),
         exec_ok = crate::sql::status::exec(ExecJobStatus::Completed),
-        exec_failing =
-            crate::sql::status::exec_in(&[ExecJobStatus::Failed, ExecJobStatus::Aborted]),
+        exec_failing = crate::sql::status::exec(ExecJobStatus::Failed),
     )
 }
 

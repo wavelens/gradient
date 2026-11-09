@@ -29,8 +29,8 @@ pub use evaluation_build::{
 };
 pub use evaluation_message::{EvaluationFailure, EvaluationWarning};
 pub use evaluation_status::{
-    change_evaluation_status, evaluation_change, reopen_evaluation, update_evaluation_status,
-    update_evaluation_status_with_error,
+    change_evaluation_status, evaluation_change, reopen_evaluation, reopen_evaluation_for_exec_job,
+    update_evaluation_status, update_evaluation_status_with_error,
 };
 pub use logging::{
     PhaseSubjectKind, enqueue_log_finalize, finalize_build_log, insert_worker_message,

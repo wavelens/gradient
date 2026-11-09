@@ -468,7 +468,8 @@ fn reachable(from: EvaluationStatus, to: EvaluationStatus) -> bool {
 
 fn allowed_move(from: EvaluationStatus, to: EvaluationStatus) -> bool {
     to.sources().contains(&from)
-        || (to == EvaluationStatus::Building && EvaluationStatus::REOPENABLE.contains(&from))
+        || (to == EvaluationStatus::Building
+            && EvaluationStatus::REOPENABLE_FOR_EXEC_JOB.contains(&from))
 }
 
 fn member_key(member: &cluster_member::Model) -> Option<String> {
