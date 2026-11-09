@@ -352,6 +352,18 @@ describe('ExecJobPageComponent', () => {
     expect(fixture.componentInstance.firstAttemptStartedAt()).toBe('2026-01-01T00:00:01');
   });
 
+  it('names why the latest attempt of a failed job ended in the status badge', () => {
+    const lost: ExecJobResponse = {
+      ...job('failed'),
+      attempts: [
+        { number: 1, worker: 'w1', started_at: '2026-01-01T00:00:01', ended_at: '2026-01-01T00:00:05', end_reason: 'timeout' },
+        { number: 2, worker: 'w1', started_at: '2026-01-01T00:00:10', ended_at: '2026-01-01T00:00:15', end_reason: 'lost' },
+      ],
+    };
+    const { fixture } = setup('failed', SSH, {}, lost);
+    expect((fixture.nativeElement as HTMLElement).querySelector('.info-bar gr-status-badge')?.textContent?.trim()).toBe('Worker lost');
+  });
+
   it('shows the worker timeline with the reported phases from the sidebar', () => {
     const { fixture } = setup('completed');
     const root = fixture.nativeElement as HTMLElement;

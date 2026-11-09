@@ -111,7 +111,7 @@
                 (click)="sidebarOpen.set(!sidebarOpen())"></button>
         <div class="info-bar-left">
           <div class="info-metric">
-            <gr-status-badge [phase]="phase(job.status)" [label]="statusLabel(job)" />
+            <gr-status-badge [phase]="phase(job.status)" [label]="statusBadgeLabel()" />
             @if (open() && job.retries_left > 0) {
               <span class="metric-value retries-left">{{ plural(job.retries_left, 'retry', 'retries') }} left</span>
             }

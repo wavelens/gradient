@@ -28,7 +28,7 @@ import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/
 import { LogViewerComponent, splitLogLines } from '@shared/log';
 import { WritableDirective, AccessService } from '@shared/access';
 import { formatDuration, plural, RelativeTimePipe, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { evaluationPhase, execJobPhase, waitingAccessFrom } from '@shared/evaluation';
+import { buildAttemptEndReasonLabel, evaluationPhase, execJobPhase, waitingAccessFrom } from '@shared/evaluation';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
@@ -181,6 +181,12 @@ export class ExecJobPageComponent implements OnInit {
     if (!job || isExecJobWaitingToStart(job.status)) return null;
     return job.attempts.reduce<ExecJobAttemptView | null>((first, a) => (!first || a.number < first.number ? a : first), null)?.started_at ?? null;
   });
+  statusBadgeLabel = computed(() => {
+    const job = this.job();
+    if (!job) return '';
+    const endReason = this.highestNumberedAttempt()?.end_reason;
+    return job.status === 'failed' && endReason ? buildAttemptEndReasonLabel(endReason) : getExecJobStatusBadgeLabel(job);
+  });
   formattedProgramRunTime = computed(() => {
     const attempt = this.highestNumberedAttempt();
     if (!attempt?.program_started_at) return '';
@@ -189,7 +195,6 @@ export class ExecJobPageComponent implements OnInit {
   });
 
   protected readonly phase = execJobPhase;
-  protected readonly statusLabel = getExecJobStatusBadgeLabel;
   protected readonly links = links;
   protected readonly plural = plural;
   protected readonly evaluationPhase = evaluationPhase;
