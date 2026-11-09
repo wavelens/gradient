@@ -14264,6 +14264,10 @@ components:
           - string
           - 'null'
           format: date-time
+        last_delivery:
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryListItem'
+          - type: 'null'
         created_by:
           $ref: '#/components/schemas/UserId'
         created_at:

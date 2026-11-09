@@ -42,6 +42,7 @@ export interface ActionResponse {
   events: string[];
   active: boolean;
   last_fired_at?: string | null;
+  last_delivery?: DeliveryListItem | null;
   created_by: UserId;
   created_at: string;
   updated_at: string;

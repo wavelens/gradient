@@ -54,6 +54,7 @@ pub struct ActionResponse {
     pub events: Vec<String>,
     pub active: bool,
     pub last_fired_at: Option<chrono::NaiveDateTime>,
+    pub last_delivery: Option<ActionDeliveryItem>,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
@@ -85,6 +86,7 @@ impl From<MTaskAction> for ActionResponse {
             events,
             active: m.active,
             last_fired_at: m.last_fired_at,
+            last_delivery: None,
             created_by: m.created_by,
             created_at: m.created_at,
             updated_at: m.updated_at,
@@ -210,7 +212,35 @@ pub async fn list_actions(
 ) -> WebResult<Json<BaseResponse<Vec<ActionResponse>>>> {
     let rows = gradient_db::actions::of_task(&db.web_db, proj.id).await?;
 
-    Ok(ok_json(rows.into_iter().map(Into::into).collect()))
+    Ok(ok_json(
+        action_rows_to_api_responses_with_newest_delivery(&db.web_db, rows).await?,
+    ))
+}
+
+async fn action_rows_to_api_responses_with_newest_delivery(
+    db: &WebDb,
+    rows: Vec<MTaskAction>,
+) -> WebResult<Vec<ActionResponse>> {
+    let ids: Vec<TaskActionId> = rows.iter().map(|row| row.id).collect();
+    let mut newest = gradient_db::actions::latest_deliveries_by_task_action_ids(db, &ids).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| ActionResponse {
+            last_delivery: newest.remove(&row.id).map(Into::into),
+            ..row.into()
+        })
+        .collect())
+}
+
+async fn action_row_to_api_response_with_newest_delivery(
+    db: &WebDb,
+    row: MTaskAction,
+) -> WebResult<Json<BaseResponse<ActionResponse>>> {
+    let response = action_rows_to_api_responses_with_newest_delivery(db, vec![row])
+        .await?
+        .pop()
+        .or_not_found(Resource::Action)?;
+    Ok(ok_json(response))
 }
 
 #[utoipa::path(
@@ -357,7 +387,7 @@ pub async fn read_action(
         .await?
         .or_not_found(Resource::Action)?;
 
-    Ok(ok_json(ActionResponse::from(row)))
+    action_row_to_api_response_with_newest_delivery(&db.web_db, row).await
 }
 
 #[utoipa::path(
@@ -464,7 +494,7 @@ pub async fn update_action(
 
     record_action_event(&audit, Action::TaskActionUpdate, project.id, &updated).await;
 
-    Ok(ok_json(ActionResponse::from(updated)))
+    action_row_to_api_response_with_newest_delivery(&state.web_db, updated).await
 }
 
 async fn record_action_event(audit: &Audit, action: Action, project: ProjectId, row: &MTaskAction) {

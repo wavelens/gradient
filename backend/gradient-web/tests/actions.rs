@@ -466,8 +466,13 @@ async fn read_action_secret_config_field_is_stripped() {
     for (row, action_type, secret_field) in cases {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
-        let db =
-            with_task_member(with_auth(mock_db(), session_id)).append_query_results([vec![row]]);
+        let db = with_task_member(with_auth(mock_db(), session_id))
+            .append_query_results([vec![row]])
+            .append_query_results([vec![task_action_delivery::Model {
+                success: false,
+                response_status: Some(503),
+                ..delivery_row()
+            }]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -484,6 +489,8 @@ async fn read_action_secret_config_field_is_stripped() {
             "{action_type}: {}",
             body["message"]["config"]
         );
+        assert_eq!(body["message"]["last_delivery"]["success"], false);
+        assert_eq!(body["message"]["last_delivery"]["response_status"], 503);
     }
 }
 

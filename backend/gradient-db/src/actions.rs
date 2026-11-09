@@ -10,6 +10,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     Order, QueryFilter, QueryOrder, QuerySelect,
 };
+use std::collections::HashMap;
 
 pub async fn of_task<C: ConnectionTrait>(db: &C, task: TaskId) -> Result<Vec<MTaskAction>, DbErr> {
     ETaskAction::find()
@@ -79,6 +80,23 @@ pub async fn deliveries_of<C: ConnectionTrait>(
         .await
 }
 
+pub async fn latest_deliveries_by_task_action_ids<C: ConnectionTrait>(
+    db: &C,
+    actions: &[TaskActionId],
+) -> Result<HashMap<TaskActionId, MTaskActionDelivery>, DbErr> {
+    if actions.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = ETaskActionDelivery::find()
+        .distinct_on([CTaskActionDelivery::ActionId])
+        .filter(CTaskActionDelivery::ActionId.is_in(actions.iter().copied()))
+        .order_by(CTaskActionDelivery::ActionId, Order::Asc)
+        .order_by(CTaskActionDelivery::DeliveredAt, Order::Desc)
+        .all(db)
+        .await?;
+    Ok(rows.into_iter().map(|row| (row.action_id, row)).collect())
+}
+
 pub async fn delivery_of<C: ConnectionTrait>(
     db: &C,
     action: TaskActionId,
@@ -88,4 +106,73 @@ pub async fn delivery_of<C: ConnectionTrait>(
         .filter(CTaskActionDelivery::ActionId.eq(action))
         .one(db)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_entity::task_action::ActionType;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::{rows, test_date};
+
+    #[tokio::test]
+    async fn latest_deliveries_by_task_action_ids_returns_newest_delivery_and_skips_actions_without_deliveries()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        crate::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the owner is written");
+        crate::rows::insert::<EProject, _>(&conn, rows::project())
+            .await
+            .expect("the project is written");
+        let task = crate::rows::insert::<ETask, _>(&conn, rows::task())
+            .await
+            .expect("the task is written");
+        let action = |name: &str| MTaskAction {
+            id: TaskActionId::now_v7(),
+            task: task.id,
+            name: name.into(),
+            action_type: ActionType::SendWebRequest,
+            config: serde_json::json!({}),
+            events: serde_json::json!([]),
+            active: true,
+            created_by: task.created_by,
+            created_at: test_date(),
+            updated_at: test_date(),
+            ..Default::default()
+        };
+        let delivered = insert(&conn, action("delivered"))
+            .await
+            .expect("the action is written");
+        let silent = insert(&conn, action("silent"))
+            .await
+            .expect("the action is written");
+        for (minutes, success, status) in [(0, true, 200), (5, false, 503)] {
+            crate::rows::insert::<ETaskActionDelivery, _>(
+                &conn,
+                MTaskActionDelivery {
+                    id: TaskActionDeliveryId::now_v7(),
+                    action_id: delivered.id,
+                    event: "evaluation.completed".into(),
+                    response_status: Some(status),
+                    success,
+                    delivered_at: test_date() + chrono::Duration::minutes(minutes),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the delivery is written");
+        }
+
+        let newest = latest_deliveries_by_task_action_ids(&conn, &[delivered.id, silent.id])
+            .await
+            .expect("the deliveries load");
+
+        assert_eq!(newest.len(), 1);
+        let row = &newest[&delivered.id];
+        assert!(!row.success);
+        assert_eq!(row.response_status, Some(503));
+        db.finish().await;
+    }
 }
