@@ -11,7 +11,6 @@ import { links } from '@shared/routing';
 import { authGuard, redirectSignedInUserToDashboardGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
 import { publicListingGuard } from '@core/guards/public-listing.guard';
-import { visibleProjectGuard } from '@core/guards/visible-project.guard';
 import {
   buildOrEvaluationAccessGuard,
   clusterJobBoardGuard,
@@ -68,7 +67,6 @@ export const routes: Routes = [
   // Project pages open to anonymous visitors of a public project
   {
     path: 'project/:project',
-    canActivate: [visibleProjectGuard],
     children: [
       // Project detail (public)
       {
@@ -240,6 +238,7 @@ export const routes: Routes = [
       {
         path: 'log',
         title: 'Evaluation Log',
+        resolve: { projectAccess: projectAccessResolver },
         data: { hideFooter: true },
         loadComponent: () =>
           import('./features/evaluations/evaluation-log/evaluation-log.component').then(

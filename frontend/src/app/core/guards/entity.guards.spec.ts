@@ -41,7 +41,7 @@ import {
   workerInProjectGuard,
 } from './entity.guards';
 import { BoardService } from '@core/services/board.service';
-import { visibleProjectGuard } from './visible-project.guard';
+import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
 
 const URL = '/project/acme/somewhere';
 const refused = (status: number) => throwError(() => new ApiError('refused', status));
@@ -71,7 +71,7 @@ function configure(services: Record<string, unknown>, user: { superuser: boolean
       { provide: BoardService, useValue: fakes.board },
       {
         provide: AuthService,
-        useValue: { initialized$: of(true), resolveSession: () => of(!!user), serverUnreachable: () => false, user: () => user, isAuthenticated: () => !!user, getSignInPageUrl: (next: string) => links.login(next) },
+        useValue: { initialized$: of(true), resolveSession: () => of(!!user), serverUnreachable: () => false, user: () => user, isAuthenticated: () => !!user, stillSignedIn: () => of(!!user), getSignInPageUrl: (next: string) => links.login(next) },
       },
     ],
   });
@@ -94,7 +94,7 @@ function page(result: unknown): string {
 describe('not-found or no-access page', () => {
   it('replaces a project a signed-in visitor cannot see', async () => {
     configure({ projects: { getProject: () => refused(404) } });
-    expect(page(await outcome(visibleProjectGuard, { project: 'acme' }))).toBe(
+    expect(page(await outcome(projectAccessResolver as unknown as CanActivateFn, { project: 'acme' }))).toBe(
       `/error/404?kind=project&name=acme&back=%2Fprojects&from=${encodeURIComponent(URL)}`,
     );
   });
@@ -106,14 +106,14 @@ describe('not-found or no-access page', () => {
       return TestBed.inject(Router).serializeUrl((result as RedirectCommand).redirectTo);
     };
     configure({ projects: { getProject: () => refused(404) }, tasks: { getTask: () => refused(403) }, caches: { getCache: () => refused(404) } }, null);
-    expect(redirect(await outcome(visibleProjectGuard, { project: 'acme' }))).toBe(login);
+    expect(redirect(await outcome(projectAccessResolver as unknown as CanActivateFn, { project: 'acme' }))).toBe(login);
     expect(redirect(await outcome(taskAccessResolver as unknown as CanActivateFn, { project: 'acme', task: 'demo' }))).toBe(login);
     expect(redirect(await outcome(cacheAccessResolver as unknown as CanActivateFn, { cache: 'store' }))).toBe(login);
   });
 
   it('lets a visible project through', async () => {
     configure({});
-    expect(await outcome(visibleProjectGuard, { project: 'acme' })).toBe(true);
+    expect(await outcome(projectAccessResolver as unknown as CanActivateFn, { project: 'acme' })).toEqual({ project: {} });
   });
 
   it('replaces a task without access and links back to its project', async () => {
