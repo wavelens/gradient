@@ -228,6 +228,13 @@ describe('buildMetricChartOption heatmap', () => {
     expect((opt.visualMap as any).text).toEqual(['6 builds', '0 builds']);
   });
 
+  it('leaves zero cells empty and gives the smallest count a visible tint', () => {
+    const zero = [{ name: '0-10s', data: [{ x: '10:00', y: 0 }, { x: '11:00', y: 100 }] }];
+    const opt = buildMetricChartOption({ type: 'heatmap', series: zero }, THEME);
+    expect((opt.series as any[])[0].data).toEqual([[1, 0, 100]]);
+    expect((opt.visualMap as any).inRange.colorAlpha[0]).toBeGreaterThanOrEqual(0.2);
+  });
+
   it('survives an empty series list', () => {
     const opt = buildMetricChartOption({ type: 'heatmap', series: [] }, THEME);
     expect((opt.series as any[])[0].data).toEqual([]);

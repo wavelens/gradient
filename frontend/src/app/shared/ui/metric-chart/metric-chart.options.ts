@@ -226,7 +226,7 @@ function heatmapOption(
   const data: [number, number, number][] = [];
   cfg.series.forEach((s, y) => {
     if (!isXY(s.data)) return;
-    s.data.forEach((p, x) => data.push([x, y, p.y]));
+    s.data.forEach((p, x) => p.y > 0 && data.push([x, y, p.y]));
   });
   const max = data.reduce((m, [, , v]) => Math.max(m, v), 0);
 
@@ -244,7 +244,7 @@ function heatmapOption(
       itemHeight: 160,
       text: [format(max), format(0)],
       textStyle: { color: theme.text },
-      inRange: { color: [theme.surface, cfg.colors?.[0] ?? theme.palette[0]] },
+      inRange: { color: [cfg.colors?.[0] ?? theme.palette[0]], colorAlpha: [0.25, 1] },
       formatter: (v) => format(Number(v)),
     },
     series: [{ type: 'heatmap', data, progressive: 0, itemStyle: { borderColor: theme.grid, borderWidth: 1 } }],
