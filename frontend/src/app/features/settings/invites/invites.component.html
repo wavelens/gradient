@@ -12,7 +12,7 @@
         <gr-row [icon]="invite.kind === 'cache' ? 'inventory_2' : invite.kind === 'team' ? 'groups' : 'folder'">
           {{ invite.scope_display_name }}
           <gr-badge severity="success">Joined</gr-badge>
-          <span slot="meta">Role {{ invite.role }}</span>
+          <span slot="meta">Role {{ getInviteRoleDisplayText(invite) }}</span>
           <a slot="actions" grButton severity="secondary" icon="arrow_forward" [routerLink]="joinedLink(invite)"
              [label]="invite.kind === 'cache' ? 'Open cache' : invite.kind === 'team' ? 'Open team' : 'Open project'"></a>
         </gr-row>
@@ -22,7 +22,7 @@
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"
-    [empty]="invites().length === 0"
+    [empty]="invites().length === 0 && joined().length === 0"
     loadingMessage="Loading invitations..."
     errorTitle="Failed to load invitations"
     emptyIcon="mail"
@@ -36,7 +36,7 @@
           {{ invite.scope_display_name }}
           <gr-badge severity="info">{{ invite.kind }}</gr-badge>
           <span slot="meta">
-            Role {{ invite.role }} ·
+            Role {{ getInviteRoleDisplayText(invite) }} ·
             Invited by {{ invite.invited_by_display_name ?? invite.invited_by }} ·
             Expires {{ invite.expires_at | serverDate }}
           </span>

@@ -105,6 +105,21 @@ describe('InvitesComponent', () => {
     expect(open?.getAttribute('href')).toBe('/project/wavelens');
   });
 
+  it('shows the joined row without an empty state once the last invite is accepted', () => {
+    const getInvites = vi.fn().mockReturnValueOnce(of([projectInvite])).mockReturnValue(of([]));
+    const { fixture } = setup([], null, getInvites);
+    const root = fixture.nativeElement as HTMLElement;
+    buttonByText(root, 'Accept')?.click();
+    fixture.detectChanges();
+    expect(root.querySelector('.joined')?.textContent).toContain('Wavelens');
+    expect(root.textContent).not.toContain('No pending invitations');
+  });
+
+  it('labels the team role sent as its enum value', () => {
+    const { fixture } = setup([{ ...teamInvite, role: 'member' }]);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Role Member');
+  });
+
   it('shares the loaded invites with the header badge and the dashboard banner', () => {
     setup([projectInvite, teamInvite]);
     expect(TestBed.inject(PendingInvitesService).count()).toBe(2);

@@ -12,7 +12,7 @@ import { UserService } from '@core/services/user.service';
 import { NotifyService } from '@core/services/notify.service';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { links } from '@shared/routing';
-import { InviteItem } from '@core/models';
+import type { InviteItem, TeamRole } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
 import {
   BadgeComponent,
@@ -23,6 +23,8 @@ import {
   RowListComponent,
 } from '@gradient/ui/ui';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
+
+const teamRoleDisplayLabels: Record<TeamRole, string> = { member: 'Member', admin: 'Admin' };
 
 @Component({
   selector: 'app-invites',
@@ -98,6 +100,10 @@ export class InvitesComponent implements OnInit {
         this.notify.failure('Invitation accept failed', err);
       },
     });
+  }
+
+  getInviteRoleDisplayText(invite: InviteItem): string {
+    return invite.kind === 'team' ? (teamRoleDisplayLabels[invite.role as TeamRole] ?? invite.role) : invite.role;
   }
 
   joinedLink(invite: InviteItem): UrlTree {
