@@ -6,7 +6,9 @@
 
 import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
+import { DrawerDirective } from '../../ui/drawer/drawer.directive';
 import { HeaderComponent } from './header.component';
 
 @Component({ standalone: true, template: '' })
@@ -85,8 +87,14 @@ describe('gr-header menu', () => {
     expect(active()).toEqual(['Projects']);
   });
 
-  it('marks a link as the current page on its detail routes', async () => {
-    const current = () => Array.from(root().querySelectorAll('.header-nav a[aria-current=page]'), (link) => link.textContent?.trim());
+  it('keeps the menu button inside the focus trap of the open menu', () => {
+    const drawer = fixture.debugElement.query(By.directive(DrawerDirective)).nativeElement as HTMLElement;
+    expect(drawer.contains(toggle())).toBe(true);
+    expect(drawer.querySelector('.header-nav')).toBeTruthy();
+  });
+
+  it('marks the link of the current section on its detail routes', async () => {
+    const current = () => Array.from(root().querySelectorAll('.header-nav a[aria-current=true]'), (link) => link.textContent?.trim());
     const router = TestBed.inject(Router);
 
     await router.navigateByUrl('/project/demo/log');

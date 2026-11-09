@@ -6,6 +6,7 @@
 
 import { Component, forwardRef, input, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
+import { getNextOptionIndexForKey } from '../next-option-index-for-key';
 
 /// Switches what a panel shows: separate tabs, one of them current. Distinct
 /// from gr-select-button, which is a joined control for a form field.
@@ -67,12 +68,9 @@ export class TabSwitchComponent implements ControlValueAccessor {
   }
 
   protected selectAndFocusTabOnTabListKeydown(event: KeyboardEvent): void {
-    const count = this.options().length;
-    const current = this.getFocusableTabIndex();
-    const target = { ArrowLeft: current - 1, ArrowRight: current + 1, Home: 0, End: count - 1 }[event.key];
-    if (target === undefined || count === 0 || this.isDisabled()) return;
+    const next = getNextOptionIndexForKey(event.key, this.getFocusableTabIndex(), this.options().length);
+    if (next === undefined || this.isDisabled()) return;
     event.preventDefault();
-    const next = (target + count) % count;
     this.pick(this.options()[next]);
     const tabs = (event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role=tab]');
     tabs[next]?.focus();

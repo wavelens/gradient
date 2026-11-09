@@ -6,12 +6,18 @@
 
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { Component, booleanAttribute, forwardRef, input, signal, ChangeDetectionStrategy } from '@angular/core';
+import { getNextOptionIndexForKey } from '../next-option-index-for-key';
 
 @Component({
   selector: 'gr-select-button',
   standalone: true,
   template: `
-    <div class="gr-select-button" role="radiogroup" [attr.aria-label]="ariaLabel() || null">
+    <div
+      class="gr-select-button"
+      role="radiogroup"
+      [attr.aria-label]="ariaLabel() || null"
+      (keydown)="selectAndFocusOptionOnArrowKey($event)"
+    >
       @for (option of options(); track $index) {
         <button
           type="button"
@@ -19,6 +25,7 @@ import { Component, booleanAttribute, forwardRef, input, signal, ChangeDetection
           class="gr-select-button__item"
           [class.gr-select-button__item--selected]="isSelected(option)"
           [attr.aria-checked]="isSelected(option)"
+          [tabindex]="$index === focusableOptionIndex() ? 0 : -1"
           [disabled]="isDisabled()"
           (click)="pick(option)"
         >
@@ -77,6 +84,23 @@ export class SelectButtonComponent implements ControlValueAccessor {
 
   protected isSelected(option: unknown): boolean {
     return this.valueOf(option) === this.value();
+  }
+
+  protected focusableOptionIndex(): number {
+    return Math.max(0, this.options().findIndex((option) => this.isSelected(option)));
+  }
+
+  protected selectAndFocusOptionOnArrowKey(event: KeyboardEvent): void {
+    const next = getNextOptionIndexForKey(event.key, this.focusableOptionIndex(), this.options().length);
+    if (next === undefined || this.isDisabled()) return;
+    event.preventDefault();
+    const value = this.valueOf(this.options()[next]);
+    if (value !== this.value()) {
+      this.value.set(value);
+      this.onChange(value);
+      this.onTouched();
+    }
+    (event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role=radio]')[next]?.focus();
   }
 
   protected pick(option: unknown): void {

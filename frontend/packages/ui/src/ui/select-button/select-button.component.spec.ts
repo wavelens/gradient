@@ -73,6 +73,19 @@ describe('SelectButtonComponent', () => {
     expect(fixture.componentInstance.scope()).toBe('mine');
   });
 
+  it('is one Tab stop and moves the selection with the arrow keys', async () => {
+    const { fixture, items } = await render();
+    expect(items().map((i) => i.tabIndex)).toEqual([0, -1]);
+    items()[0].focus();
+    items()[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.scope()).toBe('all');
+    expect(document.activeElement).toBe(items()[1]);
+    expect(items().map((i) => i.tabIndex)).toEqual([-1, 0]);
+  });
+
   it('clears the selection when re-clicked and empty is allowed', async () => {
     const { fixture, items } = await render();
     fixture.componentInstance.allowEmpty.set(true);
