@@ -9,6 +9,7 @@ use super::tokens::JobTokenRow;
 use chrono::NaiveDateTime;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
+use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_types::{
     CEvaluation, CExecJob, CExecJobAttempt, CExecJobPhase, DispatchedJobId, EEntryPoint,
     EEvaluation, EExecJob, EExecJobAttempt, EExecJobPhase, ETask, EntryPointId, EvaluationId,
@@ -27,6 +28,7 @@ pub struct ExecJobRow {
     pub entry_point: String,
     pub last_phase: Option<String>,
     pub last_dispatched_job: Option<DispatchedJobId>,
+    pub last_end_reason: Option<AttemptEndReason>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,9 +78,10 @@ crate::sql! {
     EXEC_JOBS_OF_EVALUATION = "SELECT r.*, e.eval AS entry_point_name, \
          (SELECT p.name FROM exec_job_phase p WHERE p.exec_job = r.id \
               ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS last_phase_name, \
-         (SELECT a.assignment_id FROM exec_job_attempt a WHERE a.exec_job = r.id \
-              ORDER BY a.number DESC LIMIT 1) AS last_assignment_id \
+         la.assignment_id AS last_assignment_id, la.end_reason AS last_end_reason \
          FROM exec_job r JOIN entry_point e ON e.id = r.entry_point \
+         LEFT JOIN LATERAL (SELECT a.assignment_id, a.end_reason FROM exec_job_attempt a \
+              WHERE a.exec_job = r.id ORDER BY a.number DESC LIMIT 1) la ON true \
          WHERE r.evaluation = $1 ORDER BY e.eval",
         params = [EvaluationId];
     EVALUATIONS_STARTED_BY_EXEC_JOB = "SELECT ev.id AS evaluation, t.name AS task, ev.status, \
@@ -143,6 +146,7 @@ fn job_row(row: &QueryResult) -> Result<ExecJobRow, DbErr> {
         entry_point: row.try_get("", "entry_point_name")?,
         last_phase: row.try_get("", "last_phase_name")?,
         last_dispatched_job: row.try_get("", "last_assignment_id")?,
+        last_end_reason: row.try_get("", "last_end_reason")?,
     })
 }
 
@@ -264,6 +268,7 @@ mod tests {
             entry_point: name.into(),
             last_phase: None,
             last_dispatched_job: None,
+            last_end_reason: None,
         }
     }
 
@@ -289,5 +294,34 @@ mod tests {
             ]
         );
         assert_eq!(jobs[1].job.id, master, "the pair is listed under node 0");
+    }
+
+    #[tokio::test]
+    async fn an_evaluation_exec_job_listing_reports_the_latest_attempt_end_reason() {
+        use gradient_fixtures::mock::mock_db;
+        use sea_orm::{IdenStatic, Iterable, ModelTrait};
+
+        let job = MExecJob {
+            id: ExecJobId::now_v7(),
+            status: ExecJobStatus::Failed,
+            ..Default::default()
+        };
+        let mut values: BTreeMap<String, Value> = CExecJob::iter()
+            .map(|column| (column.as_str().to_owned(), job.get(column)))
+            .collect();
+        values.insert("entry_point_name".into(), "apps.x86_64-linux.a".into());
+        values.insert("last_phase_name".into(), Value::String(None));
+        values.insert("last_assignment_id".into(), Value::Uuid(None));
+        values.insert(
+            "last_end_reason".into(),
+            i16::from(AttemptEndReason::Timeout).into(),
+        );
+        let db = mock_db()
+            .append_query_results([vec![values]])
+            .into_connection();
+
+        let jobs = of_evaluation(&db, EvaluationId::now_v7()).await.unwrap();
+
+        assert_eq!(jobs[0].last_end_reason, Some(AttemptEndReason::Timeout));
     }
 }

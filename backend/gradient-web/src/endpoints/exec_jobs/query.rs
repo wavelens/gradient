@@ -141,6 +141,7 @@ pub struct ExecJobSummary {
     pub program_exit_code: Option<i32>,
     pub started_at: Option<NaiveDateTime>,
     pub last_phase: Option<String>,
+    pub end_reason: Option<AttemptEndReason>,
     pub dispatched_job: Option<DispatchedJobId>,
     pub cluster_job: Option<ClusterJobId>,
 }
@@ -336,6 +337,7 @@ fn summary(row: ExecJobRow, clusters: &HashMap<DispatchedJobId, ClusterJobId>) -
         program_exit_code: row.job.program_exit_code,
         started_at: row.job.started_at,
         last_phase: row.last_phase,
+        end_reason: row.last_end_reason,
         dispatched_job: row.last_dispatched_job,
     }
 }
@@ -392,7 +394,7 @@ pub async fn get_exec_job(
     operation_id = "listEvaluationExecJobs",
     tag = "exec-jobs",
     summary = "List exec jobs of an evaluation",
-    description = "Returns every exec job of the evaluation, ordered by entry point, with its status, wait reason, last phase, the job board assignment of its latest attempt and the cluster job of a multi-node job. A multi-node job is listed once, under node 0's id, with the status of all its nodes.\n\n**Access:** Public projects, or members of the project.",
+    description = "Return all execution jobs of an evaluation in entrypoint order. Job entries hold status, wait reason, last phase, and the latest attempt's end reason and job board assignment. Multi-node jobs also include the cluster job. List multi-node jobs once under the ID of node 0, with the status of all nodes.\n\n**Access:** Public projects, or members of the project.",
     params(("evaluation" = EvaluationId, Path)),
     responses((status = OK, description = "Exec jobs", body = Vec<ExecJobSummary>), WebError)
 )]

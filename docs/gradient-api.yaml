@@ -5674,7 +5674,7 @@ paths:
       - exec-jobs
       summary: List exec jobs of an evaluation
       description: |-
-        Returns every exec job of the evaluation, ordered by entry point, with its status, wait reason, last phase, the job board assignment of its latest attempt and the cluster job of a multi-node job. A multi-node job is listed once, under node 0's id, with the status of all its nodes.
+        Return all execution jobs of an evaluation in entrypoint order. Job entries hold status, wait reason, last phase, and the latest attempt's end reason and job board assignment. Multi-node jobs also include the cluster job. List multi-node jobs once under the ID of node 0, with the status of all nodes.
 
         **Access:** Public projects, or members of the project.
       operationId: listEvaluationExecJobs
@@ -17630,6 +17630,10 @@ components:
           type:
           - string
           - 'null'
+        end_reason:
+          oneOf:
+          - $ref: '#/components/schemas/AttemptEndReason'
+          - type: 'null'
         dispatched_job:
           oneOf:
           - $ref: '#/components/schemas/DispatchedJobId'

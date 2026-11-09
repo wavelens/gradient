@@ -1169,6 +1169,7 @@ export interface ExecJobSummary {
   program_exit_code?: number | null;
   started_at?: string | null;
   last_phase?: string | null;
+  end_reason?: AttemptEndReason | null;
   dispatched_job?: DispatchedJobId | null;
   cluster_job?: ClusterJobId | null;
 }
