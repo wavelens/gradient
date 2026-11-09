@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::project_admin_emails;
+use crate::access::{Caller, caller_cache_mask, project_admin_emails};
 use crate::api_spec::CachePath;
 use crate::audit::Audit;
 use crate::endpoints::projects::settings::mode_label;
@@ -132,6 +132,7 @@ pub async fn get_cache_subscribers(
         cache,
         user: maybe_user,
         db,
+        api_key,
         ..
     }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<CacheSubscribersResponse>>> {
@@ -143,14 +144,11 @@ pub async fn get_cache_subscribers(
 
     let (sees_all, member_of) = match &maybe_user {
         Some(user) => {
-            let manages = gradient_db::access::cache_permission_mask(&db.web_db, cache.id, user.id)
-                .await?
-                .is_some_and(|mask| {
-                    crate::permissions::cache_mask_grants(
-                        mask,
-                        crate::permissions::CachePermission::ManageCacheSubscriptions,
-                    )
-                });
+            let manages = crate::permissions::cache_mask_grants(
+                caller_cache_mask(&db.web_db, Caller::User(user), cache.id, api_key.as_ref())
+                    .await?,
+                crate::permissions::CachePermission::ManageCacheSubscriptions,
+            );
             let member_of =
                 gradient_db::access::project_role_names(&db.web_db, user.id, project_ids.clone())
                     .await?;

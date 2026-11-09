@@ -3072,7 +3072,7 @@ paths:
       tags:
       - caches
       summary: List caches
-      description: Get a paginated list of binary caches for the current user. Include caches that belong to the user, caches that other members share with the user, and caches that project subscriptions make available. Sort the list by display name. An API key pinned to one project can return only caches for subscriptions of that project.
+      description: List binary caches for the current user in a paginated list. Include caches that belong to the user and caches that other members share with the user. Include caches that project subscriptions make available. Sort the list by display name. API keys with cache scope show only the cache in their scope. Other API keys show only caches that projects they can view subscribe to. Keys with a pinned project limit the list to that project.
       operationId: listCaches
       parameters:
       - name: page
@@ -3112,7 +3112,7 @@ paths:
       tags:
       - caches
       summary: Create cache
-      description: Creates a new binary cache with an auto-generated signing key.
+      description: Create a new binary cache with an auto-generated signing key. Only signed-in sessions can call this endpoint. API keys cannot create caches.
       operationId: createCache
       requestBody:
         content:
@@ -11094,7 +11094,7 @@ paths:
       tags:
       - teams
       summary: List my teams
-      description: Teams that include the caller as a member, with the caller's role, sorted by display name.
+      description: Teams that include the caller as a member, with the caller's role, sorted by display name. Callers need a signed-in session. Team endpoints don't accept API keys.
       operationId: listTeams
       responses:
         '200':
@@ -11121,7 +11121,7 @@ paths:
       tags:
       - teams
       summary: Create team
-      description: Creates a team and makes the caller its Admin. Who may create teams is set by `--permissions-create-team`.
+      description: Create a team and make the caller its admin. Use `--permissions-create-team` to control which users can create teams. Requests need a signed-in session. API keys cannot use team endpoints.
       operationId: createTeam
       requestBody:
         content:

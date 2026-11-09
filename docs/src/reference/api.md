@@ -79,7 +79,7 @@ Each path below upgrades to a WebSocket. On every resource change, the server pu
 
 ## Binary Cache
 
-Cache endpoints live at the root of the host, with no `/api/v1` prefix. Private caches require HTTP Basic auth. Any user name works; the password has to be a session or API key. See [netrc](../guides/share-a-cache.md#1-use-the-cache-on-a-machine) for one way to pass credentials.
+The cache endpoints sit at the host root and carry no `/api/v1` prefix. Private caches require Basic authentication over HTTP. The username can be anything. Use a session or an API key with cache scope as the password. See [netrc](../guides/share-a-cache.md#1-use-the-cache-on-a-machine) for one way to pass credentials. API keys can't create caches and can't use team endpoints.
 
 | Method | Path | Description |
 |---|---|---|

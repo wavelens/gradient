@@ -105,39 +105,41 @@ pub fn public_or(visible: Option<Condition>) -> Condition {
     }
 }
 
-pub fn subscribed_caches_of_project_visible_to_user(user: UserId, project: ProjectId) -> Condition {
-    let reachable_project = Query::select()
+pub fn subscribed_binary_caches_of_projects_visible_to_user(
+    user: UserId,
+    project: Option<ProjectId>,
+) -> Condition {
+    let mut reachable_projects = Query::select()
         .column(CProjectAccess::Project)
         .from(gradient_entity::project_access::Entity)
         .and_where(CProjectAccess::User.eq(user))
-        .and_where(CProjectAccess::Project.eq(project))
         .to_owned();
+    if let Some(project) = project {
+        reachable_projects.and_where(CProjectAccess::Project.eq(project));
+    }
     let subscribed = Query::select()
         .column(CProjectCache::Cache)
         .from(gradient_entity::project_cache::Entity)
-        .and_where(CProjectCache::Project.in_subquery(reachable_project))
+        .and_where(CProjectCache::Project.in_subquery(reachable_projects))
         .to_owned();
     Condition::all().add(CCache::Id.in_subquery(subscribed))
 }
 
-pub fn visible_to_user(user: UserId) -> Condition {
+pub fn binary_caches_created_by_user_or_with_direct_cache_role_for_user(user: UserId) -> Condition {
     let member_of = Query::select()
         .column(CCacheAccess::Cache)
         .from(gradient_entity::cache_access::Entity)
         .and_where(CCacheAccess::User.eq(user))
         .to_owned();
-    let reachable_projects = Query::select()
-        .column(CProjectAccess::Project)
-        .from(gradient_entity::project_access::Entity)
-        .and_where(CProjectAccess::User.eq(user))
-        .to_owned();
-    let subscribed_by_reachable_project = Query::select()
-        .column(CProjectCache::Cache)
-        .from(gradient_entity::project_cache::Entity)
-        .and_where(CProjectCache::Project.in_subquery(reachable_projects))
-        .to_owned();
     Condition::any()
         .add(CCache::CreatedBy.eq(user))
         .add(CCache::Id.in_subquery(member_of))
-        .add(CCache::Id.in_subquery(subscribed_by_reachable_project))
+}
+
+pub fn visible_to_user(user: UserId) -> Condition {
+    Condition::any()
+        .add(binary_caches_created_by_user_or_with_direct_cache_role_for_user(user))
+        .add(subscribed_binary_caches_of_projects_visible_to_user(
+            user, None,
+        ))
 }

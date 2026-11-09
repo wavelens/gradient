@@ -6,7 +6,8 @@
 
 use super::refusal::CacheRefusal;
 use crate::access::{
-    AccessRefusal, CacheAccess, Caller, has_cache_permission, load_cache, reject_managed_cache,
+    AccessRefusal, CacheAccess, Caller, caller_cache_mask, has_cache_permission, load_cache,
+    reject_managed_cache,
 };
 use crate::api_spec::CachePath;
 use crate::authorization::ApiKeyContext;
@@ -196,21 +197,21 @@ pub async fn get_upstream_caches(
         cache,
         db,
         user: maybe_user,
+        api_key,
         ..
     }: CacheScope<Readable>,
 ) -> WebResult<Json<BaseResponse<Vec<UpstreamCacheItem>>>> {
     let upstreams = gradient_db::caches::upstream::of_cache(&db.web_db, cache.id).await?;
-    let manages = match &maybe_user {
-        Some(user) => gradient_db::access::cache_permission_mask(&db.web_db, cache.id, user.id)
-            .await?
-            .is_some_and(|mask| {
-                crate::permissions::cache_mask_grants(
-                    mask,
-                    crate::permissions::CachePermission::ManageUpstreamCaches,
-                )
-            }),
-        None => false,
-    };
+    let manages = crate::permissions::cache_mask_grants(
+        caller_cache_mask(
+            &db.web_db,
+            Caller::from(&maybe_user),
+            cache.id,
+            api_key.as_ref(),
+        )
+        .await?,
+        CachePermission::ManageUpstreamCaches,
+    );
     let internal: Vec<CacheId> = upstreams.iter().filter_map(|u| u.upstream_cache).collect();
     let linked: std::collections::HashMap<CacheId, MCache> =
         gradient_db::lookup::by_ids::<ECache, _>(&db.web_db, &internal).await?;

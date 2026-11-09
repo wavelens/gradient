@@ -8,6 +8,7 @@ use super::refusal::TeamRefusal;
 use super::workers::withdraw_team_workers;
 use crate::api_spec::TeamPath;
 use crate::audit::Audit;
+use crate::authorization::{MaybeApiKey, reject_api_key_authentication};
 use crate::error::{WebError, WebResult, require_create_permission, require_superuser};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -121,13 +122,15 @@ fn blank_to_none(value: String) -> Option<String> {
     operation_id = "listTeams",
     tag = "teams",
     summary = "List my teams",
-    description = "Teams that include the caller as a member, with the caller's role, sorted by display name.",
+    description = "Teams that include the caller as a member, with the caller's role, sorted by display name. Callers need a signed-in session. Team endpoints don't accept API keys.",
     responses((status = OK, description = "OK", body = Vec<TeamSummary>), WebError)
 )]
 pub async fn get_teams(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamSummary>>>> {
+    reject_api_key_authentication(api_key.as_ref())?;
     let rows = gradient_db::teams::members::teams_of_user(&state.web_db, user.id).await?;
 
     let mut items: Vec<TeamSummary> = rows
@@ -168,7 +171,7 @@ pub async fn get_team_name_available(
     operation_id = "createTeam",
     tag = "teams",
     summary = "Create team",
-    description = "Creates a team and makes the caller its Admin. Who may create teams is set by `--permissions-create-team`.",
+    description = "Create a team and make the caller its admin. Use `--permissions-create-team` to control which users can create teams. Requests need a signed-in session. API keys cannot use team endpoints.",
     request_body = MakeTeamRequest,
     responses((status = OK, description = "Team created", body = String, content_type = "application/json"), WebError)
 )]
@@ -176,8 +179,10 @@ pub async fn put_team(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
+    Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     JsonBody(body): JsonBody<MakeTeamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    reject_api_key_authentication(api_key.as_ref())?;
     require_create_permission(state.config.permissions.create_team, &user)?;
 
     if gradient_db::teams::by_name(&state.web_db, body.name.as_str())

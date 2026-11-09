@@ -8,12 +8,14 @@ use super::refusal::CacheRefusal;
 use crate::access::{Caller, caller_cache_mask};
 use crate::api_spec::CachePath;
 use crate::audit::{Audit, changed_fields};
-use crate::authorization::MaybeApiKey;
+use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
 use crate::names::{CacheDisplayName, CacheName};
-use crate::permissions::{CachePermission, PermissionMask, cache_mask_grants, cache_mask_to_vec};
+use crate::permissions::{
+    CachePermission, Permission, PermissionMask, cache_mask_grants, cache_mask_to_vec, mask_grants,
+};
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
@@ -29,7 +31,8 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::TransactionTrait;
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, Condition, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -143,7 +146,7 @@ type PaginatedCache = Paginated<MCache>;
     operation_id = "listCaches",
     tag = "caches",
     summary = "List caches",
-    description = "Get a paginated list of binary caches for the current user. Include caches that belong to the user, caches that other members share with the user, and caches that project subscriptions make available. Sort the list by display name. An API key pinned to one project can return only caches for subscriptions of that project.",
+    description = "List binary caches for the current user in a paginated list. Include caches that belong to the user and caches that other members share with the user. Include caches that project subscriptions make available. Sort the list by display name. API keys with cache scope show only the cache in their scope. Other API keys show only caches that projects they can view subscribe to. Keys with a pinned project limit the list to that project.",
     params(PaginationParams),
     responses((status = OK, description = "Paginated cache list", body = PaginatedCache), WebError)
 )]
@@ -153,11 +156,25 @@ pub async fn get(
     Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<MCache>>>> {
-    let condition = match api_key.and_then(|key| key.project) {
-        Some(pinned) => {
-            gradient_db::caches::subscribed_caches_of_project_visible_to_user(user.id, pinned)
-        }
+    let condition = match api_key {
         None => gradient_db::caches::visible_to_user(user.id),
+        Some(ApiKeyContext {
+            cache_pin: Some(pin),
+            ..
+        }) => Condition::all()
+            .add(
+                gradient_db::caches::binary_caches_created_by_user_or_with_direct_cache_role_for_user(
+                    user.id,
+                ),
+            )
+            .add(CCache::Id.eq(pin)),
+        Some(key) if mask_grants(key.mask, Permission::ViewProject) => {
+            gradient_db::caches::subscribed_binary_caches_of_projects_visible_to_user(
+                user.id,
+                key.project,
+            )
+        }
+        Some(_) => Condition::all().add(Expr::val(false)),
     };
     let listing = crate::helpers::paginate(
         gradient_db::caches::ordered_by_name(condition),
@@ -175,7 +192,7 @@ pub async fn get(
     operation_id = "createCache",
     tag = "caches",
     summary = "Create cache",
-    description = "Creates a new binary cache with an auto-generated signing key.",
+    description = "Create a new binary cache with an auto-generated signing key. Only signed-in sessions can call this endpoint. API keys cannot create caches.",
     request_body = MakeCacheRequest,
     responses((status = OK, description = "Cache UUID", body = String, content_type = "application/json"), WebError)
 )]
@@ -183,8 +200,10 @@ pub async fn put(
     state: State<Arc<ServerState>>,
     audit: Audit,
     Extension(user): Extension<MUser>,
+    Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     JsonBody(body): JsonBody<MakeCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    reject_api_key_authentication(api_key.as_ref())?;
     require_create_permission(state.config.permissions.create_cache, &user)?;
     if !state
         .extensions

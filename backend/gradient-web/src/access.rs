@@ -31,8 +31,6 @@ pub(crate) enum AccessRefusal {
     KeyPinnedToDifferentCache,
     #[error("Missing cache permission `{permission}`.")]
     MissingCachePermission { permission: String },
-    #[error("A pinned API key cannot be used on team endpoints.")]
-    PinnedKeyOnTeamEndpoint,
 }
 
 impl Refusal for AccessRefusal {
@@ -420,16 +418,18 @@ async fn can_view_cache(
     has_cache_permission(db, user_id, cache_id, CachePermission::ViewCache, api_key).await
 }
 
-fn request_uses_project_pinned_api_key(api_key: Option<&ApiKeyContext>) -> bool {
-    api_key.is_some_and(|key| key.project.is_some())
-}
-
 async fn is_cache_project_subscriber(
     db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
+    if api_key.is_some_and(|key| {
+        key.cache_pin.is_some() || !mask_grants(key.mask, Permission::ViewProject)
+    }) {
+        return Ok(false);
+    }
+
     let subscriber_projects: Vec<ProjectId> =
         gradient_db::projects::caches::subscriptions_to(db, cache_id)
             .await?
@@ -467,31 +467,21 @@ pub async fn effective_cache_mask(
     Ok(None)
 }
 
+/// Only a key that is pinned to that cache can reach the cache through cache roles. The key permissions cap the role.
 async fn cache_role_mask(
     db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<Option<i64>> {
-    if request_uses_project_pinned_api_key(api_key) {
+    if api_key.is_some_and(|key| key.cache_pin != Some(cache_id)) {
         return Ok(None);
     }
-    Ok(gradient_db::access::cache_permission_mask(db, cache_id, user_id).await?)
-}
-
-fn cache_mask_allows(
-    role_mask: i64,
-    api_key: Option<&ApiKeyContext>,
-    permission: CachePermission,
-) -> bool {
-    cache_mask_grants(key_limited_cache_mask(role_mask, api_key), permission)
-}
-
-fn key_limited_cache_mask(role_mask: i64, api_key: Option<&ApiKeyContext>) -> i64 {
-    role_mask
-        & api_key
-            .and_then(|k| k.cache_permission_mask)
-            .unwrap_or(i64::MAX)
+    Ok(
+        gradient_db::access::cache_permission_mask(db, cache_id, user_id)
+            .await?
+            .map(|role_mask| api_key.map_or(role_mask, |key| role_mask & key.mask)),
+    )
 }
 
 pub async fn caller_cache_mask(
@@ -505,7 +495,7 @@ pub async fn caller_cache_mask(
     };
     Ok(cache_role_mask(db, user_id, cache_id, api_key)
         .await?
-        .map_or(0, |mask| key_limited_cache_mask(mask, api_key)))
+        .unwrap_or(0))
 }
 
 pub async fn has_cache_permission(
@@ -515,11 +505,9 @@ pub async fn has_cache_permission(
     permission: CachePermission,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
-    let Some(role_mask) = cache_role_mask(db, user_id, cache_id, api_key).await? else {
-        return Ok(false);
-    };
-
-    Ok(cache_mask_allows(role_mask, api_key, permission))
+    Ok(cache_role_mask(db, user_id, cache_id, api_key)
+        .await?
+        .is_some_and(|mask| cache_mask_grants(mask, permission)))
 }
 
 async fn require_cache_permission(
@@ -530,11 +518,11 @@ async fn require_cache_permission(
     label: Resource,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<()> {
-    let role_mask = cache_role_mask(db, user_id, cache_id, api_key)
+    let mask = cache_role_mask(db, user_id, cache_id, api_key)
         .await?
         .ok_or_else(|| WebError::not_found(label))?;
 
-    if !cache_mask_allows(role_mask, api_key, permission) {
+    if !cache_mask_grants(mask, permission) {
         return Err(AccessRefusal::MissingCachePermission {
             permission: permission.as_wire_name().to_string(),
         }
@@ -606,9 +594,7 @@ pub async fn load_team(
     team_name: String,
     access: TeamAccess,
 ) -> WebResult<(MTeam, Option<TeamRole>)> {
-    if api_key.is_some_and(|k| k.project.is_some() || k.cache_pin.is_some()) {
-        return Err(AccessRefusal::PinnedKeyOnTeamEndpoint.into());
-    }
+    crate::authorization::reject_api_key_authentication(api_key)?;
 
     let team = gradient_db::teams::by_name(db, &team_name)
         .await?
@@ -1124,7 +1110,6 @@ mod tests {
             mask,
             project,
             cache_pin: None,
-            cache_permission_mask: None,
             allowed_ips: Vec::new(),
         }
     }
@@ -1401,13 +1386,11 @@ mod tests {
         }
     }
 
-    fn cache_view_api_key(user_id: UserId) -> ApiKeyContext {
-        let _ = user_id;
+    fn cache_view_api_key() -> ApiKeyContext {
         ApiKeyContext {
-            mask: i64::MAX,
+            mask: crate::permissions::cache_view_mask(),
             project: None,
-            cache_pin: None,
-            cache_permission_mask: Some(crate::permissions::cache_view_mask()),
+            cache_pin: Some(cache_fixture(false).id),
             allowed_ips: Vec::new(),
         }
     }
@@ -1598,7 +1581,7 @@ mod tests {
     fn cache_require_intersects_with_api_key_mask() {
         run(async {
             let user = user_fixture();
-            let api_key = cache_view_api_key(user.id);
+            let api_key = cache_view_api_key();
             let db = mock_db()
                 .append_query_results([vec![cache_fixture(false)]])
                 .append_query_results([vec![cache_member_fixture()]])
@@ -1628,9 +1611,101 @@ mod tests {
                 "a0000000-0000-0000-0000-000000000001"
             ))),
             cache_pin: None,
-            cache_permission_mask: None,
             allowed_ips: Vec::new(),
         }
+    }
+
+    #[test]
+    fn any_project_key_ignores_direct_cache_membership() {
+        run(async {
+            let user = user_fixture();
+            let api_key = api_key_ctx(mask_from(&[Permission::ViewProject]), None);
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                Some(&api_key),
+                "test-cache".into(),
+                CacheAccess::Readable,
+            )
+            .await
+            .expect_err("an any-project key must not reach the owner's private caches");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
+    fn any_project_key_cannot_change_a_cache() {
+        run(async {
+            let user = user_fixture();
+            let api_key = api_key_ctx(i64::MAX, None);
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                Some(&api_key),
+                "test-cache".into(),
+                CacheAccess::Require {
+                    permission: CachePermission::ManageCacheSettings,
+                    reject_managed: false,
+                },
+            )
+            .await
+            .expect_err("an any-project key has no cache role");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
+    fn key_without_view_project_cannot_read_a_subscribed_cache() {
+        run(async {
+            let user = user_fixture();
+            let api_key = api_key_ctx(mask_from(&[Permission::TriggerEvaluation]), None);
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                Some(&api_key),
+                "test-cache".into(),
+                CacheAccess::Readable,
+            )
+            .await
+            .expect_err("reading through a project subscription needs View project on the key");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
+    fn any_project_key_with_view_project_reads_a_subscribed_cache() {
+        run(async {
+            let user = user_fixture();
+            let api_key = api_key_ctx(mask_from(&[Permission::ViewProject]), None);
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([vec![project_cache_fixture()]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let r = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                Some(&api_key),
+                "test-cache".into(),
+                CacheAccess::Readable,
+            )
+            .await;
+            assert!(r.is_ok(), "{:?}", r.err());
+        });
     }
 
     #[test]

@@ -14,7 +14,6 @@ pub struct ApiKeyContext {
     pub mask: PermissionMask,
     pub project: Option<ProjectId>,
     pub cache_pin: Option<CacheId>,
-    pub cache_permission_mask: Option<i64>,
     pub allowed_ips: Vec<String>,
 }
 

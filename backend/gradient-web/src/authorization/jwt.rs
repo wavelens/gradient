@@ -202,11 +202,6 @@ async fn decode_api_key(
         mask: api_key.permission,
         project: api_key.project,
         cache_pin: api_key.cache,
-        cache_permission_mask: if api_key.cache.is_some() {
-            Some(api_key.permission)
-        } else {
-            None
-        },
         allowed_ips: api_key.allowed_ips.clone().unwrap_or_default(),
     };
 
@@ -232,7 +227,6 @@ async fn decode_job_token(db: &WebDb, raw: &str) -> Result<DecodedRequest, Statu
         mask: job_mask(),
         project: Some(job.project),
         cache_pin: None,
-        cache_permission_mask: None,
         allowed_ips: Vec::new(),
     };
 

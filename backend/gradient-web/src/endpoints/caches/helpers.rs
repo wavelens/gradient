@@ -5,11 +5,13 @@
  */
 
 use super::refusal::CacheRefusal;
-use crate::authorization::decode_jwt;
+use crate::access::effective_cache_mask;
+use crate::authorization::{DecodedRequest, decode_jwt};
 use crate::client_ip::resolve_client_ip;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::ip_allowlist::is_allowed as ip_allowed;
+use crate::permissions::{CachePermission, cache_mask_grants};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::store_paths::original_text;
@@ -38,7 +40,7 @@ async fn try_authenticate_basic(
     last_used_stamps: &Debounce<Uuid>,
     headers: &HeaderMap,
     client_ip: IpAddr,
-) -> WebResult<Option<MUser>> {
+) -> WebResult<Option<(MUser, DecodedRequest)>> {
     let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) else {
         return Ok(None);
     };
@@ -66,38 +68,9 @@ async fn try_authenticate_basic(
         return Err(SharedRefusal::SourceIpNotAllowed.into());
     }
     Ok(by_id::<EUser, _>(db, decoded.user_id())
-        .await
-        .ok()
-        .flatten())
-}
-
-async fn user_can_access_cache(db: &WebDb, cache: &MCache, user: &MUser) -> bool {
-    if cache.created_by == user.id {
-        return true;
-    }
-
-    let direct = gradient_db::caches::access_of_user(db, cache.id, user.id)
-        .await
-        .unwrap_or(None);
-    if direct.is_some() {
-        return true;
-    }
-
-    let project_ids: Vec<ProjectId> = gradient_db::projects::access_of_user(db, user.id)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|ou| ou.project)
-        .collect();
-
-    if project_ids.is_empty() {
-        return false;
-    }
-
-    gradient_db::projects::caches::subscription_of_any(db, cache.id, project_ids)
-        .await
-        .unwrap_or(None)
-        .is_some()
+        .await?
+        .filter(|user| user.active)
+        .map(|user| (user, decoded)))
 }
 
 async fn require_cache_auth(
@@ -112,12 +85,18 @@ async fn require_cache_auth(
         return Ok(());
     }
 
-    let maybe_user =
-        try_authenticate_basic(db, jwt_secret, last_used_stamps, headers, client_ip).await?;
-    match maybe_user {
-        Some(user) if user_can_access_cache(db, cache, &user).await => Ok(()),
-        _ => Err(CacheRefusal::AuthenticationRequired.into()),
+    let Some((user, decoded)) =
+        try_authenticate_basic(db, jwt_secret, last_used_stamps, headers, client_ip).await?
+    else {
+        return Err(CacheRefusal::AuthenticationRequired.into());
+    };
+    let readable = effective_cache_mask(db, user.id, cache.id, decoded.api_key_context())
+        .await?
+        .is_some_and(|mask| cache_mask_grants(mask, CachePermission::ReadStore));
+    if !readable {
+        return Err(CacheRefusal::AuthenticationRequired.into());
     }
+    Ok(())
 }
 
 pub(super) async fn get_nar_by_hash(

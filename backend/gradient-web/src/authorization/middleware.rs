@@ -22,7 +22,7 @@ use gradient_types::*;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-use super::api_key::{DecodedRequest, MaybeApiKey};
+use super::api_key::{ApiKeyContext, DecodedRequest, MaybeApiKey};
 use super::job_scope::{JobScopeRefusal, job_scope_of_request};
 use super::jwt::{
     bearer_token, clear_jwt_token_cookie, decode_jwt, extract_bearer_or_cookie,
@@ -75,6 +75,13 @@ pub async fn require_session_authentication(req: Request, next: Next) -> WebResu
         return Err(Denial::ApiKeyOnSessionOnlyRoute.into());
     }
     Ok(next.run(req).await)
+}
+
+pub fn reject_api_key_authentication(api_key: Option<&ApiKeyContext>) -> WebResult<()> {
+    match api_key {
+        Some(_) => Err(Denial::ApiKeyOnSessionOnlyRoute.into()),
+        None => Ok(()),
+    }
 }
 
 fn presented_token(headers: &HeaderMap) -> Result<&str, Denial> {
