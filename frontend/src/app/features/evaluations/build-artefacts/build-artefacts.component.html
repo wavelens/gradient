@@ -5,8 +5,6 @@
 -->
 
 <gr-page-layout width="form" [title]="packageName() || 'Artefacts'" [breadcrumb]="breadcrumb()">
-  <a slot="actions" grButton size="small" severity="secondary" icon="arrow_back" label="Back" [routerLink]="back()"></a>
-
   <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="artefacts().length === 0"
                  loadingMessage="Loading artefacts..." errorTitle="Failed to load artefacts" (retry)="loadArtefacts()">
     <gr-empty-state slot="empty" icon="inventory_2" title="No artefacts available for this build.">
@@ -17,20 +15,34 @@
         <gr-row>
           <gr-badge>{{ fileTypeLabel(artefact) }}</gr-badge>
           {{ artefact.name }}
-          @if (artefact.size !== undefined) {
+          @if (artefact.size != null) {
             <span slot="meta">{{ formatBytes(artefact.size) }}</span>
           }
-          <a
-            slot="actions"
-            grButton
-            severity="secondary"
-            [href]="downloadUrl(artefact)"
-            [attr.target]="isHtml(artefact) ? '_blank' : null"
-            [attr.rel]="isHtml(artefact) ? 'noopener noreferrer' : null"
-            [title]="(isHtml(artefact) ? 'Open ' : 'Download ') + artefact.name"
-            [icon]="isHtml(artefact) ? 'open_in_new' : 'download'"
-            [label]="isHtml(artefact) ? 'Open' : 'Download'"
-          ></a>
+          @if (isHtml(artefact)) {
+            <a
+              slot="actions"
+              grButton
+              severity="secondary"
+              [href]="openArtefactInBrowserUrl(artefact)"
+              target="_blank"
+              rel="noopener noreferrer"
+              [title]="'Open ' + artefact.name"
+              icon="open_in_new"
+              label="Open"
+            ></a>
+          } @else {
+            <button
+              slot="actions"
+              grButton
+              type="button"
+              severity="secondary"
+              [title]="'Download ' + artefact.name"
+              icon="download"
+              label="Download"
+              [loading]="artefactNameBeingDownloaded() === artefact.name"
+              (click)="downloadBuildArtefactFile(artefact)"
+            ></button>
+          }
         </gr-row>
       }
     </gr-row-list>

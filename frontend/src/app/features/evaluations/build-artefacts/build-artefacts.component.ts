@@ -5,12 +5,15 @@
  */
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 import { EvaluationsService, isHtmlArtefact } from '@core/services/evaluations.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { type BuildOrigin, buildOriginLink, readBuildOrigin } from '@shared/routing';
+import { type BuildOrigin, readBuildOrigin } from '@shared/routing';
+import { saveResponse } from '@shared/download';
+import { ApiService } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -23,6 +26,7 @@ import {
 import { environment } from '@environments/environment';
 import { formatBytes, packageNameFromDerivationPath } from '@shared/text';
 import { BuildProduct } from '@core/models';
+import { finalize } from 'rxjs';
 
 /** Readable labels for product types and subtypes from Hydra. A more specific subtype can take priority. */
 const ARTEFACT_TYPE_LABELS: Record<string, string> = {
@@ -41,7 +45,7 @@ const ARTEFACT_TYPE_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-build-artefacts',
   standalone: true,
-  imports: [RouterModule, LoadStateComponent, PageLayoutComponent, EmptyStateComponent, BadgeComponent, ButtonComponent, RowListComponent, RowComponent],
+  imports: [LoadStateComponent, PageLayoutComponent, EmptyStateComponent, BadgeComponent, ButtonComponent, RowListComponent, RowComponent],
   templateUrl: './build-artefacts.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './build-artefacts.component.scss',
@@ -52,18 +56,20 @@ export class BuildArtefactsComponent implements OnInit {
   private evalService = inject(EvaluationsService);
   private authService = inject(AuthService);
   private projectsService = inject(ProjectsService);
+  private api = inject(ApiService);
+  private notify = inject(NotifyService);
 
   loading = signal(true);
   loadError = signal<unknown>(null);
   artefacts = signal<BuildProduct[]>([]);
   packageName = signal('');
   private downloadToken = signal<string | null>(null);
+  artefactNameBeingDownloaded = signal<string | null>(null);
 
   projectName = '';
   buildId = '';
   private from = signal<BuildOrigin>({});
   breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from(), this.buildId, 'Artefacts'));
-  back = computed(() => buildOriginLink(this.projectName, this.from(), this.buildId));
 
   ngOnInit(): void {
     this.projectName     = this.route.snapshot.paramMap.get('project') || '';
@@ -105,10 +111,20 @@ export class BuildArtefactsComponent implements OnInit {
     });
   }
 
-  downloadUrl(artefact: BuildProduct): string {
+  openArtefactInBrowserUrl(artefact: BuildProduct): string {
     const base = `${environment.apiUrl}/builds/${this.buildId}/download/${encodeURIComponent(artefact.name)}`;
     const token = this.downloadToken();
     return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  }
+
+  downloadBuildArtefactFile(artefact: BuildProduct): void {
+    this.artefactNameBeingDownloaded.set(artefact.name);
+    this.api.getBlob(`builds/${this.buildId}/download/${encodeURIComponent(artefact.name)}`)
+      .pipe(finalize(() => this.artefactNameBeingDownloaded.set(null)))
+      .subscribe({
+        next: (response) => saveResponse(response, artefact.name),
+        error: (error: unknown) => this.notify.failure(`Couldn't download ${artefact.name}`, error),
+      });
   }
 
   readonly formatBytes = formatBytes;

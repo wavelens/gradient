@@ -11,9 +11,16 @@ import { AuthService } from '@core/services/auth.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { ApiError, ApiService } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
+import { formatBytes } from '@shared/text';
 import { BuildArtefactsComponent } from './build-artefacts.component';
 
-function render(getBuildDownloads: () => unknown, getBuild: () => unknown = () => of({ derivation_path: '/nix/store/abc-hello-2.12.drv' })) {
+function render(
+  getBuildDownloads: () => unknown,
+  getBuild: () => unknown = () => of({ derivation_path: '/nix/store/abc-hello-2.12.drv' }),
+  getBlob: () => unknown = () => of(),
+) {
   TestBed.configureTestingModule({
     imports: [BuildArtefactsComponent],
     providers: [
@@ -22,7 +29,9 @@ function render(getBuildDownloads: () => unknown, getBuild: () => unknown = () =
       { provide: EvaluationsService, useValue: { getBuildDownloads, getBuild } },
       { provide: AuthService, useValue: { isAuthenticated: () => false } },
       { provide: ProjectsService, useValue: {} },
-      { provide: BreadcrumbsService, useValue: { buildPage: () => [] } },
+      { provide: BreadcrumbsService, useValue: { buildPage: vi.fn(() => []) } },
+      { provide: ApiService, useValue: { getBlob } },
+      { provide: NotifyService, useValue: { failure: vi.fn() } },
     ],
   });
   const fixture = TestBed.createComponent(BuildArtefactsComponent);
@@ -65,8 +74,37 @@ describe('BuildArtefactsComponent', () => {
     expect([...root.querySelectorAll('gr-row gr-badge')].map((badge) => badge.textContent?.trim())).toEqual(['Binary', 'Manual', 'Nix build']);
   });
 
-  it('leads back to the log of the build evaluation when opened without an origin', () => {
+  it('puts the build evaluation in the breadcrumb when opened without an origin, with no extra Back button', () => {
     const { root } = render(() => of([]), () => of({ evaluation: 'e1', derivation_path: '/nix/store/abc-hello-2.12.drv' }));
-    expect(root.querySelector('[slot=actions]')?.getAttribute('href')).toBe('/project/p/log/e1?build=b1');
+    expect(TestBed.inject(BreadcrumbsService).buildPage).toHaveBeenLastCalledWith('p', { evaluation: 'e1' }, 'b1', 'Artefacts');
+    expect(root.querySelector('[slot=actions]')).toBeNull();
+  });
+
+  it('hides the size of an artefact when the server does not know it', () => {
+    const { root } = render(() => of([
+      { name: 'a.tar', path: 'a.tar', file_type: 'file', subtype: 'binary-dist', size: null },
+      { name: 'b.tar', path: 'b.tar', file_type: 'file', subtype: 'binary-dist', size: 2048 },
+    ]));
+    expect([...root.querySelectorAll('[slot=meta]')].map((meta) => meta.textContent?.trim())).toEqual([formatBytes(2048)]);
+  });
+
+  it('downloads a file inside the app and reports a failed download in a toast', () => {
+    const getBlob = vi.fn().mockReturnValue(throwError(() => new ApiError('artefact missing', 404)));
+    const { fixture, root } = render(() => of([{ name: 'a b.tar', path: 'a b.tar', file_type: 'file', subtype: 'binary-dist' }]), undefined, getBlob);
+    const { failure } = TestBed.inject(NotifyService);
+
+    root.querySelector<HTMLButtonElement>('button[title="Download a b.tar"]')!.click();
+    fixture.detectChanges();
+
+    expect(getBlob).toHaveBeenCalledWith('builds/b1/download/a%20b.tar');
+    expect(failure).toHaveBeenCalledWith("Couldn't download a b.tar", expect.any(ApiError));
+    expect(root.querySelector('a[href*="/download/"]')).toBeNull();
+  });
+
+  it('opens HTML artefacts in a new tab', () => {
+    const { root } = render(() => of([{ name: 'report.html', path: 'report.html', file_type: 'doc', subtype: 'html' }]));
+    const link = root.querySelector<HTMLAnchorElement>('a[title="Open report.html"]')!;
+    expect(link.getAttribute('href')).toContain('/builds/b1/download/report.html');
+    expect(link.target).toBe('_blank');
   });
 });
