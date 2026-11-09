@@ -609,6 +609,13 @@ describe('TaskDetailComponent - in-progress state (#452)', () => {
     expect(badge).toBeTruthy();
   });
 
+  it('names failed, not built and substituted builds in the header counter', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true },
+      { primaryStatus: 'Failed', primary: { builds: { ...zeroCounts(), completed: 1, failed: 1, aborted: 1, substituted: 2 } } });
+    const counter = (fixture.nativeElement as HTMLElement).querySelector('.bar-line > span')?.textContent?.replace(/\s+/g, ' ').trim();
+    expect(counter).toBe('3 / 3 builds · 1 failed · 1 not built · 5 total');
+  });
+
   it('names the wait reason next to the badge of a building evaluation that waits for exec jobs', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true },
       { primaryStatus: 'Building', primary: { waiting_reason: { kind: 'exec_jobs', waiting_exec_jobs: 1 } } });
