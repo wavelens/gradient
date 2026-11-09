@@ -359,11 +359,14 @@ describe('LogViewerComponent', () => {
     });
   });
 
-  it('links to a line from its gutter', async () => {
+  it('links to a line from its gutter button', async () => {
     const { fixture, viewer } = setup();
     await show(fixture, ['a', 'b']);
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    (fixture.nativeElement.querySelectorAll('.log-gutter')[1] as HTMLElement).click();
+    const gutter = fixture.nativeElement.querySelectorAll('.log-gutter')[1] as HTMLElement;
+    expect(gutter.tagName).toBe('BUTTON');
+    expect(gutter.getAttribute('aria-label')).toBe('Link to line 2');
+    gutter.click();
     expect(viewer.highlightLine()).toBe(2);
     expect(navigate.mock.calls[0][1]).toMatchObject({ fragment: 'L2' });
   });

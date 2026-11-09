@@ -286,7 +286,7 @@
             <div class="log-header">
               <code class="log-header-title" [title]="selectedBuild()?.name ?? ''">{{ buildDisplayName(selectedBuild()?.name ?? '') }}</code>
               @if (logLineCount() > 0) {
-                <span class="log-line-count">{{ logLineCount() }} {{ logLineCount() === 1 ? 'line' : 'lines' }}</span>
+                <span class="log-line-count">{{ logLineCount() | number }} {{ logLineCount() === 1 ? 'line' : 'lines' }}</span>
               }
             </div>
             @if (transferProgress(); as p) {

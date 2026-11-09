@@ -48,7 +48,8 @@
           [class.log-line--hl]="ln.n === highlightLine()"
           [attr.data-line]="ln.n"
         >
-          <span class="log-gutter" (click)="selectLine(ln.n)" title="Link to line">{{ ln.n }}</span>
+          <button type="button" class="log-gutter" (click)="selectLine(ln.n)" title="Link to line"
+                  [attr.aria-label]="'Link to line ' + ln.n">{{ ln.n }}</button>
           @if (ln.marker !== null) {
             <span class="log-marker" role="separator">{{ ln.marker }}</span>
           } @else {
