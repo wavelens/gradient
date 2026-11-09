@@ -175,7 +175,9 @@ export class MenuComponent implements OnDestroy {
   }
 
   private items(panel: HTMLElement): HTMLElement[] {
-    return Array.from(panel.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])'));
+    return Array.from(
+      panel.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled], [aria-disabled="true"])'),
+    );
   }
 
   private onKeydown(event: KeyboardEvent): void {

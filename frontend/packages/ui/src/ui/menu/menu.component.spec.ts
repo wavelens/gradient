@@ -85,27 +85,58 @@ describe('MenuComponent', () => {
     expect(items()[1].disabled).toBe(true);
   });
 
-  it('keeps an item with a disabled reason focusable, describes it with the reason and ignores clicks', async () => {
+  it('Exclude an item that has a disabled reason from keyboard focus, show the reason and ignore clicks on it', async () => {
     const { fixture, anchor } = render();
     const opened = vi.fn();
     fixture.componentInstance.model.set([
-      { label: 'Edit', command: () => undefined },
       { label: 'Artefacts', routerLink: ['/artefacts'], command: opened, disabledReason: 'Needs a finished build' },
+      { label: 'Edit', command: () => undefined },
     ]);
     anchor().click();
     fixture.detectChanges();
     await fixture.whenStable();
-    const blocked = items()[1];
+    const [blocked, edit] = items();
     expect(blocked.tagName).toBe('BUTTON');
     expect(blocked.disabled).toBe(false);
     expect(blocked.getAttribute('aria-disabled')).toBe('true');
-    expect(document.getElementById(blocked.getAttribute('aria-describedby')!)?.textContent).toBe('Needs a finished build');
+    const reason = document.getElementById(blocked.getAttribute('aria-describedby')!)!;
+    expect(reason.textContent).toBe('Needs a finished build');
+    expect(getComputedStyle(reason).display).not.toBe('none');
+    expect(document.activeElement).toBe(edit);
     press('ArrowDown');
-    expect(document.activeElement).toBe(blocked);
+    expect(document.activeElement).toBe(edit);
     blocked.click();
     fixture.detectChanges();
     expect(opened).not.toHaveBeenCalled();
     expect(items()).toHaveLength(2);
+  });
+
+  it('Click an item through the full pointer sequence with the reason for the disabled item above it.', async () => {
+    const { fixture, anchor } = render();
+    const graph = vi.fn();
+    fixture.componentInstance.model.set([
+      { label: 'Artefacts', disabledReason: 'Needs a finished build' },
+      { label: 'Dependency graph', command: graph },
+    ]);
+    anchor().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const [blocked, target] = items();
+    const reason = document.getElementById(blocked.getAttribute('aria-describedby')!)!;
+    blocked.focus();
+    const displayBefore = getComputedStyle(reason).display;
+    const pointer = { bubbles: true, cancelable: true, button: 0 };
+    target.dispatchEvent(new PointerEvent('pointerdown', pointer));
+    target.dispatchEvent(new MouseEvent('mousedown', pointer));
+    target.focus();
+    fixture.detectChanges();
+    expect(getComputedStyle(reason).display).toBe(displayBefore);
+    target.dispatchEvent(new PointerEvent('pointerup', pointer));
+    target.dispatchEvent(new MouseEvent('mouseup', pointer));
+    target.dispatchEvent(new MouseEvent('click', pointer));
+    fixture.detectChanges();
+    expect(graph).toHaveBeenCalledTimes(1);
+    expect(items()).toHaveLength(0);
   });
 
   /// A middle click opens the link in a new tab; the menu has done its job.
