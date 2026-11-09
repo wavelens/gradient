@@ -47,6 +47,10 @@ export function evaluationPhase(status: EvaluationStatus): StatusPhase {
   }
 }
 
+export function isEvaluationNotStartedStatus(status: EvaluationStatus): boolean {
+  return status === 'Queued' || status === 'Waiting';
+}
+
 export function buildPhase(status: BuildStatus): StatusPhase {
   switch (status) {
     case 'Created':

@@ -6,7 +6,7 @@
 
 import type { BuildStatus, EvaluationFailureSummary, EvaluationStatus, FailedBuildSummary } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
-import { buildStatusLabel, isRunningEvaluationStatus } from '@shared/evaluation';
+import { buildStatusLabel, isEvaluationNotStartedStatus, isRunningEvaluationStatus } from '@shared/evaluation';
 import { plural } from '@shared/text';
 
 const BLOCKED_NAMED = 5;
@@ -29,7 +29,7 @@ export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary
 
 export function headline(summary: EvaluationFailureSummary, status: EvaluationStatus): string {
   const { total, built, failed, blocked, unfinished } = summary.packages;
-  if (status === 'Queued' || status === 'Waiting') return 'Not started yet';
+  if (isEvaluationNotStartedStatus(status)) return 'Not started yet';
   if (isRunningEvaluationStatus(status)) {
     return total ? `Still running, ${built} of ${plural(total, 'package')} built so far` : 'Still evaluating';
   }

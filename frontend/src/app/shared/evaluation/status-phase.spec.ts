@@ -5,7 +5,7 @@
  */
 
 import type { BuildStatus, EvaluationStatus } from '@core/models';
-import { buildPhase, entryPointPhase, evaluationPhase, isPendingBuildStatus, PHASE_COLOR, PHASE_SEVERITY, type StatusPhase } from './status-phase';
+import { buildPhase, entryPointPhase, evaluationPhase, isEvaluationNotStartedStatus, isPendingBuildStatus, PHASE_COLOR, PHASE_SEVERITY, type StatusPhase } from './status-phase';
 
 describe('evaluationPhase', () => {
   it.each<[EvaluationStatus, StatusPhase]>([
@@ -38,6 +38,13 @@ describe('buildPhase', () => {
     ['Skipped', 'aborted'],
   ])('maps %s to %s', (status, phase) => {
     expect(buildPhase(status)).toBe(phase);
+  });
+});
+
+describe('isEvaluationNotStartedStatus', () => {
+  it('counts Queued and Waiting as not started', () => {
+    const statuses: EvaluationStatus[] = ['Queued', 'Waiting', 'Fetching', 'Building', 'Aborted'];
+    expect(statuses.filter(isEvaluationNotStartedStatus)).toEqual(['Queued', 'Waiting']);
   });
 });
 

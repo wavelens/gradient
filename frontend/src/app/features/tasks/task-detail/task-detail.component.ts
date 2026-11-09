@@ -56,7 +56,7 @@ import {
   WalkMode,
   EvaluationStatus,
 } from '@core/models';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, inputFetchPhase, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -187,7 +187,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return !!e && isRunningEvaluationStatus(e.status);
   });
 
-  evaluationQueued = computed(() => this.latestEvaluation()?.status === 'Queued');
+  latestEvaluationNotStarted = computed(() => {
+    const e = this.latestEvaluation();
+    return !!e && isEvaluationNotStartedStatus(e.status);
+  });
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
@@ -389,16 +392,17 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   startEvaluation(walk: WalkMode = 'pruned'): void {
+    if (this.starting()) return;
     this.starting.set(true);
-    this.tasksService.startEvaluation(this.projectName, this.taskName, walk).subscribe({
-      next: (evaluation) => {
-        this.starting.set(false);
-        this.openNewEvaluation(evaluation);
-      },
-      error: (error: unknown) => {
-        this.notify.failure('Failed to start evaluation', error);
-        this.starting.set(false);
-      },
+    this.tasksService.startEvaluation(this.projectName, this.taskName, walk).pipe(
+      switchMap((evaluation) => {
+        this.selectEvaluation(evaluation);
+        return this.tasksService.getTask(this.projectName, this.taskName).pipe(catchError(() => of(null)));
+      }),
+      finalize(() => this.starting.set(false)),
+    ).subscribe({
+      next: (task) => task && this.applyTask(task, true),
+      error: (error: unknown) => this.notify.failure('Failed to start evaluation', error),
     });
   }
 
@@ -672,7 +676,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         : []),
       ...(this.canTrigger()
         ? [{ label: 'Full rewalk', icon: 'account_tree',
-             disabled: this.starting() || this.evaluationQueued(),
+             disabled: this.starting() || this.latestEvaluationNotStarted(),
              command: () => this.startEvaluation('full') }]
         : []),
       ...(this.authService.isAuthenticated()

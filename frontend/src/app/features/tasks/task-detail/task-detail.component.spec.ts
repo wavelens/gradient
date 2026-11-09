@@ -475,6 +475,23 @@ describe('TaskDetailComponent evaluation menu', () => {
       expect(comp.selectedId()).toBe('e1');
     });
 
+    it('starts one evaluation on a double click and stays busy until the new evaluation is loaded', () => {
+      const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
+      const start = vi.spyOn(tasksService, 'startEvaluation').mockReturnValue(of('e2'));
+      const task = new Subject<ReturnType<typeof taskFor>>();
+      vi.spyOn(tasksService, 'getTask').mockReturnValue(task as never);
+      vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      const comp = fixture.componentInstance;
+      comp.startEvaluation();
+      comp.startEvaluation();
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(comp.starting()).toBe(true);
+      task.next({ ...taskFor(trigger), last_evaluations: [evalSummary('e2', 'Waiting'), ...comp.evaluations()] });
+      task.complete();
+      expect(comp.starting()).toBe(false);
+      expect(comp.latestEvaluationNotStarted()).toBe(true);
+    });
+
     it('selects the evaluation a retry answers with', () => {
       const { fixture, tasksService, evaluationsService, notify } = setup(trigger, { primaryStatus: 'Failed', primary: failedBuilds });
       const evals = [evalSummary('e3', 'Queued'), ...fixture.componentInstance.evaluations()];

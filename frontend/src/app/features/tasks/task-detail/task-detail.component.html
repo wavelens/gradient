@@ -17,8 +17,8 @@
       @if (authService.isAuthenticated()) {
         <button *appWritable="triggerAccess()" grButton label="Start Evaluation" icon="play_arrow"
                 (click)="startEvaluation()" [loading]="starting()"
-                [disabled]="starting() || evaluationQueued()"
-                [grTooltip]="evaluationQueued() ? 'An evaluation is already queued' : ''"></button>
+                [disabled]="starting() || latestEvaluationNotStarted()"
+                [grTooltip]="latestEvaluationNotStarted() ? 'Evaluation has not started yet' : ''"></button>
         @if (proj.name !== 'build-request' && canOpenSettings()) {
           <a grButton label="Settings" icon="settings" severity="secondary"
                   [routerLink]="links.taskPage(projectName, taskName, 'settings')"></a>
