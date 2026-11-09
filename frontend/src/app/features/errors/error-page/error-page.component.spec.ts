@@ -6,7 +6,7 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter, Router } from '@angular/router';
 import { of } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
@@ -89,6 +89,19 @@ describe('ErrorPageComponent', () => {
     expect(render(404, DENIED, { username: 'carol' }).refreshInvites).toHaveBeenCalledOnce();
     TestBed.resetTestingModule();
     expect(render(404, DENIED, null).refreshInvites).not.toHaveBeenCalled();
+  });
+
+  it('sends Try Again back to the failed page, never reloading the error page', () => {
+    const { fixture } = render(503, { from: '/caches' }, null);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    fixture.componentInstance.retry();
+    expect(navigate).toHaveBeenCalledWith('/caches');
+
+    TestBed.resetTestingModule();
+    const typed = render(503, {}, null);
+    const home = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    typed.fixture.componentInstance.retry();
+    expect(home).toHaveBeenCalledWith('/');
   });
 
   it('keeps the plain page-not-found page for unknown addresses', () => {

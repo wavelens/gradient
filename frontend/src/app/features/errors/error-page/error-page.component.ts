@@ -5,6 +5,7 @@
  */
 
 import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
+import { Location } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { ButtonComponent, IconComponent } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
@@ -102,6 +103,8 @@ export class ErrorPageComponent {
   protected readonly links = links;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private location = inject(Location);
+  private readonly cameFromApp = !!this.router.currentNavigation()?.previousNavigation;
   private auth = inject(AuthService);
   protected invites = inject(PendingInvitesService);
 
@@ -131,11 +134,9 @@ export class ErrorPageComponent {
   }
 
   retry(): void {
-    if (this.from) {
-      this.router.navigateByUrl(this.from);
-    } else {
-      window.location.reload();
-    }
+    if (this.from) void this.router.navigateByUrl(this.from);
+    else if (this.cameFromApp) this.location.back();
+    else void this.router.navigateByUrl('/');
   }
 
   switchAccount(): void {
