@@ -82,10 +82,15 @@ enum MainCommands {
         #[arg(long)]
         no_browser: bool,
     },
-    /// Logout from the server
+    /// Logout: revoke the login token on the server, then remove it from this machine
     Logout,
     /// Display current user information
     Info,
+    /// Manage SSH keys, API keys, sessions, invitations, linked logins and settings for the logged-in account.
+    LoggedInUser {
+        #[command(subcommand)]
+        cmd: logged_in_user_account_group_commands::Commands,
+    },
     /// Manage projects
     Project {
         #[command(subcommand)]
@@ -210,6 +215,19 @@ fn store_invocation_overrides_from_cli_and_env(
         project,
         task,
     });
+}
+
+pub fn parse_subcommand_name_chain_from_cli_args(args: &[String]) -> Option<Vec<String>> {
+    let matches = Cli::command()
+        .try_get_matches_from(std::iter::once("gradient").chain(args.iter().map(String::as_str)))
+        .ok()?;
+    let mut chain = Vec::new();
+    let mut current = &matches;
+    while let Some((name, sub)) = current.subcommand() {
+        chain.push(name.to_owned());
+        current = sub;
+    }
+    Some(chain)
 }
 
 pub fn complete_env() {
@@ -417,9 +435,36 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         }
 
         MainCommands::Logout => {
+            let file = load_and_migrate_login_config_file();
+            let login = login_name_from_flag_env_or_config(&file)
+                .and_then(|name| file.accounts.get(&name).cloned())
+                .unwrap_or_default();
+            let client = login.server().and_then(|server| {
+                Client::builder()
+                    .base_url(server)
+                    .token(login.token()?)
+                    .build()
+                    .ok()
+            });
+            let revoked = match client {
+                None => false,
+                Some(client) => match client.auth().logout().await {
+                    Ok(_) => true,
+                    Err(e) => {
+                        out.human(format!(
+                        "Removed the login token from this machine, but failed to revoke it on the server ({e})"
+                    ));
+                        false
+                    }
+                },
+            };
             set_value(ConfigKey::AuthToken, String::new(), true);
-            out.ok(&serde_json::json!({"logged_out": true}));
+            out.ok(&serde_json::json!({"logged_out": true, "revoked": revoked}));
             out.human("Logged out.");
+        }
+
+        MainCommands::LoggedInUser { cmd } => {
+            logged_in_user_account_group_commands::handle(cmd, out).await
         }
 
         MainCommands::Build {

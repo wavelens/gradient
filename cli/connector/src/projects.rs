@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    AddMemberRequest, CacheSubscriptionItem, CreateRoleRequest, MakeProjectRequest, MemberItem,
-    PaginatedProjectSummary, PatchProjectRequest, PatchRoleRequest, ProjectResponse,
-    RemoveMemberRequest, RoleResponseProjectRoleOwner,
+    AddMemberRequest, CacheSubscriptionItem, CreateRoleRequest, GrantProjectRequest,
+    MakeProjectRequest, MemberItem, PaginatedProjectSummary, PatchProjectGrantRequest,
+    PatchProjectRequest, PatchRoleRequest, PendingInvitationItem, ProjectResponse,
+    ProjectSecretSummary, PutProjectSecretRequest, RemoveMemberRequest, RevokeInvitationRequest,
+    RoleResponseProjectRoleOwner, SopsRecipientResponse, TeamGrantEntry,
 };
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
@@ -296,6 +298,208 @@ impl ProjectsApi<'_> {
             &format!("projects/{project}/subscribe/{cache}"),
             true,
         )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn list_secret_summaries(
+        &self,
+        project: &str,
+    ) -> Result<Vec<ProjectSecretSummary>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{project}/secrets"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn get_project_secret_summary(
+        &self,
+        project: &str,
+        name: &str,
+    ) -> Result<ProjectSecretSummary, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{project}/secrets/{name}"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn put_project_secret(
+        &self,
+        project: &str,
+        name: &str,
+        body: PutProjectSecretRequest,
+    ) -> Result<ProjectSecretSummary, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PUT,
+            &format!("projects/{project}/secrets/{name}"),
+            true,
+        )?
+        .json(&body);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn delete_project_secret(
+        &self,
+        project: &str,
+        name: &str,
+    ) -> Result<bool, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("projects/{project}/secrets/{name}"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn get_project_sops_recipient(
+        &self,
+        project: &str,
+    ) -> Result<SopsRecipientResponse, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{project}/sops-recipient"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn make_project_public(&self, project: &str) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("projects/{project}/public"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn make_project_private(&self, project: &str) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("projects/{project}/public"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn list_project_team_grants(
+        &self,
+        project: &str,
+    ) -> Result<Vec<TeamGrantEntry>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{project}/teams"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn grant_team_access_to_project(
+        &self,
+        project: &str,
+        body: GrantProjectRequest,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("projects/{project}/teams"),
+            true,
+        )?
+        .json(&body);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn update_project_team_grant(
+        &self,
+        project: &str,
+        team: &str,
+        body: PatchProjectGrantRequest,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PATCH,
+            &format!("projects/{project}/teams/{team}"),
+            true,
+        )?
+        .json(&body);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn remove_project_team_grant(
+        &self,
+        project: &str,
+        team: &str,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("projects/{project}/teams/{team}"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn list_pending_project_invitations(
+        &self,
+        project: &str,
+    ) -> Result<Vec<PendingInvitationItem>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{project}/invitations"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn revoke_project_invitation(
+        &self,
+        project: &str,
+        body: RevokeInvitationRequest,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::DELETE,
+            &format!("projects/{project}/invitations"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 }

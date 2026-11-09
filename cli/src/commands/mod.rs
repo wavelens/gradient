@@ -23,6 +23,7 @@ pub mod eval;
 pub mod evaluation;
 pub mod generate;
 pub mod live_events;
+pub mod logged_in_user_account_group_commands;
 pub mod logs;
 pub mod logstream;
 pub mod mcp;

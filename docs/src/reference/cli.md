@@ -86,9 +86,32 @@ gradient account switch work
 | `gradient status` | - | Show whether the server connection works |
 | `gradient register` | `--username <USERNAME>`, `--name <NAME>`, `--email <EMAIL>`, `--password <PASSWORD>` | Create a new user account |
 | `gradient login [SERVER]` | `--username <USERNAME>`, `--password <PASSWORD>`, `--no-browser` | Authenticate against a server |
-| `gradient logout` | - | End the current session |
+| `gradient logout` | - | Revoke the login token on the server, then delete the token from this machine. Revocation failures still delete the token locally. |
 | `gradient info` | - | Print details of the logged-in user |
 | `gradient hash` | - | Produce an argon2id PHC string from a password, for `services.gradient.state.users.<name>.password_file` |
+
+## Logged-In User
+
+| Command | Options | Description |
+|---|---|---|
+| `gradient logged-in-user ssh-public-keys list` | - | List SSH keys for the Nix daemon |
+| `gradient logged-in-user ssh-public-keys add <NAME> [PUBLIC_KEY]` | `--file <FILE>` | Add an SSH public key. Provide the key inline or use `--file`. |
+| `gradient logged-in-user ssh-public-keys delete <ID>` | - | Delete SSH key |
+| `gradient logged-in-user api-keys list` | - | Show a list of API keys. |
+| `gradient logged-in-user api-keys create <NAME>` | `--permission <PERMISSION>`, `--expires-in-days <DAYS>`, `--api-key-project <PROJECT>`, `--cache <CACHE>`, `--allowed-ip <IP>` | Create an API key and output it once. |
+| `gradient logged-in-user api-keys edit <KEY>` | `--name <NAME>`, `--permission <PERMISSION>`, `--api-key-project <PROJECT>`, `--allowed-ip <IP>` | Change an API key. The specified permissions or IP addresses replace the current ones. |
+| `gradient logged-in-user api-keys revoke <KEY>` | - | Revoke an API key. The API key can remain in the list for the audit trail. |
+| `gradient logged-in-user api-keys delete <KEY>` | - | Delete API Key |
+| `gradient logged-in-user api-keys permissions` | - | List the permissions that an API key can grant. |
+| `gradient logged-in-user active-login-sessions list` | `--page <PAGE>`, `--per-page <PER_PAGE>` | List active login sessions |
+| `gradient logged-in-user active-login-sessions revoke <ID>` | - | Revoke the session and sign out of that device. |
+| `gradient logged-in-user invitations list` | - | List pending invitations to projects, caches and teams. |
+| `gradient logged-in-user invitations accept <TOKEN>` | - | Accept the invitation |
+| `gradient logged-in-user invitations decline <TOKEN>` | - | Decline Invitation |
+| `gradient logged-in-user linked-external-login-accounts list` | - | List login providers and show whether an account links to them. |
+| `gradient logged-in-user linked-external-login-accounts disconnect <PROVIDER>` | - | Unlink an Account from a Login Provider |
+| `gradient logged-in-user print-account-settings` | - | Print Settings for an Account |
+| `gradient logged-in-user delete-account` | `--password <PASSWORD>`, `--confirm-username <USERNAME>` | Delete the account completely, then log out. Pass either `--password` or `--confirm-username` with `--json`. Prompts never appear in that mode. |
 
 ## Projects and Tasks
 
@@ -108,6 +131,19 @@ gradient account switch work
 | `gradient project cache list` | - | Show all caches the project subscribes to |
 | `gradient project cache add <CACHE>` | - | Subscribe the project to a cache |
 | `gradient project cache remove <CACHE>` | - | End the project's subscription to a cache |
+| `gradient project secret list` | - | List secret names for the selected project. No values appear. |
+| `gradient project secret show <NAME>` | - | Show who last set a secret and when. |
+| `gradient project secret set <NAME>` | `--value <VALUE>` | Create or replace a secret. The command can read from piped stdin or a hidden prompt when `--value` is absent. |
+| `gradient project secret delete <NAME>` | - | Delete secret |
+| `gradient project show-sops-recipient` | - | Print the SOPS recipient to encrypt the repository's sops files for |
+| `gradient project make-public` | - | Allow users to view selected projects without login. |
+| `gradient project make-project-private` | - | Restrict selected projects to their members |
+| `gradient project team-grant list` | - | List the teams that have access to a project, including pending requests. |
+| `gradient project team-grant add <TEAM>` | `--role <ROLE>`, `--users`, `--workers` | Grant access to the team. A user without admin permissions for the team can send a request to a team admin. |
+| `gradient project team-grant edit <TEAM>` | `--role <ROLE>`, `--users <BOOL>`, `--workers <BOOL>` | Change roles or access for team grants |
+| `gradient project team-grant remove <TEAM>` | - | Delete the team grant or withdraw the pending request. |
+| `gradient project pending-membership-invitation list` | - | List pending membership invitations for a project. |
+| `gradient project pending-membership-invitation revoke <USER>` | - | Cancel Pending Invitations for a User |
 | `gradient task select <TASK>` | - | Choose the task that later commands target, within the selected project |
 | `gradient task show` | - | Display the selected task, its last evaluation and its builds |
 | `gradient task log` | - | Stream logs from the last evaluation of the selected task |

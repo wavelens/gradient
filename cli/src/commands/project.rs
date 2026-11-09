@@ -8,15 +8,18 @@ use crate::commands::completion;
 use crate::config::*;
 use crate::error::CliError;
 use crate::input::{
-    ask_for_choice, client_from_config, handle_input, is_interactive, selected_project,
+    ask_for_choice, ask_for_secret, client_from_config, handle_input, is_interactive,
+    selected_project,
 };
 use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::{
-    AddMemberRequest, MakeProjectRequest, PatchProjectRequest, RemoveMemberRequest,
+    AddMemberRequest, GrantProjectRequest, MakeProjectRequest, PatchProjectGrantRequest,
+    PatchProjectRequest, PutProjectSecretRequest, RemoveMemberRequest, RevokeInvitationRequest,
 };
 use connector::{Client, ConnectorError};
+use std::io::{self, IsTerminal, Read};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -71,6 +74,27 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: CacheCommands,
     },
+    /// Manage the secrets that exec jobs can request for the selected project. Values are write-only.
+    Secret {
+        #[command(subcommand)]
+        cmd: ProjectSecretCommands,
+    },
+    /// Print the SOPS recipient to encrypt the sops files in the repository
+    ShowSopsRecipient,
+    /// Allow visitors to view selected projects without login.
+    MakePublic,
+    /// Restrict the selected project to its members.
+    MakeProjectPrivate,
+    /// Manage teams that can access the selected project
+    TeamGrant {
+        #[command(subcommand)]
+        cmd: ProjectTeamGrantCommands,
+    },
+    /// Manage pending membership invitations for the selected project.
+    PendingMembershipInvitation {
+        #[command(subcommand)]
+        cmd: ProjectPendingInvitationCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -115,6 +139,80 @@ pub enum CacheCommands {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_subscribed_caches))]
         cache: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProjectSecretCommands {
+    /// List secret names
+    List,
+    /// Display the timestamp of the last secret update and the person who made it. Never display the value.
+    Show {
+        /// Secret name
+        name: String,
+    },
+    /// Create or replace a secret. The command can read the value from piped stdin or a hidden prompt with no `--value` argument.
+    Set {
+        /// Secret name
+        name: String,
+        /// Secret value. Flag values can remain in shell history or the process list. Use stdin instead.
+        #[arg(long)]
+        value: Option<String>,
+    },
+    /// Delete a secret
+    Delete {
+        /// Secret name
+        name: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProjectTeamGrantCommands {
+    /// List grants for a team (including pending requests)
+    List,
+    /// Grant team access. A non-admin user can send a request to the team admin.
+    Add {
+        /// Team name
+        team: String,
+        /// Role of team users in a project: `View`, `Write` or `Admin`
+        #[arg(long)]
+        role: Option<String>,
+        /// Allow access for team users
+        #[arg(long)]
+        users: bool,
+        /// Build the project on the team workers.
+        #[arg(long)]
+        workers: bool,
+    },
+    /// Edit the role or access of a team grant.
+    Edit {
+        /// Team name
+        team: String,
+        /// Role of team users in a project: `View`, `Write` or `Admin`
+        #[arg(long)]
+        role: Option<String>,
+        /// Grant (true) or revoke (false) access rights for team users.
+        #[arg(long)]
+        users: Option<bool>,
+        /// Allow team workers to run builds for the project (`true`) or stop the builds (`false`).
+        #[arg(long)]
+        workers: Option<bool>,
+    },
+    /// Delete the team grant or withdraw the pending request.
+    Remove {
+        /// Team name
+        team: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProjectPendingInvitationCommands {
+    /// List pending invitations
+    List,
+    /// Cancel a user's pending invitations
+    Revoke {
+        /// Username
+        user: String,
     },
 }
 
@@ -425,7 +523,253 @@ pub async fn handle(cmd: Commands, out: Output) {
                 }
             }
         }
+
+        Commands::Secret { cmd } => {
+            let project = selected_project(out);
+            let client = client_from_config(out);
+            let projects = client.projects();
+
+            match cmd {
+                ProjectSecretCommands::List => {
+                    match projects.list_secret_summaries(&project).await {
+                        Ok(secrets) => {
+                            out.ok(&secrets);
+                            if secrets.is_empty() {
+                                out.human("No secrets in the project.");
+                            }
+                            for secret in secrets {
+                                out.human(format!("{}: {}", secret.name, secret.updated_at));
+                            }
+                        }
+                        Err(e) => out.fail(e),
+                    }
+                }
+
+                ProjectSecretCommands::Show { name } => {
+                    match projects.get_project_secret_summary(&project, &name).await {
+                        Ok(secret) => {
+                            out.ok(&secret);
+                            out.human(format!("Name: {}", secret.name));
+                            out.human(format!("Updated at: {}", secret.updated_at));
+                            if let Some(by) = &secret.updated_by {
+                                out.human(format!("Updated by: {by}"));
+                            }
+                            out.human(format!("Managed: {}", secret.managed));
+                        }
+                        Err(e) => out.fail(e),
+                    }
+                }
+
+                ProjectSecretCommands::Set { name, value } => {
+                    let value = read_project_secret_value_from_flag_stdin_or_hidden_prompt(
+                        &name, value, out,
+                    );
+                    match projects
+                        .put_project_secret(&project, &name, PutProjectSecretRequest { value })
+                        .await
+                    {
+                        Ok(secret) => {
+                            out.ok(&secret);
+                            out.human("Secret saved.");
+                        }
+                        Err(e) => out.fail(e),
+                    }
+                }
+
+                ProjectSecretCommands::Delete { name } => {
+                    match projects.delete_project_secret(&project, &name).await {
+                        Ok(_) => {
+                            out.ok(&serde_json::json!({"deleted": true, "name": name}));
+                            out.human("Deleted the secret.");
+                        }
+                        Err(e) => out.fail(e),
+                    }
+                }
+            }
+        }
+
+        Commands::ShowSopsRecipient => {
+            let project = selected_project(out);
+            let client = client_from_config(out);
+            match client.projects().get_project_sops_recipient(&project).await {
+                Ok(recipient) => {
+                    out.ok(&recipient);
+                    if let Some(age) = &recipient.age {
+                        out.human(format!("age: {age}"));
+                    }
+                    out.human(format!("ssh: {}", recipient.ssh));
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::MakePublic => {
+            let project = selected_project(out);
+            let client = client_from_config(out);
+            match client.projects().make_project_public(&project).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"public": true, "project": project}));
+                    out.human("The project is now public.");
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::MakeProjectPrivate => {
+            let project = selected_project(out);
+            let client = client_from_config(out);
+            match client.projects().make_project_private(&project).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"public": false, "project": project}));
+                    out.human("The project is now private.");
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::TeamGrant { cmd } => {
+            let project = selected_project(out);
+            let client = client_from_config(out);
+            let projects = client.projects();
+
+            let result = match cmd {
+                ProjectTeamGrantCommands::List => {
+                    match projects.list_project_team_grants(&project).await {
+                        Ok(grants) => {
+                            out.ok(&grants);
+                            if grants.is_empty() {
+                                out.human("No teams have access to the project.");
+                            }
+                            for grant in grants {
+                                out.human(format!(
+                                    "{}: role={} users={} workers={} pending={}",
+                                    grant.team,
+                                    grant.role.as_deref().unwrap_or("-"),
+                                    grant.users,
+                                    grant.workers,
+                                    grant.pending
+                                ));
+                            }
+                        }
+                        Err(e) => out.fail(e),
+                    }
+                    return;
+                }
+                ProjectTeamGrantCommands::Add {
+                    team,
+                    role,
+                    users,
+                    workers,
+                } => {
+                    projects
+                        .grant_team_access_to_project(
+                            &project,
+                            GrantProjectRequest {
+                                team,
+                                role,
+                                users: Some(users),
+                                workers: Some(workers),
+                            },
+                        )
+                        .await
+                }
+                ProjectTeamGrantCommands::Edit {
+                    team,
+                    role,
+                    users,
+                    workers,
+                } => {
+                    projects
+                        .update_project_team_grant(
+                            &project,
+                            &team,
+                            PatchProjectGrantRequest {
+                                role,
+                                users,
+                                workers,
+                            },
+                        )
+                        .await
+                }
+                ProjectTeamGrantCommands::Remove { team } => {
+                    projects.remove_project_team_grant(&project, &team).await
+                }
+            };
+            match result {
+                Ok(message) => {
+                    out.ok(&serde_json::json!({"message": message}));
+                    out.human(format!("{message}."));
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::PendingMembershipInvitation { cmd } => {
+            let project = selected_project(out);
+            let client = client_from_config(out);
+            let projects = client.projects();
+
+            match cmd {
+                ProjectPendingInvitationCommands::List => {
+                    match projects.list_pending_project_invitations(&project).await {
+                        Ok(invitations) => {
+                            out.ok(&invitations);
+                            if invitations.is_empty() {
+                                out.human("No pending invitations in the project.");
+                            }
+                            for invitation in invitations {
+                                out.human(format!(
+                                    "{}: {} until {}",
+                                    invitation.user, invitation.role, invitation.expires_at
+                                ));
+                            }
+                        }
+                        Err(e) => out.fail(e),
+                    }
+                }
+                ProjectPendingInvitationCommands::Revoke { user } => {
+                    match projects
+                        .revoke_project_invitation(&project, RevokeInvitationRequest { user })
+                        .await
+                    {
+                        Ok(_) => {
+                            out.ok(&serde_json::json!({"revoked": true}));
+                            out.human("Invitation revoked.");
+                        }
+                        Err(e) => out.fail(e),
+                    }
+                }
+            }
+        }
     }
+}
+
+fn read_project_secret_value_from_flag_stdin_or_hidden_prompt(
+    name: &str,
+    value: Option<String>,
+    out: Output,
+) -> String {
+    if let Some(value) = value {
+        return value;
+    }
+    if io::stdin().is_terminal() {
+        if out.is_json() {
+            out.fail(CliError::MissingArgument("--value"));
+        }
+        return ask_for_secret(name, out);
+    }
+    let mut piped = String::new();
+    io::stdin()
+        .read_to_string(&mut piped)
+        .unwrap_or_else(|e| out.fail(CliError::ReadInput(name.to_owned(), e)));
+    let value = piped
+        .strip_suffix('\n')
+        .map(|rest| rest.strip_suffix('\r').unwrap_or(rest))
+        .unwrap_or(&piped);
+    if value.is_empty() {
+        out.fail(CliError::EmptyField(name.to_owned()));
+    }
+    value.to_owned()
 }
 
 async fn membership_names(out: Output) -> Vec<String> {

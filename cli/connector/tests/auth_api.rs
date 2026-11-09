@@ -30,3 +30,22 @@ async fn basic_login_returns_token() {
         .unwrap();
     assert_eq!(token, "abc");
 }
+
+#[tokio::test]
+async fn logout_posts_with_the_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/auth/logout"))
+        .and(wiremock::matchers::header("authorization", "Bearer t"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok("Logged out")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    client.auth().logout().await.unwrap();
+}

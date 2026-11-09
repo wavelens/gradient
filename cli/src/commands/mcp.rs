@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::base::parse_subcommand_name_chain_from_cli_args;
 use crate::config::{
     ConfigKey, load_and_migrate_login_config_file, login_name_from_flag_env_or_config,
     saved_login_for_invocation,
@@ -54,6 +55,11 @@ const ALLOWED_GRADIENT_SUBCOMMANDS: &[&str] = &[
     "search",
     "status",
     "info",
+];
+const DENIED_GRADIENT_SUBCOMMANDS: &[&[&str]] = &[
+    &["project", "secret", "set"],
+    &["project", "secret", "delete"],
+    &["task", "action", "create"],
 ];
 const GRADIENT_COMMAND_TIMEOUT_SECONDS: Duration = Duration::from_secs(600);
 const CLI_OUTPUT_SIZE_BEFORE_TEMP_FILE_BYTES: usize = 16 * 1024;
@@ -407,6 +413,16 @@ impl GradientMcp {
             let allowed = ALLOWED_GRADIENT_SUBCOMMANDS.join(", ");
             return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "`{group}` is not available here. Allowed command groups: {allowed}."
+            ))]));
+        }
+        if let Some(chain) = parse_subcommand_name_chain_from_cli_args(&args)
+            && DENIED_GRADIENT_SUBCOMMANDS
+                .iter()
+                .any(|denied| chain.iter().map(String::as_str).eq(denied.iter().copied()))
+        {
+            let command = chain.join(" ");
+            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "`gradient {command}` can work with secret values, so it isn't available here."
             ))]));
         }
         if args
