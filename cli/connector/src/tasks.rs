@@ -4,7 +4,7 @@
 use crate::api::{
     CreateTriggerRequest, EntryPointMetricsResponse, EvaluationSummary, MakeTaskRequest,
     PaginatedEntryPoints, PaginatedTaskResponse, PatchTaskRequest, TaskDetailsResponse,
-    TaskMetricsResponse, TaskResponse, TriggerOut, UpdateTriggerRequest,
+    TaskMetricsResponse, TaskResponse, TransferOwnershipRequest, TriggerOut, UpdateTriggerRequest,
 };
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
@@ -383,6 +383,43 @@ impl TasksApi<'_> {
             self.0.token(),
             Method::DELETE,
             &format!("tasks/{project}/{proj}/triggers/{id}"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn move_task_to_project(
+        &self,
+        project: &str,
+        proj: &str,
+        target_project: &str,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("tasks/{project}/{proj}/transfer"),
+            true,
+        )?
+        .json(&TransferOwnershipRequest {
+            project: target_project.to_owned(),
+        });
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn set_default_trigger(
+        &self,
+        project: &str,
+        proj: &str,
+        id: &str,
+    ) -> Result<TriggerOut, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("tasks/{project}/{proj}/triggers/{id}/default"),
             true,
         )?;
         http::decode(req.send().await?).await

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::commands::completion;
+use crate::commands::{completion, task_subcommands};
 use crate::config::*;
 use crate::input::{client_from_config, handle_input, selected_project, selected_task};
 use crate::output::{Color, ExitKind, Output};
@@ -66,6 +66,238 @@ pub enum Commands {
     Delete,
     /// Start an evaluation of the selected task
     Evaluate,
+    /// Move the selected task to another project.
+    Transfer {
+        /// Name of the target project
+        #[arg(add = ArgValueCompleter::new(completion::complete_projects))]
+        project: String,
+    },
+    /// Manage the connection to the Git repository for the selected task.
+    Repository {
+        #[command(subcommand)]
+        cmd: TaskRepositoryCommands,
+    },
+    /// Manage actions that run on events of the selected task.
+    Action {
+        #[command(subcommand)]
+        cmd: TaskActionCommands,
+    },
+    /// Manage flake input overrides for the selected task
+    FlakeInput {
+        #[command(subcommand)]
+        cmd: FlakeInputCommands,
+    },
+    /// Manage the triggers that start an evaluation of the selected task.
+    Trigger {
+        #[command(subcommand)]
+        cmd: TaskTriggerCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TaskRepositoryCommands {
+    /// Show push and pull request builds, status reports and the integrations of the project
+    Show,
+    /// Change the repository connection. Omitted flags keep their current values.
+    Edit {
+        /// Webhook receiver integration to start a build on pushes and pull requests (by name or UUID)
+        #[arg(long)]
+        inbound_integration: Option<String>,
+        /// Build on push: true or false
+        #[arg(long)]
+        build_on_push: Option<bool>,
+        /// Comma-separated branch patterns that start a build on push. Empty patterns match all branches.
+        #[arg(long, value_delimiter = ',')]
+        push_branches: Option<Vec<String>>,
+        /// Comma-separated tag patterns that start a build on push.
+        #[arg(long, value_delimiter = ',')]
+        push_tags: Option<Vec<String>>,
+        /// Build pull request: true or false
+        #[arg(long)]
+        build_on_pull_request: Option<bool>,
+        /// Comma-separated target branch patterns for pull requests to build. Empty value: all branches.
+        #[arg(long, value_delimiter = ',')]
+        pull_request_branches: Option<Vec<String>>,
+        /// Require approval before building a pull request. The value can be true or false.
+        #[arg(long)]
+        require_approval: Option<bool>,
+        /// An integration of a status reporter that can post commit statuses to a Git host. Specify it by name or UUID.
+        #[arg(long)]
+        outbound_integration: Option<String>,
+        /// Report commit status to Git host: true or false.
+        #[arg(long)]
+        report_status: Option<bool>,
+    },
+    /// Add the SSH key of the project as a read-only deploy key to the repository on the Git host
+    InstallDeployKey {
+        /// Specify the integration for status reports by name or UUID. Gradient can call the Git host with an access token. Default: this task's status reporter.
+        #[arg(long)]
+        outbound_integration: Option<String>,
+    },
+    /// Create a webhook on the Git host to send repository events to Gradient.
+    InstallWebhook {
+        /// Webhook integration that can receive events (name or UUID). Default: the integration that can start the build for this task.
+        #[arg(long)]
+        inbound_integration: Option<String>,
+        /// Specify the integration for status reports by name or UUID. Gradient can call the Git host with an access token. Default: this task's status reporter.
+        #[arg(long)]
+        outbound_integration: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TaskActionCommands {
+    /// List the actions for the selected task.
+    List,
+    /// Show Action
+    Show {
+        /// Action name or UUID
+        action: String,
+    },
+    /// Create an action. The output can only show the `send_web_request` action token, once.
+    Create {
+        /// Action Name
+        #[arg(short, long)]
+        name: String,
+        /// Action config is JSON with a `type` field. The JSON `{"type":"send_mail","recipients":["ops@example.com"]}` is an example.
+        #[arg(short, long)]
+        config: String,
+        /// Comma-separated events that trigger the action (e.g. evaluation.completed)
+        #[arg(short, long, value_delimiter = ',')]
+        events: Vec<String>,
+        /// Create an action as inactive
+        #[arg(long)]
+        inactive: bool,
+    },
+    /// Change the action. Flags not specified keep their current values.
+    Edit {
+        /// Action name or UUID
+        action: String,
+        /// Action Name
+        #[arg(short, long)]
+        name: Option<String>,
+        /// Action config is JSON with a `type` field. The JSON `{"type":"send_mail","recipients":["ops@example.com"]}` is an example.
+        #[arg(short, long)]
+        config: Option<String>,
+        /// Comma-separated events that trigger the action (e.g. evaluation.completed)
+        #[arg(short, long, value_delimiter = ',')]
+        events: Option<Vec<String>>,
+        /// Switch an action on or off: true or false.
+        #[arg(long)]
+        active: Option<bool>,
+    },
+    /// Delete action
+    Delete {
+        /// Action name or UUID
+        action: String,
+    },
+    /// List past deliveries of the action
+    Deliveries {
+        /// Action name or UUID
+        action: String,
+        /// Maximum number of entries
+        #[arg(long)]
+        limit: Option<u64>,
+        /// Number of entries to skip
+        #[arg(long)]
+        offset: Option<u64>,
+    },
+    /// Show delivery with request body and response body.
+    Delivery {
+        /// Action name or UUID
+        action: String,
+        /// Delivery UUID
+        delivery: String,
+    },
+    /// Run the action right now with a test event. Actions for a Git host only check the connection.
+    Test {
+        /// Action name or UUID
+        action: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum FlakeInputCommands {
+    /// List the flake input overrides of the selected task
+    List,
+    /// Display override settings for flake inputs
+    Show {
+        /// Name of the flake input, or the UUID of the override
+        input: String,
+    },
+    /// Override flake inputs for evaluation of the selected task
+    Create {
+        /// Name of the flake input (e.g. nixpkgs)
+        input_name: String,
+        /// Flake reference to use instead (e.g. github:NixOS/nixpkgs/nixos-unstable). Leave this option empty to update the input and preserve the original URL.
+        #[arg(long)]
+        url: Option<String>,
+    },
+    /// Change the override for a flake input.
+    Edit {
+        /// Name of the flake input, or the UUID of the override
+        input: String,
+        /// Name of the flake input (e.g. nixpkgs)
+        #[arg(long)]
+        new_name: Option<String>,
+        /// Flake reference to use instead (e.g. github:NixOS/nixpkgs/nixos-unstable). Leave this option empty to update the input and preserve the original URL.
+        #[arg(long, conflicts_with = "clear_url")]
+        url: Option<String>,
+        /// Remove the URL and update the input to retain the original URL.
+        #[arg(long)]
+        clear_url: bool,
+    },
+    /// Delete flake input overrides
+    Delete {
+        /// Name of the flake input, or the UUID of the override
+        input: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TaskTriggerCommands {
+    /// List the triggers for the selected task.
+    List,
+    /// Show trigger
+    Show {
+        /// Trigger UUID
+        trigger: String,
+    },
+    /// Create a trigger
+    Create {
+        /// Specify the trigger configuration as JSON with a `type` field. An example is '{"type":"time","cron":"0 3 * * *"}'
+        #[arg(short, long)]
+        config: String,
+        /// Create the trigger as inactive.
+        #[arg(long)]
+        inactive: bool,
+    },
+    /// Change the trigger. Omitted flags keep their current value.
+    Edit {
+        /// Trigger UUID
+        trigger: String,
+        /// Specify the trigger configuration as JSON with a `type` field. An example is '{"type":"time","cron":"0 3 * * *"}'
+        #[arg(short, long)]
+        config: Option<String>,
+        /// Enable or disable the trigger with true or false.
+        #[arg(long)]
+        active: Option<bool>,
+    },
+    /// Delete Trigger
+    Delete {
+        /// Trigger UUID
+        trigger: String,
+    },
+    /// Fire the trigger now against the task's current head commit.
+    Test {
+        /// Trigger UUID
+        trigger: String,
+    },
+    /// Set the trigger to default. Manual evaluations use that branch.
+    Default {
+        /// Trigger UUID
+        trigger: String,
+    },
 }
 
 pub async fn handle(cmd: Commands, out: Output) {
@@ -333,5 +565,39 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Err(e) => out.fail(e),
             }
         }
+
+        Commands::Transfer { project: target } => {
+            let (project, task) = selected_task(out);
+
+            let client = client_from_config(out);
+            match client
+                .tasks()
+                .move_task_to_project(&project, &task, &target)
+                .await
+            {
+                Ok(_) => {
+                    let old = format!("{project}/{task}");
+                    update_or_create_saved_login_in_config_file(|login| {
+                        if login.selected_task.as_deref() == Some(old.as_str()) {
+                            login.selected_task = Some(format!("{target}/{task}"));
+                        }
+                    });
+                    out.ok(&serde_json::json!({"moved": true, "project": target, "task": task}));
+                    out.human(format!("Moved task to project {target}."));
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::Repository { cmd } => {
+            task_subcommands::handle_task_repository_subcommand(cmd, out).await
+        }
+        Commands::Action { cmd } => {
+            task_subcommands::run_gradient_task_action_subcommand(cmd, out).await
+        }
+        Commands::FlakeInput { cmd } => {
+            task_subcommands::run_flake_input_subcommand(cmd, out).await
+        }
+        Commands::Trigger { cmd } => task_subcommands::run_task_trigger_subcommand(cmd, out).await,
     }
 }

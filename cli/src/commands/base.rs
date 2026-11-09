@@ -157,6 +157,14 @@ enum MainCommands {
         #[arg(long)]
         out: Option<String>,
     },
+    /// Search projects, tasks, cache, commit entries and store paths. List starred items when the query is empty.
+    Search {
+        /// Text, a prefix of a commit hash, or a store path
+        query: Option<String>,
+        /// Maximum name matches per kind
+        #[arg(long)]
+        limit: Option<u64>,
+    },
     /// Inspect builds (dependency graph)
     Builds {
         #[command(subcommand)]
@@ -446,6 +454,9 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         MainCommands::Pr { cmd } => pr::handle(cmd, out).await,
         MainCommands::Worker { cmd } => worker::handle(cmd, out).await,
         MainCommands::Cache { cmd } => cache::handle(cmd, out).await,
+        MainCommands::Search { query, limit } => {
+            search_command::run_gradient_search_command(query, limit, out).await
+        }
         MainCommands::Builds { cmd } => builds::handle(cmd, out).await,
         MainCommands::Evaluation { cmd } => evaluation::handle(cmd, out).await,
         MainCommands::Generate { cmd } => generate::handle(cmd, out).await,

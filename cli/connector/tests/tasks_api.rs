@@ -151,3 +151,53 @@ async fn entry_points_filter_by_evaluation() {
         connector::api::BuildStatus::Completed
     );
 }
+
+#[tokio::test]
+async fn moving_task_posts_target_project_name_to_transfer() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/tasks/proj/nightly/transfer"))
+        .and(body_json(serde_json::json!({"project": "other"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok("moved")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    client
+        .tasks()
+        .move_task_to_project("proj", "nightly", "other")
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_making_trigger_default_posts_to_default_endpoint_and_decodes_trigger() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/tasks/proj/nightly/triggers/00000000-0000-0000-0000-000000000007/default"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000007", "task": "00000000-0000-0000-0000-000000000008", "type": "time", "config": {"cron": "0 3 * * *"},
+            "active": true, "is_default": true, "last_fired_at": null,
+            "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00"
+        }))))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    let trigger = client
+        .tasks()
+        .set_default_trigger("proj", "nightly", "00000000-0000-0000-0000-000000000007")
+        .await
+        .unwrap();
+    assert!(trigger.is_default);
+}

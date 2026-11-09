@@ -51,6 +51,7 @@ const ALLOWED_GRADIENT_SUBCOMMANDS: &[&str] = &[
     "builds",
     "evaluation",
     "logs",
+    "search",
     "status",
     "info",
 ];
@@ -395,7 +396,7 @@ impl GradientMcp {
     #[tool(
         description = "Run a `gradient` CLI command with `--json` and return its output. The first \
                        argument is the command group (project, task, cache, worker, builds, \
-                       evaluation, logs, status, info)."
+                       evaluation, logs, search, status, info)."
     )]
     async fn run_gradient_command(
         &self,

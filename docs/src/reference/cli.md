@@ -116,6 +116,31 @@ gradient account switch work
 | `gradient task edit` | `--new-name <NEW_NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--repository <REPOSITORY>`, `--wildcard <WILDCARD>` | Change details of the selected task |
 | `gradient task delete` | - | Remove the selected task |
 | `gradient task evaluate` | - | Trigger a new evaluation of the selected task |
+| `gradient task transfer <PROJECT>` | - | Move the selected task to another project. |
+| `gradient task repository show` | - | Show push and pull request builds, commit status reports and the Git host integrations of the project |
+| `gradient task repository edit` | `--inbound-integration <INTEGRATION>`, `--build-on-push <BOOL>`, `--push-branches <PATTERNS>`, `--push-tags <PATTERNS>`, `--build-on-pull-request <BOOL>`, `--pull-request-branches <PATTERNS>`, `--require-approval <BOOL>`, `--outbound-integration <INTEGRATION>`, `--report-status <BOOL>` | Change the repository connection. Pass the integration as a name or UUID. Omitted flags keep their current values. |
+| `gradient task repository install-deploy-key` | `--outbound-integration <INTEGRATION>` | Add the project SSH key as a read-only deploy key on the Git host. Defaults to the status reporter of the task |
+| `gradient task repository install-webhook` | `--inbound-integration <INTEGRATION>`, `--outbound-integration <INTEGRATION>` | Create a webhook on the Git host to send repository events to Gradient. The default is the task integration. |
+| `gradient task action list` | - | List actions of the selected task. |
+| `gradient task action show <ACTION>` | - | Print one action by name or UUID |
+| `gradient task action create --name <NAME> --config <JSON>` | `--events <EVENTS>`, `--inactive` | Create an action from JSON settings. Command output: the token for the new send_web_request action, one time only. |
+| `gradient task action edit <ACTION>` | `--name <NAME>`, `--config <JSON>`, `--events <EVENTS>`, `--active <BOOL>` | Change the action. Omitted flags keep their current values. |
+| `gradient task action delete <ACTION>` | - | Delete action |
+| `gradient task action deliveries <ACTION>` | `--limit <LIMIT>`, `--offset <OFFSET>` | List past deliveries of an action |
+| `gradient task action delivery <ACTION> <DELIVERY>` | - | Print one delivery, with request body and response body |
+| `gradient task action test <ACTION>` | - | Run an action right away with a test event. Actions for the Git host only check the connection. |
+| `gradient task flake-input list` | - | List the flake input overrides of the selected task |
+| `gradient task flake-input show <INPUT>` | - | Print one override by input name or UUID. |
+| `gradient task flake-input create <INPUT_NAME>` | `--url <URL>` | Override the flake input. Omit `--url` to update the input and keep the original URL. |
+| `gradient task flake-input edit <INPUT>` | `--new-name <NEW_NAME>`, `--url <URL>`, `--clear-url` | Rename the override or change its URL. |
+| `gradient task flake-input delete <INPUT>` | - | Delete override |
+| `gradient task trigger list` | - | List the triggers of the selected task. |
+| `gradient task trigger show <TRIGGER>` | - | Print one trigger |
+| `gradient task trigger create --config <JSON>` | `--inactive` | Create Trigger from JSON Configuration |
+| `gradient task trigger edit <TRIGGER>` | `--config <JSON>`, `--active <BOOL>` | Change the trigger. Omitted flags keep their current values. |
+| `gradient task trigger delete <TRIGGER>` | - | Delete a trigger |
+| `gradient task trigger test <TRIGGER>` | - | Fire the trigger now against the current head commit of the task. |
+| `gradient task trigger default <TRIGGER>` | - | Set the trigger to default. Manual evaluations use that branch. |
 
 ## Builds and Evaluations
 
@@ -184,6 +209,7 @@ gradient account switch work
 | Command | Options | Description |
 |---|---|---|
 | `gradient generate apikey` | - | Create an API token plus the digest needed for a declarative `api_keys.<name>.key_file`, see [API Key Files](../concepts/declarative-state.md#api-key-files) |
+| `gradient search [QUERY]` | `--limit <LIMIT>` | Search readable projects, tasks, caches, commit records and store paths. List starred items if the query is empty. |
 | `gradient mcp` | `--control` | Expose this Gradient instance to MCP clients over stdio |
 
 ## Interactive Mode

@@ -12,10 +12,14 @@ pub mod caches;
 pub mod commits;
 pub mod evals;
 pub mod exec_jobs;
+pub mod flake_inputs;
 pub mod integrations;
 pub mod projects;
 pub mod pull_requests;
+pub mod search;
 pub mod server;
+pub mod task_event_actions;
+pub mod task_repository;
 pub mod tasks;
 pub mod user;
 pub mod workers;
@@ -95,6 +99,18 @@ impl Client {
     }
     pub fn tasks(&self) -> tasks::TasksApi<'_> {
         tasks::TasksApi(self)
+    }
+    pub fn task_event_actions(&self) -> task_event_actions::TaskActionsApi<'_> {
+        task_event_actions::TaskActionsApi(self)
+    }
+    pub fn flake_inputs(&self) -> flake_inputs::TaskFlakeInputOverridesApi<'_> {
+        flake_inputs::TaskFlakeInputOverridesApi(self)
+    }
+    pub fn task_repository(&self) -> task_repository::TaskRepositoryConnectionApi<'_> {
+        task_repository::TaskRepositoryConnectionApi(self)
+    }
+    pub fn search(&self) -> search::SearchApi<'_> {
+        search::SearchApi(self)
     }
     pub fn server(&self) -> server::ServerApi<'_> {
         server::ServerApi(self)

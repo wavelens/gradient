@@ -34,6 +34,8 @@ mod run_logs;
 mod run_terminal;
 mod run_waiting;
 pub mod saved_account_commands;
+pub mod search_command;
 pub mod task;
+pub mod task_subcommands;
 pub mod watch;
 pub mod worker;
