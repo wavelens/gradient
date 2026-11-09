@@ -8,21 +8,29 @@
 
 .gr-toast {
   position: fixed;
-  bottom: $spacing-md;
-  left: 50%;
+  top: calc(#{$header-height} + #{$spacing-sm});
+  right: $spacing-md;
   z-index: $z-tooltip;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-end;
   gap: $spacing-sm;
   max-width: calc(100vw - 2 * #{$spacing-md});
-  transform: translateX(-50%);
 
   &:empty { display: none; }
+
+  @media (max-width: $breakpoint-sm) {
+    left: $spacing-sm;
+    right: $spacing-sm;
+    align-items: stretch;
+    max-width: none;
+
+    .gr-toast__item { max-width: none; }
+  }
 }
 
 @keyframes gr-toast-enter {
-  from { opacity: 0; transform: translateY(16px); }
+  from { opacity: 0; transform: translateY(-16px); }
   to   { opacity: 1; transform: none; }
 }
 
