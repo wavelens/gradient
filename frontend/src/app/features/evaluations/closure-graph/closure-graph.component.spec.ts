@@ -7,7 +7,7 @@
 import { TestBed } from '@angular/core/testing';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { ClosureGraphComponent } from './closure-graph.component';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ClosureGraph } from '@core/models';
@@ -27,8 +27,7 @@ function service(graph: ClosureGraph) {
   };
 }
 
-function setup(kind: string, type?: string, graph: ClosureGraph = emptyGraph) {
-  const svc = service(graph);
+function setup(kind: string, type?: string, graph: ClosureGraph = emptyGraph, svc = service(graph)) {
   const route = {
     snapshot: {
       paramMap: convertToParamMap({ project: 'acme', kind, id: 'x1' }),
@@ -100,6 +99,20 @@ describe('ClosureGraphComponent - diagram', () => {
     fixture.detectChanges();
     expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent?.trim()).toBe('CI checks');
     fixture.destroy();
+  });
+
+  it('keeps the breadcrumb on a failed load and loads again on Try Again', () => {
+    const svc = service(emptyGraph);
+    svc.getBuildRuntimeClosure.mockReturnValueOnce(throwError(() => ({ status: 500, message: 'database unavailable' })));
+    const { fixture } = setup('build', undefined, emptyGraph, svc);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('gr-breadcrumb')).not.toBeNull();
+    expect(root.textContent).toContain('database unavailable');
+
+    [...root.querySelectorAll('button')].find((b) => b.textContent?.includes('Try Again'))!.click();
+    fixture.detectChanges();
+    expect(svc.getBuildRuntimeClosure).toHaveBeenCalledTimes(2);
+    expect(root.querySelector('gr-empty-state')?.textContent).toContain('No outputs to measure');
   });
 
   it('explains an empty closure instead of drawing an empty canvas', () => {

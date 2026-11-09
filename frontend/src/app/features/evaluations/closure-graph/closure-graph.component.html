@@ -9,12 +9,11 @@
     <div class="full-loading">
       <gr-loading-spinner message="Loading closure…" />
     </div>
-  } @else if (errorMsg()) {
-    <div class="error-state">
-      <gr-icon name="error" size="xl" />
-      <p>{{ errorMsg() }}</p>
-      <a grButton label="Go Back" severity="secondary" [routerLink]="back()"></a>
+  } @else if (loadError()) {
+    <div class="closure-header">
+      <gr-breadcrumb [trail]="breadcrumb()" />
     </div>
+    <gr-load-state class="error-state" [error]="loadError()" errorTitle="Failed to load closure" (retry)="load()" />
   } @else {
     <div class="closure-header">
       <div class="header-left">
@@ -29,6 +28,8 @@
               <span>{{ plural(nodeCount(), 'package') }} in closure</span>
               <span class="sep">·</span>
               <span>{{ totalLabel() }}</span>
+              <span class="sep">·</span>
+              <span>Sizes include all dependencies</span>
               @if (truncated()) {
                 <span class="sep">·</span>
                 <span class="warn">large closure - node list truncated</span>

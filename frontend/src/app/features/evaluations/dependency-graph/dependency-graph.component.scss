@@ -33,17 +33,11 @@
 }
 
 .error-state {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
-  gap: $spacing-md;
-  color: var(--gr-text-secondary);
-
-  gr-icon {
-    color: var(--gr-status-danger);
-  }
 }
 
 // ── Header ────────────────────────────────────────────────────────────────────

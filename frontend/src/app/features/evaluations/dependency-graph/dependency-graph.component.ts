@@ -19,19 +19,19 @@ import {
   ChangeDetectionStrategy
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { auditTime, filter } from 'rxjs/operators';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { type BuildOrigin, buildOriginLink, links, readBuildOrigin } from '@shared/routing';
+import { type BuildOrigin, links, readBuildOrigin } from '@shared/routing';
 import {
   BadgeComponent,
   BadgeSeverity,
   BreadcrumbComponent,
-  ButtonComponent,
   IconComponent,
+  LoadStateComponent,
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
 import { formatDuration, plural } from '@shared/text';
@@ -55,7 +55,7 @@ interface LayoutNode extends DependencyGraphNode {
 @Component({
   selector: 'app-dependency-graph',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent, BreadcrumbComponent],
+  imports: [CommonModule, LoadingSpinnerComponent, LoadStateComponent, IconComponent, BadgeComponent, BreadcrumbComponent],
   templateUrl: './dependency-graph.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './dependency-graph.component.scss',
@@ -75,13 +75,12 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   @ViewChild('legendEl') colourLegendBoxRef?: ElementRef<HTMLElement>;
 
   loading = signal(true);
-  errorMsg = signal<string | null>(null);
+  loadError = signal<unknown>(null);
 
   projectName = '';
   buildId = '';
   private from = signal<BuildOrigin>({});
   breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from(), this.buildId, 'Dependency graph'));
-  back = computed(() => buildOriginLink(this.projectName, this.from(), this.buildId));
   rootId = signal('');
   nodeCount = signal(0);
   edgeCount = signal(0);
@@ -138,7 +137,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
   loadGraph(): void {
     this.loading.set(true);
-    this.errorMsg.set(null);
+    this.loadError.set(null);
     this.evalService.getBuildGraph(this.buildId).subscribe({
       next: (graph) => {
         this.rootId.set(graph.root);
@@ -166,9 +165,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
           this.startTimer();
         }, 0);
       },
-      error: () => {
+      error: (error: unknown) => {
         this.loading.set(false);
-        this.errorMsg.set('Failed to load dependency graph');
+        this.loadError.set(error);
       },
     });
   }

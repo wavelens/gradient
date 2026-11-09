@@ -32,10 +32,6 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $spacing-md;
-  color: var(--gr-text-secondary);
-
-  gr-icon { color: var(--gr-status-danger); }
 }
 
 .closure-header {

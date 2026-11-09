@@ -9,12 +9,11 @@
     <div class="full-loading">
       <gr-loading-spinner message="Loading dependency graph…" />
     </div>
-  } @else if (errorMsg()) {
-    <div class="error-state">
-      <gr-icon name="error" size="xl" />
-      <p>{{ errorMsg() }}</p>
-      <a grButton label="Go Back" severity="secondary" [routerLink]="back()"></a>
+  } @else if (loadError()) {
+    <div class="graph-header">
+      <gr-breadcrumb [trail]="breadcrumb()" />
     </div>
+    <gr-load-state class="error-state" [error]="loadError()" errorTitle="Failed to load dependency graph" (retry)="loadGraph()" />
   } @else {
 
     <!-- Header -->
@@ -27,9 +26,9 @@
             <gr-badge [severity]="statusSeverity(rootStatus())">{{ statusLabel(rootStatus()) }}</gr-badge>
           </div>
           <div class="header-meta">
-            <span>{{ plural(nodeCount(), 'package') }}</span>
+            <span>{{ plural(nodeCount(), 'build') }}</span>
             <span class="sep">·</span>
-            <span>{{ plural(edgeCount(), 'dependency', 'dependencies') }}</span>
+            <span>{{ plural(edgeCount(), 'link') }}</span>
             @if (!showLabels()) {
               <span class="sep">·</span>
               <span class="zoom-hint-inline">Zoom in for names</span>

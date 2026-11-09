@@ -10,16 +10,16 @@ import {
   ChangeDetectionStrategy
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { type BuildOrigin, buildOriginLink, readBuildOrigin } from '@shared/routing';
+import { type BuildOrigin, readBuildOrigin } from '@shared/routing';
 import {
   BadgeComponent,
   BreadcrumbComponent,
-  ButtonComponent,
   EmptyStateComponent,
   IconComponent,
+  LoadStateComponent,
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
 import { formatBytes, plural } from '@shared/text';
@@ -46,7 +46,7 @@ type LaidLink = { source: LaidNode; target: LaidNode; width?: number; value: num
 @Component({
   selector: 'app-closure-graph',
   standalone: true,
-  imports: [CommonModule, RouterLink, ButtonComponent, EmptyStateComponent, LoadingSpinnerComponent, IconComponent, BadgeComponent, BreadcrumbComponent],
+  imports: [CommonModule, EmptyStateComponent, LoadStateComponent, LoadingSpinnerComponent, IconComponent, BadgeComponent, BreadcrumbComponent],
   templateUrl: './closure-graph.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './closure-graph.component.scss',
@@ -63,7 +63,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   @ViewChild('graphEl') graphRef!: ElementRef<SVGGElement>;
 
   loading = signal(true);
-  errorMsg = signal<string | null>(null);
+  loadError = signal<unknown>(null);
   truncated = signal(false);
   rootName = signal('');
   totalLabel = signal('');
@@ -77,7 +77,6 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   projectName = '';
   private from: BuildOrigin = {};
   breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from, this.id, 'Closure'));
-  back = computed(() => buildOriginLink(this.projectName, this.from, this.kind === 'build' ? this.id : undefined));
   kind = '';
   id = '';
   closureType = 'runtime';
@@ -110,7 +109,9 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     document.body.style.overflow = '';
   }
 
-  private load(): void {
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
     const isEval = this.kind === 'eval';
     const req = this.closureType === 'build'
       ? (isEval ? this.evalService.getEvalClosure(this.id) : this.evalService.getBuildClosure(this.id))
@@ -128,9 +129,9 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
         this.cdr.detectChanges();
         setTimeout(() => this.render(g), 0);
       },
-      error: () => {
+      error: (error: unknown) => {
         this.loading.set(false);
-        this.errorMsg.set('Failed to load closure');
+        this.loadError.set(error);
       },
     });
   }
@@ -182,7 +183,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
         this.build(group, nodes as LaidNode[], links as unknown as LaidLink[], width, linkPath);
         this.bounds = { minX: 0, minY: 0, maxX: width, maxY: height };
       } catch {
-        this.zone.run(() => this.errorMsg.set('Unable to render closure diagram'));
+        this.zone.run(() => this.loadError.set('Unable to render closure diagram'));
         return;
       }
     });

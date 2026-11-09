@@ -7,7 +7,7 @@
 import { TestBed } from '@angular/core/testing';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
-import { Subject, of } from 'rxjs';
+import { Observable, Subject, of, throwError } from 'rxjs';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService } from '@core/services/live.service';
 import { DependencyGraphComponent } from './dependency-graph.component';
@@ -21,10 +21,11 @@ const node = (id: string, status: string | null) => ({
 describe('DependencyGraphComponent live updates', () => {
   afterEach(() => vi.useRealTimers());
 
-  function setup(graph: BuildGraph, query: Record<string, string> = {}) {
+  function setup(graph: BuildGraph, query: Record<string, string> = {}, firstLoad?: Observable<BuildGraph>) {
     vi.useFakeTimers();
     const frames = new Subject<LiveEvent>();
     const getBuildGraph = vi.fn(() => of(graph));
+    if (firstLoad) getBuildGraph.mockReturnValueOnce(firstLoad);
     TestBed.configureTestingModule({
       imports: [DependencyGraphComponent],
       providers: [
@@ -84,11 +85,27 @@ describe('DependencyGraphComponent live updates', () => {
     const header = (fixture.nativeElement as HTMLElement).querySelector('.header-meta')?.textContent ?? '';
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
 
-    expect(header).toContain('2 packages');
-    expect(header).toContain('1 dependency');
-    expect(header).not.toContain('dependencies');
+    expect(header).toContain('2 builds');
+    expect(header).toContain('1 link');
+    expect(header).not.toContain('links');
     expect(text).toContain('Dependency failed');
     expect(text).not.toContain('FailedPermanent');
+    fixture.destroy();
+  });
+
+  it('keeps the breadcrumb on a failed load and loads again on Try Again', () => {
+    const { fixture, getBuildGraph } = setup(
+      { root: 'root', nodes: [node('root', 'Completed')], edges: [] }, {},
+      throwError(() => ({ status: 500, message: 'database unavailable' })),
+    );
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('gr-breadcrumb')).not.toBeNull();
+    expect(root.textContent).toContain('database unavailable');
+
+    [...root.querySelectorAll('button')].find((b) => b.textContent?.includes('Try Again'))!.click();
+    fixture.detectChanges();
+    expect(getBuildGraph).toHaveBeenCalledTimes(2);
+    expect(root.querySelector('.header-meta')?.textContent).toContain('1 build');
     fixture.destroy();
   });
 
