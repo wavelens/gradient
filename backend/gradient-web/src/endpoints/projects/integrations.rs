@@ -400,18 +400,32 @@ pub async fn put_integration(
         None => None,
     };
 
-    let encrypted_token = match body.access_token.as_deref() {
-        Some(t) if !t.is_empty() => Some(
+    let access_token = body
+        .access_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    let endpoint_url = body
+        .endpoint_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let endpoint_url = match (kind, endpoint_url) {
+        (IntegrationKind::Outbound, None) => return Err(ProjectRefusal::InvalidEndpointUrl.into()),
+        (_, Some(url)) => Some(http_endpoint_url(url)?),
+        (_, None) => None,
+    };
+    if kind == IntegrationKind::Outbound && access_token.is_none() {
+        return Err(SharedRefusal::EmptyField("access_token").into());
+    }
+
+    let encrypted_token = match access_token {
+        Some(t) => Some(
             encrypt_secret_with_file(&state.config.secrets.crypt_file, t)
                 .context("encrypt token")?,
         ),
-        _ => None,
+        None => None,
     };
-
-    let endpoint_url = body.endpoint_url.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
-    });
 
     let display_name = body
         .display_name
@@ -470,6 +484,14 @@ async fn connect_tasks(db: &gradient_db::WebDb, project: ProjectId) -> Vec<Strin
     connected
 }
 
+fn http_endpoint_url(url: &str) -> WebResult<String> {
+    url::Url::parse(url)
+        .ok()
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .map(|_| url.to_owned())
+        .ok_or_else(|| ProjectRefusal::InvalidEndpointUrl.into())
+}
+
 fn new_webhook_secret() -> String {
     use rand::RngExt as _;
 
@@ -498,11 +520,7 @@ pub async fn post_connect_git_host(
     if git_host == GitHostType::GitHub {
         return Err(ProjectRefusal::GitHubNeedsApp.into());
     }
-    let endpoint_url = body.endpoint_url.trim().to_string();
-    url::Url::parse(&endpoint_url)
-        .ok()
-        .filter(|u| matches!(u.scheme(), "http" | "https"))
-        .ok_or(ProjectRefusal::InvalidEndpointUrl)?;
+    let endpoint_url = http_endpoint_url(body.endpoint_url.trim())?;
     let name = body.name.into_inner();
     let display_name = body
         .display_name
@@ -705,11 +723,11 @@ pub async fn patch_integration(
     }
 
     if let Some(url) = body.endpoint_url {
-        let trimmed = url.trim().to_string();
+        let trimmed = url.trim();
         active.endpoint_url = Set(if trimmed.is_empty() {
             None
         } else {
-            Some(trimmed)
+            Some(http_endpoint_url(trimmed)?)
         });
     }
 

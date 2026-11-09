@@ -455,6 +455,50 @@ async fn inbound_create_with_secret_returns_no_generated_secret() {
 }
 
 #[tokio::test]
+async fn outbound_create_needs_endpoint_url_and_access_token() {
+    for (body, message) in [
+        (
+            serde_json::json!({"access_token": "tok"}),
+            "endpoint_url must be an http or https URL",
+        ),
+        (
+            serde_json::json!({"endpoint_url": "ftp://git.example.com", "access_token": "tok"}),
+            "endpoint_url must be an http or https URL",
+        ),
+        (
+            serde_json::json!({"endpoint_url": "https://git.example.com"}),
+            "access_token must not be empty",
+        ),
+    ] {
+        let session_id = SessionId::now_v7();
+        let db = with_project_manage(with_auth(mock_db(), session_id))
+            .append_query_results([Vec::<integration::Model>::new()]);
+        let mut request = serde_json::json!({
+            "name": "my-gitea-status",
+            "kind": "outbound",
+            "git_host_type": "gitea",
+        });
+        request
+            .as_object_mut()
+            .unwrap()
+            .extend(body.as_object().unwrap().clone());
+
+        let res = server_with_crypt_key(db)
+            .put("/api/v1/projects/test-project/integrations")
+            .add_header(
+                "authorization",
+                format!("Bearer {}", make_token(session_id)),
+            )
+            .json(&request)
+            .await;
+
+        res.assert_status_bad_request();
+        let body: Value = res.json();
+        assert_eq!(body["message"], message);
+    }
+}
+
+#[tokio::test]
 async fn clearing_inbound_secret_is_rejected() {
     let session_id = SessionId::now_v7();
     let row = gitea_inbound_row();
