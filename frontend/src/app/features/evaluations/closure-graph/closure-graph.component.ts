@@ -116,7 +116,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       ? (isEval ? this.evalService.getEvalClosure(this.id) : this.evalService.getBuildClosure(this.id))
       : (isEval ? this.evalService.getEvalRuntimeClosure(this.id) : this.evalService.getBuildRuntimeClosure(this.id));
     if (isEval) {
-      this.evalService.getEvaluation(this.id).subscribe({ next: (evaluation) => this.rootName.set(evaluationTitle(evaluation)) });
+      this.evalService.getEvaluation(this.id).subscribe({ next: (evaluation) => this.rootName.set(evaluation.task_display_name || evaluation.task_name || evaluationTitle(evaluation)) });
     }
     req.subscribe({
       next: (g) => {
