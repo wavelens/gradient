@@ -15,6 +15,7 @@ import { HtmlOverflowHiddenScrollStrategy } from '../overlay/scroll-strategy';
 import { FormErrors } from '../form-field/form-errors';
 import {
   Component,
+  DestroyRef,
   Injector,
   OnDestroy,
   ViewContainerRef,
@@ -83,6 +84,7 @@ export class DialogComponent implements OnDestroy {
   private vcr = inject(ViewContainerRef);
   private injector = inject(Injector);
   private checker = inject(InteractivityChecker);
+  private destroyRef = inject(DestroyRef);
   private ref?: OverlayRef;
   private leaving = false;
   private elementFocusedBeforeDialogOpened: HTMLElement | null = null;
@@ -162,6 +164,7 @@ export class DialogComponent implements OnDestroy {
     this.leaving = true;
     detachAnimated(this.ref, () => {
       this.leaving = false;
+      if (this.destroyRef.destroyed) return;
       this.restoreFocusToOpenerOrMainContent();
       this.hide.emit();
     });

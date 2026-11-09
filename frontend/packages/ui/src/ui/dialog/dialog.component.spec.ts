@@ -119,6 +119,30 @@ describe('DialogComponent', () => {
     expect(fixture.componentInstance.hidden()).toBe(1);
   });
 
+  it('stays silent when its page is destroyed during the exit animation', () => {
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+    const realStyle = window.getComputedStyle;
+    vi.spyOn(window, 'getComputedStyle').mockImplementation(
+      (el) => ({ ...realStyle(el), animationDuration: '0.2s' }) as CSSStyleDeclaration,
+    );
+    const fixture = render();
+    fixture.componentInstance.open.set(true);
+    fixture.detectChanges();
+    fixture.componentInstance.open.set(false);
+    fixture.detectChanges();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const host = fixture.componentInstance;
+    fixture.destroy();
+    vi.advanceTimersByTime(500);
+    expect(host.hidden()).toBe(0);
+    expect([...warn.mock.calls, ...error.mock.calls]).toEqual([]);
+  });
+
   it('hides the close button when it is not closable', () => {
     const fixture = render();
     fixture.componentInstance.closable.set(false);
