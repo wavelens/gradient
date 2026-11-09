@@ -1493,7 +1493,7 @@ describe('TaskDetailComponent entry point abort and retry', () => {
     expect(labels).toContain('Abort');
     expect(labels).not.toContain('Retry');
     run(fixture, 'Abort');
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Build', target: 'packages."x86_64-linux".hello' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Build', target: 'packages."x86_64-linux".hello · Demo' }));
     expect(spy).toHaveBeenCalledWith('b-hello');
   });
 

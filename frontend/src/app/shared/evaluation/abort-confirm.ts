@@ -12,6 +12,10 @@ export function evaluationAbortTarget(task: string, commit: string | null | unde
   return `${task} · ${commitLabel(commit)}`;
 }
 
+export function buildAbortTargetLine(build: string, task: string): string {
+  return `${build} · ${task}`;
+}
+
 export function abortEvaluationConfirm<T>(target: string, action: () => Observable<T>): ConfirmRequest<T> {
   return {
     title: 'Abort Evaluation',
@@ -28,7 +32,7 @@ export function abortBuildConfirm<T>(target: string, action: () => Observable<T>
   return {
     title: 'Abort Build',
     target,
-    consequence: 'The build for this evaluation stops.',
+    consequence: 'This action can stop the build and end the evaluation as aborted.',
     confirmLabel: 'Abort',
     failure: 'Build abort failed.',
     severity: 'danger',

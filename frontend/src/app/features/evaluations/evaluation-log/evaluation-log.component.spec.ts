@@ -584,7 +584,7 @@ describe('EvaluationLogComponent', () => {
         const reload = reloadedAs(cmp, 'Building');
         const build = target({ status: 'Building' });
         open(cmp, build).get('Abort')!.command!();
-        expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Build', target: cmp.buildDisplayName(build.name) }));
+        expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Abort Build', target: expect.stringContaining(cmp.buildDisplayName(build.name)) }));
         expect(abort).toHaveBeenCalledWith('b1');
         expect(reload).toHaveBeenCalled();
       });

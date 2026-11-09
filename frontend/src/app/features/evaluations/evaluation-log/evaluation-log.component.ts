@@ -70,7 +70,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -1166,8 +1166,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   abortBuild(build: BuildItem): void {
-    const name = this.buildDisplayName(build.name);
-    this.confirm.confirm(abortBuildConfirm(name, () => this.evalService.abortBuild(build.id)))
+    const ev = this.evaluation();
+    const target = buildAbortTargetLine(this.buildDisplayName(build.name), ev?.task_display_name || ev?.task_name || this.projectName);
+    this.confirm.confirm(abortBuildConfirm(target, () =>this.evalService.abortBuild(build.id)))
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.buildActionDone('Build aborted', build));
   }

@@ -57,7 +57,7 @@ import {
   WalkMode,
   EvaluationStatus,
 } from '@core/models';
-import { abortBuildConfirm, abortEvaluationConfirm, evaluationAbortTarget, buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -730,7 +730,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   private abortBuild(ep: EntryPointSummary): void {
-    this.confirm.confirm(abortBuildConfirm(ep.eval, () => this.evaluationsService.abortBuild(ep.build_id))).subscribe(() => {
+    const target = buildAbortTargetLine(ep.eval, this.task()?.display_name || this.taskName);
+    this.confirm.confirm(abortBuildConfirm(target, () =>this.evaluationsService.abortBuild(ep.build_id))).subscribe(() => {
       this.notify.success('Build aborted');
       this.loadTaskData();
     });
