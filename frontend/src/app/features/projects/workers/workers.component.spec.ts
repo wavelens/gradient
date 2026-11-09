@@ -187,7 +187,7 @@ describe('WorkersComponent - no-cache banner (existing)', () => {
       caches: [{ id: 'r', name: 'read-only', mode: 'ReadOnly' }, { id: 'p', name: 'pending', status: 'pending' }],
     });
     await settled(fixture);
-    expect(fixture.nativeElement.querySelector('[data-testid="no-cache-banner"]')?.textContent).toContain('No writable cache');
+    expect(fixture.nativeElement.querySelector('[data-testid="no-cache-banner"]')?.textContent).toContain('Subscription request pending');
   });
 });
 

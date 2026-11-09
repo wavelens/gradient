@@ -78,6 +78,16 @@ describe('ProjectDetailComponent subscribed caches', () => {
     TestBed.resetTestingModule();
     const banner = render(true, undefined, undefined, caches.slice(1)).root.querySelector('[data-testid="no-cache-banner"]');
     expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/caches');
+    expect(banner?.textContent).toContain('No writable cache');
+    expect(banner?.querySelector('a')?.textContent?.trim()).toBe('Add a cache');
+  });
+
+  it('names a pending writable subscription request instead of a missing cache', () => {
+    const pending: CacheSubscriptionItem = { id: 'c4', name: 'shared', display_name: 'Shared', mode: 'ReadWrite', status: 'pending' };
+    const banner = render(true, undefined, undefined, [...caches.slice(1), pending]).root.querySelector('[data-testid="no-cache-banner"]');
+    expect(banner?.textContent).toContain('Subscription request pending');
+    expect(banner?.textContent).not.toContain('No writable cache');
+    expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/caches');
   });
 });
 

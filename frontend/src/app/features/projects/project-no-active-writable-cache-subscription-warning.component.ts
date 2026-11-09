@@ -21,9 +21,15 @@ export function hasActiveCacheSubscriptionWithWriteAccess(caches: readonly Cache
   template: `
     @if (visible()) {
       <gr-message-banner type="warning" data-testid="no-cache-banner">
-        <strong>No writable cache</strong>
-        Evaluations wait for the project to subscribe to a writable cache.
-        <a [routerLink]="links.projectPage(projectName(), 'caches')">Manage cache subscriptions</a>
+        @if (requestPending()) {
+          <strong>Subscription request pending</strong>
+          Evaluations wait until a cache admin approves the request.
+          <a [routerLink]="links.projectPage(projectName(), 'caches')">View request</a>
+        } @else {
+          <strong>No writable cache</strong>
+          Evaluations wait for the project to subscribe to a writable cache.
+          <a [routerLink]="links.projectPage(projectName(), 'caches')">Add a cache</a>
+        }
       </gr-message-banner>
     }
   `,
@@ -38,4 +44,7 @@ export class ProjectNoActiveWritableCacheSubscriptionWarningComponent {
     const caches = this.caches();
     return caches !== null && !hasActiveCacheSubscriptionWithWriteAccess(caches);
   });
+  protected readonly requestPending = computed(() =>
+    (this.caches() ?? []).some((cache) => cache.status === 'pending' && cache.mode !== 'ReadOnly'),
+  );
 }
