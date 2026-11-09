@@ -262,6 +262,18 @@ describe('CacheSettingsComponent - edits', () => {
     saveButton(fixture).click();
     expect(updateCache).not.toHaveBeenCalled();
     expect(setCachePublic).toHaveBeenCalledWith('demo');
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Make cache public', target: 'Demo' }));
+  });
+
+  it('sends nothing when making the cache public is cancelled', () => {
+    const fixture = setup(admin);
+    const { updateCache, setCachePublic } = stubWrites(fixture);
+    confirm.mockImplementation(() => EMPTY);
+    edit(fixture, { priority: 40, public: true });
+    saveButton(fixture).click();
+    expect(updateCache).not.toHaveBeenCalled();
+    expect(setCachePublic).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.saving()).toBe(false);
   });
 
   it.each([

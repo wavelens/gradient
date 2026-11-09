@@ -139,6 +139,20 @@ describe('ProjectSettingsComponent - validation and unsaved edits', () => {
     fixture.componentInstance.saveSettings();
     expect(writes.updateProject).not.toHaveBeenCalled();
     expect(writes.setPublic).toHaveBeenCalledWith('acme');
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Make project public', target: 'Acme' }));
+  });
+
+  it('sends nothing when making the project public is cancelled', async () => {
+    const fixture = setup(admin);
+    const writes = spyOnWrites();
+    await settled(fixture);
+    confirm.mockImplementation(() => EMPTY);
+    fixture.componentInstance.formData = { ...fixture.componentInstance.formData, display_name: 'Renamed', public: true };
+    fixture.componentInstance.saveSettings();
+    expect(writes.updateProject).not.toHaveBeenCalled();
+    expect(writes.setPublic).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.saving()).toBe(false);
+    expect(notify.success).not.toHaveBeenCalled();
   });
 
   it('reports a save with one toast and no hint beside the disabled Save', async () => {

@@ -8,7 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { catchError, map, of, switchMap } from 'rxjs';
+import { catchError, finalize, map, of, switchMap } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -27,7 +27,13 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService, isViewerCacheMember } from '@shared/access';
+import {
+  ManagedDisableDirective,
+  ServerConfigurationManagedBannerComponent,
+  AccessService,
+  isViewerCacheMember,
+  injectSaveSettingsWithPrivateToPublicConfirmation,
+} from '@shared/access';
 import { injectCacheAccess, injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { CacheResponse, CacheSubscribersResponse, PatchCacheRequest } from '@core/models';
@@ -108,6 +114,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private saveSettingsWithPrivateToPublicConfirmation = injectSaveSettingsWithPrivateToPublicConfirmation();
 
   private resolved = injectCacheAccessData();
   access = injectCacheAccess();
@@ -219,39 +226,33 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
       if (values[field] !== this.saved[field]) Object.assign(patch, { [field]: values[field] });
     }
     const visibilityChanged = values.public !== this.saved.public;
+    const save = () =>
+      (Object.keys(patch).length > 0 ? this.cachesService.updateCache(this.cacheName, patch) : of('')).pipe(
+        switchMap(() => {
+          if (!visibilityChanged) return of('');
+          return values.public ? this.cachesService.setCachePublic(this.cacheName) : this.cachesService.setCachePrivate(this.cacheName);
+        }),
+      );
+
     this.saving.set(true);
     this.saveError.set(null);
-
-    const finish = () => {
-      this.saving.set(false);
-      this.saved = values;
-      this.formData = { ...values };
-      this.unsaved.mark();
-      this.notify.success('Cache settings saved');
-      this.loadCache();
-    };
-    const update = Object.keys(patch).length > 0 ? this.cachesService.updateCache(this.cacheName, patch) : of('');
-
-    update.subscribe({
-      next: () => {
-        if (!visibilityChanged) return finish();
-        const visibilityCall = values.public
-          ? this.cachesService.setCachePublic(this.cacheName)
-          : this.cachesService.setCachePrivate(this.cacheName);
-        visibilityCall.subscribe({
-          next: finish,
-          error: (error: unknown) => {
-            this.saveError.set(apiErrorMessage(error, 'Failed to update visibility.'));
-            this.saving.set(false);
-            this.loadCache();
-          },
-        });
-      },
-      error: (error: unknown) => {
-        this.saveError.set(apiErrorMessage(error, 'Failed to save settings.'));
-        this.saving.set(false);
-      },
-    });
+    this.saveSettingsWithPrivateToPublicConfirmation({
+      kind: 'cache',
+      target: this.cache()?.display_name ?? this.cacheName,
+      becomesPublic: values.public && !this.saved.public,
+      save,
+    })
+      .pipe(finalize(() => this.saving.set(false)))
+      .subscribe({
+        next: () => {
+          this.saved = values;
+          this.formData = { ...values };
+          this.unsaved.mark();
+          this.notify.success('Cache settings saved');
+          this.loadCache();
+        },
+        error: (error: unknown) => this.saveError.set(apiErrorMessage(error, 'Failed to save settings.')),
+      });
   }
 
   toggleActive(): void {

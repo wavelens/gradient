@@ -8,7 +8,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Observable, concat, finalize, throwError, catchError } from 'rxjs';
+import { Observable, concat, finalize, toArray } from 'rxjs';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -30,7 +30,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
+import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -89,6 +89,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private saveSettingsWithPrivateToPublicConfirmation = injectSaveSettingsWithPrivateToPublicConfirmation();
   protected accessService = inject(AccessService);
   protected config = inject(ConfigService);
 
@@ -188,34 +189,33 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
     const patch = Object.fromEntries(
       Object.entries(fields).filter(([key, value]) => saved[key as keyof ProjectForm] !== value),
     );
-    const requests: Observable<unknown>[] = [];
-    if (Object.keys(patch).length > 0) {
-      requests.push(this.failWith(this.projectsService.updateProject(this.projectName, patch), 'Failed to save settings.'));
-    }
-    if (visibility !== saved.public) {
-      const visibilityCall = visibility
-        ? this.projectsService.setPublic(this.projectName)
-        : this.projectsService.setPrivate(this.projectName);
-      requests.push(this.failWith(visibilityCall, 'Failed to update visibility.'));
-    }
+    const save = () => {
+      const requests: Observable<unknown>[] = [];
+      if (Object.keys(patch).length > 0) {
+        requests.push(this.projectsService.updateProject(this.projectName, patch));
+      }
+      if (visibility !== saved.public) {
+        requests.push(visibility ? this.projectsService.setPublic(this.projectName) : this.projectsService.setPrivate(this.projectName));
+      }
+      return concat(...requests).pipe(toArray());
+    };
 
     this.saving.set(true);
     this.saveError.set(null);
-    concat(...requests).subscribe({
-      complete: () => {
-        this.saving.set(false);
-        this.notify.success('Project settings saved');
-        this.loadProject();
-      },
-      error: (message: string) => {
-        this.saveError.set(message);
-        this.saving.set(false);
-      },
-    });
-  }
-
-  private failWith<T>(request: Observable<T>, message: string): Observable<T> {
-    return request.pipe(catchError((error: unknown) => throwError(() => apiErrorMessage(error, message))));
+    this.saveSettingsWithPrivateToPublicConfirmation({
+      kind: 'project',
+      target: this.project()?.display_name ?? this.projectName,
+      becomesPublic: visibility && !saved.public,
+      save,
+    })
+      .pipe(finalize(() => this.saving.set(false)))
+      .subscribe({
+        next: () => {
+          this.notify.success('Project settings saved');
+          this.loadProject();
+        },
+        error: (error: unknown) => this.saveError.set(apiErrorMessage(error, 'Failed to save settings.')),
+      });
   }
 
   deleteProject(): void {
