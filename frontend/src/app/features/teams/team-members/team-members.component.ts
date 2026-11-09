@@ -161,7 +161,10 @@ export class TeamMembersComponent implements OnInit {
       return;
     }
     this.users.searchUsers(event.query).subscribe({
-      next: (found) => this.suggestions.set(found.map(formatMemberNameForAutocompleteSuggestion)),
+      next: (found) => {
+        const memberUsernames = new Set(this.members().map((member) => member.user));
+        this.suggestions.set(found.filter((user) => !memberUsernames.has(user.username)).map(formatMemberNameForAutocompleteSuggestion));
+      },
       error: () => this.suggestions.set([]),
     });
   }

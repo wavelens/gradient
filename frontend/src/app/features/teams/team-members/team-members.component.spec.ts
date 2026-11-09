@@ -110,16 +110,17 @@ describe('TeamMembersComponent', () => {
     expect(row.querySelector('[slot="meta"]')?.textContent).toContain('Carol Doe · Role Member');
   });
 
-  it('suggests users to invite by display name and fills in the username', () => {
+  it('suggests users to invite by display name, fills in the username and skips members', () => {
     const { fixture } = setup();
     vi.spyOn(TestBed.inject(UserService), 'searchUsers').mockReturnValue(of([
       { id: 'u1', username: 'carol', name: 'Carol Doe' },
-      { id: 'u2', username: 'dave', name: 'dave' },
+      { id: 'u3', username: 'erin', name: 'erin' },
+      { id: 'u2', username: 'dave', name: 'Dave' },
     ]));
     fixture.componentInstance.search({ query: 'a' });
     expect(fixture.componentInstance.suggestions()).toEqual([
       { label: 'Carol Doe (carol)', value: 'carol' },
-      { label: 'dave', value: 'dave' },
+      { label: 'erin', value: 'erin' },
     ]);
   });
 

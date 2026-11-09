@@ -241,7 +241,10 @@ export class CacheMembersRolesComponent implements OnInit {
       return;
     }
     this.userService.searchUsers(event.query).subscribe({
-      next: (users) => this.userSuggestions.set(users.map(formatMemberNameForAutocompleteSuggestion)),
+      next: (users) => {
+        const memberIds = new Set(this.members().map((member) => member.id));
+        this.userSuggestions.set(users.filter((user) => !memberIds.has(user.username)).map(formatMemberNameForAutocompleteSuggestion));
+      },
       error: () => this.userSuggestions.set([]),
     });
   }
