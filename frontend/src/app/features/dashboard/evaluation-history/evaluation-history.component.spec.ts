@@ -34,5 +34,6 @@ describe('EvaluationHistoryComponent', () => {
     ]);
     expect((rects[1] as HTMLElement).style.height).toBe('100%');
     expect(rects[1].getAttribute('href')).toBe('/project/p/task/t?eval=Failed4000');
+    expect(rects.every((r) => r.getAttribute('tabindex') === '-1')).toBe(true);
   });
 });

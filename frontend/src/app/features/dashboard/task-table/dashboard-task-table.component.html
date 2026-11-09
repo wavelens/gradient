@@ -37,23 +37,24 @@
                 @if (waitingReason) {
                   <span class="waiting" [title]="waitingReason">{{ waitingReason }}</span>
                 } @else {
-                  <code>{{ l.commit.slice(0, 7) }}</code>
+                  <code [title]="l.commit">{{ l.commit.slice(0, 7) }}</code>
                 }
                 <span class="latest-evaluation-relative-time">&nbsp;· {{ l.created_at | relativeTime }}</span>
+                @if (t.evaluationNoNumbersText === null && t.entryPointsPassedCountText) {
+                  <span class="passed-on-phone" [class.failing]="t.failedEntryPointCountText">&nbsp;· {{ t.entryPointsPassedCountText }}</span>
+                }
               } @else {
                 No evaluations yet
               }
             </span>
             <div slot="actions" class="cells">
               <app-evaluation-history [bars]="t.history" [project]="t.project" [task]="t.task" />
-              @let latestEvaluationNoNumbersText =
-                t.latest?.status === 'Aborted' ? 'Aborted' : t.latest?.status === 'Failed' && !t.entry_points?.total ? 'Eval error' : null;
-              @if (latestEvaluationNoNumbersText) {
-                <span class="value"><b>{{ latestEvaluationNoNumbersText }}</b></span>
+              @if (t.evaluationNoNumbersText !== null) {
+                <span class="value"><b>{{ t.evaluationNoNumbersText }}</b></span>
                 <span class="value"></span>
               } @else {
-                <span class="value">
-                  <b>{{ t.entry_points?.total ? t.entry_points!.ok + '/' + t.entry_points!.total : '-' }}</b>
+                <span class="value" [class.failing]="t.failedEntryPointCountText">
+                  <b>{{ t.entryPointsPassedCountText }}</b>
                   <small class="sr-only">Entry points passed</small>
                 </span>
                 <span class="value">

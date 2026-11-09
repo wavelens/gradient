@@ -78,6 +78,26 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelector('.cells')?.textContent).not.toContain('Cache not configured');
   });
 
+  it('names failed entry points next to the passed count in danger text and on the phone meta line', async () => {
+    const { f, root } = render(null, () => of(PAGE));
+    await settle(f);
+    const passed = root.querySelector('gr-row .value')!;
+    expect(passed.textContent).toContain('41/45 · 4 failed');
+    expect(passed.classList).toContain('failing');
+    expect(root.querySelector('.meta .passed-on-phone')?.textContent).toContain('41/45 · 4 failed');
+    expect(root.querySelector('.meta code')?.getAttribute('title')).toBe('a1b2c3d4');
+  });
+
+  it('leaves the passed count and average time empty for a waiting evaluation', async () => {
+    const waiting = row('hosts');
+    waiting.latest = { ...waiting.latest!, status: 'Waiting' };
+    const { f, root } = render(null, () => of({ ...PAGE, tasks: [{ ...waiting, entry_points: { ok: 0, failing: 0, total: 0 } }] }));
+    await settle(f);
+    const values = Array.from(root.querySelectorAll('gr-row .value')).map((c) => c.textContent?.trim());
+    expect(values).toEqual(['', '']);
+    expect(root.querySelector('.meta .passed-on-phone')).toBeNull();
+  });
+
   it('names an evaluation error in place of the passed count and average time', async () => {
     const evaluationError = { ...row('hosts'), entry_points: { ok: 0, failing: 0, total: 0 }, delta: 0 };
     const { f, root } = render(null, () => of({ ...PAGE, tasks: [evaluationError] }));
@@ -160,7 +180,7 @@ describe('DashboardTaskTableComponent', () => {
       c.querySelector('b')?.textContent?.trim(),
       c.querySelector('small.sr-only')?.textContent?.trim(),
     ]);
-    expect(values).toEqual([['41/45', 'Entry points passed'], ['14m 00s', 'average time']]);
+    expect(values).toEqual([['41/45 · 4 failed', 'Entry points passed'], ['14m 00s', 'average time']]);
   });
 
   it('names the project and task by display name and keeps slugs in the link only', () => {

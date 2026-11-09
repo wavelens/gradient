@@ -21,7 +21,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { EMPTY, Observable, Subject, catchError, debounceTime, distinctUntilChanged, filter, map, switchMap, tap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
-import { Filter, Latest, TasksPage } from '@core/models';
+import { Filter, Latest, TaskRow, TasksPage } from '@core/models';
 import { evaluationPhase, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
 import {
   ButtonComponent,
@@ -60,6 +60,19 @@ function parseFilter(value: string | null): Filter | null {
 function parsePageQueryParameter(value: string | null): number | null {
   const page = Number(value);
   return value !== null && Number.isInteger(page) && page >= 1 ? page : null;
+}
+
+function evaluationNoNumbersText(t: TaskRow): string | null {
+  switch (t.latest?.status) {
+    case 'Aborted':
+      return 'Aborted';
+    case 'Waiting':
+      return '';
+    case 'Failed':
+      return t.entry_points?.total ? null : 'Eval error';
+    default:
+      return null;
+  }
 }
 
 function areDashboardTaskListRequestParametersEqual(a: DashboardTaskListRequestParameters, b: DashboardTaskListRequestParameters): boolean {
@@ -105,7 +118,17 @@ export class DashboardTaskTableComponent implements OnInit {
   hidden = signal(false);
   selected = computed(() => this.filter() ?? this.data()?.filter ?? null);
   taskRowsWithNewestHistoryBarsThatFit = computed(() =>
-    (this.data()?.tasks ?? []).map((t) => ({ ...t, history: t.history.slice(-this.history()) })),
+    (this.data()?.tasks ?? []).map((t) => {
+      const failedEntryPointCountText = t.entry_points?.failing ? `${t.entry_points.failing} failed` : '';
+      const ratio = t.entry_points?.total ? `${t.entry_points.ok}/${t.entry_points.total}` : '';
+      return {
+        ...t,
+        history: t.history.slice(-this.history()),
+        evaluationNoNumbersText: evaluationNoNumbersText(t),
+        entryPointsPassedCountText: [ratio, failedEntryPointCountText].filter(Boolean).join(' · '),
+        failedEntryPointCountText,
+      };
+    }),
   );
   emptyFilteredTasksTitle = computed(() => FILTERS.find((f) => f.key === this.selected())?.empty ?? 'No tasks');
   chips = computed(() => {

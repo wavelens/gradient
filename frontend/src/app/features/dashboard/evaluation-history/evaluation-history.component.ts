@@ -26,6 +26,7 @@ const MIN_HEIGHT_PCT = 15;
           class="bar"
           [style.background]="b.color"
           [style.height]="b.height"
+          tabindex="-1"
           [routerLink]="links.task(project(), task(), b.id)"
           [grTooltip]="b.title"
           [attr.aria-label]="b.title"

@@ -6,7 +6,7 @@
 
 @use '@gradient/ui/styles/variables' as *;
 
-$task-table-value-cell-grid-template-columns: 24cqi 6rem 5rem;
+$task-table-value-cell-grid-template-columns: 24cqi 8rem 5rem;
 $linked-list-row-chevron-icon-width: 20px;
 
 .section {
@@ -47,8 +47,7 @@ $linked-list-row-chevron-icon-width: 20px;
 }
 
 .task {
-  flex-shrink: 0;
-  max-width: 100%;
+  min-width: min(6rem, 100%);
 }
 
 .meta {
@@ -61,8 +60,18 @@ $linked-list-row-chevron-icon-width: 20px;
   color: var(--gr-text-secondary);
 }
 
-.latest-evaluation-relative-time {
+.latest-evaluation-relative-time,
+.passed-on-phone {
   flex-shrink: 0;
+}
+
+.passed-on-phone {
+  display: none;
+}
+
+.failing,
+.failing b {
+  color: var(--gr-status-danger);
 }
 
 code {
@@ -100,6 +109,15 @@ code {
 }
 
 @media (max-width: $breakpoint-md) {
+  .name,
+  .meta {
+    flex-wrap: wrap;
+  }
+
+  .passed-on-phone {
+    display: inline;
+  }
+
   .cells {
     grid-template-columns: 22cqi;
   }
