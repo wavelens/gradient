@@ -216,18 +216,35 @@ describe('WebhooksComponent', () => {
 
   it('keeps a refused save inside the open webhook dialog', () => {
     const { fixture, component, service, root } = setup({ webhookScope: 'project' }, { project: 'p' });
-    service.create.mockReturnValue(throwError(() => new ApiError('Enter a full URL', 422)));
+    service.create.mockReturnValue(throwError(() => new ApiError('unknown event filter', 422)));
     component.startCreate();
     component.name.set('ci');
     component.url.set('https://example.com/hook');
     component.save();
     fixture.detectChanges();
     expect(component.formOpen()).toBe(true);
-    expect(document.querySelector('.gr-dialog')?.textContent).toContain('Enter a full URL');
-    expect(root.textContent).not.toContain('Enter a full URL');
+    expect(document.querySelector('.gr-dialog')?.textContent).toContain('unknown event filter');
+    expect(root.textContent).not.toContain('unknown event filter');
 
     component.startCreate();
     expect(component.formError()).toBeNull();
+  });
+
+  it('shows a refused URL under the URL field until the URL changes', () => {
+    const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
+    service.create.mockReturnValue(throwError(() => new ApiError("URL host 'localhost' is not allowed", 422)));
+    component.startCreate();
+    component.name.set('ci');
+    component.url.set('http://localhost/hook');
+    component.save();
+    fixture.detectChanges();
+    const field = document.querySelector('#webhook-url')!.closest('gr-form-field')!;
+    expect(field.textContent).toContain("URL host 'localhost' is not allowed");
+    expect(component.formError()).toBeNull();
+
+    component.url.set('https://example.com/hook');
+    fixture.detectChanges();
+    expect(field.textContent).not.toContain('localhost');
   });
 
   it.each([

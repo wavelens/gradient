@@ -17,7 +17,7 @@ import { TeamAccessData } from '@core/resolvers/team-access.resolver';
 import { AuthService } from '@core/services/auth.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { WebhooksService } from '@core/services/webhooks.service';
-import { apiErrorMessage } from '@core/services/api.service';
+import { ApiError, apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import {
   BadgeComponent,
@@ -98,9 +98,11 @@ export class WebhooksComponent implements OnInit {
   active = signal(true);
   attempted = signal(false);
   nameError = computed(() => (this.attempted() && !this.name().trim() ? 'Enter a name.' : null));
+  serverUrlError = signal<{ url: string; message: string } | null>(null);
   urlError = computed(() => {
     if (!this.url().trim()) return this.attempted() ? 'Enter the URL to receive events.' : null;
-    return fieldChecks.httpUrl(this.url());
+    const refused = this.serverUrlError();
+    return fieldChecks.httpUrl(this.url()) ?? (refused?.url === this.url().trim() ? refused.message : null);
   });
 
   revealedSecret = signal<string | null>(null);
@@ -222,6 +224,7 @@ export class WebhooksComponent implements OnInit {
 
   private fill(hook: WebhookResponse | null): void {
     this.formError.set(null);
+    this.serverUrlError.set(null);
     this.attempted.set(false);
     this.editing.set(hook);
     this.name.set(hook?.name ?? '');
@@ -257,7 +260,8 @@ export class WebhooksComponent implements OnInit {
       this.load();
     };
     const failed = (err: unknown) => {
-      this.formError.set(apiErrorMessage(err, 'Failed to save webhook.'));
+      if (err instanceof ApiError && err.status === 422 && /\bURL\b/.test(err.message)) this.serverUrlError.set({ url: body.url, message: err.message });
+      else this.formError.set(apiErrorMessage(err, 'Failed to save webhook.'));
       this.saving.set(false);
     };
     if (target) {
