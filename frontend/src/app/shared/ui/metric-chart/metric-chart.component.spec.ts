@@ -136,16 +136,18 @@ describe('MetricChartComponent', () => {
     expect(root.querySelector('h2')).toBeNull();
     expect(root.querySelector('.metric-chart__subtitle')).toBeNull();
   });
-  it('gives up to nine series distinct palette colours', () => {
-    const roles = ['--gr-graph-running', '--gr-graph-danger', '--gr-graph-success', '--gr-graph-warning', '--gr-chart-purple', '--gr-chart-cyan', '--gr-chart-pink', '--gr-chart-orange', '--gr-chart-teal'];
+  it('gives up to eight series distinct palette colours and keeps the danger colour out of it', () => {
+    const roles = ['--gr-graph-running', '--gr-graph-success', '--gr-graph-warning', '--gr-chart-purple', '--gr-chart-cyan', '--gr-chart-pink', '--gr-chart-orange', '--gr-chart-teal'];
     const root = document.documentElement.style;
     roles.forEach((role, i) => root.setProperty(role, `#00000${i}`));
+    root.setProperty('--gr-graph-danger', '#ff0000');
     try {
       const palette = resolveChartTheme().palette;
-      expect(palette.length).toBe(9);
-      expect(new Set(palette).size).toBe(9);
+      expect(palette.length).toBe(8);
+      expect(new Set(palette).size).toBe(8);
+      expect(palette).not.toContain('#ff0000');
     } finally {
-      roles.forEach((role) => root.removeProperty(role));
+      [...roles, '--gr-graph-danger'].forEach((role) => root.removeProperty(role));
     }
   });
 

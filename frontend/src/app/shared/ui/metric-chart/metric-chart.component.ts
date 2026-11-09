@@ -31,7 +31,6 @@ export function resolveChartTheme(): ChartTheme {
     surface: read('--gr-surface-raised'),
     palette: [
       read('--gr-graph-running'),
-      read('--gr-graph-danger'),
       read('--gr-graph-success'),
       read('--gr-graph-warning'),
       read('--gr-chart-purple'),
