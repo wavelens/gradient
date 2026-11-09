@@ -108,7 +108,7 @@ describe('TaskFlakeInputsComponent', () => {
     const comp = fixture.componentInstance;
     expect(comp.isPattern(overrideGlob)).toBe(true);
     expect(comp.isPattern(override)).toBe(false);
-    expect(fixture.nativeElement.textContent ?? '').toContain('Pattern');
+    expect(fixture.nativeElement.textContent ?? '').toContain('Glob');
   });
 
   it('keep_url checkbox causes url: null submission', () => {
@@ -170,7 +170,7 @@ describe('TaskFlakeInputsComponent', () => {
     deleteButton(fixture).click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'utils' }));
     expect(remove).toHaveBeenCalledWith('acme', 'demo', 'o1');
-    expect(success).toHaveBeenCalledWith('Deleted the override for the flake input');
+    expect(success).toHaveBeenCalledWith('Override deleted');
   });
 
   it('sends nothing when the delete is cancelled', () => {

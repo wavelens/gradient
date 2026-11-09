@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Flake Input Overrides" subtitle="Override flake inputs to pin or redirect dependencies for the next evaluation">
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Flake Inputs" subtitle="Override flake inputs to pin or redirect dependencies for the next evaluation">
   @if (overrides().length) {
     <button slot="actions"
         *appWritable="access()"
@@ -24,7 +24,7 @@
     errorTitle="Failed to load flake inputs"
     emptyIcon="tune"
     emptyTitle="No overrides configured"
-    emptyMessage="No overrides configured. The task's flake.lock is used as-is."
+    emptyMessage="Evaluations use the task's flake.lock unchanged."
     (retry)="loadOverrides()"
   >
     <button slot="empty-action"
@@ -44,7 +44,7 @@
                   <div class="override-name">{{ override.input_name }}</div>
                   <div class="override-meta text-secondary">
                     @if (isPattern(override)) {
-                      <gr-badge severity="warning">Pattern</gr-badge>
+                      <gr-badge severity="warning">Glob</gr-badge>
                     }
                     <gr-badge [severity]="override.url === null ? 'success' : 'info'">
                       {{ modeLabel(override) }}

@@ -240,20 +240,20 @@ export class TaskFlakeInputsComponent implements OnInit {
 
   deleteOverride(override: FlakeInputOverrideOut): void {
     this.confirm.confirm({
-      title: 'Remove Override for Flake Input',
+      title: 'Delete Override',
       target: override.input_name,
       consequence: "Later evaluations use this input again as flake.lock pinned it. This action can't be undone.",
-      confirmLabel: 'Remove',
-      failure: 'Failed to remove the override for this flake input.',
+      confirmLabel: 'Delete',
+      failure: 'Failed to delete the override.',
       action: () => this.overridesService.delete(this.projectName, this.taskName, override.id),
     }).subscribe(() => {
-      this.notify.success('Deleted the override for the flake input');
+      this.notify.success('Override deleted');
       this.loadOverrides();
     });
   }
 
   modeLabel(override: FlakeInputOverrideOut): string {
-    return override.url === null ? 'Keep URL' : 'URL override';
+    return override.url === null ? 'Force update' : 'URL override';
   }
 
   isPattern(override: FlakeInputOverrideOut): boolean {
