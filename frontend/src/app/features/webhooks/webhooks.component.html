@@ -29,14 +29,13 @@
             <div class="webhook-meta text-secondary">
               <code>{{ hook.url }}</code>
               @let chip = getWebhookCardStatusChip(hook);
-              @let newest = newestDeliveryByWebhookId().get(hook.id);
               <gr-badge [severity]="chip.severity">{{ chip.label }}</gr-badge>
-              @if (newest) {
+              @if (hook.last_delivery; as newest) {
                 @let failureReason = newest.success ? null : getDeliveryResultReason(newest);
                 <span class="newest-delivery" [class.is-failed]="!newest.success" [title]="newest.error_message ?? ''">
                   Last delivery {{ newest.delivered_at | relativeTime }}{{ failureReason ? ': ' + failureReason : '' }}
                 </span>
-              } @else if (newest === null) {
+              } @else {
                 <span>No deliveries yet</span>
               }
             </div>

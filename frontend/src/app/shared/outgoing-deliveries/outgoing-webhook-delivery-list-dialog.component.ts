@@ -20,7 +20,7 @@ import { formatDuration, getLastErrorCause, RelativeTimePipe, ServerTimestampToL
 export type RecordedOutgoingDeliveryListRow = DeliveryListItem_WebhookDeliveryId | DeliveryListItem_TaskActionDeliveryId;
 export type RecordedOutgoingDelivery = DeliveryDetail_WebhookDeliveryId | DeliveryDetail_TaskActionDeliveryId;
 
-export function getDeliveryResultReason(delivery: RecordedOutgoingDeliveryListRow): string | null {
+export function getDeliveryResultReason(delivery: Pick<RecordedOutgoingDeliveryListRow, 'response_status' | 'error_message'>): string | null {
   if (delivery.response_status != null) return `HTTP ${delivery.response_status}`;
   return delivery.error_message ? getLastErrorCause(delivery.error_message) : null;
 }

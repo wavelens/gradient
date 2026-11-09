@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { EMPTY, catchError, finalize } from 'rxjs';
+import { finalize } from 'rxjs';
 import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo, eventNameToReadableText, eventNamePrefixesByNotificationScope, eventNameMatchesAnyPrefix } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
@@ -43,6 +43,10 @@ import { OutgoingWebhookDeliveryListDialog, getDeliveryResultReason } from '@sha
 import { fieldChecks } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 import { links } from '@shared/routing';
+
+type WebhookListItemWithLastDeliveryAttempt = WebhookResponse & {
+  last_delivery?: Pick<DeliveryListItem_WebhookDeliveryId, 'success' | 'delivered_at' | 'response_status' | 'error_message'> | null;
+};
 
 @Component({
   selector: 'app-webhooks',
@@ -90,7 +94,7 @@ export class WebhooksComponent implements OnInit {
   saving = signal(false);
   formError = signal<string | null>(null);
   togglingId = signal<string | null>(null);
-  webhooks = signal<WebhookResponse[]>([]);
+  webhooks = signal<WebhookListItemWithLastDeliveryAttempt[]>([]);
 
   editing = signal<WebhookResponse | null>(null);
   formOpen = signal(false);
@@ -121,7 +125,6 @@ export class WebhooksComponent implements OnInit {
   });
 
   overflowMenuItemsOfLastClickedWebhookRow = signal<MenuItem[]>([]);
-  newestDeliveryByWebhookId = signal<ReadonlyMap<string, DeliveryListItem_WebhookDeliveryId | null>>(new Map());
 
   eventNameToReadableText = eventNameToReadableText;
   getDeliveryResultReason = getDeliveryResultReason;
@@ -193,7 +196,6 @@ export class WebhooksComponent implements OnInit {
       next: (list) => {
         this.webhooks.set(list);
         this.loading.set(false);
-        this.loadNewestDeliveryForEachWebhook(list);
       },
       error: (error: unknown) => {
         this.loadError.set(error);
@@ -202,20 +204,9 @@ export class WebhooksComponent implements OnInit {
     });
   }
 
-  private loadNewestDeliveryForEachWebhook(hooks: WebhookResponse[]): void {
-    for (const hook of hooks) {
-      this.service
-        .deliveries(this.scope, hook.id, 1, 0)
-        .pipe(catchError(() => EMPTY))
-        .subscribe((rows) => this.newestDeliveryByWebhookId.update((newest) => new Map(newest).set(hook.id, rows[0] ?? null)));
-    }
-  }
-
-  getWebhookCardStatusChip(hook: WebhookResponse): { label: string; severity: BadgeSeverity } {
+  getWebhookCardStatusChip(hook: WebhookListItemWithLastDeliveryAttempt): { label: string; severity: BadgeSeverity } {
     if (!hook.active) return { label: 'Inactive', severity: 'neutral' };
-    return this.newestDeliveryByWebhookId().get(hook.id)?.success === false
-      ? { label: 'Failing', severity: 'danger' }
-      : { label: 'Active', severity: 'success' };
+    return hook.last_delivery?.success === false ? { label: 'Failing', severity: 'danger' } : { label: 'Active', severity: 'success' };
   }
 
   openWebhookOverflowMenuAtButton(event: Event, hook: WebhookResponse, menu: MenuComponent): void {
@@ -335,7 +326,7 @@ export class WebhooksComponent implements OnInit {
       .pipe(finalize(() => this.webhookIdWithTestDeliveryInFlight.set(null)))
       .subscribe({
         next: (delivery) => {
-          this.newestDeliveryByWebhookId.update((newest) => new Map(newest).set(hook.id, delivery));
+          this.webhooks.update((hooks) => hooks.map((row) => (row.id === hook.id ? { ...row, last_delivery: delivery } : row)));
           if (delivery.success) return this.notify.success('Test event delivered');
           const reason = getDeliveryResultReason(delivery);
           this.notify.failure("Couldn't deliver test event" + (reason ? `: ${reason}` : ''), null);

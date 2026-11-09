@@ -44,12 +44,15 @@ const newestDelivery: DeliveryListItem_WebhookDeliveryId = {
   delivered_at: '2026-09-26T12:05:00',
 };
 
+function withLastDelivery(webhook: WebhookResponse, last_delivery: DeliveryListItem_WebhookDeliveryId | null): WebhookResponse {
+  return Object.assign({ ...webhook }, { last_delivery });
+}
+
 function setup(
   data: Record<string, unknown>,
   params: Record<string, string>,
   list: () => Observable<WebhookResponse[]> = () => of([hook]),
   catalog: CatalogEntry[] = [],
-  deliveries: () => Observable<DeliveryListItem_WebhookDeliveryId[]> = () => of([]),
 ) {
   const service = {
     list: vi.fn(list),
@@ -58,7 +61,7 @@ function setup(
     delete: vi.fn(() => of({ deleted: true })),
     test: vi.fn(),
     rotateSecret: vi.fn(() => of({ secret: 'whs_new' })),
-    deliveries: vi.fn(deliveries),
+    deliveries: vi.fn((): Observable<DeliveryListItem_WebhookDeliveryId[]> => of([])),
     delivery: vi.fn(),
   };
   const notify = { success: vi.fn(), failure: vi.fn() };
@@ -410,17 +413,16 @@ describe('WebhooksComponent', () => {
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('No deliveries yet');
   });
 
-  it('marks an active webhook as failing with the reason of its newest delivery', () => {
-    const { root, service } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([hook]), [], () =>
-      of([{ ...newestDelivery, success: false, response_status: null, error_message: 'send HTTP request: connection refused' }]),
-    );
-    expect(service.deliveries).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1', 1, 0);
+  it('marks an active webhook as failing with the reason of the last delivery in the list, without a request per card', () => {
+    const failed = { ...newestDelivery, success: false, response_status: null, error_message: 'send HTTP request: connection refused' };
+    const { root, service } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([withLastDelivery(hook, failed)]));
+    expect(service.deliveries).not.toHaveBeenCalled();
     expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe('Failing');
     expect(root.querySelector('.newest-delivery')?.textContent).toContain('connection refused');
   });
 
   it('shows a failed test as the newest delivery with its reason', () => {
-    const { fixture, root, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([hook]), [], () => of([newestDelivery]));
+    const { fixture, root, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([withLastDelivery(hook, newestDelivery)]));
     service.test.mockReturnValue(of({ ...newestDelivery, id: 'd2', success: false, response_status: 404 }));
     rowButton(root, 'Test').click();
     fixture.detectChanges();
@@ -438,11 +440,11 @@ describe('WebhooksComponent', () => {
   });
 
   it.each([
-    { state: 'delivered', webhook: hook, newest: [newestDelivery], chip: 'Active', severity: 'success', line: 'Last delivery' },
-    { state: 'never delivered', webhook: hook, newest: [], chip: 'Active', severity: 'success', line: 'No deliveries yet' },
-    { state: 'inactive', webhook: { ...hook, active: false }, newest: [{ ...newestDelivery, success: false }], chip: 'Inactive', severity: 'neutral', line: 'Last delivery' },
-  ])('shows the $state webhook as $chip', ({ webhook, newest, chip, severity, line }) => {
-    const { root, component } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([webhook]), [], () => of(newest));
+    { state: 'delivered', webhook: withLastDelivery(hook, newestDelivery), chip: 'Active', severity: 'success', line: 'Last delivery' },
+    { state: 'never delivered', webhook: withLastDelivery(hook, null), chip: 'Active', severity: 'success', line: 'No deliveries yet' },
+    { state: 'inactive', webhook: withLastDelivery({ ...hook, active: false }, { ...newestDelivery, success: false }), chip: 'Inactive', severity: 'neutral', line: 'Last delivery' },
+  ])('shows the $state webhook as $chip', ({ webhook, chip, severity, line }) => {
+    const { root, component } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([webhook]));
     expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe(chip);
     expect(component.getWebhookCardStatusChip(webhook).severity).toBe(severity);
     expect(root.querySelector('.webhook-meta')?.textContent).toContain(line);
