@@ -7,6 +7,7 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ButtonComponent, ButtonSeverity } from './button.component';
+import { TooltipDirective } from '../tooltip/tooltip.directive';
 
 @Component({
   standalone: true,
@@ -34,6 +35,19 @@ class HostComponent {
   disabled = signal(false);
   size = signal<'small' | 'normal'>('normal');
   projected = signal('');
+  clicks = 0;
+}
+
+@Component({
+  standalone: true,
+  imports: [ButtonComponent, TooltipDirective],
+  template: `
+    <button grButton label="Delete" [disabledReason]="reason()" (click)="clicks = clicks + 1"></button>
+    <button grButton icon="delete" grTooltip="Delete" [disabledReason]="reason()"></button>
+  `,
+})
+class ReasonHostComponent {
+  reason = signal<string | null>('Only admins can delete roles');
   clicks = 0;
 }
 
@@ -126,6 +140,43 @@ describe('ButtonComponent', () => {
     fixture.componentInstance.projected.set('Projected');
     fixture.detectChanges();
     expect(btn().textContent).toContain('Projected');
+  });
+
+  it('explains a disabled action to keyboard, screen reader and mouse users and blocks its click', () => {
+    TestBed.configureTestingModule({ imports: [ReasonHostComponent] });
+    const fixture = TestBed.createComponent(ReasonHostComponent);
+    fixture.detectChanges();
+    const [plain, withTooltip] = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
+    const tip = () => document.querySelector('.gr-tooltip');
+
+    expect(plain.disabled).toBe(false);
+    expect(plain.getAttribute('aria-disabled')).toBe('true');
+    expect(plain.hasAttribute('tabindex')).toBe(false);
+    const description = document.getElementById(plain.getAttribute('aria-describedby')!)!;
+    expect(description.textContent).toBe('Only admins can delete roles');
+    expect(description.hidden).toBe(true);
+    plain.click();
+    expect(fixture.componentInstance.clicks).toBe(0);
+
+    plain.dispatchEvent(new FocusEvent('focus'));
+    expect(tip()!.textContent).toContain('Only admins can delete roles');
+    plain.dispatchEvent(new FocusEvent('blur'));
+    expect(tip()).toBeNull();
+
+    withTooltip.dispatchEvent(new MouseEvent('mouseenter'));
+    fixture.detectChanges();
+    expect(Array.from(document.querySelectorAll('.gr-tooltip')).map((t) => t.textContent)).toEqual(['Only admins can delete roles']);
+    withTooltip.dispatchEvent(new MouseEvent('mouseleave'));
+
+    fixture.componentInstance.reason.set(null);
+    fixture.detectChanges();
+    expect(plain.hasAttribute('aria-disabled')).toBe(false);
+    expect(plain.hasAttribute('aria-describedby')).toBe(false);
+    plain.click();
+    expect(fixture.componentInstance.clicks).toBe(1);
+    withTooltip.dispatchEvent(new MouseEvent('mouseenter'));
+    fixture.detectChanges();
+    expect(tip()!.textContent).toContain('Delete');
   });
 
   it('applies the small size class only when asked', () => {

@@ -37,7 +37,7 @@
   transition: background-color $transition-fast, border-color $transition-fast, color $transition-fast;
 }
 
-:host(:hover:not(:disabled)) {
+:host(:hover:not(:disabled, [aria-disabled='true'])) {
   background: var(--gr-btn-bg-hover);
   border-color: var(--gr-btn-border-hover);
   color: var(--gr-btn-fg-hover);
@@ -68,7 +68,7 @@
 }
 
 // Disabled buttons retain their severity fill at lower opacity. Disabled primary actions can still look like primary actions next to a filled Cancel.
-:host(:disabled:not(.gr-button--loading)) {
+:host(:is(:disabled, [aria-disabled='true']):not(.gr-button--loading)) {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -103,7 +103,7 @@
   color: var(--gr-btn-accent);
 }
 
-:host(.gr-button--text:hover:not(:disabled)) {
+:host(.gr-button--text:hover:not(:disabled, [aria-disabled='true'])) {
   background: none;
   border-color: transparent;
   color: var(--gr-text-primary);
