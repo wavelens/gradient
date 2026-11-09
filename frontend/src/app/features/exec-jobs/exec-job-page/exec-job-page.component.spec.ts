@@ -9,7 +9,7 @@ import { taskAccessData } from '@core/resolvers/access-route.testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { EMPTY, type Observable, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
-import type { ExecJobResponse, ExecJobStatus } from '@core/models';
+import type { ExecJobLog, ExecJobResponse, ExecJobStatus } from '@core/models';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { ApiError } from '@core/services/api.service';
 import { MessageService } from '@gradient/ui/ui';
@@ -49,6 +49,10 @@ const PULL_REQUEST = {
   integration: 'github',
   created_at: '2026-01-01T00:00:04',
 };
+
+function fullLog(log: string): ExecJobLog {
+  return { offset: 0, log, total_bytes: new TextEncoder().encode(log).length };
+}
 
 function job(status: ExecJobStatus, sshCommand: string | null = SSH): ExecJobResponse {
   return {
@@ -106,7 +110,7 @@ interface Setup {
   abort: ReturnType<typeof vi.fn>;
   confirm: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
-  log: ReturnType<typeof vi.fn>;
+  logAfter: ReturnType<typeof vi.fn>;
   keepVmRunning: ReturnType<typeof vi.fn>;
   letVmStop: ReturnType<typeof vi.fn>;
   navigate: ReturnType<typeof vi.spyOn>;
@@ -122,7 +126,7 @@ function setup(
   const abort = vi.fn(() => of('Success'));
   const confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => request.action());
   const run = vi.fn(() => of('Success'));
-  const log = vi.fn(() => of(LOG));
+  const logAfter = vi.fn(() => of(fullLog(LOG)));
   const keepVmRunning = vi.fn(() => of('Success'));
   const letVmStop = vi.fn(() => of('Success'));
   const route = {
@@ -141,7 +145,7 @@ function setup(
         provide: ExecJobsService,
         useValue: {
           get: () => of(response ?? job(status, sshCommand)),
-          log,
+          logAfter,
           pullRequests: () => of([PULL_REQUEST]),
           outputs: () => of([]),
           abort,
@@ -156,7 +160,7 @@ function setup(
   const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
   const fixture = TestBed.createComponent(ExecJobPageComponent);
   fixture.detectChanges();
-  return { fixture, abort, confirm, run, log, keepVmRunning, letVmStop, navigate };
+  return { fixture, abort, confirm, run, logAfter, keepVmRunning, letVmStop, navigate };
 }
 
 function toasts() {
@@ -473,7 +477,7 @@ describe('ExecJobPageComponent', () => {
         providers: [
           provideRouter([]),
           { provide: ActivatedRoute, useValue: route },
-          { provide: ExecJobsService, useValue: { get, log: () => of('hello'), pullRequests: () => of([]), outputs: () => of([]), abort: vi.fn() } },
+          { provide: ExecJobsService, useValue: { get, logAfter: () => of(fullLog('hello')), pullRequests: () => of([]), outputs: () => of([]), abort: vi.fn() } },
         ],
       });
       const fixture = TestBed.createComponent(ExecJobPageComponent);
@@ -519,7 +523,7 @@ describe('ExecJobPageComponent', () => {
     vi.useFakeTimers();
     try {
       Element.prototype.scrollTo = vi.fn() as unknown as typeof Element.prototype.scrollTo;
-      const log = vi.fn().mockReturnValueOnce(of('hello\n')).mockReturnValue(of('hello\nbye\n'));
+      const logAfter = vi.fn().mockReturnValueOnce(of(fullLog('hello\n'))).mockReturnValue(of({ offset: 6, log: 'bye\n', total_bytes: 10 }));
       const route = {
         snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo', job: 'j1' }) },
         parent: { data: of(taskAccessData({ managed: false, canEdit: true, canTrigger: true })) },
@@ -529,7 +533,7 @@ describe('ExecJobPageComponent', () => {
         providers: [
           provideRouter([]),
           { provide: ActivatedRoute, useValue: route },
-          { provide: ExecJobsService, useValue: { get: () => of(job('running')), log, pullRequests: () => of([]), outputs: () => of([]), abort: vi.fn() } },
+          { provide: ExecJobsService, useValue: { get: () => of(job('running')), logAfter, pullRequests: () => of([]), outputs: () => of([]), abort: vi.fn() } },
         ],
       });
       const fixture = TestBed.createComponent(ExecJobPageComponent);
@@ -543,6 +547,24 @@ describe('ExecJobPageComponent', () => {
       const viewer = (fixture.nativeElement as HTMLElement).querySelector('gr-log-viewer');
       expect(viewer?.querySelector('.log-search-input')).not.toBeNull();
       expect(viewer?.textContent).toContain('bye');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks a running job only for the log bytes after the ones it holds and replaces the log when the server starts over', async () => {
+    vi.useFakeTimers();
+    try {
+      const { fixture, logAfter } = setup('running');
+      logAfter.mockReturnValueOnce(of({ offset: LOG.length, log: 'more\n', total_bytes: LOG.length + 5 }));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(logAfter).toHaveBeenLastCalledWith('j1', LOG.length, 1, 0);
+      expect(fixture.componentInstance.logLines().at(-1)).toBe('more');
+
+      logAfter.mockReturnValueOnce(of(fullLog('fresh\n')));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(logAfter).toHaveBeenLastCalledWith('j1', LOG.length + 5, 1, 0);
+      expect(fixture.componentInstance.logLines()).toEqual(['fresh']);
     } finally {
       vi.useRealTimers();
     }
@@ -585,19 +607,19 @@ describe('ExecJobPageComponent', () => {
     });
 
     it('loads the log of a picked node and sets ?node=1', () => {
-      const { fixture, log, navigate } = setup('completed', SSH, {}, twoNodeJob('completed'));
-      expect(log).toHaveBeenLastCalledWith('j1', undefined, 0);
+      const { fixture, logAfter, navigate } = setup('completed', SSH, {}, twoNodeJob('completed'));
+      expect(logAfter).toHaveBeenLastCalledWith('j1', undefined, 1, 0);
       nodeItem(fixture.nativeElement, 1)?.click();
       fixture.detectChanges();
-      expect(log).toHaveBeenLastCalledWith('j1', undefined, 1);
+      expect(logAfter).toHaveBeenLastCalledWith('j1', undefined, undefined, 1);
       expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { node: 1 } }));
       expect(nodeItem(fixture.nativeElement, 1)?.classList).toContain('selected');
     });
 
     it('shows the job on node 0 and clears ?node= for a node the job does not have', () => {
-      const { fixture, log, navigate } = setup('completed', SSH, { node: '99' }, twoNodeJob('completed'));
-      expect(log).toHaveBeenCalledTimes(1);
-      expect(log).toHaveBeenCalledWith('j1', undefined, 0);
+      const { fixture, logAfter, navigate } = setup('completed', SSH, { node: '99' }, twoNodeJob('completed'));
+      expect(logAfter).toHaveBeenCalledTimes(1);
+      expect(logAfter).toHaveBeenCalledWith('j1', undefined, 1, 0);
       expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { node: null } }));
       expect((fixture.nativeElement as HTMLElement).textContent).toContain('apps.x86_64-linux.train');
       expect(nodeItem(fixture.nativeElement, 0)?.classList).toContain('selected');

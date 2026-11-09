@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, injec
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { EMPTY, Subscription, catchError, forkJoin, interval, map, startWith, switchMap, takeWhile } from 'rxjs';
+import { EMPTY, Subscription, catchError, forkJoin, interval, map, of, startWith, switchMap, takeWhile } from 'rxjs';
 import {
   ButtonComponent,
   CopyFieldComponent,
@@ -35,7 +35,7 @@ import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
-import type { ExecJobAttemptView, ExecJobPullRequestView, ExecJobResponse } from '@core/models';
+import type { ExecJobAttemptView, ExecJobLog, ExecJobPullRequestView, ExecJobResponse } from '@core/models';
 import {
   abortExecJobConfirm, getExecJobStatusBadgeLabel, hasExecTerminal, isExecJobWaitingToStart, isOpenExecJob,
 } from '../exec-job-status';
@@ -53,6 +53,11 @@ const TERMINAL_PATHS: Record<TerminalMode, (node: number) => string> = {
   attach: (node) => `shell?node=${node}&attach=true`,
   shell: (node) => `shell?node=${node}`,
 };
+
+function latestAttemptNumber(job: ExecJobResponse, node: number): number | undefined {
+  const attempts = node === 0 ? job.attempts : job.node_jobs.find((n) => n.node === node)?.attempts ?? [];
+  return attempts.length === 0 ? undefined : Math.max(...attempts.map((a) => a.number));
+}
 
 function nodeFromQuery(value: string | null | undefined): number {
   const node = Number(value);
@@ -103,6 +108,8 @@ export class ExecJobPageComponent implements OnInit {
   private jobId = '';
   private poll?: Subscription;
   private log = '';
+  private logSource: string | null = null;
+  private logBytes = 0;
   private now = signal(Date.now());
   private wantsTerminal = false;
 
@@ -227,7 +234,12 @@ export class ExecJobPageComponent implements OnInit {
       }).pipe(
         switchMap(({ job, pullRequests }) => {
           if (this.node() !== 0 && !job.node_jobs.some((n) => n.node === this.node())) this.setSelectedNodeIndexAndUrl(0);
-          return this.execJobs.log(this.jobId, undefined, this.node()).pipe(map((log) => ({ job, log, pullRequests })));
+          if (isExecJobWaitingToStart(job.status)) return of({ job, pullRequests, log: null });
+          const node = this.node();
+          const attempt = latestAttemptNumber(job, node);
+          const source = `${node}:${attempt ?? ''}`;
+          const offset = source === this.logSource ? this.logBytes : undefined;
+          return this.execJobs.logAfter(this.jobId, offset, attempt, node).pipe(map((chunk) => ({ job, pullRequests, log: { source, chunk } })));
         }),
         catchError((error: Error) => {
           this.errorMessage.set(error.message);
@@ -240,7 +252,7 @@ export class ExecJobPageComponent implements OnInit {
       this.errorMessage.set(null);
       this.now.set(Date.now());
       this.job.set(job);
-      this.showLog(isExecJobWaitingToStart(job.status) ? '' : log);
+      this.showLog(log);
       this.pullRequests.set(pullRequests);
       if (this.terminalReachable()) {
         if (this.wantsTerminal) this.showView('terminal');
@@ -251,7 +263,10 @@ export class ExecJobPageComponent implements OnInit {
     });
   }
 
-  private showLog(log: string): void {
+  private showLog(update: { source: string; chunk: ExecJobLog } | null): void {
+    const log = update === null ? '' : update.chunk.offset === 0 ? update.chunk.log : this.log + update.chunk.log;
+    this.logSource = update?.source ?? null;
+    this.logBytes = update?.chunk.total_bytes ?? 0;
     if (log === this.log) return;
     this.log = log;
     this.logLines.set(splitLogLines(log));

@@ -5,7 +5,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { Observable, map } from 'rxjs';
+import { Observable } from 'rxjs';
 import { environment } from '@environments/environment';
 import { ApiService } from './api.service';
 import { ExecJobLog, ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary } from '@core/models';
@@ -25,10 +25,6 @@ export class ExecJobsService {
 
   get(job: string): Observable<ExecJobResponse> {
     return this.api.get<ExecJobResponse>(`exec/${job}`);
-  }
-
-  log(job: string, attempt?: number, node?: number): Observable<string> {
-    return this.logAfter(job, undefined, attempt, node).pipe(map((chunk) => chunk.log));
   }
 
   logAfter(job: string, offset?: number, attempt?: number, node?: number): Observable<ExecJobLog> {
