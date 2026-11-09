@@ -218,7 +218,7 @@ export const routes: Routes = [
       },
       {
         path: 'log/:evaluationId',
-        title: 'Evaluation Log',
+        title: 'Evaluation log',
         resolve: { evaluationAccess: evaluationAccessResolver },
         data: { hideFooter: true },
         loadComponent: () =>
@@ -237,7 +237,7 @@ export const routes: Routes = [
       },
       {
         path: 'log',
-        title: 'Evaluation Log',
+        title: 'Evaluation log',
         resolve: { projectAccess: projectAccessResolver },
         data: { hideFooter: true },
         loadComponent: () =>
