@@ -12,7 +12,6 @@ import {
   ScrollRegionDirective,
   SkeletonComponent,
   TabSwitchComponent,
-  TooltipDirective,
 } from '@gradient/ui/ui';
 import { plural } from '@shared/text';
 
@@ -23,7 +22,7 @@ const LEVELS = 4;
 @Component({
   selector: 'app-dashboard-activity',
   standalone: true,
-  imports: [FormsModule, SkeletonComponent, TabSwitchComponent, TooltipDirective, ScrollRegionDirective],
+  imports: [FormsModule, SkeletonComponent, TabSwitchComponent, ScrollRegionDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @if (!hidden() && !failed()) {
@@ -53,8 +52,7 @@ const LEVELS = 4;
                   width="11"
                   height="11"
                   rx="2"
-                  [grTooltip]="c.title"
-                ></rect>
+                ><title>{{ c.title }}</title></rect>
               }
             </svg>
           </div>
