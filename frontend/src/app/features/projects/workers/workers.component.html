@@ -31,6 +31,7 @@
           Gradient.CI Servers
           <div slot="meta">
             @if (gradientCi().worker; as w) {
+              <div class="worker-stats text-secondary">{{ workerStatusText(w) }}</div>
               <gr-allowed-capabilities [value]="w" [workerReportedCapabilities]="w.live?.capabilities" />
               @if (!w.connected && w.last_error && access().canEdit) {
                 <div class="worker-last-error text-secondary">{{ w.last_error.reason }}</div>
@@ -46,10 +47,6 @@
               }
               @case ('connected') {
                 @if (gradientCi().worker; as w) {
-                  @if (!w.active) {
-                    <gr-badge severity="danger">Inactive</gr-badge>
-                  }
-                  <gr-badge [severity]="w.connected ? 'success' : 'neutral'">{{ w.connected ? 'Connected' : 'Offline' }}</gr-badge>
                   <a grButton [label]="gradientCiHost" icon="open_in_new" severity="secondary" size="small" class="worker-action-btn"
                     [href]="config.gradientCiUrl" target="_blank" rel="noopener"></a>
                   @if (w.team) {
@@ -70,14 +67,6 @@
       @if (gradientCi().state !== 'connected') {
         <gr-empty-state icon="construction" title="No workers registered">
           <p>Register a <code>gradient-worker</code> to run builds for this project.</p>
-          <button slot="action"
-            *appWritable="access()"
-            grButton
-            label="Register Worker"
-            icon="add"
-            (click)="openRegisterDialog()"
-            [appManagedDisable]="access()"
-            ></button>
         </gr-empty-state>
       }
     } @else {
@@ -86,6 +75,7 @@
           <gr-row icon="construction">
             {{ worker.display_name }}
             <div slot="meta">
+                <div class="worker-stats text-secondary">{{ workerStatusText(worker) }}</div>
                 @if (worker.url) {
                   <div class="worker-url text-secondary">{{ worker.url }}</div>
                 }
@@ -110,9 +100,6 @@
                       }
                     </div>
                   }
-                  @if (worker.live.assigned_job_count > 0) {
-                    <div class="worker-stats text-secondary">{{ worker.live.assigned_job_count }} active job{{ worker.live.assigned_job_count === 1 ? '' : 's' }}</div>
-                  }
                 }
             </div>
             <div slot="actions" class="phone-icon-buttons">
@@ -121,16 +108,6 @@
               }
               @if (worker.live?.draining) {
                 <gr-badge severity="warning">Draining</gr-badge>
-              }
-              @if (!worker.active) {
-                <gr-badge severity="danger">Inactive</gr-badge>
-              }
-              @if (!worker.live) {
-                <gr-badge severity="neutral">Offline</gr-badge>
-              } @else if (worker.active) {
-                <gr-badge severity="success">Connected</gr-badge>
-              } @else {
-                <gr-badge severity="warning">Disconnecting</gr-badge>
               }
               <a
                 grButton

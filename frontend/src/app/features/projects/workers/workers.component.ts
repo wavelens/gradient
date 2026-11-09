@@ -151,6 +151,13 @@ export class WorkersComponent implements OnInit {
   otherWorkers = computed(() => listedWorkers(this.workers(), this.gradientCi()));
   workerMenus = computed(() => new Map(this.otherWorkers().map((w) => [w.worker_id, this.menuFor(w)])));
 
+  workerStatusText(worker: ProjectWorkerEntry): string {
+    if (!worker.active) return 'Inactive';
+    const live = worker.live;
+    if (live) return `Connected · ${live.assigned_job_count}/${live.max_concurrent_builds} jobs`;
+    return worker.connected ? 'Connected' : 'Offline';
+  }
+
   private menuFor(worker: ProjectWorkerEntry): MenuItem[] {
     const busy = this.deletingId() !== null || this.togglingId() !== null || this.testingId() !== null;
     const canEdit = this.access().canEdit;

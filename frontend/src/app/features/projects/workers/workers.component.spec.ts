@@ -323,33 +323,45 @@ describe('WorkersComponent - system features', () => {
   });
 });
 
-describe('WorkersComponent - connection badge', () => {
+describe('WorkersComponent - connection status', () => {
   const live = {
     capabilities: { network: true, secrets: true, exec: false, eval: true, build: true, federate: false },
-    architectures: [], system_features: [], max_concurrent_builds: 1, assigned_job_count: 0, draining: false,
+    architectures: [], system_features: [], max_concurrent_builds: 32, assigned_job_count: 3, draining: false,
   } as unknown as ProjectWorkerEntry['live'];
+  const status = (fixture: ComponentFixture<WorkersComponent>) =>
+    (fixture.nativeElement as HTMLElement).querySelector('.worker-stats')?.textContent?.trim();
   const badges = (fixture: ComponentFixture<WorkersComponent>) =>
     Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-badge')).map((b) => b.textContent?.trim());
 
-  it('marks a deactivated worker that is still connected as on its way out', async () => {
+  it('shows a deactivated worker as inactive, also while it is still connected', async () => {
     const fixture = setup({
       access: { managed: false, canEdit: true, canTrigger: true },
       workers: [{ ...workerUnmanaged, active: false, live }],
       caches: [{ id: 'c', name: 'cache-1' }],
     });
     await settled(fixture);
-    expect(badges(fixture)).toContain('Disconnecting');
-    expect(badges(fixture)).not.toContain('Connected');
+    expect(status(fixture)).toBe('Inactive');
   });
 
-  it('shows an active connected worker as connected', async () => {
+  it('shows an active connected worker with its jobs and capacity, without a status badge', async () => {
     const fixture = setup({
       access: { managed: false, canEdit: true, canTrigger: true },
       workers: [{ ...workerUnmanaged, live }],
       caches: [{ id: 'c', name: 'cache-1' }],
     });
     await settled(fixture);
-    expect(badges(fixture)).toContain('Connected');
+    expect(status(fixture)).toBe('Connected · 3/32 jobs');
+    expect(badges(fixture)).not.toContain('Connected');
+  });
+
+  it('shows a worker without a connection as offline', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      workers: [{ ...workerUnmanaged, live: null }],
+      caches: [{ id: 'c', name: 'cache-1' }],
+    });
+    await settled(fixture);
+    expect(status(fixture)).toBe('Offline');
   });
 });
 

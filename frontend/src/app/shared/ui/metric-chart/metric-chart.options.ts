@@ -31,7 +31,7 @@ export interface MetricChartConfig {
   secondary?: { title?: string; valueFormatter?: (value: number) => string };
   /// Fixed plot margins in px: charts stacked with the same inset share their x positions.
   inset?: { left: number; right: number };
-  /// Narrow charts leave values to the tooltip and put the legend under the plot.
+  /// Narrow charts omit the title of the value axis and show fewer ticks on that axis. Put the legend below the plot.
   compact?: boolean;
 }
 
@@ -75,6 +75,7 @@ const hasIsolatedNonNullValue = (data: (number | null)[]) =>
 const axisLabel = (t: ChartTheme) => ({ color: t.text, fontSize: 12, fontFamily: t.mono });
 const axisLine = (t: ChartTheme) => ({ lineStyle: { color: t.border } });
 const AXIS_TICKS = 4;
+const COMPACT_AXIS_TICKS = 2;
 const MAX_CATEGORY_AXIS_LABEL_WIDTH_PIXELS = 120;
 const splitLine = (t: ChartTheme) => ({ lineStyle: { color: t.grid, type: 'dashed' as const } });
 
@@ -137,9 +138,9 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
       ...(areAllSeriesValuesWholeNumbers(axisSeries) ? { minInterval: 1 } : {}),
       ...(byteTicks ? { interval: byteTicks.interval } : {}),
       nameTextStyle: { color: theme.text },
-      axisLabel: { ...axisLabel(theme), show: !cfg.compact, formatter: (v: number) => fmt(v) },
+      axisLabel: { ...axisLabel(theme), formatter: (v: number) => fmt(v) },
       axisLine: axisLine(theme),
-      splitNumber: AXIS_TICKS,
+      splitNumber: cfg.compact ? COMPACT_AXIS_TICKS : AXIS_TICKS,
       splitLine: opposite ? { show: false } : splitLine(theme),
       ...(opposite ? { position: 'right' as const } : {}),
     };

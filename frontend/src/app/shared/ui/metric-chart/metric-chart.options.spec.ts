@@ -457,10 +457,11 @@ describe('compact charts', () => {
     compact: true,
   };
 
-  it('leaves the value axes to the tooltip', () => {
+  it('keeps the value labels with fewer ticks and drops the axis titles', () => {
     const axes = buildMetricChartOption(dual, THEME)['yAxis'] as any[];
     for (const axis of axes) {
-      expect(axis.axisLabel.show).toBe(false);
+      expect(axis.axisLabel.show).not.toBe(false);
+      expect(axis.splitNumber).toBeLessThan(4);
       expect(axis.name).toBeUndefined();
     }
   });

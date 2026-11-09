@@ -52,14 +52,13 @@ interface WorkerMetricChart {
     <gr-page-layout
       [breadcrumb]="breadcrumb()"
       [title]="workerName()"
-      subtitle="Live metrics, connection history and assigned jobs for this worker"
+      subtitle="Live metrics and connection history"
     >
       <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!loaded()" errorTitle="Failed to load worker stats" (retry)="load()">
       @if (samples().length === 0) {
         <gr-empty-state icon="monitoring" title="No metrics yet" message="Connected workers send CPU, memory, network, and disk samples. Graphs appear with the first sample." />
       } @else {
         <gr-card-grid min="160px">
-          <gr-stat-card label="Samples" [value]="samples().length" />
           <gr-stat-card label="Jobs for this project" [value]="jobsAssigned()" />
           <gr-stat-card label="Sessions" [value]="connections().length" />
         </gr-card-grid>
@@ -135,7 +134,14 @@ export class WorkerMetricsComponent implements OnInit {
       { title: 'Disk speed', type: 'line', series: [{ name: 'disk', data: values((s) => s.disk_speed_mbps) }], colors: ['--gr-chart-orange'], valueFormatter: this.mbps },
       { title: 'Assigned jobs', type: 'area', series: [{ name: 'assigned', data: values((s) => s.assigned_jobs) }], colors: ['--gr-chart-pink'] },
     ];
-    return charts.filter((chart) => chart.series.some((s) => s.data.some((value) => value !== null)));
+    const hasData = (series: WorkerMetricChart['series'][number]) => series.data.some((value) => value !== null);
+    return charts
+      .map((chart) => ({
+        ...chart,
+        series: chart.series.filter(hasData),
+        colors: chart.colors.filter((_, index) => hasData(chart.series[index])),
+      }))
+      .filter((chart) => chart.series.length > 0);
   });
 
   constructor() {
