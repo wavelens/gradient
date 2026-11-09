@@ -11,12 +11,14 @@ use chrono::NaiveDateTime;
 use gradient_db::DbContext;
 use gradient_db::exec_jobs::run_again::{self, RunRefusal};
 use gradient_db::exec_jobs::{attempts, continuations, nodes, phases, reads, settle, tokens};
-use gradient_db::status::check_evaluation_done;
+use gradient_db::status::{check_evaluation_done, reopen_evaluation};
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_types::events::exec_job::Reported;
 use gradient_types::ids::{DispatchedJobId, EvaluationId, ExecJobAttemptId, ExecJobId};
-use gradient_types::{MExecJob, MExecJobAttempt};
+use gradient_types::{EEvaluation, MExecJob, MExecJobAttempt};
+use sea_orm::EntityTrait;
 use tracing::info;
 
 use crate::messages::{ClusterNext, ExecNodeEnd};
@@ -322,11 +324,39 @@ pub(crate) async fn run_again(ctx: &DbContext, exec_job: ExecJobId) -> Result<Op
     match run_again::requeue(&ctx.worker_db, exec_job, ctx.config.exec.enable).await? {
         Ok(nodes) => {
             info!(%exec_job, nodes = nodes.len(), "exec job runs again");
+            if let Some(job) = nodes.first() {
+                set_failed_or_aborted_evaluation_to_building_for_queued_exec_job(
+                    ctx,
+                    job.evaluation,
+                )
+                .await?;
+            }
             settle(ctx).await?;
             Ok(None)
         }
         Err(refusal) => Ok(Some(refusal)),
     }
+}
+
+async fn set_failed_or_aborted_evaluation_to_building_for_queued_exec_job(
+    ctx: &DbContext,
+    evaluation: EvaluationId,
+) -> Result<()> {
+    let Some(eval) = EEvaluation::find_by_id(evaluation)
+        .one(&ctx.worker_db)
+        .await?
+    else {
+        return Ok(());
+    };
+    if EvaluationStatus::REOPENABLE.contains(&eval.status) && !reopen_evaluation(ctx, &eval).await?
+    {
+        info!(
+            %evaluation,
+            "A newer evaluation of the task is available, so this evaluation can stay in completed state."
+        );
+    }
+
+    Ok(())
 }
 
 pub(crate) async fn fail_before_start(

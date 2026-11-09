@@ -29,7 +29,7 @@ pub use evaluation_build::{
 };
 pub use evaluation_message::{EvaluationFailure, EvaluationWarning};
 pub use evaluation_status::{
-    change_evaluation_status, evaluation_change, update_evaluation_status,
+    change_evaluation_status, evaluation_change, reopen_evaluation, update_evaluation_status,
     update_evaluation_status_with_error,
 };
 pub use logging::{

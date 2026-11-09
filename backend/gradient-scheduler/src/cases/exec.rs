@@ -580,8 +580,27 @@ async fn a_failed_job_runs_again_as_its_next_attempt() {
         "after 2: no retry left"
     );
 
+    let evaluation_statuses = || async {
+        case.db
+            .rows::<gradient_entity::evaluation::Entity>()
+            .await
+            .iter()
+            .map(|e| e.status)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        evaluation_statuses().await,
+        vec![EvaluationStatus::Failed],
+        "after 2: the evaluation"
+    );
+
     let ran = case.scheduler.run_exec_job(job.id).await.expect("the run");
     assert_eq!(ran, Ok(()), "after 3: accepted");
+    assert_eq!(
+        evaluation_statuses().await,
+        vec![EvaluationStatus::Building],
+        "after 3: the evaluation reopens"
+    );
     case.assign_exec_jobs().await;
     case.request_job(W1, JobKind::Exec)
         .await
