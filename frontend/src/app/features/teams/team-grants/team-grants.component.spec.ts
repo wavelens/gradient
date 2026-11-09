@@ -190,6 +190,30 @@ describe('TeamGrantsComponent', () => {
     expect(component.suggestions()).toEqual(['infra']);
   });
 
+  it('leaves teams that already have member roles out of the suggestions', () => {
+    const { component } = setup('project', 'users');
+    component.search({ query: '' });
+    expect(component.suggestions()).toEqual(['infra']);
+  });
+
+  it('suggests adding workers to a granted team only to its Admins', () => {
+    const { component } = setup('project', 'workers');
+    component.allGrants.set([
+      { team: 'platform', display_name: 'Platform', role: 'View', users: true, workers: false, pending: false },
+      { team: 'infra', display_name: 'Build Farm', role: 'View', users: true, workers: false, pending: false },
+    ]);
+    component.search({ query: '' });
+    expect(component.suggestions()).toEqual(['infra']);
+  });
+
+  it('shows the server answer after a grant, which can be a request to the team', () => {
+    const { component, service, notify } = setup('project', 'users');
+    service.grantProject.mockReturnValue(of('Request sent'));
+    component.form = { team: 'newteam', role: 'View' };
+    component.grant();
+    expect(notify.success).toHaveBeenCalledWith('Request sent');
+  });
+
   it('grants the team whose display name was typed', () => {
     const { component, service } = setup('project', 'users');
     component.form = { team: 'build farm', role: 'View' };
@@ -248,7 +272,11 @@ describe('TeamGrantsComponent', () => {
       const { fixture, service, notify, changed, confirm } = setup('cache');
       (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('gr-row button.gr-button--danger')!.click();
       expect(confirm).toHaveBeenCalledWith(
-        expect.objectContaining({ target: 'Platform', consequence: 'Members of Platform lose their role on this cache.' }),
+        expect.objectContaining({
+          title: 'Remove access for Platform',
+          target: 'Platform',
+          consequence: 'Members of Platform lose their role on this cache.',
+        }),
       );
       expect(service.removeCacheGrant).toHaveBeenCalledWith('acme', 'platform');
       expect(notify.success).toHaveBeenCalledWith('Team access removed');
@@ -264,23 +292,29 @@ describe('TeamGrantsComponent', () => {
     });
 
     it('says what the project loses when only the workers go', () => {
-      const { component, confirm } = setup('project', 'workers');
+      const { component, confirm, notify } = setup('project', 'workers');
       component.remove(grantOf('platform'));
       expect(confirm).toHaveBeenCalledWith(
-        expect.objectContaining({ consequence: 'This project can no longer run builds on Platform workers.' }),
+        expect.objectContaining({
+          title: 'Stop using Platform workers',
+          consequence: 'This project can no longer run builds on Platform workers.',
+        }),
       );
+      expect(notify.success).toHaveBeenCalledWith('Team workers removed');
     });
 
     it('warns that removing one part of a pending grant withdraws the whole request', () => {
       const pendingBoth: TeamGrantEntry = { team: 'lab', display_name: 'Lab', role: 'View', users: true, workers: true, pending: true };
-      const { component, service, confirm } = setup('project', 'users');
+      const { component, service, confirm, notify } = setup('project', 'users');
       component.remove(pendingBoth);
       expect(confirm).toHaveBeenCalledWith(
         expect.objectContaining({
+          title: 'Withdraw request for Lab',
           consequence: 'The whole pending request for Lab can no longer get approval, with workers included.',
         }),
       );
       expect(service.removeProjectGrant).toHaveBeenCalledWith('acme', 'lab');
+      expect(notify.success).toHaveBeenCalledWith('Request withdrawn');
     });
   });
 

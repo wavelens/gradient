@@ -129,9 +129,17 @@ export class TeamGrantsComponent implements OnInit {
     const query = event.query.toLowerCase();
     this.suggestions.set(
       this.myTeams()
+        .filter((team) => this.canOfferTeamInGrantPicker(team))
         .filter((team) => `${team.name} ${team.display_name}`.toLowerCase().includes(query))
         .map((team) => team.name),
     );
+  }
+
+  private canOfferTeamInGrantPicker(team: TeamSummary): boolean {
+    const grant = this.allGrants().find((entry) => entry.team === team.name);
+    if (!grant) return true;
+    if (grant[this.part()]) return false;
+    return this.part() === 'users' || (!grant.pending && team.role === 'admin');
   }
 
   openGrant(): void {
@@ -174,10 +182,10 @@ export class TeamGrantsComponent implements OnInit {
     this.grantError.set(null);
     this.granting.set(true);
     request.subscribe({
-      next: () => {
+      next: (message) => {
         this.granting.set(false);
         this.showGrant.set(false);
-        this.notify.success('Granted to team');
+        this.notify.success(message);
         this.refresh();
       },
       error: (err: unknown) => {
@@ -188,18 +196,24 @@ export class TeamGrantsComponent implements OnInit {
   }
 
   remove(grant: TeamGrantEntry): void {
+    const team = grant.display_name;
+    const workers = this.part() === 'workers';
     this.confirm
       .confirm({
-        title: 'Remove team access',
-        target: grant.display_name,
+        title: grant.pending
+          ? `Withdraw request for ${team}`
+          : workers
+            ? `Stop using ${team} workers`
+            : `Remove access for ${team}`,
+        target: team,
         consequence: this.removalConsequence(grant),
-        confirmLabel: 'Remove',
+        confirmLabel: grant.pending ? 'Withdraw' : 'Remove',
         failure: "Couldn't remove team access",
         action: () =>
           this.kind() === 'project' ? this.removeFromProject(grant) : this.teams.removeCacheGrant(this.name(), grant.team),
       })
       .subscribe(() => {
-        this.notify.success('Team access removed');
+        this.notify.success(grant.pending ? 'Request withdrawn' : workers ? 'Team workers removed' : 'Team access removed');
         this.refresh();
       });
   }
