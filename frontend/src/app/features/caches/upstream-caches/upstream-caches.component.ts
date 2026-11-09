@@ -24,6 +24,7 @@ import {
   RowComponent,
   RowListComponent,
   SelectComponent,
+  TabSwitchComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { NotifyService } from '@core/services/notify.service';
@@ -79,6 +80,7 @@ const hasError = (errors: UpstreamErrors): boolean => Object.values(errors).some
     PageLayoutComponent,
     FormFieldComponent,
     SelectComponent,
+    TabSwitchComponent,
     BadgeComponent,
     RowListComponent,
     RowComponent,
@@ -135,7 +137,7 @@ export class UpstreamCachesComponent implements OnInit {
     http1_only: false,
     remote_cache: '',
     api_key: '',
-    mode: 'ReadWrite' as CacheSubscriptionMode,
+    mode: 'ReadOnly' as CacheSubscriptionMode,
   };
 
   editForm = {
@@ -147,6 +149,11 @@ export class UpstreamCachesComponent implements OnInit {
   };
 
   readonly modes = SUBSCRIPTION_MODES;
+  readonly upstreamTypeOptions = [
+    { label: 'Internal', value: 'internal' },
+    { label: 'Gradient Proto', value: 'gradient_proto' },
+    { label: 'HTTP', value: 'http' },
+  ] as const;
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
@@ -228,7 +235,7 @@ export class UpstreamCachesComponent implements OnInit {
 
   openAddDialog(): void {
     this.upstreamType = 'internal';
-    this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', http1_only: false, remote_cache: '', api_key: '', mode: 'ReadWrite' };
+    this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', http1_only: false, remote_cache: '', api_key: '', mode: 'ReadOnly' };
     this.addError.set(null);
     this.addAttempted.set(false);
     this.probeSuggestsProto.set(false);

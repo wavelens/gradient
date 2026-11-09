@@ -123,6 +123,15 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     expect(subscribeCache).toHaveBeenCalledWith('acme', 'fresh');
   });
 
+  it('reports a private cache subscription as requested, in the words of the server', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    subscribeCache.mockReturnValue(of('Subscription requested'));
+    fixture.componentInstance.newCacheName = 'private';
+    fixture.componentInstance.subscribeCache();
+    expect(notify.success).toHaveBeenCalledWith('Subscription requested');
+  });
+
   it('suggests caches by display name as well as by name, without the subscribed ones', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     TestBed.inject(CachesService).getCaches = (() =>

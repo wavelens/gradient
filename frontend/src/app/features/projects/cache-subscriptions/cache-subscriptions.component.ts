@@ -175,10 +175,10 @@ export class CacheSubscriptionsComponent implements OnInit {
     this.subscribing.set(true);
     this.errorMessage.set(null);
     this.projectsService.subscribeCache(this.projectName, name).subscribe({
-      next: () => {
+      next: (message) => {
         this.subscribing.set(false);
         this.showSubscribeDialog.set(false);
-        this.notify.success('Subscribed to cache');
+        this.notify.success(message);
         this.loadCaches();
       },
       error: (error: unknown) => {

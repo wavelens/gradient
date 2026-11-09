@@ -13,36 +13,6 @@
   padding-top: $spacing-md;
 }
 
-.type-toggle {
-  display: flex;
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-sm;
-  overflow: hidden;
-}
-
-.type-btn {
-  flex: 1;
-  padding: $spacing-sm $spacing-md;
-  background: transparent;
-  border: none;
-  color: var(--gr-text-secondary);
-  font-size: $font-size-sm;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-
-  & + & { border-left: 1px solid var(--gr-border-subtle); }
-
-  &.active {
-    background: var(--gr-status-info);
-    color: var(--gr-text-primary);
-  }
-
-  &:not(.active):hover {
-    background: var(--gr-surface-sunken);
-    color: var(--gr-text-primary);
-  }
-}
-
 .dialog-hint {
   display: flex;
   align-items: center;

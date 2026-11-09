@@ -158,11 +158,12 @@
   <div class="upstream-form">
     <gr-form-field label="Type">
       <gr-label-help slot="label" doc="concepts/caches/#upstream-types" title="Upstream types" />
-      <div class="type-toggle">
-        <button type="button" class="type-btn" [class.active]="upstreamType === 'internal'" (click)="upstreamType = 'internal'; probeSuggestsProto.set(false)">Internal</button>
-        <button type="button" class="type-btn" [class.active]="upstreamType === 'gradient_proto'" (click)="upstreamType = 'gradient_proto'; probeSuggestsProto.set(false)">Gradient Proto</button>
-        <button type="button" class="type-btn" [class.active]="upstreamType === 'http'" (click)="upstreamType = 'http'; probeSuggestsProto.set(false)">HTTP</button>
-      </div>
+      <gr-tab-switch
+        ariaLabel="Upstream type"
+        [options]="upstreamTypeOptions"
+        [ngModel]="upstreamType"
+        (ngModelChange)="upstreamType = $event; probeSuggestsProto.set(false)"
+      />
     </gr-form-field>
 
     @if (upstreamType === 'internal') {

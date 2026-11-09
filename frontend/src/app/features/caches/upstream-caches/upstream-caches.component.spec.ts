@@ -283,6 +283,18 @@ describe('UpstreamCachesComponent - field checks', () => {
     expect(updateUpstream).not.toHaveBeenCalled();
   });
 
+  it('starts a new upstream as Read Only and switches the type with the shared tab switch', () => {
+    const fixture = setup(admin);
+    const component = fixture.componentInstance;
+    component.openAddDialog();
+    fixture.detectChanges();
+    expect(component.upstreamForm.mode).toBe('ReadOnly');
+    const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('gr-tab-switch button'));
+    tabs.find((tab) => tab.textContent?.includes('HTTP'))!.click();
+    fixture.detectChanges();
+    expect(component.upstreamType).toBe('http');
+  });
+
   it('names every missing field of a new HTTP upstream and adds nothing', () => {
     const addHttpUpstream = vi.fn(() => of('ok'));
     const fixture = setup(admin);
