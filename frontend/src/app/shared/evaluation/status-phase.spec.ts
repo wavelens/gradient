@@ -117,7 +117,7 @@ describe('entryPointPhaseWithExecJob', () => {
 
 describe('phase colours', () => {
   it.each<[StatusPhase, string, string]>([
-    ['queued', 'info', '--gr-graph-running'],
+    ['queued', 'info', '--gr-graph-queued'],
     ['running', 'info', '--gr-graph-running'],
     ['waiting', 'warning', '--gr-status-warning'],
     ['success', 'success', '--gr-graph-success'],
