@@ -194,12 +194,14 @@
       <button grButton type="button" label="Generate" severity="secondary" (click)="generateWorkerId()"></button>
     </div>
   </gr-form-field>
-  <gr-form-field label="Worker URL" for="worker-url">
+  <gr-form-field label="Worker URL" for="worker-url"
+    [invalid]="(registerAttempted() || workerUrlModel.touched) && !!workerUrlError" [error]="workerUrlError ?? ''">
     <span slot="label" class="text-secondary">(optional)</span>
     <input
       grInput
       id="worker-url"
       [(ngModel)]="newWorkerUrl"
+      #workerUrlModel="ngModel"
       placeholder="e.g. wss://worker.example.com/proto"
     />
   </gr-form-field>

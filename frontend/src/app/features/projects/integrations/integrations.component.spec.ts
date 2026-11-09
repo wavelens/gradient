@@ -527,4 +527,12 @@ describe('IntegrationsComponent - validation', () => {
     comp.saveEdit();
     expect(writes.patchProjectIntegration).toHaveBeenCalledWith('acme', baseIntegration.id, { display_name: 'Gitea Staging' });
   });
+
+  it('falls back to the name for a cleared display name, same as on create', async () => {
+    const { comp, writes } = await withWrites();
+    comp.openEditDialog(baseIntegration);
+    comp.formData.display_name = '  ';
+    comp.saveEdit();
+    expect(writes.patchProjectIntegration).toHaveBeenCalledWith('acme', baseIntegration.id, { display_name: 'gitea-prod' });
+  });
 });

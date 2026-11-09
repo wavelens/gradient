@@ -84,7 +84,7 @@
   <gr-form-field label="Display Name" for="team-worker-name" [invalid]="!!displayNameError()" [error]="displayNameError() ?? ''">
     <input grInput id="team-worker-name" [(ngModel)]="form.display_name" (keyup.enter)="register()" />
   </gr-form-field>
-  <gr-form-field label="URL" for="team-worker-url" hint="Optional. Set it when the server dials the worker.">
+  <gr-form-field label="URL" for="team-worker-url" hint="Optional. Set it when the server dials the worker." [invalid]="!!urlError()" [error]="urlError() ?? ''">
     <input grInput id="team-worker-url" [(ngModel)]="form.url" placeholder="wss://worker.example.com/proto" (keyup.enter)="register()" />
   </gr-form-field>
   <div grDialogFooter>

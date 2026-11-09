@@ -102,7 +102,7 @@ describe('TeamGrantsComponent', () => {
     expect(users.fixture.nativeElement.querySelector('[aria-label="Remove role of Platform"]')).not.toBeNull();
     TestBed.resetTestingModule();
     const workers = setup('project', 'workers');
-    expect(workers.fixture.nativeElement.querySelector('[aria-label^="Stop using workers of "]')).not.toBeNull();
+    expect(workers.fixture.nativeElement.querySelector('[aria-label^="Remove workers of "]')).not.toBeNull();
   });
 
   it('drops a grants answer that arrives after the page closed', () => {

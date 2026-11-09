@@ -239,9 +239,8 @@
     @if (target.kind === 'inbound' && formData.name.trim() !== target.name) {
       <gr-message-banner type="warning" data-testid="rename-breaks-webhook">Renaming changes the Webhook URL. Update the Webhook URL on the Git host after save. Otherwise, the Git host can't deliver events.</gr-message-banner>
     }
-    <gr-form-field label="Display Name" for="edit-display-name" required
-      [invalid]="(submitAttempted() || editDisplayNameModel.dirty) && !!displayNameError" [error]="displayNameError ?? ''">
-      <input grInput id="edit-display-name" [(ngModel)]="formData.display_name" #editDisplayNameModel="ngModel" (keyup.enter)="saveEdit()" />
+    <gr-form-field label="Display Name" for="edit-display-name" hint="Human-readable label shown in the integrations list.">
+      <input grInput id="edit-display-name" [(ngModel)]="formData.display_name" placeholder="Defaults to the name" (keyup.enter)="saveEdit()" />
     </gr-form-field>
     <gr-form-field label="Git Host" for="edit-git-host">
       <gr-select

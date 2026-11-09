@@ -24,7 +24,7 @@
               <gr-badge severity="warning">Pending</gr-badge>
             }
             @if (canEdit()) {
-              <button grButton label="Remove" icon="close" severity="danger" [attr.aria-label]="(part() === 'workers' ? 'Stop using workers of ' : 'Remove role of ') + grant.display_name" (click)="remove(grant)"></button>
+              <button grButton label="Remove" icon="close" severity="danger" [attr.aria-label]="(part() === 'workers' ? 'Remove workers of ' : 'Remove role of ') + grant.display_name" (click)="remove(grant)"></button>
             }
           </div>
         </gr-row>

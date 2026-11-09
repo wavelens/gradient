@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Projects" [subtitle]="authService.isAuthenticated() ? 'Manage your projects' : 'Public projects on this server. Sign in to see your own.'">
+<gr-page-layout title="Projects" [subtitle]="authService.isAuthenticated() ? 'My projects' : 'Public projects on this server. Sign in to see your own.'">
   @if (canCreateProject && projects.items().length) {
     <button slot="actions" grButton label="Create Project" icon="add" (click)="openCreateDialog()"></button>
   } @else if (!authService.isAuthenticated()) {
@@ -122,7 +122,7 @@
       ></textarea>
     </gr-form-field>
 
-    <gr-form-field label="Visibility" for="visibility" hint="Public projects are visible to all users">
+    <gr-form-field label="Visibility" for="visibility" hint="Public: Everyone can view its builds, tasks and logs, even visitors who aren't signed in.">
       <gr-select
         inputId="visibility"
         [options]="visibilityOptions"

@@ -120,10 +120,6 @@ export class IntegrationsComponent implements OnInit {
     return taken ? 'An integration of this kind with this name is already in this project.' : null;
   }
 
-  get displayNameError(): string | null {
-    return this.formData.display_name.trim() ? null : 'Enter a display name.';
-  }
-
   get endpointUrlError(): string | null {
     return this.formData.endpoint_url.trim() ? fieldChecks.httpUrl(this.formData.endpoint_url) : 'Enter the base URL of the Git host.';
   }
@@ -328,13 +324,15 @@ export class IntegrationsComponent implements OnInit {
     const target = this.editingIntegration();
     if (!target || this.saving()) return;
     this.submitAttempted.set(true);
-    if (this.nameError || this.displayNameError || this.kindFieldsError(target.kind)) return;
+    if (this.nameError || this.kindFieldsError(target.kind)) return;
     const body: PatchIntegrationRequest = {};
-    if (this.formData.name.trim() !== target.name) {
-      body.name = this.formData.name.trim();
+    const name = this.formData.name.trim();
+    if (name !== target.name) {
+      body.name = name;
     }
-    if (this.formData.display_name.trim() !== target.display_name) {
-      body.display_name = this.formData.display_name.trim();
+    const displayName = this.formData.display_name.trim() || name;
+    if (displayName !== target.display_name) {
+      body.display_name = displayName;
     }
     if (this.formData.git_host_type !== target.git_host_type) {
       body.git_host_type = this.formData.git_host_type;
@@ -384,7 +382,7 @@ export class IntegrationsComponent implements OnInit {
       .confirm({
         title: 'Clear access token',
         target: target.display_name,
-        consequence: `The result of this action is removal of the saved access token for ${target.display_name}.`,
+        consequence: `Outbound events halt after removal of the saved access token for ${target.display_name}. They resume on entry of a new token.`,
         confirmLabel: 'Clear',
         failure: 'Failed to clear token.',
         action: () => this.integrationsService.patchProjectIntegration(this.projectName, target.id, { access_token: '' }),
@@ -404,7 +402,7 @@ export class IntegrationsComponent implements OnInit {
       .confirm({
         title: 'Delete integration',
         target: integration.display_name,
-        consequence: `The result of this action is deletion of ${integration.display_name}. Events can no longer go in or out.`,
+        consequence: `Inbound webhook events and outbound status reports for ${integration.display_name} stop.`,
         isIrreversible: true,
         confirmLabel: 'Delete',
         failure: 'Integration deletion failed.',

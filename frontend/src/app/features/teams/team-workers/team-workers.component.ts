@@ -26,6 +26,7 @@ import { AllowedCapabilitiesComponent, GradientCiConnectComponent } from '@share
 import { ConfirmService } from '@shared/confirm';
 import { MANAGED_ITEM_DISABLED_REASON, canManageTeam } from '@shared/access';
 import { fieldChecks } from '@shared/forms';
+import { checkWorkerUrlWithWebSocketOrHttpScheme } from '@shared/forms/build-worker-url-field-check';
 import { EMPTY, Observable, map, tap } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import {
@@ -146,6 +147,10 @@ export class TeamWorkersComponent implements OnInit {
     return fieldChecks.uuid(this.form.worker_id);
   }
 
+  urlError(): string | null {
+    return checkWorkerUrlWithWebSocketOrHttpScheme(this.form.url);
+  }
+
   displayNameError(): string | null {
     return this.registerAttempted() && !this.form.display_name.trim() ? DISPLAY_NAME_REQUIRED : null;
   }
@@ -157,7 +162,7 @@ export class TeamWorkersComponent implements OnInit {
   register(): void {
     if (this.busy() === 'register') return;
     this.registerAttempted.set(true);
-    if (this.workerIdError() || this.displayNameError()) return;
+    if (this.workerIdError() || this.displayNameError() || this.urlError()) return;
     this.busy.set('register');
     this.registerError.set(null);
     const worker: RegisterWorkerRequest = {

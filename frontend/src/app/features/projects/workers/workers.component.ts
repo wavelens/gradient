@@ -56,6 +56,7 @@ import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComp
 import { MANAGED_ITEM_DISABLED_REASON, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { fieldChecks } from '@shared/forms';
+import { checkWorkerUrlWithWebSocketOrHttpScheme } from '@shared/forms/build-worker-url-field-check';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import { links } from '@shared/routing';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -271,6 +272,10 @@ export class WorkersComponent implements OnInit {
     return id ? fieldChecks.uuid(id) : 'Enter a worker ID.';
   }
 
+  get workerUrlError(): string | null {
+    return checkWorkerUrlWithWebSocketOrHttpScheme(this.newWorkerUrl);
+  }
+
   get workerTokenError(): string | null {
     return fieldChecks.base64(this.newWorkerToken);
   }
@@ -290,7 +295,7 @@ export class WorkersComponent implements OnInit {
   registerWorker(): void {
     if (this.registering()) return;
     this.registerAttempted.set(true);
-    if (this.workerNameError || this.workerIdError || this.workerTokenError) return;
+    if (this.workerNameError || this.workerIdError || this.workerUrlError || this.workerTokenError) return;
     this.registering.set(true);
     this.errorMessage.set(null);
     const url = this.newWorkerUrl.trim() || undefined;
@@ -320,7 +325,7 @@ export class WorkersComponent implements OnInit {
       .confirm({
         title: 'Delete worker',
         target: worker.display_name,
-        consequence: `Removal of ${worker.display_name} from this project. Builds no longer run on this worker.`,
+        consequence: `${worker.display_name} is no longer part of this project. Builds no longer run on this worker.`,
         confirmLabel: 'Delete',
         failure: 'Failed to remove worker.',
         action: () => this.workersService.deleteWorker(this.projectName, worker.worker_id),
