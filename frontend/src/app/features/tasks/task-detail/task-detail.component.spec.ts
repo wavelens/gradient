@@ -1717,7 +1717,7 @@ describe('TaskDetailComponent - package search', () => {
 
     type(fixture, openSearch(fixture).input, 'BROK');
 
-    expect(names(fixture.nativeElement)).toEqual(['x86_64-linux.broken']);
+    expect(names(fixture.nativeElement)).toEqual(['broken']);
   });
 
   it('says that nothing matches instead of "No packages"', () => {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { groupEntryPoints } from './entry-point-groups';
+import { getEntryPointShortName, groupEntryPoints } from './entry-point-groups';
 import { EntryPointSummary, FailedAttributeSummary } from '@core/models';
 
 const ep = (attr: string, architecture = 'x86_64-linux') =>
@@ -69,6 +69,17 @@ describe('groupEntryPoints', () => {
     const groups = groupEntryPoints([ep('checks.x86_64-linux.fmt')], [{ eval: 'packages.x86_64-linux.hello', message: 'boom' }]);
 
     expect(groups.map((g) => g.title)).toEqual(['Packages', 'Checks']);
+  });
+
+  it('drops the system from a failed attribute as from its built siblings', () => {
+    const groups = groupEntryPoints([ep('packages.x86_64-linux.ok')], [{ eval: 'packages.x86_64-linux.broken', message: 'boom' }]);
+
+    expect(groups.map((g) => g.rows.map((r) => r.label))).toEqual([['broken', 'ok']]);
+  });
+
+  it('names an entry point by itself the way its task page row does', () => {
+    expect(getEntryPointShortName('packages.x86_64-linux.ok')).toBe('ok');
+    expect(getEntryPointShortName('nixosConfigurations.host.config.system.build.toplevel')).toBe('host.config.system.build.toplevel');
   });
 
   it('labels a failure that stopped partway down the path by the part it reached', () => {

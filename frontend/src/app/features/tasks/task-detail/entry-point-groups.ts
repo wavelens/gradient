@@ -38,11 +38,18 @@ function isOtherSet(set: string): boolean {
   return /^others?$/i.test(set);
 }
 
+const nixSystemRegex = /^[a-z0-9_]+-(linux|darwin|freebsd|netbsd|openbsd|cygwin|windows)$/;
+
 function pathWithinSet(attr: string, architecture?: string): { set: string; path: string[] } {
   const [set, ...rest] = attrSegments(attr);
   if (!rest.length) return { set, path: [set] };
-  const path = rest.length > 1 && rest[0] === architecture ? rest.slice(1) : rest;
+  const isSystem = architecture ? rest[0] === architecture : nixSystemRegex.test(rest[0]);
+  const path = rest.length > 1 && isSystem ? rest.slice(1) : rest;
   return { set, path };
+}
+
+export function getEntryPointShortName(attr: string): string {
+  return pathWithinSet(attr).path.join('.');
 }
 
 function sharedTailLength(paths: string[][]): number {

@@ -19,6 +19,7 @@ import { formatBytes, formatCount, formatDuration, monthDayClockTime } from '@sh
 import { buildPhase, buildStatusLabel } from '@shared/evaluation';
 import { BuildStatus, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/models';
 import { links } from '@shared/routing';
+import { getEntryPointShortName } from '../task-detail/entry-point-groups';
 
 const CHART_COLORS = {
   buildTime: '--gr-chart-cyan',
@@ -46,6 +47,7 @@ export class EntryPointMetricsComponent implements OnInit {
   loadError = signal<unknown>(null);
   points = signal<EntryPointMetricPoint[]>([]);
   evalAttr = signal('');
+  shortEntryPointName = computed(() => getEntryPointShortName(this.evalAttr()));
   keepEvaluations = signal(30);
   projectName = '';
   taskName = '';

@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" [title]="evalAttr()" [subtitle]="'Build history for the last ' + (keepEvaluations()) + ' evaluations that completed or failed.'">
+<gr-page-layout [breadcrumb]="breadcrumb()" [title]="shortEntryPointName()" [subtitle]="'Build history for the last ' + (keepEvaluations()) + ' evaluations that completed or failed.'">
   @if (latestBuildId()) {
     <a slot="actions" grButton label="View Closure" icon="account_tree" severity="secondary"
       [routerLink]="links.closure(projectName, 'build', latestBuildId(), { task: taskName })"></a>

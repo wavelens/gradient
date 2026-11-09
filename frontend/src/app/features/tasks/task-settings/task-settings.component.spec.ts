@@ -329,6 +329,17 @@ describe('TaskSettingsComponent - write failures', () => {
     }
   });
 
+  it('offers the other unmanaged projects by display name as transfer targets', () => {
+    const fixture = setup(admin);
+    const project = (name: string, display_name: string, managed = false) => ({ name, display_name, managed });
+    (TestBed.inject(ProjectsService) as unknown as Record<string, unknown>)['getProjects'] = () =>
+      of({ items: [project('acme', 'Acme'), project('other', 'Other Team'), project('nix', 'Nix Managed', true)] });
+    const component = fixture.componentInstance;
+    component.openTransferOwnershipDialogAndLoadTargetProjects();
+    expect(component.showTransferDialog()).toBe(true);
+    expect(component.transferTargetProjectOptions()).toEqual([{ label: 'Other Team', value: 'other' }]);
+  });
+
   it('shows a refused transfer inside the open dialog, not on the page', () => {
     const fixture = setup(admin);
     tasks()['transferOwnership'] = () => throwError(() => new ApiError('Project not found', 404));

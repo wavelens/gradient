@@ -192,7 +192,7 @@
             label="Transfer Ownership"
             icon="send"
             severity="danger"
-            (click)="showTransferDialog.set(true)"
+            (click)="openTransferOwnershipDialogAndLoadTargetProjects()"
             [appManagedDisable]="access()"
         ></button>
       </gr-row>
@@ -227,18 +227,16 @@ width="420px"
 <div>
   <p>Transfer <strong>{{ task()?.display_name }}</strong> to another project. This action cannot be undone.</p>
   <gr-form-field label="Target Project">
-    <gr-autocomplete
+    <gr-select
       [(ngModel)]="transferProjectName"
-      [suggestions]="transferProjectSuggestions()"
-      (completeMethod)="onTransferProjectSearch($event)"
-      placeholder="Project name"
-      [forceSelection]="false"
+      [options]="transferTargetProjectOptions()"
+      placeholder="Select project"
       [disabled]="transferring()"
     />
   </gr-form-field>
 </div>
 <div grDialogFooter>
   <button grButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
-  <button grButton label="Transfer" icon="send" severity="danger" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName.trim()"></button>
+  <button grButton label="Transfer" icon="send" severity="danger" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName"></button>
 </div>
 </gr-dialog>

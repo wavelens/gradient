@@ -17,7 +17,6 @@ import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
 import {
-  AutoCompleteComponent,
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
@@ -64,7 +63,6 @@ interface TaskForm {
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    AutoCompleteComponent,
     SelectComponent,
     CheckboxComponent,
     LoadStateComponent,
@@ -114,7 +112,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   errorMessage = signal<string | null>(null);
   transferProjectName = '';
   transferError = signal<string | null>(null);
-  transferProjectSuggestions = signal<string[]>([]);
+  transferTargetProjectOptions = signal<{ label: string; value: string }[]>([]);
 
   projectName = '';
   taskName = '';
@@ -254,16 +252,13 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     });
   }
 
-  onTransferProjectSearch(event: { query: string }): void {
-    const q = event.query.trim().toLowerCase();
+  openTransferOwnershipDialogAndLoadTargetProjects(): void {
+    this.showTransferDialog.set(true);
     this.projectsService.getProjects().subscribe({
-      next: (res) => {
-        const names = res.items
-          .map((o) => o.name)
-          .filter((n) => n !== this.projectName && (!q || n.toLowerCase().includes(q)));
-        this.transferProjectSuggestions.set(names);
-      },
-      error: () => this.transferProjectSuggestions.set([]),
+      next: (res) => this.transferTargetProjectOptions.set(res.items
+        .filter((project) => project.name !== this.projectName && !project.managed)
+        .map((project) => ({ label: project.display_name || project.name, value: project.name }))),
+      error: (error: unknown) => this.transferError.set(apiErrorMessage(error, 'Failed to load projects.')),
     });
   }
 
@@ -273,15 +268,16 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   }
 
   transferOwnership(): void {
-    if (!this.transferProjectName.trim()) return;
-    const targetProject = this.transferProjectName.trim();
+    const targetProject = this.transferProjectName;
+    if (!targetProject) return;
+    const targetLabel = this.transferTargetProjectOptions().find((option) => option.value === targetProject)?.label ?? targetProject;
     this.transferring.set(true);
     this.transferError.set(null);
     this.tasksService.transferOwnership(this.projectName, this.taskName, targetProject).subscribe({
       next: () => {
         this.transferring.set(false);
         this.showTransferDialog.set(false);
-        this.notify.success(`Task transferred to ${targetProject}`);
+        this.notify.success(`Task transferred to ${targetLabel}`);
         this.router.navigateByUrl(links.task(targetProject, this.taskName));
       },
       error: (error) => {
