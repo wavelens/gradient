@@ -108,6 +108,13 @@ describe('EvaluationSummaryComponent', () => {
     expect(text(fixture)).not.toContain('previous evaluation at');
   });
 
+  it('names a failed build once, without the system or the derivation under its attribute', () => {
+    const fixture = setup(SUMMARY);
+
+    expect(text(fixture)).not.toContain('x86_64-linux');
+    expect(text(fixture)).not.toContain('hello-2.12');
+  });
+
   it('says why a waiting evaluation has not started', () => {
     const waiting = { ...SUMMARY, packages: { total: 0, built: 0, failed: 0, blocked: 0, unfinished: 0 }, failures: [], failures_total: 0, failed_attributes: [], compared_with: null };
     const fixture = setup(waiting, { ...EVALUATION, status: 'Waiting', waiting_reason: { kind: 'no_cache' } });

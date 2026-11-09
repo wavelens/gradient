@@ -158,6 +158,7 @@ export class EvaluationSummaryComponent implements OnInit {
   protected readonly failureKind = failureKind;
   protected readonly failureTitle = failureTitle;
   protected readonly firstLine = firstLine;
+  protected readonly blockedLine = blockedLine;
   protected readonly plural = plural;
 
   constructor() {
@@ -224,11 +225,5 @@ export class EvaluationSummaryComponent implements OnInit {
   private rememberTaskName(evaluation: EvaluationResponse): void {
     if (!evaluation.task_name || !evaluation.task_display_name) return;
     this.crumbs.rememberTask(this.project, evaluation.task_name, evaluation.task_display_name);
-  }
-
-  failureMeta(failure: FailedBuildSummary): string {
-    const derivation = failure.attributes.length ? failure.name : '';
-
-    return [derivation, blockedLine(failure)].filter((part) => part.length > 0).join(' \u00b7 ');
   }
 }

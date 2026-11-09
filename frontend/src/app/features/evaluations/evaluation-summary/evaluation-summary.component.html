@@ -52,11 +52,10 @@
                     [linkLabel]="'Log of ' + failureTitle(failure)">
               <gr-status-icon slot="icon" phase="failure" size="sm" />
               <span class="mono">{{ failureTitle(failure) }}</span>
-              <span slot="meta">{{ failureMeta(failure) }}</span>
-              <span slot="actions" class="tags">
-                <gr-badge>{{ failure.architecture }}</gr-badge>
-                <gr-badge [severity]="failureKind(failure.status).severity">{{ failureKind(failure.status).label }}</gr-badge>
-              </span>
+              @if (blockedLine(failure); as blocked) {
+                <span slot="meta">{{ blocked }}</span>
+              }
+              <gr-badge slot="actions" [severity]="failureKind(failure.status).severity">{{ failureKind(failure.status).label }}</gr-badge>
             </gr-row>
           }
         </gr-row-list>
