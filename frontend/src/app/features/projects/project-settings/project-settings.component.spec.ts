@@ -186,7 +186,7 @@ describe('ProjectSettingsComponent - access gating', () => {
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete project')).toBeNull();
-    expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain("you can't change them");
+    expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain('Only the admins of this project can change these settings.');
   });
 
   it('links a visitor without a role to no member-only page', async () => {

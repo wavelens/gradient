@@ -88,7 +88,7 @@ export class ConnectRepositoryComponent implements OnInit {
 
   readonly steps = STEPS;
   access = computed(() => accessTo(this.project(), 'createTask'));
-  missingPermission = createMissingPermissionLoadStateError('createTask', 'project');
+  missingPermission = createMissingPermissionLoadStateError('project');
   projectName = '';
   step = signal<ConnectStep>('repository');
   stepIndex = computed(() => STEPS.findIndex((s) => s.id === this.step()));

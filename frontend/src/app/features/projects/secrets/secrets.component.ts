@@ -72,7 +72,7 @@ export class SecretsComponent implements OnInit {
 
   access = computed(() => accessTo(this.resolvedProject(), 'manageProjectSettings'));
   missingPermission = computed(() =>
-    createMissingPermissionLoadStateError('manageProjectSettings', 'project', isViewerProjectMember(this.resolvedProject())),
+    createMissingPermissionLoadStateError('project', isViewerProjectMember(this.resolvedProject())),
   );
   loading = signal(true);
   loadError = signal<unknown>(null);

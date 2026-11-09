@@ -40,13 +40,13 @@ describe('ServerConfigurationManagedBannerComponent', () => {
     expect(text).not.toContain('members');
   });
 
-  it('leaves out the contact-an-admin note on managed settings', () => {
+  it('leaves out the read-only note on managed settings', () => {
     expect(bannerText({ managed: true, canEdit: false, canTrigger: false }, true)).toBe('');
   });
 
-  it('tells a read-only settings viewer to contact the owning project admin', () => {
+  it('names the owning project admins to a read-only settings viewer', () => {
     const readOnly = { managed: false, canEdit: false, canTrigger: false };
-    expect(bannerText(readOnly, true)).toContain('Contact an admin for this project.');
+    expect(bannerText(readOnly, true)).toContain('Only the admins of this project can change these settings.');
     expect(bannerText(readOnly)).toBe('');
     expect(bannerText({ managed: false, canEdit: true, canTrigger: true }, true)).toBe('');
   });

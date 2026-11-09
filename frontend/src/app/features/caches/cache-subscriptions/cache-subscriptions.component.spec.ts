@@ -108,7 +108,7 @@ describe('CacheSubscriptionRequestsComponent', () => {
     const element = fixture.nativeElement as HTMLElement;
     expect(load).not.toHaveBeenCalled();
     expect(element.textContent).toContain('No access');
-    expect(element.textContent).toContain('manage cache subscriptions permission for this cache');
+    expect(element.textContent).toContain('Only the admins of this cache can view this.');
     expect(element.textContent).not.toContain('Try Again');
   });
 

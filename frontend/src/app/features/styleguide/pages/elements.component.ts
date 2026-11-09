@@ -74,7 +74,7 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
   styleUrls: ['./demo.scss', './elements.component.scss'],
 })
 export class ElementsComponent {
-  readonly refusedExample = createMissingPermissionLoadStateError('manageIntegrations', 'project');
+  readonly refusedExample = createMissingPermissionLoadStateError('project');
   readonly demoPermissions = [
     { id: 'viewProject', mutating: false },
     { id: 'createTask', mutating: true },

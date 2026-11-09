@@ -135,18 +135,18 @@ describe('ConnectRepositoryComponent', () => {
     expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="cache-missing"]')).not.toBeNull();
   });
 
-  it('shows the missing permission instead of the form to a role that cannot create tasks, without a request', () => {
+  it('shows the no-access state instead of the form to a role that cannot create tasks, without a request', () => {
     const getSubscribedCaches = vi.fn(() => of([]));
     const el = render({}, {}, { getSubscribedCaches }, ['viewProject']).nativeElement as HTMLElement;
     expect(el.querySelector('#connect-repo')).toBeNull();
-    expect(el.querySelector('gr-load-state')?.textContent).toContain('create task permission');
+    expect(el.querySelector('gr-load-state')?.textContent).toContain('Only the admins of this project can view this.');
     expect(getSubscribedCaches).not.toHaveBeenCalled();
   });
 
-  it('tells a visitor of a public project which permission connecting a repository needs', () => {
+  it('tells a visitor of a public project who can connect a repository, without permission names', () => {
     const el = render({}, {}, {}, []).nativeElement as HTMLElement;
-    expect(el.querySelector('gr-load-state')?.textContent).toContain('The create task permission for this project is necessary.');
-    expect(el.querySelector('gr-load-state')?.textContent).not.toContain('can view this');
+    expect(el.querySelector('gr-load-state')?.textContent).toContain('Only the admins of this project can view this.');
+    expect(el.querySelector('gr-load-state')?.textContent).not.toContain('permission');
   });
 
   it('ends on the events step with a link to the task', () => {

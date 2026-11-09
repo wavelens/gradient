@@ -5,17 +5,9 @@
  */
 
 import { MissingPermissionLoadStateError } from '@gradient/ui/ui';
-import type { CachePermission, Permission } from '@core/models';
-import { permissionLabel } from '@shared/text';
 
-export function createMissingPermissionLoadStateError(
-  permission: Permission | CachePermission,
-  owner: 'project' | 'cache',
-  isViewerMemberOfOwner = true,
-): MissingPermissionLoadStateError {
-  if (!isViewerMemberOfOwner) return createNoAccessLoadStateError(owner, 'members');
-  const label = permissionLabel(permission);
-  return new MissingPermissionLoadStateError(`The ${label} permission for this ${owner} is necessary. Contact the ${owner} administrator.`);
+export function createMissingPermissionLoadStateError(owner: 'project' | 'cache', isViewerMemberOfOwner = true): MissingPermissionLoadStateError {
+  return createNoAccessLoadStateError(owner, isViewerMemberOfOwner ? 'admins' : 'members');
 }
 
 export function createNoAccessLoadStateError(owner: 'project' | 'cache' | 'team', group: 'members' | 'admins'): MissingPermissionLoadStateError {

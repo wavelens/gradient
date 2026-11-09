@@ -89,7 +89,7 @@ describe('SecretsComponent', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(service.list).not.toHaveBeenCalled();
     expect(text).toContain('No access');
-    expect(text).toContain('manage project settings permission');
+    expect(text).toContain('Only the admins of this project can view this.');
     expect(text).not.toContain('Set secret');
   });
 

@@ -21,7 +21,7 @@ import { AccessState } from '@core/models/access.model';
         </gr-message-banner>
       }
     } @else if (showReadOnlyNote() && access() && !access()?.canEdit) {
-      <gr-message-banner type="info">You can view these settings, but you can't change them. Contact an admin for this {{ settingsAdminEntityKind() }}.</gr-message-banner>
+      <gr-message-banner type="info">Only the admins of this {{ settingsAdminEntityKind() }} can change these settings.</gr-message-banner>
     }
   `,
   styles: ':host { display: contents; }',

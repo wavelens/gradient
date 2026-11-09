@@ -33,7 +33,7 @@ export function loadErrorText(error: unknown): string {
   if (error instanceof MissingPermissionLoadStateError) return error.message;
   switch (getForbiddenOrMissingKindFromError(error)) {
     case 'forbidden':
-      return 'No permission to view this content. Ask an admin of this project, cache, or team for access.';
+      return 'No permission to view this content. Ask an admin for access.';
     case 'missing': {
       const reason = serverReason(error);
       return `${reason ? `${reason.replace(/\.$/, '')}. ` : ''}The resource doesn't exist or permissions deny access.`;
