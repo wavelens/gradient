@@ -21,7 +21,7 @@ use sea_orm::EntityTrait;
 use tracing::warn;
 
 use super::super::SessionHandles;
-use super::super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
+use super::super::nar::{NarUploadRecord, mark_nar_stored};
 use super::super::socket::{ProtoWriter, send_server_msg};
 use super::super::store_paths::{inbound_upload_metadata, unmapped_project};
 use super::table::Transfer;
@@ -201,13 +201,6 @@ async fn record_nar(
         return retry(format!("recording {store_path} in the cache index: {e:#}"));
     }
 
-    let _ = record_nar_push_metric(
-        &handles.db.worker_db,
-        &handles.cache_traffic,
-        project_id,
-        meta.file_size as i64,
-    )
-    .await;
     UploadOutcome::Ok
 }
 

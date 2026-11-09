@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_db::metrics::cache_traffic::{CacheTraffic, TrafficSource};
-use gradient_db::{DbContext, WorkerDb};
+use gradient_db::DbContext;
 use gradient_graph::{Graph, NarCommit, SignTargets};
 use gradient_types::events::cache::NarSigned;
 use gradient_types::ids::ProjectId;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
 pub(super) struct NarUploadRecord<'a> {
@@ -22,24 +20,6 @@ pub(super) struct NarUploadRecord<'a> {
     pub deriver: Option<&'a str>,
     pub ca: Option<&'a str>,
     pub confirmed: bool,
-}
-
-pub(super) async fn record_nar_push_metric(
-    db: &WorkerDb,
-    cache_traffic: &CacheTraffic,
-    project_id: ProjectId,
-    bytes: i64,
-) -> anyhow::Result<()> {
-    let project_cache = EProjectCache::find()
-        .filter(CProjectCache::Project.eq(project_id))
-        .one(db)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("no cache for project {}", project_id))?;
-
-    let bucket = gradient_db::metrics::cache_traffic::minute_bucket(gradient_types::now());
-    cache_traffic.record(project_cache.cache, bucket, bytes, TrafficSource::Internal);
-
-    Ok(())
 }
 
 pub(super) async fn mark_nar_stored(
