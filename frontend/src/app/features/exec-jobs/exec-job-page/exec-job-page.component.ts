@@ -38,7 +38,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import type { ExecJobAttemptView, ExecJobPullRequestView, ExecJobResponse } from '@core/models';
-import { abortExecJobConfirm, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase } from '../exec-job-status';
+import { abortExecJobConfirm, getShowJobMenuItemForExecJob, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 import { ExecJobInfoComponent } from '../exec-job-info/exec-job-info.component';
@@ -156,11 +156,8 @@ export class ExecJobPageComponent implements OnInit {
   );
   jobMenu = computed<MenuItem[]>(() => {
     const job = this.job();
-    if (!job) return [];
-    return execJobMenu(job, this.triggerAccess().canEdit, {
-      terminal: { command: () => this.showView('terminal') },
-      abort: () => this.abort(),
-    });
+    const showJob = job && getShowJobMenuItemForExecJob(job);
+    return showJob && !showJob.disabled ? [showJob] : [];
   });
   crumbs = computed(() => {
     const job = this.job();

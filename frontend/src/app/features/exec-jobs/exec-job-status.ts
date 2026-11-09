@@ -48,14 +48,21 @@ export interface ExecJobMenuActions {
   abort: () => void;
 }
 
+export function getShowJobMenuItemForExecJob(
+  { dispatched_job: job, cluster_job: cluster }: Pick<ExecJobSummary, 'dispatched_job' | 'cluster_job'>,
+): MenuItem {
+  const link = links.boardJobOrCluster(job, cluster);
+  return { label: 'Show job', icon: 'work', disabled: !link, routerLink: link };
+}
+
 export function execJobMenu(
-  { status, dispatched_job: job, cluster_job: cluster }: Pick<ExecJobSummary, 'status' | 'dispatched_job' | 'cluster_job'>,
+  job: Pick<ExecJobSummary, 'status' | 'dispatched_job' | 'cluster_job'>,
   canTrigger: boolean,
   actions: ExecJobMenuActions,
 ): MenuItem[] {
-  const link = links.boardJobOrCluster(job, cluster);
+  const { status } = job;
   return [
-    { label: 'Show job', icon: 'work', disabled: !link, routerLink: link },
+    getShowJobMenuItemForExecJob(job),
     ...(hasExecTerminal(status) ? [{ label: 'Terminal', icon: 'terminal', ...actions.terminal }] : []),
     ...(isOpenExecJob(status) && canTrigger ? [{ label: 'Abort', icon: 'stop_circle', command: actions.abort }] : []),
   ];

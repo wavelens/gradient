@@ -357,19 +357,22 @@ describe('ExecJobPageComponent', () => {
     expect(guest).toContain('2 CPUs · 500 MB memory · 2048 MB disk');
   });
 
-  it('opens the job menu of the task page from the log entry, by right click or its dots', () => {
-    const { fixture, confirm } = setup('running');
+  it('offers only Show job from the log entry, leaving Abort and Terminal to the header and the tabs', () => {
+    const { fixture } = setup('running', SSH, {}, { ...job('running'), dispatched_job: 'dj1' });
     const root = fixture.nativeElement as HTMLElement;
     const log = root.querySelector('.log-sidebar .sidebar-item') as HTMLElement;
     log.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
     fixture.detectChanges();
-    const items = () => Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item'))
+    const items = Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item'))
       .map((item) => (item.textContent ?? '').replace(item.querySelector('.gr-menu__icon')?.textContent ?? '', '').trim());
-    expect(items()).toEqual(['Show job', 'Terminal', 'Abort']);
-    expect(log.querySelector('button.sidebar-kebab')?.getAttribute('aria-label')).toBe('Actions for Exec Job');
+    expect(items).toEqual(['Show job']);
+    expect(log.querySelector('button.sidebar-kebab')?.getAttribute('aria-label')).toBe('Actions for apps.x86_64-linux.train');
+  });
 
-    Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item')).find((item) => item.textContent?.includes('Abort'))!.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'apps.x86_64-linux.train' }));
+  it('hides the log entry menu while the job has no assignment to show', () => {
+    const { fixture } = setup('queued');
+    expect(fixture.componentInstance.jobMenu()).toEqual([]);
+    expect((fixture.nativeElement as HTMLElement).querySelector('.log-sidebar .sidebar-kebab')).toBeNull();
   });
 
   it('links a finished job to its assignment on the Job Board', () => {
