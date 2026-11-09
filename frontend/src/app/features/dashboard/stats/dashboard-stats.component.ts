@@ -43,7 +43,7 @@ export class DashboardStatsComponent implements OnInit {
       { label: 'Completed build count (all time)', value: s && formatCount(s.builds_completed) },
       { label: 'Cache size', value: s && formatBytes(s.cache_size_bytes) },
       { label: 'Worker load', value: s && (s.workers.online ? `${s.workers.busy_pct}%` : '-') },
-      { label: 'Median queue wait time', value: s && formatDuration(s.queue_wait_p50_ms) },
+      { label: 'Median queue wait (24 h)', value: s && formatDuration(s.queue_wait_p50_ms) },
     ];
   });
 
