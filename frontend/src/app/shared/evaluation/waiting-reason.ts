@@ -75,7 +75,7 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
       return {
         title: 'Waiting for a worker',
         detail: reason.connected_workers === 0
-          ? 'No worker is connected.'
+          ? 'This project has no connected workers.'
           : `${plural(reason.connected_workers, 'connected worker')} (${architectures}) can't build this evaluation.`,
         requirements: reason.unmet.map(unmetRequirementLabel),
         ...forWorkerAdmin(workerAction(project), ASK_FOR_WORKER),
@@ -96,7 +96,7 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
           exec: 'Waiting for exec worker',
         }[reason.capability],
         detail: reason.connected_workers === 0
-          ? `No workers are connected to ${work}.`
+          ? `This project has no workers connected to ${work}.`
           : `${reason.connected_workers} ${reason.connected_workers === 1 ? 'worker is' : 'workers are'} connected, but none can ${work}.`,
         requirements: [],
         ...forWorkerAdmin(workerAction(project), ASK_FOR_WORKER),

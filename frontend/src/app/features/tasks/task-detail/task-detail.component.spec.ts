@@ -864,7 +864,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     );
     const text = (fixture.nativeElement as HTMLElement).querySelector('.pkg-wait')?.textContent ?? '';
     expect(text).toContain('Waiting for a worker');
-    expect(text).toContain('No worker is connected.');
+    expect(text).toContain('This project has no connected workers.');
     expect(text).toContain('aarch64-linux with feature kvm - 3 builds');
     expect(fixture.nativeElement.querySelector('.pkg-wait a[grButton]')?.getAttribute('href')).toBe('/project/acme/workers');
   });

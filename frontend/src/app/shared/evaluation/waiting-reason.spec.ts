@@ -41,6 +41,11 @@ describe('explainWaiting', () => {
     expect(linkOf(null, ADMIN)).toBe('/project/acme/workers');
   });
 
+  it('scopes the connected worker count to the project', () => {
+    const explained = explainWaiting({ kind: 'eval_workers', capability: 'eval', connected_workers: 0 }, 'acme', ADMIN);
+    expect(explained.detail).toBe('This project has no workers connected to run the evaluation.');
+  });
+
   it('lists the unmet requirements without a dangling colon in the detail', () => {
     const explained = explainWaiting({
       kind: 'workers',
