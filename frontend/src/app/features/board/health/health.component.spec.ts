@@ -10,7 +10,6 @@ import { EMPTY, NEVER, type Observable, of, throwError } from 'rxjs';
 import { BoardHealthComponent } from './health.component';
 import { BoardService } from '@core/services/board.service';
 import { AdminService } from '@core/services/admin.service';
-import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { BoardHealth, AdminTaskDto } from '@core/models';
@@ -63,7 +62,6 @@ let confirm: ReturnType<typeof vi.fn>;
 let startDeepGc: ReturnType<typeof vi.fn>;
 
 function setup(
-  githubAppEnabled: boolean,
   health: BoardHealth = HEALTH,
   setDraining = vi.fn(() => of({ draining: true })),
   confirmed = true,
@@ -76,7 +74,6 @@ function setup(
     providers: [
       provideRouter([]),
       { provide: BoardService, useValue: { getHealth: () => of(health) } },
-      { provide: ConfigService, useValue: { githubAppEnabled } },
       { provide: ConfirmService, useValue: { confirm } },
       {
         provide: AdminService,
@@ -108,7 +105,6 @@ describe('BoardHealthComponent', () => {
       providers: [
         provideRouter([]),
         { provide: BoardService, useValue: { getHealth } },
-        { provide: ConfigService, useValue: { githubAppEnabled: true } },
         { provide: AdminService, useValue: { listTasks: () => of([]) } },
       ],
     });
@@ -126,10 +122,10 @@ describe('BoardHealthComponent', () => {
     TestBed.resetTestingModule();
   });
 
-  describe('when GitHub App is configured', () => {
+  describe('details', () => {
     let fixture: ComponentFixture<BoardHealthComponent>;
 
-    beforeEach(() => { fixture = setup(true); });
+    beforeEach(() => { fixture = setup(); });
     afterEach(() => TestBed.resetTestingModule());
 
     it('does not render "HTTP routes" heading', () => {
@@ -153,24 +149,11 @@ describe('BoardHealthComponent', () => {
       expect(fixture.nativeElement.textContent).not.toContain('0a');
     });
 
-    it('hides the "Set up GitHub App" link', () => {
-      const link: HTMLAnchorElement = fixture.nativeElement.querySelector('.admin-actions a[href="/admin/github-app"]');
-      expect(link).toBeNull();
-      expect(fixture.nativeElement.textContent).not.toContain('Set up GitHub App');
-    });
-  });
-
-  describe('when GitHub App is NOT configured', () => {
-    let fixture: ComponentFixture<BoardHealthComponent>;
-
-    beforeEach(() => { fixture = setup(false); });
-    afterEach(() => TestBed.resetTestingModule());
-
-    it('shows "Set up GitHub App" text without disabled class', () => {
-      const link: HTMLAnchorElement = fixture.nativeElement.querySelector('.admin-actions a[href="/admin/github-app"]');
-      expect(link).toBeTruthy();
-      expect(link.textContent?.trim()).toBe('Set up GitHub App');
-      expect(link.classList.contains('disabled')).toBe(false);
+    it('keeps only the maintenance actions, leaving the user-menu links to the user menu', () => {
+      const actions = (fixture.nativeElement as HTMLElement).querySelector('.admin-actions') as HTMLElement;
+      expect(actions.querySelectorAll('a').length).toBe(0);
+      expect(actions.textContent).not.toContain('Set up GitHub App');
+      expect(actions.textContent).not.toContain('Event notifications');
     });
   });
 
@@ -178,20 +161,20 @@ describe('BoardHealthComponent', () => {
     afterEach(() => TestBed.resetTestingModule());
 
     it('offers "Enable Draining" and no banner when not draining', () => {
-      const fixture = setup(true);
+      const fixture = setup();
       expect(fixture.nativeElement.textContent).toContain('Enable Draining');
       expect(fixture.nativeElement.textContent).not.toContain('Instance is draining');
     });
 
     it('offers "Disable Draining" and shows a banner when draining', () => {
-      const fixture = setup(true, { ...HEALTH, draining: true });
+      const fixture = setup({ ...HEALTH, draining: true });
       expect(fixture.nativeElement.textContent).toContain('Disable Draining');
       expect(fixture.nativeElement.textContent).toContain('Instance is draining');
     });
 
     it('asks first, naming all projects, before it enables draining', () => {
       const setDraining = vi.fn(() => of({ draining: true }));
-      const fixture = setup(true, HEALTH, setDraining);
+      const fixture = setup(HEALTH, setDraining);
       adminButton(fixture, 'Enable Draining').click();
       expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Enable Draining', target: 'All projects on this instance' }));
       expect(setDraining).toHaveBeenCalledWith(true);
@@ -199,14 +182,14 @@ describe('BoardHealthComponent', () => {
 
     it('sends nothing when enabling draining is cancelled', () => {
       const setDraining = vi.fn(() => of({ draining: true }));
-      const fixture = setup(true, HEALTH, setDraining, false);
+      const fixture = setup(HEALTH, setDraining, false);
       adminButton(fixture, 'Enable Draining').click();
       expect(confirm).toHaveBeenCalledOnce();
       expect(setDraining).not.toHaveBeenCalled();
     });
 
     it('marks Disable Draining as busy while the request runs', () => {
-      const fixture = setup(true, { ...HEALTH, draining: true }, vi.fn(() => NEVER));
+      const fixture = setup({ ...HEALTH, draining: true }, vi.fn(() => NEVER));
       const button = adminButton(fixture, 'Disable Draining');
       button.click();
       fixture.detectChanges();
@@ -216,7 +199,7 @@ describe('BoardHealthComponent', () => {
     it('disables draining at once and reports a failure', () => {
       const refused = new Error('boom');
       const setDraining = vi.fn(() => throwError(() => refused));
-      const fixture = setup(true, { ...HEALTH, draining: true }, setDraining);
+      const fixture = setup({ ...HEALTH, draining: true }, setDraining);
       const failure = vi.spyOn(TestBed.inject(NotifyService), 'failure');
       adminButton(fixture, 'Disable Draining').click();
       expect(confirm).not.toHaveBeenCalled();
@@ -229,7 +212,7 @@ describe('BoardHealthComponent', () => {
     afterEach(() => TestBed.resetTestingModule());
 
     it('asks first, then starts a round and reloads the tasks', () => {
-      const fixture = setup(true);
+      const fixture = setup();
       const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
       adminButton(fixture, 'Run Deep GC').click();
       expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Run Deep GC', target: 'All storage backends' }));
@@ -238,20 +221,20 @@ describe('BoardHealthComponent', () => {
     });
 
     it('sends nothing when the round is cancelled', () => {
-      const fixture = setup(true, HEALTH, undefined, false);
+      const fixture = setup(HEALTH, undefined, false);
       adminButton(fixture, 'Run Deep GC').click();
       expect(startDeepGc).not.toHaveBeenCalled();
     });
   });
 
   it('leaves the step of a completed round empty', () => {
-    const fixture = setup(true, HEALTH, undefined, true, [{ ...TASK, status: 'completed' }]);
+    const fixture = setup(HEALTH, undefined, true, [{ ...TASK, status: 'completed' }]);
     expect(fixture.nativeElement.textContent).not.toContain('NARs');
     TestBed.resetTestingModule();
   });
 
   it('lists only the supervised loops that restarted or failed', () => {
-    const fixture = setup(true);
+    const fixture = setup();
     const rows = fixture.nativeElement.querySelectorAll('gr-table.supervision tbody tr');
     expect(rows.length).toBe(1);
     expect(rows[0].textContent).toContain('build-dispatch');
@@ -261,7 +244,7 @@ describe('BoardHealthComponent', () => {
 
   it('sums up healthy loops in one line', () => {
     const healthy = { ...HEALTH, supervised: [HEALTH.supervised[1], { ...HEALTH.supervised[1], name: 'rollup' }] };
-    const fixture = setup(true, healthy);
+    const fixture = setup(healthy);
     const rows = fixture.nativeElement.querySelectorAll('gr-table.supervision tbody tr');
     expect(rows.length).toBe(1);
     expect(rows[0].textContent).toContain('All 2 supervised loops run with no restarts');

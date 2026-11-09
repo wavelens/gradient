@@ -6,16 +6,13 @@
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
 import { ButtonComponent, CardGridComponent, LoadStateComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { BoardService } from '@core/services/board.service';
 import { AdminService } from '@core/services/admin.service';
-import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { formatBytes, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { BoardHealth, AdminTaskDto } from '@core/models';
-import { links } from '@shared/routing';
 
 const TASK_KIND_LABELS: Record<string, string> = { deep_gc: 'Deep GC' };
 const DEEP_GC_PASS_LABELS: Record<string, string> = {
@@ -38,7 +35,7 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
 @Component({
   selector: 'app-board-health',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, ButtonComponent, CardGridComponent, StatCardComponent, RouterModule, TableComponent, LoadStateComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, ButtonComponent, CardGridComponent, StatCardComponent, TableComponent, LoadStateComponent],
   template: `
     <gr-load-state [loading]="healthLoading()" [error]="healthError()" [empty]="!health()"
                    loadingMessage="Loading system health..." errorTitle="Failed to load health" (retry)="refreshHealth()">
@@ -98,10 +95,6 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
 
       <h2>Admin</h2>
       <div class="admin-actions">
-        @if (!config.githubAppEnabled) {
-          <a grButton severity="secondary" size="small" label="Set up GitHub App" [routerLink]="links.admin('github-app')"></a>
-        }
-        <a grButton severity="secondary" size="small" label="Event notifications" [routerLink]="links.admin('webhooks')"></a>
         <button grButton severity="secondary" size="small" label="Run Deep GC" (click)="runDeepGc()"></button>
         @if (h.draining) {
           <button grButton severity="secondary" size="small" label="Disable Draining" [loading]="drainBusy()" (click)="disableDraining()"></button>
@@ -134,10 +127,8 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
   styleUrl: './health.component.scss',
 })
 export class BoardHealthComponent implements OnInit {
-  protected readonly links = links;
   private board = inject(BoardService);
   private admin = inject(AdminService);
-  protected config = inject(ConfigService);
   private confirm = inject(ConfirmService);
   private notify = inject(NotifyService);
 
