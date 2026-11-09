@@ -234,7 +234,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.querySub = this.route.queryParamMap.subscribe((q) => this.followEvalParam(q.get('eval')));
     const resolved = this.resolved()?.task;
     if (resolved) this.applyTask(resolved, false);
-    this.loadTaskData(!!resolved);
+    else this.loadTaskData();
     this.startLiveUpdates();
   }
 
@@ -682,7 +682,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   private evaluationLinkItems = computed<MenuItem[]>(() => {
     const selected = this.selected();
-    const job = links.boardJobOrCluster(selected?.dispatched_job, selected?.cluster_job);
+    const job = links.boardJobOrCluster(selected?.dispatched_job, selected?.cluster_job)
+      ?? (selected && isEvaluationNotStartedStatus(selected.status) ? links.boardPendingJob({ evaluation_id: selected.id }) : undefined);
     return [
       { label: 'Show job', icon: 'work', disabledReason: showJobMenuItemDisabledReason(job, this.authService.isAuthenticated(), 'evaluation'), routerLink: job },
     ];

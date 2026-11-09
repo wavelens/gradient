@@ -297,9 +297,11 @@ describe('TaskDetailComponent - older evaluations', () => {
 describe('TaskDetailComponent - loading', () => {
   const access = { managed: false, canEdit: true, canTrigger: true };
 
-  it('renders the resolved task at once while it refreshes in the background', () => {
-    const { fixture } = setup(access, { getTask: () => NEVER });
+  it('renders the resolved task at once without loading it a second time', () => {
+    const getTask = vi.fn(() => NEVER);
+    const { fixture } = setup(access, { getTask });
     const root = fixture.nativeElement as HTMLElement;
+    expect(getTask).not.toHaveBeenCalled();
     expect(root.querySelector('gr-loading-spinner')).toBeNull();
     expect(root.querySelector('h1')?.textContent).toContain('Demo');
     expect(root.querySelector('.eval-card')).not.toBeNull();
@@ -324,6 +326,8 @@ describe('TaskDetailComponent - loading', () => {
 
   it('marks a paused task as inactive with a link to its settings in place of the live badge', () => {
     const { fixture, liveConnectionChange } = setup(access, { getTask: () => of({ ...resolvedTask(access, {}), active: false }) });
+    liveConnectionChange.fn?.(true);
+    liveConnectionChange.fn?.(false);
     liveConnectionChange.fn?.(true);
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
@@ -570,6 +574,13 @@ describe('TaskDetailComponent evaluation menu', () => {
     const { fixture } = setup(trigger, { primary: { dispatched_job: 'job-1', cluster_job: 'cluster-1' } });
     const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job');
     expect(String(item?.routerLink)).toBe('/board/clusters/cluster-1');
+  });
+
+  it.each(['Queued', 'Waiting'] as const)('links Show job of a %s evaluation to its pending job on the Job Board', (primaryStatus) => {
+    const { fixture } = setup(trigger, { primaryStatus });
+    const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job');
+    expect(item?.disabledReason).toBeNull();
+    expect(String(item?.routerLink)).toMatch(/^\/board\/pending\/[^/]+$/);
   });
 
   it('says why Show job waits until an eval worker picked the evaluation up', () => {
