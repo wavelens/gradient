@@ -29,7 +29,7 @@ pub struct TaskMetricPoint {
     pub evaluation_id: EvaluationId,
     pub created_at: chrono::NaiveDateTime,
     pub build_time_total_ms: i64,
-    pub eval_time_ms: i64,
+    pub eval_time_ms: Option<i64>,
     pub output_size_bytes: Option<i64>,
     pub closure_size_bytes: Option<i64>,
     pub runtime_closure_size_bytes: Option<i64>,
@@ -48,7 +48,7 @@ pub struct TaskMetricsResponse {
     operation_id = "getTaskMetrics",
     tag = "tasks",
     summary = "Get task metrics",
-    description = "Return the metrics points for each evaluation in the latest `keep_evaluations` evaluations that completed or failed.",
+    description = "Return the metrics points for each evaluation in the latest `keep_evaluations` evaluations that completed or failed. `eval_time_ms` runs from the start of the fetch to the finish, without the time in the queue and is `null` if the evaluation never started fetching.",
     params(("project" = String, Path), ("task" = String, Path)),
     responses((status = OK, description = "Task metrics", body = TaskMetricsResponse), WebError)
 )]
@@ -108,7 +108,10 @@ pub async fn get_task_metrics(
     // pin a web pool connection for minutes at nixpkgs scale.
     let mut points = Vec::new();
     for evaluation in evaluations {
-        let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
+        let eval_time_ms = evaluation
+            .fetch_started_at
+            .zip(evaluation.finished_at)
+            .map(|(started, finished)| (finished - started).num_milliseconds());
 
         let build_time_total_ms: i64 = shared_builds_by_eval
             .get(&evaluation.id)

@@ -72,7 +72,7 @@ export class TaskMetricsComponent implements OnInit {
     { name: 'Build time', data: this.metrics().map((p) => p.build_time_total_ms) },
   ]);
   evalTimeSeries = computed(() => [
-    { name: 'Eval time', data: this.metrics().map((p) => p.eval_time_ms) },
+    { name: 'Eval time', data: this.metrics().map((p) => p.eval_time_ms ?? null) },
   ]);
   outputSizeSeries = computed(() => [
     { name: 'Output size', data: this.metrics().map((p) => p.output_size_bytes ?? null) },
