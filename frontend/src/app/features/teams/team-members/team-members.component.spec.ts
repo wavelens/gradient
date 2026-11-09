@@ -256,7 +256,7 @@ describe('TeamMembersComponent', () => {
     const { fixture, notify, removeMember, confirm } = setup();
     removeButton(fixture.nativeElement, 'bob').click();
     expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Remove member', target: 'Bob (bob)', consequence: 'bob can no longer access this team.' }),
+      expect.objectContaining({ title: 'Remove member', target: 'Bob (bob)', consequence: 'bob loses their role on this team.' }),
     );
     expect(removeMember).toHaveBeenCalledWith('platform', 'bob');
     expect(notify.success).toHaveBeenCalledWith('Member removed');
@@ -267,8 +267,21 @@ describe('TeamMembersComponent', () => {
     const { fixture, confirm } = setup(undefined, false, vi.fn().mockReturnValue(of([...members, secondAdmin])));
     removeButton(fixture.nativeElement, 'alice').click();
     expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ target: 'Alice (alice)', consequence: 'You lose access to this team and its settings.' }),
+      expect.objectContaining({ target: 'Alice (alice)', consequence: 'You lose your role on this team.' }),
     );
+  });
+
+  it('asks before an admin lowers their own role and only then', () => {
+    const { fixture, updateMember, confirm } = setup();
+    fixture.componentInstance.updateRole('bob', 'admin');
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockImplementation(() => EMPTY);
+    fixture.componentInstance.updateRole('alice', 'member');
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ target: 'Alice (alice)', consequence: 'You lose some permissions in this team.' }),
+    );
+    expect(updateMember).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance.pendingMemberRoleSelection()).toBeNull();
   });
 
   it('sends no removal when the confirmation is cancelled', () => {

@@ -39,6 +39,9 @@ import {
   compareRoleNamesByBuiltInAccessThenName,
   countMembersByRoleName,
   formatMemberNameForConfirmDialog,
+  getMemberRemovalConsequenceSentence,
+  injectSaveMemberRoleChangeWithOwnRoleConfirmation,
+  newRoleLacksCurrentRolePermission,
   requestIfProjectMember,
 } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
@@ -102,6 +105,7 @@ export class MembersRolesComponent implements OnInit {
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private saveMemberRoleChange = injectSaveMemberRoleChangeWithOwnRoleConfirmation();
 
   access = computed(() => accessTo(this.project(), 'manageMembers'));
   roleAccess = computed(() => accessTo(this.project(), 'manageRoles'));
@@ -243,20 +247,20 @@ export class MembersRolesComponent implements OnInit {
   }
 
   updateMemberRole(username: string, role: string): void {
+    const member = this.members().find((entry) => entry.id === username);
     this.pendingMemberRoleSelection.set({ user: username, role });
-    this.projectsService
-      .updateMemberRole(this.projectName, username, role)
-      .subscribe({
-        next: () => {
-          this.members.update((members) => members.map((member) => (member.id === username ? { ...member, name: role } : member)));
-          this.pendingMemberRoleSelection.set(null);
-          this.notify.success('Member role saved');
-          if (this.isSignedInUser(username)) this.navigateToProjectOrReloadProject(false);
-        },
-        error: (error: unknown) => {
-          this.pendingMemberRoleSelection.set(null);
-          this.notify.failure("Couldn't change the member's role", error);
-        },
+    this.saveMemberRoleChange({
+      place: 'project',
+      signedInUser: this.isSignedInUser(username),
+      lowersAccess: newRoleLacksCurrentRolePermission(this.roles(), member?.name ?? '', role),
+      target: formatMemberNameForConfirmDialog(member?.user_display_name, username),
+      save: () => this.projectsService.updateMemberRole(this.projectName, username, role),
+    })
+      .pipe(finalize(() => this.pendingMemberRoleSelection.set(null)))
+      .subscribe(() => {
+        this.members.update((members) => members.map((entry) => (entry.id === username ? { ...entry, name: role } : entry)));
+        this.notify.success('Member role saved');
+        if (this.isSignedInUser(username)) this.navigateToProjectOrReloadProject(false);
       });
   }
 
@@ -265,7 +269,7 @@ export class MembersRolesComponent implements OnInit {
       .confirm({
         title: 'Remove member',
         target: formatMemberNameForConfirmDialog(this.members().find((member) => member.id === username)?.user_display_name, username),
-        consequence: `${username} loses their role in this project.`,
+        consequence: getMemberRemovalConsequenceSentence('project', username, this.isSignedInUser(username)),
         confirmLabel: 'Remove',
         failure: 'Failed to remove the member.',
         action: () => this.projectsService.removeMember(this.projectName, username),

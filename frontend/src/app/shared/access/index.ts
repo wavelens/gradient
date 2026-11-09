@@ -14,3 +14,4 @@ export * from './request-if-member';
 export * from './settings-access';
 export * from './role-order';
 export * from './member-name';
+export * from './member-access-change-confirmation';

@@ -13,8 +13,13 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfirmService } from '@shared/confirm';
-import { canManageTeam, formatMemberNameForConfirmDialog } from '@shared/access';
-import { EMPTY, merge, tap } from 'rxjs';
+import {
+  canManageTeam,
+  formatMemberNameForConfirmDialog,
+  getMemberRemovalConsequenceSentence,
+  injectSaveMemberRoleChangeWithOwnRoleConfirmation,
+} from '@shared/access';
+import { EMPTY, finalize, merge, tap } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import {
   TeamRole,
@@ -64,6 +69,7 @@ export class TeamMembersComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
   private auth = inject(AuthService);
+  private saveMemberRoleChange = injectSaveMemberRoleChangeWithOwnRoleConfirmation();
 
   readonly roles: { label: string; value: TeamRole }[] = [
     { label: 'Member', value: 'member' },
@@ -189,19 +195,21 @@ export class TeamMembersComponent implements OnInit {
   }
 
   updateRole(user: string, role: TeamRole): void {
+    const member = this.members().find((entry) => entry.user === user);
     this.pendingMemberRoleSelection.set({ user, role });
-    this.teams.updateMember(this.teamName, user, role).subscribe({
-      next: () => {
-        this.members.update((members) => members.map((member) => (member.user === user ? { ...member, role } : member)));
-        this.pendingMemberRoleSelection.set(null);
+    this.saveMemberRoleChange({
+      place: 'team',
+      signedInUser: this.isSignedInUser(user),
+      lowersAccess: member?.role === 'admin' && role !== 'admin',
+      target: formatMemberNameForConfirmDialog(member?.name, user),
+      save: () => this.teams.updateMember(this.teamName, user, role),
+    })
+      .pipe(finalize(() => this.pendingMemberRoleSelection.set(null)))
+      .subscribe(() => {
+        this.members.update((members) => members.map((entry) => (entry.user === user ? { ...entry, role } : entry)));
         this.notify.success('Member role saved');
         if (this.isSignedInUser(user)) this.currentUserTeamAccessChanged.emit(false);
-      },
-      error: (err: unknown) => {
-        this.pendingMemberRoleSelection.set(null);
-        this.notify.failure("Couldn't change the member's role", err);
-      },
-    });
+      });
   }
 
   removeMember(user: string): void {
@@ -210,7 +218,7 @@ export class TeamMembersComponent implements OnInit {
       .confirm({
         title: 'Remove member',
         target: formatMemberNameForConfirmDialog(this.members().find((member) => member.user === user)?.name, user),
-        consequence: self ? 'You lose access to this team and its settings.' : `${user} can no longer access this team.`,
+        consequence: getMemberRemovalConsequenceSentence('team', user, self),
         confirmLabel: 'Remove',
         failure: 'Failed to remove the member.',
         action: () => this.teams.removeMember(this.teamName, user),

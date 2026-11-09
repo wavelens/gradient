@@ -38,6 +38,9 @@ import {
   compareRoleNamesByBuiltInAccessThenName,
   countMembersByRoleName,
   formatMemberNameForConfirmDialog,
+  getMemberRemovalConsequenceSentence,
+  injectSaveMemberRoleChangeWithOwnRoleConfirmation,
+  newRoleLacksCurrentRolePermission,
   createNoAccessLoadStateError,
   isViewerCacheMember,
   requestIfCacheMember,
@@ -98,6 +101,7 @@ export class CacheMembersRolesComponent implements OnInit {
   private userService = inject(UserService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private saveMemberRoleChange = injectSaveMemberRoleChangeWithOwnRoleConfirmation();
 
   private cacheAccess = injectCacheAccessData();
   private router = inject(Router);
@@ -261,19 +265,21 @@ export class CacheMembersRolesComponent implements OnInit {
   }
 
   updateMemberRole(username: string, role: string): void {
+    const member = this.members().find((entry) => entry.id === username);
     this.pendingMemberRoleSelection.set({ user: username, role });
-    this.cachesService.updateMember(this.cacheName, username, role).subscribe({
-      next: () => {
-        this.members.update((members) => members.map((member) => (member.id === username ? { ...member, name: role } : member)));
-        this.pendingMemberRoleSelection.set(null);
+    this.saveMemberRoleChange({
+      place: 'cache',
+      signedInUser: this.isSignedInUser(username),
+      lowersAccess: newRoleLacksCurrentRolePermission(this.roles(), member?.name ?? '', role),
+      target: formatMemberNameForConfirmDialog(member?.user_display_name, username),
+      save: () => this.cachesService.updateMember(this.cacheName, username, role),
+    })
+      .pipe(finalize(() => this.pendingMemberRoleSelection.set(null)))
+      .subscribe(() => {
+        this.members.update((members) => members.map((entry) => (entry.id === username ? { ...entry, name: role } : entry)));
         this.notify.success('Member role saved');
         if (this.isSignedInUser(username)) this.navigateToCacheOrReloadCache(false);
-      },
-      error: (error: unknown) => {
-        this.pendingMemberRoleSelection.set(null);
-        this.notify.failure("Couldn't change the member's role", error);
-      },
-    });
+      });
   }
 
   removeMember(username: string): void {
@@ -281,7 +287,7 @@ export class CacheMembersRolesComponent implements OnInit {
       .confirm({
         title: 'Remove member',
         target: formatMemberNameForConfirmDialog(this.members().find((member) => member.id === username)?.user_display_name, username),
-        consequence: `${username} loses their role on this cache.`,
+        consequence: getMemberRemovalConsequenceSentence('cache', username, this.isSignedInUser(username)),
         confirmLabel: 'Remove',
         failure: 'Failed to remove member.',
         action: () => this.cachesService.removeMember(this.cacheName, username),
