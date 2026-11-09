@@ -53,11 +53,11 @@ export function eventNameMatchesAnyPrefix(name: string, eventNamePrefixes: reado
 }
 
 /** Group durable events by their first dot-separated segment. If `eventNamePrefixes` is present, keep only names equal to the prefix or names that start with the prefix followed by a dot. */
-export function groupCatalog(entries: CatalogEntry[], eventNamePrefixes?: readonly string[]): EventGroup[] {
+export function groupCatalog(entries: CatalogEntry[], eventNamePrefixes?: readonly string[], sshEnabled = true): EventGroup[] {
   const groups = new Map<string, EventGroup>();
   for (const { name, durable } of entries) {
     const [family, ...rest] = name.split('.');
-    const offered = !eventNamePrefixes || eventNameMatchesAnyPrefix(name, eventNamePrefixes);
+    const offered = (!eventNamePrefixes || eventNameMatchesAnyPrefix(name, eventNamePrefixes)) && (sshEnabled || family !== 'ssh_key');
     if (!durable || !offered) continue;
     const group = familyLabel(family);
     if (!groups.has(group)) groups.set(group, { group, items: [] });

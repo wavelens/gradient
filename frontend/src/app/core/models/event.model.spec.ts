@@ -46,6 +46,15 @@ describe('groupCatalog', () => {
     ]);
   });
 
+  it('hides SSH key events while SSH is off', () => {
+    const entries = [
+      { name: 'ssh_key.create', durable: true },
+      { name: 'login.success', durable: true },
+    ];
+    expect(groupCatalog(entries, undefined, false).map((g) => g.group)).toEqual(['Login']);
+    expect(groupCatalog(entries).map((g) => g.group)).toEqual(['SSH Key', 'Login']);
+  });
+
   it('keeps a whole-name prefix without matching longer segments', () => {
     const entries = [
       { name: 'cache.subscription.approve', durable: true },

@@ -8,6 +8,7 @@ import { Component, computed, inject, input, output, ChangeDetectionStrategy } f
 import { toSignal } from '@angular/core/rxjs-interop';
 import { groupCatalog } from '@core/models';
 import { EventsService } from '@core/services/events.service';
+import { ConfigService } from '@core/services/config.service';
 import { CheckGroupsComponent, type CheckGroup } from '@shared/ui';
 
 @Component({
@@ -24,8 +25,9 @@ export class ActionEventsComponent {
   selectedChange = output<string[]>();
 
   private readonly catalog = toSignal(inject(EventsService).catalog$, { initialValue: [] });
+  private readonly sshEnabled = inject(ConfigService).sshEnabled;
 
   readonly grouped = computed<CheckGroup[]>(() =>
-    groupCatalog(this.catalog(), this.eventNamePrefixes()).map(({ group, items }) => ({ label: group, items })),
+    groupCatalog(this.catalog(), this.eventNamePrefixes(), this.sshEnabled).map(({ group, items }) => ({ label: group, items })),
   );
 }
