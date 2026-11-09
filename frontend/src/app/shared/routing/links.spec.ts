@@ -6,7 +6,7 @@
 
 import { ActivatedRouteSnapshot, Route, UrlTree, convertToParamMap } from '@angular/router';
 import { routes } from '../../app.routes';
-import { buildOriginLink, links, readBuildOrigin, readInAppNextPathFromRouteSnapshot } from './links';
+import { links,readBuildOrigin, readInAppNextPathFromRouteSnapshot } from './links';
 
 function matches(config: readonly Route[], segments: readonly string[]): boolean {
   return config.some((route) => {
@@ -93,12 +93,6 @@ describe('links', () => {
     expect(String(links.boardJobOrCluster('d1', 'c1'))).toBe('/board/clusters/c1');
     expect(String(links.boardJobOrCluster('d1', null))).toBe('/board/jobs/d1');
     expect(links.boardJobOrCluster(null, undefined)).toBeUndefined();
-  });
-
-  it('returns from a build page to the task at the same evaluation, else to the log', () => {
-    expect(String(buildOriginLink('p', { task: 't', evaluation: 'e1' }, 'b1'))).toBe('/project/p/task/t?eval=e1');
-    expect(String(buildOriginLink('p', { evaluation: 'e1' }, 'b1'))).toBe('/project/p/log/e1?build=b1');
-    expect(String(buildOriginLink('p', {}))).toBe('/project/p');
   });
 
   it('Read evaluation from old `evalId` query parameter of bookmarked links', () => {

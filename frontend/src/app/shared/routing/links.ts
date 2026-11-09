@@ -107,13 +107,6 @@ export const links = {
   admin: (page: AdminPage) => url(['admin', page]),
 } as const;
 
-// The way back from a build page: the task at the same evaluation, else the evaluation log, else the project.
-export function buildOriginLink(project: string, from: BuildOrigin, build?: string): UrlTree {
-  if (from.task) return links.task(project, from.task, from.evaluation);
-  if (from.evaluation) return links.evaluationLog(project, from.evaluation, { build });
-  return links.project(project);
-}
-
 export function readBuildOrigin(query: { get(name: string): string | null }): BuildOrigin {
   return { task: query.get('task'), evaluation: query.get('eval') ?? query.get('evalId') };
 }
