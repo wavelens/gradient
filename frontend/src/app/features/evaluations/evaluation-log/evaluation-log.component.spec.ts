@@ -19,7 +19,7 @@ import { EMPTY, NEVER, type Observable, Subject, map, of, throwError } from 'rxj
 import { ApiError } from '@core/services/api.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { NotifyService } from '@core/services/notify.service';
-import { UserInfoResponse, BuildItem, EvaluationResponse, EvaluationStatus, ExecJobSummary } from '@core/models';
+import { UserInfoResponse, BuildItem, BuildWithOutputs, EvaluationResponse, EvaluationStatus, ExecJobSummary } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import type { LogViewerComponent } from '@shared/log';
 
@@ -656,6 +656,48 @@ describe('EvaluationLogComponent', () => {
       expect(append.mock.calls[0][0]).toHaveLength(12);
       c.stopLogDrainTimer();
       vi.useRealTimers();
+    });
+
+    describe('when the stream ends by itself', () => {
+      type Stream = { startLogStream: (id: string) => Promise<void> } & Internals;
+      const endedStream = { ok: true, body: { getReader: () => ({ read: async () => ({ done: true }), cancel: vi.fn() }) } };
+
+      function setupEndedStream(status: string) {
+        vi.useFakeTimers();
+        const { cmp } = setup();
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(endedStream));
+        vi.spyOn(TestBed.inject(EvaluationsService), 'getBuild').mockReturnValue(of({ status } as BuildWithOutputs));
+        cmp.selectedBuildId.set('b1');
+        const c = cmp as unknown as Stream;
+        const reload = vi.spyOn(c, 'fetchInitialLogs').mockResolvedValue(undefined);
+        return { cmp, c, reload };
+      }
+
+      afterEach(() => vi.useRealTimers());
+
+      it('says so and reconnects with backoff while the build still runs', async () => {
+        const { cmp, c, reload } = setupEndedStream('Building');
+        await c.startLogStream('b1');
+        expect(cmp.buildIdWithEndedLogStream()).toBe('b1');
+        vi.advanceTimersByTime(999);
+        expect(reload).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(reload).toHaveBeenCalledWith('b1');
+
+        await c.startLogStream('b1');
+        vi.advanceTimersByTime(1999);
+        expect(reload).toHaveBeenCalledTimes(1);
+        cmp.reloadLogAndStartStream();
+        expect(reload).toHaveBeenCalledTimes(2);
+      });
+
+      it('stays quiet once the build finished', async () => {
+        const { cmp, c, reload } = setupEndedStream('Completed');
+        await c.startLogStream('b1');
+        vi.advanceTimersByTime(60_000);
+        expect(cmp.buildIdWithEndedLogStream()).toBeNull();
+        expect(reload).not.toHaveBeenCalled();
+      });
     });
   });
 

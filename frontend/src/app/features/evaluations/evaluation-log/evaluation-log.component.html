@@ -302,6 +302,12 @@
             @if (transferProgress(); as p) {
               <gr-build-progress [progress]="p" [compact]="true" />
             }
+            @if (buildIdWithEndedLogStream() && buildIdWithEndedLogStream() === selectedBuildId()) {
+              <gr-message-banner type="warning">
+                Log stream interrupted. Reconnecting...
+                <button grButton size="small" [text]="true" label="Retry" (click)="reloadLogAndStartStream()"></button>
+              </gr-message-banner>
+            }
             @if (logPaused() && selectedBuild()?.status === 'Building') {
               <gr-message-banner type="warning">
                 The build hasn't finished. The log can resume automatically when output is slower. Skipped lines don't show in the log.
