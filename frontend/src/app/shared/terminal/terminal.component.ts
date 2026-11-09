@@ -21,6 +21,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import type { TerminalClosed, TerminalSource } from './terminal-source';
 
 const REPLAY_WINDOW_MS = 1000;
+const FONT_SIZE = 13;
 // eslint-disable-next-line no-control-regex -- ESC introduces the reports
 const TERMINAL_REPORT = /^\x1b\[[?>]?[\d;]*[Rcn]$/;
 
@@ -46,14 +47,26 @@ export class TerminalComponent {
   constructor() {
     const destroyRef = inject(DestroyRef);
     afterNextRender(() => {
-      const terminal = new Terminal({ cursorBlink: true, fontSize: 13 });
+      const screen = this.screen().nativeElement;
+      const terminal = new Terminal({ cursorBlink: true, fontSize: FONT_SIZE });
       const fit = new FitAddon();
       terminal.loadAddon(fit);
-      terminal.open(this.screen().nativeElement);
+      terminal.open(screen);
       fit.fit();
+      let disposed = false;
+      // xterm can measure the cell width only once, for each font change. So the app can only get its font, after that font has loaded.
+      const fontFamily = getComputedStyle(screen).fontFamily;
+      const useAppFont = () => {
+        if (disposed || !fontFamily) return;
+        terminal.options.fontFamily = fontFamily;
+        fit.fit();
+      };
+      if (document.fonts) void document.fonts.load(`${FONT_SIZE}px ${fontFamily}`).then(useAppFont, useAppFont);
+      else useAppFont();
       const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => fit.fit());
-      observer?.observe(this.screen().nativeElement);
+      observer?.observe(screen);
       destroyRef.onDestroy(() => {
+        disposed = true;
         observer?.disconnect();
         terminal.dispose();
       });

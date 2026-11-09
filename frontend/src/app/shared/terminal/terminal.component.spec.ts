@@ -13,14 +13,14 @@ import { TerminalComponent } from './terminal.component';
 const terminals = vi.hoisted(() => [] as {
   write: ReturnType<typeof vi.fn>;
   typed: (data: string) => void;
-  options: { disableStdin?: boolean };
+  options: { disableStdin?: boolean; fontFamily?: string };
 }[]);
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 80;
     rows = 24;
-    options: { disableStdin?: boolean } = {};
+    options: { disableStdin?: boolean; fontFamily?: string } = {};
     write = vi.fn((_bytes: unknown, parsed?: () => void) => parsed?.());
     typed: (data: string) => void = () => undefined;
     constructor() {
@@ -78,6 +78,24 @@ describe('TerminalComponent', () => {
     const bytes = new Uint8Array([104, 105]);
     output.next(bytes);
     expect(terminals[0].write.mock.calls[0][0]).toBe(bytes);
+  });
+
+  it('switches to the monospace font of the app once that font has loaded', async () => {
+    let loaded!: () => void;
+    const load = vi.fn(() => new Promise<void>((resolve) => (loaded = resolve)));
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    try {
+      const fixture = render(fakeSource().source);
+      const appFont = getComputedStyle((fixture.nativeElement as HTMLElement).querySelector('.screen')!).fontFamily;
+      expect(appFont).toContain('Space Mono');
+      expect(load).toHaveBeenCalledWith(`13px ${appFont}`);
+      expect(terminals[0].options.fontFamily).toBeUndefined();
+      loaded();
+      await Promise.resolve();
+      expect(terminals[0].options.fontFamily).toBe(appFont);
+    } finally {
+      delete (document as { fonts?: unknown }).fonts;
+    }
   });
 
   it('sends typed text to the source', () => {
