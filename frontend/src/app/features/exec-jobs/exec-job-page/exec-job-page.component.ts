@@ -38,7 +38,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import type { ExecJobAttemptView, ExecJobPullRequestView, ExecJobResponse } from '@core/models';
-import { abortExecJobConfirm, getShowJobMenuItemForExecJob, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase } from '../exec-job-status';
+import { abortExecJobConfirm, getShowJobMenuItemForExecJob, hasExecTerminal, isOpenExecJob, execJobPhase } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 import { ExecJobInfoComponent } from '../exec-job-info/exec-job-info.component';
@@ -175,7 +175,6 @@ export class ExecJobPageComponent implements OnInit {
 
   protected readonly phase = execJobPhase;
   protected readonly links = links;
-  protected readonly guestSize = guestSizeLabel;
   protected readonly plural = plural;
   protected readonly evaluationPhase = evaluationPhase;
   protected readonly phaseMarker = phaseMarker;

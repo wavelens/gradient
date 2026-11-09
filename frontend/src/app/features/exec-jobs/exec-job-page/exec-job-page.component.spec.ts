@@ -352,10 +352,13 @@ describe('ExecJobPageComponent', () => {
     }
   });
 
-  it('shows the guest size of the job', () => {
+  it('shows the guest size once, in the Info tab', () => {
     const { fixture } = setup('completed');
-    const guest = (fixture.nativeElement as HTMLElement).querySelector('.info-bar')?.textContent ?? '';
-    expect(guest).toContain('2 CPUs · 500 MB memory · 2048 MB disk');
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.info-bar')?.textContent).not.toContain('2 CPUs');
+    fixture.componentInstance.showView('info');
+    fixture.detectChanges();
+    expect(root.querySelector('app-exec-job-info')?.textContent).toContain('2 CPUs · 500 MB memory · 2048 MB disk');
   });
 
   it('offers only Show job from the log entry, leaving Abort and Terminal to the header and the tabs', () => {
