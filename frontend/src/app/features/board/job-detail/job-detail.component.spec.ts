@@ -17,6 +17,7 @@ import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { AuthService } from '@core/services/auth.service';
 import { NotifyService } from '@core/services/notify.service';
 import { BoardExecJob, PendingJobSummary } from '@core/models';
+import { formatDuration } from '@shared/text';
 
 const DETAIL: AssignedJobDetail = {
   id: 'job-1',
@@ -191,13 +192,27 @@ describe('BoardJobDetailComponent - run time', () => {
     const finished = { ...DETAIL, finished_at: '2026-06-08T00:01:10Z', worker_elapsed_ms: 9000, worker_tail_ms: 500, transit_ms: 1000 };
     const el = setup({ getJob: () => of(finished) }).nativeElement as HTMLElement;
     const steps = Array.from(el.querySelectorAll('section.timeline .step'));
-    expect(steps.map((s) => s.querySelector('.label')?.textContent?.trim())).toEqual(['Queued', 'Wait', 'Ran']);
-    expect(steps[2].lastElementChild?.textContent?.trim()).toBe('9.0 s');
+    expect(steps.map((s) => s.querySelector('.label')?.textContent?.trim())).toEqual(['Queued', 'Wait', 'Started', 'Ran']);
+    expect(steps[3].lastElementChild?.textContent?.trim()).toBe('9.0 s');
   });
 
   it('leaves out the run time for a row the server closed without a worker report', () => {
-    const steps = (setup().nativeElement as HTMLElement).querySelector('section.timeline')?.textContent ?? '';
+    const closed = { ...DETAIL, finished_at: '2026-06-08T00:05:00Z' };
+    const steps = (setup({ getJob: () => of(closed) }).nativeElement as HTMLElement).querySelector('section.timeline')?.textContent ?? '';
     expect(steps).not.toContain('Ran');
+    expect(steps).not.toContain('Running for');
+  });
+
+  it('shows the start and a live elapsed time while the job runs', () => {
+    vi.useFakeTimers({ now: new Date('2026-06-08T00:03:00Z') });
+    try {
+      const el = setup().nativeElement as HTMLElement;
+      const steps = Array.from(el.querySelectorAll('section.timeline .step'));
+      expect(steps.map((s) => s.querySelector('.label')?.textContent?.trim())).toEqual(['Queued', 'Wait', 'Started', 'Running for']);
+      expect(steps[3].lastElementChild?.textContent?.trim()).toBe(formatDuration(120_000));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

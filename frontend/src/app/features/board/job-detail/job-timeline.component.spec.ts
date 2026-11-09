@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { depths, phaseLabel, phaseRows } from './job-timeline.component';
+import { depths, phaseLabel, phaseLabelColumnWidth, phaseRows } from './job-timeline.component';
 import { JobPhaseView } from '@core/models';
 
 function span(seq: number, parent_seq: number | null, phase: string, start_ms: number, end_ms: number): JobPhaseView {
@@ -53,6 +53,10 @@ describe('job timeline', () => {
 
   it('stops walking when two spans name each other as parent', () => {
     expect(depths([span(1, 2, 'compress', 0, 10), span(2, 1, 'nar_push', 0, 5)])).toEqual([1, 1]);
+  });
+
+  it('narrows the phase name column on a phone so the bars keep room', () => {
+    expect(phaseLabelColumnWidth(360)).toBeLessThan(phaseLabelColumnWidth(1024));
   });
 
   it('labels every phase the API can send', () => {

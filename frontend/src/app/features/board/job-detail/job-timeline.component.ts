@@ -90,6 +90,12 @@ export function phaseLabel(phase: string): string {
   return PHASE_LABELS[phase] ?? phase;
 }
 
+const NARROW_TIMELINE_PX = 480;
+
+export function phaseLabelColumnWidth(hostWidth: number): number {
+  return hostWidth < NARROW_TIMELINE_PX ? 96 : 152;
+}
+
 @Component({
   selector: 'gr-job-timeline',
   standalone: true,
@@ -163,21 +169,22 @@ export class JobTimelineComponent implements OnDestroy {
     this.chart ??= echarts.init(host, undefined, { renderer: 'svg' });
     const t = resolveChartTheme();
     const total = Math.max(...rows.map(r => r.startMs + r.durationMs), 1);
+    const labelWidth = phaseLabelColumnWidth(host.clientWidth);
 
     this.chart.setOption({
-      grid: { left: 160, right: 24, top: 8, bottom: 28, containLabel: false },
+      grid: { left: labelWidth + 8, right: 24, top: 8, bottom: 28, containLabel: false },
       xAxis: {
         type: 'value',
         min: 0,
         max: total,
-        axisLabel: { color: t.text, formatter: (v: number) => formatDuration(v) },
+        axisLabel: { color: t.text, hideOverlap: true, formatter: (v: number) => formatDuration(v) },
         splitLine: { lineStyle: { color: t.grid } },
       },
       yAxis: {
         type: 'category',
         inverse: true,
         data: rows.map(r => `${' '.repeat(r.depth * 2)}${phaseLabel(r.phase)}`),
-        axisLabel: { color: t.text, fontFamily: t.mono },
+        axisLabel: { color: t.text, fontFamily: t.mono, width: labelWidth, overflow: 'truncate' },
         axisLine: { lineStyle: { color: t.border } },
         splitLine: { show: false },
       },

@@ -29,6 +29,7 @@ table.phases {
 
 table.phases th {
   text-align: left;
+  white-space: nowrap;
   color: var(--gr-text-secondary);
   font-weight: 500;
   padding: 0.4rem 0.5rem;

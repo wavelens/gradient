@@ -31,6 +31,7 @@ import {
   formatPercent,
   formatQuantity,
   serverTime,
+  CurrentTimeSignal,
   ServerTimestampToLocalDateTimePipe,
 } from '@shared/text';
 import { LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent } from '@shared/ui';
@@ -208,8 +209,11 @@ interface RuleRow {
       <section class="timeline">
         <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | serverDate }}</span></div>
         <div class="step"><span class="label">Wait</span><span>{{ waitLabel() }}</span></div>
+        <div class="step"><span class="label">Started</span><span>{{ j.dispatched_at | serverDate }}</span></div>
         @if (j.worker_elapsed_ms != null) {
           <div class="step"><span class="label">Ran</span><span>{{ formatDuration(j.worker_elapsed_ms) }}</span></div>
+        } @else if (!j.finished_at && !j.passed_over) {
+          <div class="step"><span class="label">Running for</span><span>{{ runningForLabel() }}</span></div>
         }
       </section>
 
@@ -502,6 +506,7 @@ export class BoardJobDetailComponent implements OnInit {
   protected readonly links = links;
   private route = inject(ActivatedRoute);
   private board = inject(BoardService);
+  private clock = inject(CurrentTimeSignal);
   private evaluations = inject(EvaluationsService);
   private execJobs = inject(ExecJobsService);
   private auth = inject(AuthService);
@@ -618,6 +623,13 @@ export class BoardJobDetailComponent implements OnInit {
     if (!j) return '-';
     const ms = serverTime(j.dispatched_at).getTime() - serverTime(j.queued_at).getTime();
     return ms < 0 ? '-' : formatDuration(ms);
+  });
+
+  runningForLabel = computed(() => {
+    const j = this.job();
+    if (!j) return '-';
+    const ms = this.clock.currentTimeMilliseconds() - serverTime(j.dispatched_at).getTime();
+    return formatDuration(Math.max(0, ms));
   });
 
   constructor() {
