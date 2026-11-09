@@ -11,7 +11,8 @@ import { MessageService } from '@gradient/ui/ui';
 import { Observable, defer, firstValueFrom, of, throwError } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
 import { errorInterceptor, MAX_THROTTLE_WAIT_MS } from './error.interceptor';
-import { asSessionProbe, inBackground } from './request-context';
+import { asSessionProbe } from './request-context';
+import { PageRenderTracker } from './page-render-tracker.service';
 
 interface Fixture {
   router: Router;
@@ -20,9 +21,15 @@ interface Fixture {
   toasts: MessageService;
 }
 
-function setup(auth: Partial<Fixture['auth']> = {}): Fixture {
+function setup(auth: Partial<Fixture['auth']> = {}, rendering = true): Fixture {
   const fake = { sessionLost: vi.fn(), isAuthenticated: () => true, stillSignedIn: () => of(true), ...auth };
-  TestBed.configureTestingModule({ providers: [provideRouter([]), { provide: AuthService, useValue: fake }] });
+  TestBed.configureTestingModule({
+    providers: [
+      provideRouter([]),
+      { provide: AuthService, useValue: fake },
+      { provide: PageRenderTracker, useValue: { isPageStillRendering: () => rendering } },
+    ],
+  });
   const router = TestBed.inject(Router);
   const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(true);
   return { router, navigate, auth: fake, toasts: TestBed.inject(MessageService) };
@@ -137,12 +144,12 @@ describe('errorInterceptor on 429', () => {
     expect(navigate).toHaveBeenCalledWith(['/error/429'], expect.objectContaining({ skipLocationChange: true }));
   });
 
-  it('keeps the page and stays silent when a background read stays throttled', async () => {
-    const { navigate, toasts } = setup();
+  it('keeps the page and stays silent when a read sent after the page rendered stays throttled', async () => {
+    const { navigate, toasts } = setup({}, false);
     let calls = 0;
-    const answers = () => defer(() => (++calls, throwError(() => new HttpErrorResponse({ status: 429, headers: new HttpHeaders({ 'retry-after': '0' }) }))));
-    const settled = send(answers, inBackground()).catch((e: HttpErrorResponse) => e.status);
-    await vi.advanceTimersByTimeAsync(5_000);
+    const answers = () => defer(() => (++calls, throwError(() => new HttpErrorResponse({ status: 429, headers: new HttpHeaders({ 'retry-after': '2' }) }))));
+    const settled = send(answers).catch((e: HttpErrorResponse) => e.status);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(await settled).toBe(429);
     expect(calls).toBe(4);
     expect(navigate).not.toHaveBeenCalled();
@@ -168,9 +175,9 @@ describe('errorInterceptor on an unavailable server', () => {
     expect(navigate).toHaveBeenCalledWith(['/error/503'], { queryParams: { from: '/board/workers' }, skipLocationChange: true });
   });
 
-  it('keeps the page for a failing background poll', async () => {
-    const { navigate } = setup();
-    await send(failWith(503), inBackground()).catch(() => undefined);
+  it('keeps the page for a failing poll sent after the page rendered', async () => {
+    const { navigate } = setup({}, false);
+    await send(failWith(503)).catch(() => undefined);
     expect(navigate).not.toHaveBeenCalled();
   });
 

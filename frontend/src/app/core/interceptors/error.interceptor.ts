@@ -11,6 +11,7 @@ import { MessageService } from '@gradient/ui/ui';
 import { Observable, catchError, retry, throwError, timer } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
 import { BACKGROUND, SESSION_PROBE } from './request-context';
+import { PageRenderTracker } from './page-render-tracker.service';
 
 const THROTTLE_RETRIES = 3;
 const MIN_THROTTLE_WAIT_MS = 250;
@@ -31,12 +32,12 @@ function pageUrl(router: Router): string {
   return pending ? router.serializeUrl(pending) : router.url;
 }
 
-/// Only reads for page rendering can replace the page with an error page. The interceptor can retry those reads after a rate limit. Writes never get a retry. A resent write can apply twice. Background requests (polling, search in the command palette) leave the page unchanged.
+/// Only reads that render the page can replace the page with an error page or show the throttle notice. The interceptor can retry reads after a rate limit. Writes have no retry. The server can apply a resent write twice. The interceptor can rethrow later reads (polling, retry, search in the command palette) to the inline error state on the page.
 export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   const router = inject(Router);
   const injector = inject(Injector);
   const read = READ_METHODS.has(req.method);
-  const background = req.context.get(BACKGROUND);
+  const pageRead = read && !req.context.get(BACKGROUND) && inject(PageRenderTracker).isPageStillRendering();
   const probe = req.context.get(SESSION_PROBE);
   const notify = (detail: string, life?: number) =>
     injector.get(MessageService).add({ severity: 'warn', summary: 'Server Busy', detail, life, key: 'throttle' });
@@ -45,7 +46,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
     if (!(error instanceof HttpErrorResponse) || error.status !== 429) return throwError(() => error);
     const wait = throttleWaitMs(error);
     if (wait > MAX_THROTTLE_WAIT_MS) return throwError(() => error);
-    if (!background && wait >= NOTICE_THRESHOLD_MS) notify(`Retry in ${Math.ceil(wait / 1000)} s.`, wait);
+    if (pageRead && wait >= NOTICE_THRESHOLD_MS) notify(`Retry in ${Math.ceil(wait / 1000)} s.`, wait);
     return timer(wait);
   };
 
@@ -60,12 +61,12 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
       auth.stillSignedIn().subscribe((signedIn) => signedIn || auth.sessionLost(returnUrl));
       return;
     }
-    if (error.status === 429 && !read && !background) {
+    if (error.status === 429 && !read) {
       notify(`Try again in ${Math.ceil(throttleWaitMs(error) / 1000)} seconds.`);
       return;
     }
     const status = error.status === 0 ? 503 : error.status;
-    if (read && !background && ERROR_PAGES.has(status)) {
+    if (pageRead && ERROR_PAGES.has(status)) {
       router.navigate([`/error/${status}`], { queryParams: { from: pageUrl(router) }, skipLocationChange: true });
     }
   };
