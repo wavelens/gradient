@@ -13,7 +13,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { ApiService } from '@core/services/api.service';
+import { ApiService, apiErrorMessage } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { CliDeviceInfoResponse } from '@core/models';
@@ -135,10 +135,7 @@ export class CliAuthorizeComponent implements OnInit {
         this.submitting.set(false);
         this.status.set('authorized');
       },
-      error: (e) => {
-        this.submitting.set(false);
-        this.errorMessage.set(e.message || 'Failed to authorize.');
-      },
+      error: (e: unknown) => this.showRequestFailureAndReturnToCodeForm(`Couldn't approve CLI session: ${apiErrorMessage(e, 'The server rejected the request.')}`),
     });
   }
 
@@ -152,10 +149,13 @@ export class CliAuthorizeComponent implements OnInit {
         this.submitting.set(false);
         this.status.set('denied');
       },
-      error: (e) => {
-        this.submitting.set(false);
-        this.errorMessage.set(e.message || 'Failed to deny.');
-      },
+      error: (e: unknown) => this.showRequestFailureAndReturnToCodeForm(`Couldn't reject the CLI session: ${apiErrorMessage(e, 'The server rejected the request.')}`),
     });
+  }
+
+  private showRequestFailureAndReturnToCodeForm(message: string): void {
+    this.submitting.set(false);
+    this.info.set(null);
+    this.errorMessage.set(message);
   }
 }

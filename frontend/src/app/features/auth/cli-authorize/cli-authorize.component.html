@@ -40,10 +40,10 @@
         <dl>
           <dt>Confirmation code</dt>
           <dd class="code">{{ info()!.user_code }}</dd>
-          <dt>Expiration</dt>
+          <dt>Expires in</dt>
           <dd data-testid="cli-code-expiration">
             @if (cliConfirmationCodeRemainingTimeText(); as remaining) {
-              in {{ remaining }}
+              {{ remaining }}
             } @else {
               Expired. Run <code>gradient login</code> again.
             }

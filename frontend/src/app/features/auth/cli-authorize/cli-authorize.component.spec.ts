@@ -8,7 +8,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
-import { ApiService } from '@core/services/api.service';
+import { ApiError, ApiService } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { CurrentTimeSignal } from '@shared/text';
@@ -25,7 +25,7 @@ function setup(code: string, now = NOW) {
     providers: [
       provideRouter([]),
       { provide: ApiService, useValue: { get, post } },
-      { provide: AuthService, useValue: { initialized$: of(true), isAuthenticated: () => true } },
+      { provide: AuthService, useValue: { initialized$: of(true), isAuthenticated: () => true, stillSignedIn: () => of(true) } },
       { provide: ConfigService, useValue: { logoUrl: null } },
       { provide: CurrentTimeSignal, useValue: { currentTimeMilliseconds: signal(now) } },
       { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap({ code }) } } },
@@ -48,18 +48,25 @@ describe('CliAuthorizeComponent', () => {
     expect(get).toHaveBeenCalledWith('auth/cli/info?user_code=ABCD-EF23');
   });
 
-  it('sends one authorization for a double click and drops an earlier error on success', () => {
+  it('returns to the code form with the server reason when authorization fails', () => {
     const { fixture, post } = setup('ABCD-EF23');
     const component = fixture.componentInstance;
-    post.mockReturnValueOnce(throwError(() => new Error('Transient failure')));
+    post.mockReturnValueOnce(throwError(() => new ApiError('Authorization expired', 410)));
     component.authorize();
-    expect(component.errorMessage()).toBe('Transient failure');
+    expect(component.errorMessage()).toBe("Couldn't approve CLI session: Authorization expired");
+    expect(component.info()).toBeNull();
+    expect(component.submitting()).toBe(false);
+  });
+
+  it('sends one authorization for a double click', () => {
+    const { fixture, post } = setup('ABCD-EF23');
+    const component = fixture.componentInstance;
     const pending = new Subject<string>();
     post.mockReturnValueOnce(pending);
     component.authorize();
     component.authorize();
     pending.next('ok');
-    expect(post).toHaveBeenCalledTimes(2);
+    expect(post).toHaveBeenCalledTimes(1);
     expect(component.errorMessage()).toBeNull();
     expect(component.status()).toBe('authorized');
   });
@@ -71,7 +78,7 @@ describe('CliAuthorizeComponent', () => {
       Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find((b) => b.textContent?.includes('Authorize'))!;
 
     const pending = setup('ABCD-EF23').fixture;
-    expect(expiration(pending)).toBe('in 9:05');
+    expect(expiration(pending)).toBe('9:05');
     expect(authorizeButton(pending).disabled).toBe(false);
 
     TestBed.resetTestingModule();
