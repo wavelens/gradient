@@ -148,10 +148,12 @@
           <div class="info-metric">
             <gr-eval-status-badge [status]="ev.status" [prioritized]="ev.prioritized" />
           </div>
-          <div class="info-metric">
-            <span class="metric-label">Duration</span>
-            <span class="metric-value">{{ duration() }}</span>
-          </div>
+          @if (ev.started_at) {
+            <div class="info-metric">
+              <span class="metric-label">Duration</span>
+              <span class="metric-value">{{ duration() }}</span>
+            </div>
+          }
           <div class="info-metric">
             <span class="metric-label">Triggered</span>
             <span class="metric-value">{{ ev.created_at | serverDate }}</span>

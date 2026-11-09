@@ -820,6 +820,7 @@ describe('EvaluationLogComponent', () => {
     function setupEvaluationLogPageFixture(
       builds: BuildItem[],
       getBuilds: () => Observable<unknown> = () => of({ builds, total: builds.length, active_count: 0 }),
+      evaluation: Partial<EvaluationResponse> = {},
     ) {
       TestBed.configureTestingModule({
         imports: [EvaluationLogComponent],
@@ -833,7 +834,7 @@ describe('EvaluationLogComponent', () => {
             },
           } },
           { provide: EvaluationsService, useValue: {
-            getEvaluation: () => of({ id: 'eval-1', status: 'Failed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null }),
+            getEvaluation: () => of({ id: 'eval-1', status: 'Failed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null, ...evaluation }),
             getBuilds,
             getEvaluationMessages: () => of([]),
           } },
@@ -890,6 +891,18 @@ describe('EvaluationLogComponent', () => {
       const link = (fixture.nativeElement as HTMLElement).querySelector('.info-bar-right a[href]');
       expect(link?.getAttribute('href')).toBe('/project/proj/summary/eval-1');
       fixture.destroy();
+    });
+
+    it('leaves the duration out until the evaluation starts', () => {
+      const waiting = setupEvaluationLogPageFixture([], undefined, { status: 'Waiting' });
+      waiting.detectChanges();
+      expect((waiting.nativeElement as HTMLElement).querySelector('.info-bar')?.textContent).not.toContain('Duration');
+      waiting.destroy();
+      TestBed.resetTestingModule();
+      const started = setupEvaluationLogPageFixture([], undefined, { status: 'Completed', started_at: '2026-01-01T00:00:00', finished_at: '2026-01-01T00:00:30' });
+      started.detectChanges();
+      expect((started.nativeElement as HTMLElement).querySelector('.info-bar')?.textContent).toContain('Duration');
+      started.destroy();
     });
 
     it('says "No builds" without "yet" for a finished evaluation', () => {
