@@ -34,7 +34,7 @@ describe('buildPhase', () => {
     ['FailedTransient', 'failure'],
     ['FailedTimeout', 'failure'],
     ['Aborted', 'aborted'],
-    ['DependencyFailed', 'aborted'],
+    ['DependencyFailed', 'failure'],
     ['Skipped', 'aborted'],
   ])('maps %s to %s', (status, phase) => {
     expect(buildPhase(status)).toBe(phase);
@@ -76,7 +76,7 @@ describe('entryPointPhase', () => {
     ['Building', 0, 'running'],
     ['Completed', 1, 'success'],
     ['FailedPermanent', 1, 'failure'],
-    ['DependencyFailed', 1, 'aborted'],
+    ['DependencyFailed', 1, 'failure'],
   ])('maps %s with %i building deps to %s', (build_status, building, phase) => {
     expect(entryPointPhase({ build_status, deps: deps(building) })).toBe(phase);
   });

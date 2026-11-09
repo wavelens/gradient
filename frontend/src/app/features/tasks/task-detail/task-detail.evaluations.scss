@@ -259,8 +259,8 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   padding: 1.5px $spacing-sm;
   text-decoration: none;
 
-  &.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
-  &.error { color: var(--err); border-color: color-mix(in srgb, var(--err) 32%, transparent); }
+  &.warn { color: var(--gr-status-warning-text); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
+  &.error { color: var(--gr-status-danger-text); border-color: color-mix(in srgb, var(--err) 32%, transparent); }
 }
 
 .report-note { color: var(--gr-status-danger); font-size: $font-size-sm; margin: $spacing-sm 0 0; }

@@ -60,9 +60,9 @@ export function buildPhase(status: BuildStatus): StatusPhase {
     case 'Substituted': return 'success';
     case 'FailedPermanent':
     case 'FailedTransient':
-    case 'FailedTimeout': return 'failure';
+    case 'FailedTimeout':
+    case 'DependencyFailed': return 'failure';
     case 'Aborted':
-    case 'DependencyFailed':
     case 'Skipped': return 'aborted';
   }
 }

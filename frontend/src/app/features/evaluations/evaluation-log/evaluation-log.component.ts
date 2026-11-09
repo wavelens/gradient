@@ -403,7 +403,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private readonly buildGroups: { key: string; label: string; members: string[]; phase: StatusPhase }[] = [
     { key: 'building', label: buildStatusLabel('Building'), members: ['building'], phase: 'running' },
     { key: 'failed', label: buildStatusLabel('FailedPermanent'), members: ['failed'], phase: 'failure' },
-    { key: 'dependencyfailed', label: buildStatusLabel('DependencyFailed'), members: ['dependencyfailed'], phase: 'aborted' },
+    { key: 'dependencyfailed', label: buildStatusLabel('DependencyFailed'), members: ['dependencyfailed'], phase: 'failure' },
     { key: 'aborted', label: buildStatusLabel('Aborted'), members: ['aborted'], phase: 'aborted' },
     { key: 'queued', label: buildStatusLabel('Queued'), members: ['queued'], phase: 'queued' },
     { key: 'completed', label: buildStatusLabel('Completed'), members: ['completed'], phase: 'success' },

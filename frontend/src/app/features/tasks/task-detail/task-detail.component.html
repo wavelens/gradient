@@ -283,7 +283,7 @@
           } @else if (!entryPointsLoading() && sel.status === 'Failed') {
             <gr-empty-state flat icon="error" title="Evaluation failed" />
           } @else if (!entryPointsLoading() && sel.status === 'Aborted' && !sel.started_at) {
-            <gr-empty-state flat icon="cancel" title="Aborted before evaluation" />
+            <gr-empty-state flat icon="block" title="Aborted before evaluation" />
           } @else if (!entryPointsLoading()) {
             <gr-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />
