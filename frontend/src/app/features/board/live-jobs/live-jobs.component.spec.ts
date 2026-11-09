@@ -44,6 +44,7 @@ function setup(
         useValue: {
           getAssignedJobs: () => of({ jobs: [ASSIGNED], other_running: 0 }),
           getPendingJobs,
+          getAssignmentDecisions: () => of([]),
         },
       },
       {
@@ -188,6 +189,35 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/board/clusters/c1');
   });
 
+  it('counts the running jobs and names how many a filter shows', () => {
+    const fixture = setupWithAssigned([ASSIGNED, { ...ASSIGNED, id: 'x', kind: 2, build_id: null }]);
+    const banner = () => (fixture.nativeElement as HTMLElement).querySelector('.banner')?.textContent?.trim();
+    expect(banner()).toBe('2 running jobs');
+    fixture.componentInstance.kindFilter.set('exec');
+    fixture.detectChanges();
+    expect(banner()).toBe('1 of 2 running jobs');
+  });
+
+  it('says no job runs when no filter is set and that none matches when one is', () => {
+    const fixture = setupWithAssigned([]);
+    const empty = () => (fixture.nativeElement as HTMLElement).querySelector('tbody td.muted')?.textContent?.trim();
+    expect(empty()).toBe('No running jobs.');
+    fixture.componentInstance.kindFilter.set('exec');
+    fixture.detectChanges();
+    expect(empty()).toBe('No matching running jobs.');
+  });
+
+  it('shows how long ago a job was assigned, with the exact time as its title', () => {
+    vi.useFakeTimers({ now: new Date('2026-06-08T00:07:00Z') });
+    try {
+      const cell = (setupWithAssigned([ASSIGNED]).nativeElement as HTMLElement).querySelector('tbody td.age') as HTMLElement;
+      expect(cell.textContent?.trim()).toContain('7m ago');
+      expect(cell.title).not.toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('renders - when the subject is unknown', () => {
     const fixture = setupWithAssigned([{ ...ASSIGNED, subject: null }]);
     fixture.detectChanges();
@@ -237,7 +267,7 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
     return fixture;
   }
 
-  it('surfaces rejected/negative candidate scores when scope is "incl. rejected"', () => {
+  it('surfaces passed-over and negative candidate scores when scope is "incl. passed over"', () => {
     const fixture = setupDecisions();
     const cmp = fixture.componentInstance;
     cmp.setScoreScope('all');
@@ -252,6 +282,7 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
     expect(text).toContain('passed over');
     expect(text).toContain('-8');
     expect(rows.every((r) => r.worker === 'Builder One')).toBe(true);
+    expect((fixture.nativeElement as HTMLElement).querySelector('.banner')).toBeNull();
   });
 
   it('hides the decision scores from a non-superuser and never asks for them', () => {
@@ -260,9 +291,9 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
     fixture.detectChanges();
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
 
-    expect(text).not.toContain('incl. rejected');
+    expect(text).not.toContain('incl. passed over');
     expect(text).not.toContain('superuser');
-    expect(text).toContain('No matching assigned jobs.');
+    expect(text).toContain('No running jobs.');
     expect(getAssignmentDecisions).not.toHaveBeenCalled();
   });
 });
@@ -277,6 +308,20 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     const cmp = setup({ view: 'pending' }).componentInstance;
     expect(cmp.view()).toBe('pending');
     expect(cmp.pendingJobs().length).toBe(1);
+  });
+
+  it('opens and keeps the filters named in the address', () => {
+    TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: true }) } });
+    const fixture = setup({ type: 'exec', min: '5', max: 'oops', scores: 'all' });
+    const cmp = fixture.componentInstance;
+    expect([cmp.kindFilter(), cmp.scoreMin(), cmp.scoreMax(), cmp.scoreScope()]).toEqual(['exec', 5, null, 'all']);
+
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    cmp.scoreMax.set(9.5);
+    expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { max: '9.5' } }));
+    cmp.scoreMin.set(null);
+    expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { min: null } }));
+    expect(cmp.scoreMin()).toBeNull();
   });
 
   it('writes the view to the address when switched', () => {
@@ -372,6 +417,14 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     expect(row.querySelector('td.waiting')?.textContent).toContain('Cache not configured');
   });
 
+  it('counts the dependencies a pending build waits for when the server names no other reason', () => {
+    expect(pendingRow(PENDING).querySelector('td.waiting')?.textContent?.trim()).toBe('Waiting for 3 dependencies');
+    TestBed.resetTestingModule();
+    expect(pendingRow({ ...PENDING, dependency_count: 1 }).querySelector('td.waiting')?.textContent?.trim()).toBe('Waiting for 1 dependency');
+    TestBed.resetTestingModule();
+    expect(pendingRow({ ...PENDING, dependency_count: 0 }).querySelector('td.waiting')?.textContent?.trim()).toBe('Waiting');
+  });
+
   it('names the project and task of a pending row by their display names', () => {
     const row = pendingRow({
       ...PENDING,
@@ -404,6 +457,6 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     cmp.setView('pending');
     fixture.detectChanges();
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('pending job(s)');
+    expect(text).toContain('1 pending job');
   });
 });

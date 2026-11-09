@@ -20,11 +20,18 @@ import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel }
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 import { links, oneOf, queryParamSignal } from '@shared/routing';
 import { type WaitingExplanation, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
-import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { plural, RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 
 type KindFilter = 'all' | JobKindName;
 type ScoreScope = 'current' | 'all';
 type JobListView = 'assigned' | 'pending';
+
+function createScoreFilterQueryParamSignal(name: string) {
+  const param = queryParamSignal<string>(name, '', (raw) => (raw.trim() !== '' && Number.isFinite(Number(raw)) ? raw : null));
+  return Object.assign(computed(() => (param() === '' ? null : Number(param()))), {
+    set: (value: number | null) => param.set(value === null || !Number.isFinite(value) ? '' : String(value)),
+  });
+}
 
 interface DecisionRow {
   id: string;
@@ -49,19 +56,21 @@ interface DecisionRow {
     @if (view() === 'assigned') {
       <gr-load-state [loading]="assignedJobsPanelFirstLoad.loading()" [error]="assignedJobsPanelFirstLoad.error()" [empty]="!assignedJobsPanelFirstLoad.received()"
                      loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retryAssigned()">
-        <div class="banner">
-          Showing {{ assignedRows().length }} of {{ collapseClusters(jobs()).length }} assigned job(s) visible to this account.
-          @if (otherRunning() > 0) {
-            <span class="muted">Running on projects that this account can't view: {{ otherRunning() }}.</span>
-          }
-        </div>
+        @if (!showDecisions()) {
+          <div class="banner">
+            {{ runningJobsCount() }}
+            @if (otherRunning() > 0) {
+              <span class="muted">Running on projects that this account can't view: {{ otherRunning() }}.</span>
+            }
+          </div>
+        }
 
         <div class="filters">
           @if (superuser()) {
             <label>Scores
               <select [ngModel]="scoreScope()" (ngModelChange)="setScoreScope($event)">
                 <option value="current">assigned</option>
-                <option value="all">incl. rejected</option>
+                <option value="all">incl. passed over</option>
               </select>
             </label>
           }
@@ -102,11 +111,11 @@ interface DecisionRow {
                   @if (superuser()) {
                     <td>{{ j.score | number: scoreDigits }}</td>
                   }
-                  <td>{{ j.dispatched_at | serverDate }}</td>
+                  <td class="age" [title]="j.dispatched_at | serverDate">{{ j.dispatched_at | relativeTime }}</td>
                   <td>›</td>
                 </tr>
               } @empty {
-                <tr><td [attr.colspan]="superuser() ? 6 : 5" class="muted">{{ scoreFilterMinimumExceedsMaximum() ? 'Score min is above Score max.' : 'No matching assigned jobs.' }}</td></tr>
+                <tr><td [attr.colspan]="superuser() ? 6 : 5" class="muted">{{ assignedEmptyText() }}</td></tr>
               }
             </tbody>
           </gr-table>
@@ -125,7 +134,7 @@ interface DecisionRow {
                     <a [routerLink]="links.boardJob(r.id)" (click)="$event.stopPropagation()">{{ r.subject }}</a>
                   </td>
                   <td>{{ r.score | number: scoreDigits }}</td>
-                  <td>{{ r.at | serverDate }}</td>
+                  <td class="age" [title]="r.at | serverDate">{{ r.at | relativeTime }}</td>
                   <td>›</td>
                 </tr>
               } @empty {
@@ -139,7 +148,7 @@ interface DecisionRow {
       <gr-load-state [loading]="pendingJobsFirstLoad.loading()" [error]="pendingJobsFirstLoad.error()" [empty]="!pendingJobsFirstLoad.received()"
                      loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retryPending()">
         <div class="banner">
-          {{ pendingRows().length }} pending job(s) visible to this account.
+          {{ plural(pendingRows().length, 'pending job') }}
           @if (otherPending() > 0) { <span class="muted">Pending in projects this account can't view: {{ otherPending() }}.</span> }
         </div>
         <gr-table class="jobs">
@@ -173,6 +182,8 @@ interface DecisionRow {
                         <span class="muted hint">{{ wait.hint }}</span>
                       }
                     </div>
+                  } @else if (p.dependency_count > 0) {
+                    <span class="muted">Waiting for {{ plural(p.dependency_count, 'dependency', 'dependencies') }}</span>
                   } @else {
                     <span class="muted">Waiting</span>
                   }
@@ -203,7 +214,7 @@ export class BoardLiveJobsComponent implements OnInit {
   protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
   protected readonly scoreDigits = schedulerScoreDecimalPipeDigitsFormat;
   protected readonly jobSubjectLabel = jobSubjectLabel;
-  protected readonly collapseClusters = collapseClusters;
+  protected readonly plural = plural;
 
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
@@ -216,11 +227,11 @@ export class BoardLiveJobsComponent implements OnInit {
   pendingJobs = signal<PendingJobSummary[]>([]);
   otherPending = signal(0);
 
-  kindFilter = signal<KindFilter>('all');
-  scoreMin = signal<number | null>(null);
-  scoreMax = signal<number | null>(null);
+  kindFilter = queryParamSignal<KindFilter>('type', 'all', oneOf<KindFilter>(['all', 'eval', 'build', 'exec']));
+  scoreMin = createScoreFilterQueryParamSignal('min');
+  scoreMax = createScoreFilterQueryParamSignal('max');
 
-  scoreScope = signal<ScoreScope>('current');
+  scoreScope = queryParamSignal<ScoreScope>('scores', 'current', oneOf<ScoreScope>(['current', 'all']));
   decisions = signal<AssignDecisionView[]>([]);
   protected superuser = computed(() => this.auth.user()?.superuser === true);
   showDecisions = computed(() => this.superuser() && this.scoreScope() === 'all');
@@ -245,6 +256,20 @@ export class BoardLiveJobsComponent implements OnInit {
   });
 
   assignedRows = computed(() => collapseClusters(this.filteredJobs()));
+
+  runningJobsFilterIsSet = computed(() =>
+    this.kindFilter() !== 'all' || (this.superuser() && (this.scoreMin() !== null || this.scoreMax() !== null)));
+
+  runningJobsCount = computed(() => {
+    const total = collapseClusters(this.jobs()).length;
+    const shown = this.assignedRows().length;
+    return shown === total ? plural(total, 'running job') : `${shown} of ${plural(total, 'running job')}`;
+  });
+
+  assignedEmptyText = computed(() => {
+    if (this.scoreFilterMinimumExceedsMaximum()) return 'Score min is above Score max.';
+    return this.runningJobsFilterIsSet() ? 'No matching running jobs.' : 'No running jobs.';
+  });
   pendingRows = computed(() => collapseClusters(this.pendingJobs()));
 
   rowSubject({ job, subJobs }: BoardRow<DispatchedJobSummary | PendingJobSummary>): string {
@@ -266,8 +291,7 @@ export class BoardLiveJobsComponent implements OnInit {
     return p.cluster_job ?? p.evaluation_id + (p.build_id ?? '') + (p.exec_job?.id ?? '');
   }
 
-  /// Recent decisions flattened to one row per candidate (incl. rejected and
-  /// negative scores), honoring the type/score filters above.
+  /// Recent decisions flattened to one row per candidate, including passed-over candidates and negative scores. The type and score filters above apply.
   decisionRows = computed<DecisionRow[]>(() => {
     const kind = this.kindFilter();
     const min = this.scoreMin();
