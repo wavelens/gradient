@@ -162,7 +162,6 @@ export class ConnectRepositoryComponent implements OnInit {
       .subscribe({
         next: () => {
           this.creating.set(false);
-          this.notify.success('Task created');
           this.taskName.set(this.form.name);
           this.go('access');
         },
