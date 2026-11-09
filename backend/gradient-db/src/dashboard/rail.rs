@@ -49,17 +49,17 @@ fn rail_projects_sql() -> String {
                 WHERE t.project = p.id AND {NON_PR} ORDER BY e.task, e.created_at DESC) latest \
                 ORDER BY {severity} LIMIT 1) AS status, \
             (SELECT count(*) FROM task t WHERE t.project = p.id)::bigint AS task_count \
-        FROM viewer v JOIN project p ON p.id = v.project ORDER BY p.name"
+        FROM viewer v JOIN project p ON p.id = v.project ORDER BY lower(p.display_name), p.name"
     )
 }
 
 fn rail_tasks_sql() -> String {
     format!(
-        "SELECT t.project, t.name, (SELECT e.status FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
+        "SELECT t.project, t.name, t.display_name, (SELECT e.status FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
             WHERE e.task = t.id AND {NON_PR} ORDER BY e.created_at DESC LIMIT 1) AS status \
         FROM task t WHERE t.project IN (SELECT s.project FROM user_project_star s JOIN project p ON p.id = s.project \
             WHERE s.\"user\" = $1 AND (p.public OR EXISTS (SELECT 1 FROM project_access pu \
-            WHERE pu.project = p.id AND pu.\"user\" = $1))) ORDER BY t.name"
+            WHERE pu.project = p.id AND pu.\"user\" = $1))) ORDER BY lower(t.display_name), t.name"
     )
 }
 
@@ -82,7 +82,7 @@ crate::sql! {
             OR EXISTS (SELECT 1 FROM project_cache pc JOIN project_access pu ON pu.project = pc.project \
                 WHERE pc.cache = c.id AND pu.\"user\" = $1) \
             OR EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id AND c.public) \
-        ORDER BY starred DESC, c.name",
+        ORDER BY starred DESC, lower(c.display_name), c.name",
         params = [UserId],
         tier = Bulk;
 }
@@ -104,6 +104,7 @@ pub struct RailProjectRow {
 pub struct RailTaskRow {
     pub project: ProjectId,
     pub name: String,
+    pub display_name: String,
     pub status: Option<EvaluationStatus>,
 }
 
@@ -139,6 +140,7 @@ fn rail_task_row(r: &QueryResult) -> Result<RailTaskRow, DbErr> {
     Ok(RailTaskRow {
         project: ProjectId::new(r.try_get("", "project")?),
         name: r.try_get("", "name")?,
+        display_name: r.try_get("", "display_name")?,
         status: optional_status(r)?,
     })
 }

@@ -123,7 +123,9 @@ pub struct PendingJobSummary {
     pub exec_job: Option<BoardExecJob>,
     pub cluster_job: Option<Uuid>,
     pub project_name: Option<String>,
+    pub project_display_name: Option<String>,
     pub task: Option<String>,
+    pub task_display_name: Option<String>,
     pub waiting_reason: Option<WaitingReason>,
     pub permissions: Vec<Permission>,
 }
@@ -140,7 +142,7 @@ pub struct PendingJobsResponse {
     operation_id = "getBoardPendingJobs",
     tag = "board",
     summary = "Pending (unassigned) jobs",
-    description = "Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job. `project_name` and `task` come from the evaluation of the job. `waiting_reason` comes from the exec job for exec jobs and from the evaluation otherwise. `permissions` are the caller's permissions in its project.",
+    description = "Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job. The values `project_name`, `task` and their display names come from the job evaluation. `waiting_reason` comes from the exec job for exec jobs and from the evaluation otherwise. `permissions` are the caller's permissions in its project.",
     responses((status = OK, description = "Pending jobs plus other_pending count", body = PendingJobsResponse), WebError)
 )]
 pub async fn get_pending_jobs(
@@ -188,9 +190,12 @@ pub async fn get_pending_jobs(
             let permissions = grants.get(&j.project).map_or(0, |grant| {
                 key_limited_project_mask(grant.permissions, j.project, api_key.as_ref())
             });
+            let project = projects.get(&Uuid::from(j.project));
             PendingJobSummary {
-                project_name: projects.get(&Uuid::from(j.project)).map(|p| p.name.clone()),
+                project_name: project.map(|p| p.name.clone()),
+                project_display_name: project.map(|p| p.display_name.clone()),
                 task: evaluation.task,
+                task_display_name: evaluation.task_display_name,
                 waiting_reason: subjects
                     .waiting_reason_for_pending_job(pending, evaluation.waiting_reason),
                 permissions: mask_to_vec(permissions),

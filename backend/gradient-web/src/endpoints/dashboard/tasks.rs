@@ -171,7 +171,9 @@ mod tests {
             .unwrap();
         BTreeMap::from([
             ("project", Value::from("p")),
+            ("project_display_name", Value::from("P")),
             ("task", Value::from("t")),
+            ("task_display_name", Value::from("T")),
             ("starred", Value::from(true)),
             ("team", Value::Bool(Some(false))),
             ("latest_id", Value::Uuid(latest.map(|(id, _)| id))),

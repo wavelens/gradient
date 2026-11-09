@@ -21,6 +21,7 @@ use std::sync::Arc;
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct RailTask {
     pub name: String,
+    pub display_name: String,
     pub status: Option<EvaluationStatus>,
 }
 
@@ -28,6 +29,7 @@ impl From<&RailTaskRow> for RailTask {
     fn from(task: &RailTaskRow) -> Self {
         Self {
             name: task.name.clone(),
+            display_name: task.display_name.clone(),
             status: task.status,
         }
     }
@@ -102,7 +104,7 @@ pub fn build_rail(
         .into_iter()
         .map(|p| RailProject::new(p, &tasks))
         .collect();
-    projects.sort_by(|a, b| a.tier.cmp(&b.tier).then_with(|| a.name.cmp(&b.name)));
+    projects.sort_by_cached_key(|p| (p.tier, p.display_name.to_lowercase(), p.name.clone()));
     Rail {
         projects,
         caches: caches.into_iter().map(RailCache::from).collect(),
@@ -115,7 +117,7 @@ pub fn build_rail(
     operation_id = "getDashboardRail",
     tag = "dashboard",
     summary = "Sidebar rail of the current user",
-    description = "Projects: member projects plus starred public ones, sorted by tier (`starred_active`, `active`, `starred`, `team`, `member`), then name.\nActive means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.\n`tasks` is present only on `starred_active` projects and omitted otherwise.\nCaches: those the viewer created, is a member of or reaches through a member project, plus starred public ones; starred first, then name. Superusers get no extra caches here.",
+    description = "Projects are member projects plus starred public projects. Sort by tier (`starred_active`, `active`, `starred`, `team`, `member`), then by display name.\nA non-PR evaluation in the last 14 days is active. `status` is the status of the latest non-PR evaluation, or `null`.\nThe `tasks` field is present only on `starred_active` projects. Other projects omit that field. Entries in the field sort by display name.\nCache entries include caches the viewer created, caches the viewer is a member of, or caches reachable through member projects. Cache entries also include starred public caches. Put starred caches first, then sort by display name. Superusers get no extra caches here.",
     responses((status = OK, description = "Rail projects and caches", body = Rail), WebError)
 )]
 pub async fn get_rail(
@@ -165,11 +167,13 @@ mod tests {
             RailTaskRow {
                 project: both.id,
                 name: "hosts".into(),
+                display_name: "Hosts".into(),
                 status: None,
             },
             RailTaskRow {
                 project: starred.id,
                 name: "home".into(),
+                display_name: "Home".into(),
                 status: None,
             },
         ];

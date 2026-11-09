@@ -62,7 +62,9 @@ pub struct Latest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TaskFacts {
     pub project: String,
+    pub project_display_name: String,
     pub task: String,
+    pub task_display_name: String,
     pub starred: bool,
     pub latest: Option<Latest>,
     pub previous: Option<EvaluationId>,
@@ -82,7 +84,9 @@ impl From<TaskFactsRow> for TaskFacts {
                 waiting_reason: l.waiting_reason,
             }),
             project: r.project,
+            project_display_name: r.project_display_name,
             task: r.task,
+            task_display_name: r.task_display_name,
             starred: r.starred,
             previous: r.previous,
             recent_14d: r.recent_14d,
@@ -114,7 +118,9 @@ impl From<HistoryRow> for HistoryBar {
 #[derive(Clone, Debug, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct TaskRow {
     pub project: String,
+    pub project_display_name: String,
     pub task: String,
+    pub task_display_name: String,
     pub starred: bool,
     pub tier: Tier,
     pub latest: Option<Latest>,
@@ -148,7 +154,9 @@ impl TaskRow {
             failing,
             history: Vec::new(),
             project: f.project,
+            project_display_name: f.project_display_name,
             task: f.task,
+            task_display_name: f.task_display_name,
             starred: f.starred,
             latest: f.latest,
             speed_ms: f.speed_ms,
@@ -190,6 +198,17 @@ pub fn counts(rows: &[TaskRow]) -> Counts {
     }
 }
 
+fn dashboard_task_row_project_and_task_display_name_and_slug_tie_break_sort_tuple(
+    row: &TaskRow,
+) -> (&str, &str, &str, &str) {
+    (
+        &row.project_display_name,
+        &row.task_display_name,
+        &row.project,
+        &row.task,
+    )
+}
+
 pub fn rank(rows: &mut [TaskRow]) {
     rows.sort_by(|a, b| {
         a.tier
@@ -198,7 +217,14 @@ pub fn rank(rows: &mut [TaskRow]) {
                 Reverse(a.latest.as_ref().map(|l| l.created_at))
                     .cmp(&Reverse(b.latest.as_ref().map(|l| l.created_at)))
             })
-            .then_with(|| (&a.project, &a.task).cmp(&(&b.project, &b.task)))
+            .then_with(|| {
+                dashboard_task_row_project_and_task_display_name_and_slug_tie_break_sort_tuple(a)
+                    .cmp(
+                    &dashboard_task_row_project_and_task_display_name_and_slug_tie_break_sort_tuple(
+                        b,
+                    ),
+                )
+            })
     });
 }
 
@@ -244,7 +270,9 @@ mod tests {
     ) -> TaskFacts {
         TaskFacts {
             project: "p".into(),
+            project_display_name: "P".into(),
             task: task.into(),
+            task_display_name: task.to_uppercase(),
             starred,
             latest: latest.map(|(status, day)| Latest {
                 id: EvaluationId::now_v7(),

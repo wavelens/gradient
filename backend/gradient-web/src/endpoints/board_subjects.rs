@@ -229,6 +229,7 @@ pub async fn board_projects<C: ConnectionTrait>(
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PendingEvaluation {
     pub task: Option<String>,
+    pub task_display_name: Option<String>,
     pub waiting_reason: Option<WaitingReason>,
 }
 
@@ -246,10 +247,7 @@ pub async fn pending_evaluations<C: ConnectionTrait>(
     Ok(evaluations
         .into_iter()
         .map(|(id, evaluation)| {
-            let task = evaluation
-                .task
-                .and_then(|task| tasks.get(&task))
-                .map(|t| t.name.clone());
+            let task = evaluation.task.and_then(|task| tasks.get(&task));
             let waiting_reason = WaitingReason::from_status_and_json_if_waiting(
                 evaluation.status,
                 evaluation.waiting_reason.as_ref(),
@@ -257,7 +255,8 @@ pub async fn pending_evaluations<C: ConnectionTrait>(
             (
                 id,
                 PendingEvaluation {
-                    task,
+                    task: task.map(|t| t.name.clone()),
+                    task_display_name: task.map(|t| t.display_name.clone()),
                     waiting_reason,
                 },
             )
@@ -272,10 +271,11 @@ pub struct JobEvaluationView {
     pub commit_message: Option<String>,
     pub wildcard: String,
     pub task: Option<String>,
+    pub task_display_name: Option<String>,
 }
 
 impl JobEvaluationView {
-    fn new(evaluation: MEvaluation, commit: Option<MCommit>, task: Option<String>) -> Self {
+    fn new(evaluation: MEvaluation, commit: Option<MCommit>, task: Option<MTask>) -> Self {
         Self {
             repository: evaluation.repository,
             commit: commit
@@ -284,7 +284,8 @@ impl JobEvaluationView {
                 .unwrap_or_default(),
             commit_message: commit.and_then(|c| c.message.lines().next().map(str::to_string)),
             wildcard: evaluation.wildcard,
-            task,
+            task_display_name: task.as_ref().map(|t| t.display_name.clone()),
+            task: task.map(|t| t.name),
         }
     }
 }
@@ -299,7 +300,7 @@ pub async fn job_evaluation<C: ConnectionTrait>(
 
     let commit = by_id::<ECommit, _>(db, ev.commit).await?;
     let task = match ev.task {
-        Some(task) => by_id::<ETask, _>(db, task).await?.map(|t| t.name),
+        Some(task) => by_id::<ETask, _>(db, task).await?,
         None => None,
     };
 
@@ -429,6 +430,7 @@ mod tests {
         let task = MTask {
             id: TaskId::now_v7(),
             name: "nightly".into(),
+            display_name: "Nightly".into(),
             ..Default::default()
         };
         let waiting = MEvaluation {
@@ -457,6 +459,7 @@ mod tests {
             pending[&waiting.id],
             PendingEvaluation {
                 task: Some("nightly".into()),
+                task_display_name: Some("Nightly".into()),
                 waiting_reason: Some(WaitingReason::NoCache),
             }
         );
