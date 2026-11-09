@@ -22,6 +22,6 @@
   &[data-phase='failure'] { background: color-mix(in srgb, var(--gr-status-danger) 18%, transparent);  color: var(--gr-status-danger-text); }
   &[data-phase='aborted'] { background: color-mix(in srgb, var(--gr-text-secondary) 18%, transparent); color: var(--gr-text-secondary); }
   &[data-phase='waiting'] { background: color-mix(in srgb, var(--gr-status-warning) 18%, transparent); color: var(--gr-status-warning-text); }
-  &[data-phase='queued'],
+  &[data-phase='queued'] { background: color-mix(in srgb, var(--gr-text-muted) 18%, transparent); color: var(--gr-text-secondary); }
   &[data-phase='running'] { background: color-mix(in srgb, var(--gr-status-info) 18%, transparent); color: var(--gr-status-info-text); }
 }

@@ -13,9 +13,9 @@
         @if (!proj.active) {
           @if (canOpenSettings()) {
             <a class="inactive-badge" [routerLink]="links.taskPage(projectName, taskName, 'settings')"
-               grTooltip="Task is paused. No evaluations start automatically. Activate the task in Settings."><gr-badge severity="warning">Inactive</gr-badge></a>
+               grTooltip="Task is paused. No evaluations start automatically. Activate the task in Settings."><gr-badge severity="neutral">Inactive</gr-badge></a>
           } @else {
-            <gr-badge class="inactive-badge" severity="warning" grTooltip="A paused task does not start evaluation automatically.">Inactive</gr-badge>
+            <gr-badge class="inactive-badge" severity="neutral" grTooltip="A paused task does not start evaluation automatically.">Inactive</gr-badge>
           }
         }
         @if (liveConnectionOpen() === false) {

@@ -47,7 +47,7 @@
                   <div class="action-name">{{ action.name }}</div>
                   <div class="action-meta text-secondary">
                     <gr-badge>{{ typeLabel(typeOf(action)) }}</gr-badge>
-                    <gr-badge [severity]="action.active ? 'success' : 'warning'">
+                    <gr-badge [severity]="action.active ? 'success' : 'neutral'">
                       {{ action.active ? 'Active' : 'Inactive' }}
                     </gr-badge>
                     <span>Last fired: {{ action.last_fired_at | relativeTime }}</span>

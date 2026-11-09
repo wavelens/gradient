@@ -15,7 +15,7 @@
   color: var(--phase-color);
 }
 
-:host([data-phase='queued']),
+:host([data-phase='queued']) { --phase-color: var(--gr-text-muted); }
 :host([data-phase='running']) { --phase-color: var(--gr-graph-running); }
 :host([data-phase='waiting']) { --phase-color: var(--gr-status-warning); }
 :host([data-phase='success']) { --phase-color: var(--gr-graph-success); }

@@ -17,7 +17,7 @@
             <gr-badge [severity]="d.success ? 'success' : 'danger'">{{ d.success ? 'Delivered' : 'Failed' }}</gr-badge>
             <span class="event">{{ eventNameToReadableText(d.event) }}</span>
             @if (resultReason && !detail) {
-              <span class="reason" [title]="d.error_message ?? resultReason">{{ resultReason }}</span>
+              <span class="reason" [class.reason--failed]="!d.success" [title]="d.error_message ?? resultReason">{{ resultReason }}</span>
             }
             <span class="facts">
               <span [title]="d.delivered_at | serverDate">{{ d.delivered_at | relativeTime }}</span>

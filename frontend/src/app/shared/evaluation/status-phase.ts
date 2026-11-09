@@ -27,7 +27,7 @@ export const PHASE_COLOR: Record<StatusPhase, string> = {
 };
 
 export const PHASE_SEVERITY: Record<StatusPhase, BadgeSeverity> = {
-  queued: 'info',
+  queued: 'neutral',
   running: 'info',
   waiting: 'warning',
   success: 'success',

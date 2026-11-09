@@ -44,8 +44,10 @@
 .reason {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: var(--gr-status-danger-text);
+  color: var(--gr-text-secondary);
   font-size: $font-size-sm;
+
+  &--failed { color: var(--gr-status-danger-text); }
 }
 
 .facts {
