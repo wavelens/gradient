@@ -6,7 +6,7 @@
 
 import { Component, HostListener, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AdminService } from '@core/services/admin.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -18,6 +18,7 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
+  MessageBannerComponent,
   PageLayoutComponent,
 } from '@gradient/ui/ui';
 import { Observable, defaultIfEmpty, of } from 'rxjs';
@@ -29,7 +30,7 @@ import { ManifestResult } from '@core/models';
   selector: 'app-admin-github-app',
   standalone: true,
   imports: [
-    LabelHelpComponent,CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, LoadStateComponent, PageLayoutComponent, CopyFieldComponent, FormFieldComponent],
+    LabelHelpComponent,CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, LoadStateComponent, MessageBannerComponent, PageLayoutComponent, CopyFieldComponent, FormFieldComponent],
   templateUrl: './github-app.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './github-app.component.scss',
@@ -38,6 +39,7 @@ export class GithubAppComponent implements OnInit {
   private admin = inject(AdminService);
   protected readonly trail = inject(BreadcrumbsService).admin({ label: 'GitHub App' });
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
@@ -118,7 +120,13 @@ export class GithubAppComponent implements OnInit {
     });
   }
 
-  canDeactivate(): boolean | Observable<boolean> {
+  removeReadyQueryParamAndReturnToSetupForm(): void {
+    this.credentialsMissing.set(false);
+    this.showResult.set(false);
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { ready: null }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
+
+  canDeactivate():boolean | Observable<boolean> {
     if (!this.keysVisible()) return true;
     return this.confirm
       .confirm({

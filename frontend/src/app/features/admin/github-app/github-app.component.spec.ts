@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
@@ -156,6 +156,7 @@ describe('GithubAppComponent', () => {
     expect(values).toContain('PEM');
     expect(values).toContain('whsec');
     expect(values).toContain('cid');
+    expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain('show only once');
   });
 
   it('shows a friendly error when credentials are no longer available', async () => {
@@ -171,6 +172,12 @@ describe('GithubAppComponent', () => {
       '[data-testid="github-app-credentials-missing"]',
     );
     expect(banner).toBeTruthy();
+
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>).find((button) => button.textContent?.includes('Start again'))!.click();
+    fixture.detectChanges();
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { ready: null } }));
+    expect(fixture.nativeElement.querySelector('[data-testid="github-app-create-button"]')).toBeTruthy();
   });
 
   it('shows a spinner while credentials load and a failed load with Try Again', () => {

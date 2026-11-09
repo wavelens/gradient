@@ -57,11 +57,13 @@
     >
     @if (credentialsMissing()) {
       <div class="error" data-testid="github-app-credentials-missing">
-        Credentials are no longer available - re-run the manifest flow.
+        Credentials are no longer available. Start setup again.
       </div>
+      <button grButton type="button" label="Start again" icon="refresh" (click)="removeReadyQueryParamAndReturnToSetupForm()"></button>
     } @else if (credentials(); as c) {
       <div class="result-panel">
         <h2>App created - {{ c.slug }}</h2>
+        <gr-message-banner type="warning">These credentials show only once. Copy them now.</gr-message-banner>
         <p><a [href]="c.html_url" target="_blank" rel="noopener">{{ c.html_url }}</a></p>
 
         <gr-form-field label="App ID">
