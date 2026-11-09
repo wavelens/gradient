@@ -26,6 +26,10 @@ export function deniedPage(router: Router, target: DeniedTarget, from: string): 
   return new RedirectCommand(tree, { browserUrl: from });
 }
 
+export function isInstanceAdminAreaPath(path: string | null): boolean {
+  return path === '/admin' || !!path?.startsWith('/admin/');
+}
+
 export function adminOnlyPage(router: Router, from: string): RedirectCommand {
   return new RedirectCommand(router.createUrlTree(['/error/403'], { queryParams: { from } }), { browserUrl: from });
 }

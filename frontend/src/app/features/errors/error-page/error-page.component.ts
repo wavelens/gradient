@@ -9,7 +9,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { ButtonComponent, IconComponent } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
-import { DeniedKind } from '@core/routing/access-denied';
+import { DeniedKind, isInstanceAdminAreaPath } from '@core/routing/access-denied';
 import { links } from '@shared/routing';
 
 interface ErrorMeta {
@@ -19,11 +19,18 @@ interface ErrorMeta {
   retryable: boolean;
 }
 
+const ADMIN_ONLY_META: ErrorMeta = {
+  title: 'Admin Only',
+  description: 'Instance administrators only. Ask an administrator for access.',
+  icon: 'admin_panel_settings',
+  retryable: false,
+};
+
 const ERROR_META: Record<number, ErrorMeta> = {
   403: {
-    title: 'Admin Only',
-    description: 'Instance administrators only. Ask an administrator for access.',
-    icon: 'admin_panel_settings',
+    title: 'No Access',
+    description: 'Access denied. Request access from a project or instance administrator.',
+    icon: 'lock',
     retryable: false,
   },
   404: {
@@ -120,10 +127,15 @@ export class ErrorPageComponent {
     };
   });
   meta = computed<ErrorMeta>(() => {
+    if (this.code() === 403 && isInstanceAdminAreaPath(this.from)) return ADMIN_ONLY_META;
     const base = ERROR_META[this.code()] ?? FALLBACK_META;
     return this.denied() ? { ...base, title: 'Not Found or Access Denied', icon: 'lock' } : base;
   });
   restricted = computed(() => this.code() === 403 || this.denied() !== null);
+
+  constructor() {
+    if (this.denied() && this.user()) this.invites.refresh();
+  }
 
   retry(): void {
     if (this.from) {

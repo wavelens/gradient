@@ -34,7 +34,7 @@
       } @else {
         <a grButton [routerLink]="links.dashboard()" [severity]="restricted() && !user() ? 'secondary' : 'primary'" label="Go Home"></a>
       }
-      @if (restricted() && user()) {
+      @if (restricted() && user() && !user()?.superuser) {
         <button grButton type="button" severity="secondary" label="Switch Account" (click)="switchAccount()"></button>
       }
       @if (meta().retryable) {

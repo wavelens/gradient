@@ -12,14 +12,20 @@ import { AuthService } from '@core/services/auth.service';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { ErrorPageComponent } from './error-page.component';
 
-function render(code: number, query: Record<string, string>, user: { username: string } | null, pendingInvites = 0) {
+function render(
+  code: number,
+  query: Record<string, string>,
+  user: { username: string; superuser?: boolean } | null,
+  pendingInvites = 0,
+) {
   const logout = vi.fn(() => of(null));
+  const refreshInvites = vi.fn();
   TestBed.configureTestingModule({
     imports: [ErrorPageComponent],
     providers: [
       provideRouter([]),
       { provide: AuthService, useValue: { user: signal(user), logout } },
-      { provide: PendingInvitesService, useValue: { count: () => pendingInvites } },
+      { provide: PendingInvitesService, useValue: { count: () => pendingInvites, refresh: refreshInvites } },
       { provide: ActivatedRoute, useValue: { snapshot: { data: { code }, queryParamMap: convertToParamMap(query) } } },
     ],
   });
@@ -30,7 +36,7 @@ function render(code: number, query: Record<string, string>, user: { username: s
     text: el.textContent?.trim(),
     href: el.getAttribute('href'),
   }));
-  return { text: element.textContent ?? '', links, logout, fixture };
+  return { text: element.textContent ?? '', links, logout, fixture, refreshInvites };
 }
 
 const DENIED = { kind: 'cache', name: 'researchcache', back: '/caches', from: '/caches/researchcache/nars' };
@@ -63,6 +69,23 @@ describe('ErrorPageComponent', () => {
     expect(text).toContain('Admin Only');
     expect(text).toContain('Signed in as bob.');
     expect(links.map((l) => l.text)).toEqual(['Go Home', 'Switch Account']);
+  });
+
+  it('says No Access, not Admin Only, for a refused page outside the admin area', () => {
+    const { text } = render(403, { from: '/project/alpha' }, { username: 'bob' });
+    expect(text).toContain('No Access');
+    expect(text).not.toContain('Admin Only');
+  });
+
+  it('offers no Switch Account to a superuser', () => {
+    const { links } = render(404, DENIED, { username: 'root', superuser: true });
+    expect(links.map((l) => l.text)).not.toContain('Switch Account');
+  });
+
+  it('reloads pending invitations when a signed-in user lands on a denied page', () => {
+    expect(render(404, DENIED, { username: 'carol' }).refreshInvites).toHaveBeenCalledOnce();
+    TestBed.resetTestingModule();
+    expect(render(404, DENIED, null).refreshInvites).not.toHaveBeenCalled();
   });
 
   it('keeps the plain page-not-found page for unknown addresses', () => {
