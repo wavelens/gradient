@@ -232,8 +232,8 @@ function heatmapOption(
 
   return {
     grid: { left: 8, right: 12, top: 28, bottom: 36, containLabel: true },
-    xAxis: { type: 'category', data: xs, axisLabel: axisLabel(theme), axisLine: axisLine(theme), splitArea: { show: true } },
-    yAxis: { type: 'category', data: cfg.series.map((s) => s.name), axisLabel: axisLabel(theme), axisLine: axisLine(theme), splitArea: { show: true } },
+    xAxis: { type: 'category', data: xs, axisLabel: axisLabel(theme), axisLine: axisLine(theme) },
+    yAxis: { type: 'category', data: cfg.series.map((s) => s.name), axisLabel: axisLabel(theme), axisLine: axisLine(theme) },
     visualMap: {
       min: 0,
       max,

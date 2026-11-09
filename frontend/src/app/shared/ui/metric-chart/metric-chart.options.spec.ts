@@ -235,6 +235,12 @@ describe('buildMetricChartOption heatmap', () => {
     expect((opt.visualMap as any).inRange.colorAlpha[0]).toBeGreaterThanOrEqual(0.2);
   });
 
+  it('draws no stripes behind the empty cells', () => {
+    const opt = buildMetricChartOption({ type: 'heatmap', series: bands }, THEME);
+    expect((opt.xAxis as any).splitArea).toBeUndefined();
+    expect((opt.yAxis as any).splitArea).toBeUndefined();
+  });
+
   it('survives an empty series list', () => {
     const opt = buildMetricChartOption({ type: 'heatmap', series: [] }, THEME);
     expect((opt.series as any[])[0].data).toEqual([]);

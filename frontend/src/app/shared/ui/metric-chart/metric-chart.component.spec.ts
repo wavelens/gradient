@@ -6,6 +6,7 @@
 
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import * as echarts from 'echarts/core';
 import { MetricChartComponent, resolveChartTheme } from './metric-chart.component';
 import { MetricSeries } from './metric-chart.options';
 
@@ -91,6 +92,22 @@ describe('MetricChartComponent', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('drops the radar when the chart switches to bars', async () => {
+    const fixture = TestBed.createComponent(MetricChartComponent);
+    fixture.componentRef.setInput('type', 'radar');
+    fixture.componentRef.setInput('categories', ['x86_64', 'aarch64', 'riscv64']);
+    fixture.componentRef.setInput('series', [{ name: 'builds', data: [3, 2, 1] }]);
+    fixture.autoDetectChanges();
+    await fixture.whenStable();
+    const plot = fixture.nativeElement.querySelector('.metric-chart__plot') as HTMLElement;
+    const radarOf = () => (echarts.getInstanceByDom(plot)?.getOption() as { radar?: unknown[] }).radar ?? [];
+    expect(radarOf().length).toBe(1);
+
+    fixture.componentRef.setInput('type', 'bar');
+    await fixture.whenStable();
+    expect(radarOf().length).toBe(0);
   });
 
   it('disposes the chart instance on destroy', async () => {
