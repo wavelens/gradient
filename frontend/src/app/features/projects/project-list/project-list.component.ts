@@ -33,6 +33,7 @@ import { links } from '@shared/routing';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, merge } from 'rxjs';
 import { PHASE_SEVERITY } from '@shared/evaluation';
+import { PendingInvitationsBannerComponent } from '@shared/access';
 
 @Component({
   selector: 'app-project-list',
@@ -54,6 +55,7 @@ import { PHASE_SEVERITY } from '@shared/evaluation';
     LoadMoreComponent,
     SelectComponent,
     NameFieldsComponent,
+    PendingInvitationsBannerComponent,
   ],
   templateUrl: './project-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

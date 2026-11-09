@@ -15,3 +15,4 @@ export * from './settings-access';
 export * from './role-order';
 export * from './member-name';
 export * from './member-access-change-confirmation';
+export * from './pending-invitations-banner.component';

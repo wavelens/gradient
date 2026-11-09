@@ -23,6 +23,7 @@ import {
 import { CreateCacheButtonComponent, CreateCacheDialogComponent, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
 import { Cache } from '@core/models';
 import { links } from '@shared/routing';
+import { PendingInvitationsBannerComponent } from '@shared/access';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY } from 'rxjs';
 
@@ -42,6 +43,7 @@ import { EMPTY } from 'rxjs';
     BadgeComponent,
     CreateCacheButtonComponent,
     CreateCacheDialogComponent,
+    PendingInvitationsBannerComponent,
   ],
   templateUrl: './cache-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

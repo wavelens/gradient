@@ -18,6 +18,7 @@ import {
 } from '@gradient/ui/ui';
 import { CreateTeamDialogComponent, injectCanCreateTeam, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
 import { links } from '@shared/routing';
+import { PendingInvitationsBannerComponent } from '@shared/access';
 
 @Component({
   selector: 'app-teams-list',
@@ -31,6 +32,7 @@ import { links } from '@shared/routing';
     RowComponent,
     RowListComponent,
     CreateTeamDialogComponent,
+    PendingInvitationsBannerComponent,
   ],
   templateUrl: './teams-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

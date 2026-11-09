@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { Router, provideRouter } from '@angular/router';
 import { Observable, Subject, of, throwError } from 'rxjs';
 import { ProjectListComponent } from './project-list.component';
@@ -15,12 +17,18 @@ import { ApiError } from '@core/services/api.service';
 
 const EMPTY_PAGE = { items: [], total: 0, page: 1 };
 
-function render(getProjects: () => Observable<unknown>, getPublicProjects: () => Observable<unknown> = () => of(EMPTY_PAGE), signedIn = true) {
+function render(
+  getProjects: () => Observable<unknown>,
+  getPublicProjects: () => Observable<unknown> = () => of(EMPTY_PAGE),
+  signedIn = true,
+  invitationCount = 0,
+) {
   const projects = vi.fn(getProjects);
   TestBed.configureTestingModule({
     imports: [ProjectListComponent],
     providers: [
       provideRouter([]),
+      { provide: PendingInvitesService, useValue: { count: signal(invitationCount) } },
       { provide: AuthService, useValue: { isAuthenticated: () => signedIn, user: () => (signedIn ? { superuser: false } : null) } },
       { provide: ConfigService, useValue: { publicListing: true, createProject: 'everyone', canCreate: () => true } },
       {
@@ -107,12 +115,17 @@ describe('ProjectListComponent', () => {
     expect(root.textContent).toContain('Sign in');
   });
 
-  it('drops the own empty list for a signed-in non-member while public projects are listed', () => {
+  it('keeps the own empty list for a signed-in non-member next to the public projects', () => {
     const publicPage = { items: [{ id: 'p1', name: 'nixpkgs', display_name: 'Nixpkgs', description: null }], total: 1, page: 1 };
     const { root } = render(() => of(EMPTY_PAGE), () => of(publicPage));
-    expect(root.textContent).not.toContain('No projects yet');
+    expect(root.textContent).toContain('No projects yet');
     expect(root.textContent).toContain('Nixpkgs');
     expect(Array.from(root.querySelectorAll('button')).filter((b) => b.textContent?.includes('Create Project'))).toHaveLength(1);
+  });
+
+  it('points a signed-in user with invitations to them above the list', () => {
+    const { root } = render(() => of(EMPTY_PAGE), undefined, true, 2);
+    expect(root.querySelector('app-pending-invitations-banner')?.textContent).toContain('2 pending invitations');
   });
 
   it('tells anonymous visitors when nothing is public', () => {

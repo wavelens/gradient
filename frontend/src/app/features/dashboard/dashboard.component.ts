@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, computed, inject, signal, viewChild } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { ChangeDetectionStrategy, Component, computed, signal, viewChild } from '@angular/core';
 import { merge } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { ButtonComponent, MessageBannerComponent } from '@gradient/ui/ui';
-import { PendingInvitesService } from '@core/services/pending-invites.service';
-import { links } from '@shared/routing';
+import { PendingInvitationsBannerComponent } from '@shared/access';
 import { DashboardStatsComponent } from './stats/dashboard-stats.component';
 import { DashboardTaskTableComponent } from './task-table/dashboard-task-table.component';
 import { DashboardActivityComponent } from './activity/dashboard-activity.component';
@@ -21,9 +19,9 @@ import { DashboardStartComponent } from './start/dashboard-start.component';
   selector: 'app-dashboard',
   standalone: true,
   imports: [
-    RouterLink,
     ButtonComponent,
     MessageBannerComponent,
+    PendingInvitationsBannerComponent,
     DashboardStatsComponent,
     DashboardTaskTableComponent,
     DashboardActivityComponent,
@@ -35,8 +33,6 @@ import { DashboardStartComponent } from './start/dashboard-start.component';
   styleUrl: './dashboard.component.scss',
 })
 export class DashboardComponent {
-  protected readonly links = links;
-  protected invites = inject(PendingInvitesService);
   // null until the rail answers; the router blocks load alongside it and give way if it reports first steps.
   newUser = signal<boolean | null>(null);
   hasAnyProject = signal<boolean | null>(null);

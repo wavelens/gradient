@@ -73,7 +73,7 @@ describe('DashboardComponent', () => {
 
   it('points an invited user to the pending invitations', () => {
     const root = render({ projects: [], caches: [] }, 2);
-    const banner = root.querySelector('.invites-banner');
+    const banner = root.querySelector('app-pending-invitations-banner gr-message-banner');
     expect(banner?.textContent).toContain('2 pending invitations');
     expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/settings/invites');
   });
@@ -102,6 +102,6 @@ describe('DashboardComponent', () => {
   });
 
   it('shows no invitation banner without pending invitations', () => {
-    expect(render({ projects: [], caches: [] }).querySelector('.invites-banner')).toBeNull();
+    expect(render({ projects: [], caches: [] }).querySelector('app-pending-invitations-banner gr-message-banner')).toBeNull();
   });
 });

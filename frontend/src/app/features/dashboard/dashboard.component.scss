@@ -10,11 +10,9 @@
   max-width: $content-width-detail;
   margin: 0 auto;
   padding: $spacing-md;
-}
-
-.invites-banner {
-  display: block;
-  margin-bottom: $spacing-md;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
 }
 
 .layout {

@@ -5,12 +5,13 @@
 -->
 
 <gr-page-layout title="Projects" [subtitle]="authService.isAuthenticated() ? 'Manage your projects' : 'Public projects on this server. Sign in to see your own.'">
-  @if (canCreateProject && (projects.items().length || filteredPublicProjects.length)) {
+  @if (canCreateProject && projects.items().length) {
     <button slot="actions" grButton label="Create Project" icon="add" (click)="openCreateDialog()"></button>
   } @else if (!authService.isAuthenticated()) {
     <a slot="actions" grButton label="Sign in" icon="login" [routerLink]="links.login(links.projects().toString())"></a>
   }
   @if (authService.isAuthenticated()) {
+    <app-pending-invitations-banner />
     <gr-load-state
       [loading]="projects.loading()"
       [error]="projects.error()"
@@ -19,19 +20,16 @@
       errorTitle="Failed to load projects"
       (retry)="projects.reload()"
     >
-      <div slot="empty">
-        @if (!publicProjects.loading() && filteredPublicProjects.length === 0) {
-          <gr-empty-state
-            icon="corporate_fare"
-            title="No projects yet"
-            [message]="canCreateProject ? 'Create your first project to get started with Gradient' : 'Ask a project administrator to add this account to a project.'"
-          >
-            @if (canCreateProject) {
-              <button slot="action" grButton label="Create Project" (click)="openCreateDialog()"></button>
-            }
-          </gr-empty-state>
+      <gr-empty-state
+        slot="empty"
+        icon="corporate_fare"
+        title="No projects yet"
+        [message]="canCreateProject ? 'Create your first project to get started with Gradient' : 'Ask a project administrator to add this account to a project.'"
+      >
+        @if (canCreateProject) {
+          <button slot="action" grButton label="Create Project" (click)="openCreateDialog()"></button>
         }
-      </div>
+      </gr-empty-state>
       <gr-card-grid>
         @for (project of projects.items(); track project.id) {
           <gr-nav-card
