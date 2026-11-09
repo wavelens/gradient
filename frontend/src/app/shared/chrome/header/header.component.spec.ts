@@ -102,9 +102,15 @@ describe('AppHeaderComponent - user menu', () => {
     expect(root.querySelector('.header-user a, .header-user .logout-btn')).toBeNull();
     expect(items.map((item) => item.textContent?.trim())).toEqual([
       expect.stringContaining('Settings'),
-      expect.stringContaining('My Invites'),
+      expect.stringContaining('Invitations'),
       expect.stringContaining('Log out'),
     ]);
+  });
+
+  it('counts pending invitations on the Invitations menu item', async () => {
+    TestBed.overrideProvider(PendingInvitesService, { useValue: { count: () => 2 } });
+    const { items } = await openMenu();
+    expect(items.map((item) => item.textContent?.trim())).toContainEqual(expect.stringContaining('Invitations (2)'));
   });
 
   it('names the menu button by its visible text and leaves the invitation count to the dashboard banner', () => {
