@@ -37,7 +37,7 @@ import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
-import type { ExecJobPullRequestView, ExecJobResponse } from '@core/models';
+import type { ExecJobAttemptView, ExecJobPullRequestView, ExecJobResponse } from '@core/models';
 import { abortExecJobConfirm, execJobMenu, guestSizeLabel, hasExecTerminal, isOpenExecJob, execJobPhase } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
@@ -168,9 +168,12 @@ export class ExecJobPageComponent implements OnInit {
   });
   duration = computed(() => {
     const job = this.job();
-    if (!job?.started_at) return formatDuration(null);
-    const end = job.finished_at ? serverTime(job.finished_at).getTime() : this.now();
-    return formatDuration(Math.max(0, end - serverTime(job.started_at).getTime()));
+    const attempt = job?.attempts.reduce<ExecJobAttemptView | null>((latest, a) => (!latest || a.number > latest.number ? a : latest), null);
+    const start = attempt?.started_at ?? job?.started_at;
+    if (!job || !start) return formatDuration(null);
+    const finished = attempt?.ended_at ?? job.finished_at;
+    const end = finished ? serverTime(finished).getTime() : this.now();
+    return formatDuration(Math.max(0, end - serverTime(start).getTime()));
   });
 
   protected readonly phase = execJobPhase;

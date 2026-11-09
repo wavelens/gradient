@@ -289,6 +289,20 @@ describe('ExecJobPageComponent', () => {
     expect(worker?.getAttribute('title')).toBe('w1');
   });
 
+  it('measures the duration of the latest attempt, the span its timeout counts', () => {
+    const timedOut: ExecJobResponse = {
+      ...job('failed'),
+      started_at: '2026-01-01T00:00:20',
+      finished_at: '2026-01-01T00:00:24',
+      attempts: [
+        { number: 1, worker: 'w1', started_at: '2026-01-01T00:00:01', ended_at: '2026-01-01T00:00:05', end_reason: 'timeout' },
+        { number: 2, worker: 'w1', started_at: '2026-01-01T00:00:10', ended_at: '2026-01-01T00:00:15', end_reason: 'timeout' },
+      ],
+    };
+    const { fixture } = setup('failed', SSH, {}, timedOut);
+    expect(fixture.componentInstance.duration()).toBe('5.0 s');
+  });
+
   it('shows the worker timeline with the reported phases from the sidebar', () => {
     const { fixture } = setup('completed');
     const root = fixture.nativeElement as HTMLElement;
