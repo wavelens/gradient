@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::logging::{insert_evaluation_message, insert_evaluation_message_once};
+use super::logging::insert_evaluation_message;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr};
@@ -50,24 +50,20 @@ impl EvaluationWarning<'_> {
         }
     }
 
-    fn is_raised_on_every_pass(&self) -> bool {
-        matches!(self, Self::UpstreamUnanswered { .. })
-    }
-
     pub async fn insert(
         &self,
         db: &impl ConnectionTrait,
         evaluation: EvaluationId,
     ) -> Result<(), DbErr> {
-        let message = self.to_string();
         let source = Some(self.source().to_owned());
-        if self.is_raised_on_every_pass() {
-            let level = MessageLevel::Warning;
-
-            return insert_evaluation_message_once(db, evaluation, level, message, source).await;
-        }
-
-        insert_evaluation_message(db, evaluation, MessageLevel::Warning, message, source).await
+        insert_evaluation_message(
+            db,
+            evaluation,
+            MessageLevel::Warning,
+            self.to_string(),
+            source,
+        )
+        .await
     }
 
     pub async fn report(&self, db: &impl ConnectionTrait, evaluation: EvaluationId) {
@@ -127,7 +123,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unanswered_upstream_is_stored_only_for_its_first_pass() {
+    async fn inserting_evaluation_message_with_existing_text_stores_nothing() {
         let already_stored = [BTreeMap::from([("num_items", Value::BigInt(Some(1)))])];
         let db = mock_db()
             .append_query_results([already_stored])

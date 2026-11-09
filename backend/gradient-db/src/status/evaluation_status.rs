@@ -5,16 +5,14 @@
  */
 
 use super::evaluation_message::EvaluationFailure;
-use super::logging::{PhaseSubjectKind, record_phase_event};
+use super::logging::{PhaseSubjectKind, insert_evaluation_message, record_phase_event};
 use crate::DbContext;
 use crate::sql::StatusWrite;
 use chrono::NaiveDateTime;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::transition::Transition;
 use gradient_types::*;
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel, QueryFilter, UpdateMany,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, UpdateMany};
 use tracing::{debug, warn};
 
 pub async fn update_evaluation_status(
@@ -202,17 +200,14 @@ pub async fn update_evaluation_status_with_error(
     let source = failure.source();
     debug!(evaluation_id = %evaluation.id, status = ?status, error = %failure, source, "Updating evaluation status with error");
 
-    let msg = MEvaluationMessage {
-        id: EvaluationMessageId::now_v7(),
-        evaluation: evaluation.id,
-        level: MessageLevel::Error,
-        message: failure.to_string(),
-        source: Some(source.to_owned()),
-        created_at: gradient_types::now(),
-    }
-    .into_active_model();
-
-    EEvaluationMessage::insert(msg).exec(&ctx.worker_db).await?;
+    insert_evaluation_message(
+        &ctx.worker_db,
+        evaluation.id,
+        MessageLevel::Error,
+        failure.to_string(),
+        Some(source.to_owned()),
+    )
+    .await?;
 
     update_evaluation_status(ctx, evaluation, status).await
 }

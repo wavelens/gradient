@@ -184,6 +184,15 @@ pub(super) async fn insert_evaluation_message<C: ConnectionTrait>(
     message: String,
     source: Option<String>,
 ) -> Result<(), sea_orm::DbErr> {
+    let recorded = EEvaluationMessage::find()
+        .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
+        .filter(CEvaluationMessage::Message.eq(message.as_str()))
+        .count(db)
+        .await?;
+    if recorded > 0 {
+        return Ok(());
+    }
+
     let msg = MEvaluationMessage {
         id: EvaluationMessageId::now_v7(),
         evaluation: evaluation_id,
@@ -196,25 +205,6 @@ pub(super) async fn insert_evaluation_message<C: ConnectionTrait>(
 
     EEvaluationMessage::insert(msg).exec(db).await?;
     Ok(())
-}
-
-pub(super) async fn insert_evaluation_message_once<C: ConnectionTrait>(
-    db: &C,
-    evaluation_id: EvaluationId,
-    level: MessageLevel,
-    message: String,
-    source: Option<String>,
-) -> Result<(), sea_orm::DbErr> {
-    let recorded = EEvaluationMessage::find()
-        .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
-        .filter(CEvaluationMessage::Message.eq(message.as_str()))
-        .count(db)
-        .await?;
-    if recorded > 0 {
-        return Ok(());
-    }
-
-    insert_evaluation_message(db, evaluation_id, level, message, source).await
 }
 
 pub async fn insert_worker_message<C: ConnectionTrait>(
