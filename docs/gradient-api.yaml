@@ -1754,7 +1754,7 @@ paths:
       tags:
       - board
       summary: Assigned job detail
-      description: An allocation record for one job and its timeline. The `phases` of an exec job also stores the reported phases as spans. The `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is superuser-only and null for other users. ``can_open_worker_metrics_page`` is true when the caller is a member of the job's project. Only members can open the statistics page for a worker.
+      description: Assignment records describe a single job and its timeline. The `phases` of an exec job can also store the reported phases as spans. `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is for superusers only. The value is null for other users. ``can_open_worker_metrics_page`` is true when the caller is a member of the job's project. Only members can open the statistics page for a worker. `can_view_project` is true when the caller can open the project page for that job (the project is public or the caller can view that project). Superusers can view jobs in every project. They cannot always view those project pages.
       operationId: getBoardJob
       parameters:
       - name: id
@@ -16457,6 +16457,7 @@ components:
         - project_display_name
         - worker_id
         - can_open_worker_metrics_page
+        - can_view_project
         - queued_at
         - dispatched_at
         - phases
@@ -16485,6 +16486,8 @@ components:
             - string
             - 'null'
           can_open_worker_metrics_page:
+            type: boolean
+          can_view_project:
             type: boolean
           queued_at:
             type: string

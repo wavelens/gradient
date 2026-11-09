@@ -28,6 +28,7 @@ const DETAIL: AssignedJobDetail = {
   worker_id: 'w1',
   worker_name: 'Builder One',
   can_open_worker_metrics_page: true,
+  can_view_project: true,
   dispatched_at: '2026-06-08T00:01:00Z',
   build_id: null,
   evaluation_id: 'e1',

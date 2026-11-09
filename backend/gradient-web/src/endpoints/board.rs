@@ -10,8 +10,8 @@ use super::board_subjects::{
 };
 use super::exec_jobs::query::{ExecJobAttemptView, attempt_view};
 use super::exec_jobs::timeline::with_reported_phases;
-use crate::access::key_limited_project_mask;
-use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::access::{can_view_project, key_limited_project_mask};
+use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
@@ -26,6 +26,7 @@ use axum::response::Response;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
 use gradient_db::metrics::build_times::{self, ExpensiveBuild, TopProjectBuildTime};
 use gradient_db::metrics::resource_usage::{
@@ -582,6 +583,7 @@ pub struct DispatchedJobDetail {
     pub worker_id: String,
     pub worker_name: Option<String>,
     pub can_open_worker_metrics_page: bool,
+    pub can_view_project: bool,
     pub queued_at: String,
     pub dispatched_at: String,
     pub finished_at: Option<String>,
@@ -620,13 +622,14 @@ pub struct AssignedJobSchedulerReasoning {
     operation_id = "getBoardJob",
     tag = "board",
     summary = "Assigned job detail",
-    description = "An allocation record for one job and its timeline. The `phases` of an exec job also stores the reported phases as spans. The `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is superuser-only and null for other users. ``can_open_worker_metrics_page`` is true when the caller is a member of the job's project. Only members can open the statistics page for a worker.",
+    description = "Assignment records describe a single job and its timeline. The `phases` of an exec job can also store the reported phases as spans. `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is for superusers only. The value is null for other users. ``can_open_worker_metrics_page`` is true when the caller is a member of the job's project. Only members can open the statistics page for a worker. `can_view_project` is true when the caller can open the project page for that job (the project is public or the caller can view that project). Superusers can view jobs in every project. They cannot always view those project pages.",
     params(("id" = Uuid, Path)),
     responses((status = OK, description = "Job detail", body = DispatchedJobDetail), WebError)
 )]
 pub async fn get_dispatched_job(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<DispatchedJobDetail>>> {
@@ -672,6 +675,13 @@ pub async fn get_dispatched_job(
             can_open_worker_metrics_page: can_open_worker_metrics_page(
                 &state.web_db,
                 &maybe_user,
+                c.project,
+            )
+            .await?,
+            can_view_project: can_open_project_page(
+                &state.web_db,
+                &maybe_user,
+                api_key.as_ref(),
                 c.project,
             )
             .await?,
@@ -810,6 +820,13 @@ pub async fn get_dispatched_job(
             j.project,
         )
         .await?,
+        can_view_project: can_open_project_page(
+            &state.web_db,
+            &maybe_user,
+            api_key.as_ref(),
+            j.project,
+        )
+        .await?,
         queued_at: j.queued_at.and_utc().to_rfc3339(),
         dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
         finished_at: j.finished_at.map(|t| t.and_utc().to_rfc3339()),
@@ -886,6 +903,22 @@ async fn can_open_worker_metrics_page<C: ConnectionTrait>(
 ) -> Result<bool, sea_orm::DbErr> {
     match viewer {
         Some(user) => gradient_db::access::reaches_project(db, project, user.id).await,
+        None => Ok(false),
+    }
+}
+
+async fn can_open_project_page(
+    db: &WebDb,
+    viewer: &Option<MUser>,
+    api_key: Option<&ApiKeyContext>,
+    project: ProjectId,
+) -> WebResult<bool> {
+    let public = by_id::<gradient_entity::project::Entity, _>(db, project)
+        .await?
+        .is_some_and(|p| p.public);
+    match viewer {
+        _ if public => Ok(true),
+        Some(user) => can_view_project(db, user.id, project, api_key).await,
         None => Ok(false),
     }
 }
