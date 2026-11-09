@@ -27,7 +27,7 @@ export function deniedPage(router: Router, target: DeniedTarget, from: string): 
 }
 
 export function adminOnlyPage(router: Router, from: string): RedirectCommand {
-  return new RedirectCommand(router.createUrlTree(['/error/403'], { queryParams: { from } }), { browserUrl: from });
+  return new RedirectCommand(router.createUrlTree(['/error/403'], { queryParams: { only: 'admin', from } }), { browserUrl: from });
 }
 
 export function denyOnRefusal<T>(target: DeniedTarget, from: string): OperatorFunction<T, T | RedirectCommand> {

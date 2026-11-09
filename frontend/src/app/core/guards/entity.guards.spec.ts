@@ -194,7 +194,7 @@ describe('not-found or no-access page', () => {
 
   it('shows the admin-only page to a signed-in user without superuser rights', async () => {
     configure({});
-    expect(page(await outcome(adminGuard, {}))).toBe(`/error/403?from=${encodeURIComponent(URL)}`);
+    expect(page(await outcome(adminGuard, {}))).toBe(`/error/403?only=admin&from=${encodeURIComponent(URL)}`);
   });
 
   it('lets a superuser into admin pages', async () => {
