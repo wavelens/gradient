@@ -24,7 +24,7 @@ import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
       <gr-card-grid class="kpis" min="180px">
         <gr-stat-card compact label="Scored assignments (24h)" [value]="summary()?.sample_size ?? 0" />
         <gr-stat-card compact label="Avg score" [value]="summary()?.score_avg | number: '1.2-2'" />
-        <gr-stat-card compact label="Min / Max" [value]="(summary()?.score_min | number: '1.1-1') + ' / ' + (summary()?.score_max | number: '1.1-1')" />
+        <gr-stat-card compact label="Min / Max" [value]="(summary()?.score_min | number: '1.0-0') + ' / ' + (summary()?.score_max | number: '1.0-0')" />
       </gr-card-grid>
 
       <gr-metric-chart
