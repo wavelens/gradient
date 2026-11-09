@@ -37,7 +37,7 @@ export class LinkTabsComponent {
   constructor() {
     afterRenderEffect(() => {
       this.tabs();
-      this.activeLink()?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      this.activeLink()?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
     });
   }
 }
