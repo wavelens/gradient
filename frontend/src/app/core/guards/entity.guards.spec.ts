@@ -52,7 +52,7 @@ function configure(services: Record<string, unknown>, user: { superuser: boolean
     tasks: { getTask: () => of({ id: 't1' }) },
     caches: { getCache: () => of({}) },
     teams: { get: () => of({}) },
-    evaluations: { getEvaluation: () => of({ task: 't1', task_name: 'demo' }), getBuild: () => of({ id: 'b1' }) },
+    evaluations: { getEvaluation: () => of({ task: 't1', task_name: 'demo', project_name: 'acme' }), getBuild: () => of({ id: 'b1' }) },
     board: { getJob: () => of({}), getPendingJobs: () => of({ jobs: [] }), getClusterJob: () => of({}) },
     execJobs: { get: () => of({ project: 'acme', task: 'demo' }) },
     workers: { getWorkers: () => of([{ worker_id: 'w1' }]) },
@@ -141,7 +141,7 @@ describe('not-found or no-access page', () => {
   it('hands an evaluation of the project and its task to the page', async () => {
     configure({});
     expect(await outcome(evaluationAccessResolver as unknown as CanActivateFn, { project: 'acme', evaluationId: 'e1' })).toEqual({
-      evaluation: { task: 't1', task_name: 'demo' },
+      evaluation: { task: 't1', task_name: 'demo', project_name: 'acme' },
       task: { id: 't1' },
     });
   });
