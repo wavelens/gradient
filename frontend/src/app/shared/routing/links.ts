@@ -16,6 +16,7 @@ export type BoardTab =
   | 'network' | 'health' | 'storage' | 'expensive';
 export type AdminPage = 'webhooks' | 'github-app';
 export type ClosureKind = 'build' | 'eval';
+export type LoginReason = 'expired' | 'deleted';
 
 export interface BuildOrigin {
   task?: string | null;
@@ -45,7 +46,7 @@ export function readInAppNextPathFromRouteSnapshot(route: ActivatedRouteSnapshot
 // All navigation targets in the app originate in this file. The tests in links.spec.ts check each one against app.routes.ts.
 export const links = {
   dashboard: () => url([]),
-  login: (next?: string | null, reason?: 'expired') => url(['account', 'login'], { next, reason }),
+  login: (next?: string | null, reason?: LoginReason) => url(['account', 'login'], { next, reason }),
   loginAfterRegister: (username: string, next?: string | null) => url(['account', 'login'], { registered: username, next }),
   register: (next?: string | null) => url(['account', 'register'], { next }),
 

@@ -7,7 +7,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { Router, provideRouter } from '@angular/router';
+import { Router, UrlTree, provideRouter } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from './auth.service';
 import { environment } from '@environments/environment';
@@ -135,6 +135,17 @@ describe('AuthService session probe', () => {
     service.sessionLost('/teams');
     httpMock.expectOne(`${environment.apiUrl}/auth/logout`).flush({ error: false, message: 'ok' });
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('forgets a deleted account without a logout call and tells other tabs', () => {
+    boot(() => httpMock.expectOne(userUrl).flush({ error: false, message: user }));
+    const router = TestBed.inject(Router);
+    const navigate = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+    service.forgetDeletedAccountAndGoToSignInPage();
+    expect(service.isAuthenticated()).toBe(false);
+    httpMock.expectNone(`${environment.apiUrl}/auth/logout`);
+    expect(localStorage.getItem('gradient-signed-out')).toBeTruthy();
+    expect(router.serializeUrl(navigate.mock.calls[0][0] as UrlTree)).toBe('/account/login?reason=deleted');
   });
 
   it('signs out when another tab signs out', () => {

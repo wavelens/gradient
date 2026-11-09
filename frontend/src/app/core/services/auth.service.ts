@@ -11,7 +11,7 @@ import { tap, switchMap, finalize, catchError, map, shareReplay } from 'rxjs/ope
 import { ApiError, ApiService } from './api.service';
 import { MakeUserRequest, UserInfoResponse } from '@core/models';
 import { asSessionProbe } from '@core/interceptors/request-context';
-import { links } from '@shared/routing';
+import { links, type LoginReason } from '@shared/routing';
 
 const SIGNED_OUT_KEY = 'gradient-signed-out';
 
@@ -111,6 +111,12 @@ export class AuthService {
     );
   }
 
+  forgetDeletedAccountAndGoToSignInPage(): void {
+    this.forget();
+    localStorage.setItem(SIGNED_OUT_KEY, String(Date.now()));
+    this.router.navigateByUrl(links.login(null, 'deleted'));
+  }
+
   sessionLost(returnUrl: string): void {
     this.toLogin(returnUrl, this.clearStoredUserAndTokenAndReturnExpiredReason());
   }
@@ -147,7 +153,7 @@ export class AuthService {
     this.tokenSignal.set(null);
   }
 
-  private toLogin(returnUrl: string, reason?: 'expired'): void {
+  private toLogin(returnUrl: string, reason?: LoginReason): void {
     const pending = this.router.currentNavigation()?.finalUrl;
     const target = pending ? this.router.serializeUrl(pending) : this.router.url;
     if (target.startsWith('/account/')) return;
