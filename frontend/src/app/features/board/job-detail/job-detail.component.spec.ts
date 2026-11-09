@@ -537,7 +537,7 @@ describe('BoardJobDetailComponent - exec jobs', () => {
   it('names the kind, its score and the exec job it ran with a link to its page', () => {
     const fixture = setup({ getJob: () => of(EXEC_DETAIL) });
     const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelector('.head .kind')?.textContent?.trim()).toBe('exec');
+    expect(el.querySelector('.head gr-badge.kind')?.textContent?.trim()).toBe('exec');
     expect(el.querySelector('details.scheduler tr.total .num')?.textContent?.trim()).toBe('3.8');
     const section = el.querySelector('section.exec') as HTMLElement;
     expect(section.textContent).toContain('nightly');

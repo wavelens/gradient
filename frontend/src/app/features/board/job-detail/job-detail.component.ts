@@ -13,6 +13,7 @@ import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { AuthService } from '@core/services/auth.service';
 import {
+  BadgeComponent,
   ButtonComponent,
   DialogComponent,
   IconComponent,
@@ -89,7 +90,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LoadStateComponent, LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LoadStateComponent, BadgeComponent, LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent],
   template: `
     <div class="top-row phone-icon-buttons">
       <a [routerLink]="links.board('live')" class="back" (click)="goBack($event)">
@@ -104,7 +105,7 @@ interface RuleRow {
     @if (job(); as j) {
       <header class="head">
         <div>
-          <span class="kind" [class.build]="j.kind === 1">{{ jobKindName(j.kind) }}</span>
+          <gr-badge class="kind">{{ jobKindName(j.kind) }}</gr-badge>
           <h1>{{ getAssignedJobName(j) }}</h1>
         </div>
         <gr-status-badge [phase]="jobStatusBadge().phase" [label]="jobStatusBadge().label" />
@@ -378,7 +379,7 @@ interface RuleRow {
     } @else if (pending(); as p) {
       <header class="head">
         <div>
-          <span class="kind" [class.build]="p.kind === 1">{{ jobKindName(p.kind) }}</span>
+          <gr-badge class="kind">{{ jobKindName(p.kind) }}</gr-badge>
           <h1>{{ getPendingJobName(p) }}</h1>
         </div>
       </header>
