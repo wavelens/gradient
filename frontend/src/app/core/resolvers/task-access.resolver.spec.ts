@@ -8,6 +8,7 @@ import { TestBed } from '@angular/core/testing';
 import { ActivatedRouteSnapshot, convertToParamMap } from '@angular/router';
 import { Observable, firstValueFrom, of } from 'rxjs';
 import { TasksService } from '@core/services/tasks.service';
+import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import {
   taskAccessResolver,
   TaskAccessData,
@@ -77,5 +78,12 @@ describe('taskAccessResolver', () => {
     );
     const data = await runResolver(snap({ project: 'acme', task: 'demo' }));
     expect(data.access).toEqual({ managed: true, canEdit: false, canTrigger: true });
+  });
+
+  it('unlinks the settings crumb for a user who cannot open the task settings', async () => {
+    getTask.mockReturnValue(of({ ...baseTask, permissions: ['triggerEvaluation'] }));
+    await runResolver(snap({ project: 'acme', task: 'demo' }));
+    const crumbs = TestBed.inject(BreadcrumbsService);
+    expect(crumbs.taskSettings('acme', 'demo')[3]).toEqual({ label: 'Settings', link: undefined });
   });
 });

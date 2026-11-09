@@ -13,6 +13,7 @@ import { AccessState, accessFromEntity } from '@core/models/access.model';
 import { TaskDetailsResponse } from '@core/models';
 import { denyOnRefusal } from '@core/routing/access-denied';
 import { links } from '@shared/routing';
+import { canOpenTaskSettings } from '@shared/access/settings-access';
 
 export interface TaskAccessData {
   task: TaskDetailsResponse;
@@ -25,7 +26,10 @@ export const taskAccessResolver: ResolveFn<TaskAccessData> = (route, state) => {
   const project = route.paramMap.get('project') ?? '';
   const task = route.paramMap.get('task') ?? '';
   return tasks.getTask(project, task).pipe(
-    tap((p) => crumbs.rememberTask(project, task, p.display_name)),
+    tap((p) => {
+      crumbs.rememberTask(project, task, p.display_name);
+      crumbs.rememberTaskSettingsAccess(project, task, canOpenTaskSettings(p));
+    }),
     map((p) => ({ task: p, access: accessFromEntity(p) })),
     denyOnRefusal({ kind: 'task', name: task, back: String(links.project(project)) }, state.url),
   );

@@ -246,7 +246,6 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       this.taskSig = sig;
       this.task.set(task);
       this.crumbs.rememberTask(this.projectName, this.taskName, task.display_name);
-      this.crumbs.rememberTaskSettingsAccess(this.projectName, this.taskName, canOpenTaskSettings(task));
     }
     const shown = this.selected();
     if (shown && shown.id !== this.selectedId()) this.selectedId.set(shown.id);
