@@ -19,9 +19,11 @@
             <span class="sidebar-item-label">{{ job.entry_point }}</span>
             <span class="exec-job-detail">{{ detail(job) }}</span>
           </span>
-          <button type="button" class="sidebar-kebab" [attr.aria-label]="'Actions for ' + job.entry_point" (click)="openMenu($event, job, jobMenu)">
-            <gr-icon name="more_vert" size="sm" />
-          </button>
+          @if (execJobActionMenuItemsById().get(job.id)?.length) {
+            <button type="button" class="sidebar-kebab" [attr.aria-label]="'Actions for ' + job.entry_point" (click)="openMenu($event, job, jobMenu)">
+              <gr-icon name="more_vert" size="sm" />
+            </button>
+          }
         </div>
       }
     </section>
@@ -40,9 +42,11 @@
               @for (label of job.labels; track label) { <gr-badge>{{ label }}</gr-badge> }
               @for (d of job.devices; track d.name) { <gr-badge severity="info">{{ device(d) }}</gr-badge> }
             </span>
-            <button type="button" class="entry-kebab" [attr.aria-label]="'Actions for ' + job.entry_point" (click)="openMenu($event, job, jobMenu)">
-              <gr-icon name="more_vert" />
-            </button>
+            @if (execJobActionMenuItemsById().get(job.id)?.length) {
+              <button type="button" class="entry-kebab" [attr.aria-label]="'Actions for ' + job.entry_point" (click)="openMenu($event, job, jobMenu)">
+                <gr-icon name="more_vert" />
+              </button>
+            }
           </div>
         }
       </div>

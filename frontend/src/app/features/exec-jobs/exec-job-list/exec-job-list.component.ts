@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, SimpleChanges, booleanAttribute, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, SimpleChanges, booleanAttribute, computed, inject, input, output, signal } from '@angular/core';
 import { RouterModule, type UrlTree } from '@angular/router';
 import { Subscription, catchError, interval, of, startWith, switchMap, takeWhile } from 'rxjs';
 import { BadgeComponent, IconComponent, MenuComponent, type MenuItem } from '@gradient/ui/ui';
@@ -42,6 +42,7 @@ export class ExecJobListComponent implements OnChanges {
 
   jobs = signal<ExecJobSummary[]>([]);
   menuModel = signal<MenuItem[]>([]);
+  execJobActionMenuItemsById = computed(() => new Map(this.jobs().map((job) => [job.id, this.jobMenu(job)])));
   private poll?: Subscription;
 
   protected readonly phase = execJobPhase;
@@ -84,12 +85,14 @@ export class ExecJobListComponent implements OnChanges {
 
   openMenu(event: Event, job: ExecJobSummary, menu: { toggle: (e: Event) => void }): void {
     event.stopPropagation();
-    this.menuModel.set(this.jobMenu(job));
+    this.menuModel.set(this.execJobActionMenuItemsById().get(job.id) ?? []);
     menu.toggle(event);
   }
 
   openContextMenu(event: MouseEvent, job: ExecJobSummary, menu: { openAt: (e: MouseEvent) => void }): void {
-    this.menuModel.set(this.jobMenu(job));
+    const items = this.execJobActionMenuItemsById().get(job.id) ?? [];
+    if (items.length === 0) return;
+    this.menuModel.set(items);
     menu.openAt(event);
   }
 
