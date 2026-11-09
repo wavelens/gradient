@@ -59,6 +59,6 @@ export class ManagedDisableDirective {
 }
 
 export function accessDisabledReason(state: AccessState): string {
-  if (state.managed) return 'Managed by Nix - edit via declarative config';
+  if (state.managed) return 'This item is managed by the server configuration and cannot be changed here.';
   return 'You have read-only access';
 }

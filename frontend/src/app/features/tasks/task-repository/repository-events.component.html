@@ -26,7 +26,7 @@
           }
         </span>
       } @else if (state().can_manage_integrations) {
-        <button grButton severity="secondary" size="small" [label]="'Connect ' + (host() ?? 'Git host')" icon="hub" (click)="openConnect()" data-testid="connect-git-host"></button>
+        <button grButton severity="secondary" size="small" [label]="'Connect ' + (host() ?? 'Git host')" icon="hub" (click)="openConnect()" [appManagedDisable]="access()" data-testid="connect-git-host"></button>
       } @else {
         <span data-testid="ask-admin">No connection to {{ host() ?? 'this Git host' }} yet. Ask a project admin to connect the Git host.</span>
       }
