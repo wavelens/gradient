@@ -65,6 +65,11 @@ describe('ExecJobInfoComponent', () => {
     });
   });
 
+  it('drops the retry budget once manual reruns go past it', () => {
+    const rerun = { ...JOB, retries: 0, attempts: [{ number: 1 }, { number: 2 }] } as unknown as ExecJobResponse;
+    expect(rows(render(rerun))['Attempt']).toBe('2');
+  });
+
   it('leaves the wait reason to the banner above every view', () => {
     expect(render(JOB).textContent).not.toContain('needs a worker');
   });

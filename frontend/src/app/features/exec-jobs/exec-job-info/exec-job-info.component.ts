@@ -27,6 +27,10 @@ function yesNo(value: boolean): string {
   return value ? 'Yes' : 'No';
 }
 
+function attemptLabel(attempt: number, budget: number): string {
+  return attempt <= budget ? `${attempt} of ${budget}` : String(attempt);
+}
+
 function requestedFields(job: ExecJobResponse): RequestedField[] {
   return [
     field('Architecture', [job.architecture]),
@@ -42,7 +46,7 @@ function requestedFields(job: ExecJobResponse): RequestedField[] {
     field('Image', [job.image]),
     field('Timeout', [seconds(job.timeout_secs)]),
     field('Time without output', [seconds(job.max_silent_secs)]),
-    field('Attempt', [`${job.attempts.length} of ${job.retries + 1}`]),
+    field('Attempt', [attemptLabel(job.attempts.length, job.retries + 1)]),
   ].filter((requested) => requested.values.length > 0);
 }
 
