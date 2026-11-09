@@ -118,8 +118,10 @@ describe('explainWaiting', () => {
   it('counts the exec jobs an evaluation waits for after its builds', () => {
     const explained = explainWaiting({ kind: 'exec_jobs', waiting_exec_jobs: 2 }, 'acme', ADMIN);
     expect(explained.title).toBe('Waiting for exec jobs');
-    expect(explained.detail).toBe('The builds are done. Exec jobs waiting to start: 2.');
+    expect(explained.detail).toBe('Builds are complete. 2 exec jobs wait to start.');
     expect(explained.action).toBeNull();
+    expect(explainWaiting({ kind: 'exec_jobs', waiting_exec_jobs: 1 }, 'acme', ADMIN).detail).toBe('Builds are complete. 1 exec job waits to start.');
+    expect(waitingReasonText({ kind: 'exec_jobs', waiting_exec_jobs: 1 })).toBe('Waiting for exec jobs');
   });
 });
 

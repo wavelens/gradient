@@ -46,6 +46,7 @@ const EVAL_WORKER_WAIT_TITLE: Record<Extract<WaitingReason, { kind: 'eval_worker
 };
 const EXEC_WORKER_WAIT_TITLE = 'Waiting for exec worker';
 const MANUAL_START_WAIT_TITLE = 'Waiting for manual start';
+const EXEC_JOBS_WAIT_TITLE = 'Waiting for exec jobs';
 const freeDevicesWait = (workers: number) => `Waiting for free devices on ${plural(workers, 'worker')}`;
 
 // Short wait reason for a row that already shows labels and devices as badges.
@@ -60,6 +61,8 @@ export function waitingReasonText(reason: WaitingReason | null | undefined): str
     }
     case 'manual_start':
       return MANUAL_START_WAIT_TITLE;
+    case 'exec_jobs':
+      return EXEC_JOBS_WAIT_TITLE;
     default:
       return null;
   }
@@ -196,8 +199,8 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
       };
     case 'exec_jobs':
       return {
-        title: 'Waiting for exec jobs',
-        detail: `The builds are done. Exec jobs waiting to start: ${reason.waiting_exec_jobs}.`,
+        title: EXEC_JOBS_WAIT_TITLE,
+        detail: `Builds are complete. ${plural(reason.waiting_exec_jobs, 'exec job')} ${reason.waiting_exec_jobs === 1 ? 'waits' : 'wait'} to start.`,
         requirements: [],
         action: null,
         hint: null,
