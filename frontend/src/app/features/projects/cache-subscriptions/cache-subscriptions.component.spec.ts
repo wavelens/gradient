@@ -165,6 +165,33 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     expect(fixture.componentInstance.newCacheName).toBe('nixpkgs');
   });
 
+  it('shows the display name of the cache picked on the cache page', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, { subscribe: 'nixpkgs' });
+    const publicCaches = new Subject<unknown[]>();
+    TestBed.inject(CachesService).getPublicCaches = (() => publicCaches) as never;
+    await settled(fixture);
+    publicCaches.next([{ name: 'nixpkgs', display_name: 'Nix Packages' }]);
+    publicCaches.complete();
+    await settled(fixture);
+    expect(document.body.querySelector<HTMLInputElement>('#cache-name')?.value).toBe('Nix Packages');
+    expect(fixture.componentInstance.newCacheName).toBe('nixpkgs');
+  });
+
+  it('reloads the subscriptions on the reload interval', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+      const service = TestBed.inject(ProjectsService) as unknown as { getSubscribedCaches: () => unknown };
+      fixture.detectChanges();
+      service.getSubscribedCaches = () => of([{ id: 'n', name: 'new', display_name: 'New Cache', mode: 'ReadWrite', status: 'active' }]);
+      vi.advanceTimersByTime(15_000);
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('New Cache');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('returns to Subscribe with a cache created from it selected', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
@@ -194,10 +221,10 @@ describe('CacheSubscriptionsComponent - pending requests', () => {
     expect(text).toContain('Pending approval');
   });
 
-  it('offers Cancel request on a pending row and Unsubscribe on an active one', async () => {
+  it('offers Withdraw request on a pending row and Unsubscribe on an active one', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
-    expect(findByText(fixture.nativeElement, 'cancel request')).not.toBeNull();
+    expect(findByText(fixture.nativeElement, 'withdraw request')).not.toBeNull();
     expect(findByText(fixture.nativeElement, 'unsubscribe')).not.toBeNull();
   });
 });
@@ -233,7 +260,7 @@ describe('CacheSubscriptionsComponent - unsubscribe', () => {
   it('asks before withdrawing a pending subscription request', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
-    (findByText(fixture.nativeElement, 'cancel request') as HTMLButtonElement).click();
+    (findByText(fixture.nativeElement, 'withdraw request') as HTMLButtonElement).click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Staging Cache', confirmLabel: 'Withdraw' }));
     expect(unsubscribeCache).toHaveBeenCalledWith('acme', 'staging');
   });

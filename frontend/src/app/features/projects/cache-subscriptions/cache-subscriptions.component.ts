@@ -34,7 +34,8 @@ import { ConfirmService } from '@shared/confirm';
 import { CreateCacheDialogComponent, injectCanCreateCache } from '@shared/forms';
 import { accessTo, Cache, CacheSubscriptionItem } from '@core/models';
 import { links } from '@shared/routing';
-import { catchError, forkJoin, map, of } from 'rxjs';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
+import { EMPTY, Observable, catchError, forkJoin, map, of, tap } from 'rxjs';
 
 @Component({
   selector: 'app-cache-subscriptions',
@@ -97,14 +98,15 @@ export class CacheSubscriptionsComponent implements OnInit {
     if (preselected) this.openSubscribeDialog(preselected);
   }
 
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => (this.loading() || this.loadError() ? EMPTY : this.fetchSubscribedCaches()));
+  }
+
   loadCaches(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    requestIfProjectMember(this.resolvedProject(), () => this.projectsService.getSubscribedCaches(this.projectName)).subscribe({
-      next: (list) => {
-        this.caches.set(list);
-        this.loading.set(false);
-      },
+    this.fetchSubscribedCaches().subscribe({
+      next: () => this.loading.set(false),
       error: (error: unknown) => {
         this.loadError.set(error);
         this.loading.set(false);
@@ -112,15 +114,22 @@ export class CacheSubscriptionsComponent implements OnInit {
     });
   }
 
+  private fetchSubscribedCaches(): Observable<CacheSubscriptionItem[]> {
+    return requestIfProjectMember(this.resolvedProject(), () => this.projectsService.getSubscribedCaches(this.projectName)).pipe(
+      tap((list) => this.caches.set(list)),
+    );
+  }
+
   openSubscribeDialog(cache = ''): void {
-    this.newCacheName = cache;
+    this.newCacheName = '';
     this.errorMessage.set(null);
     this.cacheSuggestions.set([]);
     this.showSubscribeDialog.set(true);
-    this.loadAvailableCaches();
+    this.loadAvailableCaches(cache);
   }
 
-  private loadAvailableCaches(): void {
+  // The picker shows a display name only for a value that its suggestions contain, so the preselected cache waits for them.
+  private loadAvailableCaches(preselected: string): void {
     const subscribedNames = new Set(this.caches().map((c) => c.name));
     forkJoin([
       this.cachesService.getCaches(1, 100).pipe(map((own) => own.items), catchError(() => of([]))),
@@ -128,7 +137,9 @@ export class CacheSubscriptionsComponent implements OnInit {
     ]).subscribe(([own, pub]) => {
       const seen = new Set<string>();
       this.availableCaches = [...own, ...pub].filter((c) => !subscribedNames.has(c.name) && !seen.has(c.name) && seen.add(c.name));
-      if (this.showSubscribeDialog()) this.onCacheSearch({ query: this.newCacheName });
+      if (!this.showSubscribeDialog()) return;
+      this.onCacheSearch({ query: preselected || this.newCacheName });
+      if (preselected) this.newCacheName = preselected;
     });
   }
 
