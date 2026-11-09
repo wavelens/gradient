@@ -130,6 +130,7 @@ export class DashboardTaskTableComponent implements OnInit {
         history: t.history.slice(-this.history()),
         evaluationNoNumbersText: evaluationNoNumbersText(t),
         entryPointsPassedCountText: [ratio, failedEntryPointCountText].filter(Boolean).join(' · '),
+        entryPointsPassedRatioWithUnitText: [ratio && `${ratio} entry points`, failedEntryPointCountText].filter(Boolean).join(' · '),
         failedEntryPointCountText,
       };
     }),

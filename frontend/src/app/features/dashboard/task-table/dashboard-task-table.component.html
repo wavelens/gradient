@@ -29,7 +29,7 @@
           @if (d.tasks.length) {
             <div class="columns" aria-hidden="true">
               <span></span>
-              <span>passed</span>
+              <span>entry points</span>
               <span>average time</span>
             </div>
           }
@@ -52,7 +52,7 @@
                   }
                   <span class="latest-evaluation-relative-time">&nbsp;· {{ l.created_at | relativeTime }}</span>
                   @if (t.evaluationNoNumbersText === null && t.entryPointsPassedCountText) {
-                    <span class="passed-on-phone" [class.failing]="t.failedEntryPointCountText">&nbsp;· {{ t.entryPointsPassedCountText }}</span>
+                    <span class="passed-on-phone" [class.failing]="t.failedEntryPointCountText">&nbsp;· {{ t.entryPointsPassedRatioWithUnitText }}</span>
                   }
                 } @else {
                   No evaluations yet

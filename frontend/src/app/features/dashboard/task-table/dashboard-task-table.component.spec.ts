@@ -94,7 +94,7 @@ describe('DashboardTaskTableComponent', () => {
     const passed = root.querySelector('gr-row .value')!;
     expect(passed.textContent).toContain('41/45 · 4 failed');
     expect(passed.classList).toContain('failing');
-    expect(root.querySelector('.meta .passed-on-phone')?.textContent).toContain('41/45 · 4 failed');
+    expect(root.querySelector('.meta .passed-on-phone')?.textContent).toContain('41/45 entry points · 4 failed');
     expect(root.querySelector('.meta code')?.getAttribute('title')).toBe('a1b2c3d4');
   });
 
@@ -197,7 +197,7 @@ describe('DashboardTaskTableComponent', () => {
   it('passed and duration labels appear once in header row', () => {
     const { root } = render(null, () => of(PAGE));
     const header = Array.from(root.querySelectorAll('.columns span')).map((s) => s.textContent?.trim());
-    expect(header).toEqual(['', 'passed', 'average time']);
+    expect(header).toEqual(['', 'entry points', 'average time']);
     const values = Array.from(root.querySelectorAll('gr-row .value')).map((c) => [
       c.querySelector('b')?.textContent?.trim(),
       c.querySelector('small.sr-only')?.textContent?.trim(),
