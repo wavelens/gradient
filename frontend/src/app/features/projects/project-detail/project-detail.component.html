@@ -17,7 +17,7 @@
       <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
     }
     @if (authService.isAuthenticated()) {
-      <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />
+      <gr-star-button labeled [target]="starTarget" [starredItemDisplayName]="project.display_name" [(starred)]="starred" />
     }
   </div>
   <gr-load-state

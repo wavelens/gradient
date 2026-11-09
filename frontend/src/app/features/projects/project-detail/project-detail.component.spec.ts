@@ -14,6 +14,8 @@ import { ProjectDetailComponent } from './project-detail.component';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
 import { TasksService } from '@core/services/tasks.service';
+import { By } from '@angular/platform-browser';
+import { StarButtonComponent } from '@shared/ui';
 
 const NO_TASKS = { items: [], total: 0, page: 1 };
 
@@ -77,6 +79,12 @@ describe('ProjectDetailComponent header', () => {
     expect(starred).toHaveBeenCalledWith({ kind: 'project', project: 'acme' });
     expect(root.querySelector('gr-star-button button')!.getAttribute('aria-pressed')).toBe('true');
     expect(root.querySelector('gr-star-button button')!.textContent!.trim()).toBe('Starred');
+  });
+
+  it('names the project by its display name on the star button', () => {
+    const { fixture } = render(true);
+    const star = fixture.debugElement.query(By.directive(StarButtonComponent)).componentInstance as StarButtonComponent;
+    expect(star.starredItemDisplayName()).toBe('Acme');
   });
 
   it('shows no star to a guest', () => {

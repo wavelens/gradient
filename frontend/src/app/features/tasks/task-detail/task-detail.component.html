@@ -36,7 +36,7 @@
       <a grButton label="Metrics" icon="show_chart" severity="secondary"
               [routerLink]="links.taskPage(projectName, taskName, 'metrics')"></a>
       @if (authService.isAuthenticated()) {
-        <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />
+        <gr-star-button labeled [target]="starTarget" [starredItemDisplayName]="proj.display_name" [(starred)]="starred" />
       }
     </div>
   </div>

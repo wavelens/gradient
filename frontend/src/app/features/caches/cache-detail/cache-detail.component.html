@@ -19,7 +19,7 @@
         <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.cachePage(cacheName, 'settings')"></a>
       }
       @if (authService.isAuthenticated()) {
-        <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />
+        <gr-star-button labeled [target]="starTarget" [starredItemDisplayName]="c.display_name" [(starred)]="starred" />
       }
     </div>
 
