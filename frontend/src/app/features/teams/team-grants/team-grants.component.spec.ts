@@ -195,13 +195,13 @@ describe('TeamGrantsComponent', () => {
   it('suggests teams by their display name', () => {
     const { component } = setup('project', 'users');
     component.search({ query: 'farm' });
-    expect(component.suggestions()).toEqual(['infra']);
+    expect(component.suggestions()).toEqual([{ label: 'Build Farm', value: 'infra' }]);
   });
 
   it('leaves teams that already have member roles out of the suggestions', () => {
     const { component } = setup('project', 'users');
     component.search({ query: '' });
-    expect(component.suggestions()).toEqual(['infra']);
+    expect(component.suggestions()).toEqual([{ label: 'Build Farm', value: 'infra' }]);
   });
 
   it('suggests adding workers to a granted team only to its Admins', () => {
@@ -211,7 +211,7 @@ describe('TeamGrantsComponent', () => {
       { team: 'infra', display_name: 'Build Farm', role: 'View', users: true, workers: false, pending: false },
     ]);
     component.search({ query: '' });
-    expect(component.suggestions()).toEqual(['infra']);
+    expect(component.suggestions()).toEqual([{ label: 'Build Farm', value: 'infra' }]);
   });
 
   it('shows the server answer after a grant, which can be a request to the team', () => {

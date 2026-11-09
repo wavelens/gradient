@@ -28,6 +28,7 @@ import {
   SelectComponent,
   SettingsSectionComponent,
   TooltipDirective,
+  type AutoCompleteSuggestion,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
@@ -44,6 +45,7 @@ import {
   createNoAccessLoadStateError,
   isViewerCacheMember,
   requestIfCacheMember,
+  formatMemberNameForAutocompleteSuggestion,
 } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -128,7 +130,7 @@ export class CacheMembersRolesComponent implements OnInit {
   roles = signal<RoleResponse_CacheRoleOwner[]>([]);
   roleNames = computed(() => this.roles().map((r) => r.name));
   availablePermissions = signal<PermissionEntry[]>([]);
-  userSuggestions = signal<string[]>([]);
+  userSuggestions = signal<AutoCompleteSuggestion[]>([]);
   memberError = signal<string | null>(null);
   roleError = signal<string | null>(null);
   membersLoadError = signal<unknown>(null);
@@ -239,7 +241,7 @@ export class CacheMembersRolesComponent implements OnInit {
       return;
     }
     this.userService.searchUsers(event.query).subscribe({
-      next: (users) => this.userSuggestions.set(users.map((u) => u.username)),
+      next: (users) => this.userSuggestions.set(users.map(formatMemberNameForAutocompleteSuggestion)),
       error: () => this.userSuggestions.set([]),
     });
   }

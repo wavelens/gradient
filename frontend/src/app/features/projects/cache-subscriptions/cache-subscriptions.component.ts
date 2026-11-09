@@ -26,6 +26,7 @@ import {
   RowComponent,
   RowListComponent,
   TooltipDirective,
+  type AutoCompleteSuggestion,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
@@ -86,7 +87,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Cache Subscriptions' }));
   caches = signal<CacheSubscriptionItem[]>([]);
   newCacheName = '';
-  cacheSuggestions = signal<string[]>([]);
+  cacheSuggestions = signal<AutoCompleteSuggestion[]>([]);
   private availableCaches: Cache[] = [];
 
   ngOnInit(): void {
@@ -136,7 +137,7 @@ export class CacheSubscriptionsComponent implements OnInit {
     this.cacheSuggestions.set(
       this.availableCaches
         .filter((c) => c.name.toLowerCase().includes(q) || c.display_name.toLowerCase().includes(q))
-        .map((c) => c.name),
+        .map((c) => ({ label: c.display_name || c.name, value: c.name })),
     );
   }
 

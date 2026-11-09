@@ -19,6 +19,7 @@ import {
   getMemberRemovalConsequenceSentence,
   injectSaveMemberRoleChangeWithOwnRoleConfirmation,
   teamRoleDisplayLabels,
+  formatMemberNameForAutocompleteSuggestion,
 } from '@shared/access';
 import { EMPTY, finalize, merge, tap } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -41,6 +42,7 @@ import {
   SelectComponent,
   SettingsSectionComponent,
   TooltipDirective,
+  type AutoCompleteSuggestion,
 } from '@gradient/ui/ui';
 
 @Component({
@@ -81,7 +83,7 @@ export class TeamMembersComponent implements OnInit {
   loadError = signal<unknown>(null);
   members = signal<TeamMemberItem[]>([]);
   invitations = signal<PendingInvitationItem[]>([]);
-  suggestions = signal<string[]>([]);
+  suggestions = signal<AutoCompleteSuggestion[]>([]);
   addError = signal<string | null>(null);
   busy = signal<string | null>(null);
   pendingMemberRoleSelection = signal<{ user: string; role: TeamRole } | null>(null);
@@ -157,7 +159,7 @@ export class TeamMembersComponent implements OnInit {
       return;
     }
     this.users.searchUsers(event.query).subscribe({
-      next: (found) => this.suggestions.set(found.map((u) => u.username)),
+      next: (found) => this.suggestions.set(found.map(formatMemberNameForAutocompleteSuggestion)),
       error: () => this.suggestions.set([]),
     });
   }

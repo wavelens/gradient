@@ -16,6 +16,7 @@ import { TeamMembersComponent } from './team-members.component';
 import { TeamsService } from '@core/services/teams.service';
 import { NotifyService } from '@core/services/notify.service';
 import { AuthService } from '@core/services/auth.service';
+import { UserService } from '@core/services/user.service';
 import { ApiError } from '@core/services/api.service';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { PendingInvitationItem, TeamResponse, TeamMemberItem } from '@core/models';
@@ -107,6 +108,19 @@ describe('TeamMembersComponent', () => {
     const row = (setup(undefined, false, undefined, [invitation]).fixture.nativeElement as HTMLElement).querySelector('gr-row[icon="mail"]')!;
     expect(row.querySelector('.mono')?.textContent).toBe('carol');
     expect(row.querySelector('[slot="meta"]')?.textContent).toContain('Carol Doe · Role member');
+  });
+
+  it('suggests users to invite by display name and fills in the username', () => {
+    const { fixture } = setup();
+    vi.spyOn(TestBed.inject(UserService), 'searchUsers').mockReturnValue(of([
+      { id: 'u1', username: 'carol', name: 'Carol Doe' },
+      { id: 'u2', username: 'dave', name: 'dave' },
+    ]));
+    fixture.componentInstance.search({ query: 'a' });
+    expect(fixture.componentInstance.suggestions()).toEqual([
+      { label: 'Carol Doe (carol)', value: 'carol' },
+      { label: 'dave', value: 'dave' },
+    ]);
   });
 
   it('shows a failed member load with Try Again instead of No members', () => {

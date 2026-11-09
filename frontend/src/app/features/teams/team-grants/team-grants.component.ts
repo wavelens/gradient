@@ -36,6 +36,7 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
+  type AutoCompleteSuggestion,
 } from '@gradient/ui/ui';
 import { links } from '@shared/routing';
 
@@ -89,7 +90,7 @@ export class TeamGrantsComponent implements OnInit {
   loadError = signal<unknown>(null);
   shownGrants = computed(() => this.allGrants().filter((grant) => grant[this.part()]));
   myTeams = signal<TeamSummary[]>([]);
-  suggestions = signal<string[]>([]);
+  suggestions = signal<AutoCompleteSuggestion[]>([]);
   grantError = signal<string | null>(null);
   granting = signal(false);
   showGrant = signal(false);
@@ -133,7 +134,7 @@ export class TeamGrantsComponent implements OnInit {
       this.myTeams()
         .filter((team) => this.canOfferTeamInGrantPicker(team))
         .filter((team) => `${team.name} ${team.display_name}`.toLowerCase().includes(query))
-        .map((team) => team.name),
+        .map((team) => ({ label: team.display_name || team.name, value: team.name })),
     );
   }
 

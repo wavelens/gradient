@@ -153,9 +153,9 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     const component = fixture.componentInstance;
     component.openSubscribeDialog();
     component.onCacheSearch({ query: 'My' });
-    expect(component.cacheSuggestions()).toEqual(['mycache']);
+    expect(component.cacheSuggestions()).toEqual([{ label: 'MyCache', value: 'mycache' }]);
     component.onCacheSearch({ query: '' });
-    expect(component.cacheSuggestions()).toEqual(['mycache']);
+    expect(component.cacheSuggestions()).toEqual([{ label: 'MyCache', value: 'mycache' }]);
   });
 
   it('opens Subscribe with the cache picked on the cache page', async () => {

@@ -28,6 +28,7 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
+  type AutoCompleteSuggestion,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
@@ -42,6 +43,7 @@ import {
   injectSaveMemberRoleChangeWithOwnRoleConfirmation,
   newRoleLacksCurrentRolePermission,
   requestIfProjectMember,
+  formatMemberNameForAutocompleteSuggestion,
 } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import {
@@ -128,7 +130,7 @@ export class MembersRolesComponent implements OnInit {
   roles = signal<RoleResponse_ProjectRoleOwner[]>([]);
   roleNames = computed(() => this.roles().map((r) => r.name));
   availablePermissions = signal<PermissionEntry[]>([]);
-  userSuggestions = signal<string[]>([]);
+  userSuggestions = signal<AutoCompleteSuggestion[]>([]);
   memberError = signal<string | null>(null);
   roleError = signal<string | null>(null);
 
@@ -219,7 +221,7 @@ export class MembersRolesComponent implements OnInit {
       return;
     }
     this.userService.searchUsers(event.query).subscribe({
-      next: (users) => this.userSuggestions.set(users.map((u) => u.username)),
+      next: (users) => this.userSuggestions.set(users.map(formatMemberNameForAutocompleteSuggestion)),
       error: () => this.userSuggestions.set([]),
     });
   }
