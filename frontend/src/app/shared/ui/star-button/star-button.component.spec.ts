@@ -7,6 +7,7 @@
 import { TestBed } from '@angular/core/testing';
 import { Subject, of, throwError } from 'rxjs';
 import { StarButtonComponent } from './star-button.component';
+import { MessageService } from '@gradient/ui/ui';
 import { StarsService } from '@core/services/stars.service';
 
 describe('StarButtonComponent', () => {
@@ -45,6 +46,19 @@ describe('StarButtonComponent', () => {
 
     expect(set).toHaveBeenCalledWith({ kind: 'cache', cache: 'main' }, false);
     expect(fixture.componentInstance.starred()).toBe(true);
+    expect(TestBed.inject(MessageService).messages()[0]?.summary).toBe("Couldn't unstar main");
+  });
+
+  it('names the starred item in the label of the icon-only button', () => {
+    TestBed.configureTestingModule({
+      imports: [StarButtonComponent],
+      providers: [{ provide: StarsService, useValue: { set: () => of(true) } }],
+    });
+    const fixture = TestBed.createComponent(StarButtonComponent);
+    fixture.componentRef.setInput('target', { kind: 'project', project: 'infra' });
+    fixture.componentRef.setInput('starredItemDisplayName', 'Infrastructure');
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('button')!.getAttribute('aria-label')).toBe('Star Infrastructure');
   });
 
   it('labels the button Star or Starred and fills the star when starred', () => {
@@ -102,7 +116,7 @@ describe('StarButtonComponent', () => {
     fixture.detectChanges();
     const button = (fixture.nativeElement as HTMLElement).querySelector('button')!;
 
-    expect(button.getAttribute('aria-label')).toBe('Star');
+    expect(button.getAttribute('aria-label')).toBe('Star acme');
     expect(button.getAttribute('aria-pressed')).toBe('true');
   });
 });

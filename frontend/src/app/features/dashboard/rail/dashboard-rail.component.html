@@ -12,7 +12,7 @@
         @for (p of r.projects; track p.name) {
           <li>
             <span class="row">
-              <gr-star-button [target]="{ kind: 'project', project: p.name }" [(starred)]="p.starred" />
+              <gr-star-button [target]="{ kind: 'project', project: p.name }" [starredItemDisplayName]="p.display_name" [(starred)]="p.starred" />
               <span class="dot" [style.background]="evaluationStatusDotColor(p.status)"></span>
               <a class="n" [routerLink]="links.project(p.name)">{{ p.display_name }}</a>
               @if (!p.tasks) {
@@ -43,7 +43,7 @@
         @for (c of r.caches; track c.name) {
           <li>
             <span class="row">
-              <gr-star-button [target]="{ kind: 'cache', cache: c.name }" [(starred)]="c.starred" />
+              <gr-star-button [target]="{ kind: 'cache', cache: c.name }" [starredItemDisplayName]="c.display_name" [(starred)]="c.starred" />
               <a class="n" [routerLink]="links.cache(c.name)">{{ c.display_name }}</a>
               <span class="count">{{ count(c.nar_count) }} NARs</span>
             </span>

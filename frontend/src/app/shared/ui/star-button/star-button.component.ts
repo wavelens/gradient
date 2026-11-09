@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, booleanAttribute, inject, input, model } from '@angular/core';
+import { ChangeDetectionStrategy, Component, booleanAttribute, computed, inject, input, model } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { finalize } from 'rxjs';
+import { NotifyService } from '@core/services/notify.service';
 import { StarsService } from '@core/services/stars.service';
 import { StarTarget } from '@core/models';
 import { ButtonComponent } from '@gradient/ui/ui';
@@ -37,7 +38,7 @@ import { ButtonComponent } from '@gradient/ui/ui';
         type="button"
         class="star-button"
         [attr.aria-pressed]="starred()"
-        aria-label="Star"
+        [attr.aria-label]="'Star ' + name()"
         (click)="toggle($event)"
       >
         <ng-container [ngTemplateOutlet]="star" />
@@ -49,9 +50,17 @@ import { ButtonComponent } from '@gradient/ui/ui';
 })
 export class StarButtonComponent {
   private stars = inject(StarsService);
+  private notify = inject(NotifyService);
   target = input.required<StarTarget>();
+  starredItemDisplayName = input<string>();
   starred = model(false);
   labeled = input(false, { transform: booleanAttribute });
+
+  protected name = computed(() => {
+    const target = this.target();
+    const slug = target.kind === 'cache' ? target.cache : target.kind === 'task' ? `${target.project} / ${target.task}` : target.project;
+    return this.starredItemDisplayName() ?? slug;
+  });
 
   private inFlight = false;
 
@@ -65,6 +74,11 @@ export class StarButtonComponent {
     this.stars
       .set(this.target(), !previous)
       .pipe(finalize(() => (this.inFlight = false)))
-      .subscribe({ error: () => this.starred.set(previous) });
+      .subscribe({
+        error: (error: unknown) => {
+          this.starred.set(previous);
+          this.notify.failure(`${previous ? "Couldn't unstar" : "Couldn't star"} ${this.name()}`, error);
+        },
+      });
   }
 }
