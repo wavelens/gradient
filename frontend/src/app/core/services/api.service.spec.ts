@@ -35,6 +35,20 @@ describe('ApiService errors', () => {
     expect(error.status).toBe(409);
   });
 
+  it('says the session ended on a 401 instead of the server text', async () => {
+    const { api, http } = setup();
+    const result = failure(firstValueFrom(api.put('projects/acme', {})));
+    http.expectOne(() => true).flush({ error: true, code: 'unauthorized', message: 'Unable to decode token' }, { status: 401, statusText: 'Unauthorized' });
+    expect((await result).message).toBe('Your session has ended. Sign in again.');
+  });
+
+  it('keeps the server text for a refused sign-in', async () => {
+    const { api, http } = setup();
+    const result = failure(firstValueFrom(api.post('auth/basic/login', {})));
+    http.expectOne(() => true).flush({ error: true, code: 'invalid_credentials', message: 'Invalid credentials' }, { status: 401, statusText: 'Unauthorized' });
+    expect((await result).message).toBe('Invalid credentials');
+  });
+
   it('never shows the transport text when the server gave no reason', async () => {
     const { api, http } = setup();
     const result = failure(firstValueFrom(api.post('evals/e1/retry')));

@@ -34,8 +34,11 @@ export class ApiError extends Error {
 const NO_CONTENT = 204;
 const EMPTY_RESPONSE = 'The server returned an empty response. Try again later.';
 
+const SESSION_ENDED_ERROR_CODE = 'unauthorized';
+
 const STATUS_MESSAGES: Record<number, string> = {
   0: 'Connection to the server failed. Check the connection and try again.',
+  401: 'Your session has ended. Sign in again.',
   403: 'No permission for this action.',
   404: 'This item is already gone.',
   409: 'Other changes conflict with this one. Reload the page and try again.',
@@ -58,7 +61,9 @@ function serverMessage(body: unknown): string | undefined {
 }
 
 function toApiError(error: HttpErrorResponse, body: unknown = error.error): ApiError {
-  return new ApiError(serverMessage(body) ?? statusMessage(error.status), error.status, readErrorCode(body));
+  const code = readErrorCode(body);
+  const sessionEnded = error.status === 401 && (code === undefined || code === SESSION_ENDED_ERROR_CODE);
+  return new ApiError((sessionEnded ? undefined : serverMessage(body)) ?? statusMessage(error.status), error.status, code);
 }
 
 function parseJson(text: string): unknown {

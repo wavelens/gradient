@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { TestBed } from '@angular/core/testing';
 import { Route } from '@angular/router';
+import { AuthService } from '@core/services/auth.service';
 import { routes } from '../../app.routes';
 import { unsavedChangesGuard } from './unsaved-changes.guard';
 
@@ -25,8 +27,22 @@ describe('unsavedChangesGuard', () => {
     },
   );
 
+  function leave(signedIn: boolean) {
+    TestBed.configureTestingModule({ providers: [{ provide: AuthService, useValue: { isAuthenticated: () => signedIn } }] });
+    const canDeactivate = vi.fn(() => false);
+    const answer = TestBed.runInInjectionContext(() =>
+      unsavedChangesGuard({ canDeactivate }, null as never, null as never, null as never),
+    );
+    return { answer, canDeactivate };
+  }
+
   it('asks the page whether it may be left', () => {
-    const answer = unsavedChangesGuard({ canDeactivate: () => false }, null as never, null as never, null as never);
-    expect(answer).toBe(false);
+    expect(leave(true).answer).toBe(false);
+  });
+
+  it('lets the page go once the session ended', () => {
+    const { answer, canDeactivate } = leave(false);
+    expect(answer).toBe(true);
+    expect(canDeactivate).not.toHaveBeenCalled();
   });
 });
