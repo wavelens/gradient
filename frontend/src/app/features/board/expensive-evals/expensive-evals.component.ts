@@ -16,7 +16,7 @@ import { BoardService } from '@core/services/board.service';
 import { ExpensiveEval } from '@core/models';
 import { links } from '@shared/routing';
 
-type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
+type Tab = 'time' | 'rss' | 'thunks' | 'fncalls' | 'alloc';
 
 @Component({
   selector: 'app-board-expensive-evals',
@@ -70,7 +70,6 @@ export class BoardExpensiveEvalsComponent implements OnInit {
   tabs: { key: Tab; label: string }[] = [
     { key: 'time', label: 'Slowest' },
     { key: 'rss', label: 'Peak RSS' },
-    { key: 'heap', label: 'Peak heap' },
     { key: 'thunks', label: 'Thunks' },
     { key: 'fncalls', label: 'Fn calls' },
     { key: 'alloc', label: 'Allocated' },
