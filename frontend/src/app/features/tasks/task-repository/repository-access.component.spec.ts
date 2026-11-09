@@ -10,6 +10,7 @@ import { of, throwError } from 'rxjs';
 import { RepositoryIntegration, TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { ApiError } from '@core/services/api.service';
+import { ConfirmService } from '@shared/confirm';
 import { RepositoryAccessComponent } from './repository-access.component';
 
 const state: TaskRepositoryResponse = {
@@ -65,7 +66,7 @@ describe('RepositoryAccessComponent', () => {
     expect(fixture.componentInstance.testError()).toBeNull();
   });
 
-  it('checks a changed URL right after saving it', () => {
+  it('checks a changed URL before saving it and records the check afterwards', () => {
     const updateTask = vi.fn(() => of('ok'));
     const checkRepository = vi.fn(() => of('1a2b'));
     const fixture = render({}, { updateTask, checkRepository });
@@ -76,8 +77,42 @@ describe('RepositoryAccessComponent', () => {
     comp.draftUrl.set('git://gradient.local/states');
     comp.saveUrl();
     expect(updateTask).toHaveBeenCalledWith('acme', 'app', { repository: 'git://gradient.local/states' });
+    expect(checkRepository).toHaveBeenCalledTimes(2);
     expect(checkRepository).toHaveBeenCalledWith('acme', 'app', 'git://gradient.local/states');
     expect(changed).toHaveBeenCalledTimes(2);
+    expect(comp.editing()).toBe(false);
+  });
+
+  it('skips the check before saving when the draft URL already passed the test', () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const checkRepository = vi.fn(() => of('1a2b'));
+    const comp = render({}, { updateTask, checkRepository }).componentInstance;
+    comp.startEdit();
+    comp.draftUrl.set('git://gradient.local/states');
+    comp.testAccess();
+    comp.saveUrl();
+    expect(updateTask).toHaveBeenCalledTimes(1);
+    expect(checkRepository).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks before saving a URL that Gradient cannot fetch', () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const checkRepository = vi.fn(() =>
+      throwError(() => new ApiError('SSH to git.example.com:2222: failed to fill whole buffer', 400, 'repository_unreachable')));
+    const comp = render({}, { updateTask, checkRepository }).componentInstance;
+    comp.startEdit();
+    comp.draftUrl.set('ssh://git@git.example.com:2222/acme/app.git');
+    comp.saveUrl();
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(comp.editing()).toBe(true);
+    const pending = TestBed.inject(ConfirmService).pending();
+    expect(pending?.request.target).toBe('ssh://git@git.example.com:2222/acme/app.git');
+    expect(pending?.request.consequence).toContain('failed to fill whole buffer');
+    expect(pending?.request.consequence).toContain('hostname and port');
+
+    pending?.request.action().subscribe();
+    expect(updateTask).toHaveBeenCalledWith('acme', 'app', { repository: 'ssh://git@git.example.com:2222/acme/app.git' });
+    expect(comp.editing()).toBe(false);
   });
 
   it('tests the unsaved URL while editing without touching the saved state', () => {

@@ -11,6 +11,8 @@ describe('fetchFailureHint', () => {
     ['Git command failed: git@host: Permission denied (publickey).', 'deploy key'],
     ['SSH to forgejo.example.com: failed to lookup address information', 'resolve the host name'],
     ['remote: Repository not found.', 'Repository not found'],
+    ['SSH to git.example.com:2222: failed to fill whole buffer', 'hostname and port'],
+    ['Session(-13): Failed getting banner during handshake', 'hostname and port'],
   ])('maps %s to a fix', (error, expected) => {
     expect(fetchFailureHint(error)).toContain(expected);
   });

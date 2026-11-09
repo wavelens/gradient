@@ -6,6 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Observable, of, switchMap, tap } from 'rxjs';
 import {
   ButtonComponent,
   CopyFieldComponent,
@@ -17,7 +18,8 @@ import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError, apiErrorMessage } from '@core/services/api.service';
-import { RepositoryFetchBannerComponent, gitHostSettingsLinks, repositoryHost } from '@shared/git';
+import { RepositoryFetchBannerComponent, fetchFailureHint, gitHostSettingsLinks, repositoryHost } from '@shared/git';
+import { ConfirmService } from '@shared/confirm';
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { RelativeTimePipe } from '@shared/text';
 import { fieldChecks, firstFieldError, unsavedChanges } from '@shared/forms';
@@ -42,6 +44,7 @@ import { provisioningIntegration } from './provisioning';
 export class RepositoryAccessComponent {
   private tasks = inject(TasksService);
   private notify = inject(NotifyService);
+  private confirm = inject(ConfirmService);
 
   project = input.required<string>();
   task = input.required<string>();
@@ -86,22 +89,48 @@ export class RepositoryAccessComponent {
   }
 
   saveUrl(): void {
-    if (this.urlError() || this.saving()) return;
+    if (this.urlError() || this.saving() || this.testing()) return;
     const url = this.draftUrl().trim();
     this.saving.set(true);
-    this.tasks.updateTask(this.project(), this.task(), { repository: url }).subscribe({
-      next: () => {
+    this.testError.set(null);
+    const check: Observable<unknown> = this.unsavedRepositoryUrlAccessTestPassed()
+      ? of(null)
+      : this.tasks.checkRepository(this.project(), this.task(), url);
+    check.pipe(switchMap(() => this.saveRepositoryUrlAndRunAfterSaveSteps(url))).subscribe({
+      next: () => this.saving.set(false),
+      error: (error: unknown) => {
         this.saving.set(false);
+        if (error instanceof ApiError && error.code === 'repository_unreachable') {
+          this.confirmSaveRepositoryUrlAfterFailedFetch(url, error.message);
+        } else {
+          this.notify.failure("Couldn't save repository URL", error);
+        }
+      },
+    });
+  }
+
+  private confirmSaveRepositoryUrlAfterFailedFetch(url: string, reason: string): void {
+    this.confirm.confirm({
+      title: 'Save unreachable URL',
+      target: url,
+      consequence: ["Gradient can't access this URL. Evaluations fail until Gradient can access the repository.", reason, fetchFailureHint(reason)]
+        .filter(Boolean)
+        .join(' '),
+      confirmLabel: 'Save as is',
+      failure: "Couldn't save repository URL",
+      action: () => this.saveRepositoryUrlAndRunAfterSaveSteps(url),
+    }).subscribe();
+  }
+
+  private saveRepositoryUrlAndRunAfterSaveSteps(url: string): Observable<string> {
+    return this.tasks.updateTask(this.project(), this.task(), { repository: url }).pipe(
+      tap(() => {
         this.cancelEdit();
         this.notify.success('Repository URL saved');
         this.changed.emit();
         this.checkSavedUrl(url);
-      },
-      error: (error: unknown) => {
-        this.saving.set(false);
-        this.notify.failure("Couldn't save repository URL", error);
-      },
-    });
+      }),
+    );
   }
 
   testAccess(): void {

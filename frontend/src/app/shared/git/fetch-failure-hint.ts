@@ -14,6 +14,10 @@ const HINTS: { pattern: RegExp; hint: string }[] = [
     hint: "Can't resolve the host name. Check the repository URL.",
   },
   {
+    pattern: /failed to fill whole buffer|handshake/i,
+    hint: 'The host closed the connection before Git started. Check the hostname and port in the repository URL.',
+  },
+  {
     pattern: /not found|does not exist|repository .* not exist/i,
     hint: 'Repository not found. Check the URL. Confirm the deploy key can access the repository.',
   },
