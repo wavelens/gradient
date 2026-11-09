@@ -45,7 +45,7 @@ const newestDelivery: DeliveryListItem_WebhookDeliveryId = {
 };
 
 function withLastDelivery(webhook: WebhookResponse, last_delivery: DeliveryListItem_WebhookDeliveryId | null): WebhookResponse {
-  return Object.assign({ ...webhook }, { last_delivery });
+  return { ...webhook, last_delivery };
 }
 
 function setup(

@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { finalize } from 'rxjs';
-import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo, eventNameToReadableText, eventNamePrefixesByNotificationScope, eventNameMatchesAnyPrefix } from '@core/models';
+import { WebhookScopeRef, WebhookResponse, accessTo, eventNameToReadableText, eventNamePrefixesByNotificationScope, eventNameMatchesAnyPrefix } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
 import { canManageTeam, createMissingPermissionLoadStateError, createNoAccessLoadStateError, isViewerCacheMember, isViewerProjectMember } from '@shared/access';
@@ -43,10 +43,6 @@ import { OutgoingWebhookDeliveryListDialog, getDeliveryResultReason } from '@sha
 import { dialogFormChangesSinceOpen, fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 import { links } from '@shared/routing';
-
-type WebhookListItemWithLastDeliveryAttempt = WebhookResponse & {
-  last_delivery?: Pick<DeliveryListItem_WebhookDeliveryId, 'success' | 'delivered_at' | 'response_status' | 'error_message'> | null;
-};
 
 type WebhookFormField = 'name' | 'url' | 'globs';
 
@@ -112,7 +108,7 @@ export class WebhooksComponent implements OnInit {
   saving = signal(false);
   formError = signal<string | null>(null);
   togglingId = signal<string | null>(null);
-  webhooks = signal<WebhookListItemWithLastDeliveryAttempt[]>([]);
+  webhooks = signal<WebhookResponse[]>([]);
 
   editing = signal<WebhookResponse | null>(null);
   formOpen = signal(false);
@@ -226,7 +222,7 @@ export class WebhooksComponent implements OnInit {
     });
   }
 
-  getWebhookCardStatusChip(hook: WebhookListItemWithLastDeliveryAttempt): { label: string; severity: BadgeSeverity } {
+  getWebhookCardStatusChip(hook: WebhookResponse): { label: string; severity: BadgeSeverity } {
     const state: WebhookCardState = !hook.active ? 'inactive' : hook.last_delivery?.success === false ? 'failing' : 'active';
     return webhookCardStateBadgeLabelAndColorSeverityByState[state];
   }
