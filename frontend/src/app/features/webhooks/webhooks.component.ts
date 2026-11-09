@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -40,13 +40,23 @@ import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { RelativeTimePipe } from '@shared/text';
 import { OutgoingWebhookDeliveryListDialog, getDeliveryResultReason } from '@shared/outgoing-deliveries';
-import { fieldChecks } from '@shared/forms';
+import { fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 import { links } from '@shared/routing';
 
 type WebhookListItemWithLastDeliveryAttempt = WebhookResponse & {
   last_delivery?: Pick<DeliveryListItem_WebhookDeliveryId, 'success' | 'delivered_at' | 'response_status' | 'error_message'> | null;
 };
+
+type WebhookFormField = 'name' | 'url' | 'globs';
+
+function getWebhookFormFieldForServerError(err: unknown): WebhookFormField | null {
+  if (!(err instanceof ApiError)) return null;
+  if (err.status === 409) return 'name';
+  if (err.status !== 422) return null;
+  if (/\bURL\b/.test(err.message)) return 'url';
+  return /event pattern/.test(err.message) ? 'globs' : null;
+}
 
 type WebhookCardState = 'active' | 'failing' | 'inactive';
 
@@ -112,13 +122,15 @@ export class WebhooksComponent implements OnInit {
   globs = signal('');
   active = signal(true);
   attempted = signal(false);
-  nameError = computed(() => (this.attempted() && !this.name().trim() ? 'Enter a name.' : null));
-  serverUrlError = signal<{ url: string; message: string } | null>(null);
+  serverFieldRejection = signal<{ field: WebhookFormField; value: string; message: string } | null>(null);
+  nameError = computed(() => (this.attempted() && !this.name().trim() ? 'Enter a name.' : this.serverRejectionOf('name', this.name())));
   urlError = computed(() => {
     if (!this.url().trim()) return this.attempted() ? 'Enter the URL to receive events.' : null;
-    const refused = this.serverUrlError();
-    return fieldChecks.httpUrl(this.url()) ?? (refused?.url === this.url().trim() ? refused.message : null);
+    return fieldChecks.httpUrl(this.url()) ?? this.serverRejectionOf('url', this.url());
   });
+  globsError = computed(() => this.serverRejectionOf('globs', this.globs()));
+  private webhookForm = viewChild<ElementRef<HTMLElement>>('webhookForm');
+  private revealFirstInvalid = injectRevealFirstInvalid();
 
   revealedSecret = signal<string | null>(null);
   webhookIdWithTestDeliveryInFlight = signal<string | null>(null);
@@ -235,9 +247,14 @@ export class WebhooksComponent implements OnInit {
     this.fill(hook);
   }
 
+  private serverRejectionOf(field: WebhookFormField, value: string): string | null {
+    const rejection = this.serverFieldRejection();
+    return rejection?.field === field && rejection.value === value.trim() ? rejection.message : null;
+  }
+
   private fill(hook: WebhookResponse | null): void {
     this.formError.set(null);
-    this.serverUrlError.set(null);
+    this.serverFieldRejection.set(null);
     this.attempted.set(false);
     this.editing.set(hook);
     this.name.set(hook?.name ?? '');
@@ -262,7 +279,10 @@ export class WebhooksComponent implements OnInit {
   save(): void {
     if (this.saving()) return;
     this.attempted.set(true);
-    if (this.nameError() || this.urlError()) return;
+    if (this.nameError() || this.urlError() || this.globsError()) {
+      this.revealFirstInvalid(() => this.webhookForm()?.nativeElement);
+      return;
+    }
     const body = { name: this.name().trim(), url: this.url().trim(), events: this.patterns(), active: this.active() };
     const target = this.editing();
     this.saving.set(true);
@@ -273,9 +293,15 @@ export class WebhooksComponent implements OnInit {
       this.load();
     };
     const failed = (err: unknown) => {
-      if (err instanceof ApiError && err.status === 422 && /\bURL\b/.test(err.message)) this.serverUrlError.set({ url: body.url, message: err.message });
-      else this.formError.set(apiErrorMessage(err, 'Failed to save webhook.'));
       this.saving.set(false);
+      const field = getWebhookFormFieldForServerError(err);
+      if (!field || !(err instanceof ApiError)) {
+        this.formError.set(apiErrorMessage(err, 'Failed to save webhook.'));
+        return;
+      }
+      const value = { name: body.name, url: body.url, globs: this.globs().trim() }[field];
+      this.serverFieldRejection.set({ field, value, message: err.message });
+      this.revealFirstInvalid(() => this.webhookForm()?.nativeElement);
     };
     if (target) {
       this.service.update(this.scope, target.id, body).subscribe({

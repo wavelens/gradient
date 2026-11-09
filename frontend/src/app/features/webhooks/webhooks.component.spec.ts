@@ -266,6 +266,27 @@ describe('WebhooksComponent', () => {
   });
 
   it.each([
+    { refusal: new ApiError('webhook already exists', 409), input: '#webhook-name' },
+    { refusal: new ApiError("invalid event pattern 'Build'", 422), input: '#webhook-globs' },
+  ])('shows the refusal "$refusal.message" under its field and focuses it', async ({ refusal, input }) => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
+    service.create.mockReturnValue(throwError(() => refusal));
+    component.startCreate();
+    component.name.set('ci');
+    component.url.set('https://example.com/hook');
+    component.globs.set('Build');
+    fixture.detectChanges();
+    component.save();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const control = document.querySelector<HTMLInputElement>(input)!;
+    expect(control.closest('gr-form-field')!.textContent).toContain(refusal.message);
+    expect(component.formError()).toBeNull();
+    expect(document.activeElement).toBe(control);
+  });
+
+  it.each([
     { action: 'toggle', summary: "Couldn't disable event notification", run: (c: WebhooksComponent) => c.toggleActive(hook) },
     { action: 'test', summary: "Couldn't send test event", run: (c: WebhooksComponent) => c.test(hook) },
   ])('reports a failed $action as a toast', ({ summary, run }) => {
