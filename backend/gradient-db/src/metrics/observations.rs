@@ -54,7 +54,7 @@ fn observations_sql() -> String {
         UNION ALL
 
         SELECT 'cache_packages'::text, NULL::int, COUNT(*)::bigint
-        FROM cached_path_signature
+        FROM cached_path
 
         UNION ALL
 

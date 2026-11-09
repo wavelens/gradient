@@ -155,7 +155,7 @@ pub(crate) fn render(obs: &Observations) -> String {
 
     let pkgs = IntGauge::new(
         "gradient_cache_packages",
-        "Total packages (signed build outputs) in caches.",
+        "Total number of unique packages stored in the cache.",
     )
     .expect("metric");
 
