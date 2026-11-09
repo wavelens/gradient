@@ -28,7 +28,7 @@ flowchart LR
 | Failed | The evaluation or at least one build failed |
 | Aborted | Stopped by hand or replaced by a newer evaluation |
 
-Evaluations skip every dependency subtree that earlier evaluations already recorded. To walk the whole closure again, run **Full rewalk** from the task menu. This starts a new evaluation.
+Evaluations skip every dependency subtree that previous evaluations recorded. Run **Reevaluate all inputs** from the task menu to walk the whole closure again. The result is a new evaluation.
 
 Task option **Only Evaluate** (`only_evaluate`, off by default) can end each evaluation right after Evaluating. Such evaluations build nothing and start no exec jobs.
 

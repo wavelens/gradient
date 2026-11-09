@@ -483,10 +483,10 @@ describe('TaskDetailComponent evaluation menu', () => {
     expect(notify.failure).toHaveBeenCalledWith('Failed to retry evaluation', error);
   });
 
-  it('starts a full rewalk from the menu', () => {
+  it('starts a full reevaluation from the menu', () => {
     const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
     const spy = vi.spyOn(tasksService, 'startEvaluation');
-    fixture.componentInstance.panelMenuModel().find(i => i.label === 'Full rewalk')!.command!();
+    fixture.componentInstance.panelMenuModel().find(i => i.label === 'Reevaluate all inputs')!.command!();
     expect(spy).toHaveBeenCalledWith('acme', 'demo', 'full');
   });
 
@@ -548,14 +548,14 @@ describe('TaskDetailComponent evaluation menu', () => {
     });
   });
 
-  it('holds the full rewalk while an evaluation is queued', () => {
+  it('holds the full reevaluation while an evaluation is queued', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Queued' });
-    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Full rewalk')?.disabled).toBe(true);
+    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Reevaluate all inputs')?.disabled).toBe(true);
   });
 
-  it('offers no full rewalk without trigger access', () => {
+  it('offers no full reevaluation without trigger access', () => {
     const { fixture } = setup({ managed: false, canEdit: false, canTrigger: false }, { primaryStatus: 'Completed' });
-    expect(menuLabels(fixture)).not.toContain('Full rewalk');
+    expect(menuLabels(fixture)).not.toContain('Reevaluate all inputs');
   });
 
   it('links Show job to the evaluation job on the Job Board', () => {
@@ -1097,7 +1097,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, 'superuser');
     const labels = fixture.componentInstance.evalMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Prioritize', 'Full rewalk', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Summary', 'Show job', 'Prioritize', 'Reevaluate all inputs', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {

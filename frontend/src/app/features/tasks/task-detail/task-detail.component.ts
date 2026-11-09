@@ -689,7 +689,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
                'Evaluation prioritized', 'Failed to prioritize evaluation') }]
         : []),
       ...(this.canTrigger()
-        ? [{ label: 'Full rewalk', icon: 'account_tree',
+        ? [{ label: 'Reevaluate all inputs', icon: 'account_tree',
              disabled: this.starting() || this.latestEvaluationNotStarted(),
              command: () => this.startEvaluation('full') }]
         : []),
