@@ -48,6 +48,14 @@ type WebhookListItemWithLastDeliveryAttempt = WebhookResponse & {
   last_delivery?: Pick<DeliveryListItem_WebhookDeliveryId, 'success' | 'delivered_at' | 'response_status' | 'error_message'> | null;
 };
 
+type WebhookCardState = 'active' | 'failing' | 'inactive';
+
+const webhookCardStateBadgeLabelAndColorSeverityByState: Record<WebhookCardState, { label: string; severity: BadgeSeverity }> = {
+  active: { label: 'Active', severity: 'success' },
+  failing: { label: 'Failing', severity: 'danger' },
+  inactive: { label: 'Inactive', severity: 'warning' },
+};
+
 @Component({
   selector: 'app-webhooks',
   standalone: true,
@@ -205,8 +213,8 @@ export class WebhooksComponent implements OnInit {
   }
 
   getWebhookCardStatusChip(hook: WebhookListItemWithLastDeliveryAttempt): { label: string; severity: BadgeSeverity } {
-    if (!hook.active) return { label: 'Inactive', severity: 'neutral' };
-    return hook.last_delivery?.success === false ? { label: 'Failing', severity: 'danger' } : { label: 'Active', severity: 'success' };
+    const state: WebhookCardState = !hook.active ? 'inactive' : hook.last_delivery?.success === false ? 'failing' : 'active';
+    return webhookCardStateBadgeLabelAndColorSeverityByState[state];
   }
 
   openWebhookOverflowMenuAtButton(event: Event, hook: WebhookResponse, menu: MenuComponent): void {

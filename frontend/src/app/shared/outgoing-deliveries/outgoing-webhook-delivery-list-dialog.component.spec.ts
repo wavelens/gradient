@@ -55,7 +55,7 @@ describe('OutgoingWebhookDeliveryListDialog', () => {
   it('names the result, the reason and the event on each row', () => {
     render(() => of([failed, delivered]));
     const [first, second] = rows();
-    expect(first.textContent).toContain('Failure');
+    expect(first.textContent).toContain('Failed');
     expect(first.textContent).toContain('connection refused');
     expect(first.querySelector('.reason')?.getAttribute('title')).toBe(failed.error_message);
     expect(second.textContent).toContain('Delivered');

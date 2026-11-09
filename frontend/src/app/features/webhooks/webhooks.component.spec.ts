@@ -442,7 +442,7 @@ describe('WebhooksComponent', () => {
   it.each([
     { state: 'delivered', webhook: withLastDelivery(hook, newestDelivery), chip: 'Active', severity: 'success', line: 'Last delivery' },
     { state: 'never delivered', webhook: withLastDelivery(hook, null), chip: 'Active', severity: 'success', line: 'No deliveries yet' },
-    { state: 'inactive', webhook: withLastDelivery({ ...hook, active: false }, { ...newestDelivery, success: false }), chip: 'Inactive', severity: 'neutral', line: 'Last delivery' },
+    { state: 'inactive', webhook: withLastDelivery({ ...hook, active: false }, { ...newestDelivery, success: false }), chip: 'Inactive', severity: 'warning', line: 'Last delivery' },
   ])('shows the $state webhook as $chip', ({ webhook, chip, severity, line }) => {
     const { root, component } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([webhook]));
     expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe(chip);

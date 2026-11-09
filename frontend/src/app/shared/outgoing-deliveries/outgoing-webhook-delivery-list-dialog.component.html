@@ -14,7 +14,7 @@
         @let resultReason = getDeliveryResultReason(d);
         <li>
           <button type="button" class="delivery" [attr.aria-expanded]="!!detail" (click)="toggleDeliveryRowExpansion(d.id)">
-            <gr-badge [severity]="d.success ? 'success' : 'danger'">{{ d.success ? 'Delivered' : 'Failure' }}</gr-badge>
+            <gr-badge [severity]="d.success ? 'success' : 'danger'">{{ d.success ? 'Delivered' : 'Failed' }}</gr-badge>
             <span class="event">{{ eventNameToReadableText(d.event) }}</span>
             @if (resultReason && !detail) {
               <span class="reason" [title]="d.error_message ?? resultReason">{{ resultReason }}</span>
