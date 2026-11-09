@@ -5,6 +5,7 @@
  */
 
 import { buildMetricChartOption } from './metric-chart.options';
+import { formatBytes, formatMegabytes } from '@shared/text';
 
 const cats = ['10:00', '11:00', '12:00'];
 const one = [{ name: 'build', data: [1, 2, 3] }];
@@ -163,6 +164,43 @@ describe('buildMetricChartOption presentation', () => {
     const opt = buildMetricChartOption({ type: 'line', series: one, categories: cats }, THEME);
     expect((opt.xAxis as any).axisLabel.color).toBe(THEME.text);
     expect(opt.backgroundColor).toBe('transparent');
+  });
+});
+
+describe('byte axes', () => {
+  const MiB = 1024 * 1024;
+  const axisFor = (data: (number | null)[], valueFormatter: (v: number) => string, yAxisMax?: number) =>
+    buildMetricChartOption({ type: 'line', series: [{ name: 'size', data }], categories: ['a', 'b'], valueFormatter, yAxisMax }, THEME).yAxis as any;
+
+  it('ticks on round binary units instead of decimal steps', () => {
+    const axis = axisFor([10 * MiB, 76.3 * MiB], formatBytes);
+    expect(axis.interval).toBe(20 * MiB);
+    expect(axis.max).toBe(80 * MiB);
+  });
+
+  it('moves to the next binary unit at 1024', () => {
+    const axis = axisFor([1.3 * 1024 * MiB], formatBytes);
+    expect(axis.interval).toBe(512 * MiB);
+    expect(axis.max).toBe(1536 * MiB);
+  });
+
+  it('never ticks below one byte', () => {
+    expect(axisFor([2], formatBytes).interval).toBe(1);
+  });
+
+  it('measures megabyte values in bytes', () => {
+    const axis = axisFor([300, 700], formatMegabytes);
+    expect(axis.interval).toBe(200);
+    expect(axis.max).toBe(800);
+  });
+
+  it('keeps a fixed maximum', () => {
+    expect(axisFor([10 * MiB], formatBytes, 100 * MiB).max).toBe(100 * MiB);
+  });
+
+  it('leaves an axis without positive values and other units to ECharts', () => {
+    expect(axisFor([0, null], formatBytes).interval).toBeUndefined();
+    expect(axisFor([76], (v) => `${v} s`).interval).toBeUndefined();
   });
 });
 

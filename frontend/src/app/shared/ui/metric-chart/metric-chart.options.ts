@@ -5,6 +5,7 @@
  */
 
 import type { EChartsOption } from 'echarts';
+import { bytesPerFormatterInput } from '@shared/text';
 
 export type MetricChartType = 'area' | 'bar' | 'line' | 'radar' | 'heatmap';
 
@@ -124,19 +125,25 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], inverse: !!cfg.horizontal, boundaryGap, axisLabel: categoryLabel, axisLine: axisLine(theme) };
   // Two value axes tick independently, so each draws its own grid: one set of
   // lines, and a shared tick count so the right-hand labels land on them.
-  const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false, max?: number) => ({
-    type: 'value' as const,
-    name: (!cfg.compact && title) || undefined,
-    min: (extent: { min: number }) => Math.min(0, extent.min),
-    max,
-    ...(areAllSeriesValuesWholeNumbers(cfg.series.filter((s) => (s.axis === 'right') === opposite)) ? { minInterval: 1 } : {}),
-    nameTextStyle: { color: theme.text },
-    axisLabel: { ...axisLabel(theme), show: !cfg.compact, formatter: (v: number) => fmt(v) },
-    axisLine: axisLine(theme),
-    splitNumber: AXIS_TICKS,
-    splitLine: opposite ? { show: false } : splitLine(theme),
-    ...(opposite ? { position: 'right' as const } : {}),
-  });
+  const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false, max?: number) => {
+    const axisSeries = cfg.series.filter((s) => (s.axis === 'right') === opposite);
+    const bytesPerValue = bytesPerFormatterInput.get(fmt);
+    const byteTicks = bytesPerValue === undefined ? undefined : getByteAxisIntervalAndMax(axisSeries.flatMap(valuesOf), max, bytesPerValue);
+    return {
+      type: 'value' as const,
+      name: (!cfg.compact && title) || undefined,
+      min: (extent: { min: number }) => Math.min(0, extent.min),
+      max: byteTicks?.max ?? max,
+      ...(areAllSeriesValuesWholeNumbers(axisSeries) ? { minInterval: 1 } : {}),
+      ...(byteTicks ? { interval: byteTicks.interval } : {}),
+      nameTextStyle: { color: theme.text },
+      axisLabel: { ...axisLabel(theme), show: !cfg.compact, formatter: (v: number) => fmt(v) },
+      axisLine: axisLine(theme),
+      splitNumber: AXIS_TICKS,
+      splitLine: opposite ? { show: false } : splitLine(theme),
+      ...(opposite ? { position: 'right' as const } : {}),
+    };
+  };
 
   const secondary = cfg.horizontal ? undefined : cfg.secondary;
   const secondaryFormat = secondary?.valueFormatter ?? format;
@@ -169,6 +176,19 @@ function gridOf(cfg: MetricChartConfig, inset: MetricChartConfig['inset'], secon
   if (cfg.compact) return { left: 4, right: 4, top: 8, bottom: cfg.series.length > 1 ? 44 : 4, containLabel: true };
   if (inset) return { left: inset.left, right: inset.right, top: 28, bottom: 24, containLabel: false };
   return { left: 8, right: secondary ? 8 : 12, top: 28, bottom: 4, containLabel: true };
+}
+
+function getByteAxisIntervalAndMax(values: (number | null)[], fixedMax: number | undefined, bytesPerValue: number) {
+  const max = fixedMax ?? values.reduce<number>((m, v) => (v !== null && v > m ? v : m), 0);
+  if (!(max > 0)) return undefined;
+  const maxBytes = max * bytesPerValue;
+  let unit = 1;
+  while (maxBytes / unit >= 1024) unit *= 1024;
+  const rawStep = maxBytes / unit / AXIS_TICKS;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const step = [1, 2, 5, 10].map((f) => f * magnitude).find((s) => s >= rawStep) ?? 10 * magnitude;
+  const interval = ((unit === 1 ? Math.max(1, step) : step) * unit) / bytesPerValue;
+  return { interval, max: fixedMax ?? Math.ceil(max / interval) * interval };
 }
 
 function dualAxisTooltip(

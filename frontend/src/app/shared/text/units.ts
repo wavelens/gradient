@@ -25,6 +25,11 @@ export function formatMegabytes(mb: Maybe): string {
   return mb == null ? '-' : formatBytes(mb * 1024 * 1024);
 }
 
+export const bytesPerFormatterInput: ReadonlyMap<(value: number) => string, number> = new Map([
+  [formatBytes, 1],
+  [formatMegabytes, 1024 * 1024],
+]);
+
 const pad = (n: number) => n.toString().padStart(2, '0');
 
 export function formatDuration(ms: Maybe): string {
