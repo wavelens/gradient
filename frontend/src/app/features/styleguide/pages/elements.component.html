@@ -26,7 +26,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 <p>Rule 1: any store path, hash, key, ID or URL is a copy field, never a bare code span.</p>
 <gr-copy-field label="Store path" [value]="storePath" />
 <gr-copy-field [value]="storePath" [inline]="true" />
-<gr-copy-field label="Public key" [value]="publicKey" [multiline]="true" [rows]="4" />
+<gr-copy-field label="Public key" [value]="publicKey" multiline />
 
 <h2>Search box</h2>
 <p>The <code>search-box</code> class: icon inside, key hint at the end. The header trigger and

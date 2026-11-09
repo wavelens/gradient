@@ -29,7 +29,7 @@ flowchart LR
 
 ## Rules
 
-- Wrap every store path, hash, key, ID and URL in a `gr-copy-field`. A bare code span is not enough. A multi-line `gr-copy-field` can grow with content, so omit `[rows]`.
+- Surround store paths, hashes, keys, IDs, and URLs with `gr-copy-field`. A plain code span won't do. The multiline `gr-copy-field` can grow to fit the content.
 - Take all colours from semantic roles. Hex values belong only in the palette, and components read roles rather than palette tokens.
 - Put new shared classes in the design system. Component stylesheets take none.
 - Build content layouts from `gr-row-list` or `gr-card-grid`. Avoid entity-specific names.

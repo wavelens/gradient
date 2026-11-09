@@ -34,15 +34,9 @@ describe('CopyFieldComponent', () => {
     expect(root.querySelector('input')).toBeNull();
   });
 
-  it('honours the rows input when multiline', async () => {
-    const { root } = await render({ value, multiline: true, rows: 6 });
-    expect(root.querySelector('textarea')?.rows).toBe(6);
-  });
-
-  it('lets the textarea grow with its rows instead of clipping', async () => {
-    const { root } = await render({ value, multiline: true, rows: 4 });
+  it('lets the textarea grow with its content instead of clipping', async () => {
+    const { root } = await render({ value, multiline: true });
     const ta = root.querySelector('textarea')!;
-    // A fixed control height would leave scrollHeight above clientHeight.
     expect(getComputedStyle(ta).height).not.toBe('34px');
   });
 
