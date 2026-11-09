@@ -5,7 +5,7 @@
  */
 
 import { blockedLine, failureKind, failureTitle, firstLine, getEvaluationSummaryCountTiles, headline } from './summary-text';
-import { EvaluationFailureSummary, FailedBuildSummary } from '@core/models';
+import { EvaluationFailureSummary, EvaluationStatus, FailedBuildSummary } from '@core/models';
 
 const summary = (packages: Partial<EvaluationFailureSummary['packages']>, evalErrors = 0): EvaluationFailureSummary => ({
   compared_with: null,
@@ -51,12 +51,13 @@ describe('evaluation summary text', () => {
     expect(headline(summary({ total: 0 }), 'EvaluatingFlake')).toBe('Still evaluating');
   });
 
-  it('shows a tile for every count the headline adds up', () => {
-    const tiles = (s: EvaluationFailureSummary, running = false) =>
-      getEvaluationSummaryCountTiles(s, running).map((t) => `${t.label} ${t.value}`);
-    expect(tiles(summary({ built: 1, failed: 1, blocked: 1 }))).toEqual(['Built 1', 'Failed 1', 'Dependency failed 1', 'Failed to evaluate 0']);
-    expect(tiles(summary({ built: 5, unfinished: 15 }))).toEqual(['Built 5', 'Failed 0', 'Not built 15', 'Failed to evaluate 0']);
-    expect(tiles(summary({ built: 5, unfinished: 15 }), true)).toEqual(['Built 5', 'Failed 0', 'Failed to evaluate 0']);
+  it('shows a tile for every non-zero count the headline adds up', () => {
+    const tiles = (s: EvaluationFailureSummary, status: EvaluationStatus = 'Completed') =>
+      getEvaluationSummaryCountTiles(s, status).map((t) => `${t.label} ${t.value}`);
+    expect(tiles(summary({ built: 1, failed: 1, blocked: 1 }, 2))).toEqual(['Packages built 1', 'Failed packages 1', 'Dependency failed 1', 'Failed to evaluate 2']);
+    expect(tiles(summary({ built: 5, unfinished: 15 }))).toEqual(['Packages built 5', 'Unbuilt packages 15']);
+    expect(tiles(summary({ built: 5, unfinished: 15 }), 'Building')).toEqual(['Packages built 5']);
+    expect(tiles(summary({ built: 5 }), 'Waiting')).toEqual([]);
   });
 
   it('reports a clean evaluation', () => {

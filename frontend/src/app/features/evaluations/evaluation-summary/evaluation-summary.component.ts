@@ -103,7 +103,8 @@ export class EvaluationSummaryComponent implements OnInit {
 
   countTiles = computed(() => {
     const summary = this.summary();
-    return summary ? getEvaluationSummaryCountTiles(summary, this.running()) : [];
+    const evaluation = this.evaluation();
+    return summary && evaluation ? getEvaluationSummaryCountTiles(summary, evaluation.status) : [];
   });
 
   breadcrumb = computed(() => {

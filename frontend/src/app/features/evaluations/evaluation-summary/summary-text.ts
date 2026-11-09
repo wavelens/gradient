@@ -17,15 +17,18 @@ export interface SummaryCountTile {
   value: number;
 }
 
-export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary, running: boolean): SummaryCountTile[] {
+export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary, status: EvaluationStatus): SummaryCountTile[] {
+  if (isEvaluationNotStartedStatus(status)) return [];
   const { built, failed, blocked, unfinished } = summary.packages;
-  return [
-    { label: 'Built', value: built },
-    { label: 'Failed', value: failed },
-    ...(blocked > 0 ? [{ label: buildStatusLabel('DependencyFailed'), value: blocked }] : []),
-    ...(unfinished > 0 && !running ? [{ label: 'Not built', value: unfinished }] : []),
+  const tiles = [
+    { label: 'Packages built', value: built },
+    { label: 'Failed packages', value: failed },
+    { label: buildStatusLabel('DependencyFailed'), value: blocked },
+    { label: 'Unbuilt packages', value: isRunningEvaluationStatus(status) ? 0 : unfinished },
     { label: 'Failed to evaluate', value: summary.failed_attributes.length },
+    { label: 'Fixed', value: summary.compared_with ? summary.fixed_total : 0 },
   ];
+  return tiles.filter((tile) => tile.value > 0);
 }
 
 export function headline(summary: EvaluationFailureSummary, status: EvaluationStatus): string {
@@ -50,8 +53,7 @@ export function headline(summary: EvaluationFailureSummary, status: EvaluationSt
 
 // A timeout or a lost worker is a fault of the CI, not of the package.
 export function failureKind(status: BuildStatus): { label: string; severity: BadgeSeverity } {
-  if (status === 'FailedTimeout') return { label: 'Timed out', severity: 'warning' };
-  if (status === 'FailedTransient') return { label: 'Worker fault', severity: 'warning' };
+  if (status === 'FailedTimeout' || status === 'FailedTransient') return { label: buildStatusLabel(status), severity: 'warning' };
 
   return { label: 'Build failed', severity: 'danger' };
 }
