@@ -286,7 +286,8 @@
             <gr-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />
           }
-          <app-exec-job-list [evaluation]="sel.id" [evaluationRunning]="isRunning(sel.status)" [project]="projectName" [task]="taskName" [canTrigger]="canTrigger()" />
+          <app-exec-job-list [evaluation]="sel.id" [evaluationRunning]="isRunning(sel.status)" [project]="projectName" [task]="taskName" [canTrigger]="canTrigger()"
+                             (allExecJobsLoadedOrPolled)="selectedEvaluationExecJobsLastReportedByList.set($event)" />
           <gr-menu #pkgMenu [model]="pkgMenuModel()" />
         </div>
       }

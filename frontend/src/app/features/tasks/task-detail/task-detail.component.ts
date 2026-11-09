@@ -56,8 +56,9 @@ import {
   EvaluationProgress,
   WalkMode,
   EvaluationStatus,
+  ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhaseWithExecJob, evaluationDuration, evaluationPhase, evaluationTitle, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -105,6 +106,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   canIncludeInstance = computed(() => this.resolved()?.task.permissions.includes('manageWorkers') ?? false);
   task = signal<TaskDetailsResponse | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
+  selectedEvaluationExecJobsLastReportedByList = signal<ExecJobSummary[]>([]);
+  execJobStatusByEntryPointAttributePath = computed(() => new Map(this.selectedEvaluationExecJobsLastReportedByList().map((job) => [job.entry_point, job.status])));
   entryPointsTotal = signal(0);
   failedAttributes = signal<FailedAttributeSummary[]>([]);
   entryPointsLoading = signal(false);
@@ -310,6 +313,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       // Drop the previous evaluation's packages immediately so the panel shows a
       // loading state, not stale data, during the (slow) entry-point fetch.
       this.entryPoints.set([]);
+      this.selectedEvaluationExecJobsLastReportedByList.set([]);
       this.entryPointsTotal.set(0);
       this.failedAttributes.set([]);
       this.entryPointsEvalId = undefined;
@@ -633,7 +637,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   protected readonly inputFetchPhase = inputFetchPhase;
 
   protected packagePhase(evaluation: EvaluationSummary, entry: EntryPointSummary): StatusPhase {
-    return evaluation.only_evaluate ? 'success' : entryPointPhase(entry);
+    return evaluation.only_evaluate ? 'success' : entryPointPhaseWithExecJob(entry, this.execJobStatusByEntryPointAttributePath().get(entry.eval));
   }
 
   pkgMenuModel = signal<MenuItem[]>([]);

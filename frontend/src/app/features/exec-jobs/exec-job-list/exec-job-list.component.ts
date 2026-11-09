@@ -40,6 +40,7 @@ export class ExecJobListComponent implements OnChanges {
   canTrigger = input(false);
   isCompact = input(false, { transform: booleanAttribute });
   firstOpenExecJobWaitingWithReason = output<ExecJobSummary | null>();
+  allExecJobsLoadedOrPolled = output<ExecJobSummary[]>();
 
   jobs = signal<ExecJobSummary[]>([]);
   menuModel = signal<MenuItem[]>([]);
@@ -76,6 +77,7 @@ export class ExecJobListComponent implements OnChanges {
     ).subscribe((jobs) => {
       if (!Array.isArray(jobs)) return;
       this.jobs.set(jobs);
+      this.allExecJobsLoadedOrPolled.emit(jobs);
       this.firstOpenExecJobWaitingWithReason.emit(jobs.find((job) => isOpenExecJob(job.status) && !!job.waiting_reason) ?? null);
     });
   }

@@ -12,6 +12,7 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { vi } from 'vitest';
 import { BehaviorSubject, EMPTY, NEVER, type Observable, Subject, of, throwError } from 'rxjs';
 import { TaskDetailComponent } from './task-detail.component';
+import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { TasksService } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -821,6 +822,22 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(root.querySelector('.pkg-bar')).toBeNull();
     expect(root.querySelector('.eval-bar')).toBeNull();
     expect(root.querySelector('.eval-only')?.textContent).toContain('Evaluation only');
+  });
+
+  it('shows an app row as queued while its exec job waits after the build finished', () => {
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      {
+        primaryStatus: 'Building',
+        getEntryPoints: () => of({ entry_points: [{ ...epSummary('app', 'apps.x86_64-linux.app'), build_status: 'Completed' }], total: 1, failed_attributes: [] }),
+      },
+    );
+    const row = () => (fixture.nativeElement as HTMLElement).querySelector('.entry-row.pkg')?.getAttribute('data-phase');
+    expect(row()).toBe('success');
+    const execJobList = fixture.debugElement.query(By.directive(ExecJobListComponent)).componentInstance as ExecJobListComponent;
+    execJobList.allExecJobsLoadedOrPolled.emit([{ id: 'x1', entry_point: 'apps.x86_64-linux.app', status: 'queued', nodes: 1, labels: [], devices: [], autostart: true, keep_vm_running: false }]);
+    fixture.detectChanges();
+    expect(row()).toBe('queued');
   });
 
   it('tags the row of a derivation an evaluation imported', () => {
