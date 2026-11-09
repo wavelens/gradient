@@ -249,7 +249,7 @@ describe('WebhooksComponent', () => {
 
   it.each([
     { action: 'toggle', summary: "Couldn't disable event notification", run: (c: WebhooksComponent) => c.toggleActive(hook) },
-    { action: 'test', summary: "Can't send test delivery", run: (c: WebhooksComponent) => c.test(hook) },
+    { action: 'test', summary: "Couldn't send test event", run: (c: WebhooksComponent) => c.test(hook) },
   ])('reports a failed $action as a toast', ({ summary, run }) => {
     const { component, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' });
     const failure = new ApiError('database is down', 500);
@@ -391,13 +391,21 @@ describe('WebhooksComponent', () => {
   });
 
   it('shows a failed test as the newest delivery with its reason', () => {
-    const { fixture, root, service } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([hook]), [], () => of([newestDelivery]));
+    const { fixture, root, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([hook]), [], () => of([newestDelivery]));
     service.test.mockReturnValue(of({ ...newestDelivery, id: 'd2', success: false, response_status: 404 }));
     rowButton(root, 'Test').click();
     fixture.detectChanges();
     expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe('Failing');
     expect(root.querySelector('.newest-delivery')?.textContent).toContain('HTTP 404');
     expect(rowButton(root, 'Test').disabled).toBe(false);
+    expect(notify.failure).toHaveBeenCalledWith("Couldn't deliver test event: HTTP 404", null);
+  });
+
+  it('confirms a delivered test with a toast', () => {
+    const { root, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' });
+    service.test.mockReturnValue(of(newestDelivery));
+    rowButton(root, 'Test').click();
+    expect(notify.success).toHaveBeenCalledWith('Test event delivered');
   });
 
   it.each([

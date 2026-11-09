@@ -321,8 +321,13 @@ export class WebhooksComponent implements OnInit {
       .test(this.scope, hook.id)
       .pipe(finalize(() => this.webhookIdWithTestDeliveryInFlight.set(null)))
       .subscribe({
-        next: (delivery) => this.newestDeliveryByWebhookId.update((newest) => new Map(newest).set(hook.id, delivery)),
-        error: (err: unknown) => this.notify.failure("Can't send test delivery", err),
+        next: (delivery) => {
+          this.newestDeliveryByWebhookId.update((newest) => new Map(newest).set(hook.id, delivery));
+          if (delivery.success) return this.notify.success('Test event delivered');
+          const reason = getDeliveryResultReason(delivery);
+          this.notify.failure("Couldn't deliver test event" + (reason ? `: ${reason}` : ''), null);
+        },
+        error: (err: unknown) => this.notify.failure("Couldn't send test event", err),
       });
   }
 
