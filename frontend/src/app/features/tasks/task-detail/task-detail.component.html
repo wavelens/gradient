@@ -143,7 +143,8 @@
                 @if (tally.overall > 0) {
                   <gr-segmented-bar class="eval-bar" [counts]="sel.builds" />
                   <span>
-                    <b>{{ tally.done }} / {{ tally.total }}</b> builds
+                    <b>{{ tally.done }} / {{ plural(tally.total, 'build') }}</b>
+                    @if (tally.failed > 0) { · <span class="tally-failed">{{ tally.failed }} failed</span> }
                     @if (tally.overall > tally.total) { <span class="tally-overall">of {{ tally.overall }} total</span> }
                   </span>
                 }
@@ -210,7 +211,7 @@
                     @if (!sel.only_evaluate) {
                       <gr-segmented-bar class="pkg-bar" [counts]="counts" />
                       @let depTally = buildTally(counts);
-                      <span class="pkg-deps" [title]="'Builds in total, including substituted ones: ' + depTally.overall">{{ depTally.done }} / {{ depTally.total }} builds</span>
+                      <span class="pkg-deps" [title]="'Builds in total, including substituted ones: ' + depTally.overall">{{ depTally.done }} / {{ plural(depTally.total, 'build') }}@if (depTally.failed > 0) { · <span class="tally-failed">{{ depTally.failed }} failed</span> }</span>
                       <span class="pkg-time">
                         {{ pkgDuration(ep) }}
                         @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }

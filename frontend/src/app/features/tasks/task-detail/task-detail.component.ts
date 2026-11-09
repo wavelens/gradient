@@ -45,7 +45,7 @@ import { firstLine } from '@features/evaluations/evaluation-summary/summary-text
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { links } from '@shared/routing';
 import { removeAnsiEscapeSequences } from '@shared/log';
-import { CurrentTimeSignal, formatDuration, monthDayClockTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { CurrentTimeSignal, formatDuration, monthDayClockTime, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import {
   StarTarget,
   TaskDetailsResponse,
@@ -841,6 +841,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   protected readonly buildTally = buildTally;
+  protected readonly plural = plural;
 
   /// Dep-closure counts plus the entry point's own build, so a package with
   /// few or no deps still shows its own progress in the bar.
