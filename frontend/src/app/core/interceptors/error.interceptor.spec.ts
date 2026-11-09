@@ -11,7 +11,7 @@ import { MessageService } from '@gradient/ui/ui';
 import { Observable, defer, firstValueFrom, of, throwError } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
 import { errorInterceptor, MAX_THROTTLE_WAIT_MS } from './error.interceptor';
-import { asSessionProbe } from './request-context';
+import { asSectionRequest, asSessionProbe } from './request-context';
 import { PageRenderTracker } from './page-render-tracker.service';
 
 interface Fixture {
@@ -185,6 +185,12 @@ describe('errorInterceptor on an unavailable server', () => {
   it('keeps the page for a failing poll sent after the page rendered', async () => {
     const { navigate } = setup({}, false);
     await send(failWith(503)).catch(() => undefined);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed section read on the page', async () => {
+    const { navigate } = setup();
+    await send(failWith(503), asSectionRequest()).catch(() => undefined);
     expect(navigate).not.toHaveBeenCalled();
   });
 

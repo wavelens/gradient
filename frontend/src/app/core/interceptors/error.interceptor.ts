@@ -10,7 +10,7 @@ import { PRIMARY_OUTLET, Router } from '@angular/router';
 import { MessageService } from '@gradient/ui/ui';
 import { Observable, catchError, retry, throwError, timer } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
-import { SESSION_PROBE } from './request-context';
+import { SECTION_REQUEST, SESSION_PROBE } from './request-context';
 import { PageRenderTracker } from './page-render-tracker.service';
 
 const THROTTLE_RETRIES = 3;
@@ -68,7 +68,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
       return;
     }
     const status = error.status === 0 ? 503 : error.status;
-    if (pageRead && ERROR_PAGES.has(status)) {
+    if (pageRead && ERROR_PAGES.has(status) && !req.context.get(SECTION_REQUEST)) {
       router.navigate([`/error/${status}`], { queryParams: { from: pageUrl(router) }, skipLocationChange: true });
     }
   };

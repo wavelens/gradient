@@ -6,6 +6,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
+import { asSectionRequest } from '@core/interceptors/request-context';
 import { ApiService } from './api.service';
 import { Activity, DashboardStats, Filter, TasksPage, Rail } from '@core/models';
 
@@ -14,19 +15,19 @@ export class DashboardService {
   private api = inject(ApiService);
 
   stats(): Observable<DashboardStats> {
-    return this.api.get<DashboardStats>('dashboard/stats');
+    return this.api.get<DashboardStats>('dashboard/stats', asSectionRequest());
   }
 
   tasks(filter: Filter | null, page: number, perPage: number, history: number): Observable<TasksPage> {
     const chosen = filter ? `filter=${filter}&` : '';
-    return this.api.get<TasksPage>(`dashboard/tasks?${chosen}page=${page}&per_page=${perPage}&history=${history}`);
+    return this.api.get<TasksPage>(`dashboard/tasks?${chosen}page=${page}&per_page=${perPage}&history=${history}`, asSectionRequest());
   }
 
   activity(): Observable<Activity> {
-    return this.api.get<Activity>(`dashboard/activity?tz_offset_minutes=${-new Date().getTimezoneOffset()}`);
+    return this.api.get<Activity>(`dashboard/activity?tz_offset_minutes=${-new Date().getTimezoneOffset()}`, asSectionRequest());
   }
 
   rail(): Observable<Rail> {
-    return this.api.get<Rail>('dashboard/rail');
+    return this.api.get<Rail>('dashboard/rail', asSectionRequest());
   }
 }
