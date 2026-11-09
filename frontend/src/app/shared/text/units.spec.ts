@@ -41,6 +41,13 @@ describe('formatDuration', () => {
     expect(formatDuration(2 * 86_400_000 + 3_600_000)).toBe('2d 1h');
   });
 
+  it('keeps one decimal under 10 ms so sub-millisecond axis ticks stay distinct', () => {
+    expect(formatDuration(0)).toBe('0 ms');
+    expect(formatDuration(0.24)).toBe('0.2 ms');
+    expect(formatDuration(1.5)).toBe('1.5 ms');
+    expect(formatDuration(12.4)).toBe('12 ms');
+  });
+
   it('shows a dash for a missing value', () => {
     expect(formatDuration(null)).toBe('-');
   });

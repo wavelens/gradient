@@ -29,6 +29,7 @@ const pad = (n: number) => n.toString().padStart(2, '0');
 
 export function formatDuration(ms: Maybe): string {
   if (ms == null || !Number.isFinite(ms)) return '-';
+  if (ms < 10) return `${Number(ms.toFixed(1))} ms`;
   if (ms < 1000) return `${Math.round(ms)} ms`;
   const secs = ms / 1000;
   if (secs < 60) return `${secs.toFixed(1)} s`;
