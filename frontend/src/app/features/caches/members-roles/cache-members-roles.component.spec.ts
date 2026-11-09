@@ -253,7 +253,7 @@ describe('CacheMembersRolesComponent - confirmed removals', () => {
     await settled(fixture);
     fixture.componentInstance.openAddMemberDialog();
     const roleRow = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row')).find((row) => row.textContent?.includes('Built-in'));
-    expect(roleRow?.textContent).toContain('1 member ·');
+    expect(roleRow?.textContent).toContain('1 member, 1 invitation ·');
     expect(fixture.componentInstance.newMember.role).toBe('Admin');
   });
 });

@@ -104,7 +104,7 @@
       </gr-settings-section>
     }
 
-    <app-team-grants kind="cache" [name]="cacheName" [cacheWithViewerPermissions]="cache()" [roles]="roleNames()" [canEdit]="access().canEdit && !access().managed" />
+    <app-team-grants kind="cache" [name]="cacheName" [cacheWithViewerPermissions]="cache()" [roles]="roleNames()" [canEdit]="access().canEdit && !access().managed" (teamGrantsWithMemberRoles)="teamGrantsReceivedForRoleHolderCount.set($event)" />
 
     <!-- Roles -->
     <gr-settings-section title="Roles" [card]="false">
@@ -132,13 +132,13 @@
       >
           <gr-row-list>
             @for (role of roles(); track role.id) {
-              @let memberCount = memberCountByRoleName()[role.name] ?? 0;
+              @let holders = holderSummaryByRoleName()[role.name];
               <gr-row icon="shield">
                 {{ role.name }}
                 @if (role.builtin) {
                   <gr-badge>Built-in</gr-badge>
                 }
-                <span slot="meta">{{ plural(memberCount, 'member') }} · {{ rolePermissionLabel(role) }}</span>
+                <span slot="meta">{{ holders.text }} · {{ rolePermissionLabel(role) }}</span>
                 <div slot="actions">
                   @if (!role.builtin) {
                     <button
@@ -159,8 +159,8 @@
                       icon="delete"
                       severity="danger"
                       [attr.aria-label]="'Delete role ' + role.name"
-                      [disabled]="savingRole() || deletingRole() || memberCount > 0"
-                      [grTooltip]="memberCount > 0 ? 'Assign another role to members of this role before deleting.' : ''"
+                      [disabled]="savingRole() || deletingRole() || holders.total > 0"
+                      [grTooltip]="holders.total > 0 ? 'Assign another role to the members, teams, and invitations of this role before deletion.' : ''"
                       [appManagedDisable]="roleAccess()"
                       (click)="deleteRole(role)"
                     ></button>

@@ -308,6 +308,13 @@ describe('MembersRolesComponent - writes', () => {
     expect(rowText('auditor')?.textContent).toContain('0 members');
     expect(deleteButton('releaser').disabled).toBe(true);
     expect(deleteButton('auditor').disabled).toBe(false);
+
+    fixture.componentInstance.teamGrantsReceivedForRoleHolderCount.set([
+      { team: 'research', display_name: 'Research', role: 'auditor', users: true, workers: false, pending: false },
+    ]);
+    fixture.detectChanges();
+    expect(rowText('auditor')?.textContent).toContain('0 members, 1 team');
+    expect(deleteButton('auditor').disabled).toBe(true);
   });
 });
 

@@ -171,6 +171,14 @@ describe('TeamGrantsComponent', () => {
     });
   });
 
+  it('hands the grants with member roles to the page after each load', () => {
+    const { component } = setup('project');
+    const received = vi.fn();
+    component.teamGrantsWithMemberRoles.subscribe(received);
+    component.load();
+    expect(received).toHaveBeenCalledWith([grantOf('platform'), grantOf('docs')]);
+  });
+
   it('links only the teams the viewer can open', () => {
     const { fixture } = setup('project', 'users');
     const row = (name: string) =>

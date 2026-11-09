@@ -80,6 +80,7 @@ export class TeamGrantsComponent implements OnInit {
   roles = input<string[]>([]);
   canEdit = input(false);
   changed = output<void>();
+  teamGrantsWithMemberRoles = output<TeamGrantEntry[]>();
 
   part = computed<GrantedPart>(() => (this.kind() === 'cache' ? 'users' : this.grants()));
   roleOptions = computed(() => this.roles().map((role) => ({ label: role, value: role })));
@@ -116,6 +117,7 @@ export class TeamGrantsComponent implements OnInit {
     grants.subscribe({
       next: (items) => {
         this.allGrants.set(items);
+        this.teamGrantsWithMemberRoles.emit(items.filter((grant) => grant.users));
         this.loading.set(false);
       },
       error: (error: unknown) => {

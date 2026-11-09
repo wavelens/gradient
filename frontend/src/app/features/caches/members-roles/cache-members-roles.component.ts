@@ -36,7 +36,7 @@ import {
   ManagedDisableDirective,
   ServerConfigurationManagedBannerComponent,
   compareRoleNamesByBuiltInAccessThenName,
-  countMembersByRoleName,
+  countRoleHoldersAndBuildBreakdownText,
   formatMemberNameForConfirmDialog,
   getMemberRemovalConsequenceSentence,
   injectSaveMemberRoleChangeWithOwnRoleConfirmation,
@@ -56,8 +56,9 @@ import {
   RoleResponse_CacheRoleOwner,
   PermissionEntry,
   PendingInvitationItem,
+  TeamGrantEntry,
 } from '@core/models';
-import { permissionLabel, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 
 interface RoleFormState {
   name: string;
@@ -141,12 +142,18 @@ export class CacheMembersRolesComponent implements OnInit {
   newMember = { user: '', role: '' };
   roleForm: RoleFormState = { name: '', permissions: {} };
 
-  memberCountByRoleName = computed(() => countMembersByRoleName(this.members()));
+  teamGrantsReceivedForRoleHolderCount = signal<TeamGrantEntry[]>([]);
+  holderSummaryByRoleName = computed(() =>
+    countRoleHoldersAndBuildBreakdownText(this.roleNames(), {
+      members: this.members(),
+      teamGrants: this.teamGrantsReceivedForRoleHolderCount(),
+      invitations: this.invitations(),
+    }),
+  );
   soleAdminUsername = computed(() => {
     const admins = this.members().filter((member) => member.name === 'Admin');
     return admins.length === 1 ? admins[0].id : null;
   });
-  readonly plural = plural;
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => merge(

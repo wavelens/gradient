@@ -37,7 +37,7 @@ import {
   ManagedDisableDirective,
   ServerConfigurationManagedBannerComponent,
   compareRoleNamesByBuiltInAccessThenName,
-  countMembersByRoleName,
+  countRoleHoldersAndBuildBreakdownText,
   formatMemberNameForConfirmDialog,
   getMemberRemovalConsequenceSentence,
   injectSaveMemberRoleChangeWithOwnRoleConfirmation,
@@ -51,9 +51,10 @@ import {
   RoleResponse_ProjectRoleOwner,
   PermissionEntry,
   PendingInvitationItem,
+  TeamGrantEntry,
   PatchRoleRequest,
 } from '@core/models';
-import { permissionLabel, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 import { Observable, finalize } from 'rxjs';
 
@@ -140,8 +141,14 @@ export class MembersRolesComponent implements OnInit {
   newMember = { user: '', role: '' };
   roleForm: RoleFormState = { name: '', permissions: {} };
 
-  memberCountByRoleName = computed(() => countMembersByRoleName(this.members()));
-  readonly plural = plural;
+  teamGrantsReceivedForRoleHolderCount = signal<TeamGrantEntry[]>([]);
+  holderSummaryByRoleName = computed(() =>
+    countRoleHoldersAndBuildBreakdownText(this.roleNames(), {
+      members: this.members(),
+      teamGrants: this.teamGrantsReceivedForRoleHolderCount(),
+      invitations: this.invitations(),
+    }),
+  );
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';

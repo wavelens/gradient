@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { plural } from '@shared/text';
+
 const builtInRoleNamesByAccess = ['View', 'Write', 'Admin'];
 
 export function compareRoleNamesByBuiltInAccessThenName(a: string, b: string): number {
@@ -14,8 +16,29 @@ export function compareRoleNamesByBuiltInAccessThenName(a: string, b: string): n
   return rank(a) - rank(b) || a.localeCompare(b);
 }
 
-export function countMembersByRoleName(members: readonly { name: string }[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const member of members) counts[member.name] = (counts[member.name] ?? 0) + 1;
-  return counts;
+export interface RoleHolderCountResult {
+  total: number;
+  text: string;
+}
+
+export function countRoleHoldersAndBuildBreakdownText(
+  roleNames: readonly string[],
+  holders: {
+    members: readonly { name: string }[];
+    teamGrants: readonly { role?: string | null }[];
+    invitations: readonly { role: string }[];
+  },
+): Record<string, RoleHolderCountResult> {
+  const countOf = (roles: readonly (string | null | undefined)[], roleName: string) => roles.filter((role) => role === roleName).length;
+  return Object.fromEntries(
+    roleNames.map((roleName) => {
+      const members = countOf(holders.members.map((member) => member.name), roleName);
+      const teams = countOf(holders.teamGrants.map((grant) => grant.role), roleName);
+      const invitations = countOf(holders.invitations.map((invitation) => invitation.role), roleName);
+      const parts = [plural(members, 'member')];
+      if (teams) parts.push(plural(teams, 'team'));
+      if (invitations) parts.push(plural(invitations, 'invitation'));
+      return [roleName, { total: members + teams + invitations, text: parts.join(', ') }];
+    }),
+  );
 }

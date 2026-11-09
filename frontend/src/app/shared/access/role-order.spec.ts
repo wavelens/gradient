@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { compareRoleNamesByBuiltInAccessThenName, countMembersByRoleName } from './role-order';
+import { compareRoleNamesByBuiltInAccessThenName, countRoleHoldersAndBuildBreakdownText } from './role-order';
 import { formatMemberNameForConfirmDialog } from './member-name';
 
 describe('member and role helpers', () => {
@@ -13,9 +13,17 @@ describe('member and role helpers', () => {
     expect(names.sort(compareRoleNamesByBuiltInAccessThenName)).toEqual(['View', 'Write', 'Admin', 'auditor', 'releaser']);
   });
 
-  it('counts the members of each role', () => {
-    const members = [{ name: 'View' }, { name: 'releaser' }, { name: 'View' }];
-    expect(countMembersByRoleName(members)).toEqual({ View: 2, releaser: 1 });
+  it('counts members, team grants and invitations of each role', () => {
+    const counts = countRoleHoldersAndBuildBreakdownText(['View', 'releaser', 'Admin'], {
+      members: [{ name: 'View' }, { name: 'releaser' }, { name: 'View' }],
+      teamGrants: [{ role: 'View' }, { role: null }],
+      invitations: [{ role: 'View' }, { role: 'Admin' }],
+    });
+    expect(counts).toEqual({
+      View: { total: 4, text: '2 members, 1 team, 1 invitation' },
+      releaser: { total: 1, text: '1 member' },
+      Admin: { total: 1, text: '0 members, 1 invitation' },
+    });
   });
 
   it('names a member by display name and username, or by username alone', () => {
