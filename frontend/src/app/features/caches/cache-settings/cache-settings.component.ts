@@ -227,15 +227,16 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
       if (values[field] !== this.saved[field]) Object.assign(patch, { [field]: values[field] });
     }
     const visibilityChanged = values.public !== this.saved.public;
-    const save = () =>
-      (Object.keys(patch).length > 0 ? this.cachesService.updateCache(this.cacheName, patch) : of('')).pipe(
+    const save = () => {
+      this.saving.set(true);
+      return (Object.keys(patch).length > 0 ? this.cachesService.updateCache(this.cacheName, patch) : of('')).pipe(
         switchMap(() => {
           if (!visibilityChanged) return of('');
           return values.public ? this.cachesService.setCachePublic(this.cacheName) : this.cachesService.setCachePrivate(this.cacheName);
         }),
       );
+    };
 
-    this.saving.set(true);
     this.saveError.set(null);
     this.saveSettingsWithPrivateToPublicConfirmation({
       kind: 'cache',

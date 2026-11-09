@@ -191,6 +191,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
       Object.entries(fields).filter(([key, value]) => saved[key as keyof ProjectForm] !== value),
     );
     const save = () => {
+      this.saving.set(true);
       const requests: Observable<unknown>[] = [];
       if (Object.keys(patch).length > 0) {
         requests.push(this.projectsService.updateProject(this.projectName, patch));
@@ -201,7 +202,6 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
       return concat(...requests).pipe(toArray());
     };
 
-    this.saving.set(true);
     this.saveError.set(null);
     this.saveSettingsWithPrivateToPublicConfirmation({
       kind: 'project',

@@ -265,6 +265,22 @@ describe('CacheSettingsComponent - edits', () => {
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Make cache public', target: 'Demo' }));
   });
 
+  it('shows no Save spinner while the make-public confirmation waits', () => {
+    const fixture = setup(admin);
+    const { setCachePublic } = stubWrites(fixture);
+    let pending: ConfirmRequest | undefined;
+    confirm.mockImplementation((request: ConfirmRequest) => {
+      pending = request;
+      return new Subject();
+    });
+    edit(fixture, { description: 'Shared Build', public: true });
+    saveButton(fixture).click();
+    expect(fixture.componentInstance.saving()).toBe(false);
+    pending?.action().subscribe();
+    expect(setCachePublic).toHaveBeenCalledWith('demo');
+    expect(fixture.componentInstance.saving()).toBe(true);
+  });
+
   it('sends nothing when making the cache public is cancelled', () => {
     const fixture = setup(admin);
     const { updateCache, setCachePublic } = stubWrites(fixture);
