@@ -15,8 +15,8 @@ use connector::api::RegisterWorkerRequest;
 pub enum Commands {
     /// Register a new worker under the selected project
     Register {
-        /// Persistent worker identity string
-        worker_id: String,
+        /// Worker UUID
+        worker_id: uuid::Uuid,
         /// Human-readable display name shown in the workers list
         #[arg(short = 'n', long = "display-name")]
         display_name: String,
@@ -56,7 +56,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .create(
                     &project,
                     RegisterWorkerRequest {
-                        worker_id,
+                        worker_id: worker_id.to_string(),
                         display_name,
                         url,
                         token,
@@ -96,11 +96,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.human("No workers registered.");
                     } else {
                         for w in workers {
-                            let status = if w.live.is_some() {
-                                "online"
-                            } else {
-                                "offline"
-                            };
+                            let status = if w.connected { "online" } else { "offline" };
                             let url_part =
                                 w.url.map(|u| format!(" (url: {})", u)).unwrap_or_default();
                             out.human(format!(

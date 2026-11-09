@@ -5,7 +5,7 @@
  */
 
 use crate::commands::build::{BuildParams, TrackedFile, result_link_name};
-use crate::config::{ConfigKey, load_config};
+use crate::config::saved_login_for_invocation;
 use crate::error::{CliError, FileAction};
 use crate::input::server_base;
 use crate::output::{ExitKind, Output};
@@ -265,13 +265,10 @@ async fn private_cache_netrc(
     server: &str,
     out: Output,
 ) -> Option<tempfile::NamedTempFile> {
-    if client.caches().public(cache).await.unwrap_or(false) {
+    if client.caches().get(cache).await.is_ok_and(|c| c.public) {
         return None;
     }
-    let token = load_config()
-        .get(&ConfigKey::AuthToken)
-        .and_then(|v| v.clone())
-        .filter(|t| !t.is_empty())?;
+    let token = saved_login_for_invocation().token()?;
     let host = crate::netrc::machine_host(server);
     let file = crate::netrc::temp_file(&host, &token)
         .unwrap_or_else(|e| out.err(ExitKind::Api, format!("Failed to write netrc: {e}")));

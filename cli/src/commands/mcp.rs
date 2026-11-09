@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::config::{ConfigKey, load_config};
+use crate::config::{
+    ConfigKey, load_and_migrate_login_config_file, login_name_from_flag_env_or_config,
+    saved_login_for_invocation,
+};
 use crate::input::client_from_config;
 use crate::output::Output;
 use crate::tui::watch::eval_is_terminal;
@@ -25,16 +28,26 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::Instant;
 
-const INSTRUCTIONS: &str = "Read-only access to a Gradient CI instance. Start from `list_projects` \
-or `list_tasks`, drill into a task with `list_evaluations`, then `list_builds` on an evaluation. \
-To diagnose a failure, fetch the derivation's output with `get_build_log`, or locate a message in \
-a long log with `search_build_log`. Arguments named `project`, `task`, `evaluation` and `build` \
-take the name or UUID as shown by the listing tools; `project` defaults to the project selected in \
-the user's Gradient CLI configuration.";
+const INSTRUCTIONS: &str = "Access to a Gradient CI instance. Start from `list_projects` or \
+`list_tasks`, drill into a task with `list_evaluations`, then `list_builds` on an evaluation. To \
+diagnose a failure, fetch the derivation's output with `get_build_log`, or locate a message in a long \
+log with `search_build_log`. Arguments named `project`, `task`, `evaluation` and `build` take the \
+name or UUID as shown by the listing tools; `project` defaults to the project selected in the user's \
+Gradient CLI configuration.";
 
-const CONTROL_INSTRUCTIONS: &str = " Control tools are enabled: `start_evaluation` queues an \
-evaluation and returns its UUID, `watch_evaluation` blocks until the evaluation finishes or \
-times out and returns each entry point's build status, `abort_evaluation` cancels one.";
+const CONTROL_INSTRUCTIONS: &str = "The control tools are enabled. `start_evaluation` can queue an \
+evaluation and return its UUID. `watch_evaluation` can block until completion or timeout and return \
+the build status for each entry point. `abort_evaluation` can cancel one evaluation. Everything else \
+(creating or editing projects, tasks, caches, workers, etc.) can go through `run_gradient_command`. \
+Pass CLI arguments for `gradient`. An example is [\"task\", \"create\", \"--name\", \"web\", ...]. \
+The command [\"task\", \"--help\"] can list the subcommands and flags of a command group. \
+`--project` and `--task` can select targets without changing the current selection.";
+
+const ALLOWED_GRADIENT_SUBCOMMANDS: &[&str] = &[
+    "project", "task", "cache", "worker", "builds", "logs", "status", "info",
+];
+const GRADIENT_COMMAND_TIMEOUT_SECONDS: Duration = Duration::from_secs(600);
+const CLI_OUTPUT_SIZE_BEFORE_TEMP_FILE_BYTES: usize = 16 * 1024;
 
 const INLINE_LOG_LINES: usize = 10;
 const WATCH_POLL: Duration = Duration::from_secs(5);
@@ -112,6 +125,12 @@ pub struct WatchArgs {
     timeout_seconds: Option<u64>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RunGradientCommandArgs {
+    /// Arguments after `gradient` (example: ["task", "create", "--name", "web"]). MCP tools append `--json`.
+    args: Vec<String>,
+}
+
 #[derive(Serialize)]
 struct WatchReport {
     evaluation: String,
@@ -132,6 +151,7 @@ struct EntryPointStatus {
 pub struct GradientMcp {
     client: Client,
     selected_project: Option<String>,
+    account_name: Option<String>,
     control: bool,
     tool_router: ToolRouter<Self>,
 }
@@ -140,7 +160,7 @@ pub struct GradientMcp {
 /// JSON-RPC protocol error.
 fn to_result<T: Serialize>(value: Result<T, ConnectorError>) -> Result<CallToolResult, ErrorData> {
     match value {
-        Ok(value) => match serde_json::to_string_pretty(&value) {
+        Ok(value) => match serde_json::to_string(&value) {
             Ok(text) => Ok(CallToolResult::success(vec![ContentBlock::text(text)])),
             Err(e) => Err(ErrorData::internal_error(format!("serialize: {e}"), None)),
         },
@@ -159,7 +179,7 @@ fn to_log_result(value: Result<String, ConnectorError>, start: u64) -> CallToolR
         return CallToolResult::success(vec![ContentBlock::text(log)]);
     }
 
-    match save_log(&log) {
+    match write_text_to_kept_temp_file_with_prefix_and_suffix("gradient-build-", ".log", &log) {
         Ok(path) => CallToolResult::success(vec![ContentBlock::text(format!(
             "{lines} log lines starting at line {start} saved to {}",
             path.display()
@@ -168,12 +188,16 @@ fn to_log_result(value: Result<String, ConnectorError>, start: u64) -> CallToolR
     }
 }
 
-fn save_log(log: &str) -> std::io::Result<PathBuf> {
+fn write_text_to_kept_temp_file_with_prefix_and_suffix(
+    prefix: &str,
+    suffix: &str,
+    text: &str,
+) -> std::io::Result<PathBuf> {
     let mut file = tempfile::Builder::new()
-        .prefix("gradient-build-")
-        .suffix(".log")
+        .prefix(prefix)
+        .suffix(suffix)
         .tempfile()?;
-    file.write_all(log.as_bytes())?;
+    file.write_all(text.as_bytes())?;
     let (_, path) = file.keep()?;
     Ok(path)
 }
@@ -192,7 +216,12 @@ fn to_error(e: ConnectorError) -> CallToolResult {
 
 #[tool_router(router = tool_router)]
 impl GradientMcp {
-    pub fn new(client: Client, selected_project: Option<String>, control: bool) -> Self {
+    pub fn new(
+        client: Client,
+        selected_project: Option<String>,
+        account_name: Option<String>,
+        control: bool,
+    ) -> Self {
         let mut tool_router = Self::tool_router();
         if control {
             tool_router += Self::control_router();
@@ -201,6 +230,7 @@ impl GradientMcp {
         Self {
             client,
             selected_project,
+            account_name,
             control,
             tool_router,
         }
@@ -353,6 +383,96 @@ impl GradientMcp {
             Err(failed) => Ok(failed),
         }
     }
+
+    #[tool(
+        description = "Run a `gradient` CLI command with `--json` and return its output. The first \
+                       argument is the command group (project, task, cache, worker, builds, logs, \
+                       status, info)."
+    )]
+    async fn run_gradient_command(
+        &self,
+        Parameters(RunGradientCommandArgs { args }): Parameters<RunGradientCommandArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let group = args.first().map(String::as_str).unwrap_or_default();
+        if !ALLOWED_GRADIENT_SUBCOMMANDS.contains(&group) {
+            let allowed = ALLOWED_GRADIENT_SUBCOMMANDS.join(", ");
+            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "`{group}` is not available here. Allowed command groups: {allowed}."
+            ))]));
+        }
+        if args
+            .iter()
+            .any(|arg| arg == "--account" || arg.starts_with("--account="))
+        {
+            return Ok(CallToolResult::error(vec![ContentBlock::text(
+                "`--account` is not available here. Commands run with the account this MCP server started with.",
+            )]));
+        }
+
+        let exe =
+            std::env::current_exe().map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let mut command = tokio::process::Command::new(exe);
+        command
+            .arg("--json")
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true);
+        if let Some(account) = &self.account_name {
+            command.env("GRADIENT_ACCOUNT", account);
+        }
+        let project_given = args
+            .iter()
+            .any(|arg| arg == "--project" || arg.starts_with("--project="));
+        if let Some(project) = self.selected_project.as_ref().filter(|_| !project_given) {
+            command.arg(format!("--project={project}"));
+        }
+
+        let output =
+            match tokio::time::timeout(GRADIENT_COMMAND_TIMEOUT_SECONDS, command.output()).await {
+                Ok(output) => output.map_err(|e| ErrorData::internal_error(e.to_string(), None))?,
+                Err(_) => {
+                    let command = args.join(" ");
+                    let seconds = GRADIENT_COMMAND_TIMEOUT_SECONDS.as_secs();
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                        "`gradient {command}` did not finish within {seconds} seconds."
+                    ))]));
+                }
+            };
+
+        let streams = if output.status.success() {
+            vec![output.stdout]
+        } else {
+            vec![output.stdout, output.stderr]
+        };
+        let text = streams
+            .iter()
+            .map(|stream| String::from_utf8_lossy(stream).trim().to_owned())
+            .filter(|stream| !stream.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let text = if text.len() > CLI_OUTPUT_SIZE_BEFORE_TEMP_FILE_BYTES {
+            match write_text_to_kept_temp_file_with_prefix_and_suffix(
+                "gradient-command-",
+                ".txt",
+                &text,
+            ) {
+                Ok(path) => {
+                    let lines = text.lines().count();
+                    let path = path.display();
+                    format!("{lines} output lines saved to {path}")
+                }
+                Err(e) => return Err(ErrorData::internal_error(e.to_string(), None)),
+            }
+        } else {
+            text
+        };
+
+        Ok(if output.status.success() {
+            CallToolResult::success(vec![ContentBlock::text(text)])
+        } else {
+            CallToolResult::error(vec![ContentBlock::text(text)])
+        })
+    }
 }
 
 impl GradientMcp {
@@ -467,7 +587,7 @@ impl GradientMcp {
 impl ServerHandler for GradientMcp {
     fn get_info(&self) -> ServerConfig {
         let instructions = if self.control {
-            format!("{INSTRUCTIONS}{CONTROL_INSTRUCTIONS}")
+            format!("{INSTRUCTIONS} {CONTROL_INSTRUCTIONS}")
         } else {
             INSTRUCTIONS.to_string()
         };
@@ -484,12 +604,10 @@ impl ServerHandler for GradientMcp {
 pub async fn run(control: bool) -> std::io::Result<()> {
     let out = Output::new(false);
     let client = client_from_config(out);
-    let selected_project = load_config()
-        .get(&ConfigKey::SelectedProject)
-        .and_then(|v| v.clone())
-        .filter(|p| !p.is_empty());
+    let selected_project = saved_login_for_invocation().get(ConfigKey::SelectedProject);
+    let account_name = login_name_from_flag_env_or_config(&load_and_migrate_login_config_file());
 
-    let service = GradientMcp::new(client, selected_project, control)
+    let service = GradientMcp::new(client, selected_project, account_name, control)
         .serve(stdio())
         .await
         .map_err(std::io::Error::other)?;

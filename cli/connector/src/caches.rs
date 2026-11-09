@@ -102,56 +102,6 @@ impl CachesApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn active(&self, cache: &str) -> Result<bool, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            &format!("caches/{cache}/active"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn set_active(&self, cache: &str, active: bool) -> Result<String, ConnectorError> {
-        let method = if active { Method::PUT } else { Method::DELETE };
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            method,
-            &format!("caches/{cache}/active"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn public(&self, cache: &str) -> Result<bool, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            &format!("caches/{cache}/public"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn set_public(&self, cache: &str, public: bool) -> Result<String, ConnectorError> {
-        let method = if public { Method::PUT } else { Method::DELETE };
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            method,
-            &format!("caches/{cache}/public"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
     pub async fn key(&self, cache: &str) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),

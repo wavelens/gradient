@@ -31,12 +31,22 @@ impl Display for FileAction {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
-    #[error("No project selected. Run `gradient project select <name>` first.")]
+    #[error(
+        "No project selected. Pass `--project <name>` or run `gradient project select <name>` first."
+    )]
     NoProjectSelected,
-    #[error("No task selected. Run `gradient task select <name>` first.")]
+    #[error("No task selected. Pass `--task <name>` or run `gradient task select <name>` first.")]
     NoTaskSelected,
     #[error("Server URL not set. Run `gradient login <url>` to set the server and authenticate.")]
     ServerNotSet,
+    #[error(
+        "A saved account named '{0}' does not exist. Run `gradient account list` to list saved accounts or run `gradient --account {0} login <url>` to add one."
+    )]
+    AccountNotFound(String),
+    #[error(
+        "No default account is set. Run `gradient account switch <name>` to choose one, or pass `--account <name>`."
+    )]
+    NoDefaultAccountSelected,
     #[error("Not logged in, or the session expired. Run `gradient login <url>` first.")]
     NotLoggedIn,
     #[error("Authentication expired before approval.")]
@@ -75,6 +85,8 @@ impl CliError {
             Self::NoProjectSelected
             | Self::NoTaskSelected
             | Self::ServerNotSet
+            | Self::AccountNotFound(_)
+            | Self::NoDefaultAccountSelected
             | Self::MissingArgument(_)
             | Self::EmptyField(_)
             | Self::NotAnInteger(_)

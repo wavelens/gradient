@@ -7,7 +7,6 @@ use crate::api::{
 };
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub enum CliPollOutcome {
@@ -15,21 +14,6 @@ pub enum CliPollOutcome {
     Expired,
     Denied,
     Token(String),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct VerifyEmailRequest {
-    pub token: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OidcLoginRequest {
-    pub redirect_uri: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OidcRedirect {
-    pub url: String,
 }
 
 pub struct AuthApi<'a>(pub(crate) &'a Client);
@@ -61,31 +45,6 @@ impl AuthApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn check_username(&self, username: &str) -> Result<bool, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            &format!("auth/check-username?username={}", username),
-            false,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn verify_email(&self, body: VerifyEmailRequest) -> Result<String, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::POST,
-            "auth/verify-email",
-            false,
-        )?
-        .json(&body);
-        http::decode(req.send().await?).await
-    }
-
     pub async fn resend_verification(
         &self,
         body: CheckUsernameRequest,
@@ -96,19 +55,6 @@ impl AuthApi<'_> {
             self.0.token(),
             Method::POST,
             "auth/resend-verification",
-            false,
-        )?
-        .json(&body);
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn oidc_login(&self, body: OidcLoginRequest) -> Result<OidcRedirect, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::POST,
-            "auth/oidc/login",
             false,
         )?
         .json(&body);

@@ -18,7 +18,6 @@ pub mod pull_requests;
 pub mod server;
 pub mod tasks;
 pub mod user;
-pub mod webhooks;
 pub mod workers;
 
 mod http;
@@ -101,9 +100,6 @@ impl Client {
     }
     pub fn user(&self) -> user::UserApi<'_> {
         user::UserApi(self)
-    }
-    pub fn webhooks(&self) -> webhooks::WebhooksApi<'_> {
-        webhooks::WebhooksApi(self)
     }
     pub fn workers(&self) -> workers::WorkersApi<'_> {
         workers::WorkersApi(self)

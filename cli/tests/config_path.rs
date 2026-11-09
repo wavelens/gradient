@@ -23,8 +23,8 @@ fn config_is_written_below_xdg_config_home() {
         .assert()
         .success();
 
-    let config = home.path().join("gradient").join("config.toml");
-    let contents = fs::read_to_string(&config).expect("config.toml below XDG_CONFIG_HOME");
+    let config = home.path().join("gradient").join("accounts.toml");
+    let contents = fs::read_to_string(&config).expect("accounts.toml below XDG_CONFIG_HOME");
     assert!(
         contents.contains("http://example.invalid"),
         "server not persisted: {contents}"

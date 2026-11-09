@@ -24,7 +24,7 @@ pub enum Commands {
     Show,
     /// Stream the logs of the selected task's last evaluation
     Log,
-    /// Create a task in the selected project with missing fields opened in $EDITOR
+    /// Create a task in the selected project with missing fields opened in $EDITOR, then select it unless `--json` is set
     Create {
         /// Name
         #[arg(short, long)]
@@ -93,6 +93,9 @@ pub async fn handle(cmd: Commands, out: Output) {
             };
 
             out.ok(&details);
+            if out.is_json() {
+                return;
+            }
             out.human("===== Task =====");
             out.human(format!("Name: {}", details.name));
             out.human(format!("Description: {}", details.description));
@@ -209,11 +212,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .await
             {
                 Ok(_) => {
-                    set_value(
-                        ConfigKey::SelectedTask,
-                        format!("{}/{}", project, name),
-                        true,
-                    );
+                    if !out.is_json() {
+                        set_value(ConfigKey::SelectedTask, format!("{project}/{name}"), true);
+                    }
                     out.ok(&serde_json::json!({"created": true}));
                     out.human("Task created.");
                 }
@@ -280,7 +281,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     &project,
                     &task,
                     PatchTaskRequest {
-                        name: Some(input.get("Name").into()),
+                        name: (input.get("Name") != task).then(|| input.get("Name").into()),
                         display_name: Some(input.get("Display Name")),
                         description: Some(input.get("Description")),
                         repository: Some(input.get("Repository")),
@@ -291,6 +292,15 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .await
             {
                 Ok(_) => {
+                    let renamed = input.get("Name");
+                    if renamed != task {
+                        let old = format!("{project}/{task}");
+                        update_or_create_saved_login_in_config_file(|login| {
+                            if login.selected_task.as_deref() == Some(old.as_str()) {
+                                login.selected_task = Some(format!("{project}/{renamed}"));
+                            }
+                        });
+                    }
                     out.ok(&serde_json::json!({"updated": true}));
                     out.human("Task updated.");
                 }

@@ -8,12 +8,6 @@ use crate::api::{
 };
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TaskIntegration {
-    pub integration_id: Option<String>,
-}
 
 pub struct TasksApi<'a>(pub(crate) &'a Client);
 
@@ -227,22 +221,6 @@ impl TasksApi<'_> {
             self.0.token(),
             Method::DELETE,
             &format!("tasks/{project}/{proj}/active"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn integration(
-        &self,
-        project: &str,
-        proj: &str,
-    ) -> Result<TaskIntegration, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            &format!("tasks/{project}/{proj}/integration"),
             true,
         )?;
         http::decode(req.send().await?).await

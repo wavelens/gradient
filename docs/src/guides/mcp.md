@@ -17,7 +17,7 @@ Any [Model Context Protocol](https://modelcontextprotocol.io) client, such as Cl
 gradient login https://gradient.example.com
 ```
 
-Tool calls execute with the identity of the logged-in user. Each call has access only to that user's projects. To set a default project for commands that accept one, run `gradient project select <name>`.
+Tool calls execute with the identity of the logged-in user. Each call has access only to that user's projects. To set a default project for commands that accept one, run `gradient project select <name>`. The server uses the default account. To connect an assistant to another account, start it with `gradient --account <name> mcp`.
 
 ## 2. Add the Server to the Client
 
@@ -70,6 +70,7 @@ With `gradient mcp --control`, the assistant can act on CI. Project permissions 
 | `start_evaluation` | Start an evaluation for a task, optionally pinned to a commit |
 | `abort_evaluation` | Abort all running and queued builds of an evaluation |
 | `watch_evaluation` | Block until an evaluation finishes, up to `timeout_seconds` (default 600, max 3600) |
+| `run_gradient_command` | Run any `gradient` command from the groups `project`, `task`, `cache`, `worker`, `builds`, `logs`, `status` and `info`, for example to create a task. The output is JSON. The assistant discovers the commands through `--help`, so these rare actions add no tool definitions to its context |
 
 Without `--control`, the server runs in read-only mode.
 

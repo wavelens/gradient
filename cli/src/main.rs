@@ -16,6 +16,21 @@ mod tui;
 
 use commands::base;
 
+#[cfg(unix)]
+fn reset_sigpipe_to_default() {
+    unsafe extern "C" {
+        fn signal(signum: i32, handler: usize) -> usize;
+    }
+    const SIGPIPE: i32 = 13;
+    const SIG_DFL: usize = 0;
+    // Without this, writing to a closed pipe such as `gradient account list | head -1` panics instead of exiting quietly.
+    unsafe {
+        signal(SIGPIPE, SIG_DFL);
+    }
+}
+
 fn main() -> std::io::Result<()> {
+    #[cfg(unix)]
+    reset_sigpipe_to_default();
     base::run()
 }

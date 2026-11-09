@@ -24,21 +24,18 @@ pub fn selected_task(out: Output) -> (String, String) {
 }
 
 pub fn server_base(out: Output) -> String {
-    load_config()
-        .get(&ConfigKey::Server)
-        .and_then(|v| v.clone())
-        .unwrap_or_else(|| out.fail(CliError::ServerNotSet))
+    saved_login_for_invocation()
+        .server()
+        .unwrap_or_else(|| match account_name_for_command() {
+            Err(e) => out.fail(e),
+            Ok(_) => out.fail(CliError::ServerNotSet),
+        })
 }
 
 pub fn client_from_config(out: Output) -> Client {
-    let cfg = load_config();
     let server = server_base(out);
-    let token = cfg
-        .get(&ConfigKey::AuthToken)
-        .and_then(|v| v.clone())
-        .filter(|t| !t.is_empty());
     let mut b = Client::builder().base_url(server);
-    if let Some(t) = token {
+    if let Some(t) = saved_login_for_invocation().token() {
         b = b.token(t);
     }
     b.build()
@@ -73,6 +70,18 @@ pub fn handle_input(fields: Vec<(String, Option<String>)>, skip: bool, out: Outp
         if let Some(values) = prefilled {
             return Inputs { values, out };
         }
+    }
+
+    if out.is_json() || !io::stdin().is_terminal() {
+        if let Some((field, _)) = fields.iter().find(|(_, value)| value.is_none()) {
+            let flag = field.to_lowercase().replace(' ', "-");
+            out.err(ExitKind::Usage, format!("No argument: --{flag}."));
+        }
+        let values = fields
+            .into_iter()
+            .map(|(field, value)| (field, value.unwrap_or_default()))
+            .collect();
+        return Inputs { values, out };
     }
 
     let draft: String = fields
@@ -140,6 +149,9 @@ fn parse_edited(
 }
 
 pub fn ask_for_secret(prompt: &str, out: Output) -> String {
+    if out.is_json() {
+        out.fail(CliError::EmptyField(prompt.to_owned()));
+    }
     print!("{}: ", prompt);
     flush_stdout(out);
 
@@ -158,6 +170,9 @@ pub fn ask_for_password(out: Output) -> String {
 }
 
 pub fn ask_for_input(prompt: &str, out: Output) -> String {
+    if out.is_json() {
+        out.fail(CliError::EmptyField(prompt.to_owned()));
+    }
     print!("{}: ", prompt);
     flush_stdout(out);
 

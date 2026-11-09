@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    ApiKeyInfo, AuditLogEntry, CreateApiKeyRequest, PaginatedSessionInfo, PatchUserSettingsRequest,
-    UserInfoResponse, UserSearchResult,
+    ApiKeyInfo, AuditLogEntry, CreateApiKeyRequest, PatchUserSettingsRequest, UserInfoResponse,
 };
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
@@ -89,30 +88,6 @@ impl UserApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn get_key(&self, api_id: &str) -> Result<ApiKeyInfo, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            &format!("user/keys/{api_id}"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn delete_key(&self, api_id: &str) -> Result<String, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::DELETE,
-            &format!("user/keys/{api_id}"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
     pub async fn revoke_key(&self, api_id: &str) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
@@ -120,18 +95,6 @@ impl UserApi<'_> {
             self.0.token(),
             Method::POST,
             &format!("user/keys/{api_id}/revoke"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn sessions(&self) -> Result<PaginatedSessionInfo, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            "user/sessions",
             true,
         )?;
         http::decode(req.send().await?).await
@@ -156,18 +119,6 @@ impl UserApi<'_> {
             self.0.token(),
             Method::GET,
             "user/audit-log",
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn search(&self, query: &str) -> Result<Vec<UserSearchResult>, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            &format!("user/search?q={query}"),
             true,
         )?;
         http::decode(req.send().await?).await

@@ -22,6 +22,5 @@ async fn all_accessors_compile() {
     let _ = client.tasks();
     let _ = client.server();
     let _ = client.user();
-    let _ = client.webhooks();
     let _ = client.workers();
 }

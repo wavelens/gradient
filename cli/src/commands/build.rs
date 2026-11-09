@@ -5,9 +5,8 @@
  */
 
 use crate::commands::attr_spec;
-use crate::config::*;
 use crate::error::CliError;
-use crate::input::client_from_config;
+use crate::input::{client_from_config, selected_project};
 use crate::output::{ExitKind, Output};
 use crate::tui::watch::eval_is_terminal;
 use connector::ConnectorError;
@@ -28,13 +27,12 @@ pub(crate) struct BuildParams {
 
 pub async fn handle_build(
     params: BuildParams,
-    project: Option<String>,
     background: bool,
     quiet: bool,
     no_link: bool,
     out: Output,
 ) {
-    let (client, started) = submit_build_request(params, project, quiet, out).await;
+    let (client, started) = submit_build_request(params, quiet, out).await;
     let evaluation = started.evaluation.to_string();
 
     if background {
@@ -81,7 +79,6 @@ pub async fn handle_build(
 
 pub(crate) async fn submit_build_request(
     mut params: BuildParams,
-    project: Option<String>,
     quiet: bool,
     out: Output,
 ) -> (connector::Client, DispatchResponse) {
@@ -92,17 +89,7 @@ pub(crate) async fn submit_build_request(
         out.fail(CliError::NotLoggedIn);
     }
 
-    let project = project
-        .or_else(|| get_value(ConfigKey::SelectedProject, true))
-        .unwrap_or_else(|| {
-            if !quiet {
-                out.progress(
-                    "Project must be set for build command. Use 'gradient project select <name>' \
-                     (it is selected automatically on `gradient login`).",
-                );
-            }
-            exit(1);
-        });
+    let project = selected_project(out);
 
     params.target = params.target.take().map(|raw| {
         let system = params

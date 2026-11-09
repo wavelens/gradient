@@ -3,7 +3,7 @@
 
 use crate::api::{BuildGraph, BuildProduct, BuildWithOutputs};
 use crate::{Client, ConnectorError, http};
-use futures::stream::Stream;
+use futures::stream::{Stream, StreamExt};
 use reqwest::Method;
 
 pub struct BuildsApi<'a>(pub(crate) &'a Client);
@@ -26,14 +26,34 @@ impl BuildsApi<'_> {
         id: &str,
     ) -> Result<impl Stream<Item = Result<String, ConnectorError>> + use<>, ConnectorError> {
         let req = http::request(
-            self.0.stream_http(),
+            self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
             &format!("builds/{id}/log"),
             true,
         )?;
-        http::json_lines(req.send().await?).await
+        Ok(
+            futures::stream::once(std::future::ready(Ok(http::decode::<String>(
+                req.send().await?,
+            )
+            .await?)))
+            .chain(
+                http::json_lines(
+                    http::request(
+                        self.0.stream_http(),
+                        self.0.base_url(),
+                        self.0.token(),
+                        Method::POST,
+                        &format!("builds/{id}/log"),
+                        true,
+                    )?
+                    .send()
+                    .await?,
+                )
+                .await?,
+            ),
+        )
     }
 
     pub async fn log_lines(

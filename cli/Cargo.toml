@@ -62,7 +62,7 @@ harmonia-utils-hash  = { git = "https://github.com/nix-community/harmonia.git", 
 zstd                 = { version = "0.14", default-features = false, features = ["zstdmt"] }
 
 # CLI surface
-clap          = { version = "4.6", features = ["derive", "unstable-ext"] }
+clap          = { version = "4.6", features = ["derive", "env", "unstable-ext"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
 crossterm     = { version = "0.29" }
 ratatui       = { version = "0.30" }
@@ -137,6 +137,7 @@ tempfile      = { workspace = true }
 thiserror     = { workspace = true }
 tokio         = { workspace = true }
 toml          = { workspace = true }
+uuid          = { workspace = true }
 
 gradient-eval         = { workspace = true, optional = true }
 harmonia-file-nar     = { workspace = true, optional = true }

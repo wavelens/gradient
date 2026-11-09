@@ -8,7 +8,7 @@ use crate::commands::cache_nar;
 use crate::commands::cache_upload;
 use crate::commands::completion;
 use crate::error::{CliError, FileAction};
-use crate::input::{client_from_config, handle_input};
+use crate::input::{ask_for_secret, client_from_config, handle_input};
 use crate::output::{ExitKind, Output};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
@@ -265,17 +265,8 @@ pub async fn handle(cmd: Commands, out: Output) {
         } => {
             let token = match token {
                 Some(t) if !t.is_empty() => t,
-                _ => {
-                    print!("API key (GRAD…): ");
-                    std::io::Write::flush(&mut std::io::stdout()).ok();
-                    let entered = rpassword::read_password().unwrap_or_else(|e| {
-                        out.fail(CliError::ReadInput("API key".into(), e));
-                    });
-                    if entered.is_empty() {
-                        out.fail(CliError::EmptyField("API key".into()));
-                    }
-                    entered
-                }
+                _ if out.is_json() => out.fail(CliError::MissingArgument("--token")),
+                _ => ask_for_secret("API key (GRAD…)", out),
             };
 
             let machine_host = crate::netrc::machine_host(&server);

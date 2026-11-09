@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::config::{ConfigKey, load_config_quiet};
+use crate::config::{ConfigKey, read_login_config_file, saved_login_for_shell_completion};
 use clap_complete::CompletionCandidate;
 use connector::Client;
 use std::ffi::OsStr;
@@ -17,6 +17,17 @@ pub fn complete_projects(current: &OsStr) -> Vec<CompletionCandidate> {
     run(current, |client, prefix| async move {
         project_names(&client, &prefix).await
     })
+}
+
+pub fn complete_accounts(current: &OsStr) -> Vec<CompletionCandidate> {
+    let prefix = current.to_string_lossy();
+    read_login_config_file()
+        .unwrap_or_default()
+        .accounts
+        .into_keys()
+        .filter(|name| name.starts_with(prefix.as_ref()))
+        .map(CompletionCandidate::new)
+        .collect()
 }
 
 pub fn complete_tasks(current: &OsStr) -> Vec<CompletionCandidate> {
@@ -108,26 +119,15 @@ fn matching(values: impl Iterator<Item = String>, prefix: &str) -> Vec<String> {
 }
 
 fn selected_project() -> Option<String> {
-    load_config_quiet()
-        .get(&ConfigKey::SelectedProject)
-        .and_then(|v| v.clone())
-        .filter(|s| !s.is_empty())
+    saved_login_for_shell_completion().get(ConfigKey::SelectedProject)
 }
 
 fn client_quiet() -> Option<Client> {
-    let cfg = load_config_quiet();
-    let server = cfg
-        .get(&ConfigKey::Server)
-        .and_then(|v| v.clone())
-        .filter(|s| !s.is_empty())?;
-    let token = cfg
-        .get(&ConfigKey::AuthToken)
-        .and_then(|v| v.clone())
-        .filter(|t| !t.is_empty());
+    let login = saved_login_for_shell_completion();
     let mut builder = Client::builder()
-        .base_url(server)
+        .base_url(login.server()?)
         .timeout(COMPLETION_TIMEOUT);
-    if let Some(token) = token {
+    if let Some(token) = login.token() {
         builder = builder.token(token);
     }
     builder.build().ok()

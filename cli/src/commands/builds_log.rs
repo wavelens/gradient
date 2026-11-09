@@ -90,10 +90,8 @@ pub async fn handle_log(
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         tokio::spawn(async move {
             pin_mut!(stream);
-            while let Some(item) = stream.next().await {
-                if let Ok(line) = item
-                    && tx.send(line).is_err()
-                {
+            while let Some(Ok(chunk)) = stream.next().await {
+                if chunk.lines().any(|line| tx.send(line.to_owned()).is_err()) {
                     break;
                 }
             }
@@ -104,6 +102,7 @@ pub async fn handle_log(
         pin_mut!(stream);
         while let Some(item) = stream.next().await {
             match item {
+                Ok(line) if line.is_empty() => {}
                 Ok(line) => {
                     if out.is_json() {
                         println!("{}", serde_json::json!({"error": false, "message": line}));

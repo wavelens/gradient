@@ -7,7 +7,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 Every command in `gradient`, taken from the CLI's `--help` output.
 
-Commands target the selected project and task. To act on a different one, pass it as an argument, or use `--project` on `gradient build`.
+Commands target the selected project and task. To act on a different one for a single command, pass the global `--project <NAME>` or `--task <NAME|PROJECT/NAME>` flag. The selection stays unchanged.
 
 ## Install
 
@@ -50,10 +50,33 @@ gradient login https://gradient.example.com
 - Pass `--no-browser` to get the login URL printed in the terminal instead.
 - For scripts, use `--username` and `--password` to log in without a browser.
 - With multiple projects available, the CLI asks which one to select.
-- Settings live in `~/.config/gradient/config.toml` (or `$XDG_CONFIG_HOME/gradient`). This file stores the server address, token and selections.
-- `gradient config <key> [value]` can read or write one of `server`, `authtoken`, `selectedproject`, `selectedtask`, `selectedbuild`.
+- Settings live in `~/.config/gradient/accounts.toml` (or `$XDG_CONFIG_HOME/gradient`). Only the owner can read the file, since it holds the login tokens.
+- `gradient config <key> [value]` reads or writes one of `server`, `authtoken`, `selectedproject`, `selectedtask` for the current account.
+- `GRADIENT_SERVER` and `GRADIENT_TOKEN` replace the saved server and token, e.g. in CI jobs without a config file.
 - Add `--json` to any command for machine-readable output with all prompts disabled.
+- Without a terminal on stdin, or with `--json`, commands never open `$EDITOR`: pass every required field as a flag, otherwise the command fails and names the missing flag.
 - A server behind a private CA works once the CA certificate is in the system trust store, e.g. `security.pki.certificateFiles` on NixOS.
+
+## Multiple Accounts
+
+Each account is a server with its own login, selected project and selected task. `gradient login` saves to the current account and makes that account the default.
+
+```sh
+gradient login https://gradient.example.com
+gradient --account work login https://ci.work.example
+gradient account list
+gradient account switch work
+```
+
+- Pass `--account <NAME>` or set `GRADIENT_ACCOUNT` to run one command with another account.
+- A `config.toml` from an older CLI version becomes the account `default`. The CLI only reads it and never changes it, so an older CLI version keeps working with it.
+- If saved accounts exist but none is the default, for example after `gradient account remove` deleted the default one, commands fail until you run `gradient account switch <NAME>` or pass `--account <NAME>`.
+
+| Command | Options | Description |
+|---|---|---|
+| `gradient account list` | - | List saved accounts, the default one marked with `*` |
+| `gradient account switch [NAME]` | - | Switch the account used by later commands. Without a name, pick one from the list |
+| `gradient account remove <NAME>` | - | Delete a saved account and its login token |
 
 ## Account
 
@@ -98,14 +121,16 @@ gradient login https://gradient.example.com
 
 | Command | Options | Description |
 |---|---|---|
-| `gradient build [TARGET]` | `--system <SYSTEM>`, `--project <PROJECT>`, `--background`, `--quiet`, `--no-link`, `--override-input <INPUT> <FLAKE>` | Submit a build request from the current git repository |
-| `gradient run [TARGET]` | `--no-shell`, `--cpus <CPUS>`, `--memory <MB>`, `--network`, `--labels <LABELS>`, `--timeout <TIMEOUT>`, `--system <SYSTEM>`, `--project <PROJECT>`, `--attach <JOB_ID>`, `-L, --forward <[LOCAL:]PORT>` | Run the flake program on an exec worker and stream the program output to this terminal, see [Run a Program from the CLI](../exec/run.md) |
+| `gradient build [TARGET]` | `--system <SYSTEM>`, `--background`, `--quiet`, `--no-link`, `--override-input <INPUT> <FLAKE>` | Submit a build request from the current git repository |
+| `gradient run [TARGET]` | `--no-shell`, `--cpus <CPUS>`, `--memory <MB>`, `--network`, `--labels <LABELS>`, `--timeout <TIMEOUT>`, `--system <SYSTEM>`, `--attach <JOB_ID>`, `-L, --forward <[LOCAL:]PORT>` | Run the flake program on an exec worker and stream the program output to this terminal, see [Run a Program from the CLI](../exec/run.md) |
 | `gradient watch <EVALUATION>` | - | Watch a running evaluation's live build logs and status |
 | `gradient logs <EVALUATION>` | - | Print the full logs of every build in an evaluation |
-| `gradient download [FLAKE_REF]` | `--evaluation <EVALUATION>`, `--task <TASK>`, `--products <PRODUCTS>`, `--out <OUT>` | Download evaluation artefacts |
+| `gradient download [FLAKE_REF]` | `--evaluation <EVALUATION>`, `--products <PRODUCTS>`, `--out <OUT>` | Download evaluation artefacts |
 | `gradient builds graph <ID>` | `--interactive` | Show a build's dependency graph |
 | `gradient builds log <ID>` | `--interactive`, `--lines <LINES>`, `--search <SEARCH>`, `--case` | View a build's log |
 | `gradient eval <PATTERN>...` | `--workers <N>`, `--max-rss <MiB>`, `--max-memory <MiB>` | Evaluate a flake to derivations locally, a JSON line per attribute. Only in `gradient-cli-full`, see [below](#local-evaluation) |
+
+- `build` and `run` no longer accept the `-p` short flag. Use the global `--project <NAME>` instead.
 
 ## Pull Requests
 

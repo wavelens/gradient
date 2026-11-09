@@ -375,7 +375,12 @@ fn mcp_without_a_server_url_exits_with_a_usage_error() {
         .stderr(predicate::str::contains("gradient login"));
 }
 
-const CONTROL_TOOLS: [&str; 3] = ["start_evaluation", "abort_evaluation", "watch_evaluation"];
+const CONTROL_TOOLS: [&str; 4] = [
+    "start_evaluation",
+    "abort_evaluation",
+    "watch_evaluation",
+    "run_gradient_command",
+];
 
 #[test]
 fn mcp_control_tools_are_opt_in() {
@@ -661,4 +666,75 @@ async fn mcp_watch_evaluation_fails_fast_on_a_task_that_does_not_own_the_evaluat
     );
 
     assert_eq!(response(&responses, 2)["result"]["isError"], json!(true));
+}
+
+#[test]
+fn mcp_run_gradient_command_refuses_account_commands() {
+    let home = TempDir::new().unwrap();
+    offline_config(&home);
+
+    let responses = session_with(
+        &home,
+        &["mcp", "--control"],
+        &call("run_gradient_command", json!({"args": ["logout"]})),
+    );
+    let result = &response(&responses, 2)["result"];
+
+    assert_eq!(result["isError"], json!(true), "{result:#}");
+    assert!(
+        !home.path().join("gradient/accounts.toml").exists(),
+        "logout ran"
+    );
+}
+
+#[test]
+fn mcp_run_gradient_command_keeps_the_account_it_started_with() {
+    let home = TempDir::new().unwrap();
+    offline_config(&home);
+
+    for args in [
+        json!(["project", "list", "--account", "prod"]),
+        json!(["project", "list", "--account=prod"]),
+    ] {
+        let responses = session_with(
+            &home,
+            &["mcp", "--control"],
+            &call("run_gradient_command", json!({"args": args})),
+        );
+        let result = &response(&responses, 2)["result"];
+        assert_eq!(result["isError"], json!(true), "{result:#}");
+    }
+}
+
+#[tokio::test]
+async fn mcp_run_gradient_command_targets_a_project_without_selecting_it() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tasks/other"))
+        .and(header("Authorization", "Bearer seeded-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "error": false,
+            "message": {"items": [], "total": 0, "page": 1, "per_page": 50}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let home = TempDir::new().unwrap();
+    server_config(&home, &server);
+
+    let responses = session_with(
+        &home,
+        &["mcp", "--control"],
+        &call(
+            "run_gradient_command",
+            json!({"args": ["task", "list", "--project", "other"]}),
+        ),
+    );
+    let result = &response(&responses, 2)["result"];
+
+    assert_eq!(result["isError"], json!(false), "{result:#}");
+    assert!(
+        !home.path().join("gradient/accounts.toml").exists(),
+        "selection changed"
+    );
 }

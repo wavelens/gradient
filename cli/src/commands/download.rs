@@ -5,9 +5,8 @@
  */
 
 use crate::commands::attr_spec;
-use crate::config::*;
 use crate::error::{CliError, FileAction};
-use crate::input::{client_from_config, flush_stdout};
+use crate::input::{client_from_config, flush_stdout, selected_task};
 use crate::output::{ExitKind, Output};
 use connector::api::{ArtefactTree, ProductArtefact};
 use std::io;
@@ -16,7 +15,6 @@ use std::path::{Path, PathBuf};
 pub async fn handle_download(
     flake_ref: Option<String>,
     evaluation: Option<String>,
-    task: Option<String>,
     products: Option<String>,
     out_dir_arg: Option<String>,
     out: Output,
@@ -29,7 +27,7 @@ pub async fn handle_download(
 
     let eval_id = match evaluation {
         Some(id) => id,
-        None => pick_latest_evaluation(&client, task.as_deref(), out).await,
+        None => pick_latest_evaluation(&client, out).await,
     };
 
     out.human(format!(
@@ -44,6 +42,7 @@ pub async fn handle_download(
 
     let flat = flatten_products(&tree);
     if flat.is_empty() {
+        out.ok(&Vec::<String>::new());
         out.human("No artefacts in this evaluation.");
         return;
     }
@@ -60,6 +59,7 @@ pub async fn handle_download(
     };
 
     if selection.is_empty() {
+        out.ok(&Vec::<String>::new());
         out.human("No products selected.");
         return;
     }
@@ -272,12 +272,8 @@ fn human_size(bytes: i64) -> String {
     }
 }
 
-async fn pick_latest_evaluation(
-    client: &connector::Client,
-    task: Option<&str>,
-    out: Output,
-) -> String {
-    let (project, task) = resolve_task(task, out);
+async fn pick_latest_evaluation(client: &connector::Client, out: Output) -> String {
+    let (project, task) = selected_task(out);
     let evaluations = match client.tasks().evaluations(&project, &task).await {
         Ok(evals) => evals,
         Err(e) => out.fail(e),
@@ -293,33 +289,6 @@ async fn pick_latest_evaluation(
         latest.id, project, task
     ));
     latest.id.to_string()
-}
-
-fn resolve_task(arg: Option<&str>, out: Output) -> (String, String) {
-    if let Some(spec) = arg {
-        if let Some((project, proj)) = spec.split_once('/') {
-            return (project.to_string(), proj.to_string());
-        }
-        let project = get_value(ConfigKey::SelectedProject, true).unwrap_or_else(|| {
-            out.err(
-                ExitKind::Usage,
-                format!(
-                    "--task '{}' has no project prefix and no project is selected.",
-                    spec
-                ),
-            );
-        });
-        return (project, spec.to_string());
-    }
-
-    if let Some(selected) = selected_task_ids() {
-        return selected;
-    }
-
-    out.err(
-        ExitKind::Usage,
-        "No task selected. Pass --task <name> or run 'gradient task select <name>' first.",
-    );
 }
 
 #[cfg(test)]

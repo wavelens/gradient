@@ -5,7 +5,6 @@
  */
 
 use crate::commands::build::{BuildParams, failure_message, submit_build_request};
-use crate::commands::completion;
 use crate::commands::logstream::stream_eval_logs;
 use crate::commands::run_forward::{self, PortForward, parse_forward};
 use crate::commands::run_waiting::{WaitingLines, ended_before_start};
@@ -14,7 +13,6 @@ use crate::input::client_from_config;
 use crate::output::{ExitKind, Output};
 use crate::tui::watch::eval_is_terminal;
 use clap::Args;
-use clap_complete::engine::ArgValueCompleter;
 use connector::api::{ExecJobStatus, ExecJobSummary, RunOptions};
 use std::io::IsTerminal;
 use std::time::Duration;
@@ -48,10 +46,8 @@ pub struct RunArgs {
     /// Target system (default: this machine)
     #[arg(long)]
     system: Option<String>,
-    #[arg(short, long, add = ArgValueCompleter::new(completion::complete_projects))]
-    project: Option<String>,
     /// Connect this terminal to the program for a running job (no upload and no evaluation)
-    #[arg(long, value_name = "JOB_ID", conflicts_with_all = ["target", "no_shell", "cpus", "memory", "network", "labels", "timeout", "system", "project"])]
+    #[arg(long, value_name = "JOB_ID", conflicts_with_all = ["target", "no_shell", "cpus", "memory", "network", "labels", "timeout", "system"])]
     attach: Option<String>,
     /// Forward a local port to a port in the guest (example: `ssh -L`, repeatable)
     #[arg(short = 'L', long = "forward", value_name = "[LOCAL:]PORT", value_parser = parse_forward)]
@@ -88,7 +84,7 @@ pub async fn handle_run(args: RunArgs, out: Output) {
         overrides: Vec::new(),
         run: Some(run_options(&args, wants_terminal)),
     };
-    let (client, started) = submit_build_request(params, args.project, false, out).await;
+    let (client, started) = submit_build_request(params, false, out).await;
     let evaluation = started.evaluation.to_string();
     out.progress(format!("Evaluation: {evaluation}"));
 

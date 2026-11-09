@@ -30,17 +30,3 @@ async fn basic_login_returns_token() {
         .unwrap();
     assert_eq!(token, "abc");
 }
-
-#[tokio::test]
-async fn check_username_returns_bool() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/api/v1/auth/check-username"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok(true)))
-        .mount(&server)
-        .await;
-
-    let client = Client::builder().base_url(server.uri()).build().unwrap();
-    let available = client.auth().check_username("alice").await.unwrap();
-    assert!(available);
-}

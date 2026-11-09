@@ -26,7 +26,7 @@ pub enum Commands {
         #[arg(add = ArgValueCompleter::new(completion::complete_projects))]
         project: String,
     },
-    /// Create a project with missing fields opened in $EDITOR
+    /// Create a project with missing fields opened in $EDITOR, then select it unless `--json` is set
     Create {
         /// Name
         #[arg(short, long)]
@@ -171,7 +171,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .await
             {
                 Ok(_) => {
-                    set_value(ConfigKey::SelectedProject, name, true);
+                    if !out.is_json() {
+                        set_value(ConfigKey::SelectedProject, name, true);
+                    }
                     out.ok(&serde_json::json!({"created": true}));
                     out.human("Project created.");
                 }
@@ -245,7 +247,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .update(
                     &project,
                     PatchProjectRequest {
-                        name: Some(input.get("Name").into()),
+                        name: (input.get("Name") != project).then(|| input.get("Name").into()),
                         display_name: Some(input.get("Display Name")),
                         description: Some(input.get("Description")),
                         hide_build_requests: None,
@@ -255,6 +257,22 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .await
             {
                 Ok(_) => {
+                    let renamed = input.get("Name");
+                    if renamed != project {
+                        update_or_create_saved_login_in_config_file(|login| {
+                            if login.selected_project.as_deref() == Some(project.as_str()) {
+                                login.selected_project = Some(renamed.clone());
+                            }
+                            let prefix = format!("{project}/");
+                            if let Some(task) = login
+                                .selected_task
+                                .as_deref()
+                                .and_then(|selected| selected.strip_prefix(&prefix))
+                            {
+                                login.selected_task = Some(format!("{renamed}/{task}"));
+                            }
+                        });
+                    }
                     out.ok(&serde_json::json!({"updated": true}));
                     out.human("Project updated.");
                 }
@@ -318,9 +336,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                         )
                         .await
                     {
-                        Ok(_) => {
-                            out.ok(&serde_json::json!({"added": true}));
-                            out.human("User added.");
+                        Ok(message) => {
+                            out.ok(&serde_json::json!({"added": true, "message": message}));
+                            out.human(format!("{message}."));
                         }
                         Err(e) => out.fail(e),
                     }
@@ -423,13 +441,12 @@ async fn membership_names(out: Output) -> Vec<String> {
 }
 
 /// Login is never blocked on a list failure.
-pub async fn post_login_project_setup(client: &Client, out: Output) {
+pub async fn post_login_project_setup(client: &Client, saved_project: Option<&str>, out: Output) {
     let projects: Vec<String> = match client.projects().list().await {
         Ok(res) => res.items.into_iter().map(|i| i.name).collect(),
         Err(_) => return,
     };
-    let current = get_value(ConfigKey::SelectedProject, true);
-    match decide_project_onboarding(&projects, current.as_deref()) {
+    match decide_project_onboarding(&projects, saved_project) {
         ProjectOnboarding::Keep(_) => {}
         ProjectOnboarding::AutoSelect(name) => {
             set_value(ConfigKey::SelectedProject, name.clone(), true);
