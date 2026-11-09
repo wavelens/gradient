@@ -18,7 +18,7 @@ tbody tr.negative td { color: var(--gr-status-warning); }
     
 
 td.subject a { display: block; max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-td.origin { min-width: 10rem; overflow-wrap: anywhere; }
+td.origin, td.worker { min-width: 10rem; overflow-wrap: anywhere; }
 td.age { white-space: nowrap; }
 td.origin a, td.subject a { color: inherit; text-decoration: none; }
 td.origin a:hover, td.subject a:hover { color: var(--gr-status-info); text-decoration: underline; }

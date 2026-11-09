@@ -424,9 +424,9 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     ],
   };
 
-  it('renders the Previous Build Attempts section when there are multiple attempts', () => {
+  it('renders the Build attempts section when there are multiple attempts', () => {
     const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
-    expect(el.textContent).toContain('Previous Build Attempts');
+    expect(el.textContent).toContain('Build attempts');
   });
 
   it('renders one row per attempt', () => {
@@ -512,7 +512,7 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
       ],
     };
     const el = setup({ getJob: () => of(singleAttempt) }).nativeElement as HTMLElement;
-    expect(el.textContent).not.toContain('Previous Build Attempts');
+    expect(el.textContent).not.toContain('Build attempts');
   });
 
   it('shows the failure message in the reason column', () => {
@@ -680,6 +680,7 @@ describe('BoardJobDetailComponent - live state', () => {
     const fixture = setup({ getJob });
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('.top-row button')?.textContent).toContain('Abort');
+    expect(el.querySelector('.top-row button .gr-button__icon')?.textContent?.trim()).toBe('stop_circle');
 
     getJob.mockReturnValue(of(finished));
     vi.advanceTimersByTime(5_000);
@@ -714,7 +715,7 @@ describe('BoardJobDetailComponent - #636', () => {
     expect(el.querySelector('h1')?.textContent?.trim()).toBe('foo');
     expect(el.querySelector('.head gr-status-badge')?.textContent?.trim()).toBe('Failed');
     expect(el.querySelector('a.task-link')?.textContent?.trim()).toBe('nightly');
-    expect(TestBed.inject(Title).getTitle()).toBe('foo · Job board · Gradient');
+    expect(TestBed.inject(Title).getTitle()).toBe('foo · Job Board · Gradient');
   });
 
   it('titles an evaluation job by its task', () => {
@@ -826,6 +827,7 @@ describe('BoardJobDetailComponent - display names', () => {
     expect(ids).toContain('Exec States Task');
     expect(ids).not.toContain('execstates');
     expect(el.querySelector('h1')?.textContent?.trim()).toBe('Exec States Task');
+    expect(TestBed.inject(Title).getTitle()).toBe('Exec States Task · Job Board · Gradient');
   });
 
   it('names the task of an exec job and the title by the task display name', () => {

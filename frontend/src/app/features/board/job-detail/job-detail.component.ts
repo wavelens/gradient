@@ -107,7 +107,7 @@ interface RuleRow {
         <gr-icon name="arrow_back" size="sm" />Live Jobs
       </a>
       @if (canAbort()) {
-        <button grButton label="Abort" icon="close" severity="danger" size="small"
+        <button grButton label="Abort" icon="stop_circle" severity="danger" size="small"
                 (click)="abort()"></button>
       }
     </div>
@@ -236,7 +236,7 @@ interface RuleRow {
 
       @if (j.previous_attempts.length > 1) {
         <section class="attempts">
-          <h2>Previous Build Attempts</h2>
+          <h2>Build attempts</h2>
           <gr-table class="rules">
             <thead><tr><th>#</th><th>Mode</th><th>Outcome</th><th>Reason</th><th>When</th><th><span class="sr-only">Open</span></th></tr></thead>
             <tbody>
@@ -604,7 +604,9 @@ export class BoardJobDetailComponent implements OnInit {
     const title = inject(Title);
     effect(() => {
       const j = this.job();
-      if (j) title.setTitle(composeTitle(getAssignedJobName(j), 'Job board'));
+      const p = this.pending();
+      const name = j ? getAssignedJobName(j) : p ? getPendingJobName(p) : null;
+      if (name) title.setTitle(composeTitle(name, 'Job Board'));
     });
   }
 

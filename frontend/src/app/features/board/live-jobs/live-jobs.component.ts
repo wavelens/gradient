@@ -95,7 +95,7 @@ interface DecisionRow {
                 <tr class="clickable" (click)="router.navigateByUrl(detail)">
                   @let subject = rowSubject(row);
                   <td>{{ jobKindName(j.kind) }}</td>
-                  <td class="mono">{{ j.cluster_job ? subJobLabel(row.subJobs) : workerDisplayNameOrNotSharedLabel(j.worker_name) }}</td>
+                  <td class="mono worker">{{ j.cluster_job ? subJobLabel(row.subJobs) : workerDisplayNameOrNotSharedLabel(j.worker_name) }}</td>
                   <td class="mono subject" [title]="subject">
                     <a [routerLink]="detail" (click)="$event.stopPropagation()">{{ subject }}</a>
                   </td>
@@ -120,7 +120,7 @@ interface DecisionRow {
                 <tr [class.negative]="r.score < 0" class="clickable" (click)="router.navigateByUrl(links.boardJob(r.id))">
                   <td>{{ r.won ? 'assigned' : 'passed over' }}</td>
                   <td>{{ jobKindName(r.kind) }}</td>
-                  <td class="mono">{{ r.worker }}</td>
+                  <td class="mono worker">{{ r.worker }}</td>
                   <td class="mono subject" [title]="r.subject">
                     <a [routerLink]="links.boardJob(r.id)" (click)="$event.stopPropagation()">{{ r.subject }}</a>
                   </td>
