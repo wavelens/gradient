@@ -33,7 +33,7 @@ pub enum Commands {
         priority: Option<i32>,
         /// Max cache storage in GB. 0 = unlimited (default), otherwise at least 1.
         #[arg(short = 'm', long, default_value_t = 0)]
-        max_storage_gb: i32,
+        max_storage_gb: i64,
     },
     /// List the caches of the current user
     List,
@@ -53,7 +53,7 @@ pub enum Commands {
         priority: Option<i32>,
         /// Max cache storage in GB. 0 = unlimited, otherwise at least 1.
         #[arg(short = 'm', long)]
-        max_storage_gb: Option<i32>,
+        max_storage_gb: Option<i64>,
         /// Answer Nix clients with paths from the upstream caches
         #[arg(long)]
         pull_through: Option<bool>,
@@ -195,7 +195,11 @@ pub async fn handle(cmd: Commands, out: Output) {
                 ),
                 (
                     "Max Storage (GB)",
-                    Some(max_storage_gb.unwrap_or(current.max_storage_gb).to_string()),
+                    Some(
+                        max_storage_gb
+                            .unwrap_or(i64::from(current.max_storage_gb))
+                            .to_string(),
+                    ),
                 ),
             ]
             .iter()
@@ -312,8 +316,8 @@ pub async fn handle(cmd: Commands, out: Output) {
 }
 
 fn parse_max_storage_gb(raw: &str, out: Output) -> i64 {
-    match raw.trim().parse::<i32>() {
-        Ok(v) if v >= 0 => v.into(),
+    match raw.trim().parse::<i64>() {
+        Ok(v) if v >= 0 => v,
         Ok(_) => out.err(
             ExitKind::Usage,
             "Max storage must be 0 (unlimited) or at least 1.",
