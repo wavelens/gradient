@@ -47,11 +47,11 @@ describe('chart tooltip', () => {
 });
 
 describe('buildMetricChartOption cartesian types', () => {
-  it('renders area as a smooth line series with a gradient fill', () => {
+  it('renders area as an unsmoothed line series with a gradient fill', () => {
     const opt = buildMetricChartOption({ type: 'area', series: one, categories: cats }, THEME);
     const s = (opt.series as any[])[0];
     expect(s.type).toBe('line');
-    expect(s.smooth).toBe(true);
+    expect(s.smooth).toBeUndefined();
     expect(s.areaStyle).toBeTruthy();
   });
 
