@@ -84,6 +84,12 @@ describe('BoardExpensiveEvalsComponent', () => {
     expect(rows().map((r) => r.cells[2].querySelector('a')?.getAttribute('href'))).toEqual(['/project/acme/log/e1', '/project/infra/log/e2']);
   });
 
+  it('names the log link instead of repeating the wildcard of the task', () => {
+    const cell = rows()[0].cells[2];
+    expect(cell.textContent?.trim()).toBe('Open log');
+    expect(cell.textContent).not.toContain('nixosConfigurations');
+  });
+
   it('falls back to the names when no display name is set', () => {
     const links = Array.from(rows()[1].cells[1].querySelectorAll('a'));
     expect(links.map((a) => a.textContent?.trim())).toEqual(['infra', 'ci']);
