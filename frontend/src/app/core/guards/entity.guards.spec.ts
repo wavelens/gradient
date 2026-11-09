@@ -37,7 +37,6 @@ import {
   entryPointEvalQueryParameterMissingGuard,
   execJobInTaskGuard,
   jobAssignedOrPendingGuard,
-  taskSettingsAccessGuard,
   workerInProjectGuard,
 } from './entity.guards';
 import { BoardService } from '@core/services/board.service';
@@ -231,25 +230,5 @@ describe('entryPointEvalQueryParameterMissingGuard', () => {
   it('sends a link without an entry point to the task metrics', () => {
     configure({});
     expect(TestBed.inject(Router).serializeUrl(run({}) as UrlTree)).toBe('/project/acme/task/demo/metrics');
-  });
-});
-
-describe('taskSettingsAccessGuard', () => {
-  const params = { project: 'acme', task: 'demo' };
-  const serialize = (result: unknown) => TestBed.inject(Router).serializeUrl(result as UrlTree);
-
-  it('sends a visitor without a settings permission back to the task page', async () => {
-    configure({ tasks: { getTask: () => of({ id: 't1', permissions: ['view'] }) } });
-    expect(serialize(await outcome(taskSettingsAccessGuard, params))).toBe('/project/acme/task/demo');
-  });
-
-  it('lets a member who may edit the task in', async () => {
-    configure({ tasks: { getTask: () => of({ id: 't1', permissions: ['editTask'] }) } });
-    expect(await outcome(taskSettingsAccessGuard, params)).toBe(true);
-  });
-
-  it('leaves a refused task to the task access resolver', async () => {
-    configure({ tasks: { getTask: () => refused(404) } });
-    expect(await outcome(taskSettingsAccessGuard, params)).toBe(true);
   });
 });

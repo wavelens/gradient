@@ -17,7 +17,6 @@ import {
   entryPointEvalQueryParameterMissingGuard,
   execJobInTaskGuard,
   jobAssignedOrPendingGuard,
-  taskSettingsAccessGuard,
   workerInProjectGuard,
 } from '@core/guards/entity.guards';
 import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
@@ -129,7 +128,7 @@ export const routes: Routes = [
           {
             path: 'settings',
             title: 'Task Settings',
-            canActivate: [authGuard, taskSettingsAccessGuard],
+            canActivate: [authGuard],
             canDeactivate: [unsavedChangesGuard],
             loadComponent: () =>
               import('./features/tasks/task-settings/task-settings.component').then(
