@@ -105,7 +105,7 @@ describe('ConnectRepositoryComponent', () => {
     fixture.componentInstance.createTask();
     fixture.detectChanges();
     const errors = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.field-error')).map((e) => e.textContent?.trim());
-    expect(errors).toEqual(['Enter the repository URL.', 'Enter a Display Name.', 'Enter a name.']);
+    expect(errors).toEqual(['Enter the repository URL.', 'Enter a display name.', 'Enter a name.']);
     expect(createTask).not.toHaveBeenCalled();
   });
 

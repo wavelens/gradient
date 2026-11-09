@@ -16,7 +16,7 @@ import { NameAvailability, maxDisplayNameCharacterCount, maxSlugNameCharacterCou
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <gr-form-field label="Display Name" [for]="noun() + '-display-name'" required
-      [invalid]="submitAttempted() && !displayName()" error="Enter a Display Name.">
+      [invalid]="submitAttempted() && !displayName()" error="Enter a display name.">
       <input
         grInput
         [id]="noun() + '-display-name'"

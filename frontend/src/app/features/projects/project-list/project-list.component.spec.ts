@@ -203,7 +203,7 @@ describe('ProjectListComponent', () => {
     Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Create')!.click();
     fixture.detectChanges();
     expect(dialog.querySelector('gr-message-banner')).toBeNull();
-    expect(dialog.textContent).toContain('Enter a Display Name.');
+    expect(dialog.textContent).toContain('Enter a display name.');
     expect(dialog.textContent).toContain('Enter a name.');
     expect(createProject).not.toHaveBeenCalled();
   });
