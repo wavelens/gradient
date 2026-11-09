@@ -135,6 +135,14 @@ describe('BoardHealthComponent', () => {
       expect(fixture.nativeElement.textContent).not.toContain('HTTP routes');
     });
 
+    it('names connections and the notification outbox in plain words', () => {
+      const text = fixture.nativeElement.textContent;
+      expect(text).toContain('Worker and cache connections');
+      expect(text).toContain('Notification outbox pending');
+      expect(text).not.toContain('Sessions');
+      expect(text).not.toContain('deliveries');
+    });
+
     it('Name the Deep GC task row in words', () => {
       expect(fixture.nativeElement.textContent).toContain('Deep GC');
     });

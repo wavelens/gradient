@@ -49,7 +49,7 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
       <gr-card-grid class="kpis" min="180px">
         <gr-stat-card compact label="Version" [value]="h.version" />
         <gr-stat-card compact label="Uptime" [value]="seconds(h.uptime_seconds)" />
-        <gr-stat-card compact label="Sessions" [value]="h.proto_sessions" />
+        <gr-stat-card compact label="Worker and cache connections" [value]="h.proto_sessions" />
       </gr-card-grid>
 
       <h2>Process</h2>
@@ -67,8 +67,8 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
         <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | serverDate) : '-' }}</span></div>
         <div class="cell"><span class="label">Cache size</span><span>{{ bytes(h.cache_bytes) }}</span></div>
         <div class="cell"><span class="label">Packages</span><span>{{ h.cache_packages }}</span></div>
-        <div class="cell"><span class="label">Pending deliveries</span><span>{{ h.pending_deliveries }}</span></div>
-        <div class="cell"><span class="label">Failed deliveries</span><span [class.bad]="h.failed_deliveries > 0">{{ h.failed_deliveries }}</span></div>
+        <div class="cell"><span class="label">Notification outbox pending</span><span>{{ h.pending_deliveries }}</span></div>
+        <div class="cell"><span class="label">Notification outbox: permanent failures</span><span [class.bad]="h.failed_deliveries > 0">{{ h.failed_deliveries }}</span></div>
       </div>
 
       <h2>Supervision</h2>
