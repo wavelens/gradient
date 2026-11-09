@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'My Invites' }]" title="My Invites" subtitle="Projects, caches and teams waiting for your answer">
+<gr-page-layout width="settings" title="Invitations" subtitle="Projects, caches and teams waiting for your answer">
   <app-settings-nav slot="banner" />
   @if (joined().length) {
     <gr-row-list class="joined">
@@ -32,17 +32,17 @@
   >
     <gr-row-list>
       @for (invite of invites(); track invite.token) {
-        <gr-row [icon]="invite.kind === 'cache' ? 'inventory_2' : invite.kind === 'team' ? 'groups' : 'folder'">
+        <gr-row>
           {{ invite.scope_display_name }}
           <gr-badge severity="info">{{ invite.kind }}</gr-badge>
           <span slot="meta">
             Role {{ invite.role }} ·
-            Invited by {{ invite.invited_by }} ·
+            Invited by {{ invite.invited_by_display_name ?? invite.invited_by }} ·
             Expires {{ invite.expires_at | serverDate }}
           </span>
           <button
             slot="actions"
-            grButton severity="secondary"
+            grButton
             label="Accept"
             icon="check"
             [disabled]="pendingToken() === invite.token"
@@ -54,7 +54,7 @@
             grButton
             label="Decline"
             icon="close"
-            severity="danger"
+            severity="secondary"
             [disabled]="pendingToken() === invite.token"
             (click)="decline(invite)"
           ></button>
