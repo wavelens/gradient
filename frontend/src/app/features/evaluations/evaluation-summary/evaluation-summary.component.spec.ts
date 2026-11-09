@@ -108,6 +108,14 @@ describe('EvaluationSummaryComponent', () => {
     expect(text(fixture)).not.toContain('previous evaluation at');
   });
 
+  it('says why a waiting evaluation has not started', () => {
+    const waiting = { ...SUMMARY, packages: { total: 0, built: 0, failed: 0, blocked: 0, unfinished: 0 }, failures: [], failures_total: 0, failed_attributes: [], compared_with: null };
+    const fixture = setup(waiting, { ...EVALUATION, status: 'Waiting', waiting_reason: { kind: 'no_cache' } });
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-waiting-notice')?.textContent).toContain('Cache not configured');
+    expect(text(fixture)).toContain('Ask a project admin to subscribe this project to a cache.');
+  });
+
   it('compares with the previous evaluation only once this one has finished', () => {
     const fixture = setup(SUMMARY, { ...EVALUATION, status: 'Building' });
 

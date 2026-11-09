@@ -15,8 +15,11 @@ import type {
   FailedBuildSummary,
   EvaluationResponse,
   EvaluationFailureSummary,
+  TaskDetailsResponse,
 } from '@core/models';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { AuthService } from '@core/services/auth.service';
+import { accessFromEntity } from '@core/models/access.model';
 import { links } from '@shared/routing';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import {
@@ -36,9 +39,10 @@ import {
   evaluationDuration,
   isRunningEvaluationStatus,
   repositoryWebUrl,
+  waitingAccessFrom,
 } from '@shared/evaluation';
 import { CurrentTimeSignal, formatDuration, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { EvalStatusBadgeComponent, LiveStatusComponent, StatusIconComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, LiveStatusComponent, StatusIconComponent, WaitingNoticeComponent } from '@shared/ui';
 import { blockedLine, failureKind, failureTitle, firstLine, getEvaluationSummaryCountTiles, headline } from './summary-text';
 
 const SUMMARY_REFRESH_MS = 1000;
@@ -67,6 +71,7 @@ interface FailureGroup {
     RowListComponent,
     StatCardComponent,
     StatusIconComponent,
+    WaitingNoticeComponent,
   ],
   templateUrl: './evaluation-summary.component.html',
   styleUrl: './evaluation-summary.component.scss',
@@ -77,6 +82,7 @@ export class EvaluationSummaryComponent implements OnInit {
   private evaluations = inject(EvaluationsService);
   private crumbs = inject(BreadcrumbsService);
   private live = inject(LiveService);
+  private auth = inject(AuthService);
   private now = inject(CurrentTimeSignal).currentTimeMilliseconds;
   private refresh = new Subject<void>();
   private liveSub?: Subscription;
@@ -89,6 +95,12 @@ export class EvaluationSummaryComponent implements OnInit {
   summary = signal<EvaluationFailureSummary | null>(null);
   loading = signal(true);
   loadError = signal<unknown>(null);
+  private taskWithUserPermissionsSignal = signal<TaskDetailsResponse | null>(null);
+
+  waitingAccess = computed(() => {
+    const task = this.taskWithUserPermissionsSignal();
+    return waitingAccessFrom(task?.permissions ?? [], !!task && accessFromEntity(task).canTrigger, this.auth.user()?.superuser === true);
+  });
 
   running = computed(() => {
     const evaluation = this.evaluation();
@@ -158,7 +170,9 @@ export class EvaluationSummaryComponent implements OnInit {
   ngOnInit(): void {
     this.project = this.route.snapshot.paramMap.get('project') ?? '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') ?? '';
-    this.load((this.route.snapshot.data?.['evaluationAccess'] as EvaluationWithOptionalTask | undefined)?.evaluation);
+    const resolved = this.route.snapshot.data?.['evaluationAccess'] as EvaluationWithOptionalTask | undefined;
+    this.taskWithUserPermissionsSignal.set(resolved?.task ?? null);
+    this.load(resolved?.evaluation);
   }
 
   load(resolvedEvaluation?: EvaluationResponse): void {
