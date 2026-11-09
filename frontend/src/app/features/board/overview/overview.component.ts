@@ -11,8 +11,8 @@ import { CardGridComponent, LoadStateComponent, StatCardComponent } from '@gradi
 import { LiveStatusComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad, requestFailedText } from '../first-load';
 import { subscribeToBoardSocketWithReload } from '../board-socket';
-import { clockTime } from '@shared/text';
 import { MetricPoint } from '@core/models';
+import { metricPointsTo24HourChartSeries } from '../hourly-metric-points-to-24-hour-slots';
 
 @Component({
   selector: 'app-board-overview',
@@ -34,8 +34,8 @@ import { MetricPoint } from '@core/models';
         title="Builds completed per hour (24h)"
         doc="ui/job-board/"
         type="area"
-        [series]="completedSeries()"
-        [categories]="categories()"
+        [series]="completedChart().series"
+        [categories]="completedChart().categories"
         [colors]="['--gr-chart-green']"
         [error]="completed() === null"
       ></gr-metric-chart>
@@ -55,8 +55,9 @@ export class BoardOverviewComponent implements OnInit {
   pending = signal<number | null>(null);
   active = signal<number | null>(null);
   completed = signal<MetricPoint[] | null>(null);
-  completedSeries = computed(() => [{ name: 'completed', data: (this.completed() ?? []).map((p) => p.count) }]);
-  categories = computed(() => (this.completed() ?? []).map((p) => clockTime(p.bucket_start)));
+  completedChart = computed(() =>
+    metricPointsTo24HourChartSeries([{ name: 'completed', points: this.completed() ?? [], pick: (p) => p.count, missing: 0 }]),
+  );
 
   ngOnInit(): void {
     this.load();

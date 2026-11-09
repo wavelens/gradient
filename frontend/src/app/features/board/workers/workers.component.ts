@@ -10,7 +10,8 @@ import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { BoardService } from '@core/services/board.service';
 import { firstLoad, requestFailedText } from '../first-load';
-import { clockTime, formatMebibytes, formatPercent } from '@shared/text';
+import { formatMebibytes, formatPercent } from '@shared/text';
+import { metricPointsTo24HourChartSeries } from '../hourly-metric-points-to-24-hour-slots';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { BadgeComponent, LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
 import { MetricChartComponent, SegmentedBarComponent, ratioSegments } from '@shared/ui';
@@ -77,8 +78,8 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
         title="Fleet over time (connected vs draining)"
         doc="ui/job-board/#workers"
         type="area"
-        [series]="fleetSeries()"
-        [categories]="fleetCats()"
+        [series]="fleetChart().series"
+        [categories]="fleetChart().categories"
         [colors]="['--gr-chart-green', '--gr-chart-orange']"
         [error]="fleet() === null"
       ></gr-metric-chart>
@@ -162,11 +163,12 @@ export class BoardWorkersComponent implements OnInit {
   anyWorkerHasExecLabelsOrDevices = computed(() =>
     (this.workers() ?? []).some((w) => this.getExecLabelsWithoutWorkerId(w).length > 0 || (w.exec?.devices.length ?? 0) > 0));
 
-  fleetCats = computed(() => (this.fleet() ?? []).map((p) => clockTime(p.bucket_start)));
-  fleetSeries = computed(() => [
-    { name: 'connected', data: (this.fleet() ?? []).map((p) => p.connected) },
-    { name: 'draining', data: (this.fleet() ?? []).map((p) => p.draining) },
-  ]);
+  fleetChart = computed(() =>
+    metricPointsTo24HourChartSeries([
+      { name: 'connected', points: this.fleet() ?? [], pick: (p) => p.connected, missing: null },
+      { name: 'draining', points: this.fleet() ?? [], pick: (p) => p.draining, missing: null },
+    ]),
+  );
 
   private radar(buckets: { key: string; in_flight: number; capacity: number }[]) {
     return {

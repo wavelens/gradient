@@ -12,6 +12,7 @@ import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { clockTime, formatDuration } from '@shared/text';
 import { MetricPoint, DurationsHeatmap } from '@core/models';
+import { metricPointsTo24HourChartSeries } from '../hourly-metric-points-to-24-hour-slots';
 
 @Component({
   selector: 'app-board-durations',
@@ -34,8 +35,8 @@ import { MetricPoint, DurationsHeatmap } from '@core/models';
         title="Build duration (hourly avg vs max)"
         doc="ui/job-board/"
         type="area"
-        [series]="buildSeries()"
-        [categories]="buildCategories()"
+        [series]="buildChart().series"
+        [categories]="buildChart().categories"
         [colors]="['--gr-chart-cyan', '--gr-graph-danger']"
         [valueFormatter]="duration"
         [error]="build() === null"
@@ -64,11 +65,12 @@ export class BoardDurationsComponent implements OnInit {
     }));
   });
 
-  buildCategories = computed(() => (this.build() ?? []).map((p) => clockTime(p.bucket_start)));
-  buildSeries = computed(() => [
-    { name: 'avg', data: (this.build() ?? []).map((p) => p.avg) },
-    { name: 'max', data: (this.build() ?? []).map((p) => p.max) },
-  ]);
+  buildChart = computed(() =>
+    metricPointsTo24HourChartSeries([
+      { name: 'avg', points: this.build() ?? [], pick: (p) => p.avg, missing: null },
+      { name: 'max', points: this.build() ?? [], pick: (p) => p.max, missing: null },
+    ]),
+  );
 
   ngOnInit(): void {
     this.load();

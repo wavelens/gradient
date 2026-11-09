@@ -11,7 +11,8 @@ import { CardGridComponent, LoadStateComponent, PopoverComponent, TableComponent
 import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad, requestFailedText } from '../first-load';
 import { scoringRuleClassNameToReadableLabel, schedulerScoreDecimalPipeDigitsFormat } from '../scoring-rule-label';
-import { clockTime, formatDuration } from '@shared/text';
+import { formatDuration } from '@shared/text';
+import { metricPointsTo24HourChartSeries } from '../hourly-metric-points-to-24-hour-slots';
 import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
 
 const WHOLE_NUMBER = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
@@ -33,8 +34,8 @@ const WHOLE_NUMBER = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
         title="Wait breakdown (hourly avg): queue (excl. deps) vs dependency"
         doc="ui/job-board/"
         type="line"
-        [series]="waitSeries()"
-        [categories]="waitCategories()"
+        [series]="waitChart().series"
+        [categories]="waitChart().categories"
         [colors]="['--gr-chart-cyan', '--gr-chart-orange']"
         [valueFormatter]="duration"
         [error]="wait() === null || deps() === null"
@@ -96,15 +97,12 @@ export class BoardSchedulerComponent implements OnInit {
 
   readonly duration = formatDuration;
 
-  waitCategories = computed(() => (this.wait() ?? []).map((p) => clockTime(p.bucket_start)));
-  waitSeries = computed(() => {
-    const wait = this.wait() ?? [];
-    const depMap = new Map((this.deps() ?? []).map((p) => [p.bucket_start, Math.round(p.avg)]));
-    return [
-      { name: 'queue wait (excl. deps)', data: wait.map((p) => Math.round(p.avg)) },
-      { name: 'dependency wait', data: wait.map((p) => depMap.get(p.bucket_start) ?? 0) },
-    ];
-  });
+  waitChart = computed(() =>
+    metricPointsTo24HourChartSeries([
+      { name: 'queue wait (excl. deps)', points: this.wait() ?? [], pick: (p) => Math.round(p.avg), missing: null },
+      { name: 'dependency wait', points: this.deps() ?? [], pick: (p) => Math.round(p.avg), missing: null },
+    ]),
+  );
 
   histogramCategories = computed(() =>
     (this.summary()?.histogram ?? []).map((b) => WHOLE_NUMBER.format(b.lo))

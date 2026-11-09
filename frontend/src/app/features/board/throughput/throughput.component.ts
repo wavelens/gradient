@@ -9,11 +9,14 @@ import { CommonModule } from '@angular/common';
 import { forkJoin } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
 import { LoadStateComponent } from '@gradient/ui/ui';
-import { MetricChartComponent } from '@shared/ui';
+import { MetricChartComponent, MetricSeries } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { workerAxisLabel } from '../worker-label';
-import { clockTime } from '@shared/text';
 import { BoardWorker, MetricPoint } from '@core/models';
+import { metricPointsTo24HourChartSeries } from '../hourly-metric-points-to-24-hour-slots';
+
+const buildHourlyChartAxisAndSeries = (named: [string, MetricPoint[]][]) =>
+  metricPointsTo24HourChartSeries(named.map(([name, points]) => ({ name, points, pick: (p: MetricPoint) => p.count, missing: 0 as const })));
 
 @Component({
   selector: 'app-board-throughput',
@@ -61,9 +64,9 @@ export class BoardThroughputComponent implements OnInit {
   protected first = firstLoad();
 
   buildCategories = signal<string[]>([]);
-  buildSeries = signal<{ name: string; data: number[] }[] | null>(null);
+  buildSeries = signal<MetricSeries[] | null>(null);
   evalCategories = signal<string[]>([]);
-  evalSeries = signal<{ name: string; data: number[] }[] | null>(null);
+  evalSeries = signal<MetricSeries[] | null>(null);
   workerCategories = signal<string[]>([]);
   workerSeries = signal<{ name: string; data: number[] }[] | null>(null);
 
@@ -84,7 +87,7 @@ export class BoardThroughputComponent implements OnInit {
     })
       .pipe(this.first.track())
       .subscribe(({ created, completed, failed }) => {
-        const { categories, series } = align([
+        const { categories, series } = buildHourlyChartAxisAndSeries([
           ['created', created],
           ['completed', completed],
           ['failed', failed],
@@ -99,7 +102,7 @@ export class BoardThroughputComponent implements OnInit {
     })
       .pipe(this.first.track())
       .subscribe(({ completed, failed }) => {
-        const { categories, series } = align([
+        const { categories, series } = buildHourlyChartAxisAndSeries([
           ['completed', completed],
           ['failed', failed],
         ]);
@@ -117,19 +120,3 @@ export class BoardThroughputComponent implements OnInit {
   }
 }
 
-/// Merge several metric series onto a shared, sorted bucket axis, zero-filling
-/// gaps so multi-line charts stay aligned even when sources have ragged buckets.
-function align(
-  named: [string, MetricPoint[]][]
-): { categories: string[]; series: { name: string; data: number[] }[] } {
-  const buckets = new Set<string>();
-  for (const [, points] of named) {
-    for (const p of points) buckets.add(p.bucket_start);
-  }
-  const ordered = [...buckets].sort();
-  const series = named.map(([name, points]) => {
-    const byBucket = new Map(points.map((p) => [p.bucket_start, p.count]));
-    return { name, data: ordered.map((b) => byBucket.get(b) ?? 0) };
-  });
-  return { categories: ordered.map((b) => clockTime(b)), series };
-}
