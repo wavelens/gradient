@@ -16,6 +16,12 @@
   border-bottom: 1px solid var(--gr-border-subtle);
   overflow-x: auto;
   scrollbar-width: none;
+
+  @media (min-width: $breakpoint-md) {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    mask-image: none;
+  }
 }
 
 .link-tab {

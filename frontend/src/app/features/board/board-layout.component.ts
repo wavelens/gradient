@@ -20,8 +20,7 @@ const TABS: { path: BoardTab; label: string; superuser?: boolean }[] = [
   { path: 'cache', label: 'Cache' },
   { path: 'storage', label: 'Storage', superuser: true },
   { path: 'network', label: 'Network' },
-  { path: 'expensive', label: 'High-Cost Builds' },
-  { path: 'expensive-evals', label: 'High-Cost Evaluations' },
+  { path: 'expensive', label: 'High Cost' },
   { path: 'health', label: 'System Health', superuser: true },
 ];
 

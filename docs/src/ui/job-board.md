@@ -20,8 +20,7 @@ The **Job Board** in the header shows scheduler and worker activity, both live a
 | Cache | Stored size, traffic, growth, latency per upstream cache. The 10 busiest caches by bytes sent in the last 24 h, limited to public caches and caches visible to the viewer | Switch traffic between **Total** and **External**. **External**: only NARs sent over the HTTP binary cache and the `/proto` cache session |
 | Storage | NAR storage latency and errors per operation (file or S3), writer lane fill and send stalls, NAR delivery queue and failures. All charts share one time axis across the whole window, minute resolution up to 6 h. Superusers only | Choose the time window |
 | Network | NAR egress, worker upload, download and disk speed, HTTP latency per route (top 10 busiest routes first, **Load more** for the rest) | |
-| Jobs | Costliest builds by wall time, peak RAM, CPU time and disk I/O | Choose the time window |
-| Evals | Costliest evaluations by time, peak memory, thunks, function calls and allocations | Choose the time window |
+| High Cost | The builds with the highest cost in real time, peak RAM, CPU time, disk I/O, or the evaluations with the highest cost in time, peak memory, thunks, function calls, allocations | Switch between **Builds** and **Evaluations**. Select a time frame |
 | System Health | Server runtime, metric pipeline lag, route stats, and supervised background loops that restarted or failed. Superusers only | **Run Deep GC**, **Enable Draining** |
 
 The chosen sub-tab, time window and traffic view stay in the URL. A copied link opens the same view.
@@ -34,9 +33,9 @@ The chosen sub-tab, time window and traffic view stay in the URL. A copied link 
 
     ![Scheduler tab](../assets/screenshots/job_board_scheduler.png)
 
-=== "Jobs"
+=== "High Cost"
 
-    ![Jobs tab](../assets/screenshots/job_board_expensive_jobs.png)
+    ![High Cost tab](../assets/screenshots/job_board_expensive_jobs.png)
 
 Draining stops new job handouts and parks running evaluations. A server restart clears the flag. A stop without draining also stays safe: the next start re-queues interrupted work.
 

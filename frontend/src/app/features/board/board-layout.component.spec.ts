@@ -25,6 +25,11 @@ describe('BoardLayoutComponent', () => {
     expect(tabs(true)).toContain('System Health');
   });
 
+  it('offers one High Cost tab for builds and evaluations', () => {
+    const shown = tabs(false);
+    expect(shown.filter((t) => t.startsWith('High'))).toEqual(['High Cost']);
+  });
+
   it('places Storage right after Cache', () => {
     const shown = tabs(true);
     expect(shown[shown.indexOf('Cache') + 1]).toBe('Storage');

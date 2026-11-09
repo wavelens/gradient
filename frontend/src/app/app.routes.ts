@@ -466,16 +466,11 @@ export const routes: Routes = [
           {
             path: 'expensive',
             loadComponent: () =>
-              import('./features/board/expensive-jobs/expensive-jobs.component').then(
-                (m) => m.BoardExpensiveJobsComponent
-              ),
+              import('./features/board/high-cost/high-cost.component').then((m) => m.BoardHighCostComponent),
           },
           {
             path: 'expensive-evals',
-            loadComponent: () =>
-              import('./features/board/expensive-evals/expensive-evals.component').then(
-                (m) => m.BoardExpensiveEvalsComponent
-              ),
+            redirectTo: '/board/expensive?highCostRanking=evaluations',
           },
         ],
       },
