@@ -40,7 +40,7 @@ import { BuildGraph, BuildStatus, DependencyEdge, DependencyGraphNode } from '@c
 
 const CARD_W = 200;
 const paint = (el: SVGElement, property: 'fill' | 'stroke', role: string) => el.style.setProperty(property, role.startsWith('var(') ? role : `var(${role})`);
-const CARD_H = 78;
+const CARD_H = 66;
 const H_GAP = 32;
 const V_GAP = 90;
 const ACTIVE_STATUSES = ['Building', 'Queued', 'Created'];
@@ -313,22 +313,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     nameText.textContent = node.name.length > 22 ? node.name.slice(0, 20) + '…' : node.name;
     g.appendChild(nameText);
 
-    // Derivation name (strip the leading <hash>- from the base path)  [text index 1]
-    const filename = node.path.split('/').pop() ?? '';
-    const dashIdx = filename.indexOf('-');
-    const drvName = dashIdx >= 0 ? filename.slice(dashIdx + 1) : filename;
-    const pathText = document.createElementNS(ns, 'text');
-    pathText.setAttribute('x', '14'); pathText.setAttribute('y', '36');
-    paint(pathText, 'fill', '--gr-text-muted');
-    pathText.setAttribute('font-size', '10');
-    pathText.setAttribute('font-family', 'monospace, Arial, sans-serif');
-    pathText.setAttribute('pointer-events', 'none');
-    pathText.textContent = drvName.length > 26 ? drvName.slice(0, 25) + '…' : drvName;
-    g.appendChild(pathText);
-
-    // Status label  [text index 2]
+    // Status label  [text index 1]
     const statusText = document.createElementNS(ns, 'text');
-    statusText.setAttribute('x', '14'); statusText.setAttribute('y', '52');
+    statusText.setAttribute('x', '14'); statusText.setAttribute('y', '40');
     paint(statusText, 'fill', '--gr-text-secondary');
     statusText.setAttribute('font-size', '11');
     statusText.setAttribute('font-family', 'Arial, sans-serif');
@@ -336,9 +323,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     statusText.textContent = this.statusLabel(node.status);
     g.appendChild(statusText);
 
-    // Build duration  [text index 3]
+    // Build duration  [text index 2]
     const durationText = document.createElementNS(ns, 'text') as SVGTextElement;
-    durationText.setAttribute('x', '14'); durationText.setAttribute('y', '66');
+    durationText.setAttribute('x', '14'); durationText.setAttribute('y', '54');
     paint(durationText, 'fill', '--gr-text-muted');
     durationText.setAttribute('font-size', '10');
     durationText.setAttribute('font-family', 'Arial, sans-serif');
@@ -363,7 +350,6 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     if (node.build) {
       g.setAttribute('tabindex', '0');
       g.setAttribute('role', 'link');
-      g.setAttribute('aria-label', `${node.name}, ${this.statusLabel(node.status)}`);
       g.addEventListener('click', () => {
         if (!this.didDrag) this.navigateToEvaluationLogForNode(node);
       });
@@ -606,7 +592,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   /// The legend shows one entry per node colour and lists every status drawn in that colour, so two entries never share a colour.
   readonly legend: { label: string; color: string }[] = (() => {
     const labelsByColor = new Map<string, string[]>();
-    for (const status of ['Created', 'Queued', 'Building', 'Completed', 'FailedPermanent', 'Aborted', 'DependencyFailed', 'Skipped'] as const) {
+    for (const status of ['Created', 'Queued', 'Building', 'Completed', 'Substituted', 'FailedPermanent', 'FailedTransient', 'FailedTimeout', 'Aborted', 'DependencyFailed', 'Skipped'] as const) {
       const color = PHASE_COLOR[buildPhase(status)];
       labelsByColor.set(color, [...(labelsByColor.get(color) ?? []), buildStatusLabel(status)]);
     }

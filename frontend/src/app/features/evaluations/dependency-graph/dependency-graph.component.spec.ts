@@ -118,7 +118,8 @@ describe('DependencyGraphComponent live updates', () => {
     const card = (fixture.nativeElement as HTMLElement).querySelector('svg g g') as SVGGElement;
 
     expect(card.getAttribute('tabindex')).toBe('0');
-    expect(card.getAttribute('aria-label')).toBe('root, Failed');
+    expect(card.hasAttribute('aria-label')).toBe(false);
+    expect([...card.querySelectorAll('text')].map((text) => text.textContent)).toEqual(['root', 'Failed', '']);
     card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
     expect(String(navigate.mock.calls[0][0])).toBe('/project/proj/log/e9?build=root');
     fixture.destroy();

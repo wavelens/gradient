@@ -111,6 +111,8 @@
                   <span class="build-dot"></span>
                   <span class="build-name">{{ buildDisplayName(build.name) }}</span>
                   @if (build.ifd) { <gr-badge severity="info">IFD</gr-badge> }
+                  @let statusLabel = buildStatusLabel(build.status);
+                  @if (statusLabel !== group.label) { <span class="build-status-label">{{ statusLabel }}</span> }
                   @if (getBuildElapsed(build)) {
                     <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
                   }

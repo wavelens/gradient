@@ -191,6 +191,14 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.groupedBuilds().map((g) => [g.key, g.builds.map((b) => b.id)])).toEqual([['completed', ['c1']], ['other', ['n1']]]);
     });
 
+    it('labels substituted builds as substituted and gives every finished build its duration', () => {
+      const { cmp } = setup();
+      const timedOut = { ...build('t1', 't1', 'FailedTimeout'), build_time_ms: 287 };
+      cmp.visibleBuilds.set([build('c1', 'c1', 'Completed'), build('s1', 's1', 'Substituted'), timedOut]);
+      expect(cmp.groupedBuilds().map((g) => g.label)).toEqual(['Failed', 'Completed', 'Substituted']);
+      expect(cmp.getBuildElapsed(timedOut)).toBe('287 ms');
+    });
+
     it('starts with every section expanded', () => {
       const { cmp } = setup();
       cmp.visibleBuilds.set(builds());

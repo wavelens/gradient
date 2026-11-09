@@ -81,8 +81,8 @@ const BUILD_STATUS_LABEL: Record<BuildStatus, string> = {
   Skipped: 'Skipped',
 };
 
-export function buildStatusLabel(status: BuildStatus): string {
-  return BUILD_STATUS_LABEL[status] ?? status;
+export function buildStatusLabel(status: string): string {
+  return BUILD_STATUS_LABEL[status as BuildStatus] ?? status;
 }
 
 export function inputFetchPhase(state: InputFetchState): StatusPhase {
