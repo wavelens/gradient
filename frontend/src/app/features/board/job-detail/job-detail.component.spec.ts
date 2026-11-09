@@ -192,14 +192,14 @@ describe('BoardJobDetailComponent - run time', () => {
     const finished = { ...DETAIL, finished_at: '2026-06-08T00:01:10Z', worker_elapsed_ms: 9000, worker_tail_ms: 500, transit_ms: 1000 };
     const el = setup({ getJob: () => of(finished) }).nativeElement as HTMLElement;
     const steps = Array.from(el.querySelectorAll('section.timeline .step'));
-    expect(steps.map((s) => s.querySelector('.label')?.textContent?.trim())).toEqual(['Queued', 'Wait', 'Started', 'Ran']);
+    expect(steps.map((s) => s.querySelector('.label')?.textContent?.trim())).toEqual(['Queued', 'Wait', 'Started', 'Worker time']);
     expect(steps[3].lastElementChild?.textContent?.trim()).toBe('9.0 s');
   });
 
   it('leaves out the run time for a row the server closed without a worker report', () => {
     const closed = { ...DETAIL, finished_at: '2026-06-08T00:05:00Z' };
     const steps = (setup({ getJob: () => of(closed) }).nativeElement as HTMLElement).querySelector('section.timeline')?.textContent ?? '';
-    expect(steps).not.toContain('Ran');
+    expect(steps).not.toContain('Worker time');
     expect(steps).not.toContain('Running for');
   });
 

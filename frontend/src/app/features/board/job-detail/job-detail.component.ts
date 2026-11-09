@@ -211,7 +211,7 @@ interface RuleRow {
         <div class="step"><span class="label">Wait</span><span>{{ waitLabel() }}</span></div>
         <div class="step"><span class="label">Started</span><span>{{ j.dispatched_at | serverDate }}</span></div>
         @if (j.worker_elapsed_ms != null) {
-          <div class="step"><span class="label">Ran</span><span>{{ formatDuration(j.worker_elapsed_ms) }}</span></div>
+          <div class="step"><span class="label">Worker time</span><span>{{ formatDuration(j.worker_elapsed_ms) }}</span></div>
         } @else if (!j.finished_at && !j.passed_over) {
           <div class="step"><span class="label">Running for</span><span>{{ runningForLabel() }}</span></div>
         }

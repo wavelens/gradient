@@ -64,7 +64,7 @@ The **Storage** tab pulls its data from the metric keys below. Each bucket keeps
 
 Open a job from **Live Jobs** to see five sections.
 
-- Values **Queued**, **Wait**, **Ran** show the queue entry time, the wait before server assignment, and the worker-reported job runtime.
+- Values **Queued**, **Wait**, **Worker time** show the queue entry time, the wait before server assignment, and the worker-reported job runtime.
 - Worker timeline with nested phases (fetch, evaluate, build, compress, upload wait, NAR push), duration, percentage, and bytes moved. Exec jobs add [reported phases](../exec/phases-and-outputs.md) and **Program run** to the period from program start to the end of the attempt.
 - Superusers see the score breakdown under **Scheduler details** and the context for the worker, job, and instance (closed by default). Scoring rules show their contribution to the winning worker in the breakdown, with the total at the end.
 
