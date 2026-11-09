@@ -254,6 +254,7 @@ describe('ExecJobPageComponent', () => {
     expect(abortButton(root)).toBeTruthy();
     root.querySelector<HTMLButtonElement>('.log-area gr-waiting-notice button')?.click();
     expect(run).toHaveBeenCalledWith('j1');
+    expect(toasts()).toContainEqual(expect.objectContaining({ severity: 'success', summary: 'Exec job added to queue' }));
   });
 
   it('puts abort at the end of the info bar', () => {

@@ -300,7 +300,7 @@ export class ExecJobPageComponent implements OnInit {
     this.execJobs.run(this.jobId).subscribe({
       next: () => {
         this.starting.set(false);
-        this.notify.success('Exec job started');
+        this.notify.success('Exec job added to queue');
         this.watch();
       },
       error: (error: unknown) => {
