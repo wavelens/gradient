@@ -18,6 +18,7 @@ function repeatStep(field: string): number | null {
 }
 
 function weekdayName(field: string): string | null {
+  if (/^[1-7]$/.test(field)) return WEEKDAY_NAMES[Number(field) - 1];
   const name = field.toLowerCase();
   return WEEKDAY_NAMES.find((day) => day.toLowerCase() === name || day.slice(0, 3).toLowerCase() === name) ?? null;
 }
