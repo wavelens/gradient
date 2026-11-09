@@ -23,7 +23,7 @@ export class DashboardService {
   }
 
   activity(): Observable<Activity> {
-    return this.api.get<Activity>('dashboard/activity');
+    return this.api.get<Activity>(`dashboard/activity?tz_offset_minutes=${-new Date().getTimezoneOffset()}`);
   }
 
   rail(): Observable<Rail> {

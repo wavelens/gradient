@@ -58,14 +58,18 @@ pub fn totals_sql(filter: Option<&str>) -> String {
     )
 }
 
+const MAX_ABSOLUTE_UTC_OFFSET_MINUTES: i32 = 14 * 60;
+
 pub fn activity_sql(filter: Option<&str>) -> String {
     format!(
-        "WITH per_day AS (SELECT e.created_at::date AS day, count(*)::bigint AS evaluations, \
+        "WITH local AS (SELECT make_interval(mins => $1::int) AS shift, \
+            (now() AT TIME ZONE 'UTC' + make_interval(mins => $1::int))::date AS today), \
+        per_day AS (SELECT (e.created_at + l.shift)::date AS day, count(*)::bigint AS evaluations, \
             count(*) FILTER (WHERE e.status = {failed})::bigint AS failed \
-            FROM evaluation e JOIN task t ON t.id = e.task LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
-            WHERE e.created_at >= current_date - 370 AND {NON_PR}{scope} GROUP BY 1) \
+            FROM local l, evaluation e JOIN task t ON t.id = e.task LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
+            WHERE e.created_at >= l.today - 371 AND {NON_PR}{scope} GROUP BY 1) \
         SELECT d::date AS date, coalesce(p.evaluations, 0) AS evaluations, coalesce(p.failed, 0) AS failed \
-        FROM generate_series(current_date - 370, current_date, interval '1 day') d \
+        FROM local l, generate_series(l.today - 370, l.today, interval '1 day') d \
         LEFT JOIN per_day p ON p.day = d::date ORDER BY d",
         failed = crate::sql::status::eval(EvaluationStatus::Failed),
         scope = in_projects("t.project", filter),
@@ -78,7 +82,7 @@ crate::sql_fn! {
         tier = Bulk;
 
     ACTIVITY = || activity_sql(Some("'11111111-1111-1111-1111-111111111111'")),
-        params = [],
+        params = [Int(60)],
         tier = Bulk;
 }
 
@@ -138,11 +142,16 @@ fn activity_day(r: &QueryResult) -> Result<ActivityDay, DbErr> {
 pub async fn activity<C: ConnectionTrait>(
     db: &C,
     filter: Option<&str>,
+    viewer_utc_offset_minutes: i32,
 ) -> Result<Vec<ActivityDay>, DbErr> {
     if no_projects(filter) {
         return Ok(Vec::new());
     }
-    db.query_all_raw(ACTIVITY.bind_built(activity_sql(filter), []))
+    let offset = viewer_utc_offset_minutes.clamp(
+        -MAX_ABSOLUTE_UTC_OFFSET_MINUTES,
+        MAX_ABSOLUTE_UTC_OFFSET_MINUTES,
+    );
+    db.query_all_raw(ACTIVITY.bind_built(activity_sql(filter), [i64::from(offset).into()]))
         .await?
         .iter()
         .map(activity_day)
@@ -168,7 +177,7 @@ mod tests {
             scoped_totals(&db, Some("")).await.unwrap(),
             Totals::default()
         );
-        assert!(activity(&db, Some("")).await.unwrap().is_empty());
+        assert!(activity(&db, Some(""), 0).await.unwrap().is_empty());
         assert!(db.into_transaction_log().is_empty());
     }
 }
