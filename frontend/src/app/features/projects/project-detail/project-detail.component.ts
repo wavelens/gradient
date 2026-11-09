@@ -58,7 +58,7 @@ export class ProjectDetailComponent implements OnInit {
   project = signal<ProjectResponse>((this.route.snapshot.data['projectAccess'] as ProjectAccessData).project);
   canCreateTask = computed(() => this.project().permissions.includes('createTask'));
   canOpenSettings = computed(() => canOpenProjectSettings(this.project()));
-  tasks = pagedList<TaskResponse>('tasks', (page, options) => this.tasksService.getTasks(this.projectName, page, 50, options));
+  tasks = pagedList<TaskResponse>('tasks', (page) => this.tasksService.getTasks(this.projectName, page, 50));
   starred = signal(false);
   activeBinaryCacheNames = signal<string[]>([]);
 

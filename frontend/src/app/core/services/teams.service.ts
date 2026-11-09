@@ -6,7 +6,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { ApiService, RequestOptions } from './api.service';
+import { ApiService } from './api.service';
 import {
   TeamSummary,
   TeamResponse,
@@ -53,8 +53,8 @@ export class TeamsService {
     return this.api.delete<string>(`teams/${team}`);
   }
 
-  members(team: string, options?: RequestOptions): Observable<TeamMemberItem[]> {
-    return this.api.get<TeamMemberItem[]>(`teams/${team}/members`, options);
+  members(team: string): Observable<TeamMemberItem[]> {
+    return this.api.get<TeamMemberItem[]>(`teams/${team}/members`);
   }
 
   addMember(team: string, user: string, role: TeamRole): Observable<string> {
@@ -69,16 +69,16 @@ export class TeamsService {
     return this.api.delete<string>(`teams/${team}/members`, { user });
   }
 
-  invitations(team: string, options?: RequestOptions): Observable<PendingInvitationItem[]> {
-    return this.api.get<PendingInvitationItem[]>(`teams/${team}/invitations`, options);
+  invitations(team: string): Observable<PendingInvitationItem[]> {
+    return this.api.get<PendingInvitationItem[]>(`teams/${team}/invitations`);
   }
 
   revokeInvitation(team: string, user: string): Observable<string> {
     return this.api.delete<string>(`teams/${team}/invitations`, { user });
   }
 
-  workers(team: string, options?: RequestOptions): Observable<TeamWorkerEntry[]> {
-    return this.api.get<TeamWorkerEntry[]>(`teams/${team}/workers`, options);
+  workers(team: string): Observable<TeamWorkerEntry[]> {
+    return this.api.get<TeamWorkerEntry[]>(`teams/${team}/workers`);
   }
 
   registerWorker(team: string, worker: RegisterWorkerRequest): Observable<RegisteredTeamWorker> {
@@ -93,12 +93,12 @@ export class TeamsService {
     return this.api.delete<string>(`teams/${team}/workers/${workerId}`);
   }
 
-  grants(team: string, options?: RequestOptions): Observable<TeamGrants> {
-    return this.api.get<TeamGrants>(`teams/${team}/grants`, options);
+  grants(team: string): Observable<TeamGrants> {
+    return this.api.get<TeamGrants>(`teams/${team}/grants`);
   }
 
-  requests(team: string, options?: RequestOptions): Observable<TeamRequestItem[]> {
-    return this.api.get<TeamRequestItem[]>(`teams/${team}/requests`, options);
+  requests(team: string): Observable<TeamRequestItem[]> {
+    return this.api.get<TeamRequestItem[]>(`teams/${team}/requests`);
   }
 
   approveRequest(team: string, id: string): Observable<string> {

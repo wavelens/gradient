@@ -78,7 +78,7 @@ export class ProjectListComponent implements OnInit {
     return this.config.canCreate(this.config.createProject, this.authService.user()?.superuser === true);
   }
 
-  projects = pagedList<ProjectSummary>('projects', (page, options) => this.projectsService.getProjects(page, 50, options));
+  projects = pagedList<ProjectSummary>('projects', (page) => this.projectsService.getProjects(page, 50));
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
@@ -91,7 +91,7 @@ export class ProjectListComponent implements OnInit {
     public: false,
   };
 
-  publicProjects = pagedList<PublicProjectSummary>('public projects', (page, options) => this.projectsService.getPublicProjects(page, 50, options));
+  publicProjects = pagedList<PublicProjectSummary>('public projects', (page) => this.projectsService.getPublicProjects(page, 50));
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => merge(

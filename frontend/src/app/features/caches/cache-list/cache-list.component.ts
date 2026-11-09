@@ -59,7 +59,7 @@ export class CacheListComponent implements OnInit {
     return this.config.canCreate(this.config.createCache, this.authService.user()?.superuser === true);
   }
 
-  caches = pagedList<Cache>('caches', (page, options) => this.cachesService.getCaches(page, 100, options));
+  caches = pagedList<Cache>('caches', (page) => this.cachesService.getCaches(page, 100));
   showCreateDialog = signal(false);
 
   publicCaches = signal<Cache[]>([]);

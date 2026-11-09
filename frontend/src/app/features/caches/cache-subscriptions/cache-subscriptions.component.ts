@@ -10,7 +10,6 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
-import { inBackground } from '@core/interceptors/request-context';
 import { NotifyService } from '@core/services/notify.service';
 import { SubscriptionRequestItem } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
@@ -62,7 +61,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
 
   constructor() {
     runReloadIntervalWhileTabVisible(() =>
-      requestIfCacheMember(this.cacheAccess()?.cache, () => this.cachesService.getSubscriptionRequests(this.cacheName, inBackground()), 'manageCacheSubscriptions').pipe(tap((requests) => {
+      requestIfCacheMember(this.cacheAccess()?.cache, () => this.cachesService.getSubscriptionRequests(this.cacheName), 'manageCacheSubscriptions').pipe(tap((requests) => {
         this.requests.set(requests);
         this.loadError.set(null);
       })));

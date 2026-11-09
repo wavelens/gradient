@@ -6,7 +6,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Observable, tap } from 'rxjs';
-import { ApiService, RequestOptions } from './api.service';
+import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
 import {
   Paginated,
@@ -51,8 +51,8 @@ export class CachesService {
     return this.api.get<boolean>(`caches/available?name=${encodeURIComponent(name)}`);
   }
 
-  getCaches(page = 1, perPage = 50, options?: RequestOptions): Observable<Paginated<Cache[]>> {
-    return this.api.get<Paginated<Cache[]>>(`caches?page=${page}&per_page=${perPage}`, options);
+  getCaches(page = 1, perPage = 50): Observable<Paginated<Cache[]>> {
+    return this.api.get<Paginated<Cache[]>>(`caches?page=${page}&per_page=${perPage}`);
   }
 
   getCache(cache: string): Observable<CacheResponse> {
@@ -145,8 +145,8 @@ export class CachesService {
     return this.api.delete<void>(`caches/${cache}/nars/${hash}`);
   }
 
-  getInvitations(cache: string, options?: RequestOptions): Observable<PendingInvitationItem[]> {
-    return this.api.get<PendingInvitationItem[]>(`caches/${cache}/invitations`, options);
+  getInvitations(cache: string): Observable<PendingInvitationItem[]> {
+    return this.api.get<PendingInvitationItem[]>(`caches/${cache}/invitations`);
   }
 
   revokeInvitation(cache: string, user: string): Observable<string> {
@@ -157,8 +157,8 @@ export class CachesService {
     return this.api.get<CacheSubscribersResponse>(`caches/${cache}/subscribers`);
   }
 
-  getSubscriptionRequests(cache: string, options?: RequestOptions): Observable<SubscriptionRequestItem[]> {
-    return this.api.get<SubscriptionRequestItem[]>(`caches/${cache}/subscription-requests`, options);
+  getSubscriptionRequests(cache: string): Observable<SubscriptionRequestItem[]> {
+    return this.api.get<SubscriptionRequestItem[]>(`caches/${cache}/subscription-requests`);
   }
 
   approveSubscriptionRequest(cache: string, project: string): Observable<string> {
@@ -169,8 +169,8 @@ export class CachesService {
     return this.api.delete<string>(`caches/${cache}/subscription-requests/${project}`);
   }
 
-  getMembers(cache: string, options?: RequestOptions): Observable<MemberItem[]> {
-    return this.api.get<MemberItem[]>(`caches/${cache}/members`, options);
+  getMembers(cache: string): Observable<MemberItem[]> {
+    return this.api.get<MemberItem[]>(`caches/${cache}/members`);
   }
 
   addMember(cache: string, user: string, role: string): Observable<string> {

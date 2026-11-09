@@ -6,7 +6,6 @@
 
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { InviteItem } from '@core/models';
-import { inBackground } from '@core/interceptors/request-context';
 import { AuthService } from './auth.service';
 import { UserService } from './user.service';
 
@@ -27,7 +26,7 @@ export class PendingInvitesService {
   }
 
   refresh(): void {
-    this.users.getInvites(inBackground()).subscribe({
+    this.users.getInvites().subscribe({
       next: (invites) => this.invites.set(invites),
       error: () => undefined,
     });

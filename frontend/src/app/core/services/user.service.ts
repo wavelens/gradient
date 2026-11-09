@@ -6,7 +6,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { ApiService, type RequestOptions } from './api.service';
+import { ApiService } from './api.service';
 import {
   GetUserSettingsResponse,
   SshKeyInfo,
@@ -93,8 +93,8 @@ export class UserService {
     return this.api.post<string>(`user/keys/${id}/revoke`, {});
   }
 
-  getInvites(options?: RequestOptions): Observable<InviteItem[]> {
-    return this.api.get<InviteItem[]>('user/invites', options);
+  getInvites(): Observable<InviteItem[]> {
+    return this.api.get<InviteItem[]>('user/invites');
   }
 
   acceptInvite(token: string): Observable<string> {
@@ -105,8 +105,8 @@ export class UserService {
     return this.api.post<string>('user/invites/decline', { token });
   }
 
-  getSessions(page = 1, perPage = 50, options?: RequestOptions): Observable<Paginated<SessionInfo[]>> {
-    return this.api.get<Paginated<SessionInfo[]>>(`user/sessions?page=${page}&per_page=${perPage}`, options);
+  getSessions(page = 1, perPage = 50): Observable<Paginated<SessionInfo[]>> {
+    return this.api.get<Paginated<SessionInfo[]>>(`user/sessions?page=${page}&per_page=${perPage}`);
   }
 
   revokeSession(id: string): Observable<string> {

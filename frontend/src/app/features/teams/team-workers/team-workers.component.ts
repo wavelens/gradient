@@ -7,7 +7,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TeamsService } from '@core/services/teams.service';
-import { inBackground } from '@core/interceptors/request-context';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -97,7 +96,7 @@ export class TeamWorkersComponent implements OnInit {
   );
 
   statusOf = (workerId: string): Observable<WorkerConnection | undefined> =>
-    this.teams.workers(this.teamName, inBackground()).pipe(map((workers) => workers.find((w) => w.worker_id === workerId)));
+    this.teams.workers(this.teamName).pipe(map((workers) => workers.find((w) => w.worker_id === workerId)));
 
   get teamName(): string {
     return this.team().name;
@@ -113,7 +112,7 @@ export class TeamWorkersComponent implements OnInit {
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => this.loading() || this.loadError() !== null ? EMPTY :
-      this.teams.workers(this.teamName, inBackground()).pipe(tap((workers) => this.workers.set(workers))));
+      this.teams.workers(this.teamName).pipe(tap((workers) => this.workers.set(workers))));
   }
 
   ngOnInit(): void {

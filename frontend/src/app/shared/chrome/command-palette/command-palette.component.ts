@@ -23,7 +23,6 @@ import {
 } from 'rxjs';
 import { IconComponent } from '@gradient/ui/ui';
 import { SearchService } from '@core/services/search.service';
-import { inBackground } from '@core/interceptors/request-context';
 import { SearchHit } from '@core/models';
 import { CommandPaletteService } from './command-palette.service';
 
@@ -157,7 +156,7 @@ export class CommandPaletteComponent {
   }
 
   private lookup(query: string): Observable<Result> {
-    return this.search.search(query, undefined, inBackground()).pipe(
+    return this.search.search(query).pipe(
       map((hits) => ({ query, hits, failed: false })),
       catchError(() => of({ query, hits: [], failed: true })),
     );

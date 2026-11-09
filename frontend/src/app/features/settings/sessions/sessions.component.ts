@@ -51,7 +51,7 @@ export class SessionsComponent implements OnInit {
   private confirm = inject(ConfirmService);
   protected readonly deviceName = deviceName;
 
-  sessions = pagedList<SessionInfo>('sessions', (page, options) => this.userService.getSessions(page, 25, options));
+  sessions = pagedList<SessionInfo>('sessions', (page) => this.userService.getSessions(page, 25));
 
   ngOnInit(): void {
     this.sessions.reload();

@@ -8,13 +8,11 @@ import { TestBed } from '@angular/core/testing';
 import { Observable, of, throwError } from 'rxjs';
 import { Paginated } from '@core/models';
 import { NotifyService } from '@core/services/notify.service';
-import { RequestOptions } from '@core/services/api.service';
-import { BACKGROUND } from '@core/interceptors/request-context';
 import { pagedList } from './paged-list';
 
 const page = (items: number[], current: number, total = 3): Paginated<number[]> => ({ items, total, page: current, per_page: 2 });
 
-function setup(fetch: (n: number, options?: RequestOptions) => Observable<Paginated<number[]>>) {
+function setup(fetch: (n: number) => Observable<Paginated<number[]>>) {
   const failure = vi.fn();
   TestBed.configureTestingModule({ providers: [{ provide: NotifyService, useValue: { failure } }] });
   const list = TestBed.runInInjectionContext(() => pagedList('numbers', fetch));
@@ -65,14 +63,5 @@ describe('pagedList', () => {
     fetch.mockClear();
     list.refreshFirstPageSilently().subscribe();
     expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('marks the silent refresh as a background request so a failure keeps the page', () => {
-    const fetch = vi.fn((_n: number, _options?: RequestOptions) => of(page([1, 2], 1)));
-    const { list } = setup(fetch);
-    list.reload();
-    expect(fetch.mock.calls[0][1]).toBeUndefined();
-    list.refreshFirstPageSilently().subscribe();
-    expect(fetch.mock.calls[1][1]?.context?.get(BACKGROUND)).toBe(true);
   });
 });

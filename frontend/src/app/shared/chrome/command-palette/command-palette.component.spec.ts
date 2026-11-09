@@ -99,7 +99,7 @@ describe('CommandPaletteComponent', () => {
     input.dispatchEvent(new Event('input'));
     vi.advanceTimersByTime(200);
     f.detectChanges();
-    expect(search).toHaveBeenLastCalledWith('hel', undefined, expect.objectContaining({ context: expect.anything() }));
+    expect(search).toHaveBeenLastCalledWith('hel');
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
@@ -126,7 +126,7 @@ describe('CommandPaletteComponent', () => {
     const { f, search } = render();
     TestBed.inject(CommandPaletteService).open();
     f.detectChanges();
-    expect(search).toHaveBeenCalledWith('', undefined, expect.objectContaining({ context: expect.anything() }));
+    expect(search).toHaveBeenCalledWith('');
   });
 
   it('renders hits as a listbox inside a modal dialog', () => {

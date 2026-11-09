@@ -78,11 +78,11 @@ describe('SessionsComponent', () => {
       .mockReturnValueOnce(createOnePageSessionsResponse([CURRENT, OTHER], 3))
       .mockReturnValueOnce(createOnePageSessionsResponse([third], 3, 2));
     const { fixture, root } = setup(getSessions);
-    expect(getSessions).toHaveBeenCalledWith(1, 25, undefined);
+    expect(getSessions).toHaveBeenCalledWith(1, 25);
     expect(root.textContent).toContain('Showing 2 of 3');
     Array.from(root.querySelectorAll<HTMLButtonElement>('gr-load-more button')).find((b) => b.textContent?.includes('Load more'))!.click();
     fixture.detectChanges();
-    expect(getSessions).toHaveBeenLastCalledWith(2, 25, undefined);
+    expect(getSessions).toHaveBeenLastCalledWith(2, 25);
     expect(revokeButtons(root)).toHaveLength(3);
     expect(root.textContent).not.toContain('Load more');
   });

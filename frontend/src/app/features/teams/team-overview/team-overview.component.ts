@@ -26,7 +26,6 @@ import { TeamMembersComponent } from '../team-members/team-members.component';
 import { TeamWorkersComponent } from '../team-workers/team-workers.component';
 import { links } from '@shared/routing';
 import { EMPTY, merge, tap } from 'rxjs';
-import { inBackground } from '@core/interceptors/request-context';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 
 @Component({
@@ -70,8 +69,8 @@ export class TeamOverviewComponent implements OnInit {
   isAdmin = computed(() => canManageTeam(this.team(), this.authService.user()));
   constructor() {
     runReloadIntervalWhileTabVisible(() => merge(
-      this.grantsLoadError() !== null ? EMPTY : this.teams.grants(this.teamName, inBackground()).pipe(tap((grants) => this.grants.set(grants))),
-      this.isAdmin() ? this.teams.requests(this.teamName, inBackground()).pipe(tap((requests) => this.requests.set(requests))) : EMPTY,
+      this.grantsLoadError() !== null ? EMPTY : this.teams.grants(this.teamName).pipe(tap((grants) => this.grants.set(grants))),
+      this.isAdmin() ? this.teams.requests(this.teamName).pipe(tap((requests) => this.requests.set(requests))) : EMPTY,
     ));
   }
 

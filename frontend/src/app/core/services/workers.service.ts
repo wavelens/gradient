@@ -6,7 +6,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { ApiService, RequestOptions } from './api.service';
+import { ApiService } from './api.service';
 import {
   AllowedCapabilities,
   ProjectWorkerEntry,
@@ -22,12 +22,12 @@ import {
 export class WorkersService {
   private api = inject(ApiService);
 
-  getWorkers(project: string, options?: RequestOptions): Observable<ProjectWorkerEntry[]> {
-    return this.api.get<ProjectWorkerEntry[]>(`projects/${project}/workers`, options);
+  getWorkers(project: string): Observable<ProjectWorkerEntry[]> {
+    return this.api.get<ProjectWorkerEntry[]>(`projects/${project}/workers`);
   }
 
-  getWorkerMetrics(project: string, workerId: string, options?: RequestOptions): Observable<WorkerMetricsResponse> {
-    return this.api.get<WorkerMetricsResponse>(`projects/${project}/workers/${workerId}/metrics`, options);
+  getWorkerMetrics(project: string, workerId: string): Observable<WorkerMetricsResponse> {
+    return this.api.get<WorkerMetricsResponse>(`projects/${project}/workers/${workerId}/metrics`);
   }
 
   registerWorker(

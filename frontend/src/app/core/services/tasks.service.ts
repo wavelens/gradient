@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { HttpResponse } from '@angular/common/http';
-import { ApiService, RequestOptions } from './api.service';
+import { ApiService } from './api.service';
 import {
   CheckRepositoryRequest,
   InstallDeployKeyRequest,
@@ -34,8 +34,8 @@ export class TasksService {
     return this.api.get<boolean>(`tasks/${project}/available?name=${encodeURIComponent(name)}`);
   }
 
-  getTasks(project: string, page = 1, perPage = 50, options?: RequestOptions): Observable<Paginated<TaskResponse[]>> {
-    return this.api.get<Paginated<TaskResponse[]>>(`tasks/${project}?page=${page}&per_page=${perPage}`, options);
+  getTasks(project: string, page = 1, perPage = 50): Observable<Paginated<TaskResponse[]>> {
+    return this.api.get<Paginated<TaskResponse[]>>(`tasks/${project}?page=${page}&per_page=${perPage}`);
   }
 
   getTask(project: string, task: string): Observable<TaskDetailsResponse> {
