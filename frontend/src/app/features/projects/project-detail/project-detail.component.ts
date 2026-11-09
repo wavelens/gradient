@@ -28,7 +28,7 @@ import { links } from '@shared/routing';
 import { canOpenProjectSettings, isViewerProjectMember } from '@shared/access';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { ProjectsService } from '@core/services/projects.service';
-import { EMPTY, catchError } from 'rxjs';
+import { EMPTY, catchError, merge, tap } from 'rxjs';
 
 @Component({
   selector: 'app-project-detail',
@@ -72,7 +72,15 @@ export class ProjectDetailComponent implements OnInit {
   starTarget: StarTarget = { kind: 'project', project: '' };
 
   constructor() {
-    runReloadIntervalWhileTabVisible(() => this.tasks.refreshFirstPageSilently());
+    runReloadIntervalWhileTabVisible(() =>
+      merge(
+        this.tasks.refreshFirstPageSilently(),
+        this.projectsService.getProject(this.projectName).pipe(
+          tap((project) => this.project.set(project)),
+          catchError(() => EMPTY),
+        ),
+      ),
+    );
   }
 
   ngOnInit(): void {

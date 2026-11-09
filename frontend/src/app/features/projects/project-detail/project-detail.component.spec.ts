@@ -115,6 +115,24 @@ describe('ProjectDetailComponent header', () => {
     expect(labels).not.toContain('Settings');
     expect(labels).not.toContain('Connect repository');
     expect(root.textContent).toContain('Ask a project administrator to connect a repository.');
+    expect(root.textContent?.match(/No tasks yet/g)).toHaveLength(1);
+  });
+
+  it('refreshes the header with the tasks on the reload interval', () => {
+    vi.useFakeTimers();
+    try {
+      const { root, fixture } = render(true);
+      const projects = TestBed.inject(ProjectsService) as unknown as { getProject: (name: string) => Observable<unknown> };
+      const getProject = vi.spyOn(projects, 'getProject').mockReturnValue(
+        of({ name: 'acme', display_name: 'Acme Renamed', description: '', role: 'Admin', permissions: EVERY_PERMISSION }),
+      );
+      vi.advanceTimersByTime(15_000);
+      fixture.detectChanges();
+      expect(getProject).toHaveBeenCalledWith('acme');
+      expect(root.textContent).toContain('Acme Renamed');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('offers no Connect repository on a project from the server configuration', () => {

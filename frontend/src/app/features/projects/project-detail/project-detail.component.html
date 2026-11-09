@@ -29,7 +29,7 @@
     errorTitle="Failed to load tasks"
     emptyIcon="folder"
     emptyTitle="No tasks yet"
-    [emptyMessage]="canCreateTask() ? 'Connect a repository to start a Nix build.' : 'No tasks yet. Ask a project administrator to connect a repository.'"
+    [emptyMessage]="canCreateTask() ? 'Connect a repository to start a Nix build.' : 'Ask a project administrator to connect a repository.'"
     (retry)="tasks.reload()"
   >
     @if (canCreateTask()) {
