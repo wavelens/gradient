@@ -49,4 +49,19 @@ describe('IncomingDeliveriesComponent', () => {
     expect(text).toContain('Queued 1 evaluation');
     expect(text).toContain('Refused with HTTP 401: bad');
   });
+
+  it('says in one line without a heading that nothing was delivered yet', () => {
+    TestBed.configureTestingModule({
+      imports: [IncomingDeliveriesComponent],
+      providers: [{ provide: IntegrationsService, useValue: { listIntegrationDeliveries: () => of([]) } }],
+    });
+    const fixture = TestBed.createComponent(IncomingDeliveriesComponent);
+    fixture.componentRef.setInput('project', 'acme');
+    fixture.componentRef.setInput('integrationId', 'i1');
+    fixture.detectChanges();
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.textContent).toContain('No deliveries yet.');
+    expect(element.textContent).not.toContain('Recent deliveries');
+    expect(element.querySelector('gr-empty-state')).toBeNull();
+  });
 });

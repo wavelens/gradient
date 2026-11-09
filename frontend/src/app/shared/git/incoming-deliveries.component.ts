@@ -43,15 +43,19 @@ export function deliverySummary(delivery: IncomingWebhookDeliveryResponse): stri
   imports: [BadgeComponent, ButtonComponent, LoadStateComponent, RelativeTimePipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="deliveries-head">
-      <strong>Recent deliveries</strong>
-      <button grButton type="button" label="Refresh" icon="refresh" severity="secondary" size="small"
-              [loading]="loading()" [disabled]="loading()" (click)="load()"></button>
-    </div>
+    @if (!error() && (deliveries().length > 0 || !loading())) {
+      <div class="deliveries-head">
+        @if (deliveries().length > 0) {
+          <strong>Recent deliveries</strong>
+        } @else {
+          <span class="text-secondary">No deliveries yet. Send a test delivery from the webhook settings of the Git host.</span>
+        }
+        <button grButton type="button" label="Refresh" icon="refresh" severity="secondary" size="small"
+                [loading]="loading()" [disabled]="loading()" (click)="load()"></button>
+      </div>
+    }
     <gr-load-state flat [loading]="loading() && deliveries().length === 0" [error]="error()"
-                   [empty]="deliveries().length === 0" emptyIcon="inbox"
-                   emptyMessage="No deliveries yet. Send a test delivery from the webhook settings of the Git host."
-                   errorTitle="Failed to load deliveries" (retry)="load()">
+                   [empty]="deliveries().length === 0" errorTitle="Failed to load deliveries" (retry)="load()">
       <ul class="deliveries">
         @for (delivery of deliveries().slice(0, limit()); track delivery.id) {
           <li>
