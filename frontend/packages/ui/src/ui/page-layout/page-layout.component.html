@@ -8,7 +8,7 @@ SPDX-License-Identifier: AGPL-3.0-only
   @if (breadcrumb().length) {
     <gr-breadcrumb [trail]="breadcrumb()" />
   }
-    <h1>{{ title() }}</h1>
+    <h1 [attr.title]="title()">{{ title() }}</h1>
     @if (subtitle()) {
       <p class="page-layout__subtitle">{{ subtitle() }}</p>
     }

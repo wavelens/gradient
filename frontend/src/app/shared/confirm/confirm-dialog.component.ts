@@ -23,6 +23,7 @@ import { ConfirmService } from './confirm.service';
       [busy]="running()"
       [error]="error()"
       width="440px"
+      (hide)="clearResultCallbackOnDialogHide()"
     >
       @if (current; as pending) {
         <p><strong>{{ pending.request.target }}</strong></p>
@@ -41,19 +42,30 @@ export class ConfirmDialogComponent {
   protected confirm = inject(ConfirmService);
   protected running = signal(false);
   protected error = signal<string | null>(null);
+  private resolveConfirmAfterDialogClosed: (() => void) | null = null;
 
   constructor() {
     effect(() => {
-      this.confirm.pending();
+      if (this.confirm.pending()) untracked(() => this.clearResultCallbackOnDialogHide());
       untracked(() => this.error.set(null));
     });
+  }
+
+  protected clearResultCallbackOnDialogHide(): void {
+    const resolve = this.resolveConfirmAfterDialogClosed;
+    this.resolveConfirmAfterDialogClosed = null;
+    resolve?.();
+  }
+
+  private closeDialogAndStoreResultCallback(resolve: () => void): void {
+    this.resolveConfirmAfterDialogClosed = resolve;
+    this.confirm.pending.set(null);
   }
 
   protected cancel(): void {
     if (this.running()) return;
     const pending = this.confirm.pending();
-    this.confirm.pending.set(null);
-    pending?.settle(null);
+    if (pending) this.closeDialogAndStoreResultCallback(() => pending.settle(null));
   }
 
   protected run(): void {
@@ -64,8 +76,7 @@ export class ConfirmDialogComponent {
     pending.request.action().pipe(take(1), defaultIfEmpty(undefined)).subscribe({
       next: (value) => {
         this.running.set(false);
-        this.confirm.pending.set(null);
-        pending.settle({ value });
+        this.closeDialogAndStoreResultCallback(() => pending.settle({ value }));
       },
       error: (error: unknown) => {
         this.running.set(false);

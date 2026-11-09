@@ -59,6 +59,7 @@ describe('gr-page-layout', () => {
   it('renders title and subtitle', async () => {
     const root = await render();
     expect(root.querySelector('h1')?.textContent).toContain('Integrations');
+    expect(root.querySelector('h1')?.getAttribute('title')).toBe('Integrations');
     expect(root.querySelector('.page-layout__subtitle')?.textContent).toContain('Git host webhooks');
   });
 

@@ -87,6 +87,18 @@ describe('ConfirmDialogComponent', () => {
     expect(panel()).toBeNull();
   });
 
+  it('hands the result over only after the dialog is gone, so callers can navigate', () => {
+    const { fixture, panel, button } = setup();
+    const panelOpenAtResult: boolean[] = [];
+    TestBed.inject(ConfirmService)
+      .confirm({ title: 'Delete', target: 'p', consequence: 'Gone.', confirmLabel: 'Delete', failure: 'No.', action: () => of(1) })
+      .subscribe(() => panelOpenAtResult.push(panel() !== null));
+    fixture.detectChanges();
+    button('Delete')!.click();
+    fixture.detectChanges();
+    expect(panelOpenAtResult).toEqual([false]);
+  });
+
   it('keeps a failure inside the dialog so the user can retry or cancel', () => {
     const { fixture, panel, button, ask } = setup();
     let attempts = 0;

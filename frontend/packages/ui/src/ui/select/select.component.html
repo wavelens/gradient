@@ -28,7 +28,7 @@ SPDX-License-Identifier: AGPL-3.0-only
   cdkConnectedOverlay
   [cdkConnectedOverlayOrigin]="trigger"
   [cdkConnectedOverlayOpen]="open()"
-  [cdkConnectedOverlayWidth]="triggerWidth() || 0"
+  [cdkConnectedOverlayMinWidth]="triggerWidth() || 0"
   (overlayOutsideClick)="close()"
   (detach)="close()"
 >
