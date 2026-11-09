@@ -297,12 +297,16 @@ describe('ExecJobPageComponent', () => {
     expect(header?.textContent).toContain('3 lines');
   });
 
-  it('labels the creation date apart from the CREATED status', () => {
-    const { fixture } = setup('created');
+  it('shows no times of an ended attempt while the job waits to run again', () => {
+    const requeued: ExecJobResponse = {
+      ...job('queued'),
+      attempts: [{ number: 1, worker: 'w1', started_at: '2026-01-01T00:00:01', program_started_at: '2026-01-01T00:00:04', ended_at: '2026-01-01T00:05:00', end_reason: 'aborted' }],
+    };
+    const { fixture } = setup('queued', SSH, {}, requeued);
     const labels = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.info-bar .metric-label'))
       .map((label) => label.textContent?.trim());
-    expect(labels).toContain('Queued at');
-    expect(labels).not.toContain('Created');
+    expect(labels).not.toContain('Program run');
+    expect(labels).not.toContain('Started');
   });
 
   it('names the worker and keeps its id on hover', () => {
@@ -312,18 +316,21 @@ describe('ExecJobPageComponent', () => {
     expect(worker?.getAttribute('title')).toBe('w1');
   });
 
-  it('measures the duration of the latest attempt, the span its timeout counts', () => {
+  it('measures the program run of the latest attempt without VM boot, the span its timeout counts', () => {
     const timedOut: ExecJobResponse = {
       ...job('failed'),
       started_at: '2026-01-01T00:00:20',
       finished_at: '2026-01-01T00:00:24',
       attempts: [
-        { number: 1, worker: 'w1', started_at: '2026-01-01T00:00:01', ended_at: '2026-01-01T00:00:05', end_reason: 'timeout' },
-        { number: 2, worker: 'w1', started_at: '2026-01-01T00:00:10', ended_at: '2026-01-01T00:00:15', end_reason: 'timeout' },
+        { number: 1, worker: 'w1', started_at: '2026-01-01T00:00:01', program_started_at: '2026-01-01T00:00:03', ended_at: '2026-01-01T00:00:05', end_reason: 'timeout' },
+        { number: 2, worker: 'w1', started_at: '2026-01-01T00:00:10', program_started_at: '2026-01-01T00:00:12', ended_at: '2026-01-01T00:00:15', end_reason: 'timeout' },
       ],
     };
     const { fixture } = setup('failed', SSH, {}, timedOut);
-    expect(fixture.componentInstance.duration()).toBe('5.0 s');
+    const metrics = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.info-bar .info-metric'))
+      .map((metric) => Array.from(metric.querySelectorAll('.metric-label, .metric-value')).map((part) => part.textContent?.trim()).join(': '));
+    expect(metrics).toContain('Program run: 3.0 s');
+    expect(metrics.some((metric) => metric.startsWith('Started: '))).toBe(true);
   });
 
   it('shows the worker timeline with the reported phases from the sidebar', () => {

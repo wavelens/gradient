@@ -113,14 +113,18 @@
               <span class="metric-value retries-left">{{ plural(job.retries_left, 'retry', 'retries') }} left</span>
             }
           </div>
-          <div class="info-metric">
-            <span class="metric-label">Duration</span>
-            <span class="metric-value">{{ duration() }}</span>
-          </div>
-          <div class="info-metric">
-            <span class="metric-label">Queued at</span>
-            <span class="metric-value">{{ job.created_at | serverDate }}</span>
-          </div>
+          @if (formattedProgramRunTime(); as programRun) {
+            <div class="info-metric">
+              <span class="metric-label">Program run</span>
+              <span class="metric-value">{{ programRun }}</span>
+            </div>
+          }
+          @if (highestNumberedAttempt(); as attempt) {
+            <div class="info-metric">
+              <span class="metric-label">Started</span>
+              <span class="metric-value">{{ attempt.started_at | serverDate }}</span>
+            </div>
+          }
           @if (job.worker) {
             <div class="info-metric">
               <span class="metric-label">Worker</span>

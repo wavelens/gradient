@@ -162,14 +162,16 @@ export class ExecJobPageComponent implements OnInit {
     const job = this.job();
     return this.breadcrumbs.taskAt(this.projectName, this.taskName, job?.evaluation, { label: job?.entry_point ?? 'Exec job' }).slice(1);
   });
-  duration = computed(() => {
+  highestNumberedAttempt = computed(() => {
     const job = this.job();
-    const attempt = job?.attempts.reduce<ExecJobAttemptView | null>((latest, a) => (!latest || a.number > latest.number ? a : latest), null);
-    const start = attempt?.started_at ?? job?.started_at;
-    if (!job || !start) return formatDuration(null);
-    const finished = attempt?.ended_at ?? job.finished_at;
-    const end = finished ? serverTime(finished).getTime() : this.now();
-    return formatDuration(Math.max(0, end - serverTime(start).getTime()));
+    if (!job || execJobPhase(job.status) === 'queued') return null;
+    return job.attempts.reduce<ExecJobAttemptView | null>((latest, a) => (!latest || a.number > latest.number ? a : latest), null);
+  });
+  formattedProgramRunTime = computed(() => {
+    const attempt = this.highestNumberedAttempt();
+    if (!attempt?.program_started_at) return '';
+    const end = attempt.ended_at ? serverTime(attempt.ended_at).getTime() : this.now();
+    return formatDuration(Math.max(0, end - serverTime(attempt.program_started_at).getTime()));
   });
 
   protected readonly phase = execJobPhase;
