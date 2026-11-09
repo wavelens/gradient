@@ -248,7 +248,7 @@ pub async fn get_team(
     operation_id = "patchTeam",
     tag = "teams",
     summary = "Change team",
-    description = "Needs Admin in the team. Only superusers set `oidc_group`, `scim_group` and the `new_project_*` fields. State-managed teams refuse changes.",
+    description = "Callers need Admin access in the team. Only superusers set the `oidc_group`, `scim_group`, and `new_project_*` fields. Set `new_project_users` only together with `new_project_role`. Teams under state management reject changes.",
     params(TeamPath),
     request_body = PatchTeamRequest,
     responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
@@ -283,6 +283,9 @@ pub async fn patch_team(
             .map(|name| builtin_role_id(&name).ok_or(TeamRefusal::InvalidNewProjectRole))
             .transpose()?;
         active.new_project_role = Set(role);
+    }
+    if *active.new_project_users.as_ref() && active.new_project_role.as_ref().is_none() {
+        return Err(TeamRefusal::RoleRequiredForUsers.into());
     }
     if let Some(group) = body.oidc_group {
         active.oidc_group = Set(blank_to_none(group));

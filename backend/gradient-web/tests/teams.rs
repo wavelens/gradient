@@ -8,9 +8,9 @@ use axum::http::StatusCode;
 use gradient_entity::team_user::TeamRole;
 use gradient_entity::{team, team_user};
 use gradient_fixtures::mock::{all_statements, exec_ok, mock_db, ran};
-use gradient_fixtures::rows::{team, team_member};
+use gradient_fixtures::rows::{superuser, team, team_member};
 use gradient_test_support::state::TestState;
-use gradient_test_support::web::{bearer, make_test_server, signed_in, with_auth};
+use gradient_test_support::web::{bearer, make_test_server, signed_in, with_auth, with_auth_as};
 use gradient_types::{CreatePermission, SessionId};
 use serde_json::{Value, json};
 
@@ -98,6 +98,28 @@ async fn only_a_superuser_grants_a_team_on_every_new_project() {
         let body: Value = res.json();
         assert_eq!(body["code"], "superuser_required");
     }
+}
+
+#[tokio::test]
+async fn granting_users_on_every_new_project_needs_a_role() {
+    let session_id = SessionId::now_v7();
+    let db = with_auth_as(mock_db(), session_id, superuser())
+        .append_query_results([vec![team()]])
+        .append_query_results([vec![team_member(TeamRole::Admin)]]);
+    let server = make_test_server(db.into_connection());
+
+    let res = server
+        .patch("/api/v1/teams/platform")
+        .add_header("authorization", bearer(session_id))
+        .json(&json!({ "new_project_users": true }))
+        .await;
+
+    res.assert_status(StatusCode::BAD_REQUEST);
+    let body: Value = res.json();
+    assert_eq!(
+        body["message"],
+        "A role is required when the grant includes users."
+    );
 }
 
 #[tokio::test]
