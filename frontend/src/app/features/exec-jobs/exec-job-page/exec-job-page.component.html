@@ -15,7 +15,7 @@
           @if (last) {
             <span class="breadcrumb-current" aria-current="page" [title]="crumb.label">{{ crumb.label }}</span>
           } @else {
-            <a [routerLink]="crumb.link" class="breadcrumb-link">{{ crumb.label }}</a>
+            <a [routerLink]="crumb.link" class="breadcrumb-link" [title]="crumb.label">{{ crumb.label }}</a>
             <span class="breadcrumb-sep">/</span>
           }
         }

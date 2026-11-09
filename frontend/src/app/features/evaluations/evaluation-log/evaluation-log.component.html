@@ -26,7 +26,7 @@
 
       <nav class="sidebar-breadcrumb" aria-label="Breadcrumb">
         @for (crumb of projectAndTaskCrumbs(); track $index) {
-          <a [routerLink]="crumb.link" class="breadcrumb-link">@if (crumb.label === null) {<gr-skeleton width="8ch" />} @else {{{ crumb.label }}}</a>
+          <a [routerLink]="crumb.link" class="breadcrumb-link" [title]="crumb.label ?? ''">@if (crumb.label === null) {<gr-skeleton width="8ch" />} @else {{{ crumb.label }}}</a>
           @if (!$last) { <span class="breadcrumb-sep" aria-hidden="true">/</span> }
         }
       </nav>

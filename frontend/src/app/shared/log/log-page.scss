@@ -134,6 +134,7 @@
 
   .breadcrumb-sep { color: var(--gr-text-muted); }
 
+  .breadcrumb-link,
   .breadcrumb-current {
     min-width: 0;
     max-width: 100%;
@@ -156,9 +157,16 @@
   .info-bar-left { gap: 0 $spacing-md; }
 
   .info-metric {
-    height: 32px;
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 32px;
     padding: 0;
     border-right: none;
+  }
+
+  .metric-value {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .sidebar-toggle {
