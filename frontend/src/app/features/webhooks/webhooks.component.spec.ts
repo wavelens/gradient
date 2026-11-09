@@ -221,7 +221,7 @@ describe('WebhooksComponent', () => {
     { scope: 'project', groups: ['Build', 'Project', 'Cache'] },
     { scope: 'cache', groups: ['Cache'] },
     { scope: 'team', groups: ['Team'] },
-    { scope: 'instance', groups: ['Login', 'Build', 'Project', 'Cache', 'Team', 'GC'] },
+    { scope: 'instance', groups: ['Account', 'Build', 'Project', 'Cache', 'Team', 'GC'] },
   ])('offers the $scope scope only the event groups it can receive', ({ scope, groups }) => {
     const catalog = ['login.success', 'build.failed', 'project.update', 'cache.update', 'cache.subscription.approve', 'team.worker.create', 'gc.swept']
       .map((name) => ({ name, durable: true }));

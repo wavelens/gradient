@@ -72,8 +72,32 @@ describe('groupCatalog', () => {
       { name: 'ssh_key.create', durable: true },
       { name: 'login.success', durable: true },
     ];
-    expect(groupCatalog(entries, undefined, false).map((g) => g.group)).toEqual(['Login']);
-    expect(groupCatalog(entries).map((g) => g.group)).toEqual(['SSH key', 'Login']);
+    expect(groupCatalog(entries, undefined, false).map((g) => g.group)).toEqual(['Account']);
+    expect(groupCatalog(entries).map((g) => g.group)).toEqual(['SSH key', 'Account']);
+  });
+
+  it('merges sign-in, sign-out, registration and session events into one Account group', () => {
+    const entries = ['login.success', 'logout', 'register', 'session.revoke', 'build.failed'].map((name) => ({ name, durable: true }));
+    expect(groupCatalog(entries)).toEqual([
+      {
+        group: 'Account',
+        items: [
+          { value: 'login.success', label: 'Signed in' },
+          { value: 'logout', label: 'Signed out' },
+          { value: 'register', label: 'Registered' },
+          { value: 'session.revoke', label: 'Session revoked' },
+        ],
+      },
+      { group: 'Build', items: [{ value: 'build.failed', label: 'Failed' }] },
+    ]);
+  });
+
+  it('drops the group name from item labels inside the group', () => {
+    const entries = ['exec_job.phase', 'cli.device.start'].map((name) => ({ name, durable: true }));
+    expect(groupCatalog(entries).flatMap((group) => group.items.map((item) => `${group.group}: ${item.label}`))).toEqual([
+      'Exec job: Changed phase',
+      'CLI: Started sign-in',
+    ]);
   });
 
   it('keeps a whole-name prefix without matching longer segments', () => {

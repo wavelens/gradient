@@ -29,7 +29,11 @@ const EVENT_LABELS: Record<string, string> = {
   'cli.device.deny': 'CLI sign-in denied',
   'login.success': 'Signed in',
   'login.failure': 'Sign-in failure',
+  logout: 'Signed out',
+  register: 'Registered',
 };
+
+const ACCOUNT_FAMILIES = new Set(['auth', 'login', 'logout', 'register', 'session', 'user']);
 
 const PHRASES: Record<string, string> = {
   'member.add': 'member added',
@@ -102,6 +106,12 @@ export function eventNameMatchesAnyPrefix(name: string, eventNamePrefixes: reado
   return eventNamePrefixes.some((prefix) => name === prefix || name.startsWith(`${prefix}.`));
 }
 
+function groupItemLabel(name: string, group: string, rest: string[]): string {
+  const label = EVENT_LABELS[name];
+  if (label?.toLowerCase().startsWith(`${group.toLowerCase()} `)) return sentence(label.slice(group.length + 1));
+  return label ?? sentence(rest.length ? phrase(rest) : words(name));
+}
+
 /** Group durable events by their first dot-separated segment. If `eventNamePrefixes` is present, keep only names equal to the prefix or names that start with the prefix followed by a dot. */
 export function groupCatalog(entries: CatalogEntry[], eventNamePrefixes?: readonly string[], sshEnabled = true): EventGroup[] {
   const groups = new Map<string, EventGroup>();
@@ -109,9 +119,10 @@ export function groupCatalog(entries: CatalogEntry[], eventNamePrefixes?: readon
     const [family, ...rest] = name.split('.');
     const offered = (!eventNamePrefixes || eventNameMatchesAnyPrefix(name, eventNamePrefixes)) && (sshEnabled || family !== 'ssh_key');
     if (!durable || !offered) continue;
-    const group = sentence(words(family));
+    const account = ACCOUNT_FAMILIES.has(family);
+    const group = account ? 'Account' : sentence(words(family));
     if (!groups.has(group)) groups.set(group, { group, items: [] });
-    groups.get(group)!.items.push({ value: name, label: EVENT_LABELS[name] ?? sentence(rest.length ? phrase(rest) : words(name)) });
+    groups.get(group)!.items.push({ value: name, label: account ? eventNameToReadableText(name) : groupItemLabel(name, group, rest) });
   }
   return Array.from(groups.values());
 }
