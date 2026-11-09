@@ -51,7 +51,7 @@ export class HeaderComponent {
     this.menuOpen.update((open) => !open);
   }
 
-  protected closeMenu(): void {
+  closeMenu(): void {
     this.menuOpen.set(false);
   }
 }

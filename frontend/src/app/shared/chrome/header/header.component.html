@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-header [brand]="brand" [nav]="nav()">
+<gr-header #header [brand]="brand" [nav]="nav()">
   @if (authService.isAuthenticated()) {
     <button slot="search" type="button" class="search-box search-trigger" aria-label="Search" (click)="palette.open()">
       <gr-icon name="search" size="sm" />
@@ -21,7 +21,7 @@
         <gr-icon name="expand_more" size="sm" />
       </button>
       @defer (on idle; on interaction(userTrigger)) {
-        <app-user-menu #userMenu />
+        <app-user-menu #userMenu (itemCommandSelected)="header.closeMenu()" />
       }
     } @else if (!authService.serverUnreachable()) {
       <a [routerLink]="links.login(router.url.startsWith('/account/') ? null : router.url)" class="user-link">Sign In</a>

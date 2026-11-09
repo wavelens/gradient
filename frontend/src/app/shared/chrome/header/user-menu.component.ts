@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, computed, inject, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, output, viewChild } from '@angular/core';
 import { MenuComponent, MenuItem } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
 import { WhatsNewService } from '@core/whats-new/whats-new.service';
@@ -23,8 +23,9 @@ export class UserMenuComponent {
   private menu = viewChild.required(MenuComponent);
 
   readonly isOpen = computed(() => this.menu().isOpen());
+  readonly itemCommandSelected = output();
 
-  protected items = computed<MenuItem[]>(() => [
+  protected items = computed<MenuItem[]>(() => ([
     { label: 'Settings', icon: 'settings', routerLink: links.settings('profile') },
     { label: 'My Invites', icon: 'mail', routerLink: links.settings('invites') },
     ...(this.whatsNew.hasNotes ? [{ label: "What's New", icon: 'new_releases', command: () => this.whatsNew.showAll() }] : []),
@@ -37,7 +38,9 @@ export class UserMenuComponent {
       : []),
     { separator: true },
     { label: 'Log out', icon: 'logout', command: () => this.auth.logout().subscribe() },
-  ]);
+  ] as MenuItem[]).map((item) =>
+    item.command ? { ...item, command: () => (this.itemCommandSelected.emit(), item.command?.()) } : item,
+  ));
 
   toggle(origin: HTMLElement): void {
     if (this.menu().isOpen()) this.menu().hide();

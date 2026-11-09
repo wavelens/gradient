@@ -125,6 +125,17 @@ describe('AppHeaderComponent - user menu', () => {
     items.find((item) => item.textContent?.includes('Log out'))!.click();
     expect(logout).toHaveBeenCalled();
   });
+
+  it('closes the navigation drawer when a menu command runs', async () => {
+    const { root, items } = await openMenu();
+    const toggle = root.querySelector<HTMLButtonElement>('.menu-toggle')!;
+    toggle.click();
+    TestBed.tick();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    items.find((item) => item.textContent?.includes('Log out'))!.click();
+    TestBed.tick();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
 });
 
 describe('AppHeaderComponent - public listing', () => {
