@@ -45,8 +45,8 @@ pub(crate) enum TaskRefusal {
     InvalidMatrixRoomId,
     #[error("SMTP is not configured on this server")]
     SmtpNotConfigured,
-    #[error("git_host_status_report actions cannot carry custom events")]
-    StatusReportWithEvents,
+    #[error("Select at least one event. The action does not run without an event.")]
+    ActionHasNoEvents,
     #[error("{action_type} requires {secret_field}")]
     MissingSecret {
         action_type: String,
@@ -133,7 +133,7 @@ impl Refusal for TaskRefusal {
             | Self::EmptyAccessToken
             | Self::InvalidMatrixRoomId
             | Self::SmtpNotConfigured
-            | Self::StatusReportWithEvents
+            | Self::ActionHasNoEvents
             | Self::MissingSecret { .. }
             | Self::NoMailRecipients
             | Self::IntegrationNotOutbound

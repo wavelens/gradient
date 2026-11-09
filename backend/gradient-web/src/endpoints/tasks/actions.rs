@@ -150,6 +150,21 @@ async fn validate_start_target(
     Ok(())
 }
 
+fn validate_task_action_events_for_type(
+    action_type: ActionType,
+    events: &[String],
+) -> Result<(), TaskRefusal> {
+    let fixed_events = matches!(
+        action_type,
+        ActionType::GitHostStatusReport | ActionType::OpenPr
+    );
+    match (fixed_events, events.is_empty()) {
+        (true, false) => Err(TaskRefusal::CustomEventsNotAllowed),
+        (false, true) => Err(TaskRefusal::ActionHasNoEvents),
+        _ => Ok(()),
+    }
+}
+
 fn validate_destination(cfg: &ActionConfig) -> WebResult<()> {
     let url_error = |e: WebhookUrlError| TaskRefusal::InvalidWebhookUrl(e.to_string());
     match cfg {
@@ -219,16 +234,11 @@ pub async fn create_action(
     audit: Audit,
     Json(body): Json<CreateActionRequest>,
 ) -> WebResult<Json<BaseResponse<CreateActionResponse>>> {
-    match &body.config {
-        ActionConfig::SendMail { .. } if !state.email.is_enabled() => {
-            return Err(TaskRefusal::SmtpNotConfigured.into());
-        }
-        ActionConfig::GitHostStatusReport { .. } if !body.events.is_empty() => {
-            return Err(TaskRefusal::StatusReportWithEvents.into());
-        }
-        _ => {}
+    if matches!(body.config, ActionConfig::SendMail { .. }) && !state.email.is_enabled() {
+        return Err(TaskRefusal::SmtpNotConfigured.into());
     }
 
+    validate_task_action_events_for_type(body.config.action_type(), &body.events)?;
     validate_destination(&body.config)?;
     validate_mail_teams(&state.web_db, project.id, &body.config).await?;
     validate_start_target(&state.web_db, project.id, &body.config).await?;
@@ -413,14 +423,8 @@ pub async fn update_action(
         }
     }
 
-    if let Some(ref evs) = body.events
-        && matches!(
-            existing_type,
-            ActionType::GitHostStatusReport | ActionType::OpenPr
-        )
-        && !evs.is_empty()
-    {
-        return Err(TaskRefusal::CustomEventsNotAllowed.into());
+    if let Some(ref evs) = body.events {
+        validate_task_action_events_for_type(existing_type, evs)?;
     }
 
     let read_at = row.updated_at;

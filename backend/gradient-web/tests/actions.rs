@@ -278,6 +278,35 @@ fn matrix_action_row() -> task_action::Model {
 }
 
 #[tokio::test]
+async fn create_webhook_task_action_with_empty_event_list_is_rejected() {
+    let session_id = SessionId::now_v7();
+    let token = make_token(session_id);
+
+    let db = with_task_edit(with_auth(mock_db(), session_id));
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .post(BASE_URL)
+        .add_header("authorization", format!("Bearer {}", token))
+        .json(&json!({
+            "name": "hook",
+            "config": { "type": "send_web_request", "url": "https://example.com/hook" },
+            "events": [],
+        }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = res.json();
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("at least one event"),
+        "{}",
+        body["message"]
+    );
+}
+
+#[tokio::test]
 async fn create_matrix_action_never_echoes_the_access_token() {
     let session_id = SessionId::now_v7();
     let token = make_token(session_id);
