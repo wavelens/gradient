@@ -87,7 +87,7 @@ export class TeamOverviewComponent implements OnInit {
 
   grantMeta(grant: { role?: string | null; users: boolean; workers: boolean }): string {
     const parts: string[] = [];
-    if (grant.users) parts.push(`Users as ${grant.role ?? 'unknown role'}`);
+    if (grant.users) parts.push(`Members get ${grant.role ?? 'unknown role'}`);
     if (grant.workers) parts.push('Workers');
     return parts.join(' · ');
   }

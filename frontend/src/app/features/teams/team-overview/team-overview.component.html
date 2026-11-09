@@ -52,7 +52,7 @@
             @for (grant of grants().caches; track grant.cache) {
               <gr-row icon="storage" [link]="links.cache(grant.cache)" [linkLabel]="'Open cache ' + grant.display_name">
                 {{ grant.display_name }}
-                <span slot="meta">Users as {{ grant.role }}</span>
+                <span slot="meta">Members get {{ grant.role ?? 'unknown role' }}</span>
               </gr-row>
             }
           </gr-row-list>

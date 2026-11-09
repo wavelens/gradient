@@ -107,6 +107,7 @@ describe('TeamOverviewComponent', () => {
       fixture.detectChanges();
       const text = (fixture.nativeElement as HTMLElement).textContent;
       expect(text).toContain('Acme');
+      expect(text).toContain('Members get View');
       expect(text).toContain('Bob');
     } finally {
       vi.useRealTimers();
