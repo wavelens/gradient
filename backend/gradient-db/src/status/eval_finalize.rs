@@ -6,7 +6,7 @@
 
 use super::evaluation_status::update_evaluation_status;
 use crate::DbContext;
-use crate::exec_jobs::ExecJobFailureAndAbortFlags;
+use crate::evaluations::EvaluationItemFailureAndAbortBooleans;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
@@ -52,18 +52,19 @@ pub async fn check_evaluation_done(
         return Ok(());
     }
 
-    let shared_build_failed =
-        crate::graph::reachability::eval_any_shared_build_failed(db, evaluation_id).await?;
-    let exec_jobs = if shared_build_failed {
-        ExecJobFailureAndAbortFlags::default()
+    let shared_builds =
+        crate::graph::reachability::read_shared_build_failure_and_abort_flags(db, evaluation_id)
+            .await?;
+    let exec_jobs = if shared_builds.failed {
+        EvaluationItemFailureAndAbortBooleans::default()
     } else {
         crate::exec_jobs::read_exec_jobs_failure_and_abort_flags(db, evaluation_id).await?
     };
 
     let eval_errors = eval_error_count(ctx, evaluation_id).await?;
-    let target = if shared_build_failed || exec_jobs.failed || eval_errors > 0 {
+    let target = if shared_builds.failed || exec_jobs.failed || eval_errors > 0 {
         EvaluationStatus::Failed
-    } else if exec_jobs.aborted {
+    } else if shared_builds.aborted || exec_jobs.aborted {
         EvaluationStatus::Aborted
     } else {
         EvaluationStatus::Completed
@@ -71,7 +72,7 @@ pub async fn check_evaluation_done(
     info!(
         %evaluation_id,
         ?target,
-        shared_build_failed,
+        ?shared_builds,
         ?exec_jobs,
         eval_errors,
         "evaluation finished"

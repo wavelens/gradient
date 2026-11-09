@@ -210,7 +210,7 @@ async fn v03_an_open_stream_gets_no_verdict_even_with_nothing_blocking() {
 }
 
 #[tokio::test]
-async fn v04_the_last_blocker_writes_the_verdict_and_a_named_aborted_build_turns_it_to_failed() {
+async fn v04_last_blocking_build_writes_verdict_and_abort_overrides_it() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(
         pass(e1)
@@ -244,7 +244,7 @@ async fn v04_the_last_blocker_writes_the_verdict_and_a_named_aborted_build_turns
     );
     assert_eq!(
         case.evaluation_status(e1).await,
-        EvaluationStatus::Failed,
+        EvaluationStatus::Aborted,
         "after 1: evaluation(E1).status"
     );
     assert_eq!(
@@ -799,7 +799,7 @@ async fn v12_stream_completion_leaves_a_user_aborted_build_and_everything_above_
     );
     assert_eq!(
         case.evaluation_status(e1).await,
-        EvaluationStatus::Failed,
+        EvaluationStatus::Aborted,
         "after 1: evaluation(E1).status"
     );
     assert_eq!(

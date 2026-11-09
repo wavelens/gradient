@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::evaluations::EvaluationItemFailureAndAbortBooleans;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
@@ -27,25 +28,33 @@ crate::sql_lazy! {
                       fixture's largest names ~98k");
 }
 
-/// The set is [`BuildStatus::REQUEUEABLE`], which is including `Aborted`.
-/// An evaluation with every shared build aborted would otherwise finalize `Completed`.
-/// Nothing would have been built for that green check.
-static EVAL_ANY_SHARED_BUILD_FAILED_SQL: LazyLock<String> = LazyLock::new(|| {
+/// Shared builds with a user abort set the evaluation to Aborted, not Failed. Builds that depend on an aborted build get DependencyFailed status. DependencyFailed can count as a failure only when there are no aborts in that evaluation. The aborted companions of a completed cluster job count as neither.
+static SELECT_SHARED_BUILD_FAILED_AND_ABORTED_FLAGS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "SELECT EXISTS (SELECT 1 FROM build_job bj \
-         JOIN derivation_build db ON db.id = bj.derivation_build \
-         WHERE bj.evaluation = $1 AND db.status IN ({failed}) \
-         AND NOT (db.status = {aborted} AND EXISTS (SELECT 1 FROM cluster_member cm \
+        "WITH outcome AS (SELECT \
+           COALESCE(bool_or(db.status IN ({failed})), false) AS failed, \
+           COALESCE(bool_or(db.status = {dependency_failed}), false) AS dependency_failed, \
+           COALESCE(bool_or(db.status = {aborted} AND NOT EXISTS (SELECT 1 FROM cluster_member cm \
               JOIN cluster_job cj ON cj.id = cm.cluster_job \
-              WHERE cm.derivation_build = db.id AND cj.status = {completed}))) AS failed",
-        failed = crate::sql::status::build_in(&BuildStatus::REQUEUEABLE),
+              WHERE cm.derivation_build = db.id AND cj.status = {completed})), false) AS aborted \
+         FROM build_job bj \
+         JOIN derivation_build db ON db.id = bj.derivation_build \
+         WHERE bj.evaluation = $1 AND db.status IN ({unfinished})) \
+         SELECT failed OR (dependency_failed AND NOT aborted) AS failed, aborted FROM outcome",
+        failed = crate::sql::status::build_in(&[
+            BuildStatus::FailedPermanent,
+            BuildStatus::FailedTimeout,
+        ]),
+        dependency_failed = crate::sql::status::build(BuildStatus::DependencyFailed),
         aborted = crate::sql::status::build(BuildStatus::Aborted),
+        unfinished = crate::sql::status::build_in(&BuildStatus::REQUEUEABLE),
         completed = i16::from(gradient_entity::cluster_job::ClusterJobStatus::Completed),
     )
 });
 
 crate::sql_lazy! {
-    EVAL_ANY_SHARED_BUILD_FAILED = || EVAL_ANY_SHARED_BUILD_FAILED_SQL.as_str(),
+    SELECT_SHARED_BUILD_FAILED_AND_ABORTED_FLAGS =
+        || SELECT_SHARED_BUILD_FAILED_AND_ABORTED_FLAGS_SQL.as_str(),
         params = [EvaluationId];
 }
 
@@ -58,13 +67,16 @@ pub async fn eval_blocked<C: ConnectionTrait>(
         .await
 }
 
-pub async fn eval_any_shared_build_failed<C: ConnectionTrait>(
+pub async fn read_shared_build_failure_and_abort_flags<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<bool, DbErr> {
-    EVAL_ANY_SHARED_BUILD_FAILED
-        .scalar(db, [evaluation.into()], "failed")
-        .await
+) -> Result<EvaluationItemFailureAndAbortBooleans, DbErr> {
+    EvaluationItemFailureAndAbortBooleans::read(
+        db,
+        &SELECT_SHARED_BUILD_FAILED_AND_ABORTED_FLAGS,
+        evaluation,
+    )
+    .await
 }
 
 pub async fn shared_build_status<C: ConnectionTrait>(
@@ -189,30 +201,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_aborted_shared_build_fails_the_evaluation_it_was_never_built_for() {
-        let sql = EVAL_ANY_SHARED_BUILD_FAILED_SQL.as_str();
-        let expected = crate::sql::status::build_in(&BuildStatus::REQUEUEABLE);
+    fn aborted_shared_build_ends_evaluation_aborted_and_sql_reads_aborted_separately_from_failed() {
+        let sql = SELECT_SHARED_BUILD_FAILED_AND_ABORTED_FLAGS_SQL.as_str();
+        let failed = crate::sql::status::build_in(&[
+            BuildStatus::FailedPermanent,
+            BuildStatus::FailedTimeout,
+        ]);
+        let aborted = crate::sql::status::build(BuildStatus::Aborted);
+        let unfinished = crate::sql::status::build_in(&BuildStatus::REQUEUEABLE);
+
+        assert!(sql.contains(&format!("db.status IN ({failed})")), "{sql}");
+        assert!(sql.contains(&format!("db.status = {aborted}")), "{sql}");
         assert!(
-            sql.contains(&format!("db.status IN ({expected})")),
-            "the verdict set is what a fresh evaluation would thaw: {sql}"
+            sql.contains(&format!("db.status IN ({unfinished})")),
+            "{sql}"
         );
         assert!(
-            BuildStatus::REQUEUEABLE.contains(&BuildStatus::Aborted),
-            "a shared build nothing built is not a success"
+            sql.contains("failed OR (dependency_failed AND NOT aborted) AS failed"),
+            "{sql}"
         );
         for ok in BuildStatus::TERMINAL_SUCCESS {
-            assert!(
-                !BuildStatus::REQUEUEABLE.contains(&ok),
-                "{ok:?} must not fail its evaluation"
-            );
+            assert!(!BuildStatus::REQUEUEABLE.contains(&ok), "{ok:?}");
         }
     }
 
     #[test]
-    fn a_companion_of_a_completed_cluster_does_not_fail_its_evaluation() {
-        let sql = EVAL_ANY_SHARED_BUILD_FAILED_SQL.as_str();
+    fn aborted_cluster_companion_is_neither_aborted_nor_failed() {
+        let sql = SELECT_SHARED_BUILD_FAILED_AND_ABORTED_FLAGS_SQL.as_str();
 
         assert!(sql.contains("FROM cluster_member cm"), "{sql}");
-        assert!(sql.contains("AND NOT (db.status ="), "{sql}");
+        assert!(
+            sql.contains("AND NOT EXISTS (SELECT 1 FROM cluster_member cm"),
+            "{sql}"
+        );
     }
 }

@@ -755,7 +755,7 @@ async fn a09_a_building_report_for_an_aborted_build_is_answered_with_abort() {
     );
     assert_eq!(
         case.evaluation(e1).await.status,
-        EvaluationStatus::Failed,
+        EvaluationStatus::Aborted,
         "after 2: evaluation(E1).status"
     );
     assert_eq!(
@@ -869,7 +869,7 @@ async fn a10_abort_build_is_refused_while_another_live_evaluation_names_the_buil
 }
 
 #[tokio::test]
-async fn a11_aborting_a_queued_pending_build_fails_its_dependents_and_the_evaluation() {
+async fn a11_aborting_queued_pending_build_fails_dependents_and_ends_evaluation_aborted() {
     let e1 = EvaluationId::now_v7();
     let case = SchedulerCase::start(shape().chain(e1)).await;
     let b = case.key(B).await;
@@ -895,7 +895,7 @@ async fn a11_aborting_a_queued_pending_build_fails_its_dependents_and_the_evalua
     );
     assert_eq!(
         case.evaluation(e1).await.status,
-        EvaluationStatus::Failed,
+        EvaluationStatus::Aborted,
         "after 2: evaluation(E1).status"
     );
     assert_eq!(
@@ -936,7 +936,7 @@ async fn a12_a_retry_is_refused_while_the_aborted_job_is_active_and_reopens_afte
     assert_eq!(case.abort_build(e1, A).await, Ok(()), "after 2: result");
     assert_eq!(
         case.evaluation(e1).await.status,
-        EvaluationStatus::Failed,
+        EvaluationStatus::Aborted,
         "after 2: evaluation(E1).status"
     );
     assert_eq!(

@@ -32,6 +32,29 @@ pub async fn by_id_in_task<C: ConnectionTrait>(
         .await
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EvaluationItemFailureAndAbortBooleans {
+    pub failed: bool,
+    pub aborted: bool,
+}
+
+impl EvaluationItemFailureAndAbortBooleans {
+    pub(crate) async fn read<C: ConnectionTrait>(
+        db: &C,
+        query: &crate::sql::Query,
+        evaluation: EvaluationId,
+    ) -> Result<Self, DbErr> {
+        let row = db
+            .query_one_raw(query.bind([evaluation.into()]))
+            .await?
+            .ok_or_else(|| DbErr::Custom(format!("{} returned no row", query.name)))?;
+        Ok(Self {
+            failed: row.try_get("", "failed")?,
+            aborted: row.try_get("", "aborted")?,
+        })
+    }
+}
+
 #[derive(Default)]
 pub struct TaskEvaluationFilter {
     pub older_than: Option<MEvaluation>,

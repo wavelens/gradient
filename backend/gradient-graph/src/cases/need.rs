@@ -536,7 +536,7 @@ async fn d08_an_aborted_entry_point_wants_nothing_until_a_retry_and_a_new_probe_
     let verdict = case.evaluation(e1).await.status;
     assert_eq!(
         verdict,
-        EvaluationStatus::Failed,
+        EvaluationStatus::Aborted,
         "after 1: evaluation(E1).status"
     );
     let counters = case.counters(e1).await;

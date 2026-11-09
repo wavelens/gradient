@@ -681,7 +681,7 @@ async fn c09_a_build_aborted_in_the_graph_before_the_claim_is_not_handed_out() {
     );
     assert_eq!(
         case.evaluation(e1).await.status,
-        EvaluationStatus::Failed,
+        EvaluationStatus::Aborted,
         "after 2: evaluation(E1).status"
     );
     assert_eq!(

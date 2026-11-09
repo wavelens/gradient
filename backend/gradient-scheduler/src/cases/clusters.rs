@@ -909,7 +909,7 @@ async fn k17_aborting_a_member_evaluation_aborts_the_attempt_and_the_survivors()
     );
     assert_eq!(
         case.evaluation(e2).await.status,
-        EvaluationStatus::Failed,
+        EvaluationStatus::Aborted,
         "after 2: evaluation(E2).status"
     );
     assert_eq!(

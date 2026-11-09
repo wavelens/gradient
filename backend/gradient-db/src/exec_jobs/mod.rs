@@ -28,6 +28,7 @@ use gradient_types::{BuildAttemptId, EvaluationId, ExecJobAttemptId, MExecJob, W
 use sea_orm::{ConnectionTrait, DbErr};
 use std::sync::LazyLock;
 
+use crate::evaluations::EvaluationItemFailureAndAbortBooleans;
 use crate::sql::status::exec_in;
 
 pub fn exec_job_waiting_reason(job: &MExecJob) -> Option<WaitingReason> {
@@ -69,12 +70,6 @@ crate::sql_lazy! {
         params = [EvaluationId];
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ExecJobFailureAndAbortFlags {
-    pub failed: bool,
-    pub aborted: bool,
-}
-
 pub async fn has_open_exec_jobs<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -87,14 +82,11 @@ pub async fn has_open_exec_jobs<C: ConnectionTrait>(
 pub async fn read_exec_jobs_failure_and_abort_flags<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<ExecJobFailureAndAbortFlags, DbErr> {
-    let query = &SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS;
-    let row = db
-        .query_one_raw(query.bind([evaluation.into()]))
-        .await?
-        .ok_or_else(|| DbErr::Custom(format!("{} returned no row", query.name)))?;
-    Ok(ExecJobFailureAndAbortFlags {
-        failed: row.try_get("", "failed")?,
-        aborted: row.try_get("", "aborted")?,
-    })
+) -> Result<EvaluationItemFailureAndAbortBooleans, DbErr> {
+    EvaluationItemFailureAndAbortBooleans::read(
+        db,
+        &SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS,
+        evaluation,
+    )
+    .await
 }

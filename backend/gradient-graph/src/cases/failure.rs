@@ -426,7 +426,7 @@ async fn f05_abort_build_is_refused_on_a_terminal_build_a_finished_evaluation_an
     );
     assert_eq!(
         case.evaluation(e1).await.status,
-        EvaluationStatus::Failed,
+        EvaluationStatus::Aborted,
         "after 5: evaluation(E1), S lost its need at step 4"
     );
     assert_eq!(
@@ -439,7 +439,7 @@ async fn f05_abort_build_is_refused_on_a_terminal_build_a_finished_evaluation_an
 }
 
 #[tokio::test]
-async fn f06_aborting_a_dependency_fails_the_entry_point_and_the_evaluation() {
+async fn f06_aborting_dependency_build_fails_entry_point_and_aborts_evaluation() {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(chain(e1).evaluation_status(EvaluationStatus::Building)).await;
 
@@ -459,7 +459,7 @@ async fn f06_aborting_a_dependency_fails_the_entry_point_and_the_evaluation() {
     );
     assert_eq!(
         case.evaluation(e1).await.status,
-        EvaluationStatus::Failed,
+        EvaluationStatus::Aborted,
         "after 1: evaluation(E1)"
     );
     assert_eq!(

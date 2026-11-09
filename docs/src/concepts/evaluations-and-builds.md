@@ -67,7 +67,7 @@ Builds belong to a derivation, not to an evaluation. Every evaluation that needs
 
 ## Abort and Retry
 
-- **Abort** on a running build stops that build for the current evaluation. Dependents in the same evaluation then fail, and a later evaluation can build the build again.
+- **Abort** on a running build can stop that build in the current evaluation. Dependent builds fail afterward. The evaluation can end with status Aborted. A later evaluation can run that build again.
 - **Retry** on a failed or aborted build queues the build again, together with the dependents that failed through it. This queueing happens inside the running evaluation.
 - **Retry** on a finished evaluation starts a new evaluation of the same commit. That new evaluation queues all failed builds again.
 - Both kinds of retry query the [upstream caches](caches.md#upstream-types) again. A worker can then substitute a build found there.
