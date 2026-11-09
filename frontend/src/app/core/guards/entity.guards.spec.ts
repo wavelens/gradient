@@ -51,7 +51,7 @@ function configure(services: Record<string, unknown>, user: { superuser: boolean
     tasks: { getTask: () => of({ id: 't1' }) },
     caches: { getCache: () => of({}) },
     teams: { get: () => of({}) },
-    evaluations: { getEvaluation: () => of({ task: 't1', task_name: 'demo', project_name: 'acme' }), getBuild: () => of({ id: 'b1' }) },
+    evaluations: { getEvaluation: () => of({ task: 't1', task_name: 'demo', project_name: 'acme' }), getBuild: () => of({ id: 'b1', evaluation: 'e1' }) },
     board: { getJob: () => of({}), getPendingJobs: () => of({ jobs: [] }), getClusterJob: () => of({}) },
     execJobs: { get: () => of({ project: 'acme', task: 'demo' }) },
     workers: { getWorkers: () => of([{ worker_id: 'w1' }]) },
@@ -166,6 +166,18 @@ describe('not-found or no-access page', () => {
   ])('replaces a missing id on the $path page', async ({ params, kind }) => {
     configure({ evaluations: { getEvaluation: () => refused(404), getBuild: () => refused(404) } });
     expect(page(await outcome(buildOrEvaluationAccessGuard, params))).toContain(`kind=${kind}&name=b9&back=%2Fproject%2Facme&`);
+  });
+
+  it.each<{ path: string; params: Record<string, string> }>([
+    { path: 'artefacts', params: { project: 'acme', buildId: 'b9' } },
+    { path: 'evaluation closure', params: { project: 'acme', kind: 'eval', id: 'e9' } },
+  ])('redirects the $path page under another project to the same page under the owning project', async ({ params }) => {
+    const getEvaluation = vi.fn(() => of({ project_name: 'infra' }));
+    configure({ evaluations: { getEvaluation, getBuild: () => of({ id: 'b9', evaluation: 'e9' }) } });
+    const result = await outcome(buildOrEvaluationAccessGuard, params);
+    expect(result).toBeInstanceOf(RedirectCommand);
+    expect(TestBed.inject(Router).serializeUrl((result as RedirectCommand).redirectTo)).toBe('/project/infra/somewhere');
+    expect(getEvaluation).toHaveBeenCalledWith('e9');
   });
 
   it('Replace a nonexistent job on the assigned job page', async () => {

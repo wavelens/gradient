@@ -6,12 +6,14 @@
 
 import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
-import { Observable, map } from 'rxjs';
+import { Observable, map, switchMap } from 'rxjs';
+import { EvaluationResponse } from '@core/models';
 import { BoardService } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { WorkersService } from '@core/services/workers.service';
 import { DeniedTarget, deniedPage, denyOnRefusal } from '@core/routing/access-denied';
+import { redirectToCorrectProjectSlug } from '@core/resolvers/evaluation-access.resolver';
 import { links } from '@shared/routing';
 
 export const execJobInTaskGuard: CanActivateFn = (route, state) => {
@@ -27,12 +29,19 @@ export const execJobInTaskGuard: CanActivateFn = (route, state) => {
 };
 
 export const buildOrEvaluationAccessGuard: CanActivateFn = (route, state) => {
+  const router = inject(Router);
   const evaluations = inject(EvaluationsService);
+  const project = route.paramMap.get('project') ?? '';
   const id = route.paramMap.get('buildId') ?? route.paramMap.get('id') ?? '';
   const isEvaluation = route.paramMap.get('kind') === 'eval';
   const target: DeniedTarget = { kind: isEvaluation ? 'evaluation' : 'build', name: id, back: String(links.projects()) };
-  const lookup: Observable<unknown> = isEvaluation ? evaluations.getEvaluation(id) : evaluations.getBuild(id);
-  return lookup.pipe(map(() => true as const), denyOnRefusal(target, state.url, route.paramMap.get('project') ?? undefined));
+  const evaluation$: Observable<EvaluationResponse> = isEvaluation
+    ? evaluations.getEvaluation(id)
+    : evaluations.getBuild(id).pipe(switchMap((build) => evaluations.getEvaluation(build.evaluation)));
+  return evaluation$.pipe(
+    map((evaluation) => evaluation.project_name === project || redirectToCorrectProjectSlug(router, state.url, evaluation.project_name)),
+    denyOnRefusal(target, state.url, project),
+  );
 };
 
 export const assignedJobDetailGuard: CanActivateFn = (route, state) => {

@@ -18,7 +18,7 @@ export interface EvaluationWithOptionalTask {
   task: TaskDetailsResponse | null;
 }
 
-function redirectToCorrectProjectSlug(router: Router, url: string, project: string): RedirectCommand {
+export function redirectToCorrectProjectSlug(router: Router, url: string, project: string): RedirectCommand {
   const tree = router.parseUrl(url);
   const group = tree.root.children['primary'];
   if (group) group.segments = group.segments.map((segment, index) => (index === 1 ? new UrlSegment(project, {}) : segment));
