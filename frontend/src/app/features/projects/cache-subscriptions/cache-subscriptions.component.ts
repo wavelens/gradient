@@ -12,8 +12,6 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { injectProject } from '@core/resolvers/project-access.resolver';
-import { AuthService } from '@core/services/auth.service';
-import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import {
@@ -32,7 +30,7 @@ import {
 import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { CreateCacheButtonComponent, CreateCacheDialogComponent, injectCanCreateCache } from '@shared/forms';
+import { CreateCacheDialogComponent, injectCanCreateCache } from '@shared/forms';
 import { accessTo, Cache, CacheSubscriptionItem } from '@core/models';
 import { links } from '@shared/routing';
 import { catchError, forkJoin, map, of } from 'rxjs';
@@ -58,7 +56,6 @@ import { catchError, forkJoin, map, of } from 'rxjs';
     RowListComponent,
     RowComponent,
     TooltipDirective,
-    CreateCacheButtonComponent,
     CreateCacheDialogComponent,
   ],
   templateUrl: './cache-subscriptions.component.html',
@@ -71,17 +68,13 @@ export class CacheSubscriptionsComponent implements OnInit {
   private cachesService = inject(CachesService);
   private resolvedProject = injectProject();
   private crumbs = inject(BreadcrumbsService);
-  private auth = inject(AuthService);
-  private config = inject(ConfigService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
   access = computed(() => accessTo(this.resolvedProject(), 'manageSubscriptions'));
-  canCreateCache = computed(() => this.config.canCreate(this.config.createCache, this.auth.user()?.superuser === true));
   private userCanCreateCache = injectCanCreateCache();
   canCreateAndSubscribe = computed(() => this.userCanCreateCache() && this.access().canEdit && !this.access().managed);
   showCreateDialog = signal(false);
-  createForSubscribe = signal(false);
 
   loading = signal(true);
   loadError = signal<unknown>(null);
@@ -149,24 +142,11 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   createInsteadOfPick(): void {
     this.showSubscribeDialog.set(false);
-    this.createForSubscribe.set(true);
     this.showCreateDialog.set(true);
   }
 
-  cacheCreated(name: string): void {
-    if (this.createForSubscribe()) {
-      this.createForSubscribe.set(false);
-      this.openSubscribeDialog(name);
-      return;
-    }
-    this.newCacheName = name;
-    this.subscribeCache();
-  }
-
   createDialogClosed(visible: boolean): void {
-    if (visible || !this.createForSubscribe()) return;
-    this.createForSubscribe.set(false);
-    this.showSubscribeDialog.set(true);
+    if (!visible) this.showSubscribeDialog.set(true);
   }
 
   subscribeCache(): void {

@@ -7,18 +7,10 @@
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
   <app-server-configuration-managed-banner [access]="access()" kind="project" />
   @if (!loading() && !loadError()) {
-    @if (canCreateCache()) {
-      <app-create-cache-button slot="actions"
-          *appWritable="access()"
-          severity="secondary"
-          [access]="access()"
-          (create)="showCreateDialog.set(true)"
-        />
-    }
     <button slot="actions"
         *appWritable="access()"
         grButton
-        label="Subscribe to Cache"
+        label="Add Cache"
         icon="add"
         [appManagedDisable]="access()"
         (click)="openSubscribeDialog()"
@@ -66,16 +58,13 @@
 </gr-page-layout>
 
 <app-create-cache-dialog
-  [header]="createForSubscribe() ? 'Create Cache' : 'Create and Subscribe to Cache'"
-  [submitLabel]="createForSubscribe() ? 'Create' : 'Create and Subscribe'"
   [(visible)]="showCreateDialog"
   (visibleChange)="createDialogClosed($event)"
-  (created)="cacheCreated($event)"
+  (created)="openSubscribeDialog($event)"
 />
 
-<!-- Subscribe Dialog -->
 <gr-dialog
-  header="Subscribe to Cache"
+  header="Add Cache"
   [(visible)]="showSubscribeDialog"
   [error]="errorMessage()"
   [busy]="subscribing()"

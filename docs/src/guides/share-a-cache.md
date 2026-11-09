@@ -58,7 +58,7 @@ A subscribed project both pushes build outputs to the cache and pulls packages f
 
 === "UI"
 
-    In the other project, go to **Settings -> Cache Subscriptions -> Subscribe to Cache**.
+    In the other project, go to **Settings -> Cache Subscriptions -> Add Cache**.
 
     - With the Admin role on both sides, the subscription activate at once.
     - Any other subscription wait as a request, marked **Pending approval**. A cache admin can approve or deny requests under **Subscriptions** on the cache page.

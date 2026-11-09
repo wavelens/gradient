@@ -83,17 +83,17 @@ async function settled(fixture: ComponentFixture<CacheSubscriptionsComponent>) {
 }
 
 describe('CacheSubscriptionsComponent - access gating', () => {
-  it('hides Subscribe and Unsubscribe under read-only access', async () => {
+  it('hides Add Cache and Unsubscribe under read-only access', async () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     await settled(fixture);
-    expect(findByText(fixture.nativeElement, 'subscribe to cache')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'add cache')).toBeNull();
     expect(findByText(fixture.nativeElement, 'unsubscribe')).toBeNull();
   });
 
-  it('shows but disables Subscribe under state-managed access', async () => {
+  it('shows but disables Add Cache under state-managed access', async () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     await settled(fixture);
-    const btn = findByText(fixture.nativeElement, 'subscribe to cache') as HTMLButtonElement | null;
+    const btn = findByText(fixture.nativeElement, 'add cache') as HTMLButtonElement | null;
     expect(btn).not.toBeNull();
     expect(btn!.disabled).toBe(true);
   });
@@ -112,15 +112,28 @@ describe('CacheSubscriptionsComponent - row actions', () => {
 });
 
 describe('CacheSubscriptionsComponent - create cache', () => {
-  it('subscribes the project to a cache created on this page', async () => {
+  it('offers one Add Cache button whose dialog subscribes or creates', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
-    findByText(fixture.nativeElement, 'create cache')!.click();
+    expect(findByText(fixture.nativeElement, 'create cache')).toBeNull();
+    findByText(fixture.nativeElement, 'add cache')!.click();
+    await settled(fixture);
+    expect(findByText(document.body, 'create new cache')).not.toBeNull();
+    expect(findByText(document.body, 'subscribe')).not.toBeNull();
+  });
+
+  it('returns to Add Cache with the previous pick when creating is cancelled', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const cmp = fixture.componentInstance;
+    cmp.openSubscribeDialog('shared-two');
+    cmp.createInsteadOfPick();
     await settled(fixture);
     const dialog = fixture.debugElement.query(By.directive(CreateCacheDialogComponent)).componentInstance as CreateCacheDialogComponent;
-    expect(dialog.visible()).toBe(true);
-    dialog.created.emit('fresh');
-    expect(subscribeCache).toHaveBeenCalledWith('acme', 'fresh');
+    dialog.visible.set(false);
+    await settled(fixture);
+    expect(cmp.showSubscribeDialog()).toBe(true);
+    expect(cmp.newCacheName).toBe('shared-two');
   });
 
   it('reports a private cache subscription as requested, in the words of the server', async () => {
@@ -170,11 +183,6 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     expect(cmp.newCacheName).toBe('fresh');
   });
 
-  it('hides Create Cache under read-only access', async () => {
-    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
-    await settled(fixture);
-    expect(findByText(fixture.nativeElement, 'create cache')).toBeNull();
-  });
 });
 
 describe('CacheSubscriptionsComponent - pending requests', () => {

@@ -49,7 +49,7 @@ A cache holds all build outputs of the project. `nix` treats the cache as a subs
 
 ## 3. Create a Project
 
-Open **Projects -> Create Project** and set up a new project. Then go to **Settings -> Cache Subscriptions -> Subscribe to Cache** and select the cache created in step 2.
+Open **Projects -> Create Project** and set up a new project. Then go to **Settings -> Cache Subscriptions -> Add Cache** and select the cache created in step 2.
 
 A project acts as the access boundary. All members, workers and caches live inside one project. After the subscription, the local worker shows up under **Settings -> Workers** within about a minute.
 
