@@ -53,6 +53,10 @@ export function isEvaluationNotStartedStatus(status: EvaluationStatus): boolean 
   return status === 'Queued' || status === 'Waiting';
 }
 
+export function abortedWithoutBuildsTitle(startedAt: string | null | undefined): string {
+  return startedAt ? 'Aborted before any builds started' : 'Aborted before the evaluation started';
+}
+
 export function buildPhase(status: BuildStatus): StatusPhase {
   switch (status) {
     case 'Created':

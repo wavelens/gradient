@@ -60,7 +60,7 @@
   </gr-load-state>
 </gr-page-layout>
 
-<gr-dialog #webhookDialog [header]="editing() ? 'Edit event notification' : 'New event notification'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px" [error]="formError()" [busy]="saving()" [confirmDiscard]="formChanges.changed()">
+<gr-dialog #webhookDialog [header]="editing() ? 'Edit Event Notification' : 'New Event Notification'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px" [error]="formError()" [busy]="saving()" [confirmDiscard]="formChanges.changed()">
   <div #webhookForm>
   <gr-form-field label="Name" for="webhook-name" [invalid]="!!nameError()" [error]="nameError() ?? ''">
     <input grInput id="webhook-name" [ngModel]="name()" (ngModelChange)="name.set($event)" (keyup.enter)="save()" />

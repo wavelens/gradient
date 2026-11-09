@@ -256,7 +256,7 @@
           } @else if (hasLoadedFirstBuildPage() && visibleBuilds().length === 0) {
             <div class="select-build-hint">
               <gr-icon [name]="ev.status === 'Aborted' ? 'cancel' : 'inventory_2'" class="hint-icon" size="xl" />
-              <span class="hint-text">{{ ev.status === 'Aborted' ? 'Aborted before any builds started' : isRunning() ? 'Nothing built yet' : 'No builds' }}</span>
+              <span class="hint-text">{{ ev.status === 'Aborted' ? abortedWithoutBuildsTitle(ev.started_at) : isRunning() ? 'Nothing built yet' : 'No builds' }}</span>
             </div>
           } @else {
             <div class="select-build-hint">

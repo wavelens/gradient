@@ -6,7 +6,7 @@
 
 import type { BuildStatus, EvaluationStatus, ExecJobStatus } from '@core/models';
 import {
-  buildPhase, entryPointPhase, entryPointPhaseWithExecJob, evaluationPhase, execJobPhase, isEvaluationNotStartedStatus, isPendingBuildStatus,
+  abortedWithoutBuildsTitle, buildPhase, entryPointPhase, entryPointPhaseWithExecJob, evaluationPhase, execJobPhase, isEvaluationNotStartedStatus, isPendingBuildStatus,
   PHASE_COLOR, PHASE_SEVERITY, phaseInFinishedEvaluation, type StatusPhase,
 } from './status-phase';
 
@@ -138,5 +138,12 @@ describe('phase colours', () => {
   ])('display %s in the color of the %s badge', (phase, severity, role) => {
     expect(PHASE_SEVERITY[phase]).toBe(severity);
     expect(PHASE_COLOR[phase]).toBe(`var(${role})`);
+  });
+});
+
+describe('abortedWithoutBuildsTitle', () => {
+  it('tells an abort before the start apart from an abort before the first build', () => {
+    expect(abortedWithoutBuildsTitle(null)).toBe('Aborted before the evaluation started');
+    expect(abortedWithoutBuildsTitle('2026-01-01T00:00:00')).toBe('Aborted before any builds started');
   });
 });

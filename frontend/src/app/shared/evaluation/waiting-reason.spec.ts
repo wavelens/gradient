@@ -5,7 +5,7 @@
  */
 
 import type { WaitingReason } from '@core/models';
-import { type WaitingAccess, explainWaiting } from './waiting-reason';
+import { type WaitingAccess, explainWaiting, waitingReasonText } from './waiting-reason';
 
 const ADMIN: WaitingAccess = { manageWorkers: true, manageSubscriptions: true, trigger: true, superuser: false };
 const VIEWER: WaitingAccess = { manageWorkers: false, manageSubscriptions: false, trigger: false, superuser: false };
@@ -113,5 +113,99 @@ describe('explainWaiting', () => {
     }, 'acme', VIEWER);
     expect(explained.detail).toBe('14 builds wait for an answer from the upstream caches. Not answering: https://attic.example/lantian.');
     expect(explained.hint).toContain('cache admin');
+  });
+});
+
+describe('waitingReasonText', () => {
+  it('names the missing exec capability', () => {
+    const reason: WaitingReason = { kind: 'eval_workers', capability: 'exec', connected_workers: 1 };
+    expect(waitingReasonText(reason)).toBe('Waiting for exec worker');
+  });
+
+  it('leaves out the labels and devices the row shows as badges', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { labels: ['3d-printer'], devices: [{ name: 'gpu:h100', count: 16 }], mounts: ['/data'], nodes: 0, custom_image: false },
+      connected_workers: 1,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('Needs mount /data');
+  });
+
+  it('names a missing architecture', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { architecture: 'aarch64-linux', labels: [], devices: [], mounts: [], nodes: 0, custom_image: false },
+      connected_workers: 2,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('Needs architecture aarch64-linux');
+  });
+
+  it('names a secret no worker offers', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { labels: [], devices: [], mounts: [], nodes: 0, custom_image: false, secrets: ['lab-key'] },
+      connected_workers: 1,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('Needs worker secret lab-key');
+  });
+
+  it('names missing network, SSH and ports', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { labels: [], devices: [], mounts: [], nodes: 0, custom_image: false, network: true, ssh: true, ports: [6006] },
+      connected_workers: 1,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('Needs a worker that allows network, a worker that allows SSH, port 6006');
+  });
+
+  it('names a worker that allows custom images', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { labels: [], devices: [], mounts: [], nodes: 0, custom_image: true },
+      connected_workers: 2,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('Needs a worker that allows custom images');
+  });
+
+  it('a nodes wait reason names the worker count', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { labels: [], devices: [], mounts: [], nodes: 2, custom_image: false },
+      connected_workers: 1,
+      matching_workers: 1,
+    };
+    expect(waitingReasonText(reason)).toBe('Needs 2 workers in one zone');
+  });
+
+  it('names the guest size no worker can hold', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: {
+        labels: [], devices: [], mounts: [], nodes: 0, custom_image: false,
+        guest: { cpus: 64, memory_mb: 0, disk_mb: 0 },
+      },
+      connected_workers: 1,
+      matching_workers: 0,
+    };
+    expect(waitingReasonText(reason)).toBe('Needs 64 CPUs');
+  });
+
+  it('counts the matching workers whose devices are busy', () => {
+    const reason: WaitingReason = {
+      kind: 'exec_workers',
+      unmet: { labels: [], devices: [], mounts: [], nodes: 0, custom_image: false },
+      connected_workers: 3,
+      matching_workers: 2,
+    };
+    expect(waitingReasonText(reason)).toBe('Waiting for free devices on 2 workers');
+  });
+
+  it('has no text without a reason', () => {
+    expect(waitingReasonText(null)).toBeNull();
   });
 });

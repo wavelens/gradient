@@ -965,7 +965,7 @@ describe('EvaluationLogComponent', () => {
     });
 
     it.each([
-      ['Aborted', 'Aborted before any builds started'],
+      ['Aborted', 'Aborted before the evaluation started'],
       ['Completed', 'No builds'],
     ] as const)('shows one main message and no sidebar list for a %s evaluation without builds', (status, message) => {
       const fixture = setupEvaluationLogPageFixture([], undefined, { status });
@@ -1434,7 +1434,7 @@ describe('EvaluationLogComponent', () => {
       const { fixture, root } = render({ getEvaluation: () => of({ ...EVALUATION, task_name: 'exec' }) });
       const sidebarJobs = root.querySelector('.log-sidebar app-exec-job-list');
       expect(sidebarJobs?.textContent).toContain('deploy');
-      expect(sidebarJobs?.textContent).toContain('waits for a manual start');
+      expect(sidebarJobs?.textContent).toContain('Waiting for manual start');
       expect(sidebarJobs?.querySelector('a.sidebar-row-link')?.getAttribute('href')).toContain('/exec/job-1');
       fixture.componentInstance.selectEvaluationSection();
       fixture.detectChanges();

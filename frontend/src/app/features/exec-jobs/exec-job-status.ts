@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { DeviceRequest, EvaluationStatus, ExecJobStatus, ExecJobSummary, ExecUnmet, GuestSize, WaitingReason } from '@core/models';
+import type { DeviceRequest, EvaluationStatus, ExecJobStatus, ExecJobSummary, ExecUnmet, GuestSize } from '@core/models';
 import type { MenuItem } from '@gradient/ui/ui';
 import type { ConfirmRequest } from '@shared/confirm';
 import type { Observable } from 'rxjs';
@@ -14,7 +14,7 @@ export function abortExecJobConfirm<T>(target: string, action: () => Observable<
   return {
     title: 'Abort Exec Job',
     target,
-    consequence: 'Exec jobs stop and do not resume. Evaluation results become Aborted. Failures in other jobs make the result Failed.',
+    consequence: 'The program stops and its VM is removed.',
     confirmLabel: 'Abort',
     failure: 'Failed to abort the exec job.',
     severity: 'danger',
@@ -107,24 +107,4 @@ export function unmetParts(unmet: ExecUnmet): string[] {
     ...(unmet.ssh ? ['a worker that allows SSH'] : []),
     ...(unmet.ports ?? []).map((port) => `port ${port}`),
   ];
-}
-
-export function waitingReasonText(reason: WaitingReason | null | undefined): string | null {
-  if (!reason) return null;
-  switch (reason.kind) {
-    case 'eval_workers':
-      return `waiting for a worker with ${reason.capability}`;
-    case 'exec_workers': {
-      // Labels and devices already appear as badges next to this text.
-      const parts = unmetParts({ ...reason.unmet, labels: [], devices: [] });
-      if (parts.length > 0) return `needs ${parts.join(', ')}`;
-      const workers = reason.matching_workers;
-      if (workers === 0) return 'waiting for a matching worker';
-      return `waiting for free devices on ${workers} ${workers === 1 ? 'worker' : 'workers'}`;
-    }
-    case 'manual_start':
-      return 'waits for a manual start';
-    default:
-      return null;
-  }
 }

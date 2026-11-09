@@ -32,7 +32,7 @@ export function abortBuildConfirm<T>(target: string, action: () => Observable<T>
   return {
     title: 'Abort Build',
     target,
-    consequence: 'This action can stop the build and end the evaluation as aborted.',
+    consequence: 'The build stops and the evaluation ends as aborted.',
     confirmLabel: 'Abort',
     failure: 'Build abort failed.',
     severity: 'danger',

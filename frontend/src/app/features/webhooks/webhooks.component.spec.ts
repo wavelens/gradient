@@ -317,8 +317,8 @@ describe('WebhooksComponent', () => {
   });
 
   it.each([
-    { action: 'delete', label: 'Delete', title: 'Delete event notification', method: 'delete' as const },
-    { action: 'rotate', label: 'Rotate secret', title: 'Rotate event notification secret', method: 'rotateSecret' as const },
+    { action: 'delete', label: 'Delete', title: 'Delete Event Notification', method: 'delete' as const },
+    { action: 'rotate', label: 'Rotate secret', title: 'Rotate Event Notification Secret', method: 'rotateSecret' as const },
   ])('asks before the $action, naming the webhook', ({ label, title, method }) => {
     const { root, service, confirm } = setup({ webhookScope: 'project' }, { project: 'p' });
     rowMenuItem(root, label).click();

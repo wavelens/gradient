@@ -38,7 +38,34 @@ export interface WaitingExplanation {
   hint: string | null;
 }
 
-const ASK_FOR_WORKER = 'Ask a project admin to register a worker that can meet the requirement.';
+const EVAL_WORKER_WAIT_TITLE: Record<Extract<WaitingReason, { kind: 'eval_workers' }>['capability'], string> = {
+  network: 'Waiting for network worker',
+  secrets: 'Waiting for worker with secrets',
+  eval: 'Waiting for evaluation worker',
+  exec: 'Waiting for exec worker',
+};
+const EXEC_WORKER_WAIT_TITLE = 'Waiting for exec worker';
+const MANUAL_START_WAIT_TITLE = 'Waiting for manual start';
+const freeDevicesWait = (workers: number) => `Waiting for free devices on ${plural(workers, 'worker')}`;
+
+// Short wait reason for a row that already shows labels and devices as badges.
+export function waitingReasonText(reason: WaitingReason | null | undefined): string | null {
+  switch (reason?.kind) {
+    case 'eval_workers':
+      return EVAL_WORKER_WAIT_TITLE[reason.capability];
+    case 'exec_workers': {
+      const parts = unmetParts({ ...reason.unmet, labels: [], devices: [] });
+      if (parts.length > 0) return `Needs ${parts.join(', ')}`;
+      return reason.matching_workers > 0 ? freeDevicesWait(reason.matching_workers) : EXEC_WORKER_WAIT_TITLE;
+    }
+    case 'manual_start':
+      return MANUAL_START_WAIT_TITLE;
+    default:
+      return null;
+  }
+}
+
+const ASK_FOR_WORKER ='Ask a project admin to register a worker that can meet the requirement.';
 
 function workerAction(project: string): WaitingAction {
   return { kind: 'link', label: 'Register worker', icon: 'construction', link: links.projectPage(project, 'workers') };
@@ -89,12 +116,7 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
         exec: 'run exec jobs',
       }[reason.capability];
       return {
-        title: {
-          network: 'Waiting for network worker',
-          secrets: 'Waiting for worker with secrets',
-          eval: 'Waiting for evaluation worker',
-          exec: 'Waiting for exec worker',
-        }[reason.capability],
+        title: EVAL_WORKER_WAIT_TITLE[reason.capability],
         detail: reason.connected_workers === 0
           ? `This project has no workers connected to ${work}.`
           : `${reason.connected_workers} ${reason.connected_workers === 1 ? 'worker is' : 'workers are'} connected, but none can ${work}.`,
@@ -156,9 +178,9 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
     case 'exec_workers': {
       const missing = unmetParts(reason.unmet);
       return {
-        title: 'Waiting for exec worker',
+        title: EXEC_WORKER_WAIT_TITLE,
         detail: missing.length === 0 && reason.matching_workers > 0
-          ? `Waiting for free devices on ${plural(reason.matching_workers, 'worker')}.`
+          ? `${freeDevicesWait(reason.matching_workers)}.`
           : 'No connected worker offers what the exec job needs.',
         requirements: missing,
         ...forWorkerAdmin(workerAction(project), ASK_FOR_WORKER),
@@ -166,7 +188,7 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
     }
     case 'manual_start':
       return {
-        title: 'Waiting for manual start',
+        title: MANUAL_START_WAIT_TITLE,
         detail: 'A person can start an exec job manually.',
         requirements: [],
         ...step(access.trigger, { kind: 'start', label: 'Run', icon: 'play_arrow' },

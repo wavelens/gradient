@@ -242,7 +242,7 @@ describe('TaskDetailComponent - failed evaluation without packages', () => {
     const { fixture } = setup(access, { primaryStatus: 'Aborted' });
     const root = fixture.nativeElement as HTMLElement;
     const text = root.textContent ?? '';
-    expect(text).toContain('Aborted before evaluation');
+    expect(text).toContain('Aborted before the evaluation started');
     expect(text).not.toContain('No packages');
     expect(text).not.toContain('0 / 0');
     expect(root.querySelector('.panel-head .dur')).toBeNull();

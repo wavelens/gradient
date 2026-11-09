@@ -52,7 +52,7 @@ describe('ExecJobListComponent', () => {
 
     const host = fixture.nativeElement as HTMLElement;
     expect(host.querySelector('gr-status-icon')?.getAttribute('data-phase')).toBe('queued');
-    expect(host.textContent).toContain('waiting for free devices on 1 worker');
+    expect(host.textContent).toContain('Waiting for free devices on 1 worker');
     expect(host.textContent).toContain('lab-a');
     expect(host.textContent).toContain('gpu:h100:8');
     expect(host.querySelector('a.entry-link')?.getAttribute('href')).toBe('/project/acme/task/demo/exec/j1');
@@ -102,7 +102,7 @@ describe('ExecJobListComponent', () => {
     fixture.detectChanges();
 
     expect((fixture.nativeElement as HTMLElement).querySelector('.job-detail')?.textContent)
-      .toBe('waits for a manual start');
+      .toBe('Waiting for manual start');
   });
 
   it('keeps polling a running evaluation until its exec jobs appear', () => {

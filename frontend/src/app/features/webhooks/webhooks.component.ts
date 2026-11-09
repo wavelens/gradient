@@ -339,7 +339,7 @@ export class WebhooksComponent implements OnInit {
   rotate(hook: WebhookResponse): void {
     this.confirm
       .confirm({
-        title: 'Rotate event notification secret',
+        title: 'Rotate Event Notification Secret',
         target: hook.name,
         consequence: 'The current secret can no longer verify deliveries. Pass the new secret to the receiving service.',
         confirmLabel: 'Rotate',
@@ -375,7 +375,7 @@ export class WebhooksComponent implements OnInit {
   startDelete(hook: WebhookResponse): void {
     this.confirm
       .confirm({
-        title: 'Delete event notification',
+        title: 'Delete Event Notification',
         target: hook.name,
         consequence: 'Deletes the event notification and its delivery history. The deletion is permanent.',
         confirmLabel: 'Delete',
