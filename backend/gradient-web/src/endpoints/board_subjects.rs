@@ -9,6 +9,7 @@ use gradient_db::exec_jobs::labels::ExecJobLabel;
 use gradient_db::lookup::{by_id, by_ids};
 use gradient_db::scheduling::assignment_record::{exec_job_of_key, shared_build_of_key};
 use gradient_entity::dispatched_job::DispatchedJobKind;
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr};
@@ -272,6 +273,7 @@ pub struct JobEvaluationView {
     pub commit: String,
     pub commit_message: Option<String>,
     pub wildcard: String,
+    pub status: EvaluationStatus,
     pub task: Option<String>,
     pub task_display_name: Option<String>,
 }
@@ -286,6 +288,7 @@ impl JobEvaluationView {
                 .unwrap_or_default(),
             commit_message: commit.and_then(|c| c.message.lines().next().map(str::to_string)),
             wildcard: evaluation.wildcard,
+            status: evaluation.status,
             task_display_name: task.as_ref().map(|t| t.display_name.clone()),
             task: task.map(|t| t.name),
         }

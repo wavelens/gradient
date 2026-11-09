@@ -122,6 +122,7 @@ const EVAL_DETAIL: AssignedJobDetail = {
     commit: 'abc1234def5678abc1234def5678abc1234def56',
     commit_message: 'Bump inputs',
     wildcard: 'packages.**',
+    status: 'Building',
     task: 'ci',
   },
   assigned_scheduler_reasoning: {
@@ -780,7 +781,7 @@ describe('BoardJobDetailComponent - #636', () => {
       ...DETAIL,
       finished_at: '2026-06-08T00:05:00Z',
       outcome: 'failed',
-      evaluation: { repository: 'https://example.com/r.git', commit: 'abc1234', wildcard: 'packages.**', task: 'nightly' },
+      evaluation: { repository: 'https://example.com/r.git', commit: 'abc1234', wildcard: 'packages.**', status: 'Failed', task: 'nightly' },
     };
     const el = setup({ getJob: () => of(job) }).nativeElement as HTMLElement;
     expect(el.querySelector('h1')?.textContent?.trim()).toBe('foo');
@@ -907,7 +908,7 @@ describe('BoardJobDetailComponent - display names', () => {
       ...DETAIL,
       kind: 2,
       exec_job: exec,
-      evaluation: { repository: 'r', commit: 'c', wildcard: 'w', task: 'exectask', task_display_name: 'Exec Task' },
+      evaluation: { repository: 'r', commit: 'c', wildcard: 'w', status: 'Completed', task: 'exectask', task_display_name: 'Exec Task' },
     };
     const el = setup({ getJob: () => of(job) }).nativeElement as HTMLElement;
     expect(el.querySelector('h1')?.textContent?.trim()).toBe('Exec Task: apps.run');

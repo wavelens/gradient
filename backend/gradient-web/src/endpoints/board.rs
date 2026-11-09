@@ -32,6 +32,7 @@ use gradient_db::metrics::build_times::{self, ExpensiveBuild, TopProjectBuildTim
 use gradient_db::metrics::resource_usage::{
     self, ExpensiveEval, ExpensiveResource, ResourceMetric,
 };
+use gradient_db::scheduling::assignment_record::find_next_dispatched_job_id_for_job_key_after;
 use gradient_db::scheduling::cluster::clusters_of_assignments;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::{build_attempt, dispatched_job, dispatched_job_phase, flake_output_node};
@@ -615,6 +616,7 @@ pub struct DispatchedJobDetail {
     pub pname: Option<String>,
     pub assigned_scheduler_reasoning: Option<AssignedJobSchedulerReasoning>,
     pub previous_attempts: Vec<AttemptSummary>,
+    pub retried_by: Option<Uuid>,
     pub passed_over: bool,
 }
 
@@ -634,7 +636,7 @@ pub struct AssignedJobSchedulerReasoning {
     operation_id = "getBoardJob",
     tag = "board",
     summary = "Assigned job detail",
-    description = "Assignment records describe a single job and its timeline. The `phases` of an exec job can also store the reported phases as spans. `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is for superusers only. The value is null for other users. ``can_open_worker_metrics_page`` is true when the caller is a member of the job's project. Only members can open the statistics page for a worker. `can_view_project` is true when the caller can open the project page for that job (the project is public or the caller can view that project). Superusers can view jobs in every project. They cannot always view those project pages.",
+    description = "Assignment records describe a single job and its timeline. The `phases` of an exec job can also store the reported phases as spans. `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is for superusers only. The value is null for other users. ``can_open_worker_metrics_page`` is true when the caller is a member of the job's project. Only members can open the statistics page for a worker. `can_view_project` is true when the caller can open the project page for that job (the project is public or the caller can view that project). Superusers can view jobs in every project. They cannot always view those project pages. `retried_by`: the next assignment after this one on the same job (if any). `evaluation.status`: the current status of the whole evaluation. `outcome`: the result of this job.",
     params(("id" = Uuid, Path)),
     responses((status = OK, description = "Job detail", body = DispatchedJobDetail), WebError)
 )]
@@ -727,6 +729,7 @@ pub async fn get_dispatched_job(
                 candidates: None,
             }),
             previous_attempts: Vec::new(),
+            retried_by: None,
             passed_over: !c.won,
         }));
     }
@@ -817,6 +820,14 @@ pub async fn get_dispatched_job(
         }
         None => Vec::new(),
     };
+    let retried_by = match &j.job_id {
+        Some(key) => {
+            find_next_dispatched_job_id_for_job_key_after(&state.web_db, key, j.dispatched_at)
+                .await?
+                .map(Into::into)
+        }
+        None => None,
+    };
 
     Ok(ok_json(DispatchedJobDetail {
         id: j.id.into(),
@@ -873,6 +884,7 @@ pub async fn get_dispatched_job(
             candidates: j.candidates,
         }),
         previous_attempts,
+        retried_by,
         passed_over: false,
     }))
 }

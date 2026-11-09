@@ -177,6 +177,22 @@ pub async fn latest_eval_jobs<C: ConnectionTrait>(
     Ok(rows.into_iter().collect())
 }
 
+pub async fn find_next_dispatched_job_id_for_job_key_after<C: ConnectionTrait>(
+    db: &C,
+    job_key: &str,
+    after: chrono::NaiveDateTime,
+) -> Result<Option<DispatchedJobId>, DbErr> {
+    EDispatchedJob::find()
+        .select_only()
+        .column(CDispatchedJob::Id)
+        .filter(CDispatchedJob::JobId.eq(job_key))
+        .filter(CDispatchedJob::DispatchedAt.gt(after))
+        .order_by_asc(CDispatchedJob::DispatchedAt)
+        .into_tuple::<DispatchedJobId>()
+        .one(db)
+        .await
+}
+
 pub async fn eval_attempts<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,

@@ -854,6 +854,7 @@ export type DispatchedJobDetail = ReportGap & {
   pname?: string | null;
   assigned_scheduler_reasoning?: AssignedJobSchedulerReasoning | null;
   previous_attempts: AttemptSummary[];
+  retried_by?: string | null;
   passed_over: boolean;
 };
 
@@ -1515,6 +1516,7 @@ export interface JobEvaluationView {
   commit: string;
   commit_message?: string | null;
   wildcard: string;
+  status: EvaluationStatus;
   task?: string | null;
   task_display_name?: string | null;
 }

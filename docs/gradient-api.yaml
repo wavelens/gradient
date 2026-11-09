@@ -1754,7 +1754,7 @@ paths:
       tags:
       - board
       summary: Assigned job detail
-      description: Assignment records describe a single job and its timeline. The `phases` of an exec job can also store the reported phases as spans. `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is for superusers only. The value is null for other users. ``can_open_worker_metrics_page`` is true when the caller is a member of the job's project. Only members can open the statistics page for a worker. `can_view_project` is true when the caller can open the project page for that job (the project is public or the caller can view that project). Superusers can view jobs in every project. They cannot always view those project pages.
+      description: 'Assignment records describe a single job and its timeline. The `phases` of an exec job can also store the reported phases as spans. `assigned_scheduler_reasoning` (score, per-rule breakdown, worker, job and instance context, runner-up candidates) is for superusers only. The value is null for other users. ``can_open_worker_metrics_page`` is true when the caller is a member of the job''s project. Only members can open the statistics page for a worker. `can_view_project` is true when the caller can open the project page for that job (the project is public or the caller can view that project). Superusers can view jobs in every project. They cannot always view those project pages. `retried_by`: the next assignment after this one on the same job (if any). `evaluation.status`: the current status of the whole evaluation. `outcome`: the result of this job.'
       operationId: getBoardJob
       parameters:
       - name: id
@@ -16575,6 +16575,11 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/AttemptSummary'
+          retried_by:
+            type:
+            - string
+            - 'null'
+            format: uuid
           passed_over:
             type: boolean
     DispatchedJobId:
@@ -18558,6 +18563,7 @@ components:
       - repository
       - commit
       - wildcard
+      - status
       properties:
         repository:
           type: string
@@ -18569,6 +18575,8 @@ components:
           - 'null'
         wildcard:
           type: string
+        status:
+          $ref: '#/components/schemas/EvaluationStatus'
         task:
           type:
           - string
