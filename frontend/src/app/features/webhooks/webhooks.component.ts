@@ -30,6 +30,8 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
+  MenuComponent,
+  type MenuItem,
   MissingPermissionLoadStateError,
   PageLayoutComponent,
   SubmitDirective,
@@ -60,6 +62,7 @@ import { links } from '@shared/routing';
     FormFieldComponent,
     InputDirective,
     LoadStateComponent,
+    MenuComponent,
     PageLayoutComponent,
     SubmitDirective,
   ],
@@ -117,6 +120,7 @@ export class WebhooksComponent implements OnInit {
     };
   });
 
+  overflowMenuItemsOfLastClickedWebhookRow = signal<MenuItem[]>([]);
   newestDeliveryByWebhookId = signal<ReadonlyMap<string, DeliveryListItem_WebhookDeliveryId | null>>(new Map());
 
   eventNameToReadableText = eventNameToReadableText;
@@ -212,6 +216,15 @@ export class WebhooksComponent implements OnInit {
     return this.newestDeliveryByWebhookId().get(hook.id)?.success === false
       ? { label: 'Failing', severity: 'danger' }
       : { label: 'Active', severity: 'success' };
+  }
+
+  openWebhookOverflowMenuAtButton(event: Event, hook: WebhookResponse, menu: MenuComponent): void {
+    this.overflowMenuItemsOfLastClickedWebhookRow.set([
+      { label: 'Rotate secret', icon: 'key', command: () => this.rotate(hook) },
+      { label: hook.active ? 'Disable' : 'Enable', icon: 'power_settings_new', command: () => this.toggleActive(hook) },
+      { label: 'Delete', icon: 'delete', danger: true, command: () => this.startDelete(hook) },
+    ]);
+    menu.toggle(event);
   }
 
   startCreate(): void {

@@ -98,7 +98,22 @@ function rowButton(root: HTMLElement, label: string): HTMLButtonElement {
   )!;
 }
 
+function rowMenuItem(root: HTMLElement, label: string): HTMLElement {
+  root.querySelector<HTMLButtonElement>('.webhook-actions button[aria-label="Actions for ci"]')!.click();
+  TestBed.inject(ApplicationRef).tick();
+  return Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item')).find((item) => item.textContent?.includes(label))!;
+}
+
 describe('WebhooksComponent', () => {
+  it('keeps Test, Deliveries and Edit on the row and the rarer actions in its menu', () => {
+    const { root } = setup({ webhookScope: 'project' }, { project: 'p' });
+    const labels = Array.from(root.querySelectorAll('.webhook-actions .gr-button__label')).map((label) => label.textContent);
+    expect(labels).toEqual(['Test', 'Deliveries', 'Edit']);
+    rowMenuItem(root, 'Delete');
+    const items = Array.from(document.querySelectorAll('.gr-menu__item')).map((item) => item.textContent?.replace(item.querySelector('.gr-menu__icon')?.textContent ?? '', '').trim());
+    expect(items).toEqual(['Rotate secret', 'Disable', 'Delete']);
+  });
+
   it.each([
     { scope: 'project', trail: ['Projects', 'Acme', 'Settings', 'Event notifications'] },
     { scope: 'cache', trail: ['Caches', 'Main', 'Settings', 'Event notifications'] },
@@ -264,7 +279,7 @@ describe('WebhooksComponent', () => {
     { action: 'rotate', label: 'Rotate secret', title: 'Rotate event notification secret', method: 'rotateSecret' as const },
   ])('asks before the $action, naming the webhook', ({ label, title, method }) => {
     const { root, service, confirm } = setup({ webhookScope: 'project' }, { project: 'p' });
-    rowButton(root, label).click();
+    rowMenuItem(root, label).click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title, target: 'ci' }));
     expect(service[method]).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1');
   });
@@ -275,14 +290,14 @@ describe('WebhooksComponent', () => {
   ])('sends no $action when the confirmation is cancelled', ({ label, method }) => {
     const { root, service, confirm, component } = setup({ webhookScope: 'project' }, { project: 'p' });
     confirm.mockImplementation(() => EMPTY);
-    rowButton(root, label).click();
+    rowMenuItem(root, label).click();
     expect(service[method]).not.toHaveBeenCalled();
     expect(component.revealedSecret()).toBeNull();
   });
 
   it('confirms a deletion with a toast and a reload', () => {
     const { root, service, notify } = setup({ webhookScope: 'project' }, { project: 'p' });
-    rowButton(root, 'Delete').click();
+    rowMenuItem(root, 'Delete').click();
     expect(notify.success).toHaveBeenCalledWith('Event notification deleted');
     expect(service.list).toHaveBeenCalledTimes(2);
   });
@@ -315,17 +330,22 @@ describe('WebhooksComponent', () => {
     expect(component.revealedSecret()).toBeNull();
   });
 
-  it.each([
-    { action: 'toggle', label: 'Disable', method: 'update' as const },
-    { action: 'test', label: 'Test', method: 'test' as const },
-  ])('sends one $action request for two clicks on the row button', ({ label, method }) => {
+  it('sends one test request for two clicks on the row button', () => {
     const { fixture, service, root } = setup({ webhookScope: 'project' }, { project: 'p' });
-    service[method].mockReturnValue(new Subject());
-    const button = () => Array.from(root.querySelectorAll<HTMLButtonElement>('.webhook-actions button')).find((b) => b.querySelector('.gr-button__label')?.textContent === label)!;
-    button().click();
+    service.test.mockReturnValue(new Subject());
+    rowButton(root, 'Test').click();
     fixture.detectChanges();
-    button().click();
-    expect(service[method]).toHaveBeenCalledTimes(1);
+    rowButton(root, 'Test').click();
+    expect(service.test).toHaveBeenCalledTimes(1);
+  });
+
+  it('locks the row menu while a disable request is open', () => {
+    const { fixture, service, root } = setup({ webhookScope: 'project' }, { project: 'p' });
+    service.update.mockReturnValue(new Subject());
+    rowMenuItem(root, 'Disable').click();
+    fixture.detectChanges();
+    expect(service.update).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1', { active: false });
+    expect(root.querySelector('.webhook-actions button[aria-label="Actions for ci"]')!.getAttribute('aria-disabled')).toBe('true');
   });
 
   it.each([

@@ -51,14 +51,13 @@
           <div class="webhook-actions">
             <button grButton label="Test" icon="play_arrow" severity="secondary" size="small" [loading]="webhookIdWithTestDeliveryInFlight() === hook.id" (click)="test(hook)"></button>
             <button grButton label="Deliveries" icon="list" severity="secondary" size="small" (click)="openDeliveries(hook)"></button>
-            <button grButton [label]="hook.active ? 'Disable' : 'Enable'" icon="power_settings_new" severity="secondary" size="small" [loading]="togglingId() === hook.id" (click)="toggleActive(hook)"></button>
-            <button grButton label="Rotate secret" icon="key" severity="secondary" size="small" (click)="rotate(hook)"></button>
             <button grButton label="Edit" icon="edit" severity="secondary" size="small" (click)="startEdit(hook)"></button>
-            <button grButton label="Delete" icon="delete" severity="danger" size="small" (click)="startDelete(hook)"></button>
+            <button grButton icon="more_vert" severity="secondary" size="small" text [loading]="togglingId() === hook.id" [attr.aria-label]="'Actions for ' + hook.name" (click)="openWebhookOverflowMenuAtButton($event, hook, webhookOverflowMenu)"></button>
           </div>
         </div>
       }
     </div>
+    <gr-menu #webhookOverflowMenu [model]="overflowMenuItemsOfLastClickedWebhookRow()" />
   </gr-load-state>
 </gr-page-layout>
 
