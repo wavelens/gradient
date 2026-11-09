@@ -16,6 +16,7 @@ use gradient_core::ServerState;
 use gradient_db::evaluations::failed_attributes::{FailedAttribute, failed_attributes};
 use gradient_db::lookup::{by_id, by_ids};
 use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr};
@@ -91,7 +92,7 @@ struct LoadedEvaluation {
     operation_id = "getEvaluationSummary",
     tag = "evals",
     summary = "Summarise what went wrong in an evaluation",
-    description = "Returns the builds that failed themselves, each with the packages it\nblocks, the attributes that failed to evaluate, and the packages fixed\nsince the previous evaluation. A build that only failed because a\ndependency failed is not listed; it is counted under the build that\ncaused it.\n\n`newly_failing` and `fixed` compare against the evaluation in\n`compared_with`. Without a previous evaluation `compared_with` is\n`null`, every `newly_failing` is `false` and `fixed` is empty.",
+    description = "Returns the builds that failed themselves, each with the packages it\nblocks, the attributes that failed to evaluate, and the packages fixed\nsince the previous evaluation. A build that only failed because a\ndependency failed is not listed; it is counted under the build that\ncaused it.\n\n`newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present.",
     params(("evaluation" = EvaluationId, Path)),
     responses((status = OK, description = "Failure summary of the evaluation.", body = EvaluationFailureSummary), WebError)
 )]
@@ -105,10 +106,7 @@ pub async fn get_evaluation_summary(
         .await?;
     let db = &state.web_db;
     let loaded = LoadedEvaluation::load(db, ctx.evaluation.id).await?;
-    let compared = match ctx.evaluation.previous {
-        Some(previous) => compared_evaluation(db, previous).await?,
-        None => None,
-    };
+    let compared = compared_evaluation(db, ctx.evaluation.previous).await?;
     let baseline = compared.as_ref().map(|(_, baseline)| baseline);
     let failures = analysis::failures(&loaded.graph, baseline);
     let fixed = baseline.map_or_else(Vec::new, |before| analysis::fixed(&loaded.graph, before));
@@ -174,11 +172,22 @@ async fn shared_build_statuses<C: ConnectionTrait>(
 
 async fn compared_evaluation<C: ConnectionTrait>(
     db: &C,
-    previous: EvaluationId,
+    previous: Option<EvaluationId>,
 ) -> Result<Option<(ComparedEvaluation, Baseline)>, DbErr> {
-    let Some(evaluation) = by_id::<EEvaluation, _>(db, previous).await? else {
-        return Ok(None);
+    let mut next = previous;
+    let evaluation = loop {
+        let Some(id) = next else {
+            return Ok(None);
+        };
+        let Some(evaluation) = by_id::<EEvaluation, _>(db, id).await? else {
+            return Ok(None);
+        };
+        if evaluation.status != EvaluationStatus::Aborted {
+            break evaluation;
+        }
+        next = evaluation.previous;
     };
+    let previous = evaluation.id;
     let commit = by_id::<ECommit, _>(db, evaluation.commit)
         .await?
         .map(|c| vec_to_hex(&c.hash))
