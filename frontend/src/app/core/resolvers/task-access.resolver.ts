@@ -31,6 +31,6 @@ export const taskAccessResolver: ResolveFn<TaskAccessData> = (route, state) => {
       crumbs.rememberTaskSettingsAccess(project, task, canOpenTaskSettings(p));
     }),
     map((p) => ({ task: p, access: accessFromEntity(p) })),
-    denyOnRefusal({ kind: 'task', name: task, back: String(links.projects()) }, state.url),
+    denyOnRefusal({ kind: 'task', name: task, back: String(links.projects()) }, state.url, project),
   );
 };

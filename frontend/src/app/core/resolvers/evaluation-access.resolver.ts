@@ -33,12 +33,12 @@ export const evaluationAccessResolver: ResolveFn<EvaluationWithOptionalTask> = (
   const target: DeniedTarget = { kind: 'evaluation', name: id, back: String(links.projects()) };
   const withTask = (evaluation: EvaluationResponse): Observable<EvaluationWithOptionalTask | RedirectCommand> => {
     const task$: Observable<TaskDetailsResponse | null> = evaluation.task_name ? tasks.getTask(project, evaluation.task_name) : of(null);
-    return task$.pipe(map((task) => (!task || task.id === evaluation.task ? { evaluation, task } : deniedPage(router, target, state.url))));
+    return task$.pipe(map((task) => (!task || task.id === evaluation.task ? { evaluation, task } : deniedPage(router, { ...target, back: String(links.project(project)) }, state.url))));
   };
   return inject(EvaluationsService).getEvaluation(id).pipe(
     switchMap((evaluation) => evaluation.project_name === project
       ? withTask(evaluation)
       : of(redirectToCorrectProjectSlug(router, state.url, evaluation.project_name))),
-    denyOnRefusal<EvaluationWithOptionalTask | RedirectCommand>(target, state.url),
+    denyOnRefusal<EvaluationWithOptionalTask | RedirectCommand>(target, state.url, project),
   );
 };

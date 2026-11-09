@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Route, UrlTree, convertToParamMap } from '@angular/router';
+import { ActivatedRouteSnapshot, Route, UrlTree, convertToParamMap } from '@angular/router';
 import { routes } from '../../app.routes';
-import { buildOriginLink, links, readBuildOrigin } from './links';
+import { buildOriginLink, links, readBuildOrigin, readInAppNextPathFromRouteSnapshot } from './links';
 
 function matches(config: readonly Route[], segments: readonly string[]): boolean {
   return config.some((route) => {
@@ -104,5 +104,13 @@ describe('links', () => {
   it('Read evaluation from old `evalId` query parameter of bookmarked links', () => {
     expect(readBuildOrigin(convertToParamMap({ evalId: 'e1' }))).toEqual({ task: null, evaluation: 'e1' });
     expect(readBuildOrigin(convertToParamMap({ eval: 'e2', evalId: 'e1' })).evaluation).toBe('e2');
+  });
+
+  it('rejects next paths that point to another site', () => {
+    const next = (value: string) => readInAppNextPathFromRouteSnapshot({ queryParamMap: convertToParamMap({ next: value }) } as ActivatedRouteSnapshot);
+    expect(next('/projects?tab=1')).toBe('/projects?tab=1');
+    expect(next('//evil.example')).toBeNull();
+    expect(next('/\\evil.example')).toBeNull();
+    expect(next('https://evil.example')).toBeNull();
   });
 });

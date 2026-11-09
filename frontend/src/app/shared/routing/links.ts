@@ -40,7 +40,7 @@ function origin(from: BuildOrigin): Query {
 
 export function readInAppNextPathFromRouteSnapshot(route: ActivatedRouteSnapshot): string | null {
   const next = route.queryParamMap.get('next');
-  return next?.startsWith('/') ? next : null;
+  return next?.startsWith('/') && !next.startsWith('//') && !next.includes('\\') ? next : null;
 }
 
 // All navigation targets in the app originate in this file. The tests in links.spec.ts check each one against app.routes.ts.

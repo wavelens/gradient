@@ -32,7 +32,7 @@ export const buildOrEvaluationAccessGuard: CanActivateFn = (route, state) => {
   const isEvaluation = route.paramMap.get('kind') === 'eval';
   const target: DeniedTarget = { kind: isEvaluation ? 'evaluation' : 'build', name: id, back: String(links.projects()) };
   const lookup: Observable<unknown> = isEvaluation ? evaluations.getEvaluation(id) : evaluations.getBuild(id);
-  return lookup.pipe(map(() => true as const), denyOnRefusal(target, state.url));
+  return lookup.pipe(map(() => true as const), denyOnRefusal(target, state.url, route.paramMap.get('project') ?? undefined));
 };
 
 export const assignedJobDetailGuard: CanActivateFn = (route, state) => {

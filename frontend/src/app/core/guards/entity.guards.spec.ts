@@ -115,10 +115,17 @@ describe('not-found or no-access page', () => {
     expect(await outcome(projectAccessResolver as unknown as CanActivateFn, { project: 'acme' })).toEqual({ project: {} });
   });
 
-  it('replaces a task without access and links back to the project list', async () => {
+  it('replaces a task without access and links back to its project when the project is readable', async () => {
     configure({ tasks: { getTask: () => refused(403) } });
     expect(page(await outcome(taskAccessResolver as unknown as CanActivateFn, { project: 'acme', task: 'demo' }))).toContain(
-      'kind=task&name=demo&back=%2Fprojects',
+      'kind=task&name=demo&back=%2Fproject%2Facme',
+    );
+  });
+
+  it('links back to the project list when the parent project is hidden too', async () => {
+    configure({ tasks: { getTask: () => refused(403) }, projects: { getProject: () => refused(404) } });
+    expect(page(await outcome(taskAccessResolver as unknown as CanActivateFn, { project: 'acme', task: 'demo' }))).toContain(
+      'kind=task&name=demo&back=%2Fprojects&',
     );
   });
 
@@ -134,7 +141,7 @@ describe('not-found or no-access page', () => {
 
   it('replaces an evaluation that belongs to another project', async () => {
     configure({ tasks: { getTask: () => of({ id: 'other-task' }) } });
-    expect(page(await outcome(evaluationAccessResolver as unknown as CanActivateFn, { project: 'acme', evaluationId: 'e1' }))).toContain('kind=evaluation&name=e1&back=%2Fprojects');
+    expect(page(await outcome(evaluationAccessResolver as unknown as CanActivateFn, { project: 'acme', evaluationId: 'e1' }))).toContain('kind=evaluation&name=e1&back=%2Fproject%2Facme&');
   });
 
   it('hands an evaluation of the project and its task to the page', async () => {
@@ -158,7 +165,7 @@ describe('not-found or no-access page', () => {
     { path: 'evaluation closure', params: { project: 'acme', kind: 'eval', id: 'b9' }, kind: 'evaluation' },
   ])('replaces a missing id on the $path page', async ({ params, kind }) => {
     configure({ evaluations: { getEvaluation: () => refused(404), getBuild: () => refused(404) } });
-    expect(page(await outcome(buildOrEvaluationAccessGuard, params))).toContain(`kind=${kind}&name=b9&back=%2Fprojects`);
+    expect(page(await outcome(buildOrEvaluationAccessGuard, params))).toContain(`kind=${kind}&name=b9&back=%2Fproject%2Facme&`);
   });
 
   it('Replace a nonexistent job on the assigned job page', async () => {

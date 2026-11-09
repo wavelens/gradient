@@ -6,6 +6,7 @@
 
 import { inject } from '@angular/core';
 import { Routes } from '@angular/router';
+import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { links } from '@shared/routing';
 import { authGuard, redirectSignedInUserToDashboardGuard } from '@core/guards/auth.guard';
@@ -391,6 +392,7 @@ export const routes: Routes = [
           { path: '', pathMatch: 'full', redirectTo: 'overview' },
           {
             path: 'overview',
+            title: 'Overview · Job Board',
             loadComponent: () =>
               import('./features/board/overview/overview.component').then(
                 (m) => m.BoardOverviewComponent
@@ -398,6 +400,7 @@ export const routes: Routes = [
           },
           {
             path: 'live',
+            title: 'Live Jobs · Job Board',
             loadComponent: () =>
               import('./features/board/live-jobs/live-jobs.component').then(
                 (m) => m.BoardLiveJobsComponent
@@ -405,6 +408,7 @@ export const routes: Routes = [
           },
           {
             path: 'scheduler',
+            title: 'Scheduler · Job Board',
             canActivate: [adminGuard],
             loadComponent: () =>
               import('./features/board/scheduler/scheduler.component').then(
@@ -413,6 +417,7 @@ export const routes: Routes = [
           },
           {
             path: 'throughput',
+            title: 'Throughput · Job Board',
             loadComponent: () =>
               import('./features/board/throughput/throughput.component').then(
                 (m) => m.BoardThroughputComponent
@@ -420,6 +425,7 @@ export const routes: Routes = [
           },
           {
             path: 'durations',
+            title: 'Durations · Job Board',
             loadComponent: () =>
               import('./features/board/durations/durations.component').then(
                 (m) => m.BoardDurationsComponent
@@ -427,6 +433,7 @@ export const routes: Routes = [
           },
           {
             path: 'workers',
+            title: 'Workers · Job Board',
             loadComponent: () =>
               import('./features/board/workers/workers.component').then(
                 (m) => m.BoardWorkersComponent
@@ -434,11 +441,13 @@ export const routes: Routes = [
           },
           {
             path: 'cache',
+            title: 'Cache · Job Board',
             loadComponent: () =>
               import('./features/board/cache/cache.component').then((m) => m.BoardCacheComponent),
           },
           {
             path: 'network',
+            title: 'Network · Job Board',
             loadComponent: () =>
               import('./features/board/network/network.component').then(
                 (m) => m.BoardNetworkComponent
@@ -446,6 +455,7 @@ export const routes: Routes = [
           },
           {
             path: 'health',
+            title: 'System Health · Job Board',
             canActivate: [adminGuard],
             loadComponent: () =>
               import('./features/board/health/health.component').then(
@@ -454,6 +464,7 @@ export const routes: Routes = [
           },
           {
             path: 'storage',
+            title: 'Storage · Job Board',
             canActivate: [adminGuard],
             loadComponent: () =>
               import('./features/board/storage/storage.component').then(
@@ -462,6 +473,7 @@ export const routes: Routes = [
           },
           {
             path: 'expensive',
+            title: 'High Cost · Job Board',
             loadComponent: () =>
               import('./features/board/high-cost/high-cost.component').then((m) => m.BoardHighCostComponent),
           },
@@ -586,6 +598,7 @@ export const routes: Routes = [
       },
 
       // Settings
+      { path: 'settings', pathMatch: 'full', redirectTo: 'settings/profile' },
       {
         path: 'settings/profile',
         title: 'Profile',
@@ -631,6 +644,7 @@ export const routes: Routes = [
     ],
   },
 
+  { path: 'admin', pathMatch: 'full', redirectTo: 'admin/webhooks' },
   {
     path: 'admin/webhooks',
     title: 'Event notifications (admin)',
@@ -660,14 +674,15 @@ export const routes: Routes = [
   // Error pages
   {
     path: 'error/403',
-    title: 'Admin Only',
+    title: (route) => (route.queryParamMap.get('only') === 'admin' ? 'Admin Only' : 'Access Denied'),
     data: { code: 403 },
     loadComponent: () =>
       import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),
   },
   {
     path: 'error/404',
-    title: (route) => (route.queryParamMap.has('kind') ? 'Not Found or Access Denied' : 'Page Not Found'),
+    title: (route) =>
+      route.queryParamMap.has('kind') && !inject(AuthService).user()?.superuser ? 'Not Found or Access Denied' : 'Page Not Found',
     data: { code: 404 },
     loadComponent: () =>
       import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),
