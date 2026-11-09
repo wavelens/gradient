@@ -28,6 +28,12 @@ export function deniedPage(router: Router, target: DeniedTarget, from: string): 
   return new RedirectCommand(tree, { browserUrl: from });
 }
 
+/// Reloads of the error page retry the failed page.
+export function removeErrorPageRouterStateFromHistory(history: History): void {
+  const { ɵrouterUrl: routerUrl, ...state } = (history.state ?? {}) as Record<string, unknown>;
+  if (typeof routerUrl === 'string' && routerUrl.startsWith('/error/')) history.replaceState(state, '');
+}
+
 export function adminOnlyPage(router: Router, from: string): RedirectCommand {
   return new RedirectCommand(router.createUrlTree(['/error/403'], { queryParams: { only: 'admin', from } }), { browserUrl: from });
 }

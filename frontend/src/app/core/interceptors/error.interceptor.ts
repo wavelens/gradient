@@ -69,7 +69,8 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
     }
     const status = error.status === 0 ? 503 : error.status;
     if (pageRead && ERROR_PAGES.has(status) && !req.context.get(SECTION_REQUEST)) {
-      router.navigate([`/error/${status}`], { queryParams: { from: pageUrl(router) }, skipLocationChange: true });
+      const from = pageUrl(router);
+      router.navigate([`/error/${status}`], { queryParams: { from }, browserUrl: from });
     }
   };
 

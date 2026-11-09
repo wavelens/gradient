@@ -131,7 +131,7 @@ describe('errorInterceptor on 429', () => {
     expect(await result.catch((e: HttpErrorResponse) => e.status)).toBe(429);
     expect(calls()).toBe(1);
     expect(toasts.messages()).toEqual([]);
-    expect(navigate).toHaveBeenCalledWith(['/error/429'], expect.objectContaining({ skipLocationChange: true }));
+    expect(navigate).toHaveBeenCalledWith(['/error/429'], expect.objectContaining({ browserUrl: expect.any(String) }));
   });
 
   it('names the full server wait when a write is throttled for long', async () => {
@@ -148,7 +148,7 @@ describe('errorInterceptor on 429', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(await settled).toBe(429);
     expect(calls()).toBe(4);
-    expect(navigate).toHaveBeenCalledWith(['/error/429'], expect.objectContaining({ skipLocationChange: true }));
+    expect(navigate).toHaveBeenCalledWith(['/error/429'], expect.objectContaining({ browserUrl: expect.any(String) }));
   });
 
   it('keeps the page and stays silent when a read sent after the page rendered stays throttled', async () => {
@@ -179,7 +179,7 @@ describe('errorInterceptor on an unavailable server', () => {
     const target = router.parseUrl('/board/workers') as UrlTree;
     vi.spyOn(router, 'currentNavigation').mockReturnValue({ finalUrl: target } as ReturnType<Router['currentNavigation']>);
     await send(failWith(503)).catch(() => undefined);
-    expect(navigate).toHaveBeenCalledWith(['/error/503'], { queryParams: { from: '/board/workers' }, skipLocationChange: true });
+    expect(navigate).toHaveBeenCalledWith(['/error/503'], { queryParams: { from: '/board/workers' }, browserUrl: '/board/workers' });
   });
 
   it('keeps the page for a failing poll sent after the page rendered', async () => {
