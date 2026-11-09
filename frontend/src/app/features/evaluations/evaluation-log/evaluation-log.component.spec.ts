@@ -342,11 +342,13 @@ describe('EvaluationLogComponent', () => {
       return new Map(labelled.map((i) => [i.label, i]));
     }
 
-    it('passes only the evaluation to the graph so its way back leads to this log', () => {
+    it('passes the task and the evaluation so build pages keep both breadcrumbs', () => {
       const { cmp } = setup();
       cmp.evaluation.set({ id: 'eval-1', task_name: 'ci' } as EvaluationResponse);
-      const items = open(cmp, target({ dispatched_job: 'job-1' }));
-      expect(String(items.get('Dependency graph')!.routerLink)).toBe('/project/proj/graph/b1?eval=eval-1');
+      const items = open(cmp, target({ dispatched_job: 'job-1', has_artefacts: true }));
+      expect(String(items.get('Dependency graph')!.routerLink)).toBe('/project/proj/graph/b1?task=ci&eval=eval-1');
+      expect(String(items.get('Closure')!.routerLink)).toBe('/project/proj/closure/build/b1?task=ci&eval=eval-1');
+      expect(String(items.get('Artefacts')!.routerLink)).toBe('/project/proj/artefacts/b1?task=ci&eval=eval-1');
     });
 
     it('offers graph, job, artefacts and log download for an assigned build', () => {

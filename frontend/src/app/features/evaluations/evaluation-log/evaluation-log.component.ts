@@ -156,7 +156,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   projectName = '';
   evaluationLogBuildOrigin(): BuildOrigin {
-    return { evaluation: this.evaluationId };
+    return { task: this.evaluation()?.task_name, evaluation: this.evaluationId };
   }
 
   projectAndTaskCrumbs = computed(() => {
