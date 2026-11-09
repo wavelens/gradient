@@ -12,14 +12,8 @@
     }
     <h1 class="error-title">{{ meta().title }}</h1>
     <p class="error-description">{{ denied()?.description ?? meta().description }}</p>
-    @if (restricted()) {
-      <p class="error-account">
-        @if (user(); as signedIn) {
-          Signed in as {{ signedIn.username }}.
-        } @else {
-          Private items require sign-in.
-        }
-      </p>
+    @if (restricted() && user(); as signedIn) {
+      <p class="error-account">Signed in as {{ signedIn.username }}.</p>
     }
     <div class="error-actions">
       @if (restricted() && !user()) {
@@ -32,7 +26,7 @@
         }
         <a grButton [routerLink]="view.backLink" [severity]="user() && !invited ? 'primary' : 'secondary'" [label]="view.backLabel"></a>
       } @else {
-        <a grButton [routerLink]="links.dashboard()" [severity]="restricted() && !user() ? 'secondary' : 'primary'" label="Go Home"></a>
+        <a grButton [routerLink]="home().link" [severity]="restricted() && !user() ? 'secondary' : 'primary'" [label]="home().label"></a>
       }
       @if (restricted() && user() && !user()?.superuser) {
         <button grButton type="button" severity="secondary" label="Switch Account" (click)="switchAccount()"></button>

@@ -22,9 +22,9 @@ interface ErrorMeta {
 
 const ERROR_META: Record<number, ErrorMeta> = {
   403: {
-    title: 'Admin Only',
-    description: 'Instance administrators only. Ask an administrator for access.',
-    icon: 'admin_panel_settings',
+    title: 'Access Denied',
+    description: "You don't have access to this page.",
+    icon: 'lock',
     retryable: false,
   },
   404: {
@@ -65,6 +65,13 @@ const ERROR_META: Record<number, ErrorMeta> = {
   },
 };
 
+const ADMIN_ONLY_META: ErrorMeta = {
+  title: 'Admin Only',
+  description: 'Instance administrators only. Ask an administrator for access.',
+  icon: 'admin_panel_settings',
+  retryable: false,
+};
+
 const FALLBACK_META: ErrorMeta = {
   title: 'Something Went Wrong',
   description: 'An unexpected error occurred.',
@@ -85,10 +92,17 @@ const DENIED_KINDS: Record<DeniedKind, { label: string; back: string }> = {
   worker: { label: 'Worker', back: 'Back to Workers' },
 };
 
+const PROJECT_PAGE = /^\/project\/[^/?#]+$/;
+
 export interface DeniedView {
   description: string;
   backLabel: string;
   backLink: string;
+}
+
+function deniedDescription(notFound: string, user: { superuser?: boolean } | null): string {
+  if (!user) return `${notFound} It doesn't exist, or it's private and needs sign-in.`;
+  return user.superuser ? notFound : `${notFound} It doesn't exist, or you don't have access to it.`;
 }
 
 @Component({
@@ -116,18 +130,27 @@ export class ErrorPageComponent {
   denied = computed<DeniedView | null>(() => {
     const kind = DENIED_KINDS[this.query.get('kind') as DeniedKind];
     if (this.code() !== 404 || !kind) return null;
-    const notFound = `${kind.label} "${this.query.get('name') ?? ''}" not found.`;
+    const back = this.query.get('back') ?? '/';
     return {
-      description: this.user()?.superuser ? notFound : `${notFound} It doesn't exist, or you don't have access to it.`,
-      backLabel: kind.back,
-      backLink: this.query.get('back') ?? '/',
+      description: deniedDescription(`${kind.label} "${this.query.get('name') ?? ''}" not found.`, this.user()),
+      backLabel: PROJECT_PAGE.test(back) ? 'Back to Project' : kind.back,
+      backLink: back,
     };
   });
   meta = computed<ErrorMeta>(() => {
+    if (this.code() === 403) {
+      if (this.query.get('only') === 'admin') return ADMIN_ONLY_META;
+      return this.user() ? ERROR_META[403] : { ...ERROR_META[403], description: 'Sign in to open this page.' };
+    }
     const base = ERROR_META[this.code()] ?? FALLBACK_META;
     return this.denied() && !this.user()?.superuser ? { ...base, title: 'Not Found or Access Denied', icon: 'lock' } : base;
   });
   restricted = computed(() => this.code() === 403 || this.denied() !== null);
+  home = computed(() =>
+    this.code() === 403 && this.from?.startsWith('/board/')
+      ? { label: 'Back to Job Board', link: links.board() }
+      : { label: 'Go Home', link: links.dashboard() },
+  );
 
   constructor() {
     if (this.denied() && this.user()) this.invites.refresh();

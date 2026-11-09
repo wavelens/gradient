@@ -65,16 +65,40 @@ describe('ErrorPageComponent', () => {
   });
 
   it('explains admin-only pages instead of redirecting', () => {
-    const { text, links } = render(403, { from: '/admin/webhooks' }, { username: 'bob' });
+    const { text, links } = render(403, { from: '/admin/webhooks', only: 'admin' }, { username: 'bob' });
     expect(text).toContain('Admin Only');
     expect(text).toContain('Signed in as bob.');
     expect(links.map((l) => l.text)).toEqual(['Go Home', 'Switch Account']);
   });
 
-  it('explains admin-only board tabs outside the admin area the same way', () => {
-    const { text } = render(403, { from: '/board/workers' }, { username: 'bob' });
+  it('sends a refused board tab back to the job board', () => {
+    const { text, links } = render(403, { from: '/board/workers', only: 'admin' }, { username: 'bob' });
     expect(text).toContain('Admin Only');
-    expect(text).not.toContain('project');
+    expect(links).toContainEqual({ text: 'Back to Job Board', href: '/board/overview' });
+    expect(links.map((l) => l.text)).not.toContain('Go Home');
+  });
+
+  it('keeps a refusal without the admin-only mark neutral', () => {
+    const signedIn = render(403, { from: '/projects' }, { username: 'bob' });
+    expect(signedIn.text).toContain('Access Denied');
+    expect(signedIn.text).toContain("You don't have access to this page.");
+    expect(signedIn.text).not.toContain('Admin');
+    TestBed.resetTestingModule();
+    const anonymous = render(403, { from: '/projects' }, null);
+    expect(anonymous.text).toContain('Sign in to open this page.');
+    expect(anonymous.text).not.toContain('Signed in as');
+  });
+
+  it('gives an anonymous visitor a single reason on a denied page', () => {
+    const { text } = render(404, DENIED, null);
+    expect(text).toContain("It doesn't exist, or it's private and needs sign-in.");
+    expect(text).not.toContain("you don't have access");
+    expect(text).not.toContain('Private items');
+  });
+
+  it('names the parent project on the back button', () => {
+    const { links } = render(404, { kind: 'task', name: 'hosts', back: '/project/infra', from: '/project/infra/t/hosts' }, { username: 'carol' });
+    expect(links).toContainEqual({ text: 'Back to Project', href: '/project/infra' });
   });
 
   it('tells a superuser only that the item is missing and offers no Switch Account', () => {
