@@ -331,6 +331,11 @@ describe('TaskDetailComponent - loading', () => {
     expect(findByText(root, 'Start Evaluation')?.hasAttribute('disabled')).toBe(false);
   });
 
+  it('leaves the build queue to the evaluation tabs instead of repeating it in the header', () => {
+    const { fixture } = setup(access, { getTask: () => of({ ...resolvedTask(access, {}), queue: { building: 1, queued: 0 } }) });
+    expect((fixture.nativeElement as HTMLElement).querySelector('.task-info')?.textContent).not.toContain('building');
+  });
+
   it('holds the project crumb with a placeholder until the project name arrives', () => {
     const { fixture } = setup(access, { getProject: () => NEVER });
     expect((fixture.nativeElement as HTMLElement).querySelector('.breadcrumb-link gr-skeleton')).not.toBeNull();

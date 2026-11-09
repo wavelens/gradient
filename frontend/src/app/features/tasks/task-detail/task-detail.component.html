@@ -64,9 +64,6 @@
       @if (proj.last_check_at) {
         <span class="chip">checked {{ proj.last_check_at | serverDate }}</span>
       }
-      @if (proj.queue.building + proj.queue.queued > 0) {
-        <span class="chip queue">{{ proj.queue.building }} building · {{ proj.queue.queued }} queued</span>
-      }
     </div>
   </div>
 

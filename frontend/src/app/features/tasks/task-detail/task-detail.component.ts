@@ -271,7 +271,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       .map(e => `${e.id}:${e.status}:${e.prioritized}:${e.errors}:${e.warnings}:${e.updated_at}:${JSON.stringify(e.builds)}:${JSON.stringify(e.waiting_reason)}`)
       .join('|');
     return [p.active, p.can_edit, p.can_trigger, p.display_name, p.description, p.repository,
-      p.wildcard, p.last_check_at, JSON.stringify(p.queue), evals].join('§');
+      p.wildcard, p.last_check_at, evals].join('§');
   }
 
   truncate(value: string, max = 42): string {

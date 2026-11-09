@@ -28,8 +28,10 @@
   align-items: center;
   padding-top: $spacing-lg;
   margin-bottom: $space-block;
+
+  > :first-child { min-width: 0; }
 }
-h1 { font-size: $font-size-xxl; margin: 0; }
+h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
 .head-actions { display: flex; gap: $space-pair; flex-wrap: wrap; }
 
 .task-info { margin-bottom: $space-block; }
@@ -61,11 +63,6 @@ h1 { font-size: $font-size-xxl; margin: 0; }
       background: var(--gr-surface-hover);
       border-color: var(--gr-accent);
     }
-  }
-
-  &.queue {
-    color: var(--gr-status-info-text);
-    border-color: color-mix(in srgb, var(--run) 32%, transparent);
   }
 }
 
@@ -287,10 +284,6 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 
   .pp-head {
     gap: $spacing-md;
-
-    > :first-child {
-      min-width: 0;
-    }
   }
 
   .head-actions {
