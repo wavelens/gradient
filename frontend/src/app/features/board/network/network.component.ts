@@ -13,9 +13,14 @@ import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { workerAxisLabel } from '../worker-label';
 import { clockTime, formatBytes, formatCount, formatDuration, formatQuantity } from '@shared/text';
-import { HttpRouteStat, BoardNetworkStats } from '@core/models';
+import { HttpRouteStat, BoardNetworkStats, SeriesPoint } from '@core/models';
 
 type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg_ms' | 'errors'>;
+
+const HOUR_MS = 3_600_000;
+
+export const getHourlySeriesPointsWithoutCurrentBucket = (points: SeriesPoint[], now: number) =>
+  points.filter((p) => Date.parse(p.bucket_start) + HOUR_MS <= now);
 
 @Component({
   selector: 'app-board-network',
@@ -141,10 +146,9 @@ export class BoardNetworkComponent implements OnInit {
     return this.sortAsc() ? 'ascending' : 'descending';
   }
 
-  egressCats = computed(() => (this.stats()?.nar_egress ?? []).map((p) => clockTime(p.bucket_start)));
-  egressSeries = computed(() => [
-    { name: 'egress', data: (this.stats()?.nar_egress ?? []).map((p) => p.sum) },
-  ]);
+  private egress = computed(() => getHourlySeriesPointsWithoutCurrentBucket(this.stats()?.nar_egress ?? [], Date.now()));
+  egressCats = computed(() => this.egress().map((p) => clockTime(p.bucket_start)));
+  egressSeries = computed(() => [{ name: 'egress', data: this.egress().map((p) => p.sum) }]);
   workerCats = computed(() =>
     (this.stats()?.workers ?? []).map((w) => workerAxisLabel(w.worker_name, w.worker_id))
   );

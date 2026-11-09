@@ -9,7 +9,7 @@ import { of } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
 import { AuthService } from '@core/services/auth.service';
 import type { BoardNetworkStats, HttpRouteStat } from '@core/models';
-import { BoardNetworkComponent } from './network.component';
+import { BoardNetworkComponent, getHourlySeriesPointsWithoutCurrentBucket } from './network.component';
 
 const route = (i: number): HttpRouteStat => ({ method: 'GET', route: `/api/v1/r${i}`, count: 100 - i, avg_ms: 5, errors: 0 });
 
@@ -54,5 +54,16 @@ describe('BoardNetworkComponent - worker speeds', () => {
     expect(component.diskSeries()[0].data).toEqual([null]);
     expect(component.transferSeries()[1].data).toEqual([null]);
     expect(component.transferSeries()[0].data).toEqual([5]);
+  });
+});
+
+describe('getHourlySeriesPointsWithoutCurrentBucket', () => {
+  it('drops the hour that is still running so egress does not appear to fall to zero', () => {
+    const now = Date.parse('2026-01-01T12:30:00Z');
+    const points = [
+      { bucket_start: '2026-01-01T11:00:00Z', count: 3, sum: 57 },
+      { bucket_start: '2026-01-01T12:00:00Z', count: 0, sum: 0 },
+    ];
+    expect(getHourlySeriesPointsWithoutCurrentBucket(points, now)).toEqual([points[0]]);
   });
 });
