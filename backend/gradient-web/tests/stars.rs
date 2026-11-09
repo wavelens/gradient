@@ -84,6 +84,10 @@ async fn stars_list_groups_by_kind() {
         BTreeMap::from([
             ("kind", Value::from(kind)),
             ("project", Value::String(project.map(str::to_string))),
+            (
+                "project_display_name",
+                Value::String(project.map(str::to_uppercase)),
+            ),
             ("name", Value::from(name)),
             ("display_name", Value::from(name.to_uppercase())),
             ("starred", Value::from(true)),

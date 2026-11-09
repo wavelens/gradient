@@ -52,7 +52,10 @@ impl From<NameHitRow> for SearchHit {
     fn from(n: NameHitRow) -> Self {
         let mut hit = match n.kind {
             NameKind::Project => project_hit(n.name, n.starred),
-            NameKind::Task { project } => task_hit(project, n.name, n.starred),
+            NameKind::Task {
+                project,
+                project_display_name,
+            } => task_hit(project, project_display_name, n.name, n.starred),
             NameKind::Cache => cache_hit(n.name, n.starred),
         };
         hit.label = n.display_name;
@@ -69,7 +72,7 @@ impl From<CommitHitRow> for SearchHit {
                 c.project, c.task, c.evaluation
             ),
             label: c.hash.chars().take(7).collect(),
-            sublabel: format!("{} / {}", c.project, c.task),
+            sublabel: format!("{} / {}", c.project_display_name, c.task_display_name),
             starred: false,
         }
     }
@@ -113,12 +116,17 @@ fn project_hit(name: String, starred: bool) -> SearchHit {
     }
 }
 
-fn task_hit(project: String, task: String, starred: bool) -> SearchHit {
+fn task_hit(
+    project: String,
+    project_display_name: String,
+    task: String,
+    starred: bool,
+) -> SearchHit {
     SearchHit {
         kind: HitKind::Task,
         route: format!("/project/{project}/task/{task}"),
         label: task,
-        sublabel: project,
+        sublabel: project_display_name,
         starred,
     }
 }
@@ -207,6 +215,10 @@ mod tests {
         BTreeMap::from([
             ("kind", Value::from(kind)),
             ("project", Value::String(project.map(str::to_string))),
+            (
+                "project_display_name",
+                Value::String(project.map(str::to_uppercase)),
+            ),
             ("name", Value::from(name)),
             ("display_name", Value::from(name.to_uppercase())),
             ("starred", Value::from(starred)),
@@ -345,7 +357,7 @@ mod tests {
             ]
         );
         assert_eq!(hits[0].label, "HOSTS");
-        assert_eq!(hits[0].sublabel, "infra");
+        assert_eq!(hits[0].sublabel, "INFRA");
         assert!(hits[0].starred);
         assert_eq!(statements, 1);
     }
@@ -374,7 +386,9 @@ mod tests {
         let evaluation = uuid::Uuid::now_v7();
         let commit = BTreeMap::from([
             ("project", Value::from("infra")),
+            ("project_display_name", Value::from("Infrastructure")),
             ("task", Value::from("hosts")),
+            ("task_display_name", Value::from("Host configs")),
             ("evaluation", Value::Uuid(Some(evaluation))),
             ("hash", Value::from(format!("deadbeef1{}", "0".repeat(31)))),
         ]);
@@ -398,6 +412,7 @@ mod tests {
             ]
         );
         assert_eq!(hits[0].label, "deadbee");
+        assert_eq!(hits[0].sublabel, "Infrastructure / Host configs");
         assert_eq!(statements, 2);
     }
 }

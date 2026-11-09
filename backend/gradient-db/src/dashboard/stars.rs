@@ -57,11 +57,12 @@ crate::sql! {
         params = [UserId, CacheId],
         tier = Hot;
 
-    STARRED = concat!("SELECT 'project' AS kind, NULL::text AS project, p.name, p.display_name, true AS starred \
+    STARRED = concat!("SELECT 'project' AS kind, NULL::text AS project, NULL::text AS project_display_name, \
+        p.name, p.display_name, true AS starred \
         FROM user_project_star s JOIN project p ON p.id = s.project WHERE s.\"user\" = $1 AND ", project_readable!("true"), " \
-        UNION ALL SELECT 'task', p.name, t.name, t.display_name, true FROM user_task_star s \
+        UNION ALL SELECT 'task', p.name, p.display_name, t.name, t.display_name, true FROM user_task_star s \
         JOIN task t ON t.id = s.task JOIN project p ON p.id = t.project WHERE s.\"user\" = $1 AND ", project_readable!("true"), " \
-        UNION ALL SELECT 'cache', NULL, c.name, c.display_name, true FROM user_cache_star s \
+        UNION ALL SELECT 'cache', NULL, NULL, c.name, c.display_name, true FROM user_cache_star s \
         JOIN cache c ON c.id = s.cache WHERE s.\"user\" = $1 AND ", cache_readable!("true"), " \
         ORDER BY kind, project, name"),
         params = [UserId],
@@ -120,7 +121,7 @@ pub async fn starred_names<C: ConnectionTrait>(
     for row in starred(db, user).await? {
         match row.kind {
             NameKind::Project => out.projects.push(row.name),
-            NameKind::Task { project } => out.tasks.push(StarredTask {
+            NameKind::Task { project, .. } => out.tasks.push(StarredTask {
                 project,
                 task: row.name,
             }),

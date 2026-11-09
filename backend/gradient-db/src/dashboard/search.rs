@@ -20,8 +20,9 @@ crate::sql! {
         params = [UserId, CacheIds(4), CachedPathHashes(4), Bool(true)],
         tier = Bulk;
 
-    SEARCH_COMMITS = concat!("SELECT project, task, evaluation, hash FROM ( \
-        SELECT DISTINCT ON (c.hash, t.id) p.name AS project, t.name AS task, e.id AS evaluation, \
+    SEARCH_COMMITS = concat!("SELECT project, project_display_name, task, task_display_name, evaluation, hash FROM ( \
+        SELECT DISTINCT ON (c.hash, t.id) p.name AS project, p.display_name AS project_display_name, \
+        t.name AS task, t.display_name AS task_display_name, e.id AS evaluation, \
         encode(c.hash, 'hex') AS hash, e.created_at FROM commit c JOIN evaluation e ON e.commit = c.id \
         JOIN task t ON t.id = e.task JOIN project p ON p.id = t.project \
         WHERE c.hash BETWEEN decode($2, 'hex') AND decode($3, 'hex') AND ", project_readable!("$4"), " \
@@ -29,17 +30,17 @@ crate::sql! {
         params = [UserId, CommitPrefixLow, CommitPrefixHigh, Bool(true)],
         tier = Hot;
 
-    SEARCH_NAMES = concat!("SELECT kind, project, name, display_name, starred FROM ( \
+    SEARCH_NAMES = concat!("SELECT kind, project, project_display_name, name, display_name, starred FROM ( \
         SELECT hits.*, row_number() OVER (PARTITION BY kind ORDER BY starred DESC, name) AS rank FROM ( \
-            SELECT 'project' AS kind, NULL::text AS project, p.name, p.display_name, \
+            SELECT 'project' AS kind, NULL::text AS project, NULL::text AS project_display_name, p.name, p.display_name, \
                 EXISTS (SELECT 1 FROM user_project_star s WHERE s.\"user\" = $1 AND s.project = p.id) AS starred \
                 FROM project p WHERE (p.name ILIKE $2 OR p.display_name ILIKE $2) AND ", project_readable!("$4"), " \
-            UNION ALL SELECT 'task', p.name, t.name, t.display_name, \
+            UNION ALL SELECT 'task', p.name, p.display_name, t.name, t.display_name, \
                 EXISTS (SELECT 1 FROM user_task_star s WHERE s.\"user\" = $1 AND s.task = t.id) \
                 FROM task t JOIN project p ON p.id = t.project \
                 WHERE (t.name ILIKE $2 OR t.display_name ILIKE $2) AND ", project_readable!("($4 OR EXISTS \
                     (SELECT 1 FROM user_task_star ts WHERE ts.\"user\" = $1 AND ts.task = t.id))"), " \
-            UNION ALL SELECT 'cache', NULL, c.name, c.display_name, \
+            UNION ALL SELECT 'cache', NULL, NULL, c.name, c.display_name, \
                 EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id) \
                 FROM cache c WHERE (c.name ILIKE $2 OR c.display_name ILIKE $2) AND ", cache_readable!("$4"), " \
         ) hits) ranked WHERE rank <= $3 ORDER BY starred DESC, kind, name"),
@@ -58,7 +59,9 @@ pub struct NarHitRow {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommitHitRow {
     pub project: String,
+    pub project_display_name: String,
     pub task: String,
+    pub task_display_name: String,
     pub evaluation: EvaluationId,
     pub hash: String,
 }
@@ -66,7 +69,10 @@ pub struct CommitHitRow {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NameKind {
     Project,
-    Task { project: String },
+    Task {
+        project: String,
+        project_display_name: String,
+    },
     Cache,
 }
 
@@ -86,10 +92,17 @@ pub fn ilike_contains(text: &str) -> String {
     format!("%{escaped}%")
 }
 
-fn name_kind(raw: &str, project: Option<String>) -> Result<NameKind, DbErr> {
+fn name_kind(
+    raw: &str,
+    project: Option<String>,
+    project_display_name: Option<String>,
+) -> Result<NameKind, DbErr> {
     match (raw, project) {
         ("project", _) => Ok(NameKind::Project),
-        ("task", Some(project)) => Ok(NameKind::Task { project }),
+        ("task", Some(project)) => Ok(NameKind::Task {
+            project_display_name: project_display_name.unwrap_or_else(|| project.clone()),
+            project,
+        }),
         ("task", None) => Err(DbErr::Type("task hit without a project".into())),
         ("cache", _) => Ok(NameKind::Cache),
         (other, _) => Err(DbErr::Type(format!("unknown search kind {other}"))),
@@ -108,7 +121,9 @@ fn nar_hit_row(r: &QueryResult) -> Result<NarHitRow, DbErr> {
 fn commit_hit_row(r: &QueryResult) -> Result<CommitHitRow, DbErr> {
     Ok(CommitHitRow {
         project: r.try_get("", "project")?,
+        project_display_name: r.try_get("", "project_display_name")?,
         task: r.try_get("", "task")?,
+        task_display_name: r.try_get("", "task_display_name")?,
         evaluation: EvaluationId::new(r.try_get("", "evaluation")?),
         hash: r.try_get("", "hash")?,
     })
@@ -116,7 +131,11 @@ fn commit_hit_row(r: &QueryResult) -> Result<CommitHitRow, DbErr> {
 
 pub(super) fn name_hit_row(r: &QueryResult) -> Result<NameHitRow, DbErr> {
     Ok(NameHitRow {
-        kind: name_kind(&r.try_get::<String>("", "kind")?, r.try_get("", "project")?)?,
+        kind: name_kind(
+            &r.try_get::<String>("", "kind")?,
+            r.try_get("", "project")?,
+            r.try_get("", "project_display_name")?,
+        )?,
         name: r.try_get("", "name")?,
         display_name: r.try_get("", "display_name")?,
         starred: r.try_get("", "starred")?,
