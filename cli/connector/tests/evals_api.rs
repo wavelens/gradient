@@ -16,7 +16,7 @@ async fn get_eval_returns_response() {
         .and(path("/api/v1/evals/00000000-0000-0000-0000-000000000001"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-                "id": "00000000-0000-0000-0000-000000000001", "task": "00000000-0000-0000-0000-000000000002", "repository": "r", "commit": "c1",
+                "id": "00000000-0000-0000-0000-000000000001", "task": "00000000-0000-0000-0000-000000000002", "project_name": "proj", "repository": "r", "commit": "c1",
                 "wildcard": "*", "status": "Completed", "previous": null, "next": null,
                 "created_at": "2024-01-01T00:00:00", "updated_at": "2024-01-01T00:00:00",
                 "error": null, "entry_points": [], "error_count": 0, "expected_thunks": null,

@@ -21,7 +21,7 @@ async fn list_projects_returns_paginated() {
                 "id": "00000000-0000-0000-0000-000000000001", "name": "foo", "display_name": "Foo", "description": "",
                 "created_by": "00000000-0000-0000-0000-000000000002", "created_at": "2024-01-01T00:00:00",
                 "allow_exec_in_build_requests": false, "hide_build_requests": false, "managed": false, "public": false,
-                "public_key": null, "role": null, "running_evaluations": 0, "permissions": []
+                "public_key": null, "role": null, "running_evaluations": 0, "waiting_evaluations": 0, "permissions": []
             }],
             "total": 1, "page": 1, "per_page": 10
         }))))

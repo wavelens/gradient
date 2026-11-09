@@ -457,7 +457,7 @@ async fn mcp_abort_evaluation_sends_the_abort_method() {
 fn eval_body(status: &str) -> Value {
     json!({"error": false, "message": {
         "id": "00000000-0000-0000-0000-000000000001",
-        "task": "00000000-0000-0000-0000-000000000002", "repository": "r", "commit": "c",
+        "task": "00000000-0000-0000-0000-000000000002", "project_name": "proj", "repository": "r", "commit": "c",
         "wildcard": "*", "status": status, "created_at": "2026-01-01T00:00:00",
         "updated_at": "2026-01-01T00:00:00", "error": null, "entry_points": [],
         "error_count": 0, "expected_thunks": null, "finished_at": null, "next": null,

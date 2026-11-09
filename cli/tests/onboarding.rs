@@ -40,6 +40,7 @@ async fn projects_mock(names: &[&str]) -> MockServer {
                 "public_key": null,
                 "role": null,
                 "running_evaluations": 0,
+                "waiting_evaluations": 0,
                 "permissions": []
             })
         })
