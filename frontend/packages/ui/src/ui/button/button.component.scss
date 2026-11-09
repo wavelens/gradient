@@ -67,12 +67,9 @@
   --gr-btn-accent: var(--gr-status-danger);
 }
 
-// Disabled buttons drop the severity color completely. They don't look like muted enabled buttons.
+// Disabled buttons retain their severity fill at lower opacity. Disabled primary actions can still look like primary actions next to a filled Cancel.
 :host(:disabled:not(.gr-button--loading)) {
-  --gr-btn-bg: transparent;
-  --gr-btn-fg: var(--gr-text-muted);
-  --gr-btn-border: var(--gr-border-subtle);
-  --gr-btn-accent: var(--gr-text-muted);
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
