@@ -48,7 +48,7 @@
             icon="check"
             (grSubmit)="saveSettings()"
             [loading]="saving()"
-            [disabled]="!unsaved.changed()"
+            [disabled]="!canSave()"
           ></button>
         </div>
       </gr-settings-section>

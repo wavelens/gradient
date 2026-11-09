@@ -36,6 +36,7 @@ import { injectRevealFirstInvalid, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { ConnectedLoginProvider, PatchUserSettingsRequest } from '@core/models';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
+import { USERNAME_PATTERN, USERNAME_RULE } from '@features/auth/username-rule';
 
 interface ProfileForm {
   username: string;
@@ -43,15 +44,12 @@ interface ProfileForm {
   email: string;
 }
 
-const USERNAME = /^[A-Za-z0-9][A-Za-z0-9_-]{1,48}[A-Za-z0-9]$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const FIELD_CHECKS: Record<keyof ProfileForm, (value: string) => string | null> = {
   username: (value) => {
     if (!value) return 'Enter a username.';
-    return USERNAME.test(value)
-      ? null
-      : 'Use 3-50 characters. Allowed characters are letters, digits, hyphens and underscore characters. Start and end with a letter or digit.';
+    return USERNAME_PATTERN.test(value) ? null : USERNAME_RULE;
   },
   name: (value) => (value ? null : 'Enter a full name.'),
   email: (value) => {

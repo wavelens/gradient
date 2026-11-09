@@ -132,6 +132,7 @@ describe('ProfileComponent - edits', () => {
     edit(fixture, { [field]: value });
     const input = (fixture.nativeElement as HTMLElement).querySelector(`#${field}`)!;
     expect(input.closest('gr-form-field')!.textContent).toContain(message);
+    expect(saveButton(fixture).disabled).toBe(true);
     saveButton(fixture).click();
     input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
     expect(profileWrites).toEqual([]);

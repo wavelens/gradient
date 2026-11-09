@@ -32,6 +32,7 @@ import {
 } from '@gradient/ui/ui';
 import { links, readInAppNextPathFromRouteSnapshot } from '@shared/routing';
 import { injectRevealFirstInvalid } from '@shared/forms';
+import { USERNAME_PATTERN, USERNAME_RULE } from '../username-rule';
 
 const PASSWORD_SPECIAL_CHARACTERS = '!@#$%^&*()_+-=[]{}|;:,.<>?';
 
@@ -53,6 +54,7 @@ export class RegisterComponent {
   private host = inject(ElementRef<HTMLElement>);
   private revealFirstInvalid = injectRevealFirstInvalid();
   protected readonly specialCharacters = PASSWORD_SPECIAL_CHARACTERS;
+  protected readonly usernameRule = USERNAME_RULE;
   protected readonly nextPagePathAfterSignIn = readInAppNextPathFromRouteSnapshot(this.route.snapshot);
 
   registerForm: FormGroup;
@@ -67,7 +69,7 @@ export class RegisterComponent {
       {
         username: [
           '',
-          [Validators.required, Validators.pattern(/^[a-zA-Z0-9_-]+$/)],
+          [Validators.required, Validators.pattern(USERNAME_PATTERN)],
           [this.usernameValidator.bind(this)],
         ],
         name: ['', [Validators.required]],

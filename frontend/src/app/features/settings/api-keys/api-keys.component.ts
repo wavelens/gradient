@@ -263,6 +263,7 @@ export class ApiKeysComponent implements OnInit {
   }
 
   onScopeChange(): void {
+    this.attempted.set(false);
     this.formProject = null;
     this.formCache = null;
     const isCacheScope = this.formScope === 'cache';

@@ -8,6 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { Observable, of, throwError } from 'rxjs';
 import { RegisterComponent } from './register.component';
+import { USERNAME_RULE } from '../username-rule';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { ApiError } from '@core/services/api.service';
@@ -52,6 +53,15 @@ async function typeUsername(fixture: ComponentFixture<RegisterComponent>, value:
 const usernameField = (root: HTMLElement) => root.querySelector('#username')!.closest('gr-form-field')!;
 
 describe('RegisterComponent - username check', () => {
+  it('refuses a username with the rule the profile page uses', () => {
+    const { fixture, root } = setup(() => of('Username is available'));
+    const username = fixture.componentInstance.username!;
+    username.setValue('-a');
+    username.markAsTouched();
+    fixture.detectChanges();
+    expect(usernameField(root).textContent).toContain(USERNAME_RULE);
+  });
+
   it('shows the reason for a taken name under the field and stops checking', async () => {
     const { fixture, root } = setup(() => throwError(() => new ApiError('Username is already taken', 200)));
     await typeUsername(fixture, 'alice');

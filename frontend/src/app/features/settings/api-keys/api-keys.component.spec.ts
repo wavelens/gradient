@@ -262,6 +262,18 @@ describe('ApiKeysComponent - field checks', () => {
     expect(createApiKey).not.toHaveBeenCalled();
   });
 
+  it('forgets the refused Create when the scope changes', () => {
+    const { fixture, component } = openCreate();
+    component.formScope = 'project';
+    component.onScopeChange();
+    component.saveKey();
+    expect(component.projectError()).toBe('Select a project.');
+    component.formScope = 'cache';
+    component.onScopeChange();
+    fixture.detectChanges();
+    expect(component.cacheError()).toBeNull();
+  });
+
   it('creates the key on Enter in the name field', () => {
     const { createApiKey } = openCreate();
     document.querySelector('#key-name')!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
