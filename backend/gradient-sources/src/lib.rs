@@ -108,3 +108,43 @@ pub enum SourceError {
     #[error("Project not found with ID: {id}")]
     ProjectNotFound { id: gradient_types::ids::ProjectId },
 }
+
+impl SourceError {
+    pub fn short_reason_for_user(&self) -> String {
+        match self {
+            Self::GitCommand(message)
+            | Self::GitCommandFailed { stderr: message }
+            | Self::GitExecution { error: message } => message
+                .lines()
+                .map(|line| line.trim().trim_start_matches("fatal:").trim())
+                .find(|line| !line.is_empty())
+                .unwrap_or(message)
+                .to_owned(),
+            other => other.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod short_reason_tests {
+    use super::SourceError;
+
+    #[test]
+    fn short_reason_for_user_strips_git_failed_wrapper_and_fatal_prefix_and_keeps_first_stderr_line()
+     {
+        let error = SourceError::GitCommandFailed {
+            stderr: "\nfatal: Could not read from remote repository.\n\nPlease make sure".into(),
+        };
+        assert_eq!(
+            error.short_reason_for_user(),
+            "Could not read from remote repository."
+        );
+        assert_eq!(
+            SourceError::BranchNotFound {
+                branch: "main".into()
+            }
+            .short_reason_for_user(),
+            "branch main does not exist on the remote"
+        );
+    }
+}

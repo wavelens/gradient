@@ -601,7 +601,10 @@ pub async fn post_task_check_repository(
     let repository = validated_repository(requested.unwrap_or_else(|| task.repository.clone()))?;
     let result = resolve_remote_ref(&db, &project, &repository, None)
         .await
-        .map_err(|e| e.to_string());
+        .map_err(|e| {
+            tracing::warn!(error = %e, %repository, "Repository check failed");
+            e.short_reason_for_user()
+        });
     if checks_saved_url {
         gradient_db::tasks::record_fetch(
             &db.web_db,

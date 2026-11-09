@@ -602,7 +602,33 @@ fn test_failure(error: anyhow::Error) -> WebError {
             | gradient_ci::ActionError::TaskNotFound { .. }
             | gradient_ci::ActionError::InvalidEvaluationId,
         ) => WebError::Internal(error),
-        None => WebError::BadGateway(ErrorCode::BAD_GATEWAY, format!("{error:#}")),
+        None => {
+            tracing::warn!(error = format!("{error:#}"), "Action test failed");
+            WebError::BadGateway(
+                ErrorCode::BAD_GATEWAY,
+                action_test_error_user_reason(&error),
+            )
+        }
+    }
+}
+
+fn action_test_error_user_reason(error: &anyhow::Error) -> String {
+    let Some(http) = error
+        .chain()
+        .find_map(|e| e.downcast_ref::<reqwest::Error>())
+    else {
+        return error.root_cause().to_string();
+    };
+    let host = http
+        .url()
+        .and_then(|url| url.host_str())
+        .unwrap_or("the destination");
+    if http.is_timeout() {
+        format!("{host} didn't respond in time")
+    } else if http.is_connect() {
+        format!("failed to connect to {host}")
+    } else {
+        format!("request to {host} failed")
     }
 }
 

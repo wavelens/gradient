@@ -29,7 +29,7 @@ pub(crate) enum TaskRefusal {
     KeepEvaluationsBelowMinimum,
     #[error("Keep Evaluations cannot exceed the server maximum {maximum}")]
     KeepEvaluationsAboveMaximum { maximum: i32 },
-    #[error("Failed to check repository: {reason}")]
+    #[error("Failed to access the repository: {reason}")]
     RepositoryCheckFailed { reason: String },
     #[error("Only the task owner or a project admin can transfer ownership.")]
     TransferNotPermitted,
