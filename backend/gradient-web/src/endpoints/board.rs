@@ -311,6 +311,10 @@ pub struct DecisionCandidateView {
     pub job_id: String,
     pub kind: i16,
     pub project: Uuid,
+    pub project_name: Option<String>,
+    pub project_display_name: Option<String>,
+    pub task: Option<String>,
+    pub task_display_name: Option<String>,
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
     pub subject: Option<String>,
@@ -335,7 +339,7 @@ pub struct AssignDecisionView {
     operation_id = "getBoardDispatchDecisions",
     tag = "board",
     summary = "Recent assignment decisions (all candidate scores)",
-    description = "Bounded ring of the most recent assignment decisions, each with every scored candidate including the rejected/negative ones the scheduler passed over. For tuning scoring rules. Superuser-only, as candidates span all projects.",
+    description = "A bounded ring can hold the most recent assignment decisions. All scored candidates appear in each decision. Rejected or negative candidates that the scheduler excluded also appear. Use the ring for tuning scoring rules. Candidates span all projects, so only a superuser can call the endpoint. Candidate entries show the project and task (`project_name`, `task` and their display names).",
     responses((status = OK, description = "Recent assignment decisions, most recent first", body = Vec<AssignDecisionView>), WebError)
 )]
 pub async fn get_assign_decisions(
@@ -346,12 +350,10 @@ pub async fn get_assign_decisions(
     require_superuser(&user)?;
 
     let decisions = scheduler.recent_decisions().await;
+    let candidates = || decisions.iter().flat_map(|d| &d.candidates);
     let subjects = JobSubjects::load(
         &state.web_db,
-        decisions
-            .iter()
-            .flat_map(|d| &d.candidates)
-            .filter_map(|c| candidate_subject(c.kind, &c.job_id, c.evaluation_id)),
+        candidates().filter_map(|c| candidate_subject(c.kind, &c.job_id, c.evaluation_id)),
     )
     .await?;
     let worker_names = WorkerNames::load(
@@ -360,6 +362,10 @@ pub async fn get_assign_decisions(
         decisions.iter().map(|d| d.worker_id.clone()),
     )
     .await?;
+    let evaluation_ids: Vec<EvaluationId> = candidates().map(|c| c.evaluation_id).collect();
+    let evaluations = board_evaluations(&state.web_db, &evaluation_ids).await?;
+    let project_ids: Vec<Uuid> = candidates().map(|c| Uuid::from(c.project)).collect();
+    let projects = board_projects(&state.web_db, &project_ids).await?;
 
     let views = decisions
         .into_iter()
@@ -374,10 +380,16 @@ pub async fn get_assign_decisions(
                 .into_iter()
                 .map(|c| {
                     let subject = candidate_subject(c.kind, &c.job_id, c.evaluation_id);
+                    let project = projects.get(&Uuid::from(c.project));
+                    let evaluation = evaluations.get(&c.evaluation_id);
                     DecisionCandidateView {
                         id: c.id.into(),
                         job_id: c.job_id,
                         kind: c.kind,
+                        project_name: project.map(|p| p.name.clone()),
+                        project_display_name: project.map(|p| p.display_name.clone()),
+                        task: evaluation.and_then(|e| e.task.clone()),
+                        task_display_name: evaluation.and_then(|e| e.task_display_name.clone()),
                         project: c.project.into(),
                         build_id: c.derivation_build.map(Into::into),
                         evaluation_id: c.evaluation_id.into(),

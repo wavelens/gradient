@@ -1595,7 +1595,7 @@ paths:
       tags:
       - board
       summary: Recent assignment decisions (all candidate scores)
-      description: Bounded ring of the most recent assignment decisions, each with every scored candidate including the rejected/negative ones the scheduler passed over. For tuning scoring rules. Superuser-only, as candidates span all projects.
+      description: A bounded ring can hold the most recent assignment decisions. All scored candidates appear in each decision. Rejected or negative candidates that the scheduler excluded also appear. Use the ring for tuning scoring rules. Candidates span all projects, so only a superuser can call the endpoint. Candidate entries show the project and task (`project_name`, `task` and their display names).
       operationId: getBoardDispatchDecisions
       responses:
         '200':
@@ -16175,6 +16175,22 @@ components:
         project:
           type: string
           format: uuid
+        project_name:
+          type:
+          - string
+          - 'null'
+        project_display_name:
+          type:
+          - string
+          - 'null'
+        task:
+          type:
+          - string
+          - 'null'
+        task_display_name:
+          type:
+          - string
+          - 'null'
         build_id:
           type:
           - string

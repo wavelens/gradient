@@ -722,6 +722,10 @@ export interface DecisionCandidateView {
   job_id: string;
   kind: number;
   project: string;
+  project_name?: string | null;
+  project_display_name?: string | null;
+  task?: string | null;
+  task_display_name?: string | null;
   build_id?: string | null;
   evaluation_id: string;
   subject?: string | null;
