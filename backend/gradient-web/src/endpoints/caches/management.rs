@@ -93,6 +93,7 @@ impl CacheResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PatchCacheRequest {
     pub name: Option<CacheName>,
     pub display_name: Option<String>,

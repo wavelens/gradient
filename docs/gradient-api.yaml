@@ -19688,6 +19688,7 @@ components:
           type:
           - boolean
           - 'null'
+      additionalProperties: false
     PatchGeneratorKind:
       type: string
       enum:
