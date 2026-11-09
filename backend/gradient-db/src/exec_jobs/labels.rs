@@ -20,6 +20,7 @@ pub struct ExecJobLabel {
     pub project: String,
     pub entry_point: String,
     pub task: String,
+    pub task_display_name: String,
     pub node_index: u32,
     pub nodes: u32,
     pub waiting_reason: Option<WaitingReason>,
@@ -44,12 +45,13 @@ pub async fn labels<C: ConnectionTrait>(
         .into_iter()
         .filter_map(|job| {
             let (entry_point, task) = entry_points.get(&job.entry_point)?;
-            let (project, task) = tasks.get(task).cloned().unwrap_or_default();
+            let (project, task, task_display_name) = tasks.get(task).cloned().unwrap_or_default();
             Some(ExecJobLabel {
                 id: job.id,
                 project,
                 entry_point: entry_point.clone(),
                 task,
+                task_display_name,
                 node_index: u32::try_from(job.node_index).unwrap_or_default(),
                 nodes: node_count(&job),
                 waiting_reason: super::exec_job_waiting_reason(&job),
@@ -106,20 +108,21 @@ async fn entry_points_of<C: ConnectionTrait>(
 async fn task_names<C: ConnectionTrait>(
     db: &C,
     ids: &[TaskId],
-) -> Result<HashMap<TaskId, (String, String)>, DbErr> {
+) -> Result<HashMap<TaskId, (String, String, String)>, DbErr> {
     let tasks = fetch_in_chunks(ids, |chunk| async move {
         ETask::find()
             .select_only()
+            .column(CTask::DisplayName)
             .column(CTask::Id)
             .column(CTask::Name)
             .column(CTask::Project)
             .filter(CTask::Id.is_in(chunk))
-            .into_tuple::<(TaskId, String, ProjectId)>()
+            .into_tuple::<(String, TaskId, String, ProjectId)>()
             .all(db)
             .await
     })
     .await?;
-    let project_ids: Vec<ProjectId> = distinct(tasks.iter().map(|(_, _, project)| *project));
+    let project_ids: Vec<ProjectId> = distinct(tasks.iter().map(|(_, _, _, project)| *project));
     let projects: HashMap<ProjectId, String> = fetch_in_chunks(&project_ids, |chunk| async move {
         EProject::find()
             .select_only()
@@ -136,9 +139,9 @@ async fn task_names<C: ConnectionTrait>(
 
     Ok(tasks
         .into_iter()
-        .map(|(id, task, project)| {
+        .map(|(task_display_name, id, task, project)| {
             let project = projects.get(&project).cloned().unwrap_or_default();
-            (id, (project, task))
+            (id, (project, task, task_display_name))
         })
         .collect())
 }

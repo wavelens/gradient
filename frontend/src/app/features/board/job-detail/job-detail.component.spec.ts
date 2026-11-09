@@ -804,7 +804,7 @@ describe('getPendingJobName', () => {
   });
 
   it('prefers the task display name over its slug', () => {
-    const exec = { id: 'x1', project: 'o1', entry_point: 'deploy', task: 'nightly', node_index: 0, nodes: 1 };
+    const exec = { id: 'x1', project: 'o1', entry_point: 'deploy', task: 'nightly', task_display_name: 'Nightly Deploy', node_index: 0, nodes: 1 };
     expect(getPendingJobName({ ...PENDING, kind: 2, exec_job: exec, task: 'nightly', task_display_name: 'Nightly Deploy' })).toBe('Nightly Deploy: deploy');
     expect(getPendingJobName({ ...PENDING, kind: 0, task: 'oktask', task_display_name: 'OK Task' })).toBe('OK Task');
   });
@@ -831,7 +831,7 @@ describe('BoardJobDetailComponent - display names', () => {
   });
 
   it('names the task of an exec job and the title by the task display name', () => {
-    const exec: BoardExecJob = { id: 'x1', project: 'o1', entry_point: 'apps.run', task: 'exectask', node_index: 0, nodes: 1 };
+    const exec: BoardExecJob = { id: 'x1', project: 'o1', entry_point: 'apps.run', task: 'exectask', task_display_name: 'Exec Task', node_index: 0, nodes: 1 };
     const job: AssignedJobDetail = {
       ...DETAIL,
       kind: 2,

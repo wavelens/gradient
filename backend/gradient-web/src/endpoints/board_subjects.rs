@@ -57,6 +57,7 @@ pub struct BoardExecJob {
     pub project: String,
     pub entry_point: String,
     pub task: String,
+    pub task_display_name: String,
     pub node_index: u32,
     pub nodes: u32,
 }
@@ -68,6 +69,7 @@ impl From<ExecJobLabel> for BoardExecJob {
             project: label.project,
             entry_point: label.entry_point,
             task: label.task,
+            task_display_name: label.task_display_name,
             node_index: label.node_index,
             nodes: label.nodes,
         }
@@ -388,6 +390,7 @@ mod tests {
             .append_query_results([vec![BTreeMap::from([
                 ("id", Value::from(task.into_inner())),
                 ("name", "nightly".into()),
+                ("display_name", "Nightly training".into()),
                 ("project", project.into_inner().into()),
             ])]])
             .append_query_results([vec![row([
@@ -414,6 +417,7 @@ mod tests {
                 project: "infra".into(),
                 entry_point: "apps.x86_64-linux.train".into(),
                 task: "nightly".into(),
+                task_display_name: "Nightly training".into(),
                 node_index: 1,
                 nodes: 2,
             })
