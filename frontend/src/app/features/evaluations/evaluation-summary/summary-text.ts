@@ -17,14 +17,17 @@ export interface SummaryCountTile {
   value: number;
 }
 
+function singularOrPluralLabelForCount(count: number, singular: string, pluralLabel: string): string {
+  return count === 1 ? singular : pluralLabel;
+}
+
 export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary, status: EvaluationStatus): SummaryCountTile[] {
   if (isEvaluationNotStartedStatus(status)) return [];
-  const { built, failed, blocked, unfinished } = summary.packages;
+  const { built } = summary.packages;
+  const unfinished = isRunningEvaluationStatus(status) ? 0 : summary.packages.unfinished;
   const tiles = [
-    { label: 'Packages built', value: built },
-    { label: 'Failed packages', value: failed },
-    { label: buildStatusLabel('DependencyFailed'), value: blocked },
-    { label: 'Unbuilt packages', value: isRunningEvaluationStatus(status) ? 0 : unfinished },
+    { label: singularOrPluralLabelForCount(built, 'Built package', 'Built packages'), value: built },
+    { label: singularOrPluralLabelForCount(unfinished, 'Unbuilt package', 'Unbuilt packages'), value: unfinished },
     { label: 'Failed to evaluate', value: summary.failed_attributes.length },
     { label: 'Fixed', value: summary.compared_with ? summary.fixed_total : 0 },
   ];

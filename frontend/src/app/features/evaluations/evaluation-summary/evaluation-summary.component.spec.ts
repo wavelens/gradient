@@ -131,7 +131,7 @@ describe('EvaluationSummaryComponent', () => {
     );
 
     expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('Aborted, 1 package not built');
-    expect(text(fixture)).toContain('Unbuilt packages');
+    expect(text(fixture)).toContain('Unbuilt package');
     expect(text(fixture)).not.toContain('Nothing went wrong');
   });
 
