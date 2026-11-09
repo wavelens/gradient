@@ -82,11 +82,12 @@ describe('ProjectDetailComponent subscribed caches', () => {
 });
 
 describe('ProjectDetailComponent task cards', () => {
-  it('marks inactive tasks', () => {
+  it('marks inactive tasks with a neutral badge', () => {
     const task = (name: string, active: boolean) => ({ id: name, name, display_name: name, description: '', active });
     const { root } = render(true, () => of({ items: [task('on', true), task('off', false)], total: 2, page: 1 }));
     const metas = Array.from(root.querySelectorAll('gr-nav-card')).map((card) => card.querySelector('[slot="meta"]')?.textContent?.trim());
     expect(metas).toEqual(['', 'Inactive']);
+    expect(root.querySelector('gr-badge .badge')?.classList).toContain('is-neutral');
   });
 });
 

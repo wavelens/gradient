@@ -48,7 +48,7 @@
                 <gr-badge severity="info">Managed</gr-badge>
               }
               @if (!worker.active) {
-                <gr-badge severity="danger">Inactive</gr-badge>
+                <gr-badge severity="neutral">Inactive</gr-badge>
               }
               <gr-badge [severity]="worker.connected ? 'success' : 'neutral'">{{ worker.connected ? 'Connected' : 'Offline' }}</gr-badge>
               @if (worker.gradient_ci) {

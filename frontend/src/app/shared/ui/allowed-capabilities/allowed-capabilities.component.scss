@@ -31,9 +31,9 @@
   &:hover { border-color: var(--gr-text-secondary); }
 
   &--on {
-    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    border-color: var(--gr-status-success);
-    color: var(--gr-status-success-text);
+    background: color-mix(in srgb, var(--gr-accent) 15%, transparent);
+    border-color: var(--gr-accent);
+    color: var(--gr-text-primary);
   }
 }
 
@@ -53,8 +53,8 @@
   font-weight: 500;
   white-space: nowrap;
   overflow-wrap: normal;
-  background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-  color: var(--gr-status-success-text);
+  background: var(--gr-surface-hover);
+  color: var(--gr-text-primary);
 
   &--unsupported-by-worker {
     background: var(--gr-surface-sunken);

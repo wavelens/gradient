@@ -47,7 +47,7 @@
           >
             <div slot="meta">
               @if (!task.active) {
-                <gr-badge severity="warning">Inactive</gr-badge>
+                <gr-badge severity="neutral">Inactive</gr-badge>
               }
               @if (task.last_evaluation_status) {
                 <gr-eval-status-badge [status]="task.last_evaluation_status" />
