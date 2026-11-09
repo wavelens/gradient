@@ -39,11 +39,12 @@ export class NameFieldComponent implements ControlValueAccessor {
   state = input<NameCheckState>('idle');
   required = input(false, { transform: booleanAttribute });
   maxLength = input<number | null>(null);
+  requiredEmptyErrorText = input<string | null>(null);
 
   protected value = signal('');
   protected isDisabled = signal(false);
 
-  protected error = computed(() => MESSAGES[this.state()] ?? '');
+  protected error = computed(() => this.requiredEmptyErrorText() ?? MESSAGES[this.state()] ?? '');
   protected invalid = computed(() => !!MESSAGES[this.state()]);
 
   private onChange: (value: string) => void = () => {};

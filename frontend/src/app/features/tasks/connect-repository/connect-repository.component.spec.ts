@@ -90,6 +90,16 @@ describe('ConnectRepositoryComponent', () => {
     expect(fixture.componentInstance.state()).toEqual(repo);
   });
 
+  it('marks the empty display name and name fields on submit', () => {
+    const createTask = vi.fn();
+    const fixture = render({}, { createTask });
+    fixture.componentInstance.createTask();
+    fixture.detectChanges();
+    const errors = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.field-error')).map((e) => e.textContent?.trim());
+    expect(errors).toEqual(['Enter the repository URL.', 'Enter a Display Name.', 'Enter a name.']);
+    expect(createTask).not.toHaveBeenCalled();
+  });
+
   it('warns about a missing cache before the task exists, since creating it starts the first evaluation', () => {
     const el = render({}, {}).nativeElement as HTMLElement;
     expect(el.querySelector('[data-testid="cache-missing"]')).not.toBeNull();

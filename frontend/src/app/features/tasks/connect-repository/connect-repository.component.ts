@@ -109,10 +109,6 @@ export class ConnectRepositoryComponent implements OnInit {
     return firstFieldError(url, fieldChecks.remoteRepository, (value) => repositoryUrlError(String(value)));
   }
 
-  get missingNamesError(): string | null {
-    return this.attempted() && (!this.form.name || !this.form.display_name) ? 'Enter a display name and a name.' : null;
-  }
-
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') ?? '';
     if (!this.access().canEdit) return;
@@ -138,7 +134,7 @@ export class ConnectRepositoryComponent implements OnInit {
   createTask(): void {
     if (this.creating() || this.names.blocksSubmit()) return;
     this.attempted.set(true);
-    if (this.missingNamesError || this.repositoryError) return;
+    if (!this.form.name || !this.form.display_name || this.repositoryError) return;
     this.creating.set(true);
     this.createError.set(null);
     this.tasks

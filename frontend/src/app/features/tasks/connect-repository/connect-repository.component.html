@@ -40,10 +40,7 @@
             <input grInput id="connect-repo" [ngModel]="form.repository" (ngModelChange)="repositoryChanged($event)"
               placeholder="ssh://git@forgejo.example.com/acme/app.git" (keyup.enter)="createTask()" />
           </gr-form-field>
-          <app-name-fields noun="task" [names]="names" [(displayName)]="form.display_name" [(name)]="form.name" (submitted)="createTask()" />
-          @if (missingNamesError; as error) {
-            <p class="text-secondary" role="alert">{{ error }}</p>
-          }
+          <app-name-fields noun="task" [names]="names" [submitAttempted]="attempted()" [(displayName)]="form.display_name" [(name)]="form.name" (submitted)="createTask()" />
           <gr-form-field label="Evaluation Wildcard" for="connect-wildcard" hint="Pattern for the outputs to evaluate (default: packages.x86_64-linux.**)">
             <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" />
             <input grInput id="connect-wildcard" [(ngModel)]="form.wildcard" (keyup.enter)="createTask()" />

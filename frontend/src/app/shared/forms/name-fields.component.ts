@@ -15,7 +15,8 @@ import { NameAvailability, maxSlugNameCharacterCount } from './name-availability
   imports: [FormsModule, FormFieldComponent, InputDirective, NameFieldComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    <gr-form-field label="Display Name" [for]="noun() + '-display-name'" required>
+    <gr-form-field label="Display Name" [for]="noun() + '-display-name'" required
+      [invalid]="submitAttempted() && !displayName()" error="Enter a Display Name.">
       <input
         grInput
         [id]="noun() + '-display-name'"
@@ -32,6 +33,7 @@ import { NameAvailability, maxSlugNameCharacterCount } from './name-availability
       [placeholder]="noun() + '-name'"
       [maxLength]="maxSlugNameCharacterCount"
       [state]="names().state()"
+      [requiredEmptyErrorText]="submitAttempted() && !name() ? 'Enter a name.' : null"
       [ngModel]="name()"
       [ngModelOptions]="{ standalone: true }"
       (ngModelChange)="onNameChange($event)"
@@ -42,6 +44,7 @@ import { NameAvailability, maxSlugNameCharacterCount } from './name-availability
 export class NameFieldsComponent {
   noun = input.required<string>();
   names = input.required<NameAvailability>();
+  submitAttempted = input(false);
   displayName = model('');
   name = model('');
   submitted = output();
