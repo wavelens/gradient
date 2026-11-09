@@ -30,5 +30,5 @@
   font-size: $font-size-md;
   cursor: pointer;
 
-  &:hover { background: var(--gr-surface-hover); }
+  &:hover, &--active { background: var(--gr-surface-hover); }
 }

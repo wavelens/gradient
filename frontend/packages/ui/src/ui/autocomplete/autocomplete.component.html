@@ -11,27 +11,41 @@ SPDX-License-Identifier: AGPL-3.0-only
   cdkOverlayOrigin
   #trigger="cdkOverlayOrigin"
   [attr.id]="inputId() || null"
-  [value]="value()"
+  [value]="text()"
   [placeholder]="placeholder()"
   [disabled]="isDisabled()"
-  [attr.aria-expanded]="open()"
+  [attr.aria-expanded]="expanded()"
+  [attr.aria-controls]="autocompleteListboxId"
+  [attr.aria-activedescendant]="expanded() && activeIndex() >= 0 ? optionId(activeIndex()) : null"
   (input)="onInput($event)"
-  (keyup.enter)="onEnter()"
-  (focus)="onFocus()"
-  (blur)="onTouched()"
+  (keydown)="onKeydown($event)"
+  (click)="openSuggestionPanelAndRequestSuggestionsForCurrentText()"
+  (blur)="onBlur()"
 />
 
 <ng-template
   cdkConnectedOverlay
   [cdkConnectedOverlayOrigin]="trigger"
-  [cdkConnectedOverlayOpen]="open() && suggestions().length > 0"
+  [cdkConnectedOverlayOpen]="expanded()"
   [cdkConnectedOverlayWidth]="panelWidth() || 0"
-  (overlayOutsideClick)="close()"
-  (detach)="close()"
+  (detach)="open.set(false)"
 >
-  <ul class="gr-autocomplete__panel" role="listbox">
-    @for (suggestion of suggestions(); track $index) {
-      <li role="option" class="gr-autocomplete__option" (click)="pick(suggestion)">{{ suggestion }}</li>
+  <ul
+    class="gr-autocomplete__panel"
+    role="listbox"
+    [id]="autocompleteListboxId"
+    [attr.aria-label]="suggestionListboxAccessibleName()"
+    (mousedown)="$event.preventDefault()"
+  >
+    @for (suggestion of options(); track $index) {
+      <li
+        role="option"
+        class="gr-autocomplete__option"
+        [id]="optionId($index)"
+        [class.gr-autocomplete__option--active]="$index === activeIndex()"
+        [attr.aria-selected]="$index === activeIndex()"
+        (click)="pick(suggestion)"
+      >{{ suggestion.label }}</li>
     }
   </ul>
 </ng-template>

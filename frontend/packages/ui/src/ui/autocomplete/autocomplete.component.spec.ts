@@ -7,7 +7,7 @@
 import { Component, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TestBed } from '@angular/core/testing';
-import { AutoCompleteComponent } from './autocomplete.component';
+import { AutoCompleteComponent, AutoCompleteSuggestion } from './autocomplete.component';
 
 @Component({
   standalone: true,
@@ -25,7 +25,7 @@ import { AutoCompleteComponent } from './autocomplete.component';
   `,
 })
 class HostComponent {
-  suggestions = signal<string[]>([]);
+  suggestions = signal<(string | AutoCompleteSuggestion)[]>([]);
   queries = signal<string[]>([]);
   entered = signal(0);
   name = signal('');
@@ -55,13 +55,67 @@ describe('AutoCompleteComponent', () => {
     expect(fixture.componentInstance.queries()).toEqual(['my']);
   });
 
-  it('lists all suggestions on focus before anything is typed', async () => {
+  it('stays closed on focus and lists all suggestions on click or ArrowDown', async () => {
     const { fixture, input } = await render();
     fixture.componentInstance.suggestions.set(['my-cache']);
     input().dispatchEvent(new Event('focus'));
     fixture.detectChanges();
+    expect(options()).toHaveLength(0);
+
+    input().click();
+    fixture.detectChanges();
     expect(fixture.componentInstance.queries()).toEqual(['']);
     expect(options()).toHaveLength(1);
+
+    input().dispatchEvent(new Event('blur'));
+    fixture.detectChanges();
+    expect(options()).toHaveLength(0);
+    input().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    fixture.detectChanges();
+    expect(options()).toHaveLength(1);
+  });
+
+  it('shows labels, writes values and names its listbox for screen readers', async () => {
+    const { fixture, type, input } = await render();
+    fixture.componentInstance.suggestions.set([{ label: 'QA Team', value: 'qa-team' }, { label: 'Ops', value: 'ops' }]);
+    type('q');
+    const listbox = document.querySelector('[role=listbox]')!;
+    expect(input().getAttribute('aria-controls')).toBe(listbox.id);
+    expect(listbox.getAttribute('aria-label')).toBe('e.g. my-cache');
+    expect(options().map((o) => o.textContent!.trim())).toEqual(['QA Team', 'Ops']);
+
+    input().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    fixture.detectChanges();
+    expect(input().getAttribute('aria-activedescendant')).toBe(options()[0].id);
+    input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.name()).toBe('qa-team');
+    expect(input().value).toBe('QA Team');
+    expect(fixture.componentInstance.entered()).toBe(0);
+  });
+
+  it('closes on Escape without letting a surrounding dialog close', async () => {
+    const { fixture, type, input } = await render();
+    fixture.componentInstance.suggestions.set(['my-cache']);
+    type('my');
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true });
+    const reachedDocument = vi.fn();
+    document.addEventListener('keydown', reachedDocument);
+    input().dispatchEvent(escape);
+    document.removeEventListener('keydown', reachedDocument);
+    fixture.detectChanges();
+    expect(options()).toHaveLength(0);
+    expect(reachedDocument).not.toHaveBeenCalled();
+  });
+
+  it('closes its panel when the field goes away', async () => {
+    const { fixture, type } = await render();
+    fixture.componentInstance.suggestions.set(['my-cache']);
+    type('my');
+    expect(options()).toHaveLength(1);
+    fixture.destroy();
+    expect(options()).toHaveLength(0);
   });
 
   it('writes the typed text back as the model value', async () => {
@@ -94,7 +148,7 @@ describe('AutoCompleteComponent', () => {
 
   it('emits enter for callers that submit from the field', async () => {
     const { fixture, input } = await render();
-    input().dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
+    input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
     fixture.detectChanges();
     expect(fixture.componentInstance.entered()).toBe(1);
   });
