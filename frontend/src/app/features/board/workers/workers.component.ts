@@ -35,7 +35,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
                    loadingMessage="Loading workers..." errorTitle="Failed to load workers" (retry)="retry()">
       <gr-table class="workers">
         <thead>
-          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Jobs</th><th>CPU load</th><th>Free RAM</th><th>Arch</th><th>Exec</th></tr>
+          <tr><th>Worker</th><th>Projects</th><th>State</th><th>Jobs</th><th>CPU load</th><th>Free RAM</th><th>Arch</th>@if (anyWorkerHasExecLabelsOrDevices()) {<th>Exec</th>}</tr>
         </thead>
         <tbody>
           @for (w of workers(); track $index) {
@@ -51,6 +51,7 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
               <td>{{ w.cpu_usage_pct != null ? percent(w.cpu_usage_pct) : '-' }}</td>
               <td>{{ megabytes(w.ram_free_mb) }}</td>
               <td class="mono">{{ w.architectures.join(', ') || '-' }}</td>
+              @if (anyWorkerHasExecLabelsOrDevices()) {
               <td class="exec">
                 @if (w.exec; as exec) {
                   <span class="labels">
@@ -64,9 +65,10 @@ const busyPercent = (busy: number, capacity: number) => Math.round((busy / capac
                   }
                 } @else { - }
               </td>
+              }
             </tr>
           } @empty {
-            <tr><td colspan="8" class="muted">No connected workers.</td></tr>
+            <tr><td [attr.colspan]="anyWorkerHasExecLabelsOrDevices() ? 8 : 7" class="muted">No connected workers.</td></tr>
           }
         </tbody>
       </gr-table>
@@ -156,6 +158,8 @@ export class BoardWorkersComponent implements OnInit {
   readonly heldSegments = (d: DeviceClass) => ratioSegments(d.total - d.free, d.total);
   readonly getExecLabelsWithoutWorkerId = (w: BoardWorker) => (w.exec?.labels ?? []).filter((label) => label !== w.id);
   readonly percent = (value: number) => formatPercent(value / 100);
+  anyWorkerHasExecLabelsOrDevices = computed(() =>
+    this.workers().some((w) => this.getExecLabelsWithoutWorkerId(w).length > 0 || (w.exec?.devices.length ?? 0) > 0));
 
   fleetCats = computed(() => this.fleet().map((p) => clockTime(p.bucket_start)));
   fleetSeries = computed(() => [

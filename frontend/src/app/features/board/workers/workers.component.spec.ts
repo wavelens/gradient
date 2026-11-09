@@ -99,4 +99,11 @@ describe('BoardWorkersComponent - exec column', () => {
     const devices = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('td.exec .device'));
     expect(devices.map((d) => !!d.querySelector('gr-segmented-bar'))).toEqual([false, true]);
   });
+
+  it('hides the column when no worker has a label beyond its own id or a device', () => {
+    const { fixture } = setup(undefined, [{ ...WORKER, exec: { labels: ['w1'], devices: [] } }]);
+    const el = fixture.nativeElement as HTMLElement;
+    expect(Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent?.trim())).not.toContain('Exec');
+    expect(el.querySelector('td.exec')).toBeNull();
+  });
 });
