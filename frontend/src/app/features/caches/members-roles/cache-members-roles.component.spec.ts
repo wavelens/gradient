@@ -119,6 +119,13 @@ describe('CacheMembersRolesComponent', () => {
     expect(element.textContent).toContain('alice');
   });
 
+  it('says the member list is for cache members when the server refuses it', async () => {
+    const fixture = setup();
+    getMembers.mockReturnValueOnce(throwError(() => new ApiError('forbidden', 403)));
+    await settled(fixture);
+    expect(fixture.nativeElement.textContent).toContain('Only the members of this cache can view this.');
+  });
+
   it('hides Invite Member and New Role buttons under read-only access (no writable)', async () => {
     const fixture = setup();
     await settled(fixture);

@@ -189,7 +189,8 @@ describe('CacheSettingsComponent - write failures', () => {
     const projects = [{ project_display_name: 'App' }, { project_display_name: 'Docs' }];
     const text = buildCacheDeleteConsequenceText({ projects, hidden: 1 } as never);
     expect(text).toContain('Used by App, Docs, 1 other project.');
-    expect(buildCacheDeleteConsequenceText({ projects: [], hidden: 0 })).toBe('');
+    expect(buildCacheDeleteConsequenceText({ projects: [], hidden: 0 })).toBe('All store paths in this cache are deleted with the cache.');
+    expect(buildCacheDeleteConsequenceText(null)).toBe('All store paths in this cache are deleted with the cache.');
   });
 
   it('sends no delete when the confirmation is cancelled', () => {

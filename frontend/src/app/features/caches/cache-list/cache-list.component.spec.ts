@@ -61,6 +61,21 @@ describe('CacheListComponent', () => {
     expect(element.textContent).toContain('Main');
   });
 
+  it('refreshes the public caches together with the own list', () => {
+    vi.useFakeTimers();
+    try {
+      const getPublicCaches = vi.fn().mockReturnValueOnce(of([])).mockReturnValue(of([PUBLIC]));
+      const { fixture, element } = setup({ authenticated: true, getPublicCaches });
+      expect(element.textContent).not.toContain('Shared');
+      vi.advanceTimersByTime(15_000);
+      fixture.detectChanges();
+      expect(getPublicCaches).toHaveBeenCalledTimes(2);
+      expect(element.textContent).toContain('Shared');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows a failed public list as an error', () => {
     const { element } = setup({ authenticated: false, getPublicCaches: () => throwError(() => new ApiError('down', 500)) });
     expect(element.textContent).toContain('Failed to load public caches');

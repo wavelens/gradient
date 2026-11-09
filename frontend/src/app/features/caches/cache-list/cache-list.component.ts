@@ -25,7 +25,7 @@ import { Cache } from '@core/models';
 import { links } from '@shared/routing';
 import { PendingInvitationsBannerComponent } from '@shared/access';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
-import { EMPTY } from 'rxjs';
+import { EMPTY, catchError, merge, tap } from 'rxjs';
 
 @Component({
   selector: 'app-cache-list',
@@ -73,7 +73,12 @@ export class CacheListComponent implements OnInit {
   }
 
   constructor() {
-    runReloadIntervalWhileTabVisible(() => (this.authService.isAuthenticated() ? this.caches.refreshFirstPageSilently() : EMPTY));
+    runReloadIntervalWhileTabVisible(() =>
+      merge(
+        this.authService.isAuthenticated() ? this.caches.refreshFirstPageSilently().pipe(catchError(() => EMPTY)) : EMPTY,
+        this.config.publicListing ? this.refreshPublicCachesSilently() : EMPTY,
+      ),
+    );
     openCreateDialogFromUrlIfAllowed(() => this.canCreateCache, () => this.openCreateDialog());
   }
 
@@ -97,6 +102,16 @@ export class CacheListComponent implements OnInit {
         this.publicLoading.set(false);
       },
     });
+  }
+
+  private refreshPublicCachesSilently() {
+    return this.cachesService.getPublicCaches().pipe(
+      tap((caches) => {
+        this.publicCaches.set(caches);
+        this.publicError.set(null);
+      }),
+      catchError(() => EMPTY),
+    );
   }
 
   openCreateDialog(): void {

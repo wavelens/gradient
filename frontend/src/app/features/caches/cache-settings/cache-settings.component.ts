@@ -43,11 +43,13 @@ import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { links } from '@shared/routing';
 import { plural } from '@shared/text';
 
-export function buildCacheDeleteConsequenceText({ projects, hidden }: CacheSubscribersResponse): string {
-  const users = projects.map((project) => project.project_display_name);
-  if (hidden) users.push(plural(hidden, 'other project', 'other projects'));
-  if (!users.length) return '';
-  return `Used by ${users.join(', ')}. Builds for these projects wait until they subscribe to another cache.`;
+const CACHE_DELETE_CONSEQUENCE = 'All store paths in this cache are deleted with the cache.';
+
+export function buildCacheDeleteConsequenceText(subscribers: CacheSubscribersResponse | null): string {
+  const users = subscribers?.projects.map((project) => project.project_display_name) ?? [];
+  if (subscribers?.hidden) users.push(plural(subscribers.hidden, 'other project', 'other projects'));
+  if (!users.length) return CACHE_DELETE_CONSEQUENCE;
+  return `${CACHE_DELETE_CONSEQUENCE} Used by ${users.join(', ')}. Builds for these projects wait until they subscribe to another cache.`;
 }
 
 interface CacheForm {
@@ -299,8 +301,8 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
     this.cachesService
       .getSubscribers(this.cacheName)
       .pipe(
+        catchError(() => of(null)),
         map(buildCacheDeleteConsequenceText),
-        catchError(() => of('')),
         switchMap((consequence) =>
           this.confirm.confirm({
             title: 'Delete cache',

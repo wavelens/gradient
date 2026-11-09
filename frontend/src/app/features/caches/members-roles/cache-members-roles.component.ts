@@ -13,7 +13,7 @@ import { CachesService } from '@core/services/caches.service';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
 import { NotifyService } from '@core/services/notify.service';
-import { apiErrorMessage } from '@core/services/api.service';
+import { ApiError, apiErrorMessage } from '@core/services/api.service';
 import {
   AutoCompleteComponent,
   BadgeComponent,
@@ -114,6 +114,8 @@ export class CacheMembersRolesComponent implements OnInit {
   roleAccess = computed(() => accessTo(this.cache(), 'manageCacheRoles'));
   viewerIsCacheMember = computed(() => isViewerCacheMember(this.cache()));
   readonly missingMembershipError = createNoAccessLoadStateError('cache', 'members');
+  private membersOnlyErrorOnForbidden = (error: unknown): unknown =>
+    error instanceof ApiError && error.status === 403 ? this.missingMembershipError : error;
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Members & Roles' }));
@@ -188,7 +190,7 @@ export class CacheMembersRolesComponent implements OnInit {
         this.membersLoading.set(false);
       },
       error: (error: unknown) => {
-        this.membersLoadError.set(error);
+        this.membersLoadError.set(this.membersOnlyErrorOnForbidden(error));
         this.membersLoading.set(false);
       },
     });
@@ -229,7 +231,7 @@ export class CacheMembersRolesComponent implements OnInit {
         this.rolesLoading.set(false);
       },
       error: (error: unknown) => {
-        this.rolesLoadError.set(error);
+        this.rolesLoadError.set(this.membersOnlyErrorOnForbidden(error));
         this.rolesLoading.set(false);
       },
     });

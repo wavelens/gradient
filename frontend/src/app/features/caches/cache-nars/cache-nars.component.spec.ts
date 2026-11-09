@@ -131,9 +131,16 @@ describe('CacheNarsComponent loading', () => {
     expect(root.querySelector('.pagination')?.textContent).toContain('Page 1 of 3');
   });
 
-  it('drops the stat cards when the stats fail', () => {
-    const { root } = render(() => of(PAGE), () => throwError(() => ({ status: 500 })));
+  it('shows a stats failure with Retry in place of the stat cards', () => {
+    const stats = vi.fn()
+      .mockReturnValueOnce(throwError(() => ({ status: 500 })))
+      .mockReturnValue(of({ total_nars: 3, total_nar_size: 10, total_file_size: 5, last_uploaded_at: null }));
+    const { fixture, root } = render(() => of(PAGE), stats);
     expect(root.querySelector('gr-stat-card')).toBeNull();
+    expect(root.textContent).toContain('Failed to load cache statistics');
+    (root.querySelector('.gr-load-state__error button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(root.querySelectorAll('gr-stat-card')).toHaveLength(4);
   });
 });
 

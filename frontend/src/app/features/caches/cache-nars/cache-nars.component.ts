@@ -84,7 +84,7 @@ export class CacheNarsComponent implements OnInit {
   rows = signal<NarSummary[] | null>(null);
   total = signal(0);
   stats = signal<NarStats | null>(null);
-  statsFailed = signal(false);
+  statsError = signal<unknown>(null);
   readonly placeholders = Array.from({ length: 10 });
   loadError = signal<unknown>(null);
 
@@ -135,13 +135,13 @@ export class CacheNarsComponent implements OnInit {
     this.loadStats();
   }
 
-  private loadStats(): void {
+  loadStats(): void {
     this.cachesService.getCacheNarStats(this.cacheName).subscribe({
       next: (s) => {
         this.stats.set(s);
-        this.statsFailed.set(false);
+        this.statsError.set(null);
       },
-      error: () => this.statsFailed.set(true),
+      error: (error: unknown) => this.statsError.set(error),
     });
   }
 

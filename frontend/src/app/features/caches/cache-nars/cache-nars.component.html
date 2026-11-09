@@ -8,7 +8,9 @@
   @if (stats()?.total_nars === 0) {
     <p class="text-secondary" data-testid="no-packages">No packages yet. See <a [routerLink]="links.cache(cacheName)">How to Use This Cache</a>.</p>
   } @else {
-  @if (!statsFailed()) {
+  @if (statsError()) {
+    <gr-load-state [error]="statsError()" errorTitle="Failed to load cache statistics" (retry)="loadStats()" />
+  } @else {
     @let s = stats();
     <gr-card-grid class="nar-stats" min="150px" [attr.aria-busy]="!s || null">
       <gr-stat-card compact label="Packages" [value]="s && formatCount(s.total_nars)" />
