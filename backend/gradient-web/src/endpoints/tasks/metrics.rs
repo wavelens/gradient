@@ -111,7 +111,7 @@ pub async fn get_task_metrics(
         let eval_time_ms = evaluation
             .fetch_started_at
             .zip(evaluation.finished_at)
-            .map(|(started, finished)| (finished - started).num_milliseconds());
+            .map(|(started, finished)| round_time_delta_to_millis(finished - started));
 
         let build_time_total_ms: i64 = shared_builds_by_eval
             .get(&evaluation.id)
@@ -321,11 +321,22 @@ pub async fn get_entry_point_metrics(
     }))
 }
 
+fn round_time_delta_to_millis(delta: chrono::TimeDelta) -> i64 {
+    (delta + chrono::TimeDelta::microseconds(500)).num_milliseconds()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use gradient_entity::{cached_path, derivation_output};
     use gradient_fixtures::mock::mock_db;
+
+    #[test]
+    fn eval_time_rounds_to_the_nearest_millisecond() {
+        let micros = chrono::TimeDelta::microseconds;
+        assert_eq!(round_time_delta_to_millis(micros(611_600)), 612);
+        assert_eq!(round_time_delta_to_millis(micros(611_400)), 611);
+    }
 
     fn now() -> chrono::NaiveDateTime {
         chrono::Utc::now().naive_utc()
