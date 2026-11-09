@@ -20,7 +20,9 @@ pub mod completion;
 pub mod download;
 #[cfg(feature = "eval")]
 pub mod eval;
+pub mod evaluation;
 pub mod generate;
+pub mod live_events;
 pub mod logs;
 pub mod logstream;
 pub mod mcp;

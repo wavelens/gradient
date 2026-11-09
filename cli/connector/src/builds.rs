@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::api::{BuildGraph, BuildProduct, BuildWithOutputs};
-use crate::{Client, ConnectorError, http};
+use crate::api::{BuildGraph, BuildProduct, BuildWithOutputs, ClosureGraph};
+use crate::{Client, ConnectorError, DownloadedBinaryFile, LiveUpdateEvent, http};
 use futures::stream::{Stream, StreamExt};
 use reqwest::Method;
 
@@ -115,6 +115,79 @@ impl BuildsApi<'_> {
             true,
         )?;
         http::decode(req.send().await?).await
+    }
+
+    pub async fn retry(&self, id: &str) -> Result<String, ConnectorError> {
+        self.post_build_action_and_decode_message(id, "retry").await
+    }
+
+    pub async fn abort(&self, id: &str) -> Result<String, ConnectorError> {
+        self.post_build_action_and_decode_message(id, "abort").await
+    }
+
+    pub async fn prioritize(&self, id: &str) -> Result<String, ConnectorError> {
+        self.post_build_action_and_decode_message(id, "prioritize")
+            .await
+    }
+
+    async fn post_build_action_and_decode_message(
+        &self,
+        id: &str,
+        action: &str,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("builds/{id}/{action}"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn closure(&self, id: &str) -> Result<ClosureGraph, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("builds/{id}/closure"),
+            false,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn runtime_closure(&self, id: &str) -> Result<ClosureGraph, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("builds/{id}/runtime-closure"),
+            false,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn sbom(&self, id: &str) -> Result<DownloadedBinaryFile, ConnectorError> {
+        let req = http::request(
+            self.0.stream_http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("builds/{id}/sbom"),
+            false,
+        )?;
+        http::decode_downloaded_file(req.send().await?).await
+    }
+
+    pub async fn live(
+        &self,
+        id: &str,
+    ) -> Result<impl Stream<Item = Result<LiveUpdateEvent, ConnectorError>> + use<>, ConnectorError>
+    {
+        http::open_live_events_websocket_stream(self.0, &format!("builds/{id}/live")).await
     }
 
     pub async fn downloads(&self, id: &str) -> Result<Vec<BuildProduct>, ConnectorError> {

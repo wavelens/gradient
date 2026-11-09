@@ -128,6 +128,20 @@ gradient account switch work
 | `gradient download [FLAKE_REF]` | `--evaluation <EVALUATION>`, `--products <PRODUCTS>`, `--out <OUT>` | Download evaluation artefacts |
 | `gradient builds graph <ID>` | `--interactive` | Show a build's dependency graph |
 | `gradient builds log <ID>` | `--interactive`, `--lines <LINES>`, `--search <SEARCH>`, `--case` | View a build's log |
+| `gradient builds retry <ID>` | - | Queue a failed, timed-out, aborted or dependency-failed build again, with the builds that failed only because of it |
+| `gradient builds abort <ID>` | - | Abort the builds in created, queued, or running state for the evaluation in progress |
+| `gradient builds prioritize <ID>` | - | Assign builds and their unresolved dependencies before other work. Superuser only. |
+| `gradient builds closure <ID>` | `--runtime-closure` | Show the dependency closure of a build and the size of each store path. `--runtime-closure` shows the paths that the output references at runtime instead. |
+| `gradient builds sbom <ID>` | `--output-file <PATH>` | Save the CycloneDX SBOM for the runtime closure of the build. Default file: the name from the server in the current directory. |
+| `gradient builds follow <ID>` | - | Print live status and progress events for a build. With `--json`, each event is one line of JSON. |
+| `gradient evaluation retry <EVALUATION>` | - | Start a new evaluation of the same commit and rebuild the failed builds. Print the UUID of the new evaluation. |
+| `gradient evaluation abort <EVALUATION>` | - | Abort a running evaluation |
+| `gradient evaluation prioritize <EVALUATION>` | - | Distribute all builds of the running evaluation ahead of other jobs. Superuser only. |
+| `gradient evaluation summary <EVALUATION>` | - | Show failed builds with the packages that they block, the attributes that failed evaluation and the packages that were fixed since the last evaluation. |
+| `gradient evaluation report <EVALUATION>` | `--output-file <PATH>`, `--keep-real-identities`, `--anonymize-package-names`, `--exclude-failed-build-logs`, `--include-worker-fleet`, `--include-exec-jobs` | Save an SQLite diagnostic report for a bug report. Default settings anonymize identifying information and include failed build logs. Only a user with permission to manage workers can use the `--include-worker-fleet` flag. |
+| `gradient evaluation closure <EVALUATION>` | `--runtime-closure` | Display the dependency closure for all entry points, with the size of each store path. `--runtime-closure` can show the runtime closure instead. |
+| `gradient evaluation show-flake-graph <EVALUATION>` | - | List the flake outputs that the evaluation reached, with their type and derivation path. |
+| `gradient evaluation follow <EVALUATION>` | - | Print live events from an evaluation until completion. Pass ``--json`` to get one JSON line per event. Use ``gradient watch`` for the full-screen display. |
 | `gradient eval <PATTERN>...` | `--workers <N>`, `--max-rss <MiB>`, `--max-memory <MiB>` | Evaluate a flake to derivations locally, a JSON line per attribute. Only in `gradient-cli-full`, see [below](#local-evaluation) |
 
 - `build` and `run` no longer accept the `-p` short flag. Use the global `--project <NAME>` instead.

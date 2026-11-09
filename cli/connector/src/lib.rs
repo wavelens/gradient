@@ -21,6 +21,7 @@ pub mod user;
 pub mod workers;
 
 mod http;
+pub use http::{DownloadedBinaryFile, LiveUpdateEvent};
 
 pub mod api {
     include!(concat!(env!("OUT_DIR"), "/api.rs"));

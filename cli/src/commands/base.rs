@@ -162,6 +162,11 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: builds::Commands,
     },
+    /// Control and inspect evaluations. Retries, cancellation, prioritization, failure summaries, diagnostic reports, closures and live events.
+    Evaluation {
+        #[command(subcommand)]
+        cmd: evaluation::Commands,
+    },
     /// Generate configuration files
     Generate {
         #[command(subcommand)]
@@ -442,6 +447,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         MainCommands::Worker { cmd } => worker::handle(cmd, out).await,
         MainCommands::Cache { cmd } => cache::handle(cmd, out).await,
         MainCommands::Builds { cmd } => builds::handle(cmd, out).await,
+        MainCommands::Evaluation { cmd } => evaluation::handle(cmd, out).await,
         MainCommands::Generate { cmd } => generate::handle(cmd, out).await,
         #[cfg(feature = "eval")]
         MainCommands::Eval(_) => unreachable!("eval is handled before the runtime starts"),

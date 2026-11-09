@@ -257,7 +257,7 @@ fn select_by_attrs(flat: &[FlatProduct<'_>], attrs: &[String]) -> Result<Vec<usi
     Ok(out)
 }
 
-fn human_size(bytes: i64) -> String {
+pub(crate) fn human_size(bytes: i64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
     let mut i = 0;

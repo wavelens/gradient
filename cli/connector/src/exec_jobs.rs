@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{ExecJobResponse, ExecJobSummary};
+use crate::http::io_error;
 use crate::{Client, ConnectorError, http};
 use futures::{SinkExt, StreamExt};
 use reqwest::Method;
 use serde::Deserialize;
-use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::{Message, http::HeaderValue};
-use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 pub struct ExecJobsApi<'a>(pub(crate) &'a Client);
 
@@ -57,16 +56,8 @@ impl ExecJobsApi<'_> {
     }
 
     async fn open_guest_socket(&self, endpoint: &str) -> Result<GuestSocket, ConnectorError> {
-        let token = self.0.token().ok_or(ConnectorError::Unauthorized)?;
-        let url = websocket_url(&http::build_url(self.0.base_url(), endpoint));
-        let mut request = url.into_client_request().map_err(io_error)?;
-        let bearer = HeaderValue::from_str(&format!("Bearer {token}")).map_err(io_error)?;
-        request.headers_mut().insert("Authorization", bearer);
-        let tls = Connector::Rustls(Arc::new(crate::rustls_config()));
-        let (socket, _) =
-            tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(tls))
-                .await
-                .map_err(io_error)?;
+        self.0.token().ok_or(ConnectorError::Unauthorized)?;
+        let socket = http::open_api_websocket(self.0, endpoint).await?;
         Ok(GuestSocket { socket })
     }
 
@@ -149,33 +140,9 @@ fn closed_frame(text: &str) -> Option<GuestEvent> {
     }
 }
 
-fn websocket_url(http_url: &str) -> String {
-    match http_url.split_once("://") {
-        Some(("https", rest)) => format!("wss://{rest}"),
-        Some(("http", rest)) => format!("ws://{rest}"),
-        _ => http_url.to_owned(),
-    }
-}
-
-fn io_error(error: impl std::error::Error + Send + Sync + 'static) -> ConnectorError {
-    ConnectorError::Io(std::io::Error::other(error))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_terminal_socket_uses_the_websocket_scheme_of_the_server() {
-        assert_eq!(
-            websocket_url("https://ci.example/api/v1/exec/j/shell?attach=true"),
-            "wss://ci.example/api/v1/exec/j/shell?attach=true"
-        );
-        assert_eq!(
-            websocket_url("http://localhost:3000/api/v1/x"),
-            "ws://localhost:3000/api/v1/x"
-        );
-    }
 
     #[test]
     fn only_the_closed_frame_ends_the_terminal() {

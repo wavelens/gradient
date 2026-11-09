@@ -44,7 +44,15 @@ The command [\"task\", \"--help\"] can list the subcommands and flags of a comma
 `--project` and `--task` can select targets without changing the current selection.";
 
 const ALLOWED_GRADIENT_SUBCOMMANDS: &[&str] = &[
-    "project", "task", "cache", "worker", "builds", "logs", "status", "info",
+    "project",
+    "task",
+    "cache",
+    "worker",
+    "builds",
+    "evaluation",
+    "logs",
+    "status",
+    "info",
 ];
 const GRADIENT_COMMAND_TIMEOUT_SECONDS: Duration = Duration::from_secs(600);
 const CLI_OUTPUT_SIZE_BEFORE_TEMP_FILE_BYTES: usize = 16 * 1024;
@@ -386,8 +394,8 @@ impl GradientMcp {
 
     #[tool(
         description = "Run a `gradient` CLI command with `--json` and return its output. The first \
-                       argument is the command group (project, task, cache, worker, builds, logs, \
-                       status, info)."
+                       argument is the command group (project, task, cache, worker, builds, \
+                       evaluation, logs, status, info)."
     )]
     async fn run_gradient_command(
         &self,

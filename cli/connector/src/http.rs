@@ -1,13 +1,32 @@
 // SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::ConnectorError;
 use crate::api::ErrorResponseBody;
 use crate::auth::CliPollOutcome;
+use crate::{Client, ConnectorError};
 use futures::stream::{Stream, StreamExt};
 use reqwest::{Method, RequestBuilder, Response};
 use reqwest_streams::JsonStreamResponse;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::{Message, http::HeaderValue};
+use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
+
+#[derive(Debug, Clone)]
+pub struct DownloadedBinaryFile {
+    pub suggested_filename: Option<String>,
+    pub bytes: bytes::Bytes,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveUpdateEvent {
+    pub event: String,
+    pub at: String,
+    pub content: serde_json::Value,
+}
 
 #[derive(serde::Deserialize)]
 struct Envelope<T> {
@@ -149,4 +168,105 @@ pub(crate) fn request(
         rb = rb.header("Authorization", format!("Bearer {}", t));
     }
     Ok(rb)
+}
+
+pub(crate) async fn decode_downloaded_file(
+    res: Response,
+) -> Result<DownloadedBinaryFile, ConnectorError> {
+    let status = res.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(ConnectorError::Unauthorized);
+    }
+    if !status.is_success() {
+        return Err(decode::<String>(res)
+            .await
+            .map_or_else(|e| e, |message| ConnectorError::Api { status, message }));
+    }
+    let suggested_filename = res
+        .headers()
+        .get(reqwest::header::CONTENT_DISPOSITION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(content_disposition_filename);
+    Ok(DownloadedBinaryFile {
+        suggested_filename,
+        bytes: res.bytes().await?,
+    })
+}
+
+fn content_disposition_filename(header: &str) -> Option<String> {
+    header
+        .split(';')
+        .find_map(|part| part.trim().strip_prefix("filename="))
+        .map(|name| name.trim_matches('"').to_owned())
+        .filter(|name| !name.is_empty())
+}
+
+pub(crate) async fn open_api_websocket(
+    client: &Client,
+    endpoint: &str,
+) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, ConnectorError> {
+    let url = websocket_url(&build_url(client.base_url(), endpoint));
+    let mut request = url.into_client_request().map_err(io_error)?;
+    if let Some(token) = client.token() {
+        let bearer = HeaderValue::from_str(&format!("Bearer {token}")).map_err(io_error)?;
+        request.headers_mut().insert("Authorization", bearer);
+    }
+    let tls = Connector::Rustls(Arc::new(crate::rustls_config()));
+    let (socket, _) =
+        tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(tls))
+            .await
+            .map_err(io_error)?;
+    Ok(socket)
+}
+
+pub(crate) async fn open_live_events_websocket_stream(
+    client: &Client,
+    endpoint: &str,
+) -> Result<impl Stream<Item = Result<LiveUpdateEvent, ConnectorError>> + use<>, ConnectorError> {
+    let socket = open_api_websocket(client, endpoint).await?;
+    Ok(socket.filter_map(|message| {
+        std::future::ready(match message {
+            Ok(Message::Text(text)) => Some(serde_json::from_str(&text).map_err(Into::into)),
+            Ok(_) => None,
+            Err(e) => Some(Err(io_error(e))),
+        })
+    }))
+}
+
+fn websocket_url(http_url: &str) -> String {
+    match http_url.split_once("://") {
+        Some(("https", rest)) => format!("wss://{rest}"),
+        Some(("http", rest)) => format!("ws://{rest}"),
+        _ => http_url.to_owned(),
+    }
+}
+
+pub(crate) fn io_error(error: impl std::error::Error + Send + Sync + 'static) -> ConnectorError {
+    ConnectorError::Io(std::io::Error::other(error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websockets_use_the_websocket_scheme_of_the_server() {
+        assert_eq!(
+            websocket_url("https://ci.example/api/v1/exec/j/shell?attach=true"),
+            "wss://ci.example/api/v1/exec/j/shell?attach=true"
+        );
+        assert_eq!(
+            websocket_url("http://localhost:3000/api/v1/x"),
+            "ws://localhost:3000/api/v1/x"
+        );
+    }
+
+    #[test]
+    fn the_attachment_filename_comes_from_content_disposition() {
+        assert_eq!(
+            content_disposition_filename(r#"attachment; filename="report.db""#).as_deref(),
+            Some("report.db")
+        );
+        assert_eq!(content_disposition_filename("attachment"), None);
+    }
 }
