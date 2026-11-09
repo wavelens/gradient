@@ -9,6 +9,7 @@ import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { finalize } from 'rxjs';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { TasksService } from '@core/services/tasks.service';
@@ -151,6 +152,10 @@ export class TaskActionsComponent implements OnInit {
   loadActions(): void {
     this.loading.set(true);
     this.loadError.set(null);
+    this.loadTaskActionsWithoutLoadingSpinner();
+  }
+
+  private loadTaskActionsWithoutLoadingSpinner(): void {
     requestIfProjectMember(this.taskAccessData()?.task, () => this.actionsService.list(this.projectName, this.taskName)).subscribe({
       next: (list) => {
         this.actions.set(list);
@@ -250,7 +255,7 @@ export class TaskActionsComponent implements OnInit {
     this.testingId.set(id);
     this.testSuccessId.set(null);
     this.testFailureId.set(null);
-    this.actionsService.test(this.projectName, this.taskName, id).subscribe({
+    this.actionsService.test(this.projectName, this.taskName, id).pipe(finalize(() => this.loadTaskActionsWithoutLoadingSpinner())).subscribe({
       next: () => {
         this.testingId.set(null);
         this.testSuccessId.set(id);

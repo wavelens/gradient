@@ -264,6 +264,16 @@ describe('TaskActionsComponent - write failures', () => {
     expect(component.revealedToken()).toBeNull();
   });
 
+  it('refreshes Last fired after a test without the loading spinner', () => {
+    const fixture = setup(writer);
+    list.mockReturnValue(of([{ ...action, last_fired_at: new Date().toISOString() }]));
+    fixture.componentInstance.testAction('a-1');
+    fixture.detectChanges();
+    expect(fixture.componentInstance.loading()).toBe(false);
+    expect(list).toHaveBeenCalledTimes(2);
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Last fired: never');
+  });
+
   it('reports a failed test with the server reason', () => {
     const fixture = setup(writer);
     (TestBed.inject(ActionsService) as unknown as Record<string, unknown>)['test'] = () => throwError(() => refused);
