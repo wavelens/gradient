@@ -443,6 +443,36 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     expect(row.querySelector('td.waiting .hint')?.textContent).toContain('Ask a project admin');
   });
 
+  it('lists pending jobs oldest first', () => {
+    TestBed.configureTestingModule({
+      imports: [BoardLiveJobsComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: BoardService,
+          useValue: {
+            getAssignedJobs: () => of({ jobs: [], other_running: 0 }),
+            getPendingJobs: () => of({
+              jobs: [
+                { ...PENDING, build_id: 'b-new', subject: 'newest', queued_at: '2026-06-08T00:05:00Z' },
+                { ...PENDING, build_id: 'b-old', subject: 'oldest', queued_at: '2026-06-07T23:00:00Z' },
+                { ...PENDING, build_id: 'b-mid', subject: 'middle', queued_at: '2026-06-08T00:01:00Z' },
+              ],
+              other_pending: 0,
+            }),
+          },
+        },
+        { provide: BoardLiveService, useValue: { connect: () => EMPTY } },
+        authAs(false),
+      ],
+    });
+    const fixture = TestBed.createComponent(BoardLiveJobsComponent);
+    fixture.componentInstance.setView('pending');
+    fixture.detectChanges();
+    const subjects = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('tbody td.subject')).map((c) => c.textContent?.trim());
+    expect(subjects).toEqual(['oldest', 'middle', 'newest']);
+  });
+
   it('loads pending jobs when switching to pending view', () => {
     const fixture = setup();
     const cmp = fixture.componentInstance;

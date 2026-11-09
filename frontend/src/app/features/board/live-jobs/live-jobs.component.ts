@@ -20,7 +20,7 @@ import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel }
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 import { links, oneOf, queryParamSignal } from '@shared/routing';
 import { type WaitingExplanation, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
-import { plural, RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { plural, RelativeTimePipe, ServerTimestampToLocalDateTimePipe, serverTime } from '@shared/text';
 
 type KindFilter = 'all' | JobKindName;
 type ScoreScope = 'current' | 'all';
@@ -151,14 +151,14 @@ interface DecisionRow {
           {{ plural(pendingRows().length, 'pending job') }}
           @if (otherPending() > 0) { <span class="muted">Pending in projects this account can't view: {{ otherPending() }}.</span> }
         </div>
-        <gr-table class="jobs">
+        <gr-table class="jobs pending">
           <thead><tr><th>Kind</th><th>Project / task</th><th>Derivation / Evaluation / Exec</th><th>Waiting for</th><th>Age</th></tr></thead>
           <tbody>
             @for (row of pendingRows(); track pendingKey(row.job)) {
               @let p = row.job;
               @let subject = rowSubject(row);
               <tr class="clickable" (click)="router.navigateByUrl(links.boardPendingJob(p))">
-                <td>{{ jobKindName(p.kind) }}</td>
+                <td class="kind">{{ jobKindName(p.kind) }}</td>
                 <td class="origin">
                   @if (p.project_name; as project) {
                     <a [routerLink]="links.project(project)" (click)="$event.stopPropagation()">{{ p.project_display_name || project }}</a>
@@ -270,7 +270,8 @@ export class BoardLiveJobsComponent implements OnInit {
     if (this.scoreFilterMinimumExceedsMaximum()) return 'Score min is above Score max.';
     return this.runningJobsFilterIsSet() ? 'No matching running jobs.' : 'No running jobs.';
   });
-  pendingRows = computed(() => collapseClusters(this.pendingJobs()));
+  pendingRows = computed(() =>
+    collapseClusters([...this.pendingJobs()].sort((a, b) => serverTime(a.queued_at).getTime() - serverTime(b.queued_at).getTime())));
 
   rowSubject({ job, subJobs }: BoardRow<DispatchedJobSummary | PendingJobSummary>): string {
     if (!job.cluster_job) return jobSubjectLabel(job.subject, job.exec_job);
