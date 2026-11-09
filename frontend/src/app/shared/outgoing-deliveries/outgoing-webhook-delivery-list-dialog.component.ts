@@ -25,6 +25,14 @@ export function getDeliveryResultReason(delivery: RecordedOutgoingDeliveryListRo
   return delivery.error_message ? getLastErrorCause(delivery.error_message) : null;
 }
 
+export function formatBodyAsIndentedJsonIfJson(body: string): string {
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2);
+  } catch {
+    return body;
+  }
+}
+
 const DELIVERIES_PER_PAGE = 50;
 
 @Component({
@@ -45,6 +53,7 @@ export class OutgoingWebhookDeliveryListDialog implements OnInit {
   readonly duration = formatDuration;
   readonly eventNameToReadableText = eventNameToReadableText;
   readonly getDeliveryResultReason = getDeliveryResultReason;
+  readonly formatBodyAsIndentedJsonIfJson = formatBodyAsIndentedJsonIfJson;
   visible = signal(true);
   deliveries = signal<RecordedOutgoingDeliveryListRow[]>([]);
   loading = signal(true);

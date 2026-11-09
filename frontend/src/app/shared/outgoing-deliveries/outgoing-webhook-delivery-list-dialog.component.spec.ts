@@ -70,10 +70,23 @@ describe('OutgoingWebhookDeliveryListDialog', () => {
     expect(rows()[0].getAttribute('aria-expanded')).toBe('true');
     const detail = document.querySelector('.gr-dialog .detail')!;
     expect(detail.textContent).toContain('connection refused');
-    expect(detail.textContent).toContain('{"event":"build.failed"}');
+    expect(detail.querySelector('pre')?.textContent).toBe('{\n  "event": "build.failed"\n}');
+    expect(rows()[0].querySelector('.reason')).toBeNull();
     rows()[0].click();
     fixture.detectChanges();
     expect(document.querySelector('.gr-dialog .detail')).toBeNull();
+  });
+
+  it('names the response status of an expanded delivery and keeps a body that is not JSON as sent', () => {
+    const { fixture } = render(
+      () => of([{ ...failed, response_status: 404, error_message: null }]),
+      (id) => of({ ...failed, id, response_status: 404, error_message: null, request_body: '{}', response_body: 'Not Found' }),
+    );
+    rows()[0].click();
+    fixture.detectChanges();
+    const detail = document.querySelector('.gr-dialog .detail')!;
+    expect(detail.textContent).toContain('HTTP 404');
+    expect(detail.querySelectorAll('pre')[1]?.textContent).toBe('Not Found');
   });
 
   it('drops a detail that arrives after its row was closed', () => {

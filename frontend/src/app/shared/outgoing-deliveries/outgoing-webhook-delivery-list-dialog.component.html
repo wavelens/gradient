@@ -16,7 +16,7 @@
           <button type="button" class="delivery" [attr.aria-expanded]="!!detail" (click)="toggleDeliveryRowExpansion(d.id)">
             <gr-badge [severity]="d.success ? 'success' : 'danger'">{{ d.success ? 'Delivered' : 'Failure' }}</gr-badge>
             <span class="event">{{ eventNameToReadableText(d.event) }}</span>
-            @if (resultReason) {
+            @if (resultReason && !detail) {
               <span class="reason" [title]="d.error_message ?? resultReason">{{ resultReason }}</span>
             }
             <span class="facts">
@@ -32,12 +32,15 @@
               } @else if (detail === 'error') {
                 <p class="error">Delivery details failed to load.</p>
               } @else {
+                @if (detail.response_status != null) {
+                  <p [class.error]="!detail.success">HTTP {{ detail.response_status }}</p>
+                }
                 @if (detail.error_message) {
                   <p class="error">{{ detail.error_message }}</p>
                 }
-                <details><summary>Request Body</summary><pre>{{ detail.request_body }}</pre></details>
+                <details><summary>Request body</summary><pre>{{ formatBodyAsIndentedJsonIfJson(detail.request_body) }}</pre></details>
                 @if (detail.response_body) {
-                  <details><summary>Response body</summary><pre>{{ detail.response_body }}</pre></details>
+                  <details><summary>Response body</summary><pre>{{ formatBodyAsIndentedJsonIfJson(detail.response_body) }}</pre></details>
                 }
               }
             </div>
