@@ -97,7 +97,21 @@ describe('EvaluationSummaryComponent', () => {
 
     expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('3 packages did not build, 1 attribute failed to evaluate');
     expect(sections(fixture)).toEqual(['Newly failing 1', 'Still failing 1', 'Failed to evaluate 1', 'Fixed 1']);
-    expect(text(fixture)).toContain('2 newly failing and 1 fixed since aaaaaaaa');
+    expect(text(fixture)).toContain('2 new failures and 1 fix since the previous evaluation at aaaaaaaa');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.compared a')?.getAttribute('href')).toBe('/project/testproject/summary/e1');
+  });
+
+  it('names no commit in the comparison when the previous evaluation built the same one', () => {
+    const fixture = setup({ ...SUMMARY, compared_with: { id: 'e1', commit: EVALUATION.commit } });
+
+    expect(text(fixture)).toContain('1 fix since the previous evaluation');
+    expect(text(fixture)).not.toContain('previous evaluation at');
+  });
+
+  it('compares with the previous evaluation only once this one has finished', () => {
+    const fixture = setup(SUMMARY, { ...EVALUATION, status: 'Building' });
+
+    expect(text(fixture)).not.toContain('since the previous evaluation');
   });
 
   it('links a failed build to that build on the log page', () => {

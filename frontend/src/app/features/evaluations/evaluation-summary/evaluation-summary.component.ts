@@ -37,7 +37,7 @@ import {
   isRunningEvaluationStatus,
   repositoryWebUrl,
 } from '@shared/evaluation';
-import { CurrentTimeSignal, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { CurrentTimeSignal, formatDuration, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { EvalStatusBadgeComponent, LiveStatusComponent, StatusIconComponent } from '@shared/ui';
 import { blockedLine, failureKind, failureTitle, firstLine, getEvaluationSummaryCountTiles, headline } from './summary-text';
 
@@ -146,6 +146,7 @@ export class EvaluationSummaryComponent implements OnInit {
   protected readonly failureKind = failureKind;
   protected readonly failureTitle = failureTitle;
   protected readonly firstLine = firstLine;
+  protected readonly plural = plural;
 
   constructor() {
     this.refresh
