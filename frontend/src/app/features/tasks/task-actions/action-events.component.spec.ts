@@ -43,7 +43,7 @@ describe('ActionEventsComponent', () => {
 
   it('passes a ticked event on as the new selection', () => {
     let emitted: string[] = [];
-    component.selectedChange.subscribe((v: string[]) => { emitted = v; });
+    component.selected.subscribe((v: string[]) => { emitted = v; });
     fixture.detectChanges();
     const box = (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLInputElement>('input[type=checkbox]')[1];
     box.click();

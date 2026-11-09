@@ -19,7 +19,7 @@ function render(selected: string[], disabled = false) {
   fixture.componentRef.setInput('disabled', disabled);
   fixture.detectChanges();
   const emitted: string[][] = [];
-  fixture.componentInstance.selectedChange.subscribe((v) => emitted.push(v));
+  fixture.componentInstance.selected.subscribe((v) => emitted.push(v));
   const root = fixture.nativeElement as HTMLElement;
   return { root, emitted, boxes: Array.from(root.querySelectorAll<HTMLInputElement>('input[type=checkbox]')) };
 }
@@ -35,7 +35,14 @@ describe('CheckGroupsComponent', () => {
     const { boxes, emitted } = render(['task.star']);
     boxes[0].click();
     boxes[2].click();
-    expect(emitted).toEqual([['task.star', 'build.failed'], []]);
+    expect(emitted).toEqual([['task.star', 'build.failed'], ['build.failed']]);
+  });
+
+  it('keeps both of two quick clicks before the parent passes the selection back', () => {
+    const { boxes, emitted } = render([]);
+    boxes[0].click();
+    boxes[1].click();
+    expect(emitted.at(-1)).toEqual(['build.failed', 'build.completed']);
   });
 
   it('locks every box while disabled', () => {

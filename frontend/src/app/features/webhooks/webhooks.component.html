@@ -70,11 +70,7 @@
   </gr-form-field>
   <gr-form-field label="Events" hint="Nothing selected receives every event in this scope.">
     <gr-label-help slot="label" doc="reference/events/#webhooks" title="Webhook events" />
-    <app-action-events
-      [selected]="events()"
-      [eventNamePrefixes]="eventNamePrefixes"
-      (selectedChange)="events.set($event)"
-    />
+    <app-action-events [(selected)]="events" [eventNamePrefixes]="eventNamePrefixes" />
   </gr-form-field>
   <gr-form-field label="Event globs (optional)" for="webhook-globs" [hint]="eventGlobsExamplesHint" [invalid]="!!globsError()" [error]="globsError() ?? ''">
     <input grInput id="webhook-globs" [ngModel]="globs()" (ngModelChange)="globs.set($event)" (keyup.enter)="save()" />

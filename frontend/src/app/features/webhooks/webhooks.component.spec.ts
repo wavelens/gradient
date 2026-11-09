@@ -191,6 +191,34 @@ describe('WebhooksComponent', () => {
     expect(component.formOpen()).toBe(true);
   });
 
+  it('saves every event checked after a discarded form was opened again', () => {
+    const catalog = ['build.failed', 'build.completed'].map((name) => ({ name, durable: true }));
+    const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([hook]), catalog);
+    const dialogButton = (label: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>('.gr-dialog button')].find((b) => b.textContent?.trim() === label)!;
+    component.startCreate();
+    component.name.set('Deploy hook');
+    fixture.detectChanges();
+    dialogButton('Cancel').click();
+    fixture.detectChanges();
+    dialogButton('Discard').click();
+    fixture.detectChanges();
+    expect(component.formOpen()).toBe(false);
+
+    component.startCreate();
+    fixture.detectChanges();
+    const boxes = [...document.querySelectorAll<HTMLInputElement>('.gr-dialog input[type=checkbox]')];
+    boxes[0].click();
+    boxes[1].click();
+    component.name.set('ci');
+    component.url.set('https://example.com/hook');
+    component.save();
+    expect(service.create).toHaveBeenCalledWith(
+      { kind: 'project', name: 'p' },
+      expect.objectContaining({ events: ['build.failed', 'build.completed'] }),
+    );
+  });
+
   it('keeps subscribed events outside the scope visible in the globs field', () => {
     const { component, service } = setup({ webhookScope: 'team' }, { team: 'platform' });
     component.startEdit({ ...hook, events: ['team.worker.create', 'evaluation.completed', 'build.*'] });

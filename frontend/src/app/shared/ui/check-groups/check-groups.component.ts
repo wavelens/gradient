@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, input, model } from '@angular/core';
 
 export interface CheckGroup {
   label: string;
@@ -37,14 +37,13 @@ export interface CheckGroup {
 })
 export class CheckGroupsComponent {
   groups = input.required<readonly CheckGroup[]>();
-  selected = input.required<readonly string[]>();
+  selected = model.required<string[]>();
   disabled = input(false);
-  selectedChange = output<string[]>();
 
   protected toggle(value: string, checked: boolean): void {
     const set = new Set(this.selected());
     if (checked) set.add(value);
     else set.delete(value);
-    this.selectedChange.emit(Array.from(set));
+    this.selected.set(Array.from(set));
   }
 }
