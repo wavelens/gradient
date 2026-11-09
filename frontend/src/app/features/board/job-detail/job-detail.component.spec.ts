@@ -275,6 +275,14 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(el.querySelector('.ids .worker-link')?.textContent?.trim()).toBe('Builder One');
   });
 
+  it('labels the log link as the log, leaving "Evaluation" to the section heading', () => {
+    const el = setup().nativeElement as HTMLElement;
+    const labels = Array.from(el.querySelectorAll('.ids .label')).map((l) => l.textContent?.trim());
+    expect(labels).toContain('Log');
+    expect(labels).not.toContain('Evaluation');
+    expect(el.querySelector('.ids .log-link')?.textContent?.trim()).toBe('Open log');
+  });
+
   it('falls back to the project name and marks an unnamed worker as not shared, without a link', () => {
     const detail = { ...DETAIL, worker_name: null, project_display_name: '' };
     const el = setup({ getJob: () => of(detail) }).nativeElement as HTMLElement;

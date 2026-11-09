@@ -118,8 +118,8 @@ interface RuleRow {
           }
         </div>
         <div>
-          <span class="label">Evaluation</span>
-          <a [routerLink]="links.evaluationLog(j.project_name, j.evaluation_id, { build: j.build_id })" [title]="j.evaluation_id">Open log</a>
+          <span class="label">Log</span>
+          <a class="log-link" [routerLink]="links.evaluationLog(j.project_name, j.evaluation_id, { build: j.build_id })" [title]="j.evaluation_id">Open log</a>
         </div>
         @if (j.cluster_job) {
           <div>
