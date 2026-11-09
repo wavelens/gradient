@@ -44,6 +44,7 @@ import { groupEntryPoints } from './entry-point-groups';
 import { firstLine } from '@features/evaluations/evaluation-summary/summary-text';
 import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job-list.component';
 import { links } from '@shared/routing';
+import { removeAnsiEscapeSequences } from '@shared/log';
 import { CurrentTimeSignal, formatDuration, monthDayClockTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import {
   StarTarget,
@@ -605,6 +606,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       case 'time': return 'Schedule';
       default: return 'Manual';
     }
+  }
+
+  getFailedAttributeTooltipText(failure: FailedAttributeSummary): string {
+    return `${failure.eval} - ${removeAnsiEscapeSequences(failure.message)}`;
   }
 
   searchTerm = signal('');

@@ -33,14 +33,14 @@ describe('waitingReasonText', () => {
     expect(waitingReasonText(reason)).toBe('waiting for a worker with exec');
   });
 
-  it('lists what no worker offers', () => {
+  it('leaves out the labels and devices the row shows as badges', () => {
     const reason: WaitingReason = {
       kind: 'exec_workers',
-      unmet: { labels: ['3d-printer'], devices: [{ name: 'gpu:h100', count: 16 }], mounts: [], nodes: 0, custom_image: false },
+      unmet: { labels: ['3d-printer'], devices: [{ name: 'gpu:h100', count: 16 }], mounts: ['/data'], nodes: 0, custom_image: false },
       connected_workers: 1,
       matching_workers: 0,
     };
-    expect(waitingReasonText(reason)).toBe('needs label 3d-printer, gpu:h100:16');
+    expect(waitingReasonText(reason)).toBe('needs mount /data');
   });
 
   it('names a missing architecture', () => {

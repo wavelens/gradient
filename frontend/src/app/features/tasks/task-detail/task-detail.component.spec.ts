@@ -228,6 +228,24 @@ describe('TaskDetailComponent - failed evaluation without packages', () => {
     expect(text).not.toContain('at flake.lock');
     expect(text).not.toContain('No packages');
   });
+
+  it('says an evaluation aborted before it started was never evaluated, without a tally or timer', () => {
+    const { fixture } = setup(access, { primaryStatus: 'Aborted' });
+    const root = fixture.nativeElement as HTMLElement;
+    const text = root.textContent ?? '';
+    expect(text).toContain('Aborted before evaluation');
+    expect(text).not.toContain('No packages');
+    expect(text).not.toContain('0 / 0');
+    expect(root.querySelector('.panel-head .dur')).toBeNull();
+    expect(root.querySelector('.panel-head .sub')?.textContent).toMatch(/queued\s+Jan 1/);
+  });
+
+  it('dates the header by the start time once the evaluation started', () => {
+    const { fixture } = setup(access, { primaryStatus: 'Completed', primary: { started_at: '2026-01-02T03:04:00' } });
+    const sub = (fixture.nativeElement as HTMLElement).querySelector('.panel-head .sub')?.textContent ?? '';
+    expect(sub).toMatch(/started\s+Jan 2/);
+    expect(sub).not.toContain('queued');
+  });
 });
 
 describe('TaskDetailComponent - older evaluations', () => {

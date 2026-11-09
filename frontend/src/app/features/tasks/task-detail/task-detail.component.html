@@ -129,21 +129,30 @@
                     <span class="mono" [title]="sel.commit">{{ commitLabel(sel.commit) }}</span> ·
                   }
                 }
-                {{ triggerLabel(sel) }} · started {{ sel.created_at | serverDate }}
+                {{ triggerLabel(sel) }} ·
+                @if (sel.started_at) {
+                  started <time [attr.datetime]="sel.started_at">{{ monthDayClockTime(sel.started_at) }}</time>
+                } @else {
+                  queued <time [attr.datetime]="sel.created_at">{{ monthDayClockTime(sel.created_at) }}</time>
+                }
               </div>
             </div>
             <div class="bar-line">
               @if (sel.only_evaluate) {
                 <span class="eval-only"><gr-icon name="info" size="sm" /> Evaluation only - other tasks do the build</span>
               } @else {
-                <gr-segmented-bar class="eval-bar" [counts]="sel.builds" />
                 @let tally = buildTally(sel.builds);
-                <span>
-                  <b>{{ tally.done }} / {{ tally.total }}</b> builds
-                  @if (tally.overall > tally.total) { <span class="tally-overall">of {{ tally.overall }} total</span> }
-                </span>
+                @if (tally.overall > 0) {
+                  <gr-segmented-bar class="eval-bar" [counts]="sel.builds" />
+                  <span>
+                    <b>{{ tally.done }} / {{ tally.total }}</b> builds
+                    @if (tally.overall > tally.total) { <span class="tally-overall">of {{ tally.overall }} total</span> }
+                  </span>
+                }
               }
-              <span class="dur"><gr-icon name="timer" size="sm" /> <b>{{ evalDuration(sel) }}</b></span>
+              @if (sel.started_at) {
+                <span class="dur"><gr-icon name="timer" size="sm" /> <b>{{ evalDuration(sel) }}</b></span>
+              }
               @if (sel.errors > 0) {
                 <a class="msg-chip error" [routerLink]="links.evaluationLog(projectName, sel.id, { messages: true })">
                   {{ sel.errors }} {{ sel.errors === 1 ? 'error' : 'errors' }}
@@ -216,7 +225,7 @@
                 } @else {
                   <div class="entry-row pkg" data-phase="failure" [style.animation-delay.ms]="($index % staggeredRows) * 18">
                     <a class="entry-link" [routerLink]="links.evaluationLog(projectName, sel.id, { messages: true })"
-                       [title]="row.failure.eval + ' - ' + row.failure.message" [attr.aria-label]="row.label + ', failed to evaluate'"></a>
+                       [title]="getFailedAttributeTooltipText(row.failure)" [attr.aria-label]="row.label + ', failed to evaluate'"></a>
                     <gr-status-icon class="phase-swatch" [phase]="'failure'" size="sm" />
                     <span class="pkg-name entry-name">{{ row.label }}</span>
                     <span class="pkg-error">Failed to evaluate</span>
@@ -271,6 +280,8 @@
             }
           } @else if (selectedEvaluationErrorFirstLine(); as error) {
             <gr-empty-state flat icon="error" title="Evaluation failed" [message]="error" />
+          } @else if (!entryPointsLoading() && sel.status === 'Aborted' && !sel.started_at) {
+            <gr-empty-state flat icon="cancel" title="Aborted before evaluation" />
           } @else if (!entryPointsLoading()) {
             <gr-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />

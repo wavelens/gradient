@@ -103,7 +103,8 @@ export function waitingReasonText(reason: WaitingReason | null | undefined): str
     case 'eval_workers':
       return `waiting for a worker with ${reason.capability}`;
     case 'exec_workers': {
-      const parts = unmetParts(reason.unmet);
+      // Labels and devices already appear as badges next to this text.
+      const parts = unmetParts({ ...reason.unmet, labels: [], devices: [] });
       if (parts.length > 0) return `needs ${parts.join(', ')}`;
       const workers = reason.matching_workers;
       if (workers === 0) return 'waiting for a matching worker';

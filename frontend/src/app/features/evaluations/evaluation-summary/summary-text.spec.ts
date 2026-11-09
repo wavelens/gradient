@@ -90,4 +90,8 @@ describe('evaluation summary text', () => {
   it('shows the first line of an evaluation error that has text', () => {
     expect(firstLine('\n  error: attribute missing\n  at flake.nix:3')).toBe('error: attribute missing');
   });
+
+  it('removes terminal colour codes from the first line', () => {
+    expect(firstLine('\u001b[31;1merror:\u001b[0m attribute missing')).toBe('error: attribute missing');
+  });
 });

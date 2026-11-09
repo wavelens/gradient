@@ -7,6 +7,7 @@
 import type { BuildStatus, EvaluationFailureSummary, EvaluationStatus, FailedBuildSummary } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
 import { buildStatusLabel, isEvaluationNotStartedStatus, isRunningEvaluationStatus } from '@shared/evaluation';
+import { removeAnsiEscapeSequences } from '@shared/log';
 import { plural } from '@shared/text';
 
 const BLOCKED_NAMED = 5;
@@ -69,5 +70,5 @@ export function blockedLine(failure: FailedBuildSummary): string {
 }
 
 export function firstLine(message: string): string {
-  return message.split('\n').map((line) => line.trim()).find((line) => line.length > 0) ?? '';
+  return removeAnsiEscapeSequences(message).split('\n').map((line) => line.trim()).find((line) => line.length > 0) ?? '';
 }
