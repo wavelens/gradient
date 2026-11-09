@@ -152,9 +152,9 @@ interface DecisionRow {
                 <td>{{ jobKindName(p.kind) }}</td>
                 <td class="origin">
                   @if (p.project_name; as project) {
-                    <a [routerLink]="links.project(project)" (click)="$event.stopPropagation()">{{ project }}</a>
+                    <a [routerLink]="links.project(project)" (click)="$event.stopPropagation()">{{ p.project_display_name || project }}</a>
                     @if (p.task; as task) {
-                      / <a [routerLink]="links.task(project, task, p.evaluation_id)" (click)="$event.stopPropagation()">{{ task }}</a>
+                      / <a [routerLink]="links.task(project, task, p.evaluation_id)" (click)="$event.stopPropagation()">{{ p.task_display_name || task }}</a>
                     }
                   } @else {
                     <span class="muted">-</span>

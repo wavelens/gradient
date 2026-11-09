@@ -68,15 +68,17 @@ const JOB_OUTCOME_BADGES: Record<string, { phase: StatusPhase; label: string }> 
 };
 
 export function getAssignedJobName(j: AssignedJobDetail): string {
-  if (j.kind === EXEC_KIND && j.exec_job) return `${j.exec_job.task}: ${jobSubjectLabel(null, j.exec_job)}`;
+  const task = j.evaluation?.task_display_name || j.evaluation?.task;
+  if (j.kind === EXEC_KIND && j.exec_job) return `${task || j.exec_job.task}: ${jobSubjectLabel(null, j.exec_job)}`;
   if (j.kind === BUILD_KIND) return j.pname ?? j.derivations[0]?.pname ?? j.derivations[0]?.drv_path ?? j.id;
-  return j.evaluation?.task ?? (j.project_display_name || j.project_name);
+  return task || j.project_display_name || j.project_name;
 }
 
 export function getPendingJobName(p: PendingJobSummary): string {
-  if (p.exec_job) return `${p.exec_job.task}: ${jobSubjectLabel(null, p.exec_job)}`;
+  const task = p.task_display_name || p.task;
+  if (p.exec_job) return `${task || p.exec_job.task}: ${jobSubjectLabel(null, p.exec_job)}`;
   if (p.kind === BUILD_KIND) return p.subject ?? p.build_id ?? p.evaluation_id;
-  return p.task ?? p.project_name ?? p.evaluation_id;
+  return task || p.project_display_name || p.project_name || p.evaluation_id;
 }
 
 interface RuleRow {
@@ -155,7 +157,7 @@ interface RuleRow {
               @if (ev.task) {
                 <tr>
                   <td class="label">Task</td>
-                  <td class="mono"><a class="task-link" [routerLink]="links.task(j.project_name, ev.task, j.evaluation_id)">{{ ev.task }}</a></td>
+                  <td><a class="task-link" [routerLink]="links.task(j.project_name, ev.task, j.evaluation_id)">{{ ev.task_display_name || ev.task }}</a></td>
                 </tr>
               }
             </tbody>
@@ -168,7 +170,10 @@ interface RuleRow {
           <h2>Exec job</h2>
           <gr-table class="kv">
             <tbody>
-              <tr><td class="label">Task</td><td class="mono">{{ ex.task }}</td></tr>
+              <tr>
+                <td class="label">Task</td>
+                <td><a class="task-link" [routerLink]="links.task(j.project_name, ex.task, j.evaluation_id)">{{ j.evaluation?.task_display_name || ex.task }}</a></td>
+              </tr>
               <tr>
                 <td class="label">Entry point</td>
                 <td class="mono"><a class="exec-link" [routerLink]="links.boardExecJob(ex)">{{ ex.entry_point }}</a></td>
@@ -398,12 +403,12 @@ interface RuleRow {
         @if (p.project_name; as project) {
           <div>
             <span class="label">Project</span>
-            <a class="project-link" [routerLink]="links.project(project)">{{ project }}</a>
+            <a class="project-link" [routerLink]="links.project(project)">{{ p.project_display_name || project }}</a>
           </div>
           @if (p.task; as task) {
             <div>
               <span class="label">Task</span>
-              <a [routerLink]="links.task(project, task, p.evaluation_id)">{{ task }}</a>
+              <a [routerLink]="links.task(project, task, p.evaluation_id)">{{ p.task_display_name || task }}</a>
             </div>
           }
         }

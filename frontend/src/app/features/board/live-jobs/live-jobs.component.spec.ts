@@ -372,6 +372,17 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     expect(row.querySelector('td.waiting')?.textContent).toContain('Cache not configured');
   });
 
+  it('names the project and task of a pending row by their display names', () => {
+    const row = pendingRow({
+      ...PENDING,
+      project_name: 'sandbox',
+      project_display_name: 'Sandbox',
+      task: 'execstates',
+      task_display_name: 'Exec States Task',
+    });
+    expect(row.querySelector('td.origin')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Sandbox / Exec States Task');
+  });
+
   it('shows a hint instead of the action to a viewer who may not fix the waiting reason', () => {
     const row = pendingRow({ ...PENDING, project_name: 'sandbox', waiting_reason: { kind: 'no_cache' }, permissions: ['viewProject'] });
 

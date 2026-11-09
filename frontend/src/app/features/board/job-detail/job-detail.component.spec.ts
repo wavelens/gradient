@@ -786,4 +786,43 @@ describe('getPendingJobName', () => {
     expect(getPendingJobName(PENDING)).toBe('hello-2.12.1');
     expect(getPendingJobName({ ...PENDING, kind: 0, task: 'oktask', project_name: 'sandbox' })).toBe('oktask');
   });
+
+  it('prefers the task display name over its slug', () => {
+    const exec = { id: 'x1', project: 'o1', entry_point: 'deploy', task: 'nightly', node_index: 0, nodes: 1 };
+    expect(getPendingJobName({ ...PENDING, kind: 2, exec_job: exec, task: 'nightly', task_display_name: 'Nightly Deploy' })).toBe('Nightly Deploy: deploy');
+    expect(getPendingJobName({ ...PENDING, kind: 0, task: 'oktask', task_display_name: 'OK Task' })).toBe('OK Task');
+  });
+});
+
+describe('BoardJobDetailComponent - display names', () => {
+  it('names the project and task of a pending job by their display names', () => {
+    const pending: PendingJobSummary = {
+      ...PENDING,
+      kind: 0,
+      build_id: null,
+      project_name: 'sandbox',
+      project_display_name: 'Sandbox',
+      task: 'execstates',
+      task_display_name: 'Exec States Task',
+    };
+    const el = setup({ getPendingJobs: () => of({ jobs: [pending], other_pending: 0 }) }, 'e1', true).nativeElement as HTMLElement;
+    const ids = el.querySelector('section.ids')?.textContent ?? '';
+    expect(ids).toContain('Sandbox');
+    expect(ids).toContain('Exec States Task');
+    expect(ids).not.toContain('execstates');
+    expect(el.querySelector('h1')?.textContent?.trim()).toBe('Exec States Task');
+  });
+
+  it('names the task of an exec job and the title by the task display name', () => {
+    const exec: BoardExecJob = { id: 'x1', project: 'o1', entry_point: 'apps.run', task: 'exectask', node_index: 0, nodes: 1 };
+    const job: AssignedJobDetail = {
+      ...DETAIL,
+      kind: 2,
+      exec_job: exec,
+      evaluation: { repository: 'r', commit: 'c', wildcard: 'w', task: 'exectask', task_display_name: 'Exec Task' },
+    };
+    const el = setup({ getJob: () => of(job) }).nativeElement as HTMLElement;
+    expect(el.querySelector('h1')?.textContent?.trim()).toBe('Exec Task: apps.run');
+    expect(el.querySelector('section.exec a.task-link')?.textContent?.trim()).toBe('Exec Task');
+  });
 });
