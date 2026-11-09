@@ -152,20 +152,6 @@
             <span class="metric-label">Duration</span>
             <span class="metric-value">{{ duration() }}</span>
           </div>
-          @if (ev.status === 'Building' && (buildingCount() > 0 || queuedCount() > 0)) {
-            <div class="info-metric">
-              <span class="metric-label">Build count</span>
-              @if (buildingCount() > 0) {
-                <span class="metric-value">{{ buildingCount() }} running</span>
-              }
-              @if (queuedCount() > 0) {
-                @if (buildingCount() > 0) {
-                  <span class="metric-sep">·</span>
-                }
-                <span class="metric-value queue-waiting">{{ queuedCount() }} waiting</span>
-              }
-            </div>
-          }
           <div class="info-metric">
             <span class="metric-label">Triggered</span>
             <span class="metric-value">{{ ev.created_at | serverDate }}</span>

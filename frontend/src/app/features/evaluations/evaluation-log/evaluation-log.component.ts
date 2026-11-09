@@ -165,14 +165,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private initialShowEval = false;
   private fetchingInitialBuild = false;
 
-  queuedCount = computed(() =>
-    this.builds().filter(b => b.status === 'Queued').length
-  );
-
-  buildingCount = computed(() =>
-    this.builds().filter(b => b.status === 'Building').length
-  );
-
   selectedBuild = computed(() =>
     this.builds().find(b => b.id === this.selectedBuildId()) ?? null
   );
