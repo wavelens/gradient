@@ -1727,7 +1727,7 @@ paths:
       tags:
       - board
       summary: Pending (unassigned) jobs
-      description: Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job. `project_name` and `task` come from the evaluation of the job. `waiting_reason` comes from the exec job for exec jobs and from the evaluation otherwise. `permissions` are the caller's permissions in its project.
+      description: Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count. `cluster_job` names the cluster job of a sub job. The values `project_name`, `task` and their display names come from the job evaluation. `waiting_reason` comes from the exec job for exec jobs and from the evaluation otherwise. `permissions` are the caller's permissions in its project.
       operationId: getBoardPendingJobs
       responses:
         '200':
@@ -5249,9 +5249,17 @@ paths:
       - dashboard
       summary: Daily evaluation activity of the current user
       description: |-
-        One entry per day from 370 days ago through today, oldest first, days without evaluations included as zero.
-        Counts non-PR evaluations of the projects the viewer may see; `failed` counts evaluations with status `Failed`.
+        Entries run from 370 days ago through today, one per day, oldest first.
+        Days without evaluations get 0. Entries count non-PR evaluations in projects that the viewer can see. `failed` is the count of evaluations with status `Failed`.
+        `tz_offset_minutes` is the offset of the viewer from UTC (120 for UTC+2). The default is 0. Values outside ±840 map to the nearest limit. Dates and today follow that local time.
       operationId: getDashboardActivity
+      parameters:
+      - name: tz_offset_minutes
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
       responses:
         '200':
           description: Daily evaluation counts
@@ -5277,10 +5285,10 @@ paths:
       - dashboard
       summary: Sidebar rail of the current user
       description: |-
-        Projects: member projects plus starred public ones, sorted by tier (`starred_active`, `active`, `starred`, `team`, `member`), then name.
-        Active means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.
-        `tasks` is present only on `starred_active` projects and omitted otherwise.
-        Caches: those the viewer created, is a member of or reaches through a member project, plus starred public ones; starred first, then name. Superusers get no extra caches here.
+        Projects are member projects plus starred public projects. Sort by tier (`starred_active`, `active`, `starred`, `team`, `member`), then by display name.
+        A non-PR evaluation in the last 14 days is active. `status` is the status of the latest non-PR evaluation, or `null`.
+        The `tasks` field is present only on `starred_active` projects. Other projects omit that field. Entries in the field sort by display name.
+        Cache entries include caches the viewer created, caches the viewer is a member of, or caches reachable through member projects. Cache entries also include starred public caches. Put starred caches first, then sort by display name. Superusers get no extra caches here.
       operationId: getDashboardRail
       responses:
         '200':
@@ -5957,9 +5965,7 @@ paths:
         dependency failed is not listed; it is counted under the build that
         caused it.
 
-        `newly_failing` and `fixed` compare against the evaluation in
-        `compared_with`. Without a previous evaluation `compared_with` is
-        `null`, every `newly_failing` is `false` and `fixed` is empty.
+        `newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present.
       operationId: getEvaluationSummary
       parameters:
       - name: evaluation
@@ -10491,7 +10497,7 @@ paths:
       tags:
       - tasks
       summary: Get task metrics
-      description: Return the metrics points for each evaluation in the latest `keep_evaluations` evaluations that completed or failed.
+      description: Return the metrics points for each evaluation in the latest `keep_evaluations` evaluations that completed or failed. `eval_time_ms` runs from the start of the fetch to the finish, without the time in the queue and is `null` if the evaluation never started fetching.
       operationId: getTaskMetrics
       parameters:
       - name: project
@@ -16921,6 +16927,7 @@ components:
       type: object
       required:
       - id
+      - project_name
       - repository
       - commit
       - wildcard
@@ -16938,6 +16945,8 @@ components:
           oneOf:
           - $ref: '#/components/schemas/TaskId'
           - type: 'null'
+        project_name:
+          type: string
         task_name:
           type:
           - string
@@ -18479,6 +18488,10 @@ components:
           type:
           - string
           - 'null'
+        task_display_name:
+          type:
+          - string
+          - 'null'
     JobPhaseView:
       type: object
       required:
@@ -19994,7 +20007,15 @@ components:
           type:
           - string
           - 'null'
+        project_display_name:
+          type:
+          - string
+          - 'null'
         task:
+          type:
+          - string
+          - 'null'
+        task_display_name:
           type:
           - string
           - 'null'
@@ -20503,8 +20524,11 @@ components:
       type: object
       required:
       - name
+      - display_name
       properties:
         name:
+          type: string
+        display_name:
           type: string
         status:
           oneOf:
@@ -21377,7 +21401,6 @@ components:
       - evaluation_id
       - created_at
       - build_time_total_ms
-      - eval_time_ms
       - dependencies_count
       properties:
         evaluation_id:
@@ -21389,7 +21412,9 @@ components:
           type: integer
           format: int64
         eval_time_ms:
-          type: integer
+          type:
+          - integer
+          - 'null'
           format: int64
         output_size_bytes:
           type:
@@ -21560,14 +21585,20 @@ components:
       type: object
       required:
       - project
+      - project_display_name
       - task
+      - task_display_name
       - starred
       - tier
       - history
       properties:
         project:
           type: string
+        project_display_name:
+          type: string
         task:
+          type: string
+        task_display_name:
           type: string
         starred:
           type: boolean

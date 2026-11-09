@@ -13,7 +13,9 @@ import { TaskRow, TasksPage } from '@core/models';
 
 const row = (task: string): TaskRow => ({
   project: 'infra',
+  project_display_name: 'Infrastructure',
   task,
+  task_display_name: `${task} build`,
   starred: false,
   tier: 'active',
   latest: { id: 'e1', status: 'Failed', commit: 'a1b2c3d4', created_at: '2026-09-23T10:00:00' },

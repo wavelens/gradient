@@ -42,7 +42,7 @@ describe('DashboardRailComponent', () => {
   it('links projects, nested tasks and caches directly', () => {
     const root = render({
       projects: [{ name: 'infra', display_name: 'Infra', starred: true, tier: 'starred_active', status: 'Failed', task_count: 2,
-        tasks: [{ name: 'hosts', status: 'Failed' }] }],
+        tasks: [{ name: 'hosts', display_name: 'Hosts', status: 'Failed' }] }],
       caches: [{ name: 'main', display_name: 'Main', starred: false, nar_count: 1200 }],
     });
     expect(hrefs(root)).toContain('/project/infra');

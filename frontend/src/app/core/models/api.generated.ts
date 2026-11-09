@@ -986,6 +986,7 @@ export type EvaluationProgress = {
 export interface EvaluationResponse {
   id: EvaluationId;
   task?: TaskId | null;
+  project_name: string;
   task_name?: string | null;
   task_display_name?: string | null;
   repository: string;
@@ -1492,6 +1493,7 @@ export interface JobEvaluationView {
   commit_message?: string | null;
   wildcard: string;
   task?: string | null;
+  task_display_name?: string | null;
 }
 
 export interface JobPhaseView {
@@ -2009,7 +2011,9 @@ export interface PendingJobSummary {
   exec_job?: BoardExecJob | null;
   cluster_job?: string | null;
   project_name?: string | null;
+  project_display_name?: string | null;
   task?: string | null;
+  task_display_name?: string | null;
   waiting_reason?: WaitingReason | null;
   permissions: Permission[];
 }
@@ -2190,6 +2194,7 @@ export interface RailProject {
 
 export interface RailTask {
   name: string;
+  display_name: string;
   status?: EvaluationStatus | null;
 }
 
@@ -2525,7 +2530,7 @@ export interface TaskMetricPoint {
   evaluation_id: EvaluationId;
   created_at: string;
   build_time_total_ms: number;
-  eval_time_ms: number;
+  eval_time_ms?: number | null;
   output_size_bytes?: number | null;
   closure_size_bytes?: number | null;
   runtime_closure_size_bytes?: number | null;
@@ -2582,7 +2587,9 @@ export interface TaskResponse {
 
 export interface TaskRow {
   project: string;
+  project_display_name: string;
   task: string;
+  task_display_name: string;
   starred: boolean;
   tier: Tier;
   latest?: Latest | null;
