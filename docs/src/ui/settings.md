@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Settings
 
-Settings exist at three levels. The levels are user, project, and cache. Fields of an entity from [Nix declaration](../guides/manage-with-nix.md) show as disabled and carry the hint **This item is managed by the server configuration and cannot be changed here.**.
+Settings exist at three levels. The levels are user, project, and cache. Fields of an entity from [Nix declaration](../guides/manage-with-nix.md) show as disabled and carry the hint **This item is managed by the server configuration and cannot be changed here.**
 
 ![Project Settings](../assets/screenshots/project_settings.png)
 

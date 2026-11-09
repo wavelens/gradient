@@ -52,7 +52,7 @@ The NixOS build runs `state.validate` on the state. This check is on by default.
 ## Verify Deployment
 
 - `journalctl -u gradient-server` shows `State configuration validated successfully` after the new state loads.
-- Declared entities show in the UI with disabled form fields and the hint **This item is managed by the server configuration and cannot be changed here.**.
+- Declared entities show in the UI with disabled form fields and the hint **This item is managed by the server configuration and cannot be changed here.**
 
 ## Next Steps
 
