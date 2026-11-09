@@ -666,7 +666,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             const finishedNow = this.isRunning() && !this.isRunningStatus(evaluation.status);
             this.evaluation.set(evaluation);
             this.loadBuilds();
-            if (finishedNow) this.loadMessages(true);
+            if (!finishedNow) return;
+            this.loadMessages(true);
+            this.stopLiveUpdates();
           },
         }),
     );
@@ -1254,8 +1256,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   isRunning(): boolean {
-    const s = this.evaluation()?.status;
-    return s === 'Queued' || s === 'Fetching' || s === 'EvaluatingFlake' || s === 'EvaluatingDerivation' || s === 'Building' || s === 'Waiting';
+    const status = this.evaluation()?.status;
+    return !!status && isRunningEvaluationStatus(status);
   }
 
   protected readonly links = links;

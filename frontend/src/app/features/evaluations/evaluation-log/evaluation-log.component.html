@@ -173,7 +173,7 @@
           </div>
         </div>
         <div class="info-bar-right">
-          @if (liveConnectionOpen() !== null) { <gr-live-status [connected]="!!liveConnectionOpen()" /> }
+          @if (isRunning() && liveConnectionOpen() !== null) { <gr-live-status [connected]="!!liveConnectionOpen()" /> }
           <a grButton size="small" label="Summary" icon="summarize" severity="secondary"
              [routerLink]="links.evaluationSummary(projectName, evaluationId)"></a>
           @if (isRunning()) {

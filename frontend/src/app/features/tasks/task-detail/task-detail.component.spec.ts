@@ -1735,3 +1735,20 @@ describe('TaskDetailComponent - package search', () => {
     expect(document.activeElement).not.toBe(input);
   });
 });
+
+describe('TaskDetailComponent - live package reloads', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('reloads the packages once after the throttle window so the last live change shows', () => {
+    const { tasksService, frames } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const entryPoints = vi.spyOn(tasksService, 'getEntryPoints');
+    frames.next({ event: 'evaluation.status', at: '', content: {} } as LiveEvent);
+    vi.advanceTimersByTime(500);
+    frames.next({ event: 'evaluation.status', at: '', content: {} } as LiveEvent);
+    vi.advanceTimersByTime(500);
+    expect(entryPoints).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(3000);
+    expect(entryPoints).toHaveBeenCalledTimes(1);
+  });
+});

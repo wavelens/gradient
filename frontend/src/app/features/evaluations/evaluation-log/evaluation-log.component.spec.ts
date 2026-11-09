@@ -918,6 +918,26 @@ describe('EvaluationLogComponent', () => {
       return { fixture, frames, getEvaluation };
     }
 
+    it('drops the live badge and the socket once the evaluation reaches a final status', async () => {
+      const { fixture, frames, getEvaluation } = setupLive(null, 'Building');
+      const cmp = fixture.componentInstance;
+      fixture.detectChanges();
+      cmp.liveConnectionOpen.set(true);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('gr-live-status')).not.toBeNull();
+      getEvaluation.mockImplementation(() => of({
+        id: 'eval-1', status: 'Failed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00',
+        started_at: '2026-01-01T00:00:00', finished_at: null, trigger: null, progress: null,
+      }));
+      frames.next({ event: 'evaluation.status', at: '', content: {} } as LiveEvent);
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      fixture.detectChanges();
+      expect(cmp.evaluation()?.status).toBe('Failed');
+      expect(fixture.nativeElement.querySelector('gr-live-status')).toBeNull();
+      expect(frames.observed).toBe(false);
+      fixture.destroy();
+    });
+
     it('applies activity frames without refetching the evaluation', () => {
       const { fixture, frames, getEvaluation } = setupLive({ kind: 'fetching', inputs: [] });
       expect(fixture.componentInstance.progress()).toEqual({ kind: 'fetching', inputs: [] });

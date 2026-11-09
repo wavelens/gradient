@@ -137,6 +137,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private entryPointsEvalId?: string;
   private entryPointsSig = '';
   private lastEntryPointsFetch = 0;
+  private entryPointsReloadTimer?: ReturnType<typeof setTimeout>;
   private readonly ENTRY_POINTS_LIVE_INTERVAL_MS = 4000;
 
   private readonly OLDER_PAGE = 10;
@@ -207,6 +208,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.liveSub?.unsubscribe();
     this.querySub?.unsubscribe();
+    clearTimeout(this.entryPointsReloadTimer);
   }
 
   private followEvalParam(id: string | null): void {
@@ -249,8 +251,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     // The entry-point page walks the graph for stale histograms; on live pings
     // throttle it so a running evaluation's rapid status stream doesn't
     // hammer the backend. The cheap summary above keeps headline counts live.
-    if (!live || Date.now() - this.lastEntryPointsFetch >= this.ENTRY_POINTS_LIVE_INTERVAL_MS) {
+    const wait = live ? this.lastEntryPointsFetch + this.ENTRY_POINTS_LIVE_INTERVAL_MS - Date.now() : 0;
+    if (wait <= 0) {
       this.loadEntryPoints(this.selected()?.id);
+    } else {
+      this.entryPointsReloadTimer ??= setTimeout(() => this.loadEntryPoints(this.selected()?.id), wait);
     }
   }
 
@@ -301,6 +306,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   private loadEntryPoints(evaluationId?: string): void {
+    clearTimeout(this.entryPointsReloadTimer);
+    this.entryPointsReloadTimer = undefined;
     if (!evaluationId) {
       this.entryPoints.set([]);
       this.entryPointsTotal.set(0);
