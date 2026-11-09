@@ -72,7 +72,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDurationText, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDurationText, buildPhase, buildStatusLabel, buildPhaseFinished, buildStatusInFinishedEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -428,7 +428,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const buckets: BuildItem[][] = this.buildGroups.map(() => []);
     for (const build of this.visibleBuilds()) {
       if (!matchesBuildSearch(build.name, this.sidebarSearchQuery())) continue;
-      buckets[indexByGroup.get(this.statusClass(build.status)) ?? buckets.length - 1].push(build);
+      buckets[indexByGroup.get(this.statusClass(this.getBuildRowDisplayStatus(build))) ?? buckets.length - 1].push(build);
     }
     const collapsed = this.collapsedGroups();
     return this.buildGroups
@@ -446,6 +446,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       if (!next.delete(key)) next.add(key);
       return next;
     });
+  }
+
+  getBuildRowDisplayStatus(build: Pick<BuildItem, 'status'>): string {
+    const evaluation = this.evaluation();
+    return evaluation ? buildStatusInFinishedEvaluation(build.status, evaluation.status) : build.status;
   }
 
   buildStatusColor(status: string | null | undefined): string {
@@ -488,8 +493,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     // rather than taken as given because builds also arrive from live updates
     // and deep links, out of the paged order.
     return [...byKey.values()].sort((a, b) => {
-      const oa = this.buildStatusOrder[this.statusClass(a.status)] ?? 99;
-      const ob = this.buildStatusOrder[this.statusClass(b.status)] ?? 99;
+      const oa = this.buildStatusOrder[this.statusClass(this.getBuildRowDisplayStatus(a))] ?? 99;
+      const ob = this.buildStatusOrder[this.statusClass(this.getBuildRowDisplayStatus(b))] ?? 99;
       if (oa !== ob) return oa - ob;
       if (a.depth !== b.depth) return a.depth - b.depth;
       return this.buildDisplayName(a.name).localeCompare(this.buildDisplayName(b.name), undefined, { numeric: true });

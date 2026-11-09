@@ -199,6 +199,17 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.getBuildElapsed(timedOut)).toBe('287 ms');
     });
 
+    it('groups a build that continues for a newer evaluation as aborted once this evaluation finished', () => {
+      const { cmp } = setup();
+      cmp.evaluation.set({ status: 'Aborted' } as EvaluationResponse);
+      const reused = build('r1', 'r1', 'Building');
+      cmp.visibleBuilds.set([reused, build('c1', 'c1', 'Completed')]);
+      expect(cmp.groupedBuilds().map((g) => [g.key, g.builds.map((b) => b.id)])).toEqual([['aborted', ['r1']], ['completed', ['c1']]]);
+      expect(cmp.getBuildRowDisplayStatus(reused)).toBe('Aborted');
+      cmp.evaluation.set({ status: 'Building' } as EvaluationResponse);
+      expect(cmp.getBuildRowDisplayStatus(reused)).toBe('Building');
+    });
+
     it('starts with every section expanded', () => {
       const { cmp } = setup();
       cmp.visibleBuilds.set(builds());

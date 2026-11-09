@@ -102,7 +102,7 @@
               @for (build of group.collapsed ? [] : group.builds; track build.id) {
                 <div
                   class="build-item"
-                  [style.--build-status-color]="buildStatusColor(build.status)"
+                  [style.--build-status-color]="buildStatusColor(getBuildRowDisplayStatus(build))"
                   [class.selected]="selectedBuildId() === build.id"
                   [attr.data-build-id]="build.id"
                   (contextmenu)="openBuildMenu($event, build, buildMenu)"
@@ -117,7 +117,7 @@
                   <span class="build-dot"></span>
                   <span class="build-name">{{ buildDisplayName(build.name) }}</span>
                   @if (build.ifd) { <gr-badge severity="info">IFD</gr-badge> }
-                  @let statusLabel = buildStatusLabel(build.status);
+                  @let statusLabel = buildStatusLabel(getBuildRowDisplayStatus(build));
                   @if (statusLabel !== group.label) { <span class="build-status-label">{{ statusLabel }}</span> }
                   @if (getBuildElapsed(build)) {
                     <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
@@ -190,6 +190,11 @@
       <div class="log-area">
         @if (missingBuildId()) {
           <gr-message-banner type="warning">The linked build does not belong to this evaluation.</gr-message-banner>
+        }
+        @if (selectedSection() !== 'messages' && selectedBuild(); as build) {
+          @if (getBuildRowDisplayStatus(build) !== build.status) {
+            <gr-message-banner type="info">This evaluation finished. The build is still in progress for a newer evaluation.</gr-message-banner>
+          }
         }
         @if (ev.status === 'Waiting' && selectedSection() !== 'messages' && selectedBuildId()) {
           <gr-waiting-notice banner [reason]="ev.waiting_reason" [project]="projectName" [access]="waitingAccess()" />
