@@ -397,10 +397,30 @@ describe('IntegrationsComponent - write failures', () => {
     (TestBed.inject(IntegrationsService) as unknown as { createProjectIntegration: typeof create }).createProjectIntegration = create;
     await settled(fixture);
     const comp = fixture.componentInstance;
-    comp.formData = { ...comp.formData, name: 'reporter', kind: 'outbound', endpoint_url: 'https://git.example.com' };
+    comp.formData = { ...comp.formData, name: 'reporter', kind: 'outbound', endpoint_url: 'https://git.example.com', access_token: 'tok' };
     comp.createIntegration();
     fixture.detectChanges();
     expect(comp.backToTrigger()).toBeNull();
+  });
+
+  it('asks for the endpoint URL and access token before creating a status reporter', async () => {
+    const fixture = setup(writable, []);
+    const create = vi.fn(() => of({ ...githubOutbound, id: 'new-id' }));
+    (TestBed.inject(IntegrationsService) as unknown as { createProjectIntegration: typeof create }).createProjectIntegration = create;
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    comp.openCreateDialog();
+    comp.formData = { ...comp.formData, name: 'reporter', kind: 'outbound', endpoint_url: '', access_token: '' };
+    comp.createIntegration();
+    fixture.detectChanges();
+    const dialog = document.querySelector('.gr-dialog') as HTMLElement;
+    expect(dialog.textContent).toContain('Enter the base URL of the Git host.');
+    expect(dialog.textContent).toContain('Enter an access token.');
+    expect(create).not.toHaveBeenCalled();
+
+    comp.formData = { ...comp.formData, endpoint_url: 'https://git.example.com', access_token: 'tok' };
+    comp.createIntegration();
+    expect(create).toHaveBeenCalledWith('acme', expect.objectContaining({ endpoint_url: 'https://git.example.com', access_token: 'tok' }));
   });
 
   it('opens no create dialog for a trigger under read-only access', async () => {

@@ -137,7 +137,7 @@
                 </div>
               } @else {
                 <div class="integration-body">
-                  <gr-field-row label="Endpoint URL" [value]="integration.endpoint_url || '(not set - defaults will be used)'" mono />
+                  <gr-field-row label="Endpoint URL" [value]="integration.endpoint_url || 'Not set'" mono />
                   <gr-form-field label="Access Token">
                     @if (integration.has_access_token) {
                       <gr-badge severity="success">Configured</gr-badge>
@@ -205,14 +205,15 @@
       <textarea id="int-allowed-ips" grInput rows="3" [(ngModel)]="formData.allowed_ips" #createIpsModel="ngModel" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
     </gr-form-field>
   } @else {
-    <gr-form-field label="Endpoint URL" for="int-endpoint" hint="Base URL of the Git host instance."
+    <gr-form-field label="Endpoint URL" for="int-endpoint" hint="Base URL of the Git host instance." required
       [invalid]="(submitAttempted() || createEndpointModel.touched) && !!endpointUrlError" [error]="endpointUrlError ?? ''">
       <input grInput id="int-endpoint" [(ngModel)]="formData.endpoint_url" #createEndpointModel="ngModel"
         placeholder="e.g. https://gitea.example.com" (keyup.enter)="createIntegration()" />
     </gr-form-field>
-    <gr-form-field label="Access Token" for="int-token">
-      <input grInput id="int-token" type="password" [(ngModel)]="formData.access_token"
-        placeholder="API token with commit status write permission" />
+    <gr-form-field label="Access Token" for="int-token" required
+      [invalid]="(submitAttempted() || createTokenModel.touched) && !!accessTokenError" [error]="accessTokenError ?? ''">
+      <input grInput id="int-token" type="password" [(ngModel)]="formData.access_token" #createTokenModel="ngModel"
+        placeholder="API token with commit status write permission" (keyup.enter)="createIntegration()" />
     </gr-form-field>
   }
 
@@ -263,7 +264,7 @@
         <textarea id="edit-allowed-ips" grInput rows="3" [(ngModel)]="formData.allowed_ips" #editIpsModel="ngModel" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
       </gr-form-field>
     } @else {
-      <gr-form-field label="Endpoint URL" for="edit-endpoint"
+      <gr-form-field label="Endpoint URL" for="edit-endpoint" required
         [invalid]="(submitAttempted() || editEndpointModel.dirty) && !!endpointUrlError" [error]="endpointUrlError ?? ''">
         <input grInput id="edit-endpoint" [(ngModel)]="formData.endpoint_url" #editEndpointModel="ngModel" (keyup.enter)="saveEdit()" />
       </gr-form-field>

@@ -125,7 +125,11 @@ export class IntegrationsComponent implements OnInit {
   }
 
   get endpointUrlError(): string | null {
-    return fieldChecks.httpUrl(this.formData.endpoint_url);
+    return this.formData.endpoint_url.trim() ? fieldChecks.httpUrl(this.formData.endpoint_url) : 'Enter the base URL of the Git host.';
+  }
+
+  get accessTokenError(): string | null {
+    return this.formData.access_token.trim() ? null : 'Enter an access token.';
   }
 
   get allowedIpsError(): string | null {
@@ -258,6 +262,7 @@ export class IntegrationsComponent implements OnInit {
     if (this.saving()) return;
     this.submitAttempted.set(true);
     if (this.nameError || this.kindFieldsError(this.formData.kind)) return;
+    if (this.formData.kind === 'outbound' && this.accessTokenError) return;
 
     this.saving.set(true);
     this.errorMessage.set(null);
@@ -272,8 +277,8 @@ export class IntegrationsComponent implements OnInit {
     if (this.formData.kind === 'inbound') {
       body.allowed_ips = splitLines(this.formData.allowed_ips);
     } else {
-      if (this.formData.endpoint_url.trim()) body.endpoint_url = this.formData.endpoint_url.trim();
-      if (this.formData.access_token.trim()) body.access_token = this.formData.access_token.trim();
+      body.endpoint_url = this.formData.endpoint_url.trim();
+      body.access_token = this.formData.access_token.trim();
     }
     this.integrationsService.createProjectIntegration(this.projectName, body).subscribe({
       next: (created) => {
