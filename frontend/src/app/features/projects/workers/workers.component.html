@@ -37,7 +37,7 @@
           <div slot="actions">
             @switch (gradientCi().state) {
               @case ('connect') {
-                <button *appWritable="access()" grButton severity="secondary" label="Connect" icon="link" size="small" (click)="showGradientCiConnect.set(true)"></button>
+                <button *appWritable="access()" grButton severity="secondary" label="Connect" icon="link" size="small" [appManagedDisable]="access()" (click)="showGradientCiConnect.set(true)"></button>
               }
               @case ('connected') {
                 @if (gradientCi().worker; as w) {

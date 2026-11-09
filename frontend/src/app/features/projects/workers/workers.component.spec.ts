@@ -244,6 +244,14 @@ describe('WorkersComponent - access gating', () => {
     expect(itemOf(menu, 'Delete')?.danger).toBe(true);
     expect(findByText(fixture.nativeElement, 'fire test')).toBeNull();
   });
+
+  it('disables Test worker until the worker is connected', async () => {
+    const online = { ...workerUnmanaged, worker_id: 'online', connected: true };
+    const fixture = setup({ access: { managed: false, canEdit: true, canTrigger: true }, workers: [workerUnmanaged, online], caches: [{ id: 'c', name: 'c' }] });
+    await settled(fixture);
+    expect(itemOf(menuOf(fixture, workerUnmanaged), 'Test worker')?.disabled).toBe(true);
+    expect(itemOf(menuOf(fixture, online), 'Test worker')?.disabled).toBe(false);
+  });
 });
 
 describe('WorkersComponent - team workers', () => {
@@ -414,6 +422,12 @@ describe('WorkersComponent - Gradient.CI Servers entry', () => {
     const fixture = setup({ access: writable, workers: [], caches });
     await settled(fixture);
     expect(buttonsLabelled(entry(fixture)!, 'Connect').length).toBe(1);
+  });
+
+  it('shows but disables Connect on a state-managed project, like Register Worker', async () => {
+    const fixture = setup({ access: { ...writable, managed: true }, workers: [], caches });
+    await settled(fixture);
+    expect(buttonsLabelled(entry(fixture)!, 'Connect')[0].getAttribute('aria-disabled')).toBe('true');
   });
 
   it('shows a project connection with its offline reason and Disconnect', async () => {

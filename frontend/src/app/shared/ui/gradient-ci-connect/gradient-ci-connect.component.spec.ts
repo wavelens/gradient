@@ -60,6 +60,8 @@ describe('GradientCiConnectComponent', () => {
     const statusOf = vi.fn(() => of({ connected: false }));
     const { fixture, component } = setup('project', statusOf);
 
+    const closeButtons = [...document.querySelectorAll('.gr-dialog button')].filter((b) => /close/i.test(b.getAttribute('aria-label') ?? b.textContent ?? ''));
+    expect(closeButtons).toHaveLength(1);
     document.querySelector<HTMLButtonElement>('.gr-dialog__close')!.click();
     fixture.detectChanges();
     vi.advanceTimersByTime(10_000);

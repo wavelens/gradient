@@ -27,7 +27,7 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { MANAGED_ITEM_DISABLED_REASON, WritableDirective, createMissingPermissionLoadStateError, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
+import { MANAGED_ITEM_DISABLED_REASON, ServerConfigurationManagedBannerComponent, WritableDirective, createMissingPermissionLoadStateError, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { RelativeTimePipe } from '@shared/text';
@@ -53,6 +53,7 @@ const SECRET_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
     RowListComponent,
     SettingsSectionComponent,
     WritableDirective,
+    ServerConfigurationManagedBannerComponent,
   ],
   templateUrl: './secrets.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
