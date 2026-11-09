@@ -121,7 +121,7 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     fixture.detectChanges();
     const cells = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr td'))
       .map((cell) => cell.textContent?.trim());
-    expect(cells.slice(0, 4)).toEqual(['exec', 'Builder One', 'apps.x86_64-linux.train (node 1)', '7.3']);
+    expect(cells.slice(0, 5)).toEqual(['exec', '-', 'Builder One', 'apps.x86_64-linux.train (node 1)', '7.3']);
   });
 
   it('hides the score column and score filters from a non-superuser and ignores a score filter', () => {
@@ -131,7 +131,7 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     const el = fixture.nativeElement as HTMLElement;
     expect(Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent?.trim())).not.toContain('Score');
     expect(el.querySelector('.filters')?.textContent).not.toContain('Score');
-    expect(el.querySelectorAll('tbody tr td').length).toBe(5);
+    expect(el.querySelectorAll('tbody tr td').length).toBe(6);
     expect(fixture.componentInstance.filteredJobs().length).toBe(1);
   });
 
@@ -169,7 +169,7 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     const fixture = setupWithAssigned([{ ...ASSIGNED, worker_name: 'Builder One' }, { ...ASSIGNED, id: 'j2' }]);
     fixture.detectChanges();
     const workers = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr'))
-      .map((row) => row.querySelectorAll('td')[1].textContent?.trim());
+      .map((row) => row.querySelector('td.worker')?.textContent?.trim());
     expect(workers).toEqual(['Builder One', 'Not shared with this account']);
   });
 
@@ -182,7 +182,7 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     fixture.detectChanges();
     const rows = (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('tbody tr');
     expect(rows.length).toBe(1);
-    expect(Array.from(rows[0].querySelectorAll('td')).slice(1, 3).map((cell) => cell.textContent?.trim()))
+    expect(Array.from(rows[0].querySelectorAll('td')).slice(2, 4).map((cell) => cell.textContent?.trim()))
       .toEqual(['2 sub jobs', 'apps.x86_64-linux.train (cluster, 2 sub jobs)']);
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     rows[0].click();
@@ -448,6 +448,13 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
       task_display_name: 'Exec States Task',
     });
     expect(row.querySelector('td.origin')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Sandbox / Exec States Task');
+  });
+
+  it('names the project and task of an assigned row by their display names', () => {
+    const fixture = setupWithAssigned([{ ...ASSIGNED, project_name: 'sandbox', project_display_name: 'Sandbox', task: 'oktask', task_display_name: 'OK Task' }]);
+    const cell = fixture.nativeElement.querySelector('tbody td.origin') as HTMLElement;
+    expect(cell.textContent?.replace(/\s+/g, ' ').trim()).toBe('Sandbox / OK Task');
+    expect(Array.from(cell.querySelectorAll('a')).map((a) => a.getAttribute('href'))).toEqual(['/project/sandbox', '/project/sandbox/task/oktask?eval=e1abc123']);
   });
 
   it('shows a hint instead of the action to a viewer who may not fix the waiting reason', () => {

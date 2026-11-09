@@ -55,7 +55,7 @@ function setup(superuser = false): ComponentFixture<BoardExpensiveJobsComponent>
 
 function workerCells(fixture: ComponentFixture<BoardExpensiveJobsComponent>): string[] {
   const rows = Array.from(fixture.nativeElement.querySelectorAll('tbody tr')) as HTMLElement[];
-  return rows.map((r) => (r.querySelectorAll('td')[3] as HTMLElement).textContent!.trim());
+  return rows.map((r) => (r.querySelector('td:last-child') as HTMLElement).textContent!.trim());
 }
 
 describe('BoardExpensiveJobsComponent', () => {
@@ -75,6 +75,13 @@ describe('BoardExpensiveJobsComponent', () => {
     const fixture = setup();
     const link = fixture.nativeElement.querySelector('a.build-link') as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe('/project/nixpkgs/log/e1?build=b1');
+  });
+
+  it('names the project and task of each build by display name and links them', () => {
+    const fixture = setup();
+    const cell = fixture.nativeElement.querySelector('app-board-project-task-links') as HTMLElement;
+    expect(cell.textContent?.replace(/\s+/g, ' ').trim()).toBe('Nixpkgs / CI');
+    expect(Array.from(cell.querySelectorAll('a')).map((a) => a.getAttribute('href'))).toEqual(['/project/nixpkgs', '/project/nixpkgs/task/ci?eval=e1']);
   });
 
   it('links each resource row to the evaluation log that built it', () => {

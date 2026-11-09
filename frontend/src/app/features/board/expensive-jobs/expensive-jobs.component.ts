@@ -14,6 +14,7 @@ import { LabelHelpComponent, MetricChartComponent } from '@shared/ui';
 import { RouterModule } from '@angular/router';
 import { links, oneOf, queryParamSignal } from '@shared/routing';
 import { firstLoad, requestFailedText } from '../first-load';
+import { BoardProjectTaskLinksComponent } from '../project-task-links.component';
 import { formatDuration, formatQuantity } from '@shared/text';
 import { ExpensiveBuild, ExpensiveResource, TopProjectBuildTime } from '@core/models';
 
@@ -22,7 +23,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 @Component({
   selector: 'app-board-expensive-jobs',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, MetricChartComponent, LabelHelpComponent, TableComponent, TabSwitchComponent, LoadStateComponent],
+  imports: [CommonModule, FormsModule, RouterModule, MetricChartComponent, LabelHelpComponent, TableComponent, TabSwitchComponent, LoadStateComponent, BoardProjectTaskLinksComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading jobs..." errorTitle="Failed to load jobs" (retry)="retry()">
@@ -40,12 +41,15 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk';
 
       @if (tab() === 'time') {
         <gr-table class="expensive">
-          <thead><tr><th>#</th><th>Derivation</th><th>Build time</th><th>Worker</th></tr></thead>
+          <thead><tr><th>#</th><th>Project / task</th><th>Derivation</th><th>Build time</th><th>Worker</th></tr></thead>
           <tbody>
             @for (b of builds() ?? []; track b.build_id; let i = $index) {
-              <tr><td>{{ i + 1 }}</td><td class="mono"><a class="build-link" [routerLink]="links.evaluationLog(b.project_slug, b.evaluation, { build: b.build_id })">{{ b.name }}</a></td><td>{{ duration(b.build_time_ms) }}</td><td class="mono">{{ b.worker_name ?? b.worker ?? '-' }}</td></tr>
+              <tr><td>{{ i + 1 }}</td>
+                <td><app-board-project-task-links [project]="b.project_slug" [projectDisplayName]="b.project_display_name"
+                                                  [task]="b.task_name" [taskDisplayName]="b.task_display_name" [evaluation]="b.evaluation" /></td>
+                <td class="mono"><a class="build-link" [routerLink]="links.evaluationLog(b.project_slug, b.evaluation, { build: b.build_id })">{{ b.name }}</a></td><td>{{ duration(b.build_time_ms) }}</td><td class="mono">{{ b.worker_name ?? b.worker ?? '-' }}</td></tr>
             } @empty {
-              <tr><td colspan="4" class="muted">{{ builds() === null ? failed : 'No builds in this window.' }}</td></tr>
+              <tr><td colspan="5" class="muted">{{ builds() === null ? failed : 'No builds in this window.' }}</td></tr>
             }
           </tbody>
         </gr-table>

@@ -13,6 +13,7 @@ import { LiveStatusComponent } from '@shared/ui';
 import { AuthService } from '@core/services/auth.service';
 import { ButtonComponent, LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
+import { BoardProjectTaskLinksComponent } from '../project-task-links.component';
 import { subscribeToBoardSocketWithReload } from '../board-socket';
 import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
 import { schedulerScoreDecimalPipeDigitsFormat } from '../scoring-rule-label';
@@ -57,7 +58,7 @@ interface DecisionRow {
 @Component({
   selector: 'app-board-live-jobs',
   standalone: true,
-  imports: [RelativeTimePipe, CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, TabSwitchComponent, LoadStateComponent, LiveStatusComponent],
+  imports: [RelativeTimePipe, CommonModule, ServerTimestampToLocalDateTimePipe, FormsModule, RouterModule, ButtonComponent, TableComponent, TabSwitchComponent, LoadStateComponent, LiveStatusComponent, BoardProjectTaskLinksComponent],
   template: `
     <div class="view-toggle">
       <gr-tab-switch ariaLabel="Job list" [options]="assignedAndPendingJobListTabOptions" [ngModel]="view()" (ngModelChange)="setView($event)" />
@@ -102,7 +103,7 @@ interface DecisionRow {
           @if (assignedRows().length || assignedEmptyText()) {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th>@if (superuser()) {<th>Score</th>}<th>Assigned</th><th><span class="sr-only">Details</span></th></tr>
+              <tr><th>Kind</th><th>Project / task</th><th>Worker</th><th>Derivation / Evaluation / Exec</th>@if (superuser()) {<th>Score</th>}<th>Assigned</th><th><span class="sr-only">Details</span></th></tr>
             </thead>
             <tbody>
               @for (row of assignedRows(); track row.job.id) {
@@ -111,6 +112,10 @@ interface DecisionRow {
                 <tr class="clickable" (click)="router.navigateByUrl(detail)">
                   @let subject = rowSubject(row);
                   <td>{{ jobKindName(j.kind) }}</td>
+                  <td class="origin">
+                    <app-board-project-task-links [project]="j.project_name" [projectDisplayName]="j.project_display_name"
+                                                  [task]="j.task" [taskDisplayName]="j.task_display_name" [evaluation]="j.evaluation_id" />
+                  </td>
                   <td class="mono worker">{{ j.cluster_job ? subJobLabel(row.subJobs) : workerDisplayNameOrNotSharedLabel(j.worker_name) }}</td>
                   <td class="mono subject" [title]="subject">
                     <a [routerLink]="detail" (click)="$event.stopPropagation()">{{ subject }}</a>
@@ -122,7 +127,7 @@ interface DecisionRow {
                   <td>›</td>
                 </tr>
               } @empty {
-                <tr><td [attr.colspan]="superuser() ? 6 : 5" class="muted">{{ assignedEmptyText() }}</td></tr>
+                <tr><td [attr.colspan]="superuser() ? 7 : 6" class="muted">{{ assignedEmptyText() }}</td></tr>
               }
             </tbody>
           </gr-table>
@@ -166,14 +171,8 @@ interface DecisionRow {
               <tr class="clickable" (click)="router.navigateByUrl(links.boardPendingJob(p))">
                 <td class="kind">{{ jobKindName(p.kind) }}</td>
                 <td class="origin">
-                  @if (p.project_name; as project) {
-                    <a [routerLink]="links.project(project)" (click)="$event.stopPropagation()">{{ p.project_display_name || project }}</a>
-                    @if (p.task; as task) {
-                      / <a [routerLink]="links.task(project, task, p.evaluation_id)" (click)="$event.stopPropagation()">{{ p.task_display_name || task }}</a>
-                    }
-                  } @else {
-                    <span class="muted">-</span>
-                  }
+                  <app-board-project-task-links [project]="p.project_name" [projectDisplayName]="p.project_display_name"
+                                                [task]="p.task" [taskDisplayName]="p.task_display_name" [evaluation]="p.evaluation_id" />
                 </td>
                 <td class="mono subject"><a [routerLink]="links.boardPendingJob(p)" [title]="subject" (click)="$event.stopPropagation()">{{ subject }}</a></td>
                 <td class="waiting">

@@ -11,6 +11,7 @@ import { LoadStateComponent, TabSwitchComponent, TableComponent } from '@gradien
 import { FormsModule } from '@angular/forms';
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { firstLoad } from '../first-load';
+import { BoardProjectTaskLinksComponent } from '../project-task-links.component';
 import { formatQuantity } from '@shared/text';
 import { BoardService } from '@core/services/board.service';
 import { ExpensiveEval } from '@core/models';
@@ -21,7 +22,7 @@ type Tab = 'time' | 'rss' | 'thunks' | 'fncalls' | 'alloc';
 @Component({
   selector: 'app-board-expensive-evals',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, TableComponent, TabSwitchComponent, LoadStateComponent],
+  imports: [CommonModule, FormsModule, RouterModule, TableComponent, TabSwitchComponent, LoadStateComponent, BoardProjectTaskLinksComponent],
   template: `
     <gr-load-state [loading]="first.loading()" [error]="first.error()" [empty]="!first.received()"
                    loadingMessage="Loading evaluations..." errorTitle="Failed to load evaluations" (retry)="retry()">
@@ -38,15 +39,14 @@ type Tab = 'time' | 'rss' | 'thunks' | 'fncalls' | 'alloc';
       </div>
 
       <gr-table class="expensive">
-        <thead><tr><th>#</th><th>Project / Task</th><th>Evaluation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
+        <thead><tr><th>#</th><th>Project / task</th><th>Evaluation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
         <tbody>
           @for (r of rows(); track r.evaluation; let i = $index) {
             <tr>
               <td>{{ i + 1 }}</td>
               <td>
-                <a [routerLink]="links.project(r.project_name)">{{ r.project_display_name || r.project_name }}</a>
-                /
-                <a [routerLink]="links.task(r.project_name, r.task_name)">{{ r.task_display_name || r.task_name }}</a>
+                <app-board-project-task-links [project]="r.project_name" [projectDisplayName]="r.project_display_name"
+                                              [task]="r.task_name" [taskDisplayName]="r.task_display_name" />
               </td>
               <td><a class="evaluation-link" [routerLink]="links.evaluationLog(r.project_name, r.evaluation)">Open log</a></td>
               <td>{{ quantity(r.value, r.unit) }}</td>
