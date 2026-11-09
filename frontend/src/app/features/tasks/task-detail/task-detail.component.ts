@@ -59,7 +59,7 @@ import {
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -210,6 +210,13 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   latestEvaluationNotStarted = computed(() => {
     const e = this.latestEvaluation();
     return !!e && isEvaluationNotStartedStatus(e.status);
+  });
+
+  startDisabledReason = computed(() => {
+    const latest = this.latestEvaluation();
+    if (!latest || !this.latestEvaluationNotStarted()) return null;
+    const waiting = latest.waiting_reason && explainWaiting(latest.waiting_reason, this.projectName, this.waitingAccess()).title;
+    return `The latest evaluation has not started yet${waiting ? `: ${waiting}` : ''}.`;
   });
 
   ngOnInit(): void {

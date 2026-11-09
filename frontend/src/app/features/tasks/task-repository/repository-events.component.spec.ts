@@ -47,12 +47,13 @@ function repo(overrides: Partial<TaskRepositoryResponse> = {}): TaskRepositoryRe
   };
 }
 
-function render(state: TaskRepositoryResponse, services: { tasks?: object; integrations?: object; githubApp?: boolean; superuser?: boolean } = {}, managed = false) {
+function render(state: TaskRepositoryResponse, services: { tasks?: object; integrations?: object; githubApp?: boolean; superuser?: boolean; outsideTaskRoute?: boolean } = {}, managed = false) {
+  const routeData = services.outsideTaskRoute ? {} : taskAccessData({ managed, canEdit: !managed, canTrigger: !managed });
   TestBed.configureTestingModule({
     imports: [RepositoryEventsComponent],
     providers: [
       provideRouter([]),
-      { provide: ActivatedRoute, useValue: { parent: { data: of(taskAccessData({ managed, canEdit: !managed, canTrigger: !managed })) } } },
+      { provide: ActivatedRoute, useValue: { parent: { data: of(routeData) } } },
       { provide: TasksService, useValue: services.tasks ?? {} },
       { provide: IntegrationsService, useValue: services.integrations ?? { listIntegrationDeliveries: () => of([]) } },
       { provide: ConfigService, useValue: { githubAppEnabled: services.githubApp ?? false } },
@@ -71,6 +72,17 @@ describe('RepositoryEventsComponent', () => {
   it('offers to connect the host when no connection serves the repository', () => {
     const el = render(repo()).nativeElement as HTMLElement;
     expect(el.querySelector('[data-testid="connect-git-host"]')?.textContent).toContain('forgejo.example.com');
+  });
+
+  it('keeps Connect usable in the connect wizard, which has no task route data and explains a block', () => {
+    const wizard = render(repo(), { outsideTaskRoute: true }).nativeElement as HTMLElement;
+    expect(wizard.querySelector('[data-testid="connect-git-host"]')?.hasAttribute('aria-disabled')).toBe(false);
+
+    TestBed.resetTestingModule();
+    const managed = render(repo({ can_edit: false }), {}, true).nativeElement as HTMLElement;
+    const button = managed.querySelector('[data-testid="connect-git-host"]')!;
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(managed.querySelector(`#${button.getAttribute('aria-describedby')}`)?.textContent).toContain('managed by the server configuration');
   });
 
   it('points a GitHub repository to the next step for the GitHub App', () => {

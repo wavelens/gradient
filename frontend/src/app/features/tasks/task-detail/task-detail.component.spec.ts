@@ -583,7 +583,16 @@ describe('TaskDetailComponent - in-progress state (#452)', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Queued' });
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
-    expect(startBtn!.disabled).toBe(true);
+    expect(startBtn!.getAttribute('aria-disabled')).toBe('true');
+    expect(fixture.componentInstance.startDisabledReason()).toBe('The latest evaluation has not started yet.');
+  });
+
+  it('names the wait reason of the latest evaluation as the reason Start Evaluation is blocked', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true },
+      { primaryStatus: 'Waiting', primary: { waiting_reason: { kind: 'no_cache' } } });
+    const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement;
+    const reason = (fixture.nativeElement as HTMLElement).querySelector(`#${startBtn.getAttribute('aria-describedby')}`);
+    expect(reason?.textContent).toBe('The latest evaluation has not started yet: No writable cache.');
   });
 
   it('enables Start Evaluation while the latest evaluation runs', () => {

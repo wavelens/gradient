@@ -29,7 +29,7 @@ import { IncomingDeliveriesComponent, SELF_HOSTED_GIT_HOSTS, deliverySummary, gi
 import { CurrentTimeSignal, relativeTime, slugify } from '@shared/text';
 import { fieldChecks, splitList, unsavedChanges } from '@shared/forms';
 import { provisioningIntegration } from './provisioning';
-import { ManagedDisableDirective, accessDisabledReason } from '@shared/access';
+import { accessDisabledReason } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 
 interface EventsForm {
@@ -86,7 +86,6 @@ function integrationLabel(i: RepositoryIntegration): string {
     SelectComponent,
     SettingsSectionComponent,
     IncomingDeliveriesComponent,
-    ManagedDisableDirective,
   ],
   templateUrl: './repository-events.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
