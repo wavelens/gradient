@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, computed, input, model } from '@angular/core';
-import { permissionLabel } from '@shared/text';
+import { permissionLabelWithCapitalizedFirstLetter } from '@shared/text';
 import { PermissionEntry } from '@core/models';
 import { CheckGroupsComponent, type CheckGroup } from '../check-groups/check-groups.component';
 
@@ -25,7 +25,7 @@ export class PermissionPickerComponent {
       label,
       items: this.permissions()
         .filter((p) => p.mutating === mutating)
-        .map((p) => ({ value: p.id, label: permissionLabel(p.id) })),
+        .map((p) => ({ value: p.id, label: permissionLabelWithCapitalizedFirstLetter(p.id) })),
     });
     return [group('Read', false), group('Write', true)].filter((g) => g.items.length > 0);
   });

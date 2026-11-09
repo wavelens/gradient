@@ -31,7 +31,7 @@ describe('PermissionPickerComponent', () => {
   it('splits the permissions into a read and a write group', () => {
     const { root } = render();
     const groups = Array.from(root.querySelectorAll('fieldset')).map((r) => r.textContent?.replace(/\s+/g, ' ').trim());
-    expect(groups).toEqual(['Read view project', 'Write delete project']);
+    expect(groups).toEqual(['Read View project', 'Write Delete project']);
   });
 
   it('hands back a new selection when a permission is ticked', async () => {

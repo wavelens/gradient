@@ -397,7 +397,7 @@ describe('WebhooksComponent', () => {
     );
     expect(service.list).not.toHaveBeenCalled();
     expect(root.textContent).toContain('No access');
-    expect(root.textContent).toContain('manage webhooks permission for this project');
+    expect(root.textContent).toContain('manage event notifications permission for this project');
     expect(root.textContent).not.toContain('New Webhook');
     expect(root.textContent).not.toContain('Try Again');
   });
