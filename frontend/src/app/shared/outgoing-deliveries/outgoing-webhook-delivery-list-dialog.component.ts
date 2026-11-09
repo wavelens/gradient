@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, input, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable } from 'rxjs';
 import { BadgeComponent, ButtonComponent, DialogComponent, IconComponent, LoadStateComponent } from '@gradient/ui/ui';
@@ -62,6 +62,7 @@ export class OutgoingWebhookDeliveryListDialog implements OnInit {
   expandedDeliveryDetailByDeliveryId = signal<ReadonlyMap<string, RecordedOutgoingDelivery | 'loading' | 'error'>>(new Map());
   offset = signal(0);
   hasMore = signal(false);
+  pagingSummary = computed(() => `Page ${this.offset() / DELIVERIES_PER_PAGE + 1} · row range ${this.offset() + 1}–${this.offset() + this.deliveries().length}`);
 
   ngOnInit(): void {
     this.loadPage();
@@ -70,12 +71,12 @@ export class OutgoingWebhookDeliveryListDialog implements OnInit {
   loadPage(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    this.loadDeliveryPage()(DELIVERIES_PER_PAGE, this.offset())
+    this.loadDeliveryPage()(DELIVERIES_PER_PAGE + 1, this.offset())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (rows) => {
-          this.deliveries.set(rows);
-          this.hasMore.set(rows.length === DELIVERIES_PER_PAGE);
+          this.deliveries.set(rows.slice(0, DELIVERIES_PER_PAGE));
+          this.hasMore.set(rows.length > DELIVERIES_PER_PAGE);
           this.loading.set(false);
         },
         error: (error: unknown) => {

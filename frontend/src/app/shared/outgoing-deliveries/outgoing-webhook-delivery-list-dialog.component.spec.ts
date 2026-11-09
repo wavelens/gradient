@@ -101,18 +101,27 @@ describe('OutgoingWebhookDeliveryListDialog', () => {
     expect(document.querySelector('.gr-dialog .detail')).toBeNull();
   });
 
-  it('pages past the first 50 deliveries and back', () => {
-    const full = Array.from({ length: 50 }, (_, i) => ({ ...delivered, id: `d${i}` }));
-    const { fixture, loadDeliveryPage } = render((_, offset) => of(offset === 0 ? full : [failed]));
-    expect(loadDeliveryPage).toHaveBeenLastCalledWith(50, 0);
+  it('pages past the first 50 deliveries and back and names the page and its rows', () => {
+    const firstPageAndOneMore = Array.from({ length: 51 }, (_, i) => ({ ...delivered, id: `d${i}` }));
+    const { fixture, loadDeliveryPage } = render((_, offset) => of(offset === 0 ? firstPageAndOneMore : [failed]));
+    const summary = () => document.querySelector('.gr-dialog .paging-summary')?.textContent?.trim();
+    expect(loadDeliveryPage).toHaveBeenLastCalledWith(51, 0);
+    expect(rows()).toHaveLength(50);
+    expect(summary()).toBe('Page 1 · row range 1–50');
     expect(footerButton('Previous').disabled).toBe(true);
     footerButton('Next').click();
     fixture.detectChanges();
-    expect(loadDeliveryPage).toHaveBeenLastCalledWith(50, 50);
+    expect(loadDeliveryPage).toHaveBeenLastCalledWith(51, 50);
     expect(rows()).toHaveLength(1);
+    expect(summary()).toBe('Page 2 · row range 51–51');
     expect(footerButton('Next').disabled).toBe(true);
     footerButton('Previous').click();
-    expect(loadDeliveryPage).toHaveBeenLastCalledWith(50, 0);
+    expect(loadDeliveryPage).toHaveBeenLastCalledWith(51, 0);
+  });
+
+  it('offers no next page when exactly 50 deliveries exist', () => {
+    render(() => of(Array.from({ length: 50 }, (_, i) => ({ ...delivered, id: `d${i}` }))));
+    expect(document.querySelectorAll('.gr-dialog__footer button')).toHaveLength(0);
   });
 
   it('shows no pager while every delivery fits one page', () => {

@@ -19,7 +19,8 @@ import { EventsService } from '@core/services/events.service';
 import { NotifyService } from '@core/services/notify.service';
 import { AuthService } from '@core/services/auth.service';
 import type { CatalogEntry, DeliveryListItem_WebhookDeliveryId, WebhookResponse } from '@core/models';
-import { webhooksBase } from '@core/models/webhook.model';
+import { eventNameMatchesAnyPrefix } from '@core/models';
+import { eventNamePrefixesByNotificationScope, webhooksBase } from '@core/models/webhook.model';
 import { EVERY_CACHE_PERMISSION, EVERY_PERMISSION } from '@core/resolvers/access-route.testing';
 
 const hook: WebhookResponse = {
@@ -260,6 +261,26 @@ describe('WebhooksComponent', () => {
     expect(legends).toEqual(groups);
   });
 
+  it('leaves out of the project scope the creation and deletion of the project itself', () => {
+    const offered = ['project.create', 'project.update', 'project.delete', 'project.member.add', 'project.webhook.create']
+      .filter((name) => eventNameMatchesAnyPrefix(name, eventNamePrefixesByNotificationScope.project));
+    expect(offered).toEqual(['project.update', 'project.member.add', 'project.webhook.create']);
+  });
+
+  it('reloads the list in the background so the last delivery stays current', () => {
+    vi.useFakeTimers();
+    try {
+      const { fixture, service, root } = setup({ webhookScope: 'project' }, { project: 'p' });
+      service.list.mockReturnValue(of([withLastDelivery(hook, { ...newestDelivery, success: false, response_status: 500 })]));
+      vi.advanceTimersByTime(15_000);
+      fixture.detectChanges();
+      expect(service.list).toHaveBeenCalledTimes(2);
+      expect(root.textContent).toContain('Failing');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('names the empty name and URL under their fields and sends nothing', () => {
     const { fixture, component, service } = setup({ webhookScope: 'project' }, { project: 'p' });
     component.startCreate();
@@ -478,13 +499,13 @@ describe('WebhooksComponent', () => {
     service.deliveries.mockReturnValueOnce(throwError(() => new ApiError('database is down', 500)));
     component.openDeliveries(hook);
     TestBed.inject(ApplicationRef).tick();
-    expect(service.deliveries).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1', 50, 0);
+    expect(service.deliveries).toHaveBeenCalledWith({ kind: 'project', name: 'p' }, 'w1', 51, 0);
     expect(document.body.textContent).toContain('Failed to load deliveries');
     expect(document.querySelector('.gr-dialog')?.textContent).not.toContain('No deliveries yet');
 
     document.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     TestBed.inject(ApplicationRef).tick();
-    expect(service.deliveries).toHaveBeenLastCalledWith({ kind: 'project', name: 'p' }, 'w1', 50, 0);
+    expect(service.deliveries).toHaveBeenLastCalledWith({ kind: 'project', name: 'p' }, 'w1', 51, 0);
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('No deliveries yet');
   });
 

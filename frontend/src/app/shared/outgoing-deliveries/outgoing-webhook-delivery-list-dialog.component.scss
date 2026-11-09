@@ -102,3 +102,10 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+
+.paging-summary {
+  margin-right: auto;
+  align-self: center;
+  font-size: $font-size-sm;
+  color: var(--gr-text-secondary);
+}

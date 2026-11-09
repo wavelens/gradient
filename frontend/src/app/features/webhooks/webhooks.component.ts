@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, OnInit, computed, injec
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { finalize } from 'rxjs';
+import { EMPTY, finalize, tap } from 'rxjs';
 import { WebhookScopeRef, WebhookResponse, accessTo, eventNameToReadableText, eventNamePrefixesByNotificationScope, eventNameMatchesAnyPrefix } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
@@ -43,6 +43,7 @@ import { OutgoingWebhookDeliveryListDialog, getDeliveryResultReason } from '@sha
 import { dialogFormChangesSinceOpen, fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 import { links } from '@shared/routing';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 
 type WebhookFormField = 'name' | 'url' | 'globs';
 
@@ -146,6 +147,15 @@ export class WebhooksComponent implements OnInit {
 
   eventNameToReadableText = eventNameToReadableText;
   getDeliveryResultReason = getDeliveryResultReason;
+
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => (this.denied() || this.loading()
+      ? EMPTY
+      : this.service.list(this.scope).pipe(tap((list) => {
+        this.webhooks.set(list);
+        this.loadError.set(null);
+      }))));
+  }
 
   ngOnInit(): void {
     const { data, paramMap } = this.route.snapshot;

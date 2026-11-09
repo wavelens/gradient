@@ -52,6 +52,7 @@
 
   @if (offset() > 0 || hasMore()) {
     <div grDialogFooter>
+      <span class="paging-summary" aria-live="polite">{{ pagingSummary() }}</span>
       <button grButton type="button" label="Previous" severity="secondary" [disabled]="offset() === 0" (click)="changePageOffsetAndLoadPage(-1)"></button>
       <button grButton type="button" label="Next" severity="secondary" [disabled]="!hasMore()" (click)="changePageOffsetAndLoadPage(1)"></button>
     </div>
