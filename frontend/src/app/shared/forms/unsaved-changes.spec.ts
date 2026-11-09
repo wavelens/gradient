@@ -8,7 +8,7 @@ import { Injector, runInInjectionContext } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { EMPTY, Observable, firstValueFrom, isObservable } from 'rxjs';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
-import { unsavedChanges } from './unsaved-changes';
+import { dialogFormChangesSinceOpen, unsavedChanges } from './unsaved-changes';
 
 function setup(answer: 'leave' | 'stay') {
   const confirm = vi.fn((request: ConfirmRequest) => (answer === 'leave' ? request.action() : EMPTY));
@@ -64,5 +64,20 @@ describe('unsavedChanges', () => {
     const dirty = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(dirty);
     expect(dirty.defaultPrevented).toBe(true);
+  });
+});
+
+describe('dialogFormChangesSinceOpen', () => {
+  it('reports a change only after the dialog opened and while the form differs from that moment', () => {
+    let name = '';
+    const form = dialogFormChangesSinceOpen(() => ({ name }));
+    name = 'typed before open';
+    expect(form.changed()).toBe(false);
+    form.mark();
+    expect(form.changed()).toBe(false);
+    name = 'Acme';
+    expect(form.changed()).toBe(true);
+    name = 'typed before open';
+    expect(form.changed()).toBe(false);
   });
 });

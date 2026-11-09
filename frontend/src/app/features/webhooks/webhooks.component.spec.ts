@@ -165,6 +165,24 @@ describe('WebhooksComponent', () => {
     );
   });
 
+  it('closes an untouched form on Cancel and asks first once something was typed', () => {
+    const { fixture, component } = setup({ webhookScope: 'team' }, { team: 'platform' });
+    const cancel = () => [...document.querySelectorAll<HTMLButtonElement>('[grDialogFooter] button')].find((b) => b.textContent?.includes('Cancel'))!;
+    component.startCreate();
+    fixture.detectChanges();
+    cancel().click();
+    fixture.detectChanges();
+    expect(component.formOpen()).toBe(false);
+
+    component.startCreate();
+    component.name.set('Deploy hook');
+    fixture.detectChanges();
+    cancel().click();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog__discard')?.textContent).toContain('Discard changes?');
+    expect(component.formOpen()).toBe(true);
+  });
+
   it('keeps subscribed events outside the scope visible in the globs field', () => {
     const { component, service } = setup({ webhookScope: 'team' }, { team: 'platform' });
     component.startEdit({ ...hook, events: ['team.worker.create', 'evaluation.completed', 'build.*'] });

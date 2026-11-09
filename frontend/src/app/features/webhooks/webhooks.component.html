@@ -60,7 +60,7 @@
   </gr-load-state>
 </gr-page-layout>
 
-<gr-dialog [header]="editing() ? 'Edit event notification' : 'New event notification'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px" [error]="formError()" [busy]="saving()">
+<gr-dialog #webhookDialog [header]="editing() ? 'Edit event notification' : 'New event notification'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px" [error]="formError()" [busy]="saving()" [confirmDiscard]="formChanges.changed()">
   <div #webhookForm>
   <gr-form-field label="Name" for="webhook-name" [invalid]="!!nameError()" [error]="nameError() ?? ''">
     <input grInput id="webhook-name" [ngModel]="name()" (ngModelChange)="name.set($event)" (keyup.enter)="save()" />
@@ -82,7 +82,7 @@
   <gr-checkbox label="Active" [ngModel]="active()" (ngModelChange)="active.set($event)" />
   </div>
   <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" [disabled]="saving()" (click)="formOpen.set(false)"></button>
+    <button grButton label="Cancel" severity="secondary" [disabled]="saving()" (click)="webhookDialog.close()"></button>
     <button grButton label="Save" icon="check" [loading]="saving()" (grSubmit)="save()"></button>
   </div>
 </gr-dialog>

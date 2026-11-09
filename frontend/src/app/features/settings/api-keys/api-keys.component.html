@@ -80,11 +80,13 @@
 
 <!-- Create / Edit Dialog -->
 <gr-dialog
+  #keyDialog
   [(visible)]="showDialog"
   width="520px"
   [header]="editingKey() ? 'Edit API Key' : 'Create API Key'"
   [error]="errorMessage()"
   [busy]="creating() || saving()"
+  [confirmDiscard]="formChanges.changed()"
 >
   <div #keyForm>
     <gr-form-field label="Name" for="key-name" [invalid]="!!nameError()" [error]="nameError() ?? ''">
@@ -181,7 +183,7 @@
       grButton
       label="Cancel"
       severity="secondary"
-      (click)="showDialog.set(false)"
+      (click)="keyDialog.close()"
       [disabled]="creating() || saving()"
     ></button>
     <button

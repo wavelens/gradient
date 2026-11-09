@@ -165,6 +165,15 @@ describe('ApiKeysComponent - field checks', () => {
     return { fixture, component, createApiKey, field };
   }
 
+  it('asks before Cancel throws away a typed key name', () => {
+    const { fixture, component } = openCreate();
+    const cancel = [...document.querySelectorAll<HTMLButtonElement>('[grDialogFooter] button')].find((b) => b.textContent?.includes('Cancel'))!;
+    cancel.click();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog__discard')?.textContent).toContain('Discard changes?');
+    expect(component.showDialog()).toBe(true);
+  });
+
   it('checks the allowed sources once the field loses focus, not while typing', () => {
     const { fixture, component, field } = openCreate();
     const ips = document.querySelector('#key-allowed-ips') as HTMLTextAreaElement;

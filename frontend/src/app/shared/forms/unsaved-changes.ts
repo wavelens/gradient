@@ -45,3 +45,16 @@ export function unsavedChanges(read: () => unknown, page: string): UnsavedChange
         .pipe(defaultIfEmpty(false)),
   };
 }
+
+export interface UnsavedChangesFlag {
+  mark(): void;
+  changed(): boolean;
+}
+
+export function dialogFormChangesSinceOpen(read: () => unknown): UnsavedChangesFlag {
+  let opened: string | null = null;
+  return {
+    mark: () => (opened = JSON.stringify(read())),
+    changed: () => opened !== null && JSON.stringify(read()) !== opened,
+  };
+}

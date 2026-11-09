@@ -40,7 +40,7 @@ import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { RelativeTimePipe } from '@shared/text';
 import { OutgoingWebhookDeliveryListDialog, getDeliveryResultReason } from '@shared/outgoing-deliveries';
-import { fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
+import { dialogFormChangesSinceOpen, fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 import { links } from '@shared/routing';
 
@@ -121,6 +121,7 @@ export class WebhooksComponent implements OnInit {
   events = signal<string[]>([]);
   globs = signal('');
   active = signal(true);
+  formChanges = dialogFormChangesSinceOpen(() => [this.name(), this.url(), this.events(), this.globs(), this.active()]);
   attempted = signal(false);
   serverFieldRejection = signal<{ field: WebhookFormField; value: string; message: string } | null>(null);
   nameError = computed(() => (this.attempted() && !this.name().trim() ? 'Enter a name.' : this.serverRejectionOf('name', this.name())));
@@ -265,6 +266,7 @@ export class WebhooksComponent implements OnInit {
     this.events.set(patterns.filter(offered));
     this.globs.set(patterns.filter((event) => !offered(event)).join(', '));
     this.active.set(hook?.active ?? true);
+    this.formChanges.mark();
     this.formOpen.set(true);
   }
 

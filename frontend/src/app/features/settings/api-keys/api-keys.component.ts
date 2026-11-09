@@ -34,7 +34,7 @@ import { ConfirmService } from '@shared/confirm';
 import { AccessState, ApiKeyInfo, PatchApiKeyRequest, PermissionEntry } from '@core/models';
 import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { PermissionPickerComponent } from '@shared/ui';
-import { CreateCacheDialogComponent, fieldChecks, injectCanCreateCache, injectRevealFirstInvalid, isIpNetwork, splitLines } from '@shared/forms';
+import { CreateCacheDialogComponent, dialogFormChangesSinceOpen, fieldChecks, injectCanCreateCache, injectRevealFirstInvalid, isIpNetwork, splitLines } from '@shared/forms';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
 type ScopeType = 'none' | 'project' | 'cache';
@@ -139,6 +139,15 @@ export class ApiKeysComponent implements OnInit {
   formProject: string | null = null;
   formCache: string | null = null;
   formAllowedIps = '';
+  formChanges = dialogFormChangesSinceOpen(() => [
+    this.formName,
+    this.formExpiresInDays,
+    this.formPermissions,
+    this.formScope,
+    this.formProject,
+    this.formCache,
+    this.formAllowedIps,
+  ]);
 
   ngOnInit(): void {
     this.loadKeys();
@@ -216,6 +225,7 @@ export class ApiKeysComponent implements OnInit {
     this.attempted.set(false);
     this.keyNameConflictError.set(null);
     this.allowedIpsTouched.set(false);
+    this.formChanges.mark();
     this.showDialog.set(true);
   }
 
@@ -239,6 +249,7 @@ export class ApiKeysComponent implements OnInit {
     this.attempted.set(false);
     this.keyNameConflictError.set(null);
     this.allowedIpsTouched.set(false);
+    this.formChanges.mark();
     this.showDialog.set(true);
   }
 
