@@ -86,13 +86,22 @@ describe('WorkerMetricsComponent', () => {
     expect(charts[0].series[0].data).toEqual([40, null]);
   });
 
-  it('leaves a series without values out of its chart and legend', async () => {
+  it('names the speed chart after both series when both have values', async () => {
+    const fixture = setup('builder-1', () => of({
+      worker_id: WORKER_ID, display_name: 'builder-1', connections: [], jobs_dispatched: 0,
+      samples: [{ at: '2026-11-08T10:00:00', upload_speed_mbps: 5, download_speed_mbps: 7 }],
+    }));
+    await settled(fixture);
+    expect(fixture.componentInstance.charts().map((chart) => chart.title)).toContain('Upload and download speed');
+  });
+
+  it('leaves a series without values out of its chart, legend and title', async () => {
     const fixture = setup('builder-1', () => of({
       worker_id: WORKER_ID, display_name: 'builder-1', connections: [], jobs_dispatched: 0,
       samples: [{ at: '2026-11-08T10:00:00', upload_speed_mbps: 5, download_speed_mbps: null }],
     }));
     await settled(fixture);
-    const speed = fixture.componentInstance.charts().find((chart) => chart.title === 'Upload and download speed')!;
+    const speed = fixture.componentInstance.charts().find((chart) => chart.title === 'Upload speed')!;
     expect(speed.series.map((series) => series.name)).toEqual(['upload']);
     expect(speed.colors).toEqual(['--gr-chart-purple']);
   });

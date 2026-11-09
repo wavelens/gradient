@@ -33,6 +33,15 @@ interface WorkerMetricChart {
   yAxisMax?: number;
 }
 
+interface WorkerMetricChartDefinition extends Omit<WorkerMetricChart, 'title'> {
+  title: string | ((shownSeriesNames: string[]) => string);
+}
+
+function speedTitle(shownSeriesNames: string[]): string {
+  const names = shownSeriesNames.join(' and ');
+  return `${names.charAt(0).toUpperCase()}${names.slice(1)} speed`;
+}
+
 @Component({
   selector: 'app-worker-metrics',
   standalone: true,
@@ -118,11 +127,11 @@ export class WorkerMetricsComponent implements OnInit {
   times = computed(() => this.samples().map((s) => clockTime(s.at)));
   charts = computed(() => {
     const values = (pick: (sample: WorkerSamplePoint) => number | null | undefined) => this.samples().map((s) => pick(s) ?? null);
-    const charts: WorkerMetricChart[] = [
+    const charts: WorkerMetricChartDefinition[] = [
       { title: 'CPU usage', type: 'line', series: [{ name: 'cpu', data: values((s) => s.cpu_usage_pct) }], colors: ['--gr-chart-cyan'], valueFormatter: this.percent, yAxisMax: 100 },
       { title: 'RAM free', type: 'area', series: [{ name: 'ram free', data: values((s) => s.ram_free_mb) }], colors: ['--gr-chart-green'], valueFormatter: this.megabytes },
       {
-        title: 'Upload and download speed',
+        title: speedTitle,
         type: 'line',
         series: [
           { name: 'upload', data: values((s) => s.upload_speed_mbps) },
@@ -136,11 +145,15 @@ export class WorkerMetricsComponent implements OnInit {
     ];
     const hasData = (series: WorkerMetricChart['series'][number]) => series.data.some((value) => value !== null);
     return charts
-      .map((chart) => ({
-        ...chart,
-        series: chart.series.filter(hasData),
-        colors: chart.colors.filter((_, index) => hasData(chart.series[index])),
-      }))
+      .map((chart): WorkerMetricChart => {
+        const series = chart.series.filter(hasData);
+        return {
+          ...chart,
+          title: typeof chart.title === 'string' ? chart.title : chart.title(series.map((s) => s.name)),
+          series,
+          colors: chart.colors.filter((_, index) => hasData(chart.series[index])),
+        };
+      })
       .filter((chart) => chart.series.length > 0);
   });
 
