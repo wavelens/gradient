@@ -22,6 +22,7 @@ import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { signal } from '@angular/core';
 import { MenuItem } from '@gradient/ui/ui';
+import { MANAGED_ITEM_DISABLED_REASON } from '@shared/access';
 import { ProjectWorkerEntry } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
@@ -295,7 +296,8 @@ describe('WorkersComponent - team workers', () => {
     await settled(fixture);
     const menu = menuOf(fixture, workerUnmanaged);
     expect(itemOf(menu, 'Deactivate')?.disabled).toBe(false);
-    expect(itemOf(menu, 'Edit')?.disabled).toBe(true);
+    expect(itemOf(menu, 'Edit')?.disabledReason).toBe(MANAGED_ITEM_DISABLED_REASON);
+    expect(itemOf(menu, 'Delete')?.disabledReason).toBe(MANAGED_ITEM_DISABLED_REASON);
   });
 
   it('fireTest calls the service and surfaces the result via a toast', async () => {

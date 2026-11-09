@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { canAbortBuild, canPrioritizeBuild, canRetryBuild } from './build-actions';
+import {
+  canAbortBuild, canPrioritizeBuild, canRetryBuild, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason,
+  getDownloadLogMenuItemDisabledReason, showJobMenuItemDisabledReason,
+} from './build-actions';
 
 describe('build actions', () => {
   it('prioritizes only a pending build nobody prioritized yet', () => {
@@ -34,5 +37,15 @@ describe('build actions', () => {
     expect(canRetryBuild({ status: 'Aborted', replaced: false }, 'Aborted')).toBe(true);
     expect(canRetryBuild({ status: 'Failed', replaced: true }, 'FailedTimeout')).toBe(false);
     expect(canRetryBuild({ status: 'Completed', replaced: false }, 'Aborted')).toBe(false);
+  });
+
+  it('gives a reason for every build menu item it disables and none for a usable one', () => {
+    expect(getArtefactsMenuItemDisabledReason('Building', true)).toBe('Artefacts are available after a successful build.');
+    expect(getArtefactsMenuItemDisabledReason('Completed', false)).toBe('No stored artefacts for this build.');
+    expect(getArtefactsMenuItemDisabledReason('Substituted', true)).toBeNull();
+    expect(getClosureMenuItemDisabledReason('Completed')).toBeNull();
+    expect(getDownloadLogMenuItemDisabledReason('FailedPermanent')).toBeNull();
+    expect(showJobMenuItemDisabledReason(null, true, 'evaluation')).toBe('No job for this evaluation on the job board.');
+    expect(showJobMenuItemDisabledReason('job-1', true, 'build')).toBeNull();
   });
 });

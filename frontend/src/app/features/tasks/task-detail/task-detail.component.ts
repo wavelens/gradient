@@ -59,7 +59,9 @@ import {
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDurationText, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDurationText, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+
+const NO_EVALUATION_SELECTED = 'No evaluation selected.';
 
 @Component({
   selector: 'app-task-detail',
@@ -656,17 +658,19 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     if (!selected || !this.canRetryEvaluation(selected)) return null;
     return {
       label: 'Retry', icon: 'replay',
-      disabled: this.starting() || this.evaluationInProgress(),
+      disabled: this.starting(),
+      disabledReason: this.evaluationInProgress() ? 'An evaluation of this task is in progress.' : null,
       command: () => this.retryEvaluation(selected),
     };
   });
 
   private evaluationPageItems = computed<MenuItem[]>(() => {
     const selected = this.selected();
+    const disabledReason = selected ? null : NO_EVALUATION_SELECTED;
     return [
-      { label: 'Logs', icon: 'article', disabled: !selected,
+      { label: 'Logs', icon: 'article', disabledReason,
         routerLink: selected ? links.evaluationLog(this.projectName, selected.id) : undefined },
-      { label: 'Summary', icon: 'summarize', disabled: !selected,
+      { label: 'Summary', icon: 'summarize', disabledReason,
         routerLink: selected ? links.evaluationSummary(this.projectName, selected.id) : undefined },
     ];
   });
@@ -675,7 +679,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const selected = this.selected();
     const job = links.boardJobOrCluster(selected?.dispatched_job, selected?.cluster_job);
     return [
-      { label: 'Show job', icon: 'work', disabled: !job || !this.authService.isAuthenticated(), routerLink: job },
+      { label: 'Show job', icon: 'work', disabledReason: showJobMenuItemDisabledReason(job, this.authService.isAuthenticated(), 'evaluation'), routerLink: job },
     ];
   });
 
@@ -703,11 +707,12 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         : []),
       ...(this.canTrigger()
         ? [{ label: 'Reevaluate all inputs', icon: 'account_tree',
-             disabled: this.starting() || this.latestEvaluationNotStarted(),
+             disabled: this.starting(),
+             disabledReason: this.startDisabledReason(),
              command: () => this.startEvaluation('full') }]
         : []),
       ...(this.authService.isAuthenticated()
-        ? [{ label: 'Diagnostic report', icon: 'bug_report', disabled: !selected,
+        ? [{ label: 'Diagnostic report', icon: 'bug_report', disabledReason: selected ? null : NO_EVALUATION_SELECTED,
              command: () => this.openReportDialog() }]
         : []),
     ];
@@ -810,23 +815,21 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   private buildPkgMenu(ep: EntryPointSummary, evalId: string): MenuItem[] {
     const evaluation = this.evaluations().find(e => e.id === evalId);
-    const built = ep.build_status === 'Completed' || ep.build_status === 'Substituted';
-    const canArtefacts = built && ep.has_artefacts;
     const from = { task: this.taskName, evaluation: evalId };
     return [
       {
-        label: 'Artefacts', icon: 'download', disabled: !canArtefacts,
-        routerLink: canArtefacts ? links.artefacts(this.projectName, ep.build_id, from) : undefined,
+        label: 'Artefacts', icon: 'download', disabledReason: getArtefactsMenuItemDisabledReason(ep.build_status, ep.has_artefacts),
+        routerLink: links.artefacts(this.projectName, ep.build_id, from),
       },
       {
         label: 'Dependency graph', icon: 'account_tree',
         routerLink: links.dependencyGraph(this.projectName, ep.build_id, from),
       },
       {
-        label: 'View closure', icon: 'hub', disabled: !built,
-        routerLink: built ? links.closure(this.projectName, 'build', ep.build_id, from) : undefined,
+        label: 'View closure', icon: 'hub', disabledReason: getClosureMenuItemDisabledReason(ep.build_status),
+        routerLink: links.closure(this.projectName, 'build', ep.build_id, from),
       },
-      { label: 'SBOM', icon: 'inventory_2', disabled: !built, command: () => this.downloadSbom(ep) },
+      { label: 'SBOM', icon: 'inventory_2', disabledReason: getSbomDownloadMenuItemDisabledReason(ep.build_status), command: () => this.downloadSbom(ep) },
       {
         label: 'Entry-point metrics', icon: 'show_chart',
         routerLink: links.entryPointMetrics(this.projectName, this.taskName, ep.eval),

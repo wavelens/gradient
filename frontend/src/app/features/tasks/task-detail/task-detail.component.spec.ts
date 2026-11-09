@@ -473,7 +473,7 @@ describe('TaskDetailComponent evaluation menu', () => {
       extraEvals: [evalSummary('e0', 'Failed', failedBuilds)],
     });
     fixture.componentInstance.select(fixture.componentInstance.evaluations()[1]);
-    expect(retryItem(fixture)?.disabled).toBe(true);
+    expect(retryItem(fixture)?.disabledReason).toBe('An evaluation of this task is in progress.');
   });
 
   it('reports a failed retry', () => {
@@ -551,7 +551,7 @@ describe('TaskDetailComponent evaluation menu', () => {
 
   it('holds the full reevaluation while an evaluation is queued', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Queued' });
-    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Reevaluate all inputs')?.disabled).toBe(true);
+    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Reevaluate all inputs')?.disabledReason).toBe('The latest evaluation has not started yet.');
   });
 
   it('offers no full reevaluation without trigger access', () => {
@@ -563,7 +563,7 @@ describe('TaskDetailComponent evaluation menu', () => {
     const { fixture } = setup(trigger, { primary: { dispatched_job: 'job-1' } });
     const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job');
     expect(String(item?.routerLink)).toBe('/board/jobs/job-1');
-    expect(item?.disabled).toBe(false);
+    expect(item?.disabledReason).toBeNull();
   });
 
   it('links Show job of a split evaluation to its cluster job', () => {
@@ -572,9 +572,9 @@ describe('TaskDetailComponent evaluation menu', () => {
     expect(String(item?.routerLink)).toBe('/board/clusters/cluster-1');
   });
 
-  it('disables Show job until an eval worker picked the evaluation up', () => {
+  it('says why Show job waits until an eval worker picked the evaluation up', () => {
     const { fixture } = setup(trigger);
-    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job')?.disabled).toBe(true);
+    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job')?.disabledReason).toBe('No job for this evaluation on the job board.');
   });
 });
 
@@ -585,6 +585,8 @@ describe('TaskDetailComponent - in-progress state (#452)', () => {
     expect(startBtn).not.toBeNull();
     expect(startBtn!.getAttribute('aria-disabled')).toBe('true');
     expect(fixture.componentInstance.startDisabledReason()).toBe('The latest evaluation has not started yet.');
+    const reevaluate = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Reevaluate all inputs');
+    expect(reevaluate?.disabledReason).toBe('The latest evaluation has not started yet.');
   });
 
   it('names the wait reason of the latest evaluation as the reason Start Evaluation is blocked', () => {
@@ -1242,9 +1244,9 @@ describe('TaskDetailComponent package sbom', () => {
     expect(menuLabels(fixture)).not.toContain('SBOM');
   });
 
-  it('greys out the sbom of an entry point without outputs', () => {
+  it('says why the sbom of an entry point without outputs waits', () => {
     const { fixture } = setup(access);
-    expect(sbomItem(fixture, { ...epSummary('hello'), build_status: 'Building' })?.disabled).toBe(true);
+    expect(sbomItem(fixture, { ...epSummary('hello'), build_status: 'Building' })?.disabledReason).toBe('The SBOM is available after a successful build.');
   });
 
   it('downloads the sbom of a built entry point under the server filename', () => {
@@ -1262,7 +1264,7 @@ describe('TaskDetailComponent package sbom', () => {
     });
 
     const item = sbomItem(fixture, epSummary('hello'));
-    expect(item?.disabled).toBe(false);
+    expect(item?.disabledReason).toBeNull();
     item!.command!();
 
     expect(download).toHaveBeenCalledWith('b-hello');
@@ -1373,7 +1375,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
     const comp = fixture.componentInstance;
     comp.openPkgContextMenu(new MouseEvent('contextmenu'), epSummary('hello'), 'e1', { openAt: () => {} });
     const closure = comp.pkgMenuModel().find(i => i.label === 'View closure');
-    expect(closure?.disabled).toBe(false);
+    expect(closure?.disabledReason).toBeNull();
     expect(String(closure?.routerLink)).toBe('/project/acme/closure/build/b-hello?task=demo&eval=e1');
   });
 

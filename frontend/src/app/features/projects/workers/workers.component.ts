@@ -53,7 +53,7 @@ import {
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
+import { MANAGED_ITEM_DISABLED_REASON, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { fieldChecks } from '@shared/forms';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
@@ -162,7 +162,7 @@ export class WorkersComponent implements OnInit {
   private menuFor(worker: ProjectWorkerEntry): MenuItem[] {
     const busy = this.deletingId() !== null || this.togglingId() !== null || this.testingId() !== null;
     const canEdit = this.access().canEdit;
-    const rowLocked = this.access().managed;
+    const lockedReason = this.access().managed ? MANAGED_ITEM_DISABLED_REASON : null;
     const testWorker: MenuItem = {
       label: 'Test worker',
       icon: 'bolt',
@@ -179,7 +179,7 @@ export class WorkersComponent implements OnInit {
     }
     if (!canEdit) return [];
     return [
-      { label: 'Edit', icon: 'edit', disabled: busy || this.renaming() || rowLocked, command: () => this.openRenameDialog(worker) },
+      { label: 'Edit', icon: 'edit', disabled: busy || this.renaming(), disabledReason: lockedReason, command: () => this.openRenameDialog(worker) },
       {
         label: worker.active ? 'Deactivate' : 'Activate',
         icon: worker.active ? 'pause' : 'play_arrow',
@@ -188,7 +188,7 @@ export class WorkersComponent implements OnInit {
       },
       testWorker,
       { separator: true },
-      { label: 'Delete', icon: 'delete', danger: true, disabled: busy || rowLocked, command: () => this.deleteWorker(worker) },
+      { label: 'Delete', icon: 'delete', danger: true, disabled: busy, disabledReason: lockedReason, command: () => this.deleteWorker(worker) },
     ];
   }
   showGradientCiConnect = signal(false);

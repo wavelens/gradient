@@ -178,7 +178,7 @@
                       (click)="requestAbort($event, sel)"></button>
             } @else if (retryEvaluationItem(); as retry) {
               <button grButton size="small" label="Retry" icon="replay" severity="secondary"
-                      [disabled]="retry.disabled" (click)="retry.command?.()"></button>
+                      [disabled]="retry.disabled" [disabledReason]="retry.disabledReason" (click)="retry.command?.()"></button>
             }
             <button grButton size="small" icon="more_vert" severity="secondary"
                     (click)="panelMenu.toggle($event)" aria-label="More"></button>

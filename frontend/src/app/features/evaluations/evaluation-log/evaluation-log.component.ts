@@ -72,7 +72,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDurationText, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, getEvaluationTriggerLabel, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDurationText, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -199,7 +199,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
     const from = this.evaluationLogBuildOrigin();
     const job = build.dispatched_job;
-    const buildOutputExists = ['Completed', 'Substituted'].includes(build.status);
     return [
       {
         label: 'Dependency graph',
@@ -209,32 +208,32 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       {
         label: 'Closure',
         icon: 'hub',
-        disabled: !buildOutputExists,
-        routerLink: buildOutputExists ? links.closure(this.projectName, 'build', build.id, from) : undefined,
+        disabledReason: getClosureMenuItemDisabledReason(build.status),
+        routerLink: links.closure(this.projectName, 'build', build.id, from),
       },
       {
         label: 'Show job',
         icon: 'work',
-        disabled: !job || !this.authService.isAuthenticated(),
+        disabledReason: showJobMenuItemDisabledReason(job, this.authService.isAuthenticated(), 'build'),
         routerLink: job ? links.boardJob(job) : undefined,
       },
       {
         label: 'Artefacts',
         icon: 'inventory_2',
-        disabled: !build.has_artefacts,
-        routerLink: build.has_artefacts ? links.artefacts(this.projectName, build.id, from) : undefined,
+        disabledReason: getArtefactsMenuItemDisabledReason(build.status, build.has_artefacts),
+        routerLink: links.artefacts(this.projectName, build.id, from),
       },
       { separator: true },
       {
         label: 'Download Log',
         icon: 'download',
-        disabled: ['Created', 'Queued', 'DependencyFailed'].includes(build.status),
+        disabledReason: getDownloadLogMenuItemDisabledReason(build.status),
         command: () => void this.downloadLog(build),
       },
       {
         label: 'SBOM',
         icon: 'description',
-        disabled: !buildOutputExists,
+        disabledReason: getSbomDownloadMenuItemDisabledReason(build.status),
         command: () => this.downloadSbom(build),
       },
       ...(this.canPrioritize(build)

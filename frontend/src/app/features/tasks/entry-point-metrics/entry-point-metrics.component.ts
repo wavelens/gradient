@@ -16,7 +16,7 @@ import { MetricChartComponent } from '@shared/ui';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { formatBytes, formatCount, formatDuration, monthDayClockTime } from '@shared/text';
-import { buildPhase, buildStatusLabel } from '@shared/evaluation';
+import { buildPhase, buildStatusLabel, getClosureMenuItemDisabledReason } from '@shared/evaluation';
 import { BuildStatus, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/models';
 import { links } from '@shared/routing';
 import { getEntryPointShortName } from '../task-detail/entry-point-groups';
@@ -111,10 +111,7 @@ export class EntryPointMetricsComponent implements OnInit {
   readonly formatDeps = (v: number) => `${formatCount(v)} deps`;
 
   newestBuildHistoryMetricPoint = computed(() => this.points().at(-1));
-  newestBuildSucceeded = computed(() => {
-    const newest = this.newestBuildHistoryMetricPoint();
-    return !!newest && buildPhase(newest.build_status) === 'success';
-  });
+  closureDisabledReason = computed(() => getClosureMenuItemDisabledReason(this.newestBuildHistoryMetricPoint()?.build_status ?? ''));
 
   buildStatusCounts = computed(() => {
     const counts = new Map<BuildStatus, number>();

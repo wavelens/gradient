@@ -360,43 +360,42 @@ describe('EvaluationLogComponent', () => {
       expect(String(items.get('Closure')!.routerLink)).toBe('/project/proj/closure/build/b1?eval=eval-1');
       expect(String(items.get('Show job')!.routerLink)).toBe('/board/jobs/job-1');
       expect(String(items.get('Artefacts')!.routerLink)).toBe('/project/proj/artefacts/b1?eval=eval-1');
-      expect([...items.values()].some((i) => i.disabled)).toBe(false);
+      expect([...items.values()].some((i) => i.disabled || i.disabledReason)).toBe(false);
     });
 
-    it('disables the closure until the build output exists', () => {
+    it('says why the closure waits until the build output exists', () => {
       const { cmp } = setup();
-      const closure = open(cmp, target({ status: 'Failed' })).get('Closure')!;
-      expect(closure.disabled).toBe(true);
-      expect(closure.routerLink).toBeUndefined();
+      expect(open(cmp, target({ status: 'Failed' })).get('Closure')!.disabledReason).toBe('The closure is available after the build succeeds.');
     });
 
-    it('disables the job entry for a build that was never assigned', () => {
+    it('says why the job entry is unavailable for a build that was never assigned', () => {
       const { cmp } = setup();
-      expect(open(cmp, target({ dispatched_job: null })).get('Show job')!.disabled).toBe(true);
+      vi.spyOn(TestBed.inject(AuthService), 'isAuthenticated').mockReturnValue(true);
+      expect(open(cmp, target({ dispatched_job: null })).get('Show job')!.disabledReason).toBe('No job for this build on the job board.');
     });
 
-    it('disables the job entry for a signed-out visitor, since the job page needs a sign-in', () => {
+    it('asks a signed-out visitor to sign in for the job entry, since the job page needs a sign-in', () => {
       const { cmp } = setup();
       vi.spyOn(TestBed.inject(AuthService), 'isAuthenticated').mockReturnValue(false);
-      expect(open(cmp, target({ dispatched_job: 'job-1' })).get('Show job')!.disabled).toBe(true);
+      expect(open(cmp, target({ dispatched_job: 'job-1' })).get('Show job')!.disabledReason).toBe('Sign in to open the job board.');
     });
 
-    it('disables artefacts for a build that published none', () => {
+    it('says why artefacts are unavailable for a build that published none', () => {
       const { cmp } = setup();
-      expect(open(cmp, target({ has_artefacts: false })).get('Artefacts')!.disabled).toBe(true);
+      expect(open(cmp, target({ has_artefacts: false })).get('Artefacts')!.disabledReason).toBe('No stored artefacts for this build.');
     });
 
-    it('disables the log download while the build is still queued or never ran', () => {
+    it('says why the log download waits while the build is still queued or never ran', () => {
       const { cmp } = setup();
-      expect(open(cmp, target({ status: 'Queued' })).get('Download Log')!.disabled).toBe(true);
-      expect(open(cmp, target({ status: 'DependencyFailed' })).get('Download Log')!.disabled).toBe(true);
+      expect(open(cmp, target({ status: 'Queued' })).get('Download Log')!.disabledReason).toBe('Logs are available after build start.');
+      expect(open(cmp, target({ status: 'DependencyFailed' })).get('Download Log')!.disabledReason).toBe("This build didn't run because a dependency failed.");
     });
 
-    it('greys out the sbom until the build has outputs', () => {
+    it('says why the sbom waits until the build has outputs', () => {
       const { cmp } = setup();
-      expect(open(cmp, target({ status: 'Building' })).get('SBOM')!.disabled).toBe(true);
-      expect(open(cmp, target({ status: 'Failed' })).get('SBOM')!.disabled).toBe(true);
-      expect(open(cmp, target({ status: 'Substituted' })).get('SBOM')!.disabled).toBe(false);
+      expect(open(cmp, target({ status: 'Building' })).get('SBOM')!.disabledReason).toBe('The SBOM is available after a successful build.');
+      expect(open(cmp, target({ status: 'Failed' })).get('SBOM')!.disabledReason).toBeTruthy();
+      expect(open(cmp, target({ status: 'Substituted' })).get('SBOM')!.disabledReason).toBeNull();
     });
 
     it('downloads the sbom of the build under the server filename', () => {
