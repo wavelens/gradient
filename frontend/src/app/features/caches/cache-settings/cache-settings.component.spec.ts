@@ -96,12 +96,10 @@ describe('CacheSettingsComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'deactivate')).toBeNull();
   });
 
-  it('shows but disables Save / Delete under state-managed access', () => {
+  it('hides Save and disables Delete under state-managed access', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
-    const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
     const del = findByText(fixture.nativeElement, 'delete cache') as HTMLButtonElement | null;
-    expect(save).not.toBeNull();
-    expect(save!.disabled).toBe(true);
+    expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(del).not.toBeNull();
     expect(del!.disabled).toBe(true);
   });

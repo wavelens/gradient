@@ -11,7 +11,9 @@ import { permissionLabel } from '@shared/text';
 export function createMissingPermissionLoadStateError(
   permission: Permission | CachePermission,
   owner: 'project' | 'cache',
+  isViewerMemberOfOwner = true,
 ): MissingPermissionLoadStateError {
+  if (!isViewerMemberOfOwner) return createNoAccessLoadStateError(owner, 'members');
   return new MissingPermissionLoadStateError(
     `This role doesn't include the ${permissionLabel(permission)} permission for this ${owner}. Ask a ${owner} admin.`,
   );

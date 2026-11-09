@@ -13,7 +13,7 @@ import { AuthService } from '@core/services/auth.service';
 import { injectTeam } from '@core/resolvers/team-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
 import { AccessState, TeamResponse, PatchTeamRequest } from '@core/models';
-import { ManagedDisableDirective, ServerConfigurationManagedBannerComponent, WritableDirective, canManageTeam } from '@shared/access';
+import { AccessService, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canManageTeam } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -47,7 +47,6 @@ interface SettingsForm {
     FormsModule,
     RouterModule,
     ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
-    WritableDirective,
     ButtonComponent,
     CheckboxComponent,
     FormFieldComponent,
@@ -76,6 +75,7 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
   private authService = inject(AuthService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  protected accessService = inject(AccessService);
 
   readonly roleOptions = [
     { label: 'None', value: '' },
@@ -112,7 +112,7 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
   }
 
   canSave(): boolean {
-    return !this.saving() && !this.access().managed && this.access().canEdit && this.unsaved.changed() && !this.displayNameError;
+    return !this.saving() && this.accessService.isWritable(this.access()) && this.unsaved.changed() && !this.displayNameError;
   }
 
   save(): void {

@@ -23,7 +23,7 @@
     </gr-message-banner>
   }
   @if (!access().canEdit) {
-    <gr-load-state [error]="missingPermission" />
+    <gr-load-state [error]="missingPermission()" />
   } @else if (loading() || loadError()) {
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading integrations..." errorTitle="Failed to load integrations" (retry)="loadIntegrations()" />
   } @else {

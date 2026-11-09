@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, booleanAttribute, computed, input } from '@angular/core';
 import { MessageBannerComponent } from '@gradient/ui/ui';
 import { AccessState } from '@core/models/access.model';
 
@@ -15,6 +15,8 @@ import { AccessState } from '@core/models/access.model';
   template: `
     @if (access()?.managed && access()?.canEdit) {
       <gr-message-banner type="info">This {{ kind() }} is managed by the server configuration and cannot be changed here.</gr-message-banner>
+    } @else if (showReadOnlyNote() && access() && !access()?.canEdit) {
+      <gr-message-banner type="info">You can view these settings, but you can't change them. Contact an admin for this {{ settingsAdminEntityKind() }}.</gr-message-banner>
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -22,4 +24,7 @@ import { AccessState } from '@core/models/access.model';
 export class ServerConfigurationManagedBannerComponent {
   access = input.required<AccessState | null | undefined>();
   kind = input.required<'project' | 'cache' | 'team' | 'task'>();
+  showReadOnlyNote = input(false, { transform: booleanAttribute });
+
+  protected settingsAdminEntityKind = computed(() => (this.kind() === 'task' ? 'project' : this.kind()));
 }

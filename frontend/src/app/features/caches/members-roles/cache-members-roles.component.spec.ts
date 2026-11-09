@@ -152,7 +152,7 @@ describe('CacheMembersRolesComponent', () => {
     await settled(fixture);
     const element = fixture.nativeElement as HTMLElement;
     expect(getMembers).not.toHaveBeenCalled();
-    expect(element.textContent).toContain('Only the members of this cache can view this.');
+    expect(element.textContent?.split('Only the members of this cache can view this.').length).toBe(2);
     expect(element.textContent).not.toContain('Failed to load');
     expect(element.textContent).not.toContain('Try Again');
   });

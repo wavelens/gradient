@@ -82,13 +82,13 @@ export class TeamMembersComponent implements OnInit {
   addAttempted = signal(false);
   newMember: { user: string; role: TeamRole } = { user: '', role: 'member' };
 
-  readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'Server settings', group: 'Group' };
+  readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'Server configuration', group: 'Group' };
 
   canEdit = computed(() => canManageTeam(this.team(), this.auth.user()));
   readonly allMembersPhraseByMemberSource: Record<TeamMemberSource, string | null> = {
     api: null,
-    state: 'all set in the server configuration',
-    group: 'all added through a group',
+    state: 'from the server configuration',
+    group: 'from a group',
   };
   memberSourceSharedByAllMembers = computed<TeamMemberSource | null>(() => {
     const sources = new Set(this.members().map((member) => member.source));
@@ -98,7 +98,7 @@ export class TeamMembersComponent implements OnInit {
   countLabel = computed(() => {
     const count = `${this.members().length} ${this.members().length === 1 ? 'member' : 'members'}`;
     const shared = this.memberSourceSharedByAllMembers();
-    return shared ? `${count} · ${this.allMembersPhraseByMemberSource[shared]}` : count;
+    return shared ? `${count} ${this.allMembersPhraseByMemberSource[shared]}` : count;
   });
 
   private get teamName(): string {

@@ -8,7 +8,7 @@
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!project()" loadingMessage="Loading project settings..."
                errorTitle="Failed to load project settings" (retry)="loadProject()">
 @if (project(); as project) {
-  <app-server-configuration-managed-banner [access]="access()" kind="project" />
+  <app-server-configuration-managed-banner [access]="access()" kind="project" showReadOnlyNote />
   <gr-settings-section title="General">
     <gr-form-field label="Name" for="project-name">
       <input
@@ -73,19 +73,21 @@
     @if (saveError()) {
       <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
     }
-    <div class="gr-form-actions" *appWritable="access()">
-      <button
-        grButton
-        label="Save Changes"
-        icon="check"
-        (grSubmit)="saveSettings()"
-        [loading]="saving()"
-        [disabled]="!!saveBlockedReason || !unsaved.changed()"
-      ></button>
-      @if (saveBlockedReason; as reason) {
-        <small class="text-secondary save-hint" role="status">{{ reason }}</small>
-      }
-    </div>
+    @if (accessService.isWritable(access())) {
+      <div class="gr-form-actions">
+        <button
+          grButton
+          label="Save Changes"
+          icon="check"
+          (grSubmit)="saveSettings()"
+          [loading]="saving()"
+          [disabled]="!!saveBlockedReason || !unsaved.changed()"
+        ></button>
+        @if (saveBlockedReason; as reason) {
+          <small class="text-secondary save-hint" role="status">{{ reason }}</small>
+        }
+      </div>
+    }
 
   </gr-settings-section>
 

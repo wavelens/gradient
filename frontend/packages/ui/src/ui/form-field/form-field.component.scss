@@ -34,6 +34,10 @@
     color: var(--gr-status-danger);
   }
 
+  &:has(:is(input, textarea, select, [role='combobox']):is(:disabled, [readonly], [aria-disabled='true'])) .required {
+    display: none;
+  }
+
   .hint:empty { display: none; }
 
   .hint,

@@ -27,7 +27,7 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService, isViewerCacheMember } from '@shared/access';
+import { ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService, isViewerCacheMember } from '@shared/access';
 import { injectCacheAccess, injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { CacheResponse, CacheSubscribersResponse, PatchCacheRequest } from '@core/models';
@@ -80,7 +80,6 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
     ButtonComponent,
     InputDirective,
     LoadStateComponent,
-    WritableDirective,
     ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
     PageLayoutComponent,
     FormFieldComponent,
@@ -104,7 +103,7 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
 export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   protected readonly links = links;
   private route = inject(ActivatedRoute);
-  private accessService = inject(AccessService);
+  protected accessService = inject(AccessService);
   private router = inject(Router);
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);

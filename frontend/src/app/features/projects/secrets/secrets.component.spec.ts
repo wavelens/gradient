@@ -15,7 +15,7 @@ import { SecretsComponent } from './secrets.component';
 import { ProjectSecretsService } from '@core/services/project-secrets.service';
 import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { AccessState } from '@core/models/access.model';
-import { ProjectSecretSummary, SopsRecipientResponse } from '@core/models';
+import { ProjectResponse, ProjectSecretSummary, SopsRecipientResponse } from '@core/models';
 import { docsUrl } from '@core/docs';
 import { ApiError } from '@core/services/api.service';
 
@@ -47,7 +47,7 @@ function recipientField(fixture: ComponentFixture<SecretsComponent>): HTMLInputE
   return (fixture.nativeElement as HTMLElement).querySelector('gr-copy-field #sops-recipient') as HTMLInputElement;
 }
 
-function setup(access: AccessState = admin) {
+function setup(access: AccessState = admin, project: Partial<ProjectResponse> = {}) {
   const service = {
     sopsRecipient: vi.fn(() => of<SopsRecipientResponse>(ed25519Recipient)),
     list: vi.fn(() => of<ProjectSecretSummary[]>(listed)),
@@ -61,7 +61,7 @@ function setup(access: AccessState = admin) {
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useFactory: () => projectRouteStub('acme', access) },
+      { provide: ActivatedRoute, useFactory: () => projectRouteStub('acme', access, project) },
       { provide: ProjectSecretsService, useValue: service },
       { provide: ConfirmService, useValue: { confirm } },
     ],
@@ -91,6 +91,14 @@ describe('SecretsComponent', () => {
     expect(text).toContain('No access');
     expect(text).toContain('manage project settings permission');
     expect(text).not.toContain('Set secret');
+  });
+
+  it('tells a visitor of a public project that only members see secrets', async () => {
+    const { fixture } = setup({ managed: false, canEdit: false, canTrigger: false }, { role: null, permissions: [] });
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Only the members of this project can view this.');
+    expect(text).not.toContain('permission');
   });
 
   it('shows a refused load as one error without the empty state', async () => {

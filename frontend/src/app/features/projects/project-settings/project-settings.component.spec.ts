@@ -167,20 +167,19 @@ describe('ProjectSettingsComponent - validation and unsaved edits', () => {
 });
 
 describe('ProjectSettingsComponent - access gating', () => {
-  it('hides Save / Delete under read-only access', async () => {
+  it('hides Save / Delete under read-only access and says so once', async () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete project')).toBeNull();
+    expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain("you can't change them");
   });
 
-  it('shows but disables Save / Delete under state-managed access', async () => {
+  it('hides Save and disables Delete under state-managed access', async () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     await settled(fixture);
-    const save = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
     const del = findByText(fixture.nativeElement, 'delete project') as HTMLButtonElement | null;
-    expect(save).not.toBeNull();
-    expect(save!.disabled).toBe(true);
+    expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(del).not.toBeNull();
     expect(del!.disabled).toBe(true);
   });

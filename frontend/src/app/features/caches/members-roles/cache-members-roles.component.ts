@@ -30,7 +30,7 @@ import {
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfCacheMember } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, createNoAccessLoadStateError, isViewerCacheMember, requestIfCacheMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, finalize, merge, tap } from 'rxjs';
@@ -93,6 +93,8 @@ export class CacheMembersRolesComponent implements OnInit {
   protected cache = linkedSignal(() => this.cacheAccess()?.cache);
   access = computed(() => accessTo(this.cache(), 'manageCacheMembers'));
   roleAccess = computed(() => accessTo(this.cache(), 'manageCacheRoles'));
+  viewerIsCacheMember = computed(() => isViewerCacheMember(this.cache()));
+  readonly missingMembershipError = createNoAccessLoadStateError('cache', 'members');
 
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Members & Roles' }));

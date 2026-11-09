@@ -8,7 +8,7 @@
 @if (canOpenParentProjectSettings()) {
   <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
 }
-<app-server-configuration-managed-banner [access]="access()" kind="task" />
+<app-server-configuration-managed-banner [access]="access()" kind="task" showReadOnlyNote />
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!task()" loadingMessage="Loading task settings..."
                errorTitle="Failed to load task settings" (retry)="loadTask()">
 @if (task(); as proj) {
@@ -114,19 +114,21 @@
       @if (errorMessage()) {
         <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
       }
-      <div class="gr-form-actions" *appWritable="access()">
-        <button
-          grButton
-          label="Save Changes"
-          icon="check"
-          (grSubmit)="saveSettings()"
-          [loading]="saving()"
-          [disabled]="!!saveBlockedReason || !unsaved.changed()"
-        ></button>
-        @if (saveBlockedReason; as reason) {
-          <small class="text-secondary save-hint" role="status">{{ reason }}</small>
-        }
-      </div>
+      @if (accessService.isWritable(access())) {
+        <div class="gr-form-actions">
+          <button
+            grButton
+            label="Save Changes"
+            icon="check"
+            (grSubmit)="saveSettings()"
+            [loading]="saving()"
+            [disabled]="!!saveBlockedReason || !unsaved.changed()"
+          ></button>
+          @if (saveBlockedReason; as reason) {
+            <small class="text-secondary save-hint" role="status">{{ reason }}</small>
+          }
+        </div>
+      }
     </div>
 
   </gr-settings-section>

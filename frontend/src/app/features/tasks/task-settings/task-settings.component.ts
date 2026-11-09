@@ -33,7 +33,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, accessDisabledReason, canOpenProjectSettings } from '@shared/access';
+import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canOpenProjectSettings } from '@shared/access';
 import { fieldChecks, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { TaskResponse, ConcurrencyPolicy, PatchTaskRequest } from '@core/models';
@@ -94,6 +94,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   protected config = inject(ConfigService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  protected accessService = inject(AccessService);
   private injector = inject(Injector);
   private saveArea = viewChild<ElementRef<HTMLElement>>('saveArea');
 
@@ -147,10 +148,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   }
 
   get saveBlockedReason(): string | null {
-    const access = this.access();
-    if (access.managed || !access.canEdit) return accessDisabledReason(access);
-    if (this.displayNameError || this.keepEvaluationsError) return 'Fix the marked fields to save.';
-    return null;
+    return this.displayNameError || this.keepEvaluationsError ? 'Fix the marked fields to save.' : null;
   }
 
   canDeactivate(): boolean | Observable<boolean> {
@@ -207,7 +205,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   }
 
   saveSettings(): void {
-    if (this.saving() || this.saveBlockedReason) return;
+    if (this.saving() || !this.accessService.isWritable(this.access()) || this.saveBlockedReason) return;
     const saved = this.savedForm;
     const patch: PatchTaskRequest = Object.fromEntries(
       Object.entries(this.formData).filter(([key, value]) => saved[key as keyof TaskForm] !== value),

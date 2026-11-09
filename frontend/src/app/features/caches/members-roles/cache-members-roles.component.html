@@ -6,164 +6,167 @@
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Members & Roles">
   <app-server-configuration-managed-banner [access]="access()" kind="cache" />
-  <!-- Members -->
-  <gr-settings-section title="Members" [card]="false">
-    <button
-      slot="actions"
-        *appWritable="access()"
-        grButton
-        label="Add Member"
-        icon="add"
-        severity="secondary"
-        (click)="openAddMemberDialog()"
-        [disabled]="rolesLoading() || roles().length === 0"
-        [appManagedDisable]="access()"
-      ></button>
-    <gr-load-state
-      [loading]="membersLoading()"
-      [error]="membersLoadError()"
-      [empty]="members().length === 0"
-      loadingMessage="Loading members..."
-      errorTitle="Failed to load members"
-      emptyIcon="group"
-      emptyTitle="No members"
-      emptyMessage="Add a member to give someone access."
-      (retry)="loadMembers()"
-    >
-        <gr-row-list>
-          @let pending = pendingMemberRoleSelection();
-          @for (member of members(); track member.id) {
-            <gr-row icon="person">
-              <span class="mono">{{ member.id }}</span>
-              @if (member.user_display_name && member.user_display_name !== member.id) {
-                <span slot="meta">{{ member.user_display_name }}</span>
-              }
-              <div slot="actions">
-                @if (!access().canEdit) {
-                  <gr-badge severity="neutral" class="member-role">{{ member.name }}</gr-badge>
+  @if (viewerIsCacheMember()) {
+    <gr-settings-section title="Members" [card]="false">
+      <button
+        slot="actions"
+          *appWritable="access()"
+          grButton
+          label="Add Member"
+          icon="add"
+          severity="secondary"
+          (click)="openAddMemberDialog()"
+          [disabled]="rolesLoading() || roles().length === 0"
+          [appManagedDisable]="access()"
+        ></button>
+      <gr-load-state
+        [loading]="membersLoading()"
+        [error]="membersLoadError()"
+        [empty]="members().length === 0"
+        loadingMessage="Loading members..."
+        errorTitle="Failed to load members"
+        emptyIcon="group"
+        emptyTitle="No members"
+        emptyMessage="Add a member to give someone access."
+        (retry)="loadMembers()"
+      >
+          <gr-row-list>
+            @let pending = pendingMemberRoleSelection();
+            @for (member of members(); track member.id) {
+              <gr-row icon="person">
+                <span class="mono">{{ member.id }}</span>
+                @if (member.user_display_name && member.user_display_name !== member.id) {
+                  <span slot="meta">{{ member.user_display_name }}</span>
                 }
-                <gr-select
-                  *appWritable="access()"
-                  [ngModel]="pending?.user === member.id ? pending.role : member.name"
-                  [options]="roles()"
-                  optionLabel="name"
-                  optionValue="name"
-                  [disabled]="pending !== null || rolesLoading()"
-                  [appManagedDisable]="access()"
-                  [ariaLabel]="'Role: ' + member.id"
-                  (ngModelChange)="updateMemberRole(member.id, $event)"
-                />
-                <button
-                  *appWritable="access()"
-                  grButton
-                  label="Remove"
-                  icon="close"
-                  severity="danger"
-                  [attr.aria-label]="'Remove ' + member.id"
-                  [disabled]="pending !== null"
-                  [appManagedDisable]="access()"
-                  (click)="removeMember(member.id)"
-                ></button>
-              </div>
-            </gr-row>
-          }
-        </gr-row-list>
-    </gr-load-state>
-  </gr-settings-section>
-
-  @if (access().canEdit && (invitations().length > 0 || invitationsLoadError())) {
-    <gr-settings-section title="Pending Invitations" [card]="false">
-      <gr-load-state flat [error]="invitationsLoadError()" errorTitle="Failed to load invitations" (retry)="loadInvitations()">
-      <gr-row-list>
-        @for (invitation of invitations(); track invitation.user) {
-          <gr-row icon="mail">
-            <span class="mono">{{ invitation.user }}</span>
-            <span slot="meta">
-              Role {{ invitation.role }} ·
-              Expires {{ invitation.expires_at | serverDate }}
-            </span>
-            <button
-              slot="actions"
-              *appWritable="access()"
-              grButton
-              label="Revoke"
-              icon="close"
-              severity="danger"
-              [appManagedDisable]="access()"
-              (click)="revokeInvitation(invitation.user)"
-            ></button>
-          </gr-row>
-        }
-      </gr-row-list>
+                <div slot="actions">
+                  @if (!access().canEdit) {
+                    <gr-badge severity="neutral" class="member-role">{{ member.name }}</gr-badge>
+                  }
+                  <gr-select
+                    *appWritable="access()"
+                    [ngModel]="pending?.user === member.id ? pending.role : member.name"
+                    [options]="roles()"
+                    optionLabel="name"
+                    optionValue="name"
+                    [disabled]="pending !== null || rolesLoading()"
+                    [appManagedDisable]="access()"
+                    [ariaLabel]="'Role: ' + member.id"
+                    (ngModelChange)="updateMemberRole(member.id, $event)"
+                  />
+                  <button
+                    *appWritable="access()"
+                    grButton
+                    label="Remove"
+                    icon="close"
+                    severity="danger"
+                    [attr.aria-label]="'Remove ' + member.id"
+                    [disabled]="pending !== null"
+                    [appManagedDisable]="access()"
+                    (click)="removeMember(member.id)"
+                  ></button>
+                </div>
+              </gr-row>
+            }
+          </gr-row-list>
       </gr-load-state>
     </gr-settings-section>
-  }
 
-  <app-team-grants kind="cache" [name]="cacheName" [cacheWithViewerPermissions]="cache()" [roles]="roleNames()" [canEdit]="access().canEdit && !access().managed" />
-
-  <!-- Roles -->
-  <gr-settings-section title="Roles" [card]="false">
-    <button
-      slot="actions"
-        *appWritable="roleAccess()"
-        grButton
-        label="New Role"
-        icon="add"
-        severity="secondary"
-        (click)="openCreateRoleDialog()"
-        [disabled]="rolesLoading() || availablePermissions().length === 0"
-        [appManagedDisable]="roleAccess()"
-      ></button>
-    <gr-load-state
-      [loading]="rolesLoading()"
-      [error]="rolesLoadError()"
-      [empty]="roles().length === 0"
-      loadingMessage="Loading roles..."
-      errorTitle="Failed to load roles"
-      emptyIcon="shield"
-      emptyTitle="No roles"
-      emptyMessage="Create a role to describe what members may do."
-      (retry)="loadRoles()"
-    >
+    @if (access().canEdit && (invitations().length > 0 || invitationsLoadError())) {
+      <gr-settings-section title="Pending Invitations" [card]="false">
+        <gr-load-state flat [error]="invitationsLoadError()" errorTitle="Failed to load invitations" (retry)="loadInvitations()">
         <gr-row-list>
-          @for (role of roles(); track role.id) {
-            <gr-row icon="shield">
-              {{ role.name }}
-              @if (role.builtin) {
-                <gr-badge>Built-in</gr-badge>
-              }
-              <span slot="meta">{{ rolePermissionLabel(role) }}</span>
-              <div slot="actions">
-                @if (!role.builtin) {
-                  <button
-                    *appWritable="roleAccess()"
-                    grButton
-                    label="Edit"
-                    icon="edit"
-                    severity="secondary"
-                    [attr.aria-label]="'Edit role ' + role.name"
-                    [disabled]="savingRole() || deletingRole()"
-                    [appManagedDisable]="roleAccess()"
-                    (click)="openEditRoleDialog(role)"
-                  ></button>
-                  <button
-                    *appWritable="roleAccess()"
-                    grButton
-                    label="Delete"
-                    icon="delete"
-                    severity="danger"
-                    [attr.aria-label]="'Delete role ' + role.name"
-                    [disabled]="savingRole() || deletingRole()"
-                    [appManagedDisable]="roleAccess()"
-                    (click)="deleteRole(role)"
-                  ></button>
-                }
-              </div>
+          @for (invitation of invitations(); track invitation.user) {
+            <gr-row icon="mail">
+              <span class="mono">{{ invitation.user }}</span>
+              <span slot="meta">
+                Role {{ invitation.role }} ·
+                Expires {{ invitation.expires_at | serverDate }}
+              </span>
+              <button
+                slot="actions"
+                *appWritable="access()"
+                grButton
+                label="Revoke"
+                icon="close"
+                severity="danger"
+                [appManagedDisable]="access()"
+                (click)="revokeInvitation(invitation.user)"
+              ></button>
             </gr-row>
           }
         </gr-row-list>
-    </gr-load-state>
-  </gr-settings-section>
+        </gr-load-state>
+      </gr-settings-section>
+    }
+
+    <app-team-grants kind="cache" [name]="cacheName" [cacheWithViewerPermissions]="cache()" [roles]="roleNames()" [canEdit]="access().canEdit && !access().managed" />
+
+    <!-- Roles -->
+    <gr-settings-section title="Roles" [card]="false">
+      <button
+        slot="actions"
+          *appWritable="roleAccess()"
+          grButton
+          label="New Role"
+          icon="add"
+          severity="secondary"
+          (click)="openCreateRoleDialog()"
+          [disabled]="rolesLoading() || availablePermissions().length === 0"
+          [appManagedDisable]="roleAccess()"
+        ></button>
+      <gr-load-state
+        [loading]="rolesLoading()"
+        [error]="rolesLoadError()"
+        [empty]="roles().length === 0"
+        loadingMessage="Loading roles..."
+        errorTitle="Failed to load roles"
+        emptyIcon="shield"
+        emptyTitle="No roles"
+        emptyMessage="Create a role to describe what members may do."
+        (retry)="loadRoles()"
+      >
+          <gr-row-list>
+            @for (role of roles(); track role.id) {
+              <gr-row icon="shield">
+                {{ role.name }}
+                @if (role.builtin) {
+                  <gr-badge>Built-in</gr-badge>
+                }
+                <span slot="meta">{{ rolePermissionLabel(role) }}</span>
+                <div slot="actions">
+                  @if (!role.builtin) {
+                    <button
+                      *appWritable="roleAccess()"
+                      grButton
+                      label="Edit"
+                      icon="edit"
+                      severity="secondary"
+                      [attr.aria-label]="'Edit role ' + role.name"
+                      [disabled]="savingRole() || deletingRole()"
+                      [appManagedDisable]="roleAccess()"
+                      (click)="openEditRoleDialog(role)"
+                    ></button>
+                    <button
+                      *appWritable="roleAccess()"
+                      grButton
+                      label="Delete"
+                      icon="delete"
+                      severity="danger"
+                      [attr.aria-label]="'Delete role ' + role.name"
+                      [disabled]="savingRole() || deletingRole()"
+                      [appManagedDisable]="roleAccess()"
+                      (click)="deleteRole(role)"
+                    ></button>
+                  }
+                </div>
+              </gr-row>
+            }
+          </gr-row-list>
+      </gr-load-state>
+    </gr-settings-section>
+  } @else {
+    <gr-load-state [error]="missingMembershipError" />
+  }
 </gr-page-layout>
 
 <!-- Add Member Dialog -->

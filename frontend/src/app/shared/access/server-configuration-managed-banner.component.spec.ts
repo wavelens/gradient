@@ -9,10 +9,11 @@ import { AccessState } from '@core/models/access.model';
 import { ServerConfigurationManagedBannerComponent } from './server-configuration-managed-banner.component';
 
 describe('ServerConfigurationManagedBannerComponent', () => {
-  function bannerText(access: AccessState): string {
+  function bannerText(access: AccessState, showReadOnlyNote = false): string {
     const fixture = TestBed.createComponent(ServerConfigurationManagedBannerComponent);
     fixture.componentRef.setInput('access', access);
     fixture.componentRef.setInput('kind', 'task');
+    fixture.componentRef.setInput('showReadOnlyNote', showReadOnlyNote);
     fixture.detectChanges();
     return (fixture.nativeElement as HTMLElement).textContent?.trim() ?? '';
   }
@@ -23,5 +24,12 @@ describe('ServerConfigurationManagedBannerComponent', () => {
     [{ managed: false, canEdit: true, canTrigger: true }, false],
   ])('explains the server configuration only to someone who could edit otherwise: %o', (access, shown) => {
     expect(bannerText(access).includes('managed by the server configuration')).toBe(shown);
+  });
+
+  it('tells a read-only settings viewer to contact the owning project admin', () => {
+    const readOnly = { managed: false, canEdit: false, canTrigger: false };
+    expect(bannerText(readOnly, true)).toContain('Contact an admin for this project.');
+    expect(bannerText(readOnly)).toBe('');
+    expect(bannerText({ managed: false, canEdit: true, canTrigger: true }, true)).toBe('');
   });
 });

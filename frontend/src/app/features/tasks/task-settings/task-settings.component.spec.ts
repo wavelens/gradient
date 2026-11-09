@@ -104,12 +104,10 @@ describe('TaskSettingsComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
   });
 
-  it('shows but disables Save Changes when task is state-managed', () => {
+  it('hides Save Changes when task is state-managed', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain('server configuration');
-    const btn = findByText(fixture.nativeElement, 'save changes') as HTMLButtonElement | null;
-    expect(btn).not.toBeNull();
-    expect(btn!.disabled).toBe(true);
+    expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
   });
 
   it('hides Delete Task under read-only access', () => {

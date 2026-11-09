@@ -39,7 +39,7 @@ import {
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, createMissingPermissionLoadStateError } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, createMissingPermissionLoadStateError, isViewerProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { IncomingDeliveriesComponent, SELF_HOSTED_GIT_HOSTS, firstRepositoryHost, gitHostLabel, guessGitHost, webhookEvents } from '@shared/git';
 import { ServerTimestampToLocalDateTimePipe, slugify } from '@shared/text';
@@ -99,7 +99,9 @@ export class IntegrationsComponent implements OnInit {
 
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Integrations' }));
-  missingPermission = createMissingPermissionLoadStateError('manageIntegrations', 'project');
+  missingPermission = computed(() =>
+    createMissingPermissionLoadStateError('manageIntegrations', 'project', isViewerProjectMember(this.resolvedProject())),
+  );
   integrations = signal<IntegrationResponse[]>([]);
   integrationAccess = computed(
     () => new Map(this.integrations().map((i) => [i.id, { ...this.access(), managed: i.managed }])),

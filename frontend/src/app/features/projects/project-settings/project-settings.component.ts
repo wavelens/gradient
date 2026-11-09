@@ -30,7 +30,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, accessDisabledReason, requestIfProjectMember } from '@shared/access';
+import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -88,6 +88,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  protected accessService = inject(AccessService);
   protected config = inject(ConfigService);
 
   access = computed(() => accessTo(this.resolvedProject(), 'manageProjectSettings'));
@@ -126,10 +127,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   }
 
   get saveBlockedReason(): string | null {
-    const access = this.access();
-    if (access.managed || !access.canEdit) return accessDisabledReason(access);
-    if (this.displayNameError) return 'Fix the marked fields to save.';
-    return null;
+    return this.displayNameError ? 'Fix the marked fields to save.' : null;
   }
 
   canDeactivate(): boolean | Observable<boolean> {
@@ -183,7 +181,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   }
 
   saveSettings(): void {
-    if (this.saving() || this.saveBlockedReason) return;
+    if (this.saving() || !this.accessService.isWritable(this.access()) || this.saveBlockedReason) return;
     const saved = this.savedForm;
     const { public: visibility, ...fields } = this.formData;
     const patch = Object.fromEntries(
