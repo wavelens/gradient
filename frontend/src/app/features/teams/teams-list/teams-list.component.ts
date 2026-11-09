@@ -16,7 +16,7 @@ import {
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
-import { CreateTeamDialogComponent, injectCanCreateTeam } from '@shared/forms';
+import { CreateTeamDialogComponent, injectCanCreateTeam, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
 import { links } from '@shared/routing';
 
 @Component({
@@ -45,6 +45,10 @@ export class TeamsListComponent implements OnInit {
   loadError = signal<unknown>(null);
   items = signal<TeamSummary[]>([]);
   showCreate = signal(false);
+
+  constructor() {
+    openCreateDialogFromUrlIfAllowed(this.canCreateTeam, () => this.openCreate());
+  }
 
   openCreate(): void {
     this.showCreate.set(true);

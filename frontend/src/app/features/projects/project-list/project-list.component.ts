@@ -27,7 +27,7 @@ import {
   PageLayoutComponent,
   SelectComponent,
 } from '@gradient/ui/ui';
-import { NameFieldsComponent, nameAvailability } from '@shared/forms';
+import { NameFieldsComponent, nameAvailability, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
 import { ProjectSummary, PublicProjectSummary } from '@core/models';
 import { links } from '@shared/routing';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -98,6 +98,7 @@ export class ProjectListComponent implements OnInit {
       this.authService.isAuthenticated() ? this.projects.refreshFirstPageSilently() : EMPTY,
       this.config.publicListing ? this.publicProjects.refreshFirstPageSilently() : EMPTY,
     ));
+    openCreateDialogFromUrlIfAllowed(() => this.canCreateProject, () => this.openCreateDialog());
   }
 
   ngOnInit(): void {

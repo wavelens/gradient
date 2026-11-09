@@ -15,3 +15,4 @@ export * from './unsaved-changes';
 export * from './validators';
 export * from './create-team-dialog.component';
 export * from './create-permissions';
+export * from './create-dialog-link-parameter';

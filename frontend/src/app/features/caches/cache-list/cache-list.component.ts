@@ -20,7 +20,7 @@ import {
   NavCardComponent,
   PageLayoutComponent,
 } from '@gradient/ui/ui';
-import { CreateCacheButtonComponent, CreateCacheDialogComponent } from '@shared/forms';
+import { CreateCacheButtonComponent, CreateCacheDialogComponent, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
 import { Cache } from '@core/models';
 import { links } from '@shared/routing';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -72,6 +72,7 @@ export class CacheListComponent implements OnInit {
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => (this.authService.isAuthenticated() ? this.caches.refreshFirstPageSilently() : EMPTY));
+    openCreateDialogFromUrlIfAllowed(() => this.canCreateCache, () => this.openCreateDialog());
   }
 
   ngOnInit(): void {
