@@ -184,21 +184,18 @@ function noJsonDump(el: HTMLElement): void {
   expect(el.querySelectorAll('pre').length).toBe(0);
 }
 
-describe('BoardJobDetailComponent - report gap', () => {
-  it('splits the time after the last phase into worker tail and transit', () => {
+describe('BoardJobDetailComponent - run time', () => {
+  it('shows one queue time, the wait and how long the worker ran', () => {
     const finished = { ...DETAIL, finished_at: '2026-06-08T00:01:10Z', worker_elapsed_ms: 9000, worker_tail_ms: 500, transit_ms: 1000 };
     const el = setup({ getJob: () => of(finished) }).nativeElement as HTMLElement;
-    const steps = el.querySelector('section.timeline')?.textContent ?? '';
-    expect(steps).toContain('Worker tail');
-    expect(steps).toContain('500 ms');
-    expect(steps).toContain('Transit');
-    expect(steps).toContain('1.0 s');
+    const steps = Array.from(el.querySelectorAll('section.timeline .step'));
+    expect(steps.map((s) => s.querySelector('.label')?.textContent?.trim())).toEqual(['Queued', 'Wait', 'Ran']);
+    expect(steps[2].lastElementChild?.textContent?.trim()).toBe('9.0 s');
   });
 
-  it('shows no split for a row the server closed without a worker report', () => {
+  it('leaves out the run time for a row the server closed without a worker report', () => {
     const steps = (setup().nativeElement as HTMLElement).querySelector('section.timeline')?.textContent ?? '';
-    expect(steps).not.toContain('Worker tail');
-    expect(steps).not.toContain('Transit');
+    expect(steps).not.toContain('Ran');
   });
 });
 
@@ -538,11 +535,11 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     expect(link.injector.get(RouterLink).urlTree?.toString()).toBe('/project/project-one/task/nightly/exec/x1?node=1');
   });
 
-  it('shows when the attempt started next to the assignment and the finish', () => {
+  it('shows the queue time and the wait without repeating the same timestamp', () => {
     const el = setup({ getJob: () => of(EXEC_DETAIL) }).nativeElement as HTMLElement;
     const labels = Array.from(el.querySelectorAll('section.timeline .step .label')).map((s) => s.textContent?.trim());
-    expect(labels).toEqual(expect.arrayContaining(['Queued', 'Assigned', 'Started', 'Finished']));
-    expect(labels.indexOf('Started')).toBe(labels.indexOf('Assigned') + 1);
+    expect(labels.slice(0, 2)).toEqual(['Queued', 'Wait']);
+    expect(labels).not.toContain('Assigned');
     expect(el.querySelector('.head gr-status-badge')?.textContent?.trim()).toBe('Completed');
   });
 

@@ -29,6 +29,14 @@ describe('job timeline', () => {
     expect(rows[1].share).toBeCloseTo(0.8);
   });
 
+  it('adds the program run after the last phase so the axis covers the whole run', () => {
+    const rows = phaseRows(NESTED, 4000);
+    expect(rows.at(-1)).toEqual(expect.objectContaining({ phase: 'program_run', startMs: 1000, durationMs: 3000, share: 0.75 }));
+    expect(rows[0].share).toBeCloseTo(0.25);
+    expect(phaseLabel('program_run')).toBe('Program run');
+    expect(phaseRows(NESTED, 900).length).toBe(2);
+  });
+
   it('survives a job with no phases', () => {
     expect(phaseRows([])).toEqual([]);
     expect(depths([])).toEqual([]);

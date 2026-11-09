@@ -180,24 +180,15 @@ interface RuleRow {
 
       <section class="timeline">
         <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | serverDate }}</span></div>
-        <div class="step"><span class="label">Ready</span><span>{{ j.ready_at ? (j.ready_at | serverDate) : '-' }}</span></div>
         <div class="step"><span class="label">Wait</span><span>{{ waitLabel() }}</span></div>
-        <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Assigned' }}</span><span>{{ j.dispatched_at | serverDate }}</span></div>
-        @if (j.exec_attempt; as a) {
-          <div class="step"><span class="label">Started</span><span>{{ a.started_at | serverDate }}</span></div>
-        }
-        <div class="step"><span class="label">Finished</span><span>{{ j.finished_at ? (j.finished_at | serverDate) : '-' }}</span></div>
-        @if (j.worker_tail_ms !== null) {
-          <div class="step"><span class="label">Worker tail</span><span>{{ formatDuration(j.worker_tail_ms) }}</span></div>
-        }
-        @if (j.transit_ms !== null) {
-          <div class="step"><span class="label">Transit</span><span>{{ formatDuration(j.transit_ms) }}</span></div>
+        @if (j.worker_elapsed_ms != null) {
+          <div class="step"><span class="label">Ran</span><span>{{ formatDuration(j.worker_elapsed_ms) }}</span></div>
         }
       </section>
 
       @if (j.phases.length) {
         <h2>Worker timeline <gr-label-help doc="ui/job-board/#job-inspection" title="About the worker timeline" /></h2>
-        <gr-job-timeline [phases]="j.phases" />
+        <gr-job-timeline [phases]="j.phases" [workerElapsedMs]="j.kind === EXEC_KIND ? j.worker_elapsed_ms : null" />
       }
 
       @if (j.derivations.length) {
@@ -513,6 +504,7 @@ export class BoardJobDetailComponent implements OnInit {
   });
 
   protected readonly jobKindName = jobKindName;
+  protected readonly EXEC_KIND = EXEC_KIND;
   protected readonly jobSubjectLabel = jobSubjectLabel;
   protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
   protected readonly formatBytes = formatBytes;

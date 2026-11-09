@@ -46,12 +46,13 @@ export interface PhaseRow {
   bytes: number;
 }
 
-export function phaseRows(phases: JobPhaseView[]): PhaseRow[] {
+export function phaseRows(phases: JobPhaseView[], workerElapsedMs: number | null = null): PhaseRow[] {
   if (phases.length === 0) { return []; }
 
   const depth = depths(phases);
-  const total = Math.max(...phases.map(p => p.end_ms), 1);
-  return phases.map((p, i) => ({
+  const lastPhaseEnd = Math.max(...phases.map(p => p.end_ms));
+  const total = Math.max(lastPhaseEnd, workerElapsedMs ?? 0, 1);
+  const rows = phases.map((p, i) => ({
     seq: p.seq,
     phase: p.phase,
     depth: depth[i],
@@ -61,6 +62,11 @@ export function phaseRows(phases: JobPhaseView[]): PhaseRow[] {
     paths: p.paths,
     bytes: p.bytes,
   }));
+  if (workerElapsedMs !== null && workerElapsedMs > lastPhaseEnd) {
+    const durationMs = workerElapsedMs - lastPhaseEnd;
+    rows.push({ seq: -1, phase: 'program_run', depth: 0, startMs: lastPhaseEnd, durationMs, share: durationMs / total, paths: 0, bytes: 0 });
+  }
+  return rows;
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -83,6 +89,7 @@ const PHASE_LABELS: Record<string, string> = {
   upload_wait: 'Upload wait',
   nar_push: 'NAR push',
   cache_query_wait: 'Cache-query wait',
+  program_run: 'Program run',
 };
 
 export function phaseLabel(phase: string): string {
@@ -125,12 +132,13 @@ export function phaseLabel(phase: string): string {
 })
 export class JobTimelineComponent implements OnDestroy {
   readonly phases = input.required<JobPhaseView[]>();
+  readonly workerElapsedMs = input<number | null | undefined>(null);
 
   private readonly chartRef = viewChild<ElementRef<HTMLElement>>('chart');
   private readonly theme = inject(ThemeService);
   private chart: echarts.ECharts | null = null;
 
-  readonly rows = computed(() => phaseRows(this.phases()));
+  readonly rows = computed(() => phaseRows(this.phases(), this.workerElapsedMs() ?? null));
   readonly duration = formatDuration;
   readonly bytes = formatBytes;
   readonly count = formatCount;
