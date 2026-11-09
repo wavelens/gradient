@@ -47,7 +47,7 @@ enum Denial {
     MalformedAuthorizationHeader,
     #[error("Authorization header not found")]
     NoCredentials,
-    #[error("Unable to decode token")]
+    #[error("Your session has ended or the API key is no longer valid. Sign in again.")]
     UndecodableToken,
     #[error("User not found")]
     UnknownUser,

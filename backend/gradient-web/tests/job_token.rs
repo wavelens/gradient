@@ -90,5 +90,8 @@ async fn a_revoked_job_token_is_unauthorized() {
         .await;
 
     res.assert_status_unauthorized();
-    assert_eq!(res.json::<Json>()["message"], "Unable to decode token");
+    assert_eq!(
+        res.json::<Json>()["message"],
+        "Your session has ended or the API key is no longer valid. Sign in again."
+    );
 }

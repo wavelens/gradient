@@ -56,7 +56,10 @@ async fn undecodable_token_returns_401_envelope() {
         .add_header("authorization", "Bearer not-a-real-jwt")
         .await;
     res.assert_status_unauthorized();
-    assert_envelope(&res.json::<Value>(), "Unable to decode token");
+    assert_envelope(
+        &res.json::<Value>(),
+        "Your session has ended or the API key is no longer valid. Sign in again.",
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
