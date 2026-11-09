@@ -12,7 +12,18 @@ import {
 } from '@angular/cdk/overlay';
 import { ComponentPortal } from '@angular/cdk/portal';
 import { disposeAnimated } from '../overlay/overlay-animation';
-import { Component, Directive, ElementRef, OnDestroy, inject, input, ChangeDetectionStrategy } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ComponentRef,
+  Directive,
+  ElementRef,
+  OnDestroy,
+  effect,
+  inject,
+  input,
+} from '@angular/core';
 
 export type TooltipPosition = 'top' | 'bottom' | 'left' | 'right';
 
@@ -51,7 +62,20 @@ export class TooltipDirective implements OnDestroy {
   private overlay = inject(Overlay);
   private positions = inject(OverlayPositionBuilder);
   private host = inject(ElementRef<HTMLElement>);
+  private document = inject(DOCUMENT);
   private ref?: OverlayRef;
+  private panel?: ComponentRef<TooltipPanelComponent>;
+  private readonly hideWhenPointerLeavesHost = (event: PointerEvent) => {
+    if (!(event.target instanceof Node) || !this.host.nativeElement.contains(event.target)) this.hide();
+  };
+
+  constructor() {
+    effect(() => {
+      const text = this.grTooltip();
+      if (!text) this.hide();
+      else this.render(text);
+    });
+  }
 
   ngOnDestroy(): void {
     this.hide();
@@ -66,14 +90,23 @@ export class TooltipDirective implements OnDestroy {
       scrollStrategy: this.overlay.scrollStrategies.close(),
       panelClass: 'gr-tooltip-overlay',
     });
-    const panel = this.ref.attach(new ComponentPortal(TooltipPanelComponent));
-    panel.instance.text = this.grTooltip();
-    panel.changeDetectorRef.detectChanges();
+    this.panel = this.ref.attach(new ComponentPortal(TooltipPanelComponent));
+    this.render(this.grTooltip());
+    // A disabled host doesn't fire mouseleave. Listeners on the document watch the pointer target instead.
+    this.document.addEventListener('pointermove', this.hideWhenPointerLeavesHost, { passive: true });
   }
 
   hide(): void {
     const ref = this.ref;
     this.ref = undefined;
+    this.panel = undefined;
+    this.document.removeEventListener('pointermove', this.hideWhenPointerLeavesHost);
     disposeAnimated(ref);
+  }
+
+  private render(text: string): void {
+    if (!this.panel) return;
+    this.panel.instance.text = text;
+    this.panel.changeDetectorRef.detectChanges();
   }
 }

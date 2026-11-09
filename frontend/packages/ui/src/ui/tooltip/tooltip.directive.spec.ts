@@ -54,6 +54,28 @@ describe('TooltipDirective', () => {
     expect(tip()).toBeNull();
   });
 
+  it('hides an open tooltip once its text turns empty and follows text changes', () => {
+    const { fixture, target } = render();
+    target().dispatchEvent(new MouseEvent('mouseenter'));
+    fixture.detectChanges();
+    fixture.componentInstance.text.set('Start is running');
+    fixture.detectChanges();
+    expect(tip()!.textContent).toContain('Start is running');
+    fixture.componentInstance.text.set('');
+    fixture.detectChanges();
+    expect(tip()).toBeNull();
+  });
+
+  it('hides when the pointer moves off a disabled host that sends no mouseleave', () => {
+    const { fixture, target } = render();
+    target().dispatchEvent(new MouseEvent('mouseenter'));
+    fixture.detectChanges();
+    target().dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+    expect(tip()).toBeTruthy();
+    document.body.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+    expect(tip()).toBeNull();
+  });
+
   it('does not stack overlays when hover fires twice', () => {
     const { fixture, target } = render();
     target().dispatchEvent(new MouseEvent('mouseenter'));
