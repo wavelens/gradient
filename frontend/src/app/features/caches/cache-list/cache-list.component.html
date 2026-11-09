@@ -4,8 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Caches" subtitle="Manage your build caches">
-  @if (canCreateCache) {
+<gr-page-layout title="Caches" [subtitle]="authService.isAuthenticated() ? 'Manage your build caches' : 'Public caches on this server. Sign in to see your own.'">
+  @if (canCreateCache && caches.items().length) {
     <app-create-cache-button slot="actions" (create)="openCreateDialog()" />
   }
   @if (authService.isAuthenticated()) {

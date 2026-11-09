@@ -11,7 +11,7 @@
   @if (!statsFailed()) {
     @let s = stats();
     <gr-card-grid class="nar-stats" min="150px" [attr.aria-busy]="!s || null">
-      <gr-stat-card compact label="Total NARs" [value]="s && formatCount(s.total_nars)" />
+      <gr-stat-card compact label="Packages" [value]="s && formatCount(s.total_nars)" />
       <gr-stat-card compact label="Uncompressed size" [value]="s && formatBytes(s.total_nar_size)" />
       <gr-stat-card compact label="Compressed size" [value]="s && formatBytes(s.total_file_size)" />
       <gr-stat-card compact label="Last uploaded" [value]="s && (s.last_uploaded_at | relativeTime)" />

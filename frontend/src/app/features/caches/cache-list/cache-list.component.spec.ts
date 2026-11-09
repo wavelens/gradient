@@ -71,12 +71,21 @@ describe('CacheListComponent', () => {
     const { element } = setup({ authenticated: false });
     expect(element.textContent).toContain('Shared');
     expect(element.textContent).not.toContain('No caches yet');
+    expect(element.textContent).toContain('Public caches on this server.');
+    expect(element.textContent).not.toContain('Manage your build caches');
   });
 
   it('shows the empty state for a signed-in user without caches, also above public caches', () => {
     const { element } = setup({ authenticated: true, getCaches: () => of({ items: [] }) });
     expect(element.textContent).toContain('No caches yet');
     expect(element.textContent).toContain('Shared');
+    expect(element.querySelectorAll('app-create-cache-button')).toHaveLength(1);
+  });
+
+  it('offers Create in the header once the list has caches', () => {
+    const { element } = setup({ authenticated: true });
+    expect(element.querySelectorAll('app-create-cache-button')).toHaveLength(1);
+    expect(element.textContent).toContain('Manage your build caches');
   });
 
   it('opens the created cache', () => {

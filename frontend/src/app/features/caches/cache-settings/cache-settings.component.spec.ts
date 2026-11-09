@@ -279,6 +279,7 @@ describe('CacheSettingsComponent - edits', () => {
   it.each([
     { field: 'max_storage_gb', value: 0.5, message: 'Enter 0 for no limit' },
     { field: 'max_storage_gb', value: null, message: 'Enter 0 for no limit' },
+    { field: 'max_storage_gb', value: 2_147_483_648, message: 'from 1 to 2147483647' },
     { field: 'priority', value: 300, message: 'Enter an integer from 0 to 255.' },
     { field: 'local_priority', value: -5, message: 'Enter an integer from 0 to 255.' },
     { field: 'display_name', value: '  ', message: 'Enter a display name.' },

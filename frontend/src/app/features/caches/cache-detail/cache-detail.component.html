@@ -21,7 +21,11 @@
     </div>
 
   @if (!c.active) {
-  <gr-message-banner type="warning" data-testid="inactive-cache">This cache is inactive. Nix clients can't fetch store paths from the cache until administrators activate the cache.</gr-message-banner>
+  <gr-message-banner type="warning" data-testid="inactive-cache">This cache is inactive. Nix clients can't fetch store paths from the cache until administrators activate the cache.
+    @if (editAccess().canEdit) {
+      <a grButton size="small" severity="secondary" label="Open settings" [routerLink]="links.cachePage(c.name, 'settings')"></a>
+    }
+  </gr-message-banner>
   } @else {
   <gr-settings-section
     title="How to Use This Cache"
@@ -66,7 +70,7 @@
         />
     </div>
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
-      <gr-stat-card label="Packages stored" [value]="statsLoading() ? null : formatCount(stats()?.total_packages ?? 0)" />
+      <gr-stat-card label="Packages" [value]="statsLoading() ? null : formatCount(stats()?.total_packages ?? 0)" />
       <gr-stat-card label="Uncompressed size" [value]="statsLoading() ? null : formatBytes(stats()?.total_nar_bytes ?? 0)" />
       <gr-stat-card label="Compressed size" [value]="statsLoading() ? null : formatBytes(stats()?.total_bytes ?? 0)" />
     </gr-card-grid>

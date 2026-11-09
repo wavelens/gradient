@@ -11,7 +11,7 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
-import { injectCacheAccessData } from '@core/resolvers/inject-access';
+import { injectCacheAccess, injectCacheAccessData } from '@core/resolvers/inject-access';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -99,6 +99,7 @@ export class CacheDetailComponent implements OnInit {
   protected authService = inject(AuthService);
 
   private access = injectCacheAccessData();
+  protected editAccess = injectCacheAccess();
   cache = computed<CacheResponse | null>(() => this.access()?.cache ?? null);
   statsLoading = signal(true);
   stats = signal<CacheStatsResponse | null>(null);

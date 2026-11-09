@@ -97,11 +97,11 @@ function setup(
 }
 
 describe('UpstreamCachesComponent - badges', () => {
-  it('show the mode only for internal upstream caches, since external upstream caches are always read-only', () => {
+  it('shows the mode for every upstream kind', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [...oneUpstream, httpUpstream]);
     const rows = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row'));
     const badges = rows.map((row) => Array.from(row.querySelectorAll('gr-badge')).map((b) => b.textContent?.trim()));
-    expect(badges).toEqual([['Internal', 'Read Only'], ['HTTP']]);
+    expect(badges).toEqual([['Internal', 'Read Only'], ['HTTP', 'Read Only']]);
   });
 });
 
@@ -118,47 +118,6 @@ describe('UpstreamCachesComponent - loading', () => {
     fixture.detectChanges();
     expect(load).toHaveBeenCalledTimes(2);
     expect(root.textContent).toContain('Upstream A');
-  });
-});
-
-describe('UpstreamCachesComponent - HTTP upstream probe', () => {
-  const realFetch = globalThis.fetch;
-  afterEach(() => { globalThis.fetch = realFetch; });
-
-  function probeWith(url: string, fetchImpl: typeof fetch) {
-    globalThis.fetch = fetchImpl;
-    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    fixture.componentInstance.upstreamForm.url = url;
-    return fixture.componentInstance;
-  }
-
-  it('does not probe a scheme-less URL that would hit our own origin', async () => {
-    const fetchSpy = vi.fn();
-    const component = probeWith('randomtext', fetchSpy as unknown as typeof fetch);
-    await component.probeHttpUrl();
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(component.probeSuggestsProto()).toBe(false);
-  });
-
-  it('suggests proto only when the body is a real gradient-cache-info', async () => {
-    const fetchSpy = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ GradientVersion: '0.1.0', GradientUrl: 'https://g.example.com' }),
-    });
-    const component = probeWith('https://g.example.com', fetchSpy as unknown as typeof fetch);
-    await component.probeHttpUrl();
-    expect(fetchSpy).toHaveBeenCalledWith('https://g.example.com/gradient-cache-info?json', expect.anything());
-    expect(component.probeSuggestsProto()).toBe(true);
-  });
-
-  it('does not suggest proto when a 200 returns a non-gradient body', async () => {
-    const fetchSpy = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.reject(new SyntaxError('Unexpected token <')),
-    });
-    const component = probeWith('https://not-gradient.example.com', fetchSpy as unknown as typeof fetch);
-    await component.probeHttpUrl();
-    expect(component.probeSuggestsProto()).toBe(false);
   });
 });
 
@@ -293,6 +252,22 @@ describe('UpstreamCachesComponent - field checks', () => {
     tabs.find((tab) => tab.textContent?.includes('HTTP'))!.click();
     fixture.detectChanges();
     expect(component.upstreamType).toBe('http');
+  });
+
+  it('clears the failed attempt when the type changes', () => {
+    const fixture = setup(admin);
+    const component = fixture.componentInstance;
+    component.openAddDialog();
+    component.switchUpstreamType('http');
+    component.addUpstream();
+    component.addError.set('Failed to add upstream cache.');
+    fixture.detectChanges();
+    expect(fieldText('up-url')).toContain('Enter the cache URL.');
+    component.switchUpstreamType('gradient_proto');
+    component.switchUpstreamType('http');
+    fixture.detectChanges();
+    expect(component.addError()).toBeNull();
+    expect(fieldText('up-url')).not.toContain('Enter the cache URL.');
   });
 
   it('names every missing field of a new HTTP upstream and adds nothing', () => {

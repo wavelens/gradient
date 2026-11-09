@@ -40,9 +40,7 @@
           <gr-row icon="cloud_download">
             {{ u.display_name }}
             <gr-badge>{{ kindLabel(u) }}</gr-badge>
-            @if (u.kind === 'internal') {
-              <gr-badge>{{ modeLabel(u.mode) }}</gr-badge>
-            }
+            <gr-badge>{{ modeLabel(u.mode) }}</gr-badge>
             @if (u.http1_only) {
               <gr-badge severity="neutral">HTTP/1.1</gr-badge>
             }
@@ -128,7 +126,7 @@
         <gr-form-field hint="For caches that break HTTP/2 transfers.">
           <gr-checkbox inputId="edit-http1-only" [(ngModel)]="editForm.http1_only" [binary]="true" label="HTTP/1.1 only" />
         </gr-form-field>
-        <small class="text-secondary">External caches are always Read Only.</small>
+        <small class="text-secondary">HTTP caches are always Read Only.</small>
       } @else {
         <gr-form-field label="Mode" for="edit-mode">
           <gr-label-help slot="label" doc="concepts/caches/#upstream-types" title="Upstream modes" />
@@ -164,7 +162,7 @@
         ariaLabel="Upstream type"
         [options]="upstreamTypeOptions"
         [ngModel]="upstreamType"
-        (ngModelChange)="upstreamType = $event; probeSuggestsProto.set(false)"
+        (ngModelChange)="switchUpstreamType($event)"
       />
     </gr-form-field>
 
@@ -221,15 +219,7 @@
         <input grInput id="up-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="cache.nixos.org" (keyup.enter)="addUpstream()" />
       </gr-form-field>
       <gr-form-field label="Substituter URL" for="up-url" [invalid]="!!addErrors().url" [error]="addErrors().url ?? ''">
-        <input grInput id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" (blur)="probeHttpUrl()" (keyup.enter)="addUpstream()" />
-        @if (probeSuggestsProto()) {
-          <div class="dialog-hint">
-            <gr-icon name="lightbulb" size="sm" />
-            This looks like a Gradient cache.
-            <button type="button" class="hint-link-btn" (click)="switchToGradientProto()">Switch to Gradient Proto</button>
-            for native protocol pulling.
-          </div>
-        }
+        <input grInput id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" (keyup.enter)="addUpstream()" />
       </gr-form-field>
       <gr-form-field label="Public Key" for="up-pubkey" [invalid]="!!addErrors().public_key" [error]="addErrors().public_key ?? ''">
         <input grInput id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" (keyup.enter)="addUpstream()" />
@@ -237,7 +227,7 @@
       <gr-form-field hint="For caches that break HTTP/2 transfers.">
         <gr-checkbox inputId="up-http1-only" [(ngModel)]="upstreamForm.http1_only" [binary]="true" label="HTTP/1.1 only" />
       </gr-form-field>
-      <small class="text-secondary">Http caches are always Read Only.</small>
+      <small class="text-secondary">HTTP caches are always Read Only.</small>
   }
   </div>
   <div grDialogFooter>

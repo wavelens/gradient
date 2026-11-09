@@ -16,7 +16,6 @@ import {
   CheckboxComponent,
   DialogComponent,
   FormFieldComponent,
-  IconComponent,
   InputDirective,
   LoadStateComponent,
   MessageService,
@@ -33,12 +32,12 @@ import { LabelHelpComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService } from '@shared/access';
 import { injectCacheAccessTo } from '@core/resolvers/inject-access';
-import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
 import { UpstreamCacheItem, CacheSubscriptionMode, PatchUpstreamRequest, ProtocolProbe } from '@core/models';
 import { CreateCacheDialogComponent, fieldChecks, injectCanCreateCache } from '@shared/forms';
 import { links } from '@shared/routing';
 import { SUBSCRIPTION_MODES, subscriptionModeLabel } from '@shared/text';
 
+type UpstreamType = 'internal' | 'gradient_proto' | 'http';
 type UpstreamErrors = Partial<Record<'cache_name' | 'display_name' | 'url' | 'remote_cache' | 'public_key', string | null>>;
 
 const DISPLAY_NAME_REQUIRED = 'Enter a display name.';
@@ -76,7 +75,6 @@ const hasError = (errors: UpstreamErrors): boolean => Object.values(errors).some
     LoadStateComponent,
     WritableDirective,
     ManagedDisableDirective, ServerConfigurationManagedBannerComponent,
-    IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
     SelectComponent,
@@ -112,7 +110,6 @@ export class UpstreamCachesComponent implements OnInit {
   savingUpstream = signal(false);
   testingUpstreamId = signal<string | null>(null);
   togglingUpstreamId = signal<string | null>(null);
-  probeSuggestsProto = signal(false);
 
   upstreamCaches = signal<UpstreamCacheItem[]>([]);
   showAddDialog = signal(false);
@@ -126,7 +123,7 @@ export class UpstreamCachesComponent implements OnInit {
   cacheName = '';
   breadcrumb = computed(() => this.crumbs.cacheSettings(this.cacheName, { label: 'Upstream Caches' }));
 
-  upstreamType: 'internal' | 'gradient_proto' | 'http' = 'internal';
+  upstreamType: UpstreamType = 'internal';
   upstreamForm = {
     cache_name: '',
     display_name: '',
@@ -236,7 +233,6 @@ export class UpstreamCachesComponent implements OnInit {
     this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', http1_only: false, remote_cache: '', api_key: '', mode: 'ReadOnly' };
     this.addError.set(null);
     this.addAttempted.set(false);
-    this.probeSuggestsProto.set(false);
     this.showAddDialog.set(true);
   }
 
@@ -329,19 +325,10 @@ export class UpstreamCachesComponent implements OnInit {
     });
   }
 
-  probeHttpUrl(): Promise<void> {
-    this.probeSuggestsProto.set(false);
-    const url = normalizeProbeUrl(this.upstreamForm.url);
-    if (!url) return Promise.resolve();
-    return fetch(`${url}/gradient-cache-info?json`, { method: 'GET', mode: 'cors' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((body) => { if (isGradientCacheInfo(body)) this.probeSuggestsProto.set(true); })
-      .catch(() => {});
-  }
-
-  switchToGradientProto(): void {
-    this.upstreamType = 'gradient_proto';
-    this.probeSuggestsProto.set(false);
+  switchUpstreamType(type: UpstreamType): void {
+    this.upstreamType = type;
+    this.addError.set(null);
+    this.addAttempted.set(false);
   }
 
   testUpstream(upstream: UpstreamCacheItem): void {

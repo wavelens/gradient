@@ -65,6 +65,7 @@ type CheckedField = 'display_name' | 'priority' | 'local_priority' | 'max_storag
 const CHECKED_FIELDS: CheckedField[] = ['display_name', 'priority', 'local_priority', 'max_storage_gb'];
 const PATCH_FIELDS = ['display_name', 'description', 'priority', 'local_priority', 'max_storage_gb', 'pull_through'] as const;
 const PRIORITY_RANGE = 'Enter an integer from 0 to 255.';
+const MAX_STORAGE_GB = 2_147_483_647;
 
 const isBlank = (value: unknown): boolean => value === null || value === undefined || String(value).trim() === '';
 
@@ -203,9 +204,9 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
       case 'local_priority':
         return isBlank(value) || isWholeNumber(value, 0, 255) ? null : PRIORITY_RANGE;
       case 'max_storage_gb':
-        return isWholeNumber(value, 0, Number.MAX_SAFE_INTEGER)
+        return isWholeNumber(value, 0, MAX_STORAGE_GB)
           ? null
-          : 'Enter 0 for no limit, otherwise an integer of at least 1 in GB.';
+          : 'Enter 0 for no limit, otherwise a whole number of GB from 1 to 2147483647.';
     }
   }
 

@@ -121,16 +121,16 @@ describe('CacheDetailComponent loading', () => {
     const root = fixture.nativeElement as HTMLElement;
 
     expect(root.textContent).toContain('Failed to load cache stats');
-    expect(root.textContent).not.toContain('Packages stored');
+    expect(root.textContent).not.toContain('Packages');
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
     fixture.detectChanges();
     expect(getCacheStats).toHaveBeenCalledTimes(2);
-    expect(root.textContent).toContain('Packages stored');
+    expect(root.textContent).toContain('Packages');
   });
 });
 
 describe('CacheDetailComponent empty and inactive caches', () => {
-  function render(active: boolean) {
+  function render(active: boolean, canEdit = false) {
     TestBed.configureTestingModule({
       imports: [CacheDetailComponent],
       providers: [
@@ -142,7 +142,7 @@ describe('CacheDetailComponent empty and inactive caches', () => {
           provide: ActivatedRoute,
           useValue: {
             snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) },
-            parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', active, public: true } } }) },
+            parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', active, public: true }, access: { managed: false, canEdit, canTrigger: canEdit } } }) },
           },
         },
         { provide: StarsService, useValue: { starred: () => of(false), set: () => of(true) } },
@@ -165,6 +165,14 @@ describe('CacheDetailComponent empty and inactive caches', () => {
     expect(root.querySelector('[data-testid="inactive-cache"]')?.textContent).toContain('This cache is inactive.');
     expect(root.textContent).not.toContain('How to Use This Cache');
     expect(root.querySelector('#cache-conf')).toBeNull();
+    expect(root.querySelector('[data-testid="inactive-cache"] a')).toBeNull();
+  });
+
+  it('links editors from the inactive warning to the cache settings', () => {
+    const root = render(false, true);
+    const link = root.querySelector<HTMLAnchorElement>('[data-testid="inactive-cache"] a');
+    expect(link?.textContent).toContain('Open settings');
+    expect(link?.getAttribute('href')).toBe('/caches/main/settings');
   });
 });
 

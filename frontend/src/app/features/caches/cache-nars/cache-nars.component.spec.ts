@@ -144,7 +144,7 @@ describe('CacheNarsComponent delete', () => {
     const service = TestBed.inject(CachesService) as unknown as { deleteCacheNar: () => unknown };
     service.deleteCacheNar = vi.fn(() => of('ok'));
     fixture.componentInstance.askDelete(NAR);
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete NAR', target: 'abc123' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete NAR', target: 'hello (abc123)' }));
     expect(service.deleteCacheNar).toHaveBeenCalledWith('main', 'abc123');
     expect(fixture.componentInstance.rows()).toEqual([]);
   });

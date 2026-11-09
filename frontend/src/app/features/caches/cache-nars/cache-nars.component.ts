@@ -204,7 +204,7 @@ export class CacheNarsComponent implements OnInit {
     this.confirm
       .confirm({
         title: 'Delete NAR',
-        target: row.hash,
+        target: `${row.package} (${row.hash})`,
         consequence:
           "If other caches still hold this NAR, only this cache's signature is removed. Otherwise the NAR blob is deleted permanently.",
         confirmLabel: 'Delete',
