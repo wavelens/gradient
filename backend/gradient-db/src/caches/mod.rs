@@ -105,6 +105,21 @@ pub fn public_or(visible: Option<Condition>) -> Condition {
     }
 }
 
+pub fn subscribed_caches_of_project_visible_to_user(user: UserId, project: ProjectId) -> Condition {
+    let reachable_project = Query::select()
+        .column(CProjectAccess::Project)
+        .from(gradient_entity::project_access::Entity)
+        .and_where(CProjectAccess::User.eq(user))
+        .and_where(CProjectAccess::Project.eq(project))
+        .to_owned();
+    let subscribed = Query::select()
+        .column(CProjectCache::Cache)
+        .from(gradient_entity::project_cache::Entity)
+        .and_where(CProjectCache::Project.in_subquery(reachable_project))
+        .to_owned();
+    Condition::all().add(CCache::Id.in_subquery(subscribed))
+}
+
 pub fn visible_to_user(user: UserId) -> Condition {
     let member_of = Query::select()
         .column(CCacheAccess::Cache)

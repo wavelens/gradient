@@ -8,6 +8,7 @@ use super::refusal::CacheRefusal;
 use crate::access::{Caller, caller_cache_mask};
 use crate::api_spec::CachePath;
 use crate::audit::{Audit, changed_fields};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
@@ -141,16 +142,22 @@ type PaginatedCache = Paginated<MCache>;
     operation_id = "listCaches",
     tag = "caches",
     summary = "List caches",
-    description = "Get a paginated list of binary caches for the current user. Include caches that belong to the user, caches shared with the user as a member, and caches available through a project subscription. Sort the list by display name.",
+    description = "Get a paginated list of binary caches for the current user. Include caches that belong to the user, caches that other members share with the user, and caches that project subscriptions make available. Sort the list by display name. An API key pinned to one project can return only caches for subscriptions of that project.",
     params(PaginationParams),
     responses((status = OK, description = "Paginated cache list", body = PaginatedCache), WebError)
 )]
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<MCache>>>> {
-    let condition = gradient_db::caches::visible_to_user(user.id);
+    let condition = match api_key.and_then(|key| key.project) {
+        Some(pinned) => {
+            gradient_db::caches::subscribed_caches_of_project_visible_to_user(user.id, pinned)
+        }
+        None => gradient_db::caches::visible_to_user(user.id),
+    };
     let listing = crate::helpers::paginate(
         gradient_db::caches::ordered_by_name(condition),
         &state.web_db,

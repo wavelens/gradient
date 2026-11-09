@@ -28,7 +28,7 @@ use gradient_sources::generate_ssh_key;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::TransactionTrait;
+use sea_orm::{ColumnTrait, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -198,7 +198,7 @@ type PaginatedProjectSummary = Paginated<ProjectSummary>;
     operation_id = "listProjects",
     tag = "projects",
     summary = "List projects",
-    description = "Return all projects where the current user is a member, along with the caller's role and `permissions`.",
+    description = "Return all projects with current user as member, and caller's role and `permissions`. An API key for one project can list only that project.",
     params(PaginationParams),
     responses((status = OK, description = "Project list", body = PaginatedProjectSummary), WebError)
 )]
@@ -208,12 +208,11 @@ pub async fn get(
     Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<ProjectSummary>>>> {
-    let listing = paginate(
-        gradient_db::projects::reachable_by_user(user.id),
-        &state.web_db,
-        &params,
-    )
-    .await?;
+    let mut reachable = gradient_db::projects::reachable_by_user(user.id);
+    if let Some(pinned) = api_key.as_ref().and_then(|key| key.project) {
+        reachable = reachable.filter(CProject::Id.eq(pinned));
+    }
+    let listing = paginate(reachable, &state.web_db, &params).await?;
 
     let project_ids: Vec<ProjectId> = listing.items.iter().map(|o| o.id).collect();
     let evaluations_per_project =
