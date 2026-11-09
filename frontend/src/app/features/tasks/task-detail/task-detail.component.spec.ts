@@ -293,6 +293,18 @@ describe('TaskDetailComponent - loading', () => {
     expect(root.querySelector('gr-live-status')?.textContent).toContain('Live');
   });
 
+  it('marks a paused task as inactive with a link to its settings in place of the live badge', () => {
+    const { fixture, liveConnectionChange } = setup(access, { getTask: () => of({ ...resolvedTask(access, {}), active: false }) });
+    liveConnectionChange.fn?.(true);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('gr-live-status')).toBeNull();
+    const badge = root.querySelector<HTMLAnchorElement>('a.inactive-badge');
+    expect(badge?.textContent).toContain('Inactive');
+    expect(badge?.getAttribute('href')).toBe('/project/acme/task/demo/settings');
+    expect(findByText(root, 'Start Evaluation')?.hasAttribute('disabled')).toBe(false);
+  });
+
   it('holds the project crumb with a placeholder until the project name arrives', () => {
     const { fixture } = setup(access, { getProject: () => NEVER });
     expect((fixture.nativeElement as HTMLElement).querySelector('.breadcrumb-link gr-skeleton')).not.toBeNull();
