@@ -19,6 +19,10 @@
   </div>
 
   <div class="header-content">
+    <div class="header-search">
+      <ng-content select="[slot=search]" />
+    </div>
+
     <div id="header-menu" class="header-menu" [grDrawer]="menuOpen()" (grDrawerClose)="closeMenu()">
       <nav class="header-nav" aria-label="Main">
         @for (item of navigationLinksWithCurrentPageSignals(); track item.link.href) {
@@ -32,10 +36,6 @@
         <ng-content select="[slot=actions]" />
         <ng-content select="[slot=lang]" />
       </div>
-    </div>
-
-    <div class="header-search">
-      <ng-content select="[slot=search]" />
     </div>
 
     <button

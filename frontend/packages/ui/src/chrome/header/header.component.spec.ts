@@ -97,4 +97,10 @@ describe('gr-header menu', () => {
     fixture.detectChanges();
     expect(current()).toEqual([]);
   });
+
+  it('reaches the search before the account menu with the keyboard', () => {
+    const search = root().querySelector('.header-search')!;
+    const account = root().querySelector('.header-account')!;
+    expect(search.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
