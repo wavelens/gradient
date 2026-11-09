@@ -10,9 +10,6 @@
     [title]="c.display_name"
     [subtitle]="c.description"
   >
-    @if (!c.active) {
-      <gr-badge slot="meta" severity="danger">Inactive</gr-badge>
-    }
     <div slot="actions">
       <a grButton label="NARs" icon="database" severity="secondary" [routerLink]="links.cachePage(cacheName, 'nars')"></a>
       @if (c.can_edit) {
@@ -23,6 +20,9 @@
       }
     </div>
 
+  @if (!c.active) {
+  <gr-message-banner type="warning" data-testid="inactive-cache">This cache is inactive. Nix clients can't fetch store paths from the cache until administrators activate the cache.</gr-message-banner>
+  } @else {
   <gr-settings-section
     title="How to Use This Cache"
     description="Add the following to your /etc/nix/nix.conf or NixOS configuration."
@@ -47,8 +47,12 @@
       </gr-form-field>
     }
   </gr-settings-section>
+  }
 
   <gr-load-state [error]="statsError()" errorTitle="Failed to load cache stats" (retry)="loadStats()">
+  @if (!statsLoading() && !stats()?.total_packages) {
+  <p class="text-secondary" data-testid="no-packages">No packages yet.@if (c.active) { See "How to Use This Cache" above.}</p>
+  } @else {
   <div class="section">
     <div class="section-head">
       <h2>Storage</h2>
@@ -64,7 +68,7 @@
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
       <gr-stat-card label="Packages stored" [value]="statsLoading() ? null : formatCount(stats()?.total_packages ?? 0)" />
       <gr-stat-card label="Uncompressed size" [value]="statsLoading() ? null : formatBytes(stats()?.total_nar_bytes ?? 0)" />
-      <gr-stat-card label="Compressed stored" [value]="statsLoading() ? null : formatBytes(stats()?.total_bytes ?? 0)" />
+      <gr-stat-card label="Compressed size" [value]="statsLoading() ? null : formatBytes(stats()?.total_bytes ?? 0)" />
     </gr-card-grid>
 
     <gr-metric-chart title="Storage over time"
@@ -83,7 +87,7 @@
     <h2>Traffic</h2>
     <gr-card-grid min="220px" [attr.aria-busy]="statsLoading() || null">
       <gr-stat-card label="Requests in this hour" [value]="statsLoading() ? null : formatCount((stats()?.hours ?? []).at(-1)?.requests ?? 0)" />
-      <gr-stat-card label="Traffic (last hour)" [value]="statsLoading() ? null : formatBytes((stats()?.hours ?? []).at(-1)?.bytes ?? 0)" />
+      <gr-stat-card label="Traffic in this hour" [value]="statsLoading() ? null : formatBytes((stats()?.hours ?? []).at(-1)?.bytes ?? 0)" />
     </gr-card-grid>
 
     <gr-metric-chart title="Traffic over time"
@@ -107,6 +111,7 @@
           />
       </gr-metric-chart>
   </div>
+  }
   </gr-load-state>
 
   <gr-settings-section class="used-by" title="Projects using this cache" description="Projects that push builds to this cache or read from this cache." [card]="false">

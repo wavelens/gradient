@@ -378,6 +378,22 @@ describe('UpstreamCachesComponent - write failures', () => {
   });
 });
 
+describe('UpstreamCachesComponent - connection test', () => {
+  const probe = (ok: boolean) => ({ ok, status: ok ? 200 : null, latency_ms: 5, error: ok ? null : 'protocol error' });
+
+  it.each([
+    [false, true],
+    [true, false],
+  ])('keeps the result until dismissed and suggests HTTP/1.1 only when only HTTP/1.1 works (already on: %s)', (http1Only, hinted) => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [{ ...httpUpstream, http1_only: http1Only }]);
+    Object.assign(TestBed.inject(CachesService), { testUpstream: () => of({ ok: true, message: 'Upstream reachable', http1: probe(true), http2: probe(false) }) });
+    fixture.componentInstance.testUpstream({ ...httpUpstream, http1_only: http1Only });
+    const toast = TestBed.inject(MessageService).messages().at(-1)!;
+    expect(toast.life).toBe(0);
+    expect(toast.detail?.includes('Turn on "HTTP/1.1 only" in Edit.')).toBe(hinted);
+  });
+});
+
 describe('UpstreamCachesComponent - removal', () => {
   const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
 
@@ -386,10 +402,10 @@ describe('UpstreamCachesComponent - removal', () => {
     const confirm = vi.fn((request: ConfirmRequest) => request.action());
     const fixture = setup(admin, oneUpstream, undefined, { removeUpstream, confirm });
     findIconButton(fixture.nativeElement, 'delete')!.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Upstream A' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete upstream cache', target: 'Upstream A', confirmLabel: 'Delete' }));
     expect(removeUpstream).toHaveBeenCalledWith('demo', 'u1');
     expect(TestBed.inject(MessageService).messages()).toContainEqual(
-      expect.objectContaining({ severity: 'success', summary: 'Upstream cache removed' }),
+      expect.objectContaining({ severity: 'success', summary: 'Upstream cache deleted' }),
     );
   });
 

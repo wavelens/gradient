@@ -346,15 +346,17 @@ export class UpstreamCachesComponent implements OnInit {
     this.probeSuggestsProto.set(false);
   }
 
-  testUpstream(id: string): void {
-    this.testingUpstreamId.set(id);
-    this.cachesService.testUpstream(this.cacheName, id).subscribe({
+  testUpstream(upstream: UpstreamCacheItem): void {
+    this.testingUpstreamId.set(upstream.id);
+    this.cachesService.testUpstream(this.cacheName, upstream.id).subscribe({
       next: (r) => {
         this.testingUpstreamId.set(null);
+        const http1OnlyHint = r.http1.ok && !r.http2.ok && !upstream.http1_only ? ' HTTP/1.1 only works. Turn on "HTTP/1.1 only" in Edit.' : '';
         this.messageService.add({
           severity: r.ok ? 'success' : 'error',
           summary: r.message,
-          detail: `HTTP/1.1: ${probeSummary(r.http1)}; HTTP/2: ${probeSummary(r.http2)}`,
+          detail: `HTTP/1.1: ${probeSummary(r.http1)}; HTTP/2: ${probeSummary(r.http2)}.${http1OnlyHint}`,
+          life: 0,
         });
       },
       error: (error: unknown) => {
@@ -385,15 +387,15 @@ export class UpstreamCachesComponent implements OnInit {
   removeUpstream(upstream: UpstreamCacheItem): void {
     this.confirm
       .confirm({
-        title: 'Remove upstream cache',
+        title: 'Delete upstream cache',
         target: upstream.display_name,
         consequence: `This cache stops using ${upstream.display_name} as an upstream. You can add it again later.`,
-        confirmLabel: 'Remove',
-        failure: 'Failed to remove the upstream cache.',
+        confirmLabel: 'Delete',
+        failure: "Couldn't delete upstream cache",
         action: () => this.cachesService.removeUpstream(this.cacheName, upstream.id),
       })
       .subscribe(() => {
-        this.notify.success('Upstream cache removed');
+        this.notify.success('Upstream cache deleted');
         this.loadUpstreamCaches();
       });
   }

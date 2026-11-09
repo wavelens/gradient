@@ -29,6 +29,7 @@ import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.compo
 import { formatBytes, formatCount, RelativeTimePipe } from '@shared/text';
 import { narSearchText, parseNarSearch } from './nar-search';
 import { NarSummary, NarStats, Paginated } from '@core/models';
+import { links } from '@shared/routing';
 
 type SortKey = 'created_at' | 'nar_size' | 'last_fetched_at';
 type SortOrder = 'asc' | 'desc';
@@ -65,6 +66,7 @@ export class CacheNarsComponent implements OnInit {
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
+  protected readonly links = links;
   access = injectCacheAccessTo('writeStore');
 
   cacheName = '';

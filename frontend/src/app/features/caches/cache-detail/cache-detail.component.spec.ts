@@ -129,6 +129,45 @@ describe('CacheDetailComponent loading', () => {
   });
 });
 
+describe('CacheDetailComponent empty and inactive caches', () => {
+  function render(active: boolean) {
+    TestBed.configureTestingModule({
+      imports: [CacheDetailComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: CachesService, useValue: { getCache: () => NEVER, getCacheStats: () => of({ total_packages: 0, total_bytes: 0, total_nar_bytes: 0, hours: [] }), getSubscribers: () => NEVER } },
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) },
+            parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', active, public: true } } }) },
+          },
+        },
+        { provide: StarsService, useValue: { starred: () => of(false), set: () => of(true) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(CacheDetailComponent);
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  it('replaces storage and traffic with one line while the cache has no packages', () => {
+    const root = render(true);
+    expect(root.querySelector('[data-testid="no-packages"]')?.textContent).toBe('No packages yet. See "How to Use This Cache" above.');
+    expect(root.querySelector('gr-stat-card')).toBeNull();
+    expect(root.querySelector('gr-metric-chart')).toBeNull();
+  });
+
+  it('warns about an inactive cache and hides the nix.conf snippet', () => {
+    const root = render(false);
+    expect(root.querySelector('[data-testid="inactive-cache"]')?.textContent).toContain('This cache is inactive.');
+    expect(root.textContent).not.toContain('How to Use This Cache');
+    expect(root.querySelector('#cache-conf')).toBeNull();
+  });
+});
+
 describe('CacheDetailComponent header', () => {
   function render(authenticated: boolean) {
     const starred = vi.fn(() => of(true));

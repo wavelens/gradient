@@ -127,7 +127,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   deny(request: SubscriptionRequestItem): void {
     this.confirm
       .confirm({
-        title: 'Deny Subscription Request',
+        title: 'Deny subscription request',
         target: request.project_display_name,
         consequence: `${request.project_display_name} can't use this cache. The project can apply again later.`,
         confirmLabel: 'Deny',

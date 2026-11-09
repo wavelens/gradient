@@ -71,7 +71,7 @@ describe('CacheNarsComponent loading', () => {
   it('lays out the stat cards and the table with placeholders until the data arrives', () => {
     const { root } = render(() => NEVER);
     expect(root.querySelector('gr-loading-spinner')).toBeNull();
-    expect(root.querySelectorAll('.stat-value gr-skeleton').length).toBe(5);
+    expect(root.querySelectorAll('.stat-value gr-skeleton').length).toBe(4);
     const table = root.querySelector('gr-table')!;
     expect(table.getAttribute('aria-busy')).toBe('true');
     expect(table.querySelectorAll('th').length).toBeGreaterThan(0);
@@ -111,6 +111,24 @@ describe('CacheNarsComponent loading', () => {
     query.next(convertToParamMap({ package: 'hello' }));
     fixture.detectChanges();
     expect(root.textContent).toContain('No archives match the current filters.');
+  });
+
+  it('says in one line that an empty cache has no packages yet', () => {
+    const stats = { total_nars: 0, total_nar_size: 0, total_file_size: 0, last_uploaded_at: null, oldest_fetched_at: null } as NarStats;
+    const { root } = render(() => of({ ...PAGE, items: [], total: 0 }), () => of(stats));
+    expect(root.querySelector('[data-testid="no-packages"] a')?.getAttribute('href')).toBe('/caches/main');
+    expect(root.querySelector('gr-stat-card')).toBeNull();
+    expect(root.querySelector('form[role="search"]')).toBeNull();
+    expect(root.querySelector('gr-table')).toBeNull();
+  });
+
+  it('lists the package first and shows the pager only with more than one page', () => {
+    const { fixture, root } = render(() => of(PAGE));
+    expect(Array.from(root.querySelectorAll('th')).slice(0, 2).map((th) => th.textContent?.trim())).toEqual(['Package', 'Hash']);
+    expect(root.querySelector('.pagination')).toBeNull();
+    fixture.componentInstance.total.set(120);
+    fixture.detectChanges();
+    expect(root.querySelector('.pagination')?.textContent).toContain('Page 1 of 3');
   });
 
   it('drops the stat cards when the stats fail', () => {

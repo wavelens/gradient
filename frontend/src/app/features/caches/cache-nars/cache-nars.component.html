@@ -5,14 +5,16 @@
 -->
 
 <gr-page-layout [breadcrumb]="breadcrumb()" title="NARs" subtitle="Browse and manage Nix archives stored in this cache.">
+  @if (stats()?.total_nars === 0) {
+    <p class="text-secondary" data-testid="no-packages">No packages yet. See <a [routerLink]="links.cache(cacheName)">How to Use This Cache</a>.</p>
+  } @else {
   @if (!statsFailed()) {
     @let s = stats();
     <gr-card-grid class="nar-stats" min="150px" [attr.aria-busy]="!s || null">
       <gr-stat-card compact label="Total NARs" [value]="s && formatCount(s.total_nars)" />
-      <gr-stat-card compact label="NAR size" [value]="s && formatBytes(s.total_nar_size)" />
-      <gr-stat-card compact label="File size" [value]="s && formatBytes(s.total_file_size)" />
+      <gr-stat-card compact label="Uncompressed size" [value]="s && formatBytes(s.total_nar_size)" />
+      <gr-stat-card compact label="Compressed size" [value]="s && formatBytes(s.total_file_size)" />
       <gr-stat-card compact label="Last uploaded" [value]="s && (s.last_uploaded_at | relativeTime)" />
-      <gr-stat-card compact label="Oldest fetched" [value]="s && (s.oldest_fetched_at | relativeTime)" />
     </gr-card-grid>
   }
 
@@ -43,17 +45,17 @@
     <gr-table [attr.aria-busy]="loading() || null">
       <thead>
         <tr>
-          <th>Hash</th>
           <th>Package</th>
+          <th>Hash</th>
           <th class="size-col" [attr.aria-sort]="ariaSort('nar_size')">
             <button class="gr-th-sort" type="button" (click)="sortBy('nar_size')">
-              NAR size
+              Uncompressed size
               @if (sort() === 'nar_size') {
                 <gr-icon [name]="order() === 'asc' ? 'arrow_upward' : 'arrow_downward'" size="sm" />
               }
             </button>
           </th>
-          <th class="size-col">Compressed</th>
+          <th class="size-col">Compressed size</th>
           <th [attr.aria-sort]="ariaSort('created_at')">
             <button class="gr-th-sort" type="button" (click)="sortBy('created_at')">
               Created
@@ -76,8 +78,8 @@
       <tbody>
         @for (_ of rows() ? [] : placeholders; track $index) {
           <tr>
-            <td><code class="mono"><gr-skeleton width="32ch" /></code></td>
             <td><gr-skeleton width="12ch" /></td>
+            <td><code class="mono"><gr-skeleton width="32ch" /></code></td>
             <td class="size-col"><gr-skeleton width="6ch" /></td>
             <td class="size-col"><gr-skeleton width="6ch" /></td>
             <td><gr-skeleton width="7ch" /></td>
@@ -87,8 +89,8 @@
         }
         @for (row of rows(); track row.hash) {
           <tr class="is-clickable" (click)="show(row)">
-            <td><code class="mono">{{ row.hash }}</code></td>
             <td>{{ row.package }}</td>
+            <td><code class="mono">{{ row.hash }}</code></td>
             <td class="size-col">{{ formatBytes(row.nar_size) }}</td>
             <td class="size-col">{{ formatBytes(row.file_size) }}</td>
             <td class="text-secondary">{{ row.created_at | relativeTime }}</td>
@@ -110,7 +112,7 @@
       </tbody>
     </gr-table>
 
-    @if (rows()) {
+    @if (rows() && totalPages() > 1) {
       <div class="pagination">
         <span class="text-secondary">
           Page {{ page() }} of {{ totalPages() }} &middot; {{ total() }} total
@@ -124,6 +126,7 @@
       </div>
     }
   </gr-load-state>
+  }
 </gr-page-layout>
 
 <app-cache-nars-detail-drawer

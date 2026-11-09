@@ -24,8 +24,8 @@
       <gr-field-row label="Store path" [value]="d.store_path" mono />
       <gr-field-row label="NAR hash" [value]="d.nar_hash ?? '-'" mono />
       <gr-field-row label="File hash" [value]="d.file_hash ?? '-'" mono />
-      <gr-field-row label="NAR size" [value]="formatBytes(d.nar_size)" />
-      <gr-field-row label="File size" [value]="formatBytes(d.file_size)" />
+      <gr-field-row label="Uncompressed size" [value]="formatBytes(d.nar_size)" />
+      <gr-field-row label="Compressed size" [value]="formatBytes(d.file_size)" />
       <gr-field-row label="Deriver" [value]="d.deriver ?? '-'" mono />
       <gr-field-row label="CA" [value]="d.ca ?? '-'" mono />
       <gr-field-row label="Fetch count" [value]="d.fetch_count" />
