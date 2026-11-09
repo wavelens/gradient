@@ -87,6 +87,18 @@ async fn config_hides_the_ssh_port_when_disabled() {
 }
 
 #[tokio::test]
+async fn config_reports_the_keep_evaluations_limit() {
+    let db = mock_db();
+    let server = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.eval.max_keep = 30)
+        .server();
+
+    let body: Value = server.get("/api/v1/config").await.json();
+    assert_eq!(body["message"]["max_keep_evaluations_per_task"], 30);
+}
+
+#[tokio::test]
 async fn config_reports_gradient_ci_turned_off() {
     let db = mock_db();
     let server = TestState::new()

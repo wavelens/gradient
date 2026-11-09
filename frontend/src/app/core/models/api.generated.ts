@@ -2378,6 +2378,7 @@ export interface ServerConfig {
   logo_url?: string | null;
   exec_enabled: boolean;
   public_listing: boolean;
+  max_keep_evaluations_per_task?: number | null;
 }
 
 export type SessionId = string;

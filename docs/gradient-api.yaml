@@ -21021,6 +21021,11 @@ components:
           type: boolean
         public_listing:
           type: boolean
+        max_keep_evaluations_per_task:
+          type:
+          - integer
+          - 'null'
+          format: int32
     SessionId:
       type: string
       format: uuid

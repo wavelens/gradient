@@ -168,6 +168,7 @@ pub struct ServerConfig {
     pub logo_url: Option<String>,
     pub exec_enabled: bool,
     pub public_listing: bool,
+    pub max_keep_evaluations_per_task: Option<i32>,
 }
 
 #[utoipa::path(
@@ -219,6 +220,7 @@ pub async fn get_config(
             logo_url: state.config.server.frontend_logo_url.clone(),
             exec_enabled: state.config.exec.enable,
             public_listing: state.config.server.public_listing,
+            max_keep_evaluations_per_task: state.config.eval.keep_evaluations_max(),
         },
     };
 
