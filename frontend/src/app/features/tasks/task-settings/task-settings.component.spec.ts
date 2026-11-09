@@ -115,11 +115,15 @@ describe('TaskSettingsComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'delete task')).toBeNull();
   });
 
-  it('shows but disables Delete Task when managed', () => {
+  it('hides the Danger Zone when managed', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
-    const btn = findByText(fixture.nativeElement, 'delete task') as HTMLButtonElement | null;
-    expect(btn).not.toBeNull();
-    expect(btn!.disabled).toBe(true);
+    expect(findByText(fixture.nativeElement, 'delete task')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'transfer ownership')).toBeNull();
+  });
+
+  it('describes the active status by what triggers do', () => {
+    const fixture = setup({ managed: false, canEdit: true });
+    expect(fixture.nativeElement.textContent).toContain('Triggers start an evaluation.');
   });
 });
 

@@ -141,7 +141,7 @@
       </gr-row>
       <gr-row icon="schedule" linkLabel="Triggers" [link]="links.taskPage(projectName, taskName, 'triggers')">
         Triggers
-        <span slot="meta">Polling intervals, Git host push and pull-request events, and cron schedules</span>
+        <span slot="meta">Polling intervals and cron schedules. Integrations provide the triggers for push and pull request events.</span>
       </gr-row>
       <gr-row icon="bolt" linkLabel="Actions" [link]="links.taskPage(projectName, taskName, 'actions')">
         Actions
@@ -166,7 +166,7 @@
   <gr-settings-section title="Status">
     <gr-row>
       {{ proj.active ? 'Task is Active' : 'Task is Inactive' }}
-      <span slot="meta">{{ proj.active ? 'The task is currently evaluating and building.' : 'The task is paused and not evaluating.' }}</span>
+      <span slot="meta">{{ proj.active ? 'Triggers start an evaluation.' : "Triggers don't start an evaluation. Start Evaluation can still start one." }}</span>
       <button
         slot="actions"
         *appWritable="access()"
@@ -181,7 +181,7 @@
     </gr-row>
   </gr-settings-section>
 
-  @if (access().canEdit) {
+  @if (accessService.isWritable(access())) {
     <gr-settings-section title="Danger Zone" danger>
       <gr-row>
         Transfer Ownership
@@ -193,7 +193,6 @@
             icon="send"
             severity="danger"
             (click)="openTransferOwnershipDialogAndLoadTargetProjects()"
-            [appManagedDisable]="access()"
         ></button>
       </gr-row>
       <gr-row>
@@ -206,7 +205,6 @@
             icon="delete"
             severity="danger"
             (click)="deleteTask()"
-            [appManagedDisable]="access()"
         ></button>
       </gr-row>
     </gr-settings-section>
