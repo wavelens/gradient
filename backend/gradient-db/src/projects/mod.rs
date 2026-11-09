@@ -46,10 +46,16 @@ pub fn all_public() -> Select<EProject> {
         .order_by_asc(CProject::Id)
 }
 
-pub async fn running_evaluations_per_project<C: ConnectionTrait>(
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProjectEvaluationProgressCounts {
+    pub running: i64,
+    pub waiting: i64,
+}
+
+pub async fn get_running_and_waiting_evaluation_counts_by_project_id<C: ConnectionTrait>(
     db: &C,
     project_ids: &[ProjectId],
-) -> Result<HashMap<ProjectId, i64>, DbErr> {
+) -> Result<HashMap<ProjectId, ProjectEvaluationProgressCounts>, DbErr> {
     if project_ids.is_empty() {
         return Ok(HashMap::new());
     }
@@ -63,23 +69,34 @@ pub async fn running_evaluations_per_project<C: ConnectionTrait>(
     let task_to_project: HashMap<TaskId, ProjectId> =
         tasks.into_iter().map(|p| (p.id, p.project)).collect();
 
-    let mut running_per_project: HashMap<ProjectId, i64> = HashMap::new();
+    let mut per_project: HashMap<ProjectId, ProjectEvaluationProgressCounts> = HashMap::new();
     if !task_ids.is_empty() {
-        let running = EEvaluation::find()
+        let in_progress = EEvaluation::find()
             .filter(CEvaluation::Task.is_in(task_ids))
-            .filter(CEvaluation::Status.is_in(EvaluationStatus::DOING_WORK_STATUSES))
+            .filter(
+                CEvaluation::Status.is_in(
+                    EvaluationStatus::DOING_WORK_STATUSES
+                        .into_iter()
+                        .chain([EvaluationStatus::Waiting]),
+                ),
+            )
             .all(db)
             .await?;
-        for eval in running {
+        for eval in in_progress {
             if let Some(task_id) = eval.task
                 && let Some(&project_id) = task_to_project.get(&task_id)
             {
-                *running_per_project.entry(project_id).or_insert(0) += 1;
+                let counts = per_project.entry(project_id).or_default();
+                if eval.status == EvaluationStatus::Waiting {
+                    counts.waiting += 1;
+                } else {
+                    counts.running += 1;
+                }
             }
         }
     }
 
-    Ok(running_per_project)
+    Ok(per_project)
 }
 
 pub async fn set_public<C: ConnectionTrait>(

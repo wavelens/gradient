@@ -22,6 +22,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
 use gradient_core::ServerState;
+use gradient_db::projects::ProjectEvaluationProgressCounts;
 use gradient_scheduler::Scheduler;
 use gradient_sources::generate_ssh_key;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
@@ -65,6 +66,7 @@ pub struct ProjectSummary {
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
     pub running_evaluations: i64,
+    pub waiting_evaluations: i64,
     pub role: Option<String>,
     pub permissions: Vec<Permission>,
 }
@@ -72,7 +74,7 @@ pub struct ProjectSummary {
 impl ProjectSummary {
     fn new(
         project: MProject,
-        running_evaluations: i64,
+        evaluations: ProjectEvaluationProgressCounts,
         role: Option<String>,
         permissions: PermissionMask,
     ) -> Self {
@@ -88,7 +90,8 @@ impl ProjectSummary {
             managed: project.managed,
             created_by: project.created_by,
             created_at: project.created_at,
-            running_evaluations,
+            running_evaluations: evaluations.running,
+            waiting_evaluations: evaluations.waiting,
             role,
             permissions: mask_to_vec(permissions),
         }
@@ -213,14 +216,21 @@ pub async fn get(
     .await?;
 
     let project_ids: Vec<ProjectId> = listing.items.iter().map(|o| o.id).collect();
-    let running_per_project =
-        gradient_db::projects::running_evaluations_per_project(&state.web_db, &project_ids).await?;
+    let evaluations_per_project =
+        gradient_db::projects::get_running_and_waiting_evaluation_counts_by_project_id(
+            &state.web_db,
+            &project_ids,
+        )
+        .await?;
 
     let mut grants =
         gradient_db::access::project_grants(&state.web_db, user.id, project_ids).await?;
 
     let listing = listing.map(|project| {
-        let running_evaluations = *running_per_project.get(&project.id).unwrap_or(&0);
+        let evaluations = evaluations_per_project
+            .get(&project.id)
+            .copied()
+            .unwrap_or_default();
         let (role, permissions) = match grants.remove(&project.id) {
             Some(grant) => (
                 Some(grant.role),
@@ -228,7 +238,7 @@ pub async fn get(
             ),
             None => (None, 0),
         };
-        ProjectSummary::new(project, running_evaluations, role, permissions)
+        ProjectSummary::new(project, evaluations, role, permissions)
     });
 
     Ok(ok_json(listing))
