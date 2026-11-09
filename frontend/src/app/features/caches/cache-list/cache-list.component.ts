@@ -5,6 +5,7 @@
  */
 
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { entityKindToIconName } from '@shared/ui';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { CachesService } from '@core/services/caches.service';
@@ -50,6 +51,7 @@ import { EMPTY, catchError, merge, tap } from 'rxjs';
   styleUrl: './cache-list.component.scss',
 })
 export class CacheListComponent implements OnInit {
+  protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly links = links;
   private cachesService = inject(CachesService);
   protected authService = inject(AuthService);

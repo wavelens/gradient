@@ -52,7 +52,7 @@ import {
 } from '@gradient/ui/ui';
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
-import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
+import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent, entityKindToIconName } from '@shared/ui';
 import { MANAGED_ITEM_DISABLED_REASON, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { fieldChecks } from '@shared/forms';
@@ -173,7 +173,7 @@ export class WorkersComponent implements OnInit {
     if (worker.team) {
       const teamLink = this.teamGrants()?.teamLink(worker.team);
       return [
-        ...(teamLink ? [{ label: 'Manage on team', icon: 'groups', routerLink: teamLink }] : []),
+        ...(teamLink ? [{ label: 'Manage on team', icon: entityKindToIconName.team, routerLink: teamLink }] : []),
         ...(canEdit ? [testWorker] : []),
       ];
     }

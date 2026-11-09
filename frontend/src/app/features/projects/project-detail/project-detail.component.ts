@@ -20,7 +20,7 @@ import {
   NavCardComponent,
   PageLayoutComponent,
 } from '@gradient/ui/ui';
-import { EvalStatusBadgeComponent, StarButtonComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, StarButtonComponent, entityKindToIconName } from '@shared/ui';
 import { CacheSubscriptionItem, StarTarget, ProjectResponse, TaskResponse } from '@core/models';
 import { ProjectNoActiveWritableCacheSubscriptionWarningComponent } from '../project-no-active-writable-cache-subscription-warning.component';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
@@ -51,6 +51,7 @@ import { EMPTY, catchError, merge, tap } from 'rxjs';
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class ProjectDetailComponent implements OnInit {
+  protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly links = links;
   private route = inject(ActivatedRoute);
   protected authService = inject(AuthService);

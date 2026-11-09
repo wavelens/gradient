@@ -22,7 +22,7 @@
   >
     <gr-row-list>
       @for (request of requests(); track request.project) {
-        <gr-row icon="folder">
+        <gr-row [icon]="entityKindToIconName.project">
           {{ request.project_display_name }}
           <gr-badge severity="neutral">{{ modeLabel(request.mode) }}</gr-badge>
           <span slot="meta">

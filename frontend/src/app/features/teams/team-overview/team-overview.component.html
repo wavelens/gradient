@@ -35,19 +35,19 @@
         <gr-load-state flat [loading]="grantsLoading()" [error]="grantsLoadError()"
           [empty]="grants().projects.length + grants().caches.length === 0"
           loadingMessage="Loading projects and caches..." errorTitle="Failed to load projects and caches" (retry)="loadGrants()"
-          emptyIcon="corporate_fare" emptyTitle="No projects or caches"
+          [emptyIcon]="entityKindToIconName.project" emptyTitle="No projects or caches"
           emptyMessage="The team has no access to projects or caches yet. An admin of a project or cache grants access on the 'Members & Roles' page of that project or cache.">
-          <a slot="empty-action" grButton label="Projects" icon="corporate_fare" severity="secondary" [routerLink]="links.projects()"></a>
-          <a slot="empty-action" grButton label="Caches" icon="storage" severity="secondary" [routerLink]="links.caches()"></a>
+          <a slot="empty-action" grButton label="Projects" [icon]="entityKindToIconName.project" severity="secondary" [routerLink]="links.projects()"></a>
+          <a slot="empty-action" grButton label="Caches" [icon]="entityKindToIconName.cache" severity="secondary" [routerLink]="links.caches()"></a>
           <gr-row-list>
             @for (grant of grants().projects; track grant.project) {
-              <gr-row icon="corporate_fare" [link]="links.project(grant.project)" [linkLabel]="'Open project ' + grant.display_name">
+              <gr-row [icon]="entityKindToIconName.project" [link]="links.project(grant.project)" [linkLabel]="'Open project ' + grant.display_name">
                 {{ grant.display_name }}
                 <span slot="meta">{{ grantMeta(grant) }}</span>
               </gr-row>
             }
             @for (grant of grants().caches; track grant.cache) {
-              <gr-row icon="storage" [link]="links.cache(grant.cache)" [linkLabel]="'Open cache ' + grant.display_name">
+              <gr-row [icon]="entityKindToIconName.cache" [link]="links.cache(grant.cache)" [linkLabel]="'Open cache ' + grant.display_name">
                 {{ grant.display_name }}
                 <span slot="meta">Members get {{ grant.role ?? 'unknown role' }}</span>
               </gr-row>

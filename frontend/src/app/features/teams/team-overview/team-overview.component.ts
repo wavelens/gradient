@@ -5,6 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, linkedSignal, signal } from '@angular/core';
+import { entityKindToIconName } from '@shared/ui';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
@@ -46,6 +47,7 @@ import { runReloadIntervalWhileTabVisible } from '@shared/paging';
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class TeamOverviewComponent implements OnInit {
+  protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly links = links;
   private route = inject(ActivatedRoute);
   private router = inject(Router);

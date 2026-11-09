@@ -5,6 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { entityKindToIconName } from '@shared/ui';
 import { RowComponent, RowListComponent } from '@gradient/ui/ui';
 import { links } from '@shared/routing';
 import { withCreateDialogQueryParam } from '@shared/forms/create-dialog-link-parameter';
@@ -30,8 +31,8 @@ import { withCreateDialogQueryParam } from '@shared/forms/create-dialog-link-par
 })
 export class DashboardStartComponent {
   readonly steps = [
-    { icon: 'folder', title: 'Create a project', detail: 'A project groups tasks and members', link: withCreateDialogQueryParam(links.projects()) },
+    { icon: entityKindToIconName.project, title: 'Create a project', detail: 'A project groups tasks and members', link: withCreateDialogQueryParam(links.projects()) },
     { icon: 'group', title: 'Create a team', detail: 'A team shares its members and workers with projects and caches', link: withCreateDialogQueryParam(links.teams()) },
-    { icon: 'storage', title: 'Create or subscribe to a cache', detail: 'Serve build results to your machines', link: withCreateDialogQueryParam(links.caches()) },
+    { icon: entityKindToIconName.cache, title: 'Create or subscribe to a cache', detail: 'Serve build results to your machines', link: withCreateDialogQueryParam(links.caches()) },
   ];
 }

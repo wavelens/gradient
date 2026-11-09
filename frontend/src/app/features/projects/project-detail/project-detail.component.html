@@ -27,7 +27,7 @@
     [empty]="tasks.items().length === 0"
     loadingMessage="Loading project..."
     errorTitle="Failed to load tasks"
-    emptyIcon="folder"
+    [emptyIcon]="entityKindToIconName.task"
     emptyTitle="No tasks yet"
     [emptyMessage]="canCreateTask() ? 'Connect a repository to start a Nix build.' : 'Ask a project administrator to connect a repository.'"
     (retry)="tasks.reload()"
@@ -40,7 +40,7 @@
       <gr-card-grid>
         @for (task of tasks.items(); track task.id) {
           <gr-nav-card
-            icon="folder"
+            [icon]="entityKindToIconName.task"
             [title]="task.display_name || task.name"
             [description]="task.description"
             [link]="links.task(projectName, task.name)"

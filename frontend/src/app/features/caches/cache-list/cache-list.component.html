@@ -20,7 +20,7 @@
     >
       <gr-empty-state
         slot="empty"
-        icon="storage"
+        [icon]="entityKindToIconName.cache"
         title="No caches yet"
         [message]="canCreateCache ? 'Create your first cache to store build artifacts' : 'No cache memberships yet.'"
       >
@@ -34,7 +34,7 @@
           <gr-card-grid>
             @for (cache of activeCaches; track cache.id) {
               <gr-nav-card
-                icon="storage"
+                [icon]="entityKindToIconName.cache"
                 [title]="cache.display_name"
                 [description]="cache.description"
                 [link]="links.cache(cache.name)"
@@ -88,7 +88,7 @@
     >
       <div slot="empty">
         @if (!authService.isAuthenticated()) {
-          <gr-empty-state icon="storage" title="No caches yet" message="No caches have been created yet" />
+          <gr-empty-state [icon]="entityKindToIconName.cache" title="No caches yet" message="No caches have been created yet" />
         }
       </div>
       <div class="discover-header">

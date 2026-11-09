@@ -20,11 +20,11 @@
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading cache subscriptions..." errorTitle="Failed to load caches" (retry)="loadCaches()" />
   } @else {
     @if (caches().length === 0) {
-      <gr-empty-state icon="storage" title="No cache subscriptions" message="Subscribe to a Nix binary cache to have builds pushed there automatically." />
+      <gr-empty-state [icon]="entityKindToIconName.cache" title="No cache subscriptions" message="Subscribe to a Nix binary cache to have builds pushed there automatically." />
     } @else {
       <gr-row-list>
         @for (cache of caches(); track cache.id) {
-          <gr-row icon="storage">
+          <gr-row [icon]="entityKindToIconName.cache">
             {{ cache.display_name }}
             @if (cache.status === 'pending') {
               <gr-badge severity="warning">Pending approval</gr-badge>

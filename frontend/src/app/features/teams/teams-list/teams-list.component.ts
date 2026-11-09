@@ -5,6 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { entityKindToIconName } from '@shared/ui';
 import { Router, RouterModule } from '@angular/router';
 import { TeamsService } from '@core/services/teams.service';
 import { TeamSummary } from '@core/models';
@@ -38,6 +39,7 @@ import { PendingInvitationsBannerComponent, teamRoleDisplayLabels } from '@share
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class TeamsListComponent implements OnInit {
+  protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly links = links;
   protected readonly teamRoleDisplayLabels = teamRoleDisplayLabels;
   private teams = inject(TeamsService);

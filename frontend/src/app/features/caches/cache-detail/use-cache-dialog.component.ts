@@ -5,6 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, model, signal, untracked } from '@angular/core';
+import { entityKindToIconName } from '@shared/ui';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { ButtonComponent, DialogComponent, FormFieldComponent, LoadStateComponent, SelectComponent } from '@gradient/ui/ui';
@@ -24,7 +25,7 @@ import { links } from '@shared/routing';
       <p>Select a project to open its cache subscription with this cache selected.</p>
       <gr-load-state [loading]="loading()" [error]="error()" [empty]="projects().length === 0" flat
                      errorTitle="Failed to load projects" (retry)="load()"
-                     emptyIcon="folder" emptyTitle="No projects where a cache subscription can be managed.">
+                     [emptyIcon]="entityKindToIconName.project" emptyTitle="No projects where a cache subscription can be managed.">
         @if (canCreateProject()) {
           <a slot="empty-action" grButton label="Create project" icon="add" [routerLink]="links.projects()"></a>
         }
@@ -41,6 +42,7 @@ import { links } from '@shared/routing';
   `,
 })
 export class UseCacheDialogComponent {
+  protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly links = links;
   private projectsService = inject(ProjectsService);
   private router = inject(Router);

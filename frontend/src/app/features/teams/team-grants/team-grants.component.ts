@@ -15,6 +15,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { entityKindToIconName } from '@shared/ui';
 import { FormsModule } from '@angular/forms';
 import { RouterModule, type UrlTree } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -71,6 +72,7 @@ interface GrantForm {
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class TeamGrantsComponent implements OnInit {
+  protected readonly entityKindToIconName = entityKindToIconName;
   private teams = inject(TeamsService);
   private authService = inject(AuthService);
   private notify = inject(NotifyService);

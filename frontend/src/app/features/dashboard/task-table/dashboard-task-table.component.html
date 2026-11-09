@@ -12,7 +12,7 @@
       [error]="error()"
       [empty]="data()?.counts?.all === 0"
       errorTitle="Failed to load tasks"
-      emptyIcon="folder"
+      [emptyIcon]="entityKindToIconName.task"
       emptyTitle="No tasks yet"
       (retry)="load()"
     >

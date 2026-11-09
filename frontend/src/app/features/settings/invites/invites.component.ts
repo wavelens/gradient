@@ -5,6 +5,7 @@
  */
 
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { entityKindToIconName } from '@shared/ui';
 import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink, type UrlTree } from '@angular/router';
@@ -45,6 +46,7 @@ import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class InvitesComponent implements OnInit {
+  protected readonly entityKindToIconName = entityKindToIconName;
   private userService = inject(UserService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);

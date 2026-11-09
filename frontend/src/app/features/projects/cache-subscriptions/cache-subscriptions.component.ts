@@ -28,7 +28,7 @@ import {
   TooltipDirective,
   type AutoCompleteSuggestion,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent } from '@shared/ui';
+import { LabelHelpComponent, entityKindToIconName } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { CreateCacheDialogComponent, injectCanCreateCache } from '@shared/forms';
@@ -64,6 +64,7 @@ import { EMPTY, Observable, catchError, forkJoin, map, of, tap } from 'rxjs';
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class CacheSubscriptionsComponent implements OnInit {
+  protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly links = links;
   private route = inject(ActivatedRoute);
   private projectsService = inject(ProjectsService);

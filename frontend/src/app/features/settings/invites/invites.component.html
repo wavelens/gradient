@@ -9,7 +9,7 @@
   @if (joined().length) {
     <gr-row-list class="joined">
       @for (invite of joined(); track invite.token) {
-        <gr-row [icon]="invite.kind === 'cache' ? 'inventory_2' : invite.kind === 'team' ? 'groups' : 'folder'">
+        <gr-row [icon]="entityKindToIconName[invite.kind]">
           {{ invite.scope_display_name }}
           <gr-badge severity="success">Joined</gr-badge>
           <span slot="meta">Role {{ getInviteRoleDisplayText(invite) }}</span>

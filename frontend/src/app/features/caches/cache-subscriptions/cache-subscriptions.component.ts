@@ -5,6 +5,7 @@
  */
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { entityKindToIconName } from '@shared/ui';
 import { ServerTimestampToLocalDateTimePipe, subscriptionModeLabel } from '@shared/text';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
@@ -44,6 +45,7 @@ import {
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class CacheSubscriptionRequestsComponent implements OnInit {
+  protected readonly entityKindToIconName = entityKindToIconName;
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);

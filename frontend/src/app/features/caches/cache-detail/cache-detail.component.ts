@@ -33,6 +33,7 @@ import {
   MetricChartComponent,
   MetricSeries,
   StarButtonComponent,
+  entityKindToIconName,
 } from '@shared/ui';
 import {
   StarTarget,
@@ -90,6 +91,7 @@ const CHART_COLORS = {
   styleUrl: './cache-detail.component.scss',
 })
 export class CacheDetailComponent implements OnInit {
+  protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly links = links;
   protected readonly netrcDocsUrl = docsUrl('guides/share-a-cache/#1-use-the-cache-on-a-machine');
   private route = inject(ActivatedRoute);

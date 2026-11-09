@@ -128,7 +128,7 @@
         @if (used.projects.length) {
           <gr-row-list>
             @for (project of used.projects; track project.project) {
-              <gr-row icon="folder" [link]="links.project(project.project)" [linkLabel]="project.project_display_name">
+              <gr-row [icon]="entityKindToIconName.project" [link]="links.project(project.project)" [linkLabel]="project.project_display_name">
                 {{ project.project_display_name }}
                 <gr-badge severity="neutral">{{ modeLabel(project.mode) }}</gr-badge>
               </gr-row>

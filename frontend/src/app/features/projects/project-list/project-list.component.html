@@ -22,7 +22,7 @@
     >
       <gr-empty-state
         slot="empty"
-        icon="corporate_fare"
+        [icon]="entityKindToIconName.project"
         title="No projects yet"
         [message]="canCreateProject ? 'Create your first project to get started with Gradient' : 'Ask a project administrator to add this account to a project.'"
       >
@@ -33,7 +33,7 @@
       <gr-card-grid>
         @for (project of projects.items(); track project.id) {
           <gr-nav-card
-            icon="corporate_fare"
+            [icon]="entityKindToIconName.project"
             [title]="project.display_name || project.name"
             [description]="project.description"
             [link]="links.project(project.name)"

@@ -33,7 +33,7 @@ import {
   SkeletonComponent,
   TabSwitchComponent,
 } from '@gradient/ui/ui';
-import { StatusIconComponent } from '@shared/ui';
+import { StatusIconComponent, entityKindToIconName } from '@shared/ui';
 import { formatDuration, RelativeTimePipe } from '@shared/text';
 import { EvaluationHistoryComponent } from '../evaluation-history/evaluation-history.component';
 import { MAX_BARS, barsThatFit } from '../format';
@@ -103,6 +103,7 @@ function areDashboardTaskListRequestParametersEqual(a: DashboardTaskListRequestP
   styleUrl: './dashboard-task-table.component.scss',
 })
 export class DashboardTaskTableComponent implements OnInit {
+  protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly links = links;
   private dashboard = inject(DashboardService);
   private route = inject(ActivatedRoute);
