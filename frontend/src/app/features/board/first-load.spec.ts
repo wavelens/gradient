@@ -5,9 +5,20 @@
  */
 
 import { Subject, of, throwError } from 'rxjs';
-import { firstLoad } from './first-load';
+import { TestBed } from '@angular/core/testing';
+import { NotifyService } from '@core/services/notify.service';
+import { firstLoad as createFirstLoad } from './first-load';
+
+const failure = vi.fn();
+
+function firstLoad() {
+  TestBed.configureTestingModule({ providers: [{ provide: NotifyService, useValue: { failure } }] });
+  return TestBed.runInInjectionContext(() => createFirstLoad());
+}
 
 describe('firstLoad', () => {
+  beforeEach(() => failure.mockClear());
+
   it('starts loading', () => {
     expect(firstLoad().loading()).toBe(true);
   });
@@ -49,7 +60,7 @@ describe('firstLoad', () => {
     expect(load.loading()).toBe(false);
   });
 
-  it('keeps a failure of the first paint so the page can show it instead of empty charts', () => {
+  it('keeps a first paint where one request failed on screen and names the failure in a toast', () => {
     const load = firstLoad();
     const ok = new Subject<number>();
     ok.pipe(load.track()).subscribe();
@@ -58,7 +69,19 @@ describe('firstLoad', () => {
     ok.complete();
     expect(load.loading()).toBe(false);
     expect(load.received()).toBe(true);
-    expect((load.error() as Error).message).toBe('down');
+    expect(load.error()).toBeNull();
+    expect(failure).toHaveBeenCalledWith("Couldn't load some items", expect.objectContaining({ message: 'down' }));
+  });
+
+  it('replaces the page with the failure when no request of the first paint answered', () => {
+    const load = firstLoad();
+    const slow = new Subject<number>();
+    slow.pipe(load.track()).subscribe();
+    throwError(() => new Error('down')).pipe(load.track()).subscribe();
+    slow.error(new Error('also down'));
+    expect(load.received()).toBe(false);
+    expect(load.error()).toBeInstanceOf(Error);
+    expect(failure).not.toHaveBeenCalled();
   });
 
   it('ignores a failed poll once the page is on screen, and a later poll that fully answers clears an old failure', () => {

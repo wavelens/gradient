@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Signal, signal } from '@angular/core';
+import { Signal, inject, signal } from '@angular/core';
 import { EMPTY, MonoTypeOperatorFunction, catchError, defer, finalize, tap } from 'rxjs';
+import { NotifyService } from '@core/services/notify.service';
 
 export interface FirstLoad {
   /// True until every tracked request of the first paint has settled.
@@ -17,18 +18,31 @@ export interface FirstLoad {
   restart(): void;
 }
 
-/// A board page polls, so only its first fetch earns a spinner: later refreshes
-/// replace what is already on screen. Piping every request of the first paint
-/// through `track()` holds the spinner until all of them have answered, rather
-/// than clearing it on whichever returns first.
+/// Pages on the board poll. Spinners mark the first fetch only. Later updates replace on-screen content. Pass every request for the first render through `track()`. A spinner can stay until all requests settle. Page errors only replace the page, when no requests in that round get a response. Partial failures keep the part that loaded and show a toast.
 export function firstLoad(): FirstLoad {
+  const notify = inject(NotifyService);
   const loading = signal(true);
   const received = signal(false);
   const error = signal<unknown>(null);
   let pending = 0;
   let reporting = true;
-  let hasReceivedDataInCurrentLoadRound = false;
-  let hasTrackedRequestFailedInCurrentLoadRound = false;
+  let hasReceivedDataSinceRestart = false;
+  let hasReceivedDataThisLoadRound = false;
+  let loadRoundFailure: unknown = null;
+
+  function finishLoadRound(): void {
+    if (reporting) {
+      error.set(hasReceivedDataThisLoadRound ? null : loadRoundFailure);
+      if (hasReceivedDataThisLoadRound && loadRoundFailure !== null) notify.failure("Couldn't load some items", loadRoundFailure);
+    } else if (loadRoundFailure === null) {
+      error.set(null);
+    }
+    hasReceivedDataThisLoadRound = false;
+    loadRoundFailure = null;
+    received.set(hasReceivedDataSinceRestart);
+    loading.set(false);
+    reporting = false;
+  }
 
   return {
     loading: loading.asReadonly(),
@@ -41,7 +55,7 @@ export function firstLoad(): FirstLoad {
     restart(): void {
       loading.set(true);
       received.set(false);
-      hasReceivedDataInCurrentLoadRound = false;
+      hasReceivedDataSinceRestart = false;
       this.refresh();
     },
     track<T>(): MonoTypeOperatorFunction<T> {
@@ -51,23 +65,17 @@ export function firstLoad(): FirstLoad {
           return source;
         }).pipe(
           tap(() => {
-            hasReceivedDataInCurrentLoadRound = true;
+            hasReceivedDataSinceRestart = true;
+            hasReceivedDataThisLoadRound = true;
             if (!loading()) received.set(true);
           }),
           catchError((failure: unknown) => {
-            hasTrackedRequestFailedInCurrentLoadRound = true;
-            if (reporting) error.set(failure);
+            loadRoundFailure = failure;
             return EMPTY;
           }),
           finalize(() => {
             pending -= 1;
-            if (pending === 0) {
-              if (!reporting && !hasTrackedRequestFailedInCurrentLoadRound) error.set(null);
-              hasTrackedRequestFailedInCurrentLoadRound = false;
-              received.set(hasReceivedDataInCurrentLoadRound);
-              loading.set(false);
-              reporting = false;
-            }
+            if (pending === 0) finishLoadRound();
           })
         );
     },
