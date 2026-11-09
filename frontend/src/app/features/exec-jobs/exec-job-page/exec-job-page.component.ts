@@ -169,6 +169,11 @@ export class ExecJobPageComponent implements OnInit {
     if (!job || isExecJobWaitingToStart(job.status)) return null;
     return job.attempts.reduce<ExecJobAttemptView | null>((latest, a) => (!latest || a.number > latest.number ? a : latest), null);
   });
+  firstAttemptStartedAt = computed(() => {
+    const job = this.job();
+    if (!job || isExecJobWaitingToStart(job.status)) return null;
+    return job.attempts.reduce<ExecJobAttemptView | null>((first, a) => (!first || a.number < first.number ? a : first), null)?.started_at ?? null;
+  });
   formattedProgramRunTime = computed(() => {
     const attempt = this.highestNumberedAttempt();
     if (!attempt?.program_started_at) return '';

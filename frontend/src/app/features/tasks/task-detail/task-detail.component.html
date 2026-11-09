@@ -90,7 +90,7 @@
                 <span class="ev-title" [class.mono]="!e.commit_message">{{ evalTitle(e) }}</span>
               </span>
               <span class="l2">
-                <time [attr.datetime]="e.created_at">{{ monthDayClockTime(e.created_at) }}</time><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span>
+                <time [attr.datetime]="e.started_at ?? e.created_at">{{ monthDayClockTime(e.started_at ?? e.created_at) }}</time><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span>
               </span>
             </button>
           }

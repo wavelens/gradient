@@ -59,7 +59,7 @@ import {
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDurationText, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 @Component({
   selector: 'app-task-detail',
@@ -608,8 +608,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   pkgDuration(evaluation: EvaluationSummary, ep: EntryPointSummary): string {
     if (ep.build_status === 'Building' && !isRunningEvaluationStatus(evaluation.status)) return '';
-    const ms = buildDuration({ status: ep.build_status, ...ep }, ep.build_status === 'Building' ? this.tick() : 0);
-    return ms == null ? '' : formatDuration(ms);
+    return buildDurationText({ status: ep.build_status, ...ep }, ep.build_status === 'Building' ? this.tick() : 0, evaluation.created_at);
   }
 
   readonly commitLabel = commitLabel;

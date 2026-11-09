@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { buildDuration, evaluationDuration, isRunningEvaluationStatus } from './duration';
+import { buildDuration, buildDurationText, evaluationDuration, isRunningEvaluationStatus } from './duration';
 
 describe('isRunningEvaluationStatus', () => {
   it('returns true for in-flight statuses', () => {
@@ -62,5 +62,18 @@ describe('buildDuration', () => {
 
   it('is unknown for a build that has not started', () => {
     expect(buildDuration({ status: 'Queued', build_time_ms: null, build_started_at: null }, now)).toBeNull();
+  });
+});
+
+describe('buildDurationText', () => {
+  const build = { status: 'Completed', build_time_ms: 3_600_000, build_started_at: '2026-05-20T11:00:00' };
+
+  it('names a build that started before the evaluation existed as reused instead of showing its old time', () => {
+    expect(buildDurationText(build, 0, '2026-05-20T12:00:00')).toBe('reused');
+  });
+
+  it('shows the time of a build the evaluation ran itself', () => {
+    expect(buildDurationText(build, 0, '2026-05-20T10:59:00')).not.toBe('reused');
+    expect(buildDurationText({ ...build, build_time_ms: null, status: 'Queued', build_started_at: null }, 0, '2026-05-20T10:59:00')).toBe('');
   });
 });

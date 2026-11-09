@@ -72,7 +72,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, getEvaluationTriggerLabel, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDurationText, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, getEvaluationTriggerLabel, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -1277,8 +1277,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   protected readonly abortedWithoutBuildsTitle = abortedWithoutBuildsTitle;
 
   getBuildElapsed(build: BuildItem): string {
-    const ms = buildDuration(build, this.clock.currentTimeMilliseconds());
-    return ms == null ? '' : formatDuration(ms);
+    return buildDurationText(build, this.clock.currentTimeMilliseconds(), this.evaluation()?.created_at);
   }
 
   isRunning(): boolean {

@@ -122,10 +122,10 @@
               <span class="metric-value">{{ programRun }}</span>
             </div>
           }
-          @if (highestNumberedAttempt(); as attempt) {
+          @if (firstAttemptStartedAt(); as startedAt) {
             <div class="info-metric">
               <span class="metric-label">Started</span>
-              <span class="metric-value">{{ attempt.started_at | serverDate }}</span>
+              <span class="metric-value">{{ startedAt | serverDate }}</span>
             </div>
           }
           @if (job.worker) {
