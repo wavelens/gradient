@@ -15,6 +15,7 @@ import {
   ElementRef,
   NgZone,
   ChangeDetectorRef,
+  DestroyRef,
   ChangeDetectionStrategy
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -36,6 +37,7 @@ import {
 import { formatDuration, plural } from '@shared/text';
 import { PHASE_COLOR, PHASE_SEVERITY, buildDuration, buildPhase, buildStatusLabel, type StatusPhase } from '@shared/evaluation';
 import { longestPathDepths } from './dependency-depths';
+import { observeElementResizeUntilDestroyed } from '../observe-element-resize-until-destroyed';
 import { BuildGraph, BuildStatus, DependencyEdge, DependencyGraphNode } from '@core/models';
 
 const CARD_W = 200;
@@ -66,6 +68,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   private crumbs = inject(BreadcrumbsService);
   private zone = inject(NgZone);
   private cdr = inject(ChangeDetectorRef);
+  private destroyRef = inject(DestroyRef);
 
   @ViewChild('svgEl') svgRef!: ElementRef<SVGSVGElement>;
   @ViewChild('graphEl') graphRef!: ElementRef<SVGGElement>;
@@ -158,6 +161,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
         setTimeout(() => {
           this.createSvgElements();
           this.centerViewport();
+          if (this.svgRef) observeElementResizeUntilDestroyed(this.svgRef.nativeElement, this.destroyRef, () => this.centerViewport());
           this.startLiveUpdates();
           this.startTimer();
         }, 0);

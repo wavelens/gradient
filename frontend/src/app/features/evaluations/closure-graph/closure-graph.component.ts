@@ -6,7 +6,7 @@
 
 import {
   Component, OnInit, OnDestroy, inject, signal, computed,
-  ViewChild, ElementRef, NgZone, ChangeDetectorRef,
+  ViewChild, ElementRef, NgZone, ChangeDetectorRef, DestroyRef,
   ChangeDetectionStrategy
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -24,6 +24,7 @@ import {
 } from '@gradient/ui/ui';
 import { formatBytes, plural } from '@shared/text';
 import { evaluationTitle } from '@shared/evaluation';
+import { observeElementResizeUntilDestroyed } from '../observe-element-resize-until-destroyed';
 import { buildClosureSankey, contributesTo, SankeyNode, SankeyLink } from './closure-aggregate';
 import { ClosureGraph } from '@core/models';
 
@@ -56,6 +57,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   private evalService = inject(EvaluationsService);
   private zone = inject(NgZone);
   private cdr = inject(ChangeDetectorRef);
+  private destroyRef = inject(DestroyRef);
 
   @ViewChild('svgEl') svgRef!: ElementRef<SVGSVGElement>;
   @ViewChild('graphEl') graphRef!: ElementRef<SVGGElement>;
@@ -185,6 +187,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       }
     });
     this.fitToScreen();
+    observeElementResizeUntilDestroyed(svg, this.destroyRef, () => this.fitToScreen());
   }
 
   private build(
