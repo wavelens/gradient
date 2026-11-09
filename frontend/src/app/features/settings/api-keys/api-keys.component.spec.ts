@@ -262,6 +262,22 @@ describe('ApiKeysComponent - field checks', () => {
     expect(createApiKey).not.toHaveBeenCalled();
   });
 
+  it('keeps the ticked permissions between Any project and Project and pre-ticks read for a cache', () => {
+    const { component } = openCreate();
+    component.availablePermissions.set([{ id: 'viewProject', mutating: false }, { id: 'editTask', mutating: true }]);
+    component.availableCachePermissions.set([{ id: 'viewCache', mutating: false }, { id: 'readStore', mutating: false }, { id: 'writeStore', mutating: true }]);
+    component.formPermissions = { viewProject: true, editTask: true };
+    component.formScope = 'project';
+    component.onScopeChange();
+    expect(component.formPermissions).toEqual({ viewProject: true, editTask: true });
+    component.formScope = 'cache';
+    component.onScopeChange();
+    expect(component.formPermissions).toEqual({ viewCache: true, readStore: true, writeStore: false });
+    component.formScope = 'none';
+    component.onScopeChange();
+    expect(component.formPermissions).toEqual({ viewProject: true, editTask: false });
+  });
+
   it('forgets the refused Create when the scope changes', () => {
     const { fixture, component } = openCreate();
     component.formScope = 'project';

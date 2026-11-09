@@ -72,6 +72,19 @@ describe('grSubmit', () => {
     expect(document.activeElement).toBe(field);
   });
 
+  it('scrolls the error message into view after the field', async () => {
+    const { fixture, host, button } = await render();
+    button.addEventListener('click', () => host.urlBad.set(true));
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+    button.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(scrolled.at(-1)).toBe(root.querySelector('.field-error'));
+    expect(scrolled).toContain(root.querySelector('input'));
+  });
+
   it('ignores errors in another section', async () => {
     const { fixture, host, button } = await render();
     host.nameBad.set(true);

@@ -18,6 +18,7 @@ export function revealFirstInvalid(root: ParentNode): boolean {
 function focusInvalid(control: HTMLElement | null | undefined): boolean {
   if (!control) return false;
   control.scrollIntoView({ block: 'nearest' });
+  control.ownerDocument.getElementById(control.getAttribute('aria-describedby') ?? '')?.scrollIntoView({ block: 'nearest' });
   control.focus({ preventScroll: true });
   return true;
 }

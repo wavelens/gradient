@@ -266,12 +266,10 @@ export class ApiKeysComponent implements OnInit {
     this.attempted.set(false);
     this.formProject = null;
     this.formCache = null;
-    const isCacheScope = this.formScope === 'cache';
-    const perms = isCacheScope ? this.availableCachePermissions() : this.availablePermissions();
-    const out: Record<string, boolean> = {};
-    for (const p of perms) out[p.id] = false;
-    this.formPermissions = out;
-    if (!isCacheScope) this.formPermissions['viewProject'] = true;
+    const ids = this.activePermissions().map((permission) => permission.id);
+    if (ids.every((id) => id in this.formPermissions)) return;
+    const preselected = this.formScope === 'cache' ? ['viewCache', 'readStore'] : ['viewProject'];
+    this.formPermissions = Object.fromEntries(ids.map((id) => [id, preselected.includes(id)]));
   }
 
   activePermissions(): PermissionEntry[] {
