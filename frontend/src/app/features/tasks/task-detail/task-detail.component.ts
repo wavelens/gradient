@@ -138,6 +138,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private entryPointsEvalId?: string;
   private entryPointsSig = '';
   private lastEntryPointsFetch = 0;
+  private lastFetchedEntryPointListEvaluationIdAndStatusKey = '';
   private entryPointsReloadTimer?: ReturnType<typeof setTimeout>;
   private readonly ENTRY_POINTS_LIVE_INTERVAL_MS = 4000;
 
@@ -247,23 +248,27 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       this.task.set(task);
       this.crumbs.rememberTask(this.projectName, this.taskName, task.display_name);
     }
-    const shown = this.selected();
-    if (shown && shown.id !== this.selectedId()) this.selectedId.set(shown.id);
     // The entry-point page walks the graph for stale histograms; on live pings
     // throttle it so a running evaluation's rapid status stream doesn't
     // hammer the backend. The cheap summary above keeps headline counts live.
-    const wait = live ? this.lastEntryPointsFetch + this.ENTRY_POINTS_LIVE_INTERVAL_MS - Date.now() : 0;
+    const shown = this.selected();
+    const statusChanged = this.lastFetchedEntryPointListEvaluationIdAndStatusKey !== this.getEvaluationStatusKey(shown);
+    const wait = live && !statusChanged ? this.lastEntryPointsFetch + this.ENTRY_POINTS_LIVE_INTERVAL_MS - Date.now() : 0;
     if (wait <= 0) {
-      this.loadEntryPoints(this.selected()?.id);
+      this.loadEntryPoints(shown?.id);
     } else {
       this.entryPointsReloadTimer ??= setTimeout(() => this.loadEntryPoints(this.selected()?.id), wait);
     }
   }
 
+  private getEvaluationStatusKey(evaluation: EvaluationSummary | null | undefined): string {
+    return evaluation ? `${evaluation.id}:${evaluation.status}` : '';
+  }
+
   /// Fields whose change should re-render the header / eval strip / panel.
   private taskSignature(p: TaskDetailsResponse): string {
     const evals = (p.last_evaluations ?? [])
-      .map(e => `${e.id}:${e.status}:${e.prioritized}:${e.errors}:${e.warnings}:${e.updated_at}:${JSON.stringify(e.builds)}`)
+      .map(e => `${e.id}:${e.status}:${e.prioritized}:${e.errors}:${e.warnings}:${e.updated_at}:${JSON.stringify(e.builds)}:${JSON.stringify(e.waiting_reason)}`)
       .join('|');
     return [p.active, p.can_edit, p.can_trigger, p.display_name, p.description, p.repository,
       p.wildcard, p.last_check_at, JSON.stringify(p.queue), evals].join('§');
@@ -288,18 +293,9 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   private showEvaluation(id: string): void {
-    if (this.selectedId() !== id) {
-      // Drop the previous evaluation's packages immediately so the panel shows a
-      // loading state, not stale data, during the (slow) entry-point fetch.
-      this.entryPoints.set([]);
-      this.entryPointsTotal.set(0);
-      this.failedAttributes.set([]);
-      this.entryPointsEvalId = undefined;
-      this.entryPointsSig = '';
-    }
     this.selectedId.set(id);
     this.crumbs.rememberEvaluation(this.projectName, this.taskName, id);
-    this.loadEntryPoints(id);
+    this.loadEntryPoints(this.selected()?.id);
   }
 
   private entryPointSignature(eps: EntryPointSummary[]): string {
@@ -309,16 +305,22 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private loadEntryPoints(evaluationId?: string): void {
     clearTimeout(this.entryPointsReloadTimer);
     this.entryPointsReloadTimer = undefined;
-    if (!evaluationId) {
+    const shownPackageListIsFromDifferentEvaluation = this.entryPointsEvalId !== undefined && evaluationId !== this.entryPointsEvalId;
+    if (!evaluationId || shownPackageListIsFromDifferentEvaluation) {
+      // Drop the previous evaluation's packages immediately so the panel shows a
+      // loading state, not stale data, during the (slow) entry-point fetch.
       this.entryPoints.set([]);
       this.entryPointsTotal.set(0);
       this.failedAttributes.set([]);
       this.entryPointsEvalId = undefined;
       this.entryPointsSig = '';
+    }
+    if (!evaluationId) {
       this.entryPointsLoading.set(false);
       return;
     }
     this.lastEntryPointsFetch = Date.now();
+    this.lastFetchedEntryPointListEvaluationIdAndStatusKey = this.getEvaluationStatusKey(this.evaluations().find(e => e.id === evaluationId));
     const switching = evaluationId !== this.entryPointsEvalId;
     if (switching) {
       this.entryPointsLoading.set(true);
@@ -336,7 +338,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       next: (page) => {
         // Drop out-of-order responses: only apply the fetch for the still-selected
         // evaluation and search term, so a slow earlier request can't clobber a newer one.
-        if (this.selectedId() !== evaluationId || this.searchTerm() !== term) return;
+        if (this.selected()?.id !== evaluationId || this.searchTerm() !== term) return;
         this.entryPointsLoading.set(false);
         this.entryPointsError.set(null);
         this.entryPointsTotal.set(page.total);
@@ -356,7 +358,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         this.entryPoints.set(next);
       },
       error: (error: unknown) => {
-        if (this.selectedId() !== evaluationId) return;
+        if (this.selected()?.id !== evaluationId) return;
         this.entryPointsLoading.set(false);
         this.entryPointsError.set(error);
       },
@@ -383,7 +385,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, TaskDetailComponent.ENTRY_POINTS_PAGE, offset, term).subscribe({
       next: (page) => {
         this.entryPointsAppending = false;
-        if (this.selectedId() !== evaluationId || this.searchTerm() !== term) return;
+        if (this.selected()?.id !== evaluationId || this.searchTerm() !== term) return;
         this.entryPointsTotal.set(page.total);
         const shown = this.entryPoints();
         const seen = new Set(shown.map(e => e.id));
@@ -394,7 +396,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       },
       error: (error: unknown) => {
         this.entryPointsAppending = false;
-        if (this.selectedId() === evaluationId) this.moreEntryPointsError.set(error);
+        if (this.selected()?.id === evaluationId) this.moreEntryPointsError.set(error);
       },
     });
   }
@@ -511,14 +513,14 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   reloadEntryPoints(): void {
     this.entryPointsEvalId = undefined;
-    this.loadEntryPoints(this.selectedId() ?? undefined);
+    this.loadEntryPoints(this.selected()?.id);
   }
 
   private applySearch(term: string): void {
     if (term === this.searchTerm()) return;
     this.searchTerm.set(term);
     this.entryPointsEvalId = undefined;
-    this.loadEntryPoints(this.selectedId() ?? undefined);
+    this.loadEntryPoints(this.selected()?.id);
   }
 
   /// Ctrl/Cmd+F searches the packages; left/right arrows step through the evaluation strip.

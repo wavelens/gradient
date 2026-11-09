@@ -229,6 +229,14 @@ describe('TaskDetailComponent - failed evaluation without packages', () => {
     expect(text).not.toContain('No packages');
   });
 
+  it('still says the evaluation failed when its error cannot load', () => {
+    const { fixture } = setup(access, { primaryStatus: 'Failed', getEvaluation: () => throwError(() => new Error('offline')) });
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Evaluation failed');
+    expect(text).not.toContain('No packages');
+  });
+
   it('says an evaluation aborted before it started was never evaluated, without a tally or timer', () => {
     const { fixture } = setup(access, { primaryStatus: 'Aborted' });
     const root = fixture.nativeElement as HTMLElement;
@@ -502,7 +510,7 @@ describe('TaskDetailComponent evaluation menu', () => {
 
     it('does not switch when the start fails', () => {
       const { comp } = startThenArrive(() => throwError(() => new Error('nope')));
-      expect(comp.selectedId()).toBe('e1');
+      expect(comp.selected()?.id).toBe('e1');
     });
 
     it('starts one evaluation on a double click and stays busy until the new evaluation is loaded', () => {
@@ -1627,7 +1635,6 @@ describe('TaskDetailComponent - eval query param', () => {
       { eval: 'gone' },
     );
     expect(fixture.componentInstance.selected()?.id).toBe('e1');
-    expect(fixture.componentInstance.selectedId()).toBe('e1');
     expect(fixture.componentInstance.entryPoints().map((e) => e.id)).toEqual(['pkg']);
   });
 });
@@ -1768,5 +1775,39 @@ describe('TaskDetailComponent - live package reloads', () => {
     expect(entryPoints).not.toHaveBeenCalled();
     vi.advanceTimersByTime(3000);
     expect(entryPoints).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads the packages at once when the selected evaluation changes status', () => {
+    const access = { managed: false, canEdit: true, canTrigger: true };
+    const getTask = vi.fn(() => of(resolvedTask(access, {})));
+    const { tasksService, frames } = setup(access, { getTask });
+    const entryPoints = vi.spyOn(tasksService, 'getEntryPoints');
+    getTask.mockReturnValue(of(resolvedTask(access, { primaryStatus: 'Completed' })));
+    frames.next({ event: 'evaluation.status', at: '', content: {} } as LiveEvent);
+    vi.advanceTimersByTime(500);
+    expect(entryPoints).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a started evaluation selected while a refresh still lists only the older ones', () => {
+    const access = { managed: false, canEdit: true, canTrigger: true };
+    const getTask = vi.fn(() => of(resolvedTask(access, {})));
+    const { fixture } = setup(access, { getTask, startEvaluation: () => of('e-new') });
+    const cmp = fixture.componentInstance;
+    cmp.startEvaluation();
+    expect(cmp.selected()?.id).toBe('e1');
+    getTask.mockReturnValue(of(resolvedTask(access, { extraEvals: [evalSummary('e-new', 'Queued')] })));
+    cmp.loadTaskData(true);
+    expect(cmp.selected()?.id).toBe('e-new');
+  });
+
+  it('shows a changed waiting reason without waiting for another update', () => {
+    const access = { managed: false, canEdit: true, canTrigger: true };
+    const waiting = (waiting_reason: EvaluationSummary['waiting_reason']) => resolvedTask(access, { primaryStatus: 'Waiting', primary: { waiting_reason } });
+    const getTask = vi.fn(() => of(waiting({ kind: 'workers', unmet: [], connected_workers: 0, available_architectures: [] })));
+    const { fixture } = setup(access, { getTask });
+    getTask.mockReturnValue(of(waiting({ kind: 'eval_workers', capability: 'eval', connected_workers: 0 })));
+    fixture.componentInstance.loadTaskData(true);
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Waiting for evaluation worker');
   });
 });
