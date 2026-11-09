@@ -289,6 +289,14 @@ describe('ExecJobPageComponent', () => {
     expect(current?.getAttribute('title')).toBe('apps.x86_64-linux.train');
   });
 
+  it('names the entry point in the crumb only, not again in the log header', async () => {
+    const { fixture } = setup('completed');
+    await settle(fixture);
+    const header = (fixture.nativeElement as HTMLElement).querySelector('gr-log-viewer .log-header');
+    expect(header?.textContent).not.toContain('apps.x86_64-linux.train');
+    expect(header?.textContent).toContain('3 lines');
+  });
+
   it('labels the creation date apart from the CREATED status', () => {
     const { fixture } = setup('created');
     const labels = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.info-bar .metric-label'))

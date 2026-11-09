@@ -202,7 +202,7 @@
         } @else {
           <gr-log-viewer [lines]="logLines()" [marker]="phaseMarker">
             <div class="log-header">
-              <code class="log-header-title">{{ job.entry_point }}</code>
+              <span class="log-header-title">Log</span>
               @if (logLines().length > 0) {
                 <span class="log-line-count">{{ logLines().length }} {{ logLines().length === 1 ? 'line' : 'lines' }}</span>
               }
