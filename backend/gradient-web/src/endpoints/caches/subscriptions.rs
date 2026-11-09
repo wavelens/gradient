@@ -37,16 +37,24 @@ pub struct SubscriptionRequestItem {
     pub project_display_name: String,
     pub mode: CacheSubscriptionMode,
     pub requested_by: String,
+    pub requested_by_display_name: Option<String>,
     pub created_at: NaiveDateTime,
 }
 
 impl SubscriptionRequestItem {
-    fn new(request: &MCacheSubscriptionRequest, project: &MProject, requested_by: String) -> Self {
+    fn new(
+        request: &MCacheSubscriptionRequest,
+        project: &MProject,
+        requester: Option<&MUser>,
+    ) -> Self {
         Self {
             project: project.name.clone(),
             project_display_name: project.display_name.clone(),
             mode: request.mode.clone(),
-            requested_by,
+            requested_by: requester
+                .map(|u| u.username.clone())
+                .unwrap_or_else(|| request.requested_by.to_string()),
+            requested_by_display_name: requester.map(|u| u.name.clone()),
             created_at: request.created_at,
         }
     }
@@ -75,24 +83,21 @@ pub async fn get_cache_subscription_requests(
     )
     .await?;
 
-    let requesters: HashMap<UserId, String> = by_ids::<EUser, _>(
+    let requesters: HashMap<UserId, MUser> = by_ids::<EUser, _>(
         &db.web_db,
         &requests.iter().map(|r| r.requested_by).collect::<Vec<_>>(),
     )
-    .await?
-    .into_iter()
-    .map(|(id, u)| (id, u.username))
-    .collect();
+    .await?;
 
     let items: Vec<SubscriptionRequestItem> = requests
         .iter()
         .filter_map(|r| {
             let project = projects.get(&r.project)?;
-            let requested_by = requesters
-                .get(&r.requested_by)
-                .cloned()
-                .unwrap_or_else(|| r.requested_by.to_string());
-            Some(SubscriptionRequestItem::new(r, project, requested_by))
+            Some(SubscriptionRequestItem::new(
+                r,
+                project,
+                requesters.get(&r.requested_by),
+            ))
         })
         .collect();
 
@@ -349,4 +354,37 @@ pub async fn delete_subscription_request(
     .await;
 
     Ok(ok_json("Subscription request denied".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::rows;
+    use gradient_fixtures::test_date;
+
+    fn request() -> MCacheSubscriptionRequest {
+        MCacheSubscriptionRequest {
+            id: CacheSubscriptionRequestId::now_v7(),
+            project: rows::project().id,
+            cache: CacheId::now_v7(),
+            mode: CacheSubscriptionMode::ReadWrite,
+            requested_by: rows::user().id,
+            created_at: test_date(),
+        }
+    }
+
+    #[test]
+    fn a_request_names_the_requester_by_username_and_display_name() {
+        let item = SubscriptionRequestItem::new(&request(), &rows::project(), Some(&rows::user()));
+        assert_eq!(item.requested_by, "testuser");
+        assert_eq!(item.requested_by_display_name.as_deref(), Some("Test User"));
+    }
+
+    #[test]
+    fn a_request_from_a_deleted_user_falls_back_to_the_user_id() {
+        let request = request();
+        let item = SubscriptionRequestItem::new(&request, &rows::project(), None);
+        assert_eq!(item.requested_by, request.requested_by.to_string());
+        assert_eq!(item.requested_by_display_name, None);
+    }
 }
