@@ -189,7 +189,8 @@ export class DashboardTaskTableComponent implements OnInit {
     return d ? Math.max(1, Math.ceil(d.total / PAGE_SIZE)) : 1;
   }
 
-  newestEvaluationWaitingReasonTitle(project: string, latest: Latest): string {
+  newestEvaluationWaitingReasonTitle(project: string, latest: Latest | null | undefined): string | null {
+    if (!latest || (!latest.waiting_reason && latest.status !== 'Waiting')) return null;
     return explainWaiting(latest.waiting_reason, project, waitingAccessFrom([], false, false)).title;
   }
 

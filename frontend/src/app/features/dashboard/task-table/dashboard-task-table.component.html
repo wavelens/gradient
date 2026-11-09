@@ -34,7 +34,7 @@
             </div>
           }
           @for (t of taskRowsWithNewestHistoryBarsThatFit(); track t.project + '/' + t.task) {
-            @let waitingReason = t.latest?.status === 'Waiting' ? newestEvaluationWaitingReasonTitle(t.project, t.latest!) : null;
+            @let waitingReason = newestEvaluationWaitingReasonTitle(t.project, t.latest);
             @let label = t.project_display_name + ' / ' + t.task_display_name;
             <gr-row [link]="links.task(t.project, t.task)" [linkLabel]="label">
               @if (t.latest; as l) {

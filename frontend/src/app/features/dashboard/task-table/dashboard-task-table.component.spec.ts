@@ -78,6 +78,16 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelector('.cells')?.textContent).not.toContain('No writable cache');
   });
 
+  it('explains a building evaluation that waits for exec jobs in the icon label and meta line', async () => {
+    const building = row('hosts');
+    building.latest = { ...building.latest!, status: 'Building', waiting_reason: { kind: 'exec_jobs', waiting_exec_jobs: 1 } };
+    const { f, root } = render(null, () => of({ ...PAGE, tasks: [building] }));
+    await settle(f);
+    const reason = root.querySelector('.meta .waiting')?.textContent?.trim() ?? '';
+    expect(reason).not.toBe('');
+    expect(root.querySelector('gr-status-icon')?.getAttribute('aria-label')).toBe(reason);
+  });
+
   it('names failed entry points next to the passed count in danger text and on the phone meta line', async () => {
     const { f, root } = render(null, () => of(PAGE));
     await settle(f);
