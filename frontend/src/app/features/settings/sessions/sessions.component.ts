@@ -21,7 +21,6 @@ import {
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
-import { links } from '@shared/routing';
 import { pagedList } from '@shared/paging';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
@@ -44,7 +43,6 @@ import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class SessionsComponent implements OnInit {
-  protected readonly links = links;
   private userService = inject(UserService);
   private auth = inject(AuthService);
   private notify = inject(NotifyService);

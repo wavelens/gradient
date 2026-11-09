@@ -25,7 +25,6 @@ import {
   RowComponent,
   RowListComponent,
 } from '@gradient/ui/ui';
-import { links } from '@shared/routing';
 import { SettingsNavComponent } from '../settings-nav/settings-nav.component';
 
 const OPENSSH_PUBLIC_KEY =
@@ -57,7 +56,6 @@ function sshKeyComment(publicKey: string): string {
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class SshKeysComponent implements OnInit {
-  protected readonly links = links;
   private userService = inject(UserService);
   private config = inject(ConfigService);
   private notify = inject(NotifyService);

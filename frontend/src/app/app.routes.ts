@@ -624,7 +624,7 @@ export const routes: Routes = [
       },
       {
         path: 'settings/invites',
-        title: 'My Invites',
+        title: 'Invitations',
         loadComponent: () =>
           import('./features/settings/invites/invites.component').then(
             (m) => m.InvitesComponent

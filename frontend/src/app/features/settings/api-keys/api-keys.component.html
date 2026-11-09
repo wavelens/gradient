@@ -4,10 +4,10 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout width="settings" [breadcrumb]="[{ label: 'Settings', link: links.settings('profile') }, { label: 'API Keys' }]" title="API Keys" subtitle="Manage API keys for programmatic access">
+<gr-page-layout width="settings" title="API Keys" subtitle="Manage API keys for programmatic access">
   <app-settings-nav slot="banner" />
   @if (keys().length) {
-    <button slot="actions" grButton label="New API Key" icon="add" (click)="openCreateDialog()"></button>
+    <button slot="actions" grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
   }
   <gr-load-state
     [loading]="loading()"
@@ -39,7 +39,7 @@
               <span>
                 · Last used: {{ key.last_used_at ? (key.last_used_at | serverDate) : 'never' }}
               </span>
-              @if (key.expires_at) {
+              @if (key.expires_at && !key.revoked_at) {
                 <span>· Expires: {{ key.expires_at | serverDate }}</span>
               }
             </div>

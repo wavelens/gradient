@@ -28,14 +28,14 @@ describe('SettingsNavComponent', () => {
   it('links every settings page to its siblings and counts pending invites', () => {
     expect(render(true, 2)).toEqual([
       ['Profile', '/settings/profile'],
-      ['API keys', '/settings/keys'],
-      ['SSH keys', '/settings/ssh-keys'],
+      ['API Keys', '/settings/keys'],
+      ['SSH Keys', '/settings/ssh-keys'],
       ['Sessions', '/settings/sessions'],
-      ['Invites (2)', '/settings/invites'],
+      ['Invitations (2)', '/settings/invites'],
     ]);
   });
 
   it('leaves SSH keys out while the server has SSH turned off', () => {
-    expect(render(false).map(([label]) => label)).not.toContain('SSH keys');
+    expect(render(false).map(([label]) => label)).not.toContain('SSH Keys');
   });
 });

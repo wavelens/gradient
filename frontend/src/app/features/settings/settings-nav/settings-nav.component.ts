@@ -25,10 +25,10 @@ export class SettingsNavComponent {
     const pending = this.invites.count();
     return [
       { label: 'Profile', link: links.settings('profile') },
-      { label: 'API keys', link: links.settings('keys') },
-      ...(this.config.sshEnabled ? [{ label: 'SSH keys', link: links.settings('ssh-keys') }] : []),
+      { label: 'API Keys', link: links.settings('keys') },
+      ...(this.config.sshEnabled ? [{ label: 'SSH Keys', link: links.settings('ssh-keys') }] : []),
       { label: 'Sessions', link: links.settings('sessions') },
-      { label: pending ? `Invites (${pending})` : 'Invites', link: links.settings('invites') },
+      { label: pending ? `Invitations (${pending})` : 'Invitations', link: links.settings('invites') },
     ];
   });
 }
