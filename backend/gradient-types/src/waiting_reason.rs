@@ -50,6 +50,9 @@ pub enum WaitingReason {
         matching_workers: u32,
     },
     ManualStart,
+    ExecJobs {
+        waiting_exec_jobs: u32,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -156,10 +159,12 @@ impl WaitingReason {
         status: gradient_entity::evaluation::EvaluationStatus,
         value: Option<&serde_json::Value>,
     ) -> Option<Self> {
-        if status != gradient_entity::evaluation::EvaluationStatus::Waiting {
-            return None;
+        use gradient_entity::evaluation::EvaluationStatus::{Building, Waiting};
+        let reason = value.and_then(Self::from_json)?;
+        match (status, &reason) {
+            (Waiting, _) | (Building, Self::ExecJobs { .. }) => Some(reason),
+            _ => None,
         }
-        value.and_then(Self::from_json)
     }
 
     pub fn workers(

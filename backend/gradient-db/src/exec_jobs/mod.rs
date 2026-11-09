@@ -52,6 +52,14 @@ static HAS_OPEN_EXEC_JOBS_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+static COUNT_WAITING_EXEC_JOBS_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT count(*)::bigint AS waiting FROM exec_job WHERE evaluation = $1 \
+         AND status IN ({open}) AND waiting_reason IS NOT NULL AND NOT waits_for_manual_start",
+        open = exec_in(&ExecJobStatus::OPEN),
+    )
+});
+
 static SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT EXISTS (SELECT 1 FROM exec_job WHERE evaluation = $1 AND status IN ({failed})) \
@@ -66,6 +74,8 @@ static SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS_SQL: LazyLock<String> = LazyLock
 crate::sql_lazy! {
     HAS_OPEN_EXEC_JOBS = || HAS_OPEN_EXEC_JOBS_SQL.as_str(),
         params = [EvaluationId];
+    COUNT_WAITING_EXEC_JOBS = || COUNT_WAITING_EXEC_JOBS_SQL.as_str(),
+        params = [EvaluationId];
     SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS = || SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS_SQL.as_str(),
         params = [EvaluationId];
 }
@@ -77,6 +87,16 @@ pub async fn has_open_exec_jobs<C: ConnectionTrait>(
     HAS_OPEN_EXEC_JOBS
         .scalar(db, [evaluation.into()], "open")
         .await
+}
+
+pub async fn count_waiting_exec_jobs<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<u32, DbErr> {
+    let waiting: i64 = COUNT_WAITING_EXEC_JOBS
+        .scalar(db, [evaluation.into()], "waiting")
+        .await?;
+    Ok(u32::try_from(waiting).unwrap_or(u32::MAX))
 }
 
 pub async fn read_exec_jobs_failure_and_abort_flags<C: ConnectionTrait>(

@@ -161,7 +161,9 @@ impl WaitingRefresh<'_> {
                         .await?
                     {
                         BuildPhase::Pending(a) => Some((a.target, a.reason)),
-                        BuildPhase::Settled | BuildPhase::Unnamed => None,
+                        BuildPhase::Settled | BuildPhase::Unnamed => {
+                            self.exec_jobs_wait(eval.id, reason.as_ref()).await?
+                        }
                     }
                 }
                 _ => None,
@@ -214,6 +216,20 @@ impl WaitingRefresh<'_> {
         }
 
         Ok(unbuildables)
+    }
+
+    async fn exec_jobs_wait(
+        &self,
+        evaluation: EvaluationId,
+        current: Option<&WaitingReason>,
+    ) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
+        let waiting_exec_jobs =
+            gradient_db::exec_jobs::count_waiting_exec_jobs(&self.db.worker_db, evaluation)
+                .await
+                .context("count waiting exec jobs")?;
+        let next = (waiting_exec_jobs > 0).then_some(WaitingReason::ExecJobs { waiting_exec_jobs });
+        let clears_stale = matches!(current, Some(WaitingReason::ExecJobs { .. }));
+        Ok((next.is_some() || clears_stale).then_some((EvaluationStatus::Building, next)))
     }
 }
 
