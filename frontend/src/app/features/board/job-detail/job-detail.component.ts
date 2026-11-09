@@ -12,6 +12,7 @@ import { BoardService, AssignedJobDetail, InstanceContextView, Windowed } from '
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { AuthService } from '@core/services/auth.service';
+import { NotifyService } from '@core/services/notify.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -65,6 +66,12 @@ const JOB_OUTCOME_BADGES: Record<string, { phase: StatusPhase; label: string }> 
   completed: { phase: 'success', label: 'Completed' },
   failed: { phase: 'failure', label: 'Failed' },
   abandoned: { phase: 'aborted', label: 'Aborted' },
+};
+
+const JOB_KIND_ABORT_TOAST_TEXT: Record<string, string> = {
+  eval: 'Evaluation aborted',
+  build: 'Build aborted',
+  exec: 'Exec job aborted',
 };
 
 export function getAssignedJobName(j: AssignedJobDetail): string {
@@ -488,6 +495,7 @@ export class BoardJobDetailComponent implements OnInit {
   private execJobs = inject(ExecJobsService);
   private auth = inject(AuthService);
   private confirm = inject(ConfirmService);
+  private notify = inject(NotifyService);
   private destroyRef = inject(DestroyRef);
   private location = inject(Location);
 
@@ -675,7 +683,11 @@ export class BoardJobDetailComponent implements OnInit {
   abort(): void {
     const j = this.job();
     if (!j) return;
-    this.confirm.confirm(this.abortConfirm(j)).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.loadJob(j.id));
+    this.confirm.confirm(this.abortConfirm(j)).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      const toast = JOB_KIND_ABORT_TOAST_TEXT[jobKindName(j.kind)];
+      if (toast) this.notify.success(toast);
+      this.loadJob(j.id);
+    });
   }
 
   openBuild(buildId: string): void {

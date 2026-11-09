@@ -15,6 +15,7 @@ import { BoardService, AssignedJobDetail } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { AuthService } from '@core/services/auth.service';
+import { NotifyService } from '@core/services/notify.service';
 import { BoardExecJob, PendingJobSummary } from '@core/models';
 
 const DETAIL: AssignedJobDetail = {
@@ -621,6 +622,18 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     expect(aborted).toEqual(['x1']);
   });
 
+  it('confirms a finished abort with a toast named after the job kind', () => {
+    fakeConfirm();
+    const fixture = setup({ getJob: () => of(DETAIL), abortJob: () => of('Success') });
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+    const cmp = fixture.componentInstance;
+    cmp.abort();
+    expect(success).toHaveBeenLastCalledWith('Build aborted');
+    cmp.job.set({ ...EVAL_DETAIL, id: 'job-2' });
+    cmp.abort();
+    expect(success).toHaveBeenLastCalledWith('Evaluation aborted');
+  });
+
   it('aborts a running build or eval job on the board, naming the package or the task and commit', () => {
     const aborted: string[] = [];
     const confirm = fakeConfirm();
@@ -642,8 +655,10 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     fakeConfirm(false);
     TestBed.overrideProvider(AuthService, { useValue: { user: () => ({ superuser: true }) } });
     const fixture = setup({ abortJob });
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
     fixture.componentInstance.abort();
     expect(abortJob).not.toHaveBeenCalled();
+    expect(success).not.toHaveBeenCalled();
   });
 
   it('finds a pending exec job by its exec job id', () => {
