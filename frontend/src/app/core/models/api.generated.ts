@@ -2612,6 +2612,7 @@ export interface TaskRow {
   task: string;
   task_display_name: string;
   starred: boolean;
+  active: boolean;
   tier: Tier;
   latest?: Latest | null;
   entry_points?: Outcomes | null;

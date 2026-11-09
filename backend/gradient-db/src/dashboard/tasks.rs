@@ -25,7 +25,7 @@ fn task_facts_sql() -> String {
             SELECT t.id FROM task t JOIN project_access pu ON pu.project = t.project WHERE pu.\"user\" = $1 \
             UNION SELECT s.task FROM user_task_star s JOIN task st ON st.id = s.task \
             JOIN project sproj ON sproj.id = st.project WHERE s.\"user\" = $1 AND sproj.public) \
-        SELECT p.name AS project, p.display_name AS project_display_name, t.name AS task, t.display_name AS task_display_name, \
+        SELECT p.name AS project, p.display_name AS project_display_name, t.name AS task, t.display_name AS task_display_name, t.active, \
             EXISTS (SELECT 1 FROM user_task_star s WHERE s.\"user\" = $1 AND s.task = t.id) AS starred, \
             EXISTS (SELECT 1 FROM project_access ta WHERE ta.project = t.project AND ta.\"user\" = $1 AND ta.via_team) AS team, \
             l.id AS latest_id, l.status AS latest_status, encode(c.hash, 'hex') AS latest_commit, \
@@ -108,6 +108,7 @@ pub struct TaskFactsRow {
     pub task: String,
     pub task_display_name: String,
     pub starred: bool,
+    pub active: bool,
     pub latest: Option<LatestTaskEvaluationRow>,
     pub previous: Option<EvaluationId>,
     pub recent_14d: i64,
@@ -170,6 +171,7 @@ fn task_facts_row(r: &QueryResult) -> Result<TaskFactsRow, DbErr> {
         task: r.try_get("", "task")?,
         task_display_name: r.try_get("", "task_display_name")?,
         starred: r.try_get("", "starred")?,
+        active: r.try_get("", "active")?,
         team: r.try_get("", "team")?,
         latest: latest(r)?,
         previous: r

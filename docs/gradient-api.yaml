@@ -21669,6 +21669,7 @@ components:
       - task
       - task_display_name
       - starred
+      - active
       - tier
       - history
       properties:
@@ -21681,6 +21682,8 @@ components:
         task_display_name:
           type: string
         starred:
+          type: boolean
+        active:
           type: boolean
         tier:
           $ref: '#/components/schemas/Tier'

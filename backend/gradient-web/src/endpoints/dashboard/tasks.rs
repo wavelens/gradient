@@ -175,6 +175,7 @@ mod tests {
             ("task", Value::from("t")),
             ("task_display_name", Value::from("T")),
             ("starred", Value::from(true)),
+            ("active", Value::from(true)),
             ("team", Value::Bool(Some(false))),
             ("latest_id", Value::Uuid(latest.map(|(id, _)| id))),
             ("latest_status", Value::Int(latest.map(|(_, s)| s))),

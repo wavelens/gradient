@@ -17,6 +17,7 @@ const row = (task: string): TaskRow => ({
   task,
   task_display_name: `${task} build`,
   starred: false,
+  active: true,
   tier: 'active',
   latest: { id: 'e1', status: 'Failed', commit: 'a1b2c3d4', created_at: '2026-09-23T10:00:00' },
   entry_points: { ok: 41, failing: 4, total: 45 },
