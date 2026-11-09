@@ -77,13 +77,19 @@ export class RepositoryAccessComponent {
     this.unsavedRepositoryUrlAccessTestPassed.set(false);
   }
 
+  cancelEdit(): void {
+    this.editing.set(false);
+    this.testError.set(null);
+    this.unsavedRepositoryUrlAccessTestPassed.set(false);
+  }
+
   saveUrl(): void {
     if (this.urlError() || this.saving()) return;
     this.saving.set(true);
     this.tasks.updateTask(this.project(), this.task(), { repository: this.draftUrl().trim() }).subscribe({
       next: () => {
         this.saving.set(false);
-        this.editing.set(false);
+        this.cancelEdit();
         this.notify.success('Repository URL saved');
         this.changed.emit();
       },

@@ -75,6 +75,22 @@ describe('RepositoryAccessComponent', () => {
     expect(changed).not.toHaveBeenCalled();
   });
 
+  it('drops the result of testing a discarded URL on Cancel', () => {
+    const checkRepository = vi.fn(() => throwError(() => new ApiError('failed to lookup address information', 400)));
+    const fixture = render({ fetch: { failed: false, checked_at: new Date().toISOString() } }, { checkRepository });
+    const el = fixture.nativeElement as HTMLElement;
+    fixture.componentInstance.startEdit();
+    fixture.componentInstance.draftUrl.set('git://nope.invalid/x');
+    fixture.componentInstance.testAccess();
+    fixture.detectChanges();
+    expect(el.querySelector('[role=alert]')?.textContent).toContain('failed to lookup');
+
+    (Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Cancel')) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(el.querySelector('[role=alert]')).toBeNull();
+    expect(el.querySelector('[data-testid=fetch-ok]')).not.toBeNull();
+  });
+
   it('refuses a local path as repository URL without saving', () => {
     const updateTask = vi.fn(() => of('ok'));
     const fixture = render({}, { updateTask });

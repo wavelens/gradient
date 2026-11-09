@@ -10,7 +10,7 @@
       <input grInput id="repo-url" [ngModel]="draftUrl()" (ngModelChange)="draftUrl.set($event); unsavedRepositoryUrlAccessTestPassed.set(false)" (keyup.enter)="saveUrl()" />
     </gr-form-field>
     <div class="gr-form-actions">
-      <button grButton label="Cancel" severity="secondary" (click)="editing.set(false)" [disabled]="saving()"></button>
+      <button grButton label="Cancel" severity="secondary" (click)="cancelEdit()" [disabled]="saving()"></button>
       <button grButton label="Save URL" icon="check" (click)="saveUrl()" [loading]="saving()" [disabled]="saving() || !!urlError()"></button>
     </div>
   } @else {
