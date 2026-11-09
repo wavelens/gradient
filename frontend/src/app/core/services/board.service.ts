@@ -6,7 +6,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Observable, shareReplay } from 'rxjs';
-import { ApiService, RequestOptions } from './api.service';
+import { ApiService } from './api.service';
 import {
   GradientCapabilities,
   RuleDescription,
@@ -188,8 +188,8 @@ export class BoardService {
     return this.api.get<BoardHealth>('board/health');
   }
 
-  getStorage(windowHours = 6, options?: RequestOptions): Observable<BoardStorage> {
-    return this.api.get<BoardStorage>(`board/storage?window_hours=${windowHours}`, options);
+  getStorage(windowHours = 6): Observable<BoardStorage> {
+    return this.api.get<BoardStorage>(`board/storage?window_hours=${windowHours}`);
   }
 
   getDurationsHeatmap(windowHours = 24): Observable<DurationsHeatmap> {

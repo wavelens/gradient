@@ -9,7 +9,6 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Subscription, catchError, forkJoin, interval, map, startWith, switchMap, takeWhile } from 'rxjs';
-import { inBackground } from '@core/interceptors/request-context';
 import {
   ButtonComponent,
   CopyFieldComponent,
@@ -209,14 +208,14 @@ export class ExecJobPageComponent implements OnInit {
   private watch(): void {
     this.poll?.unsubscribe();
     this.poll = interval(POLL_MS).pipe(
-      startWith(-1),
-      switchMap((tick) => forkJoin({
-        job: this.execJobs.get(this.jobId, tick >= 0 ? inBackground() : undefined),
-        pullRequests: this.execJobs.pullRequests(this.jobId, inBackground()),
+      startWith(0),
+      switchMap(() => forkJoin({
+        job: this.execJobs.get(this.jobId),
+        pullRequests: this.execJobs.pullRequests(this.jobId),
       }).pipe(
         switchMap(({ job, pullRequests }) => {
           if (this.node() !== 0 && !job.node_jobs.some((n) => n.node === this.node())) this.setSelectedNodeIndexAndUrl(0);
-          return this.execJobs.log(this.jobId, undefined, this.node(), inBackground()).pipe(map((log) => ({ job, log, pullRequests })));
+          return this.execJobs.log(this.jobId, undefined, this.node()).pipe(map((log) => ({ job, log, pullRequests })));
         }),
         catchError((error: Error) => {
           this.errorMessage.set(error.message);

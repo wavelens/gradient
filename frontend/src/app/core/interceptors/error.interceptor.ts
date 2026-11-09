@@ -10,7 +10,7 @@ import { PRIMARY_OUTLET, Router } from '@angular/router';
 import { MessageService } from '@gradient/ui/ui';
 import { Observable, catchError, retry, throwError, timer } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
-import { BACKGROUND, SESSION_PROBE } from './request-context';
+import { SESSION_PROBE } from './request-context';
 import { PageRenderTracker } from './page-render-tracker.service';
 
 const THROTTLE_RETRIES = 3;
@@ -39,7 +39,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   const router = inject(Router);
   const injector = inject(Injector);
   const read = READ_METHODS.has(req.method);
-  const pageRead = read && !req.context.get(BACKGROUND) && inject(PageRenderTracker).isPageStillRendering();
+  const pageRead = read && inject(PageRenderTracker).isPageStillRendering();
   const probe = req.context.get(SESSION_PROBE);
   const notify = (detail: string, life?: number) =>
     injector.get(MessageService).add({ severity: 'warn', summary: 'Server Busy', detail, life, key: 'throttle' });

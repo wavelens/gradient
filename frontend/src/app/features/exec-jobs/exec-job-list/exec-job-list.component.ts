@@ -11,7 +11,6 @@ import { BadgeComponent, IconComponent, MenuComponent, type MenuItem } from '@gr
 import { StatusIconComponent } from '@shared/ui';
 import type { ExecJobSummary } from '@core/models';
 import { ApiError } from '@core/services/api.service';
-import { inBackground } from '@core/interceptors/request-context';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
@@ -65,7 +64,7 @@ export class ExecJobListComponent implements OnChanges {
     const evaluation = this.evaluation();
     this.poll = interval(POLL_MS).pipe(
       startWith(0),
-      switchMap(() => this.execJobs.forEvaluation(evaluation, inBackground()).pipe(
+      switchMap(() => this.execJobs.forEvaluation(evaluation).pipe(
         catchError((error: unknown) => of(error instanceof ApiError && !error.unreachable ? 'refused' as const : null)),
       )),
       takeWhile((jobs) => jobs !== 'refused'

@@ -7,7 +7,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Observable, Subject, catchError, interval, map, startWith, switchMap } from 'rxjs';
-import { inBackground } from '@core/interceptors/request-context';
 import { BoardService } from '@core/services/board.service';
 import { FormsModule } from '@angular/forms';
 import { LoadStateComponent, TabSwitchComponent } from '@gradient/ui/ui';
@@ -180,7 +179,7 @@ export class BoardStorageComponent implements OnInit {
   }
 
   private fetch(hours: number, poll: boolean): Observable<StorageView> {
-    return this.board.getStorage(hours, poll ? inBackground() : undefined).pipe(
+    return this.board.getStorage(hours).pipe(
       map((stats) => ({ stats, buckets: windowBuckets(stats.granularity, hours, Date.now()) })),
       catchError((error: unknown) => {
         if (!poll) this.loadError.set(error);

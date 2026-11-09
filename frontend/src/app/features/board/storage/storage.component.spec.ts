@@ -34,7 +34,7 @@ describe('BoardStorageComponent', () => {
   });
 
   it('loads a 6 hour window and renders four charts', () => {
-    expect(getStorage).toHaveBeenCalledWith(6, undefined);
+    expect(getStorage).toHaveBeenCalledWith(6);
     expect(fixture.nativeElement.querySelectorAll('gr-metric-chart').length).toBe(4);
   });
 
@@ -45,7 +45,7 @@ describe('BoardStorageComponent', () => {
     button.click();
     fixture.detectChanges();
 
-    expect(getStorage).toHaveBeenLastCalledWith(24, undefined);
+    expect(getStorage).toHaveBeenLastCalledWith(24);
   });
 
   it('puts every chart on one axis spanning the whole window', () => {
@@ -96,6 +96,6 @@ describe('BoardStorageComponent', () => {
     fixture.componentInstance.select(1);
     fixture.componentInstance.select(24);
 
-    expect(getStorage).toHaveBeenLastCalledWith(24, undefined);
+    expect(getStorage).toHaveBeenLastCalledWith(24);
   });
 });

@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '@environments/environment';
-import { ApiService, RequestOptions } from './api.service';
+import { ApiService } from './api.service';
 import { ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary } from '@core/models';
 
 function query(params: Record<string, number | undefined>): string {
@@ -19,20 +19,20 @@ function query(params: Record<string, number | undefined>): string {
 export class ExecJobsService {
   private api = inject(ApiService);
 
-  forEvaluation(evaluation: string, options?: RequestOptions): Observable<ExecJobSummary[]> {
-    return this.api.get<ExecJobSummary[]>(`evals/${evaluation}/exec`, options);
+  forEvaluation(evaluation: string): Observable<ExecJobSummary[]> {
+    return this.api.get<ExecJobSummary[]>(`evals/${evaluation}/exec`);
   }
 
-  get(job: string, options?: RequestOptions): Observable<ExecJobResponse> {
-    return this.api.get<ExecJobResponse>(`exec/${job}`, options);
+  get(job: string): Observable<ExecJobResponse> {
+    return this.api.get<ExecJobResponse>(`exec/${job}`);
   }
 
-  log(job: string, attempt?: number, node?: number, options?: RequestOptions): Observable<string> {
-    return this.api.get<string>(`exec/${job}/log${query({ attempt, node })}`, options);
+  log(job: string, attempt?: number, node?: number): Observable<string> {
+    return this.api.get<string>(`exec/${job}/log${query({ attempt, node })}`);
   }
 
-  outputs(job: string, node?: number, options?: RequestOptions): Observable<ExecJobOutputView[]> {
-    return this.api.get<ExecJobOutputView[]>(`exec/${job}/outputs${query({ node })}`, options);
+  outputs(job: string, node?: number): Observable<ExecJobOutputView[]> {
+    return this.api.get<ExecJobOutputView[]>(`exec/${job}/outputs${query({ node })}`);
   }
 
   outputUrl(job: string, path: string, node?: number): string {
@@ -40,8 +40,8 @@ export class ExecJobsService {
     return `${environment.apiUrl}/exec/${job}/outputs/${encoded}${query({ node })}`;
   }
 
-  pullRequests(job: string, options?: RequestOptions): Observable<ExecJobPullRequestView[]> {
-    return this.api.get<ExecJobPullRequestView[]>(`exec/${job}/pull-requests`, options);
+  pullRequests(job: string): Observable<ExecJobPullRequestView[]> {
+    return this.api.get<ExecJobPullRequestView[]>(`exec/${job}/pull-requests`);
   }
 
   abort(job: string): Observable<string> {
