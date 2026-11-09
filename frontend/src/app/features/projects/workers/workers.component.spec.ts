@@ -536,6 +536,7 @@ describe('WorkersComponent - load errors', () => {
     expect(root.textContent).toContain('No access');
     expect(root.textContent).toContain('Only the members of this project can view this.');
     expect(root.textContent).not.toContain('Try Again');
+    expect(root.querySelector('app-team-grants')).toBeNull();
     expect(service.getWorkers).not.toHaveBeenCalled();
     expect(projects.getSubscribedCaches).not.toHaveBeenCalled();
   });

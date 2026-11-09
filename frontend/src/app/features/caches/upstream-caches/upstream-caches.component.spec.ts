@@ -180,7 +180,7 @@ describe('UpstreamCachesComponent - access gating', () => {
     const addBtn = findByText(fixture.nativeElement, 'add upstream cache') as HTMLButtonElement | null;
     const editBtn = findIconButton(fixture.nativeElement, 'edit');
     const delBtn = findIconButton(fixture.nativeElement, 'delete');
-    expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')?.textContent).toContain('managed by the server configuration');
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')?.textContent).toContain('come from the server configuration');
     expect(addBtn).not.toBeNull();
     expect(addBtn!.disabled).toBe(true);
     expect(editBtn).not.toBeNull();

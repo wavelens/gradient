@@ -23,7 +23,19 @@ describe('ServerConfigurationManagedBannerComponent', () => {
     [{ managed: true, canEdit: false, canTrigger: false }, false],
     [{ managed: false, canEdit: true, canTrigger: true }, false],
   ])('explains the server configuration only to someone who could edit otherwise: %o', (access, shown) => {
-    expect(bannerText(access).includes('managed by the server configuration')).toBe(shown);
+    expect(bannerText(access).includes('come from the server configuration')).toBe(shown);
+  });
+
+  it.each([
+    ['cache', true],
+    ['team', true],
+    ['project', false],
+  ])('mentions what still works on a managed %s: %s', (kind, mentioned) => {
+    const fixture = TestBed.createComponent(ServerConfigurationManagedBannerComponent);
+    fixture.componentRef.setInput('access', { managed: true, canEdit: true, canTrigger: true });
+    fixture.componentRef.setInput('kind', kind);
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).textContent?.includes('Deactivating and adding extra members still work here.')).toBe(mentioned);
   });
 
   it('tells a read-only settings viewer to contact the owning project admin', () => {

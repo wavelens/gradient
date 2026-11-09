@@ -116,6 +116,11 @@ describe('ProjectDetailComponent header', () => {
     expect(root.textContent).toContain('Ask a project administrator to connect a repository.');
   });
 
+  it('offers no Connect repository on a project from the server configuration', () => {
+    const { root } = render(true, undefined, { role: 'Admin', permissions: EVERY_PERMISSION, managed: true });
+    expect(root.textContent).not.toContain('Connect repository');
+  });
+
   it('offers neither Settings nor Connect repository to a visitor without a role', () => {
     const { root } = render(true, undefined, { role: null, permissions: [] });
     const labels = Array.from(root.querySelectorAll('[slot="actions"] [grButton]')).map((el) => el.querySelector('.gr-button__label')?.textContent?.trim());

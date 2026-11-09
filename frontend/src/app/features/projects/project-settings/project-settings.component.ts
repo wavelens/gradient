@@ -30,7 +30,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
+import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember, isViewerProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -98,6 +98,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
   deleteAccess = computed(() => accessTo(this.resolvedProject(), 'deleteProject'));
   manageIntegrationsAccess = computed(() => accessTo(this.resolvedProject(), 'manageIntegrations'));
   webhooksAccess = computed(() => accessTo(this.resolvedProject(), 'manageWebhooks'));
+  isViewerProjectMember = computed(() => isViewerProjectMember(this.resolvedProject()));
 
   loading = signal(true);
   loadError = signal<unknown>(null);

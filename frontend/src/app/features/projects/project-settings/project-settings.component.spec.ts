@@ -47,7 +47,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function setup(access: AccessState, permissions?: Permission[]): ComponentFixture<ProjectSettingsComponent> {
+function setup(access: AccessState, permissions?: Permission[], fields: Partial<ProjectResponse> = {}): ComponentFixture<ProjectSettingsComponent> {
   notify.success.mockClear();
   notify.failure.mockClear();
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
@@ -57,7 +57,7 @@ function setup(access: AccessState, permissions?: Permission[]): ComponentFixtur
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useFactory: () => projectRouteStub('acme', access, permissions && { permissions }) },
+      { provide: ActivatedRoute, useFactory: () => projectRouteStub('acme', access, { ...(permissions && { permissions }), ...fields }) },
       {
         provide: ProjectsService,
         useValue: {
@@ -187,6 +187,15 @@ describe('ProjectSettingsComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete project')).toBeNull();
     expect(fixture.nativeElement.querySelector('gr-message-banner')?.textContent).toContain("you can't change them");
+  });
+
+  it('links a visitor without a role to no member-only page', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [], { role: null });
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).not.toContain('Members & Roles');
+    expect(text).not.toContain('Workers');
+    expect(text).not.toContain('SSH Key');
   });
 
   it('hides Save and disables Delete under state-managed access', async () => {

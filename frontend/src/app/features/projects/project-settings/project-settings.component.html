@@ -92,6 +92,7 @@
 
   </gr-settings-section>
 
+  @if (isViewerProjectMember()) {
   <gr-settings-section title="More Settings" [card]="false">
     <gr-row-list>
       <gr-row icon="group" linkLabel="Members and roles" [link]="links.projectPage(projectName, 'members')">
@@ -153,6 +154,7 @@
     }
 
   </gr-settings-section>
+  }
 
   <!-- Danger Zone -->
   @if ((sshKey() && sshKeyAccess().canEdit) || deleteAccess().canEdit) {
