@@ -120,16 +120,16 @@ describe('ApiKeysComponent - managed-key gating', () => {
     const revokeButtons = buttonsByText(fixture.nativeElement, 'revoke');
     const deleteButtons = buttonsByText(fixture.nativeElement, 'delete');
     expect(revokeButtons.length).toBe(1);
-    expect(revokeButtons[0].disabled).toBe(true);
+    expect(revokeButtons[0].getAttribute('aria-disabled')).toBe('true');
     expect(deleteButtons.length).toBe(1);
-    expect(deleteButtons[0].disabled).toBe(true);
+    expect(deleteButtons[0].getAttribute('aria-disabled')).toBe('true');
   });
 
   it('renders Edit present-but-disabled for a managed key', () => {
     const fixture = setup([managedKey]);
     const editButtons = buttonsByText(fixture.nativeElement, 'edit');
     expect(editButtons.length).toBe(1);
-    expect(editButtons[0].disabled).toBe(true);
+    expect(editButtons[0].getAttribute('aria-disabled')).toBe('true');
   });
 });
 

@@ -24,7 +24,7 @@ import {
 } from '@core/models';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
-import { canManageTeam } from '@shared/access';
+import { MANAGED_ITEM_DISABLED_REASON, canManageTeam } from '@shared/access';
 import { fieldChecks } from '@shared/forms';
 import { EMPTY, Observable, map, tap } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -69,6 +69,7 @@ export class TeamWorkersComponent implements OnInit {
   private authService = inject(AuthService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  protected readonly managedItemDisabledReason = MANAGED_ITEM_DISABLED_REASON;
   config = inject(ConfigService);
 
   team = input.required<TeamResponse>();

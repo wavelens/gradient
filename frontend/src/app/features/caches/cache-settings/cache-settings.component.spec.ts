@@ -101,7 +101,7 @@ describe('CacheSettingsComponent - access gating', () => {
     const del = findByText(fixture.nativeElement, 'delete cache') as HTMLButtonElement | null;
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(del).not.toBeNull();
-    expect(del!.disabled).toBe(true);
+    expect(del!.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('keeps Deactivate usable under state-managed access, since state restores it on restart', () => {

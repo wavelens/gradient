@@ -124,12 +124,7 @@ export class TaskTriggersComponent implements OnInit {
   access = injectTaskAccessTo('manageTriggers');
   integrationAccess = injectTaskAccessTo('manageIntegrations');
 
-  rowDisabled = computed(
-    () =>
-      this.firingId() !== null ||
-      this.makingDefaultId() !== null ||
-      this.accessSvc.shouldDisableInput(this.access()),
-  );
+  rowBusy = computed(() => this.firingId() !== null || this.makingDefaultId() !== null);
 
   triggerAccess = computed(() => this.accessSvc.triggerAccess(this.taskAccess()));
 
@@ -212,7 +207,7 @@ export class TaskTriggersComponent implements OnInit {
   private openRequestedEdit(list: TriggerOut[]): void {
     const query = this.route.snapshot.queryParamMap;
     const trigger = list.find((t) => t.id === query.get('edit'));
-    if (!trigger || this.editRequestHandled || this.rowDisabled()) return;
+    if (!trigger || this.editRequestHandled || this.rowBusy() || this.accessSvc.shouldDisableInput(this.access())) return;
     this.editRequestHandled = true;
     this.startEdit(trigger);
     const integration = query.get('integration');

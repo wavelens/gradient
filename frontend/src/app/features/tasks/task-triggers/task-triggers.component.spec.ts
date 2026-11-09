@@ -169,11 +169,11 @@ describe('TaskTriggersComponent - access gating', () => {
     const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
     const fireBtn = findByText(fixture.nativeElement, 'fire now') as HTMLButtonElement | null;
     expect(newBtn).not.toBeNull();
-    expect(newBtn!.disabled).toBe(true);
+    expect(newBtn!.getAttribute('aria-disabled')).toBe('true');
     expect(editBtn).not.toBeNull();
-    expect(editBtn!.disabled).toBe(true);
+    expect(editBtn!.getAttribute('aria-disabled')).toBe('true');
     expect(deleteBtn).not.toBeNull();
-    expect(deleteBtn!.disabled).toBe(true);
+    expect(deleteBtn!.getAttribute('aria-disabled')).toBe('true');
     expect(fireBtn).not.toBeNull();
     // Fire Now is a trigger action, not a config edit - exempt from the managed flag (AccessService.triggerAccess).
     expect(fireBtn!.disabled).toBe(false);

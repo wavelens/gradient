@@ -83,7 +83,8 @@
                 icon="edit"
                 severity="secondary"
                 [attr.aria-label]="'Edit upstream cache ' + u.display_name"
-                [disabled]="rowDisabled()"
+                [disabled]="rowBusy()"
+                [appManagedDisable]="access()"
                 (click)="openEditDialog(u)"
               ></button>
               <button
@@ -93,7 +94,8 @@
                 icon="delete"
                 severity="danger"
                 [attr.aria-label]="'Delete upstream cache ' + u.display_name"
-                [disabled]="rowDisabled()"
+                [disabled]="rowBusy()"
+                [appManagedDisable]="access()"
                 (click)="removeUpstream(u)"
               ></button>
             </div>

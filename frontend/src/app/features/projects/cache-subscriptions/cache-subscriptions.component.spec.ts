@@ -95,7 +95,7 @@ describe('CacheSubscriptionsComponent - access gating', () => {
     await settled(fixture);
     const btn = findByText(fixture.nativeElement, 'add cache') as HTMLButtonElement | null;
     expect(btn).not.toBeNull();
-    expect(btn!.disabled).toBe(true);
+    expect(btn!.getAttribute('aria-disabled')).toBe('true');
   });
 });
 

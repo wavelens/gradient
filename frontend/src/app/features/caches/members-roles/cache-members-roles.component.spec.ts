@@ -244,8 +244,8 @@ describe('CacheMembersRolesComponent - confirmed removals', () => {
     getMembers.mockReturnValue(of([{ id: 'alice', name: 'Admin' }, { id: 'bob', name: 'View' }]));
     await settled(fixture);
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector<HTMLButtonElement>('[aria-label="Remove alice"]')!.disabled).toBe(true);
-    expect(root.querySelector<HTMLButtonElement>('[aria-label="Remove bob"]')!.disabled).toBe(false);
+    expect(root.querySelector<HTMLButtonElement>('[aria-label="Remove alice"]')!.getAttribute('aria-disabled')).toBe('true');
+    expect(root.querySelector<HTMLButtonElement>('[aria-label="Remove bob"]')!.getAttribute('aria-disabled')).toBeNull();
   });
 
   it('counts the members of each role and preselects the lowest role for a new member', async () => {

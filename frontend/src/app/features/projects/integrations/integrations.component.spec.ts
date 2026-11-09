@@ -144,7 +144,7 @@ describe('IntegrationsComponent - access gating', () => {
     await settled(fixture);
     const newBtn = findByText(fixture.nativeElement, 'new integration') as HTMLButtonElement | null;
     expect(newBtn).not.toBeNull();
-    expect(newBtn!.disabled).toBe(true);
+    expect(newBtn!.getAttribute('aria-disabled')).toBe('true');
 
     const editButtons = findAllByText(fixture.nativeElement, 'edit');
     const deleteButtons = findAllByText(fixture.nativeElement, 'delete');
@@ -163,8 +163,8 @@ describe('IntegrationsComponent - access gating', () => {
     const deleteButtons = findAllByText(fixture.nativeElement, 'delete');
     expect(editButtons.length).toBeGreaterThan(0);
     expect(deleteButtons.length).toBeGreaterThan(0);
-    expect(editButtons.some((b) => !b.disabled)).toBe(false);
-    expect(deleteButtons.some((b) => !b.disabled)).toBe(false);
+    expect(editButtons.some((b) => b.getAttribute('aria-disabled') !== 'true')).toBe(false);
+    expect(deleteButtons.some((b) => b.getAttribute('aria-disabled') !== 'true')).toBe(false);
   });
 
   it('shows working New Integration / Edit / Delete under full access', async () => {

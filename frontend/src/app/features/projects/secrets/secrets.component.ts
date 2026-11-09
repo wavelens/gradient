@@ -27,7 +27,7 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { WritableDirective, createMissingPermissionLoadStateError, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
+import { MANAGED_ITEM_DISABLED_REASON, WritableDirective, createMissingPermissionLoadStateError, isViewerProjectMember, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { RelativeTimePipe } from '@shared/text';
@@ -63,6 +63,7 @@ export class SecretsComponent implements OnInit {
   private secretsService = inject(ProjectSecretsService);
   private resolvedProject = injectProject();
   private crumbs = inject(BreadcrumbsService);
+  protected readonly managedItemDisabledReason = MANAGED_ITEM_DISABLED_REASON;
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 

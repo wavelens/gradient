@@ -100,7 +100,8 @@
                   icon="edit"
                   severity="secondary"
                   size="small"
-                  [disabled]="rowDisabled()"
+                  [disabled]="rowBusy()"
+                  [appManagedDisable]="access()"
                   (click)="startEdit(action)"
                 ></button>
                 <button
@@ -110,7 +111,8 @@
                   icon="delete"
                   severity="danger"
                   size="small"
-                  [disabled]="rowDisabled()"
+                  [disabled]="rowBusy()"
+                  [appManagedDisable]="access()"
                   (click)="deleteAction(action)"
                 ></button>
               </div>

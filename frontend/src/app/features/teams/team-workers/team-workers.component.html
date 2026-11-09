@@ -57,7 +57,7 @@
               }
               @if (isAdmin()) {
                 <button grButton label="Edit" icon="edit" severity="secondary" size="small"
-                  [disabled]="worker.managed || busy() === worker.worker_id" (click)="openEdit(worker)"></button>
+                  [disabled]="busy() === worker.worker_id" [disabledReason]="worker.managed ? managedItemDisabledReason : null" (click)="openEdit(worker)"></button>
                 @if (worker.active) {
                   <button grButton label="Deactivate" icon="pause" severity="secondary" size="small"
                     [loading]="busy() === worker.worker_id" (click)="setActive(worker, false)"></button>
@@ -65,7 +65,7 @@
                   <button grButton label="Activate" icon="play_arrow" severity="secondary" size="small"
                     [loading]="busy() === worker.worker_id" (click)="setActive(worker, true)"></button>
                 }
-                <button grButton label="Delete" icon="delete" severity="danger" size="small" [attr.aria-label]="'Delete worker ' + worker.display_name" [disabled]="worker.managed || busy() === worker.worker_id"
+                <button grButton label="Delete" icon="delete" severity="danger" size="small" [attr.aria-label]="'Delete worker ' + worker.display_name" [disabled]="busy() === worker.worker_id" [disabledReason]="worker.managed ? managedItemDisabledReason : null"
                   (click)="remove(worker)"></button>
               }
             </div>

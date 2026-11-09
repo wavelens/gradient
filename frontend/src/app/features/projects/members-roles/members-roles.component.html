@@ -155,8 +155,8 @@
                     icon="delete"
                     severity="danger"
                     [attr.aria-label]="'Delete role ' + role.name"
-                    [disabled]="savingRole() || deletingRole() || holders.total > 0"
-                    [grTooltip]="holders.total > 0 ? 'Assign another role to the members, teams, and invitations of this role before deletion.' : ''"
+                    [disabled]="savingRole() || deletingRole()"
+                    [disabledReason]="holders.total > 0 ? 'Assign another role to the members, teams, and invitations of this role before deletion.' : null"
                     [appManagedDisable]="roleAccess()"
                     (click)="deleteRole(role)"
                   ></button>

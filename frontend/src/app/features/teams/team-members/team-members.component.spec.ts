@@ -156,8 +156,8 @@ describe('TeamMembersComponent', () => {
     const { fixture } = setup();
     const element = fixture.nativeElement as HTMLElement;
     const removeButton = (user: string) => element.querySelector<HTMLButtonElement>(`[aria-label="Remove ${user}"]`)!;
-    expect(removeButton('alice').disabled).toBe(true);
-    expect(removeButton('bob').disabled).toBe(false);
+    expect(removeButton('alice').getAttribute('aria-disabled')).toBe('true');
+    expect(removeButton('bob').getAttribute('aria-disabled')).toBeNull();
   });
 
   it('lets a superuser outside the team add members', () => {

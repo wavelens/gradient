@@ -89,11 +89,7 @@ export class TaskActionsComponent implements OnInit {
   access = injectTaskAccessTo('manageActions');
   memberAccess = injectTaskAccessTo('manageMembers');
 
-  rowDisabled = computed(
-    () =>
-      this.testingId() !== null ||
-      this.accessSvc.shouldDisableInput(this.access()),
-  );
+  rowBusy = computed(() => this.testingId() !== null);
 
   triggerAccess = computed(() => this.accessSvc.triggerAccess(this.access()));
 

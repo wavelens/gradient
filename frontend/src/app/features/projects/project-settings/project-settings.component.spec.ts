@@ -204,7 +204,7 @@ describe('ProjectSettingsComponent - access gating', () => {
     const del = findByText(fixture.nativeElement, 'delete project') as HTMLButtonElement | null;
     expect(findByText(fixture.nativeElement, 'save changes')).toBeNull();
     expect(del).not.toBeNull();
-    expect(del!.disabled).toBe(true);
+    expect(del!.getAttribute('aria-disabled')).toBe('true');
   });
 });
 

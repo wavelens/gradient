@@ -7,7 +7,8 @@
 import { Component, Directive, forwardRef, signal } from '@angular/core';
 import { TestBed, ComponentFixture } from '@angular/core/testing';
 import { ControlValueAccessor, FormsModule, NG_VALUE_ACCESSOR } from '@angular/forms';
-import { ManagedDisableDirective } from './managed-disable.directive';
+import { ButtonComponent } from '@gradient/ui/ui';
+import { MANAGED_ITEM_DISABLED_REASON, ManagedDisableDirective } from './managed-disable.directive';
 import { AccessState } from '@core/models/access.model';
 
 @Component({
@@ -139,6 +140,40 @@ describe('ManagedDisableDirective with a ControlValueAccessor', () => {
     fixture.componentInstance.access.set({ managed: false, canEdit: true, canTrigger: true });
     fixture.detectChanges();
     expect(cvaInstance().isDisabled).toBe(false);
+  });
+});
+
+@Component({
+  selector: 'gr-button-host',
+  standalone: true,
+  imports: [ButtonComponent, ManagedDisableDirective],
+  template: `<button grButton label="Delete" [disabled]="busy()" [appManagedDisable]="access()" (click)="clicks = clicks + 1"></button>`,
+})
+class GrButtonHostComponent {
+  busy = signal(false);
+  clicks = 0;
+  access = signal<AccessState>({ managed: true, canEdit: true, canTrigger: true });
+}
+
+describe('ManagedDisableDirective on a grButton', () => {
+  it('keeps the button focusable, blocks clicks and announces the reason', () => {
+    TestBed.configureTestingModule({ imports: [GrButtonHostComponent] });
+    const fixture = TestBed.createComponent(GrButtonHostComponent);
+    fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    const description = fixture.nativeElement.querySelector(`#${button.getAttribute('aria-describedby')}`) as HTMLElement;
+    expect(description.textContent).toBe(MANAGED_ITEM_DISABLED_REASON);
+    button.click();
+    expect(fixture.componentInstance.clicks).toBe(0);
+
+    fixture.componentInstance.access.set({ managed: false, canEdit: true, canTrigger: true });
+    fixture.componentInstance.busy.set(true);
+    fixture.detectChanges();
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-disabled')).toBeNull();
   });
 });
 

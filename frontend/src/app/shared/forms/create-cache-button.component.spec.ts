@@ -32,7 +32,7 @@ function setup(canCreateCache: boolean) {
     fixture.detectChanges();
   };
   const hover = () => {
-    host.querySelector('.create-cache-button')!.dispatchEvent(new Event('mouseenter'));
+    button.dispatchEvent(new Event('mouseenter'));
     fixture.detectChanges();
   };
   return { host: fixture.componentInstance, button, press, hover };
@@ -41,15 +41,16 @@ function setup(canCreateCache: boolean) {
 describe('CreateCacheButtonComponent', () => {
   it('opens the dialog while another cache fits', () => {
     const { host, button, press } = setup(true);
-    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBeNull();
     press();
     expect(host.opened).toBe(1);
   });
 
-  it('stays visible but disabled at the cache limit and explains why on hover', () => {
+  it('stays visible and focusable at the cache limit and explains why on hover', () => {
     const { host, button, press, hover } = setup(false);
     expect(button.textContent).toContain('Create Cache');
-    expect(button.disabled).toBe(true);
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
     press();
     expect(host.opened).toBe(0);
     hover();

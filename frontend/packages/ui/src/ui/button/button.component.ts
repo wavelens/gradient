@@ -4,10 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ElementRef, OnDestroy, booleanAttribute, computed, effect, inject, input, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, InjectionToken, OnDestroy, Signal, booleanAttribute, computed, effect, inject, input, ChangeDetectionStrategy } from '@angular/core';
 import { TooltipDirective, TooltipOverlay } from '../tooltip/tooltip.directive';
 
 export type ButtonSeverity = 'primary' | 'secondary' | 'danger';
+
+export interface ButtonDisabledReasonSignalSupplier {
+  disabledReason: Signal<string | null>;
+}
+
+export const GR_BUTTON_DISABLED_REASON_INJECTION_TOKEN = new InjectionToken<ButtonDisabledReasonSignalSupplier>('GR_BUTTON_DISABLED_REASON_INJECTION_TOKEN');
 
 let disabledReasonSpanSeq = 0;
 
@@ -29,8 +35,8 @@ let disabledReasonSpanSeq = 0;
     @if (!loading() && icon() && iconPos() === 'right') {
       <span class="gr-button__icon material-symbols-outlined" aria-hidden="true">{{ icon() }}</span>
     }
-    @if (disabledReason()) {
-      <span hidden [id]="disabledReasonDescriptionId">{{ disabledReason() }}</span>
+    @if (shownDisabledReason()) {
+      <span hidden [id]="disabledReasonDescriptionId">{{ shownDisabledReason() }}</span>
     }
   `,
   host: {
@@ -42,7 +48,7 @@ let disabledReasonSpanSeq = 0;
     '[class.gr-button--loading]': 'loading()',
     '[attr.aria-busy]': 'loading() ? "true" : null',
     '[attr.aria-disabled]': 'blocked() ? "true" : null',
-    '[attr.aria-describedby]': 'disabledReason() ? disabledReasonDescriptionId : null',
+    '[attr.aria-describedby]': 'shownDisabledReason() ? disabledReasonDescriptionId : null',
     '[attr.tabindex]': 'loading() ? "-1" : null',
     '(mouseenter)': 'showDisabledReason()',
     '(focus)': 'showDisabledReason()',
@@ -63,7 +69,9 @@ export class ButtonComponent implements OnDestroy {
   disabledReason = input<string | null | undefined>(null);
 
   protected disabledReasonDescriptionId = `gr-button-disabled-reason-${disabledReasonSpanSeq++}`;
-  protected blocked = computed(() => this.loading() || !!this.disabledReason());
+  private disabledReasonSupplier = inject(GR_BUTTON_DISABLED_REASON_INJECTION_TOKEN, { self: true, optional: true });
+  protected shownDisabledReason = computed(() => this.disabledReason() || this.disabledReasonSupplier?.disabledReason());
+  protected blocked = computed(() => this.loading() || !!this.shownDisabledReason());
   private hostTooltip = inject(TooltipDirective, { self: true, optional: true });
   protected reasonTooltip = new TooltipOverlay();
 
@@ -78,7 +86,7 @@ export class ButtonComponent implements OnDestroy {
       { capture: true },
     );
     effect(() => {
-      const reason = this.disabledReason() ?? '';
+      const reason = this.shownDisabledReason() ?? '';
       if (this.hostTooltip) this.hostTooltip.setTooltipTextFromButtonDisabledReason(reason);
       else this.reasonTooltip.update(reason);
     });
@@ -89,7 +97,7 @@ export class ButtonComponent implements OnDestroy {
   }
 
   protected showDisabledReason(): void {
-    if (!this.hostTooltip) this.reasonTooltip.show(this.disabledReason() ?? '');
+    if (!this.hostTooltip) this.reasonTooltip.show(this.shownDisabledReason() ?? '');
   }
 
   protected severityClass = computed(() => `gr-button--${this.severity() || 'primary'}`);

@@ -36,8 +36,8 @@
               <gr-select [ngModel]="pending?.user === member.user ? pending.role : member.role" [options]="roles" optionLabel="label" optionValue="value"
                 [disabled]="isSoleAdmin" [grTooltip]="soleAdminReason"
                 [ariaLabel]="'Role: ' + member.user" (ngModelChange)="updateRole(member.user, $event)" />
-              <button grButton label="Remove" icon="close" severity="danger" [attr.aria-label]="'Remove ' + member.user" [disabled]="pending?.user === member.user || isSoleAdmin"
-                [grTooltip]="soleAdminReason" (click)="removeMember(member.user)"></button>
+              <button grButton label="Remove" icon="close" severity="danger" [attr.aria-label]="'Remove ' + member.user" [disabled]="pending?.user === member.user"
+                [disabledReason]="soleAdminReason" (click)="removeMember(member.user)"></button>
             } @else {
               <gr-badge severity="neutral">{{ teamRoleDisplayLabels[member.role] }}</gr-badge>
             }

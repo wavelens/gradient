@@ -174,13 +174,13 @@ describe('SecretsComponent', () => {
     expect(fixture.componentInstance.formOpen()).toBe(true);
   });
 
-  it('disables Replace and Delete on a managed secret', async () => {
+  it('blocks Replace and Delete on a managed secret', async () => {
     const { fixture } = setup();
     await settled(fixture);
     const row = rowOf(fixture, 'lab-key');
-    expect(buttonIn(row, 'Replace')!.disabled).toBe(true);
-    expect(buttonIn(row, 'Delete')!.disabled).toBe(true);
-    expect(buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.disabled).toBe(false);
+    expect(buttonIn(row, 'Replace')!.getAttribute('aria-disabled')).toBe('true');
+    expect(buttonIn(row, 'Delete')!.getAttribute('aria-disabled')).toBe('true');
+    expect(buttonIn(rowOf(fixture, 'wandb-token'), 'Delete')!.getAttribute('aria-disabled')).toBeNull();
   });
 
   it('asks before deleting a secret, naming it', async () => {

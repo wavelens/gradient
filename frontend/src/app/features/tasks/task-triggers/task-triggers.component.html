@@ -83,7 +83,8 @@
                   severity="secondary"
                   size="small"
                   [loading]="makingDefaultId() === trigger.id"
-                  [disabled]="rowDisabled()"
+                  [disabled]="rowBusy()"
+                  [appManagedDisable]="access()"
                   (click)="makeDefault(trigger.id)"
                 ></button>
               }
@@ -94,7 +95,8 @@
                 icon="edit"
                 severity="secondary"
                 size="small"
-                [disabled]="rowDisabled()"
+                [disabled]="rowBusy()"
+                [appManagedDisable]="access()"
                 (click)="startEdit(trigger)"
               ></button>
               @if (!trigger.is_default) {
@@ -105,7 +107,8 @@
                   icon="delete"
                   severity="danger"
                   size="small"
-                  [disabled]="rowDisabled()"
+                  [disabled]="rowBusy()"
+                  [appManagedDisable]="access()"
                   (click)="deleteTrigger(trigger)"
                 ></button>
               }

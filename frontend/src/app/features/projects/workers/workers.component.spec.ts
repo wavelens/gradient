@@ -222,7 +222,7 @@ describe('WorkersComponent - access gating', () => {
     await settled(fixture);
     const btn = findByText(fixture.nativeElement, 'register worker') as HTMLButtonElement | null;
     expect(btn).not.toBeNull();
-    expect(btn!.disabled).toBe(true);
+    expect(btn!.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('keeps Edit, Test worker and Delete in the row menu, each running its action', async () => {

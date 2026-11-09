@@ -110,9 +110,9 @@ describe('MembersRolesComponent - access gating', () => {
     const addBtn = findByText(fixture.nativeElement, 'invite member') as HTMLButtonElement | null;
     const newRoleBtn = findByText(fixture.nativeElement, 'new role') as HTMLButtonElement | null;
     expect(addBtn).not.toBeNull();
-    expect(addBtn!.disabled).toBe(true);
+    expect(addBtn!.getAttribute('aria-disabled')).toBe('true');
     expect(newRoleBtn).not.toBeNull();
-    expect(newRoleBtn!.disabled).toBe(true);
+    expect(newRoleBtn!.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('lists the members to a visitor outside the project but shows the roles as no access', async () => {
@@ -306,15 +306,15 @@ describe('MembersRolesComponent - writes', () => {
 
     expect(rowText('releaser')?.textContent).toContain('2 members');
     expect(rowText('auditor')?.textContent).toContain('0 members');
-    expect(deleteButton('releaser').disabled).toBe(true);
-    expect(deleteButton('auditor').disabled).toBe(false);
+    expect(deleteButton('releaser').getAttribute('aria-disabled')).toBe('true');
+    expect(deleteButton('auditor').getAttribute('aria-disabled')).toBeNull();
 
     fixture.componentInstance.teamGrantsReceivedForRoleHolderCount.set([
       { team: 'research', display_name: 'Research', role: 'auditor', users: true, workers: false, pending: false },
     ]);
     fixture.detectChanges();
     expect(rowText('auditor')?.textContent).toContain('0 members, 1 team');
-    expect(deleteButton('auditor').disabled).toBe(true);
+    expect(deleteButton('auditor').getAttribute('aria-disabled')).toBe('true');
   });
 });
 

@@ -182,11 +182,11 @@ describe('UpstreamCachesComponent - access gating', () => {
     const delBtn = findIconButton(fixture.nativeElement, 'delete');
     expect((fixture.nativeElement as HTMLElement).querySelector('gr-message-banner')?.textContent).toContain('come from the server configuration');
     expect(addBtn).not.toBeNull();
-    expect(addBtn!.disabled).toBe(true);
+    expect(addBtn!.getAttribute('aria-disabled')).toBe('true');
     expect(editBtn).not.toBeNull();
-    expect(editBtn!.disabled).toBe(true);
+    expect(editBtn!.getAttribute('aria-disabled')).toBe('true');
     expect(delBtn).not.toBeNull();
-    expect(delBtn!.disabled).toBe(true);
+    expect(delBtn!.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('renders Add / Edit / Delete enabled under full access', () => {

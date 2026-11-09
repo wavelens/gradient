@@ -28,7 +28,6 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
-  TooltipDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
@@ -90,7 +89,6 @@ interface RoleFormState {
     RowComponent,
     BadgeComponent,
     SelectComponent,
-    TooltipDirective,
   ],
   templateUrl: './members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

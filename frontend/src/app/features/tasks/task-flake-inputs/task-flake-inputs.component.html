@@ -63,7 +63,7 @@
                   icon="edit"
                   severity="secondary"
                   size="small"
-                  [disabled]="rowDisabled()"
+                  [appManagedDisable]="access()"
                   (click)="startEdit(override)"
                 ></button>
                 <button
@@ -73,7 +73,7 @@
                   icon="delete"
                   severity="danger"
                   size="small"
-                  [disabled]="rowDisabled()"
+                  [appManagedDisable]="access()"
                   (click)="deleteOverride(override)"
                 ></button>
               </div>

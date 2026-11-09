@@ -26,7 +26,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import { ConfirmService } from '@shared/confirm';
 import { LabelHelpComponent } from '@shared/ui';
 import { fieldChecks } from '@shared/forms';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, AccessService, requestIfProjectMember } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { FlakeInputOverrideOut, CreateFlakeInputOverrideRequest } from '@core/models';
 
@@ -76,14 +76,12 @@ export class TaskFlakeInputsComponent implements OnInit {
   private overridesService = inject(FlakeInputOverridesService);
   private crumbs = inject(BreadcrumbsService);
   private messageService = inject(MessageService);
-  private accessSvc = inject(AccessService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
 
   access = injectTaskAccess();
   private taskAccessData = injectTaskAccessData();
 
-  rowDisabled = computed(() => this.accessSvc.shouldDisableInput(this.access()));
 
   loading = signal(true);
   loadError = signal<unknown>(null);
