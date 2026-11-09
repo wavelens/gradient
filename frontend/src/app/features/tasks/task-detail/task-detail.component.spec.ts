@@ -609,6 +609,12 @@ describe('TaskDetailComponent - in-progress state (#452)', () => {
     expect(badge).toBeTruthy();
   });
 
+  it('names the wait reason next to the badge of a building evaluation that waits for exec jobs', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true },
+      { primaryStatus: 'Building', primary: { waiting_reason: { kind: 'exec_jobs', waiting_exec_jobs: 1 } } });
+    expect(fixture.nativeElement.querySelector('.title-line .waiting-reason')?.textContent).toContain('Waiting for exec jobs');
+  });
+
   it('keeps the title badge once the evaluation finished', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Completed' });
     expect(fixture.nativeElement.querySelector('.title-line gr-eval-status-badge')?.textContent?.trim()).toBe('Completed');

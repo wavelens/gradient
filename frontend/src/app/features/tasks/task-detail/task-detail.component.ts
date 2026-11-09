@@ -221,6 +221,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return `The latest evaluation has not started yet${waiting ? `: ${waiting}` : ''}.`;
   });
 
+  protected getWaitingReasonTitleForEvaluationWithNonWaitingStatus(evaluation: EvaluationSummary): string | null {
+    if (!evaluation.waiting_reason || evaluation.status === 'Waiting') return null;
+    return explainWaiting(evaluation.waiting_reason, this.projectName, this.waitingAccess()).title;
+  }
+
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';

@@ -121,6 +121,9 @@
                   }
                 </h2>
                 <gr-eval-status-badge [status]="sel.status" [prioritized]="sel.prioritized" />
+                @if (getWaitingReasonTitleForEvaluationWithNonWaitingStatus(sel); as waitingTitle) {
+                  <span class="waiting-reason"><gr-icon name="pause_circle" size="sm" /> {{ waitingTitle }}</span>
+                }
               </div>
               <div class="sub">
                 @if (sel.commit_message) {

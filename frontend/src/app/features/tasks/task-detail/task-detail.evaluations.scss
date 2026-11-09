@@ -226,6 +226,14 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
   white-space: nowrap;
 }
 .panel-title .sub { color: var(--gr-text-muted); font-size: $font-size-xs; margin-top: 2px; }
+.panel-title .waiting-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  color: var(--gr-status-warning);
+  font-size: $font-size-xs;
+  white-space: nowrap;
+}
 .commit-link {
   color: inherit;
   text-decoration: none;
