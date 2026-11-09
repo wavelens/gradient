@@ -52,6 +52,19 @@ describe('ProjectListComponent', () => {
     expect(Array.from(root.querySelectorAll('gr-badge')).map((b) => b.textContent?.trim())).toEqual(['View']);
   });
 
+  it('shows running and waiting evaluations as separate chips', () => {
+    const page = {
+      items: [
+        { id: 'p1', name: 'busy', display_name: 'Busy', role: 'Admin', running_evaluations: 2, waiting_evaluations: 1 },
+        { id: 'p2', name: 'idle', display_name: 'Idle', role: 'Admin', running_evaluations: 0, waiting_evaluations: 0 },
+      ],
+      total: 2,
+      page: 1,
+    };
+    const { root } = render(() => of(page));
+    expect(Array.from(root.querySelectorAll('gr-badge')).map((b) => b.textContent?.trim())).toEqual(['2 running', '1 waiting']);
+  });
+
   it('reloads the list while the tab stays open', () => {
     vi.useFakeTimers();
     try {
