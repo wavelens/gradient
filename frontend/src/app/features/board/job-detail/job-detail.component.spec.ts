@@ -421,7 +421,7 @@ describe('BoardJobDetailComponent - pending route', () => {
     const el = setup({ getPendingJobs: () => of({ jobs: [pending], other_pending: 0 }) }, 'e1', true)
       .nativeElement as HTMLElement;
 
-    expect(el.querySelector('gr-waiting-notice')?.textContent).toContain('Cache not configured');
+    expect(el.querySelector('gr-waiting-notice')?.textContent).toContain('No writable cache');
     const hrefs = Array.from(el.querySelectorAll('section.ids a, gr-waiting-notice a')).map((a) => a.getAttribute('href'));
     expect(hrefs).toEqual(expect.arrayContaining([
       '/project/sandbox',

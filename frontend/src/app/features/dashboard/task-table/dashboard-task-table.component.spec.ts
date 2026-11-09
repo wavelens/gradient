@@ -73,9 +73,9 @@ describe('DashboardTaskTableComponent', () => {
     waiting.latest = { ...waiting.latest!, status: 'Waiting', waiting_reason: { kind: 'no_cache' } };
     const { f, root } = render(null, () => of({ ...PAGE, tasks: [waiting] }));
     await settle(f);
-    expect(root.querySelector('.meta .waiting')?.textContent).toContain('Cache not configured');
+    expect(root.querySelector('.meta .waiting')?.textContent).toContain('No writable cache');
     expect(root.querySelector('.meta code')).toBeNull();
-    expect(root.querySelector('.cells')?.textContent).not.toContain('Cache not configured');
+    expect(root.querySelector('.cells')?.textContent).not.toContain('No writable cache');
   });
 
   it('names failed entry points next to the passed count in danger text and on the phone meta line', async () => {

@@ -119,7 +119,7 @@ describe('EvaluationSummaryComponent', () => {
     const waiting = { ...SUMMARY, packages: { total: 0, built: 0, failed: 0, blocked: 0, unfinished: 0 }, failures: [], failures_total: 0, failed_attributes: [], compared_with: null };
     const fixture = setup(waiting, { ...EVALUATION, status: 'Waiting', waiting_reason: { kind: 'no_cache' } });
 
-    expect((fixture.nativeElement as HTMLElement).querySelector('gr-waiting-notice')?.textContent).toContain('Cache not configured');
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-waiting-notice')?.textContent).toContain('No writable cache');
     expect(text(fixture)).toContain('Ask a project admin to subscribe this project to a cache.');
   });
 

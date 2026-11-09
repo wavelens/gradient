@@ -112,17 +112,17 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
       };
     case 'no_cache':
       return {
-        title: 'Cache not configured',
+        title: 'No writable cache',
         detail: 'A cache is necessary to store build results. Subscribe this project to a cache before the evaluation can run.',
         requirements: [],
-        ...forSubscriptionAdmin(cachesAction(project, 'Configure cache'), 'Ask a project admin to subscribe this project to a cache.'),
+        ...forSubscriptionAdmin(cachesAction(project, 'Add a cache'), 'Ask a project admin to subscribe this project to a cache.'),
       };
     case 'cache_storage_full':
       return {
         title: 'Cache storage full',
         detail: 'Every writable cache for this project is full. Free space or raise the limit before this evaluation can run.',
         requirements: [],
-        ...forSubscriptionAdmin(cachesAction(project, 'Open the cache subscription'),
+        ...forSubscriptionAdmin(cachesAction(project, 'Open cache subscriptions'),
           "Ask a project admin to free space in this project's cache or raise the limit."),
       };
     case 'draining':
@@ -149,7 +149,7 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
         title: 'Waiting for upstream cache',
         detail: `${reason.pending_shared_builds} ${reason.pending_shared_builds === 1 ? 'build waits' : 'builds wait'} for an answer from the upstream caches.${failing}`,
         requirements: [],
-        ...forSubscriptionAdmin(cachesAction(project, 'Open the cache subscription'),
+        ...forSubscriptionAdmin(cachesAction(project, 'Open cache subscriptions'),
           "Ask a cache admin to check the upstream caches for this project's cache."),
       };
     }

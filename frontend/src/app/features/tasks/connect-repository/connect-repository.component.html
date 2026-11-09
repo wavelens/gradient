@@ -22,11 +22,11 @@
         <gr-settings-section title="Repository">
           @if (missingCache()) {
             <gr-message-banner type="warning" data-testid="cache-missing">
-              <strong>Builds need a cache</strong>
+              <strong>No writable cache</strong>
               This project doesn't push builds to any Nix binary cache yet. Register the project for a cache subscription before the first build.
             </gr-message-banner>
             <div class="gr-form-actions">
-              <a grButton label="Open the cache subscription" icon="open_in_new" severity="secondary"
+              <a grButton label="Add a cache" icon="open_in_new" severity="secondary"
                 [routerLink]="links.projectPage(projectName, 'caches')" target="_blank"></a>
               <button grButton label="Check again" icon="refresh" severity="secondary" (click)="loadCaches()"></button>
             </div>

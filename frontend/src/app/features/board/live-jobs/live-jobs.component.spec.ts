@@ -428,7 +428,7 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
       '/board/pending/e1abc123',
       '/project/sandbox/caches',
     ]);
-    expect(row.querySelector('td.waiting')?.textContent).toContain('Cache not configured');
+    expect(row.querySelector('td.waiting')?.textContent).toContain('No writable cache');
   });
 
   it('counts the dependencies a pending build waits for when the server names no other reason', () => {

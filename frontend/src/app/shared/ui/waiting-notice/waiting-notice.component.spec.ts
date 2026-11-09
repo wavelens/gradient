@@ -24,7 +24,7 @@ function render(reason: WaitingReason, access: WaitingAccess, banner = false) {
 describe('WaitingNoticeComponent', () => {
   it('links a project admin straight to the page that fixes the wait', () => {
     const { root } = render({ kind: 'no_cache' }, { manageWorkers: true, manageSubscriptions: true, trigger: true, superuser: false });
-    expect(root.textContent).toContain('Cache not configured');
+    expect(root.textContent).toContain('No writable cache');
     expect(root.querySelector('a[grButton]')?.getAttribute('href')).toBe('/project/acme/caches');
   });
 

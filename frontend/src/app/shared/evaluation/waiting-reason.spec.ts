@@ -19,8 +19,8 @@ function linkOf(reason: WaitingReason | null, access: WaitingAccess): string | n
 describe('explainWaiting', () => {
   it('sends a project admin to the cache subscriptions when no cache is configured', () => {
     const explained = explainWaiting({ kind: 'no_cache' }, 'acme', ADMIN);
-    expect(explained.title).toBe('Cache not configured');
-    expect(explained.action).toEqual(expect.objectContaining({ kind: 'link', label: 'Configure cache' }));
+    expect(explained.title).toBe('No writable cache');
+    expect(explained.action).toEqual(expect.objectContaining({ kind: 'link', label: 'Add a cache' }));
     expect(linkOf({ kind: 'no_cache' }, ADMIN)).toBe('/project/acme/caches');
     expect(explained.hint).toBeNull();
   });
