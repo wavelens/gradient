@@ -9,7 +9,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { ButtonComponent, IconComponent } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
-import { DeniedKind, isInstanceAdminAreaPath } from '@core/routing/access-denied';
+import { DeniedKind } from '@core/routing/access-denied';
 import { links } from '@shared/routing';
 
 interface ErrorMeta {
@@ -19,18 +19,11 @@ interface ErrorMeta {
   retryable: boolean;
 }
 
-const ADMIN_ONLY_META: ErrorMeta = {
-  title: 'Admin Only',
-  description: 'Instance administrators only. Ask an administrator for access.',
-  icon: 'admin_panel_settings',
-  retryable: false,
-};
-
 const ERROR_META: Record<number, ErrorMeta> = {
   403: {
-    title: 'No Access',
-    description: 'Access denied. Request access from a project or instance administrator.',
-    icon: 'lock',
+    title: 'Admin Only',
+    description: 'Instance administrators only. Ask an administrator for access.',
+    icon: 'admin_panel_settings',
     retryable: false,
   },
   404: {
@@ -80,11 +73,11 @@ const FALLBACK_META: ErrorMeta = {
 
 const DENIED_KINDS: Record<DeniedKind, { label: string; back: string }> = {
   project: { label: 'Project', back: 'Back to Projects' },
-  task: { label: 'Task', back: 'Back to Project' },
+  task: { label: 'Task', back: 'Back to Projects' },
   cache: { label: 'Cache', back: 'Back to Caches' },
   team: { label: 'Team', back: 'Back to Teams' },
-  evaluation: { label: 'Evaluation', back: 'Back to Project' },
-  build: { label: 'Build', back: 'Back to Project' },
+  evaluation: { label: 'Evaluation', back: 'Back to Projects' },
+  build: { label: 'Build', back: 'Back to Projects' },
   execJob: { label: 'Exec job', back: 'Back to Task' },
   job: { label: 'Job', back: 'Back to Job Board' },
   clusterJob: { label: 'Cluster job', back: 'Back to Job Board' },
@@ -120,16 +113,16 @@ export class ErrorPageComponent {
   denied = computed<DeniedView | null>(() => {
     const kind = DENIED_KINDS[this.query.get('kind') as DeniedKind];
     if (this.code() !== 404 || !kind) return null;
+    const notFound = `${kind.label} "${this.query.get('name') ?? ''}" not found.`;
     return {
-      description: `${kind.label} "${this.query.get('name') ?? ''}" not found. It doesn't exist, or you don't have access to it.`,
+      description: this.user()?.superuser ? notFound : `${notFound} It doesn't exist, or you don't have access to it.`,
       backLabel: kind.back,
       backLink: this.query.get('back') ?? '/',
     };
   });
   meta = computed<ErrorMeta>(() => {
-    if (this.code() === 403 && isInstanceAdminAreaPath(this.from)) return ADMIN_ONLY_META;
     const base = ERROR_META[this.code()] ?? FALLBACK_META;
-    return this.denied() ? { ...base, title: 'Not Found or Access Denied', icon: 'lock' } : base;
+    return this.denied() && !this.user()?.superuser ? { ...base, title: 'Not Found or Access Denied', icon: 'lock' } : base;
   });
   restricted = computed(() => this.code() === 403 || this.denied() !== null);
 

@@ -71,14 +71,17 @@ describe('ErrorPageComponent', () => {
     expect(links.map((l) => l.text)).toEqual(['Go Home', 'Switch Account']);
   });
 
-  it('says No Access, not Admin Only, for a refused page outside the admin area', () => {
-    const { text } = render(403, { from: '/project/alpha' }, { username: 'bob' });
-    expect(text).toContain('No Access');
-    expect(text).not.toContain('Admin Only');
+  it('explains admin-only board tabs outside the admin area the same way', () => {
+    const { text } = render(403, { from: '/board/workers' }, { username: 'bob' });
+    expect(text).toContain('Admin Only');
+    expect(text).not.toContain('project');
   });
 
-  it('offers no Switch Account to a superuser', () => {
-    const { links } = render(404, DENIED, { username: 'root', superuser: true });
+  it('tells a superuser only that the item is missing and offers no Switch Account', () => {
+    const { text, links } = render(404, DENIED, { username: 'root', superuser: true });
+    expect(text).toContain('Cache "researchcache" not found.');
+    expect(text).not.toContain('Access Denied');
+    expect(text).not.toContain("don't have access");
     expect(links.map((l) => l.text)).not.toContain('Switch Account');
   });
 

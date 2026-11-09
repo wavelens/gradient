@@ -25,7 +25,6 @@ import { cacheAccessResolver, shouldRefetchCacheRecordOnCacheNameOrCacheRecordPa
 import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
 import { evaluationAccessResolver } from '@core/resolvers/evaluation-access.resolver';
 import { teamAccessResolver } from '@core/resolvers/team-access.resolver';
-import { isInstanceAdminAreaPath } from '@core/routing/access-denied';
 
 export const routes: Routes = [
   // Authentication routes (public)
@@ -661,7 +660,7 @@ export const routes: Routes = [
   // Error pages
   {
     path: 'error/403',
-    title: (route) => (isInstanceAdminAreaPath(route.queryParamMap.get('from')) ? 'Admin Only' : 'No Access'),
+    title: 'Admin Only',
     data: { code: 403 },
     loadComponent: () =>
       import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),

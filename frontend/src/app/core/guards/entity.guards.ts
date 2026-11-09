@@ -28,10 +28,9 @@ export const execJobInTaskGuard: CanActivateFn = (route, state) => {
 
 export const buildOrEvaluationAccessGuard: CanActivateFn = (route, state) => {
   const evaluations = inject(EvaluationsService);
-  const project = route.paramMap.get('project') ?? '';
   const id = route.paramMap.get('buildId') ?? route.paramMap.get('id') ?? '';
   const isEvaluation = route.paramMap.get('kind') === 'eval';
-  const target: DeniedTarget = { kind: isEvaluation ? 'evaluation' : 'build', name: id, back: String(links.project(project)) };
+  const target: DeniedTarget = { kind: isEvaluation ? 'evaluation' : 'build', name: id, back: String(links.projects()) };
   const lookup: Observable<unknown> = isEvaluation ? evaluations.getEvaluation(id) : evaluations.getBuild(id);
   return lookup.pipe(map(() => true as const), denyOnRefusal(target, state.url));
 };
