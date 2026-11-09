@@ -22,6 +22,8 @@
   &.is-neutral {
     background: var(--gr-surface-hover);
     color: var(--gr-text-secondary);
+    text-transform: none;
+    letter-spacing: normal;
   }
 
   &.is-success { background: color-mix(in srgb, var(--gr-status-success) 18%, transparent); color: var(--gr-status-success-text); }
