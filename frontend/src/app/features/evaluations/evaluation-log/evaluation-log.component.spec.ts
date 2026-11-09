@@ -911,6 +911,15 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
+    it('repeats project and task in the main column for phones, where the sidebar is off-canvas', () => {
+      const fixture = setupEvaluationLogPageFixture([], undefined, { task_name: 'ci' });
+      fixture.detectChanges();
+      const hrefs = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.log-main .phone-breadcrumb a'))
+        .map((a) => a.getAttribute('href'));
+      expect(hrefs).toEqual(['/project/proj', '/project/proj/task/ci?eval=eval-1']);
+      fixture.destroy();
+    });
+
     it('Link from the info bar to the evaluation summary', () => {
       const fixture = setupEvaluationLogPageFixture([]);
       fixture.detectChanges();

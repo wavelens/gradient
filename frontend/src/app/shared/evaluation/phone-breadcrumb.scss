@@ -1,0 +1,26 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+// At phone width the sidebar with the breadcrumb sits off-canvas, so the main column repeats project and task in one truncated line.
+.phone-breadcrumb { display: none; }
+
+@media (max-width: $breakpoint-md) {
+  .phone-breadcrumb {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    font-size: $font-size-xs;
+    color: var(--gr-text-muted);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+
+    .log-main > & { flex-shrink: 0; padding: $spacing-xs $spacing-md 0; }
+    a { color: inherit; }
+    .breadcrumb-sep { margin: 0 $spacing-xs; }
+  }
+}

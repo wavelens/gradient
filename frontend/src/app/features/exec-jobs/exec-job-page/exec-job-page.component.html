@@ -95,6 +95,12 @@
     <div class="log-main">
       <h1 class="sr-only">Log of exec job</h1>
       <div class="phone-breadcrumb-and-view-tabs-row">
+        <nav class="phone-breadcrumb" aria-label="Project and task">
+          @for (crumb of projectAndTaskCrumbs(); track $index) {
+            <a [routerLink]="crumb.link">{{ crumb.label }}</a>
+            @if (!$last) { <span class="breadcrumb-sep" aria-hidden="true">/</span> }
+          }
+        </nav>
         <span class="breadcrumb-current" [title]="job.entry_point">{{ job.entry_point }}</span>
         <gr-tab-switch ariaLabel="Display" [options]="views()" optionLabel="label" optionValue="value"
                        [ngModel]="view()" (ngModelChange)="showView($event)" />

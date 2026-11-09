@@ -141,6 +141,12 @@
     <!-- ── Main ─────────────────────────────────────────────────── -->
     <div class="log-main" (mouseenter)="setPointerOver('log')" (mouseleave)="setPointerOver(null)">
       <h1 class="sr-only">Evaluation log</h1>
+      <nav class="phone-breadcrumb" aria-label="Project and task">
+        @for (crumb of projectAndTaskCrumbs().slice(1); track $index) {
+          <a [routerLink]="crumb.link">{{ crumb.label }}</a>
+          @if (!$last) { <span class="breadcrumb-sep" aria-hidden="true">/</span> }
+        }
+      </nav>
 
       <!-- Info bar -->
       <div class="info-bar">

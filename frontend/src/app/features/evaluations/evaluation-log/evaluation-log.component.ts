@@ -86,6 +86,7 @@ import { saveResponse } from '@shared/download';
   styleUrls: [
     '../../../shared/log/log-page.scss',
     '../../../shared/log/log-sidebar.scss',
+    '../../../shared/evaluation/phone-breadcrumb.scss',
     './evaluation-log.component.scss',
     './evaluation-log.sidebar.scss',
     './evaluation-log.messages.scss',

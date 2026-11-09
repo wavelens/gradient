@@ -79,6 +79,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
   styleUrls: [
     '../../../shared/log/log-page.scss',
     '../../../shared/log/log-sidebar.scss',
+    '../../../shared/evaluation/phone-breadcrumb.scss',
     './exec-job-page.component.scss',
   ],
 })
@@ -162,6 +163,7 @@ export class ExecJobPageComponent implements OnInit {
     const job = this.job();
     return this.breadcrumbs.taskAt(this.projectName, this.taskName, job?.evaluation, { label: job?.entry_point ?? 'Exec job' }).slice(1);
   });
+  projectAndTaskCrumbs = computed(() => this.crumbs().slice(-3, -1));
   highestNumberedAttempt = computed(() => {
     const job = this.job();
     if (!job || isExecJobWaitingToStart(job.status)) return null;
