@@ -25,8 +25,12 @@
            [grDrawer]="buildsOpen()" (grDrawerClose)="buildsOpen.set(false)">
 
       <nav class="sidebar-breadcrumb" aria-label="Breadcrumb">
-        @for (crumb of projectAndTaskCrumbs(); track $index) {
-          <a [routerLink]="crumb.link" class="breadcrumb-link" [title]="crumb.label ?? ''">@if (crumb.label === null) {<gr-skeleton width="8ch" />} @else {{{ crumb.label }}}</a>
+        @for (crumb of breadcrumb(); track $index) {
+          @if (crumb.link) {
+            <a [routerLink]="crumb.link" class="breadcrumb-link" [title]="crumb.label ?? ''">@if (crumb.label === null) {<gr-skeleton width="8ch" />} @else {{{ crumb.label }}}</a>
+          } @else {
+            <span class="breadcrumb-current" aria-current="page">{{ crumb.label }}</span>
+          }
           @if (!$last) { <span class="breadcrumb-sep" aria-hidden="true">/</span> }
         }
       </nav>
@@ -142,7 +146,7 @@
     <div class="log-main" (mouseenter)="setPointerOver('log')" (mouseleave)="setPointerOver(null)">
       <h1 class="sr-only">Evaluation log</h1>
       <nav class="phone-breadcrumb" aria-label="Project and task">
-        @for (crumb of projectAndTaskCrumbs().slice(1); track $index) {
+        @for (crumb of projectAndTaskCrumbs(); track $index) {
           <a [routerLink]="crumb.link">{{ crumb.label }}</a>
           @if (!$last) { <span class="breadcrumb-sep" aria-hidden="true">/</span> }
         }

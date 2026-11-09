@@ -9,6 +9,7 @@ import type { Observable } from 'rxjs';
 import type { Crumb } from '@gradient/ui/ui';
 import { type BuildOrigin, links } from '@shared/routing';
 import { CachesService } from './caches.service';
+import { EvaluationsService } from './evaluations.service';
 import { ProjectsService } from './projects.service';
 import { TasksService } from './tasks.service';
 import { TeamsService } from './teams.service';
@@ -24,7 +25,9 @@ export class BreadcrumbsService {
   private tasks = inject(TasksService);
   private caches = inject(CachesService);
   private teams = inject(TeamsService);
+  private evaluationsService = inject(EvaluationsService);
   private names = new Map<string, WritableSignal<string | null>>();
+  private taskUrlNameSignalByEvaluationId = new Map<string, Signal<string | null>>();
   private evaluations = new Map<string, string>();
   private taskSettingsAccessByTaskKey = new Map<string, boolean>();
 
@@ -55,10 +58,28 @@ export class BreadcrumbsService {
   }
 
   buildPage(project: string, from: BuildOrigin, build: string, label: string): Crumb[] {
-    const trail: Crumb[] = from.evaluation
-      ? [{ label: 'Evaluation', link: links.evaluationLog(project, from.evaluation, { build }) }, { label }]
-      : [{ label }];
-    return from.task ? this.taskAt(project, from.task, from.evaluation, ...trail) : this.project(project, ...trail);
+    if (from.evaluation) {
+      const link = links.evaluationLog(project, from.evaluation, { build });
+      return this.buildEvaluationBreadcrumbsWithLinkAndTail(project, from.evaluation, from.task, link, [{ label }]);
+    }
+    return from.task ? this.taskAt(project, from.task, null, { label }) : this.project(project, { label });
+  }
+
+  buildEvaluationPageBreadcrumbs(project: string, evaluation: string, task: string | null | undefined, ...tail: Crumb[]): Crumb[] {
+    const link = tail.length ? links.evaluationLog(project, evaluation) : undefined;
+    return this.buildEvaluationBreadcrumbsWithLinkAndTail(project, evaluation, task, link, tail);
+  }
+
+  private buildEvaluationBreadcrumbsWithLinkAndTail(
+    project: string,
+    evaluation: string,
+    task: string | null | undefined,
+    link: Crumb['link'],
+    tail: Crumb[],
+  ): Crumb[] {
+    const crumb: Crumb = { label: 'Evaluation', link };
+    const taskName = task || this.getEvaluationTaskUrlNameSignal(evaluation)();
+    return taskName ? this.taskAt(project, taskName, evaluation, crumb, ...tail) : this.project(project, crumb, ...tail);
   }
 
   cache(cache: string, ...tail: Crumb[]): Crumb[] {
@@ -78,7 +99,7 @@ export class BreadcrumbsService {
   }
 
   admin(...tail: Crumb[]): Crumb[] {
-    return [{ label: 'Admin' }, ...tail];
+    return [{ label: 'Admin', link: links.admin('webhooks') }, ...tail];
   }
 
   rememberProject(project: string, displayName: string): void {
@@ -107,6 +128,19 @@ export class BreadcrumbsService {
 
   getLastKnownDisplayNameSignal(kind: 'project' | 'task' | 'cache' | 'team', ...urlNames: string[]): Signal<string | null> | undefined {
     return this.names.get([kind, ...urlNames].join('/'));
+  }
+
+  private getEvaluationTaskUrlNameSignal(evaluation: string): Signal<string | null> {
+    const known = this.taskUrlNameSignalByEvaluationId.get(evaluation);
+    if (known) return known;
+    const task = signal<string | null>(null);
+    this.taskUrlNameSignalByEvaluationId.set(evaluation, task);
+    untracked(() => this.evaluationsService.getEvaluation(evaluation).subscribe({
+      next: (loaded) => task.set(loaded.task_name || null),
+      error: () => {},
+    }));
+
+    return task;
   }
 
   private remember(key: string, displayName: string): void {

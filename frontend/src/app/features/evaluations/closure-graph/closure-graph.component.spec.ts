@@ -24,8 +24,11 @@ function service(graph: ClosureGraph) {
     getBuildRuntimeClosure: vi.fn(() => of(graph)),
     getEvalRuntimeClosure: vi.fn(() => of(graph)),
     getEvaluation: vi.fn(() => of({ commit: 'abcdef1234567890', task_name: 'ci', task_display_name: 'CI checks' })),
+    getBuild: vi.fn(() => of({ id: 'x1', evaluation: 'e9' })),
   };
 }
+
+const crumbs = { buildPage: vi.fn(() => []), buildEvaluationPageBreadcrumbs: vi.fn(() => []) };
 
 function setup(kind: string, type?: string, graph: ClosureGraph = emptyGraph, svc = service(graph)) {
   const route = {
@@ -39,7 +42,7 @@ function setup(kind: string, type?: string, graph: ClosureGraph = emptyGraph, sv
     imports: [ClosureGraphComponent],
     providers: [
       provideRouter([]),
-      { provide: BreadcrumbsService, useValue: { buildPage: () => [] } },
+      { provide: BreadcrumbsService, useValue: crumbs },
       { provide: ActivatedRoute, useValue: route },
       { provide: EvaluationsService, useValue: svc },
     ],
@@ -48,6 +51,19 @@ function setup(kind: string, type?: string, graph: ClosureGraph = emptyGraph, sv
   fixture.detectChanges();
   return Object.assign(svc, { fixture });
 }
+
+describe('ClosureGraphComponent - breadcrumb', () => {
+  it('leads a build closure opened without an origin back through the evaluation of the build', () => {
+    setup('build');
+    expect(crumbs.buildPage).toHaveBeenLastCalledWith('acme', { task: null, evaluation: 'e9' }, 'x1', 'Closure');
+  });
+
+  it('ends an evaluation closure under the evaluation itself', () => {
+    const svc = setup('eval');
+    expect(svc.getBuild).not.toHaveBeenCalled();
+    expect(crumbs.buildEvaluationPageBreadcrumbs).toHaveBeenLastCalledWith('acme', 'x1', null, { label: 'Closure' });
+  });
+});
 
 describe('ClosureGraphComponent - view selection', () => {
   it('defaults to the runtime closure when no type query param is present', () => {

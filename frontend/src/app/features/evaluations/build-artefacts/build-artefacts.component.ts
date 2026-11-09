@@ -77,7 +77,7 @@ export class BuildArtefactsComponent implements OnInit {
     this.evalService.getBuild(this.buildId).subscribe({
       next: (build) => {
         this.packageName.set(packageNameFromDerivationPath(build.derivation_path));
-        this.from.update((from) => (from.task || from.evaluation ? from : { evaluation: build.evaluation }));
+        this.from.update((from) => ({ ...from, evaluation: from.evaluation || build.evaluation }));
       },
       error: () => this.packageName.set(this.buildId.slice(0, 8)),
     });

@@ -123,7 +123,10 @@ export class EvaluationSummaryComponent implements OnInit {
     const task = this.evaluation()?.task_name;
     const page = { label: 'Summary' };
 
-    return task ? this.crumbs.taskAt(this.project, task, this.evaluation()?.id, page) : this.crumbs.project(this.project, page);
+    const evaluation = this.evaluation()?.id;
+    return task && evaluation
+      ? this.crumbs.buildEvaluationPageBreadcrumbs(this.project, evaluation, task, page)
+      : this.crumbs.project(this.project, page);
   });
 
   failureGroups = computed<FailureGroup[]>(() => {

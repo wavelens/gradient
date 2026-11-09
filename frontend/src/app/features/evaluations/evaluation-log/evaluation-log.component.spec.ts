@@ -1419,12 +1419,14 @@ describe('EvaluationLogComponent', () => {
       const crumbs = Array.from(
         (fixture.nativeElement as HTMLElement).querySelectorAll('nav[aria-label="Breadcrumb"] .breadcrumb-link, nav[aria-label="Breadcrumb"] .breadcrumb-current'),
       );
-      expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Projects', 'MyProject', 'Nightly']);
+      expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Projects', 'MyProject', 'Nightly', 'Evaluation']);
       expect(crumbs.map((crumb) => crumb.getAttribute('href'))).toEqual([
         '/projects',
         '/project/proj',
         '/project/proj/task/nightly?eval=eval-1',
+        null,
       ]);
+      expect(crumbs[3].getAttribute('aria-current')).toBe('page');
       fixture.destroy();
     });
   });

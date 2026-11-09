@@ -75,7 +75,7 @@ describe('BuildArtefactsComponent', () => {
 
   it('puts the build evaluation in the breadcrumb when opened without an origin, with no extra Back button', () => {
     const { root } = render(() => of([]), () => of({ evaluation: 'e1', derivation_path: '/nix/store/abc-hello-2.12.drv' }));
-    expect(TestBed.inject(BreadcrumbsService).buildPage).toHaveBeenLastCalledWith('p', { evaluation: 'e1' }, 'b1', 'Artefacts');
+    expect(TestBed.inject(BreadcrumbsService).buildPage).toHaveBeenLastCalledWith('p', { task: null, evaluation: 'e1' }, 'b1', 'Artefacts');
     expect(root.querySelector('[slot=actions]')).toBeNull();
   });
 

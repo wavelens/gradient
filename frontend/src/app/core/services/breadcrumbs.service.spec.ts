@@ -8,23 +8,26 @@ import { TestBed } from '@angular/core/testing';
 import { Subject, of, throwError } from 'rxjs';
 import { BreadcrumbsService } from './breadcrumbs.service';
 import { CachesService } from './caches.service';
+import { EvaluationsService } from './evaluations.service';
 import { ProjectsService } from './projects.service';
 import { TasksService } from './tasks.service';
 import { TeamsService } from './teams.service';
 
-function setup(overrides: { getProject?: () => unknown } = {}) {
+function setup(overrides: { getProject?: () => unknown; getEvaluation?: () => unknown } = {}) {
   const getProject = vi.fn(overrides.getProject ?? (() => of({ display_name: 'MyProject' })));
   const getTaskInfo = vi.fn(() => of({ display_name: 'MyTask' }));
+  const getEvaluation = vi.fn(overrides.getEvaluation ?? (() => of({ task_name: 'build' })));
   TestBed.configureTestingModule({
     providers: [
       { provide: ProjectsService, useValue: { getProject } },
       { provide: TasksService, useValue: { getTaskInfo } },
+      { provide: EvaluationsService, useValue: { getEvaluation } },
       { provide: CachesService, useValue: { getCache: () => of({ display_name: 'MyCache' }) } },
       { provide: TeamsService, useValue: { get: () => of({ display_name: 'MyTeam' }) } },
     ],
   });
 
-  return { crumbs: TestBed.inject(BreadcrumbsService), getProject, getTaskInfo };
+  return { crumbs: TestBed.inject(BreadcrumbsService), getProject, getTaskInfo, getEvaluation };
 }
 
 const labels = (trail: { label: string | null }[]) => trail.map((crumb) => crumb.label);
@@ -54,10 +57,13 @@ describe('BreadcrumbsService', () => {
     expect(settings).toEqual({ label: 'Settings', link: undefined });
   });
 
-  it('shows the admin crumb without a link, since there is no admin overview page', () => {
+  it('links the admin crumb to the first admin page', () => {
     const { crumbs } = setup();
 
-    expect(crumbs.admin({ label: 'Webhooks' })).toEqual([{ label: 'Admin' }, { label: 'Webhooks' }]);
+    const trail = crumbs.admin({ label: 'Webhooks' });
+
+    expect(labels(trail)).toEqual(['Admin', 'Webhooks']);
+    expect(String(trail[0].link)).toBe('/admin/webhooks');
   });
 
   it('starts cache and team trails at the list pages', () => {
@@ -125,7 +131,32 @@ describe('BreadcrumbsService', () => {
     expect(String(fromTask[2].link)).toBe('/project/acme/task/build?eval=e1');
     expect(String(fromTask[3].link)).toBe('/project/acme/log/e1?build=b1');
     expect(fromTaskOnly.map((crumb) => crumb.label).slice(3)).toEqual(['Artefacts']);
-    expect(labels(fromLog)).toEqual(['Projects', 'MyProject', 'Evaluation', 'Artefacts']);
-    expect(String(fromLog[2].link)).toBe('/project/acme/log/e1?build=b1');
+    expect(labels(fromLog)).toEqual(['Projects', 'MyProject', 'MyTask', 'Evaluation', 'Artefacts']);
+    expect(String(fromLog[2].link)).toBe('/project/acme/task/build?eval=e1');
+    expect(String(fromLog[3].link)).toBe('/project/acme/log/e1?build=b1');
+  });
+
+  it('looks up the task of an evaluation a single time for every page that misses it', () => {
+    const evaluation = new Subject<{ task_name: string }>();
+    const { crumbs, getEvaluation } = setup({ getEvaluation: () => evaluation });
+
+    expect(labels(crumbs.buildPage('acme', { evaluation: 'e1' }, 'b1', 'Closure'))).toEqual(['Projects', 'MyProject', 'Evaluation', 'Closure']);
+    evaluation.next({ task_name: 'build' });
+    crumbs.buildPage('acme', { evaluation: 'e1' }, 'b2', 'Dependency graph');
+
+    expect(labels(crumbs.buildPage('acme', { evaluation: 'e1' }, 'b1', 'Closure'))).toEqual(['Projects', 'MyProject', 'MyTask', 'Evaluation', 'Closure']);
+    expect(getEvaluation).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends an evaluation page trail with the evaluation, linked to its log only below it', () => {
+    const { crumbs, getEvaluation } = setup();
+
+    const log = crumbs.buildEvaluationPageBreadcrumbs('acme', 'e1', 'build');
+    const summary = crumbs.buildEvaluationPageBreadcrumbs('acme', 'e1', 'build', { label: 'Summary' });
+
+    expect(labels(log)).toEqual(['Projects', 'MyProject', 'MyTask', 'Evaluation']);
+    expect(log[3].link).toBeUndefined();
+    expect(String(summary[3].link)).toBe('/project/acme/log/e1');
+    expect(getEvaluation).not.toHaveBeenCalled();
   });
 });

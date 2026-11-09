@@ -213,7 +213,7 @@ describe('EvaluationSummaryComponent', () => {
   });
 
   it('leads back through the task, named as the evaluation names it without a lookup', () => {
-    expect(crumbs(setup(SUMMARY))).toEqual(['Projects', 'MyProject', 'MyTask', 'Summary']);
+    expect(crumbs(setup(SUMMARY))).toEqual(['Projects', 'MyProject', 'MyTask', 'Evaluation', 'Summary']);
     expect(getTaskInfo).not.toHaveBeenCalled();
   });
 

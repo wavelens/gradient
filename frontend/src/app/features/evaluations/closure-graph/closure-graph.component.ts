@@ -75,8 +75,12 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   transform = computed(() => `translate(${this.tx()},${this.ty()}) scale(${this.scale()})`);
 
   projectName = '';
-  private from: BuildOrigin = {};
-  breadcrumb = computed(() => this.crumbs.buildPage(this.projectName, this.from, this.id, 'Closure'));
+  private from = signal<BuildOrigin>({});
+  breadcrumb = computed(() =>
+    this.kind === 'eval'
+      ? this.crumbs.buildEvaluationPageBreadcrumbs(this.projectName, this.id, this.from().task, { label: 'Closure' })
+      : this.crumbs.buildPage(this.projectName, this.from(), this.id, 'Closure'),
+  );
   kind = '';
   id = '';
   closureType = 'runtime';
@@ -99,7 +103,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     this.kind = this.route.snapshot.paramMap.get('kind') || 'build';
     this.id = this.route.snapshot.paramMap.get('id') || '';
     this.closureType = this.route.snapshot.queryParamMap.get('type') === 'build' ? 'build' : 'runtime';
-    this.from = readBuildOrigin(this.route.snapshot.queryParamMap);
+    this.from.set(readBuildOrigin(this.route.snapshot.queryParamMap));
     this.typeLabel.set(this.closureType === 'build' ? 'Build closure' : 'Runtime closure');
     this.load();
   }
@@ -118,6 +122,11 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       : (isEval ? this.evalService.getEvalRuntimeClosure(this.id) : this.evalService.getBuildRuntimeClosure(this.id));
     if (isEval) {
       this.evalService.getEvaluation(this.id).subscribe({ next: (evaluation) => this.rootName.set(evaluation.task_display_name || evaluation.task_name || evaluationTitle(evaluation)) });
+    } else if (!this.from().evaluation) {
+      this.evalService.getBuild(this.id).subscribe({
+        next: (build) => this.from.update((from) => ({ ...from, evaluation: build.evaluation })),
+        error: () => {},
+      });
     }
     req.subscribe({
       next: (g) => {

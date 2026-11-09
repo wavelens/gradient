@@ -160,10 +160,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return { task: this.evaluation()?.task_name, evaluation: this.evaluationId };
   }
 
-  projectAndTaskCrumbs = computed(() => {
+  breadcrumb = computed(() => {
     const task = this.evaluation()?.task_name;
-    return task ? this.crumbs.taskAt(this.projectName, task, this.evaluationId) : this.crumbs.project(this.projectName);
+    return task
+      ? this.crumbs.buildEvaluationPageBreadcrumbs(this.projectName, this.evaluationId, task)
+      : this.crumbs.project(this.projectName);
   });
+  projectAndTaskCrumbs = computed(() => this.breadcrumb().slice(1).filter((crumb) => crumb.link));
   evaluationId = '';
   private initialBuildId: string | null = null;
   missingBuildId = signal<string | null>(null);
