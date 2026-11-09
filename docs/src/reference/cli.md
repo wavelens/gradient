@@ -144,6 +144,7 @@ gradient account switch work
 | `gradient project team-grant remove <TEAM>` | - | Delete the team grant or withdraw the pending request. |
 | `gradient project pending-membership-invitation list` | - | List pending membership invitations for a project. |
 | `gradient project pending-membership-invitation revoke <USER>` | - | Cancel Pending Invitations for a User |
+| `gradient project webhook <VERB>` | see [Webhooks](#webhooks) | Manage webhooks for the selected project. See [Webhooks](#webhooks). |
 | `gradient task select <TASK>` | - | Choose the task that later commands target, within the selected project |
 | `gradient task show` | - | Display the selected task, its last evaluation and its builds |
 | `gradient task log` | - | Stream logs from the last evaluation of the selected task |
@@ -231,6 +232,17 @@ gradient account switch work
 | `gradient cache nar delete <CACHE> <HASH>` | `--yes` | Remove a NAR from a cache |
 | `gradient cache nar stats <CACHE>` | - | Print aggregate statistics over all NARs in a cache |
 | `gradient cache upload <CACHE> [PATHS]...` | `--nar-file <NAR_FILE>`, `--narinfo <NARINFO>`, `--no-closure` | Upload one or more NARs to a cache |
+| `gradient cache enable <NAME>` | - | Enable a cache that was disabled. |
+| `gradient cache disable <NAME>` | - | Turn off the cache. The Nix client and builds no longer use the cache. |
+| `gradient cache publish <NAME>`, `gradient cache unpublish <NAME>` | - | Allow cache access without login, or make the cache private again. |
+| `gradient cache subscribers <NAME>` | - | List projects that subscribe to the cache. |
+| `gradient cache user list\|add\|edit\|remove <CACHE> [USER] [ROLE]` | - | List, invite, change roles for, or remove cache users. |
+| `gradient cache invitation list\|revoke <CACHE> [USER]` | - | List or revoke pending invitations in the cache. |
+| `gradient cache role list\|show\|create\|edit\|delete <CACHE>` | `--name <NAME>`, `--role-permission-names <PERMISSIONS>` | Manage custom roles. The `list` outputs also include the permissions that a role can use. |
+| `gradient cache team list\|add\|edit\|remove <CACHE> [TEAM] [ROLE]` | - | Manage the teams that can access the cache and their roles. |
+| `gradient cache request list\|approve\|deny <CACHE> [PROJECT]` | - | List, approve, or deny requests from projects to subscribe to the cache. |
+| `gradient cache upstream list\|add\|edit\|delete\|test <CACHE> [ID]` | `--display-name <NAME>`, `--internal-cache-name <CACHE>`, `--url <URL>`, `--public-key <KEY>`, `--http1-only`, `--remote-cache-name <CACHE>`, `--api-key <KEY>`, `--cache-access-mode <MODE>`, `--active <BOOL>` | Manage upstream caches. `add` can take `--internal-cache-name` for caches on this server, `--url` with `--public-key` for Nix binary caches and `--url` with `--remote-cache-name` for another Gradient server. `test` can probe HTTP/1.1 and HTTP/2. |
+| `gradient cache webhook <VERB> <CACHE>` | see [Webhooks](#webhooks) | Manage webhooks for the cache. See [Webhooks](#webhooks) |
 
 ## Workers
 
@@ -239,6 +251,49 @@ gradient account switch work
 | `gradient worker register --display-name <DISPLAY_NAME> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--url <URL>`, `--token <TOKEN>` | Add a new worker to the selected project |
 | `gradient worker list` | - | Show every worker in the selected project |
 | `gradient worker delete <WORKER_ID>` | - | Remove a worker from the selected project |
+| `gradient worker metrics <WORKER_ID>` | - | Print worker load samples, connections and dispatched jobs |
+| `gradient worker check <WORKER_ID>` | - | Check the connection of the worker and the permission to work on the selected project. |
+
+## Exec Jobs
+
+Exec jobs are programs that `gradient run` can launch on exec workers. These commands inspect and control a job by its ID.
+
+| Command | Options | Description |
+|---|---|---|
+| `gradient exec-job list <EVALUATION>` | - | List the exec jobs for an evaluation |
+| `gradient exec-job show\|logs\|cancel <JOB>` | - | Show details of an exec job, output logs, or cancel the job. |
+| `gradient exec-job artifact list <JOB>`, `gradient exec-job artifact download <JOB> <PATH>` | `--node-index <N>`, `--output-file-path <FILE>` | List the output files of a job, or download one of them. Keep a path with `/` as one argument. |
+| `gradient exec-job keep-vm-running <JOB> on\|off` | - | Specify whether to leave the VM running after program exit, or to stop it. |
+| `gradient exec-job console <JOB>` | `--node-index <N>` | Connect the terminal to the VM serial console. Use `~.` at the start of a line to detach without stopping the job. The console can reject `--json`. |
+| `gradient exec-job pull-requests <JOB>` | - | List the pull requests that the job opened. |
+
+## Administration
+
+These commands act on the whole instance. They need a superuser account. AI agents can't use them through `gradient mcp`.
+
+| Command | Options | Description |
+|---|---|---|
+| `gradient administration state` | `--export-format <nix\|json>` | Output the live configuration as `services.gradient.state`. The fields in the credentials file stay empty. |
+| `gradient administration drain on\|off` | - | Turn drain on or off. Workers receive no new jobs while drain is active. |
+| `gradient administration deep-gc` | - | Start deep garbage collection for the database and storage. Print the task ID. |
+| `gradient administration task list\|show [TASK_ID]` | - | List the administration tasks, or show one task (for example, to track deep garbage collection). |
+| `gradient administration webhook <VERB>` | see [Webhooks](#webhooks) | Manage webhooks across the entire instance. See [Webhooks](#webhooks) for details. |
+| `gradient administration worker list\|show [WORKER_ID]` | - | List the workers that connect to this server, or print a single worker. |
+
+## Webhooks
+
+`gradient project webhook`, `gradient team webhook`, `gradient cache webhook`, and `gradient administration webhook` share these verbs. Team and cache webhooks take a team name or a cache name before other arguments.
+
+| Command | Options | Description |
+|---|---|---|
+| `list`, `show <ID>` | - | List webhooks with the result of the last delivery, or print a single webhook. |
+| `create` | `--name <NAME>`, `--url <URL>`, `--event <PATTERN>`, `--active <BOOL>` | Create a webhook and output its signing secret once. Repeat `--event` for multiple patterns. Omit `--event` to send all events. |
+| `edit <ID>` | `--name <NAME>`, `--url <URL>`, `--event <PATTERN>`, `--all-events`, `--active <BOOL>` | Change a webhook. `--event` replaces all event patterns |
+| `delete <ID>` | - | Remove a webhook |
+| `deliveries <ID>`, `delivery <ID> <DELIVERY_ID>` | `--limit <N>`, `--offset <N>` | List past deliveries, or print one delivery with its request body and response body. |
+| `rotate-secret <ID>`, `ping <ID>` | - | Replace the signing secret, or send a ``webhook.ping`` event. |
+
+- AI agents can run webhook commands for projects, teams and caches through `gradient mcp --control`. The MCP server rejects `create` and `rotate-secret`, since both commands print the signature secret.
 
 ## Teams
 
@@ -264,24 +319,7 @@ gradient account switch work
 | `gradient team worker edit <TEAM> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--active <BOOL>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Change a team worker. Deactivating aborts its running jobs |
 | `gradient team worker delete <TEAM> <WORKER_ID>` | - | Remove a team worker |
 | `gradient team worker missing-worker-capabilities <TEAM>` | `--projects <PROJECTS>` | Show what waiting evaluations need that no connected worker offers |
-
-## Webhooks
-
-Webhook commands target the selected project. Pass `--team <TEAM>` to manage a team's webhooks instead.
-
-| Command | Options | Description |
-|---|---|---|
-| `gradient webhook list` | `--team <TEAM>` | List the webhooks with the result of their last delivery |
-| `gradient webhook show <ID>` | `--team <TEAM>` | Display one webhook |
-| `gradient webhook create` | `--name <NAME>`, `--url <URL>`, `--event <PATTERN>`, `--active <BOOL>`, `--team <TEAM>` | Create a webhook and print its signing secret once. Without `--event`, every event is sent |
-| `gradient webhook edit <ID>` | `--name <NAME>`, `--url <URL>`, `--event <PATTERN>`, `--all-events`, `--active <BOOL>`, `--team <TEAM>` | Change a webhook. `--event` replaces all event patterns |
-| `gradient webhook delete <ID>` | `--team <TEAM>` | Remove a webhook |
-| `gradient webhook rotate-signing-secret <ID>` | `--team <TEAM>` | Replace the signing secret and print the new one once |
-| `gradient webhook send-test-ping <ID>` | `--team <TEAM>` | Send a `webhook.ping` event right away and print the delivery attempt |
-| `gradient webhook delivery-attempts list <ID>` | `--limit <LIMIT>`, `--offset <OFFSET>`, `--team <TEAM>` | List the delivery attempts of a webhook |
-| `gradient webhook delivery-attempts show <ID> <DELIVERY_ID>` | `--team <TEAM>` | Print one delivery attempt with its request and response body |
-
-- The agent can run `team` and `webhook` commands through `gradient mcp --control`, except `webhook create` and `webhook rotate-signing-secret`. Those two commands output a signing secret, so the MCP server cannot accept them.
+| `gradient team webhook <VERB> <TEAM>` | see [Webhooks](#webhooks) | Manage team webhooks. See [Webhooks](#webhooks). |
 
 ## Tools
 

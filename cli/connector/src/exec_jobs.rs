@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::api::{ExecJobResponse, ExecJobSummary};
+use crate::api::{ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary};
 use crate::http::io_error;
 use crate::{Client, ConnectorError, http};
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use reqwest::Method;
 use serde::Deserialize;
 use tokio::net::TcpStream;
@@ -52,6 +52,98 @@ impl ExecJobsApi<'_> {
         port: u16,
     ) -> Result<GuestSocket, ConnectorError> {
         self.open_guest_socket(&format!("exec/{job}/forward?port={port}"))
+            .await
+    }
+
+    pub async fn list_output_files(
+        &self,
+        job: &str,
+        node: Option<u32>,
+    ) -> Result<Vec<ExecJobOutputView>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("exec/{job}/outputs"),
+            true,
+        )?
+        .query(&node.map(|node| vec![("node", node)]).unwrap_or_default());
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn download_job_output_file_from_node(
+        &self,
+        job: &str,
+        path: &str,
+        node: Option<u32>,
+    ) -> Result<impl Stream<Item = Result<bytes::Bytes, ConnectorError>> + use<>, ConnectorError>
+    {
+        let token = self.0.token().ok_or(ConnectorError::Unauthorized)?;
+        let mut url = reqwest::Url::parse(&http::build_url(
+            self.0.base_url(),
+            &format!("exec/{job}/outputs"),
+        ))
+        .map_err(io_error)?;
+        url.path_segments_mut()
+            .map_err(|()| io_error(std::fmt::Error))?
+            .push(path);
+        if let Some(node) = node {
+            url.query_pairs_mut().append_pair("node", &node.to_string());
+        }
+        let res = self
+            .0
+            .stream_http()
+            .get(url)
+            .bearer_auth(token)
+            .send()
+            .await?;
+        let status = res.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(ConnectorError::Unauthorized);
+        }
+        if !status.is_success() {
+            return Err(ConnectorError::Api {
+                status,
+                message: res.text().await.unwrap_or_default(),
+            });
+        }
+        Ok(res
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(ConnectorError::from)))
+    }
+
+    pub async fn set_vm_keep_running(
+        &self,
+        job: &str,
+        keep: bool,
+    ) -> Result<String, ConnectorError> {
+        let method = if keep { Method::POST } else { Method::DELETE };
+        self.0
+            .send_authenticated_request(method, &format!("exec/{job}/keep-vm-running"), None::<&()>)
+            .await
+    }
+
+    pub async fn get_exec_job_pull_requests(
+        &self,
+        job: &str,
+    ) -> Result<Vec<ExecJobPullRequestView>, ConnectorError> {
+        self.0
+            .send_authenticated_request(
+                Method::GET,
+                &format!("exec/{job}/pull-requests"),
+                None::<&()>,
+            )
+            .await
+    }
+
+    pub async fn open_job_serial_console_socket(
+        &self,
+        job: &str,
+        node: Option<u32>,
+    ) -> Result<GuestSocket, ConnectorError> {
+        let query = node.map(|node| format!("?node={node}")).unwrap_or_default();
+        self.open_guest_socket(&format!("exec/{job}/console{query}"))
             .await
     }
 

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod admin;
 pub mod attr_spec;
 pub mod base;
 pub mod build;
@@ -13,14 +14,17 @@ pub mod builds;
 pub mod builds_log;
 pub mod cache;
 pub mod cache_nar;
+pub mod cache_sharing;
 pub mod cache_upload;
 #[cfg(feature = "nix")]
 pub mod cache_upload_nix;
+pub mod cache_upstream;
 pub mod completion;
 pub mod download;
 #[cfg(feature = "eval")]
 pub mod eval;
 pub mod evaluation;
+pub mod exec_job_commands;
 pub mod generate;
 pub mod live_events;
 pub mod logged_in_user_account_group_commands;

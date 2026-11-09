@@ -13,13 +13,17 @@ use serde::de::DeserializeOwned;
 pub enum WebhookResource {
     Project(String),
     Team(String),
+    Cache(String),
+    Instance,
 }
 
 impl WebhookResource {
-    fn project_or_team_path_prefix(&self) -> String {
+    fn webhooks_path_prefix(&self) -> String {
         match self {
             Self::Project(project) => format!("projects/{project}/webhooks"),
             Self::Team(team) => format!("teams/{team}/webhooks"),
+            Self::Cache(cache) => format!("caches/{cache}/webhooks"),
+            Self::Instance => "admin/webhooks".to_owned(),
         }
     }
 }
@@ -38,7 +42,7 @@ impl WebhooksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             method,
-            &format!("{}{suffix}", owner.project_or_team_path_prefix()),
+            &format!("{}{suffix}", owner.webhooks_path_prefix()),
             true,
         )
     }

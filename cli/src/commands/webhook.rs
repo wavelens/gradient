@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::input::{client_from_config, selected_project};
+use crate::input::client_from_config;
 use crate::output::Output;
 use clap::{Args, Subcommand};
 use connector::api::{
@@ -13,25 +13,26 @@ use connector::api::{
 use connector::webhooks::WebhookResource;
 
 #[derive(Args, Debug)]
-pub struct WebhookArgs {
-    /// Use the webhooks of this team, not the webhooks of the selected project
-    #[arg(long, global = true, value_name = "TEAM")]
-    team: Option<String>,
-    #[command(subcommand)]
-    cmd: Commands,
-}
+pub struct NoWebhookOwnerArguments {}
 
 #[derive(Subcommand, Debug)]
-pub enum Commands {
+pub enum WebhookSubcommands<WebhookOwnerArgs: Args> {
     /// List webhooks with the last delivery result.
-    List,
+    List {
+        #[command(flatten)]
+        owner: WebhookOwnerArgs,
+    },
     /// Show a single webhook
     Show {
+        #[command(flatten)]
+        owner: WebhookOwnerArgs,
         /// Webhook ID
         id: uuid::Uuid,
     },
     /// Create a webhook and only print its signing secret, once.
     Create {
+        #[command(flatten)]
+        owner: WebhookOwnerArgs,
         /// Webhook name
         #[arg(short, long)]
         name: String,
@@ -47,6 +48,8 @@ pub enum Commands {
     },
     /// Modify a webhook. Use --event to replace the whole event list.
     Edit {
+        #[command(flatten)]
+        owner: WebhookOwnerArgs,
         /// Webhook ID
         id: uuid::Uuid,
         /// Webhook name
@@ -67,56 +70,47 @@ pub enum Commands {
     },
     /// Delete a webhook
     Delete {
+        #[command(flatten)]
+        owner: WebhookOwnerArgs,
         /// Webhook ID
         id: uuid::Uuid,
     },
-    /// Replace the webhook signing secret and print the new secret once
-    RotateSigningSecret {
+    /// List past deliveries for a webhook
+    Deliveries {
+        #[command(flatten)]
+        owner: WebhookOwnerArgs,
         /// Webhook ID
         id: uuid::Uuid,
-    },
-    /// Send a `webhook.ping` event to the webhook now and print the delivery attempt.
-    SendTestPing {
-        /// Webhook ID
-        id: uuid::Uuid,
-    },
-    /// Inspect attempts to deliver webhooks
-    DeliveryAttempts {
-        #[command(subcommand)]
-        cmd: WebhookDeliveryAttemptsCommand,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum WebhookDeliveryAttemptsCommand {
-    /// List the delivery attempts for a webhook
-    List {
-        /// Webhook ID
-        id: uuid::Uuid,
-        /// Maximum number of delivery attempts to list
+        /// Number of deliveries to display
         #[arg(long)]
         limit: Option<u64>,
-        /// Number of delivery attempts to skip
+        /// Number of latest deliveries to skip
         #[arg(long)]
         offset: Option<u64>,
     },
-    /// Show one delivery attempt, including the request body and response body.
-    Show {
+    /// Print one delivery with its request body and response body.
+    Delivery {
+        #[command(flatten)]
+        owner: WebhookOwnerArgs,
         /// Webhook ID
         id: uuid::Uuid,
-        /// Delivery attempt ID
+        /// Delivery ID
         delivery_id: uuid::Uuid,
     },
-}
-
-fn webhook_owner_from_team_flag_or_selected_project(
-    team: Option<String>,
-    out: Output,
-) -> WebhookResource {
-    match team {
-        Some(team) => WebhookResource::Team(team),
-        None => WebhookResource::Project(selected_project(out)),
-    }
+    /// Replace the webhook signing secret and print the new secret once
+    RotateSecret {
+        #[command(flatten)]
+        owner: WebhookOwnerArgs,
+        /// Webhook ID
+        id: uuid::Uuid,
+    },
+    /// Send the `webhook.ping` event to the webhook URL.
+    Ping {
+        #[command(flatten)]
+        owner: WebhookOwnerArgs,
+        /// Webhook ID
+        id: uuid::Uuid,
+    },
 }
 
 fn print_webhook_line(out: Output, webhook: &WebhookResponse) {
@@ -164,12 +158,15 @@ fn print_webhook_delivery_attempt_line(out: Output, attempt: &DeliveryListItemWe
     ));
 }
 
-pub async fn handle(args: WebhookArgs, out: Output) {
-    let owner = webhook_owner_from_team_flag_or_selected_project(args.team, out);
+pub async fn run_webhook_subcommand<WebhookOwnerArgs: Args>(
+    cmd: WebhookSubcommands<WebhookOwnerArgs>,
+    webhooks_for: impl Fn(&WebhookOwnerArgs) -> WebhookResource,
+    out: Output,
+) {
     let client = client_from_config(out);
     let webhooks = client.webhooks();
-    match args.cmd {
-        Commands::List => match webhooks.list(&owner).await {
+    match cmd {
+        WebhookSubcommands::List { owner } => match webhooks.list(&webhooks_for(&owner)).await {
             Ok(list) => {
                 out.ok(&list);
                 if list.is_empty() {
@@ -181,15 +178,18 @@ pub async fn handle(args: WebhookArgs, out: Output) {
             Err(e) => out.fail(e),
         },
 
-        Commands::Show { id } => match webhooks.get(&owner, &id.to_string()).await {
-            Ok(webhook) => {
-                out.ok(&webhook);
-                print_webhook_line(out, &webhook);
+        WebhookSubcommands::Show { owner, id } => {
+            match webhooks.get(&webhooks_for(&owner), &id.to_string()).await {
+                Ok(webhook) => {
+                    out.ok(&webhook);
+                    print_webhook_line(out, &webhook);
+                }
+                Err(e) => out.fail(e),
             }
-            Err(e) => out.fail(e),
-        },
+        }
 
-        Commands::Create {
+        WebhookSubcommands::Create {
+            owner,
             name,
             url,
             events,
@@ -201,7 +201,7 @@ pub async fn handle(args: WebhookArgs, out: Output) {
                 events,
                 active,
             };
-            match webhooks.create(&owner, body).await {
+            match webhooks.create(&webhooks_for(&owner), body).await {
                 Ok(created) => {
                     out.ok(&created);
                     out.human("Created webhook.");
@@ -215,7 +215,8 @@ pub async fn handle(args: WebhookArgs, out: Output) {
             }
         }
 
-        Commands::Edit {
+        WebhookSubcommands::Edit {
+            owner,
             id,
             name,
             url,
@@ -230,7 +231,10 @@ pub async fn handle(args: WebhookArgs, out: Output) {
                 events,
                 active,
             };
-            match webhooks.update(&owner, &id.to_string(), body).await {
+            match webhooks
+                .update(&webhooks_for(&owner), &id.to_string(), body)
+                .await
+            {
                 Ok(webhook) => {
                     out.ok(&webhook);
                     out.human("Updated webhook.");
@@ -240,17 +244,22 @@ pub async fn handle(args: WebhookArgs, out: Output) {
             }
         }
 
-        Commands::Delete { id } => match webhooks.delete(&owner, &id.to_string()).await {
-            Ok(deleted) => {
-                out.ok(&deleted);
-                out.human("Webhook deleted.");
-            }
-            Err(e) => out.fail(e),
-        },
-
-        Commands::RotateSigningSecret { id } => {
+        WebhookSubcommands::Delete { owner, id } => {
             match webhooks
-                .rotate_webhook_signing_secret(&owner, &id.to_string())
+                .delete(&webhooks_for(&owner), &id.to_string())
+                .await
+            {
+                Ok(deleted) => {
+                    out.ok(&deleted);
+                    out.human("Webhook deleted.");
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        WebhookSubcommands::RotateSecret { owner, id } => {
+            match webhooks
+                .rotate_webhook_signing_secret(&webhooks_for(&owner), &id.to_string())
                 .await
             {
                 Ok(rotated) => {
@@ -264,9 +273,9 @@ pub async fn handle(args: WebhookArgs, out: Output) {
             }
         }
 
-        Commands::SendTestPing { id } => {
+        WebhookSubcommands::Ping { owner, id } => {
             match webhooks
-                .send_webhook_test_ping(&owner, &id.to_string())
+                .send_webhook_test_ping(&webhooks_for(&owner), &id.to_string())
                 .await
             {
                 Ok(attempt) => {
@@ -277,10 +286,13 @@ pub async fn handle(args: WebhookArgs, out: Output) {
             }
         }
 
-        Commands::DeliveryAttempts {
-            cmd: WebhookDeliveryAttemptsCommand::List { id, limit, offset },
+        WebhookSubcommands::Deliveries {
+            owner,
+            id,
+            limit,
+            offset,
         } => match webhooks
-            .list_webhook_delivery_attempts(&owner, &id.to_string(), limit, offset)
+            .list_webhook_delivery_attempts(&webhooks_for(&owner), &id.to_string(), limit, offset)
             .await
         {
             Ok(attempts) => {
@@ -295,10 +307,16 @@ pub async fn handle(args: WebhookArgs, out: Output) {
             Err(e) => out.fail(e),
         },
 
-        Commands::DeliveryAttempts {
-            cmd: WebhookDeliveryAttemptsCommand::Show { id, delivery_id },
+        WebhookSubcommands::Delivery {
+            owner,
+            id,
+            delivery_id,
         } => match webhooks
-            .get_webhook_delivery_attempt(&owner, &id.to_string(), &delivery_id.to_string())
+            .get_webhook_delivery_attempt(
+                &webhooks_for(&owner),
+                &id.to_string(),
+                &delivery_id.to_string(),
+            )
             .await
         {
             Ok(attempt) => {

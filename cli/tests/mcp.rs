@@ -688,6 +688,28 @@ fn mcp_run_gradient_command_refuses_account_commands() {
 }
 
 #[test]
+fn run_gradient_command_refuses_administration_group() {
+    let home = TempDir::new().unwrap();
+    offline_config(&home);
+
+    let responses = session_with(
+        &home,
+        &["mcp", "--control"],
+        &call(
+            "run_gradient_command",
+            json!({"args": ["administration", "drain", "on"]}),
+        ),
+    );
+    let result = &response(&responses, 2)["result"];
+
+    assert_eq!(result["isError"], json!(true), "{result:#}");
+    assert!(
+        result.to_string().contains("not available here"),
+        "{result:#}"
+    );
+}
+
+#[test]
 fn mcp_run_gradient_command_keeps_the_account_it_started_with() {
     let home = TempDir::new().unwrap();
     offline_config(&home);

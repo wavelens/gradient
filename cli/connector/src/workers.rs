@@ -3,6 +3,7 @@
 
 use crate::api::{
     PatchWorkerRequest, ProjectWorkerEntry, RegisterWorkerRequest, RegisterWorkerResponse,
+    WorkerMetricsResponse, WorkerTestResponse,
 };
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
@@ -55,6 +56,34 @@ impl WorkersApi<'_> {
         )?
         .json(&body);
         http::decode(req.send().await?).await
+    }
+
+    pub async fn get_worker_metrics(
+        &self,
+        project: &str,
+        worker_id: &str,
+    ) -> Result<WorkerMetricsResponse, ConnectorError> {
+        self.0
+            .send_authenticated_request(
+                Method::GET,
+                &format!("projects/{project}/workers/{worker_id}/metrics"),
+                None::<&()>,
+            )
+            .await
+    }
+
+    pub async fn test_worker_connection_and_authorization(
+        &self,
+        project: &str,
+        worker_id: &str,
+    ) -> Result<WorkerTestResponse, ConnectorError> {
+        self.0
+            .send_authenticated_request(
+                Method::POST,
+                &format!("projects/{project}/workers/{worker_id}/test"),
+                None::<&()>,
+            )
+            .await
     }
 
     pub async fn delete(&self, project: &str, worker_id: &str) -> Result<String, ConnectorError> {

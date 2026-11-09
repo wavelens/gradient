@@ -36,6 +36,18 @@ pub enum Commands {
         #[arg(add = ArgValueCompleter::new(completion::complete_workers))]
         worker_id: String,
     },
+    /// Print metrics for a worker in the selected project.
+    Metrics {
+        /// Worker ID
+        #[arg(add = ArgValueCompleter::new(completion::complete_workers))]
+        worker_id: String,
+    },
+    /// Check the worker connection and the permission to work on the selected project.
+    Check {
+        /// Worker ID
+        #[arg(add = ArgValueCompleter::new(completion::complete_workers))]
+        worker_id: String,
+    },
 }
 
 pub async fn handle(cmd: Commands, out: Output) {
@@ -118,6 +130,66 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Ok(_) => {
                     out.ok(&serde_json::json!({"deleted": true}));
                     out.human("Worker unregistered.");
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::Metrics { worker_id } => {
+            let project = selected_project(out);
+            let client = client_from_config(out);
+            match client
+                .workers()
+                .get_worker_metrics(&project, &worker_id)
+                .await
+            {
+                Ok(metrics) => {
+                    out.ok(&metrics);
+                    out.human(format!(
+                        "{} \"{}\"",
+                        metrics.worker_id, metrics.display_name
+                    ));
+                    out.human(format!(
+                        "Jobs dispatched in total: {}",
+                        metrics.jobs_dispatched
+                    ));
+                    if let Some(sample) = metrics.samples.last() {
+                        let cpu = sample
+                            .cpu_usage_pct
+                            .map_or_else(|| "-".to_owned(), |cpu| format!("{cpu:.0}%"));
+                        out.human(format!(
+                            "Final sample ({}): {} / {} jobs, CPU {}",
+                            sample.at, sample.assigned_jobs, sample.max_concurrent_builds, cpu
+                        ));
+                    }
+                    for connection in &metrics.connections {
+                        match &connection.disconnected_at {
+                            Some(disconnected_at) => out.human(format!(
+                                "Connected at {}. Disconnected at {}.",
+                                connection.connected_at, disconnected_at
+                            )),
+                            None => out.human(format!(
+                                "Connected at {}, still online",
+                                connection.connected_at
+                            )),
+                        }
+                    }
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::Check { worker_id } => {
+            let project = selected_project(out);
+            let client = client_from_config(out);
+            match client
+                .workers()
+                .test_worker_connection_and_authorization(&project, &worker_id)
+                .await
+            {
+                Ok(result) => {
+                    out.ok(&result);
+                    out.human(&result.message);
                 }
                 Err(e) => out.fail(e),
             }

@@ -5,14 +5,18 @@
  */
 
 use crate::commands::cache_nar;
+use crate::commands::cache_sharing;
 use crate::commands::cache_upload;
+use crate::commands::cache_upstream;
 use crate::commands::completion;
+use crate::commands::webhook::{WebhookSubcommands, run_webhook_subcommand};
 use crate::error::{CliError, FileAction};
 use crate::input::{ask_for_secret, client_from_config, handle_input};
 use crate::output::{ExitKind, Output};
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::{MakeCacheRequest, PatchCacheRequest};
+use connector::webhooks::WebhookResource;
 use std::fs;
 
 #[derive(Subcommand, Debug)]
@@ -95,6 +99,78 @@ pub enum Commands {
     },
     /// Upload NAR(s) to a cache
     Upload(crate::commands::cache_upload::UploadArgs),
+    /// Re-enable a Disabled Cache
+    Enable {
+        /// Cache name
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        name: String,
+    },
+    /// Disable the cache. Nix clients and builds no longer use that cache until a later command can turn that cache back on.
+    Disable {
+        /// Cache name
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        name: String,
+    },
+    /// Allow anyone to read the cache without login
+    Publish {
+        /// Cache name
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        name: String,
+    },
+    /// Make a public cache private again.
+    Unpublish {
+        /// Cache name
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        name: String,
+    },
+    /// List projects that subscribe to caches
+    Subscribers {
+        /// Cache name
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        name: String,
+    },
+    /// Manage the users that are members of a cache.
+    User {
+        #[command(subcommand)]
+        cmd: cache_sharing::CacheUserCommands,
+    },
+    /// List or revoke pending membership invitations for a cache.
+    Invitation {
+        #[command(subcommand)]
+        cmd: cache_sharing::CacheInvitationCommands,
+    },
+    /// Manage custom roles for the cache
+    Role {
+        #[command(subcommand)]
+        cmd: cache_sharing::CacheRoleCommand,
+    },
+    /// Manage the teams that can access the cache.
+    Team {
+        #[command(subcommand)]
+        cmd: cache_sharing::CacheTeamCommand,
+    },
+    /// Approve or deny requests from a project to subscribe to the cache.
+    Request {
+        #[command(subcommand)]
+        cmd: cache_sharing::CacheRequestSubcommand,
+    },
+    /// Manage upstream caches that provide store paths to the cache.
+    Upstream {
+        #[command(subcommand)]
+        cmd: cache_upstream::CacheUpstreamCommands,
+    },
+    /// Manage cache webhooks
+    Webhook {
+        #[command(subcommand)]
+        cmd: WebhookSubcommands<CacheWebhookListArguments>,
+    },
+}
+
+#[derive(Args, Debug)]
+pub struct CacheWebhookListArguments {
+    /// Cache Name
+    #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+    cache: String,
 }
 
 pub async fn handle(cmd: Commands, out: Output) {
@@ -312,6 +388,92 @@ pub async fn handle(cmd: Commands, out: Output) {
 
         Commands::Nar { cmd } => cache_nar::handle(cmd, out).await,
         Commands::Upload(args) => cache_upload::handle(args, out).await,
+        Commands::Enable { name } => {
+            let client = client_from_config(out);
+            match client.caches().activate_cache(&name).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"active": true}));
+                    out.human("Cache enabled.");
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+        Commands::Disable { name } => {
+            let client = client_from_config(out);
+            match client.caches().deactivate_cache(&name).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"active": false}));
+                    out.human("Cache disabled.");
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+        Commands::Publish { name } => {
+            let client = client_from_config(out);
+            match client.caches().make_cache_public(&name).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"public": true}));
+                    out.human("The cache is now public.");
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+        Commands::Unpublish { name } => {
+            let client = client_from_config(out);
+            match client.caches().make_cache_private(&name).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"public": false}));
+                    out.human("The cache is private now.");
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+        Commands::Subscribers { name } => {
+            let client = client_from_config(out);
+            match client
+                .caches()
+                .list_projects_subscribed_to_cache(&name)
+                .await
+            {
+                Ok(subscribers) => {
+                    out.ok(&subscribers);
+                    if subscribers.projects.is_empty() && subscribers.hidden == 0 {
+                        out.human("No projects subscribe to this cache.");
+                    }
+                    for project in &subscribers.projects {
+                        out.human(format!(
+                            "{} ({}): {}",
+                            project.project, project.project_display_name, project.mode
+                        ));
+                    }
+                    if subscribers.hidden > 0 {
+                        out.human(format!(
+                            "{} more projects remain hidden.",
+                            subscribers.hidden
+                        ));
+                    }
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+        Commands::User { cmd } => cache_sharing::handle_cache_user_commands(cmd, out).await,
+        Commands::Invitation { cmd } => {
+            cache_sharing::apply_cache_invitation_commands(cmd, out).await
+        }
+        Commands::Role { cmd } => cache_sharing::apply_cache_role_command(cmd, out).await,
+        Commands::Team { cmd } => cache_sharing::execute_cache_team_command(cmd, out).await,
+        Commands::Request { cmd } => {
+            cache_sharing::respond_to_subscription_cache_requests(cmd, out).await
+        }
+        Commands::Upstream { cmd } => cache_upstream::handle(cmd, out).await,
+        Commands::Webhook { cmd } => {
+            run_webhook_subcommand(
+                cmd,
+                |owner| WebhookResource::Cache(owner.cache.clone()),
+                out,
+            )
+            .await
+        }
     }
 }
 

@@ -20,7 +20,7 @@ path = "src/lib.rs"
 [dependencies]
 bytes               = { workspace = true }
 futures             = { workspace = true }
-reqwest             = { workspace = true, features = ["json", "query"] }
+reqwest             = { workspace = true, features = ["json", "query", "stream"] }
 reqwest-streams     = { workspace = true }
 rustls              = { workspace = true }
 rustls-native-certs = { workspace = true }

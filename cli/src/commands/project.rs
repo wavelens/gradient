@@ -5,6 +5,9 @@
  */
 
 use crate::commands::completion;
+use crate::commands::webhook::{
+    NoWebhookOwnerArguments, WebhookSubcommands, run_webhook_subcommand,
+};
 use crate::config::*;
 use crate::error::CliError;
 use crate::input::{
@@ -18,6 +21,7 @@ use connector::api::{
     AddMemberRequest, GrantProjectRequest, MakeProjectRequest, PatchProjectGrantRequest,
     PatchProjectRequest, PutProjectSecretRequest, RemoveMemberRequest, RevokeInvitationRequest,
 };
+use connector::webhooks::WebhookResource;
 use connector::{Client, ConnectorError};
 use std::io::{self, IsTerminal, Read};
 
@@ -94,6 +98,11 @@ pub enum Commands {
     PendingMembershipInvitation {
         #[command(subcommand)]
         cmd: ProjectPendingInvitationCommands,
+    },
+    /// Manage webhooks for the selected project.
+    Webhook {
+        #[command(subcommand)]
+        cmd: WebhookSubcommands<NoWebhookOwnerArguments>,
     },
 }
 
@@ -522,6 +531,15 @@ pub async fn handle(cmd: Commands, out: Output) {
                     }
                 }
             }
+        }
+
+        Commands::Webhook { cmd } => {
+            run_webhook_subcommand(
+                cmd,
+                |_| WebhookResource::Project(selected_project(out)),
+                out,
+            )
+            .await
         }
 
         Commands::Secret { cmd } => {

@@ -14,6 +14,12 @@ use std::io::{IsTerminal, Write};
 use std::process::Command;
 use std::{fs, io};
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OnOffSetting {
+    On,
+    Off,
+}
+
 pub fn selected_project(out: Output) -> String {
     get_value(ConfigKey::SelectedProject, true)
         .unwrap_or_else(|| out.fail(CliError::NoProjectSelected))

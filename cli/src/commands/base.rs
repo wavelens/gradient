@@ -121,8 +121,6 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: team::Commands,
     },
-    /// Manage webhooks for the selected project, or for the team set with --team.
-    Webhook(webhook::WebhookArgs),
     /// Submit a build request from the current git repository
     Build {
         /// Eval target attribute path (default: task's wildcard)
@@ -145,6 +143,16 @@ enum MainCommands {
     },
     /// Run the flake program on an exec worker and stream the program output to this terminal
     Run(run::RunArgs),
+    /// Inspect exec jobs and control them. An exec job is a program that `gradient run` can launch on an exec worker.
+    ExecJob {
+        #[command(subcommand)]
+        cmd: exec_job_commands::Commands,
+    },
+    /// Manage the whole instance. Only a superuser account can run these commands.
+    Administration {
+        #[command(subcommand)]
+        cmd: admin::Commands,
+    },
     /// Watch a running evaluation's live build logs and status
     Watch {
         /// Evaluation UUID to watch
@@ -493,6 +501,8 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             build::handle_build(params, background, quiet, no_link, out).await
         }
         MainCommands::Run(args) => run::handle_run(args, out).await,
+        MainCommands::ExecJob { cmd } => exec_job_commands::handle(cmd, out).await,
+        MainCommands::Administration { cmd } => admin::handle(cmd, out).await,
         MainCommands::Watch { evaluation } => watch::handle_watch(&evaluation, out).await,
         MainCommands::Logs { evaluation } => logs::handle_logs(&evaluation, out).await,
         MainCommands::Download {
@@ -510,7 +520,6 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             search_command::run_gradient_search_command(query, limit, out).await
         }
         MainCommands::Team { cmd } => team::handle(cmd, out).await,
-        MainCommands::Webhook(args) => webhook::handle(args, out).await,
         MainCommands::Builds { cmd } => builds::handle(cmd, out).await,
         MainCommands::Evaluation { cmd } => evaluation::handle(cmd, out).await,
         MainCommands::Generate { cmd } => generate::handle(cmd, out).await,

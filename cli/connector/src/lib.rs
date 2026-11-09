@@ -130,6 +130,26 @@ impl Client {
         workers::WorkersApi(self)
     }
 
+    pub(crate) async fn send_authenticated_request<T: serde::de::DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        endpoint: &str,
+        body: Option<&(impl serde::Serialize + ?Sized)>,
+    ) -> Result<T, ConnectorError> {
+        let mut req = http::request(
+            self.http(),
+            self.base_url(),
+            self.token(),
+            method,
+            endpoint,
+            true,
+        )?;
+        if let Some(body) = body {
+            req = req.json(body);
+        }
+        http::decode(req.send().await?).await
+    }
+
     pub async fn health(&self) -> Result<String, ConnectorError> {
         let req = http::request(
             self.http(),

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::webhook::{WebhookSubcommands, run_webhook_subcommand};
 use crate::input::{client_from_config, handle_input};
 use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
@@ -11,6 +12,7 @@ use connector::api::{
     MakeTeamRequest, PatchTeamRequest, PatchWorkerRequest, RegisterWorkerRequest,
     RemoveTeamMemberRequest, RevokeInvitationRequest, TeamMemberRequest, TeamRole,
 };
+use connector::webhooks::WebhookResource;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -83,6 +85,17 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TeamWorkerSubcommand,
     },
+    /// Manage team webhooks
+    Webhook {
+        #[command(subcommand)]
+        cmd: WebhookSubcommands<TeamWebhookTeamNameArguments>,
+    },
+}
+
+#[derive(Args, Debug)]
+pub struct TeamWebhookTeamNameArguments {
+    /// Team name
+    team: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -383,6 +396,10 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Worker { cmd } => handle_workers(cmd, &client, out).await,
+        Commands::Webhook { cmd } => {
+            run_webhook_subcommand(cmd, |owner| WebhookResource::Team(owner.team.clone()), out)
+                .await
+        }
     }
 }
 

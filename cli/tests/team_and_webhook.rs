@@ -140,12 +140,12 @@ async fn webhook_list_targets_the_selected_project() {
     .await;
 
     let home = home_with(&server);
-    let assert = gradient(&home, &["--json", "webhook", "list"]).success();
+    let assert = gradient(&home, &["--json", "project", "webhook", "list"]).success();
     assert_eq!(envelope(&assert)["message"][0]["name"], "notify");
 }
 
 #[tokio::test]
-async fn webhook_team_flag_targets_the_team_after_the_subcommand() {
+async fn webhook_edit_all_events_sends_empty_events_list() {
     let server = MockServer::start().await;
     answer(
         &server,
@@ -161,12 +161,12 @@ async fn webhook_team_flag_targets_the_team_after_the_subcommand() {
         &home,
         &[
             "--json",
+            "team",
             "webhook",
             "edit",
+            "ops",
             HOOK,
             "--all-events",
-            "--team",
-            "ops",
         ],
     )
     .success();
@@ -195,6 +195,7 @@ async fn webhook_create_sends_every_event_pattern() {
             "--json",
             "--project",
             "api",
+            "project",
             "webhook",
             "create",
             "--name",

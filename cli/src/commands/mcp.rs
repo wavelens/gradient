@@ -50,20 +50,24 @@ const ALLOWED_GRADIENT_SUBCOMMANDS: &[&str] = &[
     "cache",
     "worker",
     "team",
-    "webhook",
     "builds",
     "evaluation",
     "logs",
     "search",
     "status",
     "info",
+    "exec-job",
 ];
 const DENIED_GRADIENT_SUBCOMMANDS: &[&[&str]] = &[
     &["project", "secret", "set"],
     &["project", "secret", "delete"],
     &["task", "action", "create"],
-    &["webhook", "create"],
-    &["webhook", "rotate-signing-secret"],
+    &["project", "webhook", "create"],
+    &["project", "webhook", "rotate-secret"],
+    &["team", "webhook", "create"],
+    &["team", "webhook", "rotate-secret"],
+    &["cache", "webhook", "create"],
+    &["cache", "webhook", "rotate-secret"],
 ];
 const GRADIENT_COMMAND_TIMEOUT_SECONDS: Duration = Duration::from_secs(600);
 const CLI_OUTPUT_SIZE_BEFORE_TEMP_FILE_BYTES: usize = 16 * 1024;
@@ -406,7 +410,7 @@ impl GradientMcp {
     #[tool(
         description = "Run a `gradient` CLI command with `--json` and return its output. The first \
                        argument is the command group (project, task, cache, worker, team, \
-                       webhook, builds, evaluation, logs, search, status, info)."
+                       builds, evaluation, logs, search, status, info, exec-job)."
     )]
     async fn run_gradient_command(
         &self,

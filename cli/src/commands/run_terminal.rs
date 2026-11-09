@@ -79,6 +79,52 @@ pub(crate) async fn attach(client: &connector::Client, job: &str, out: Output) -
     finish(client, job, end, out).await
 }
 
+pub(crate) async fn attach_terminal_to_job_serial_console(
+    client: &connector::Client,
+    job: &str,
+    node: Option<u32>,
+    out: Output,
+) -> ! {
+    let console = client
+        .exec_jobs()
+        .open_job_serial_console_socket(job, node)
+        .await
+        .unwrap_or_else(|e| out.err(ExitKind::Api, format!("Can't open the console: {e}")));
+    let raw = RawTerminal::enable().unwrap_or_else(|e| {
+        out.err(
+            ExitKind::Api,
+            format!("Can't switch terminal to raw mode: {e}"),
+        )
+    });
+    let end = forward(console).await;
+    drop(raw);
+    match end {
+        TerminalEnd::Closed {
+            exit_code: Some(code),
+            ..
+        } => exit(code),
+        TerminalEnd::Closed {
+            exit_code: None,
+            message: Some(message),
+        } => out.err(ExitKind::Api, message),
+        TerminalEnd::Closed {
+            exit_code: None,
+            message: None,
+        } => {
+            out.progress("Console closed.");
+            exit(0)
+        }
+        TerminalEnd::EscapeRequested => {
+            out.progress("The console session ended.");
+            exit(0)
+        }
+        TerminalEnd::ConnectionLost => out.err(
+            ExitKind::Api,
+            "Connection to the console ended unexpectedly.",
+        ),
+    }
+}
+
 async fn finish(client: &connector::Client, job: &str, end: TerminalEnd, out: Output) -> ! {
     match end {
         TerminalEnd::Closed {
