@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { links } from '@shared/routing';
-import { createMissingPermissionLoadStateError } from '@shared/access';
+import { createMissingPermissionLoadStateError, isViewerProjectMember } from '@shared/access';
 import { accessTo } from '@core/models/access.model';
 import { injectProject } from '@core/resolvers/project-access.resolver';
 import {
@@ -84,7 +84,7 @@ export class ConnectRepositoryComponent implements OnInit {
 
   readonly steps = STEPS;
   access = computed(() => accessTo(this.project(), 'createTask'));
-  missingPermission = createMissingPermissionLoadStateError('createTask', 'project');
+  missingPermission = computed(() => createMissingPermissionLoadStateError('createTask', 'project', isViewerProjectMember(this.project())));
   projectName = '';
   step = signal<ConnectStep>('repository');
   stepIndex = computed(() => STEPS.findIndex((s) => s.id === this.step()));

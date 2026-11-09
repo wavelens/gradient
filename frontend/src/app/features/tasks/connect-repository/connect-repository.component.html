@@ -7,7 +7,7 @@
 <gr-page-layout width="form" [breadcrumb]="breadcrumb()" title="Connect repository"
   subtitle="Gradient can build each new commit in a repository and report the result to the Git host.">
   @if (!access().canEdit) {
-    <gr-load-state [error]="missingPermission" />
+    <gr-load-state [error]="missingPermission()" />
   } @else {
     <ol class="connect-steps" aria-label="Steps">
       @for (s of steps; track s.id; let i = $index) {

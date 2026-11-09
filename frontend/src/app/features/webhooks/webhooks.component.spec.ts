@@ -378,6 +378,15 @@ describe('WebhooksComponent', () => {
     expect(root.textContent).not.toContain('Try Again');
   });
 
+  it('tells a non-member of the project that only members can view webhooks', () => {
+    const { root, service } = setup(
+      { webhookScope: 'project', projectAccess: { project: { permissions: [] } } },
+      { project: 'p' },
+    );
+    expect(service.list).not.toHaveBeenCalled();
+    expect(root.textContent).toContain('Only the members of this project can view this.');
+  });
+
   it('shows a team member no access without asking the server', () => {
     const { root, service } = setup({ webhookScope: 'team', teamAccess: { team: { role: 'member' } } }, { team: 'platform' });
     expect(service.list).not.toHaveBeenCalled();

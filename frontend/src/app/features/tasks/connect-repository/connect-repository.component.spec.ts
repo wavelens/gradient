@@ -127,6 +127,11 @@ describe('ConnectRepositoryComponent', () => {
     expect(getSubscribedCaches).not.toHaveBeenCalled();
   });
 
+  it('tells a non-member that only project members can connect a repository', () => {
+    const el = render({}, {}, {}, []).nativeElement as HTMLElement;
+    expect(el.querySelector('gr-load-state')?.textContent).toContain('Only the members of this project can view this.');
+  });
+
   it('ends on the events step with a link to the task', () => {
     const fixture = render({ task: 'app', step: 'events' }, {});
     const link = (fixture.nativeElement as HTMLElement).querySelector('a[href="/project/acme/task/app"]');

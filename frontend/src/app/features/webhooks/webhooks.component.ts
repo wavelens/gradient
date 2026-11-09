@@ -12,7 +12,7 @@ import { EMPTY, catchError, finalize } from 'rxjs';
 import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo, eventNameToReadableText, eventNamePrefixesByNotificationScope, eventNameMatchesAnyPrefix } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
-import { canManageTeam, createMissingPermissionLoadStateError, createNoAccessLoadStateError } from '@shared/access';
+import { canManageTeam, createMissingPermissionLoadStateError, createNoAccessLoadStateError, isViewerCacheMember, isViewerProjectMember } from '@shared/access';
 import { TeamAccessData } from '@core/resolvers/team-access.resolver';
 import { AuthService } from '@core/services/auth.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -169,11 +169,11 @@ export class WebhooksComponent implements OnInit {
   private missingPermission(): MissingPermissionLoadStateError | null {
     if (this.scope.kind === 'project') {
       const project = (this.route.snapshot.data['projectAccess'] as ProjectAccessData | undefined)?.project;
-      return accessTo(project, 'manageWebhooks').canEdit ? null : createMissingPermissionLoadStateError('manageWebhooks', 'project');
+      return accessTo(project, 'manageWebhooks').canEdit ? null : createMissingPermissionLoadStateError('manageWebhooks', 'project', isViewerProjectMember(project));
     }
     if (this.scope.kind === 'cache') {
       const cache = (this.route.parent?.snapshot.data['cacheAccess'] as CacheAccessData | undefined)?.cache;
-      return accessTo(cache, 'manageCacheWebhooks').canEdit ? null : createMissingPermissionLoadStateError('manageCacheWebhooks', 'cache');
+      return accessTo(cache, 'manageCacheWebhooks').canEdit ? null : createMissingPermissionLoadStateError('manageCacheWebhooks', 'cache', isViewerCacheMember(cache));
     }
     if (this.scope.kind === 'team') {
       const team = (this.route.snapshot.data['teamAccess'] as TeamAccessData | undefined)?.team;
