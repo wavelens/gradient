@@ -27,7 +27,7 @@
           <div class="webhook-info">
             <div class="webhook-name">{{ hook.name }}</div>
             <div class="webhook-meta text-secondary">
-              <code>{{ hook.url }}</code>
+              <code>{{ urlWithoutQuery(hook.url) }}</code>
               @let chip = getWebhookCardStatusChip(hook);
               <gr-badge [severity]="chip.severity">{{ chip.label }}</gr-badge>
               @if (hook.last_delivery; as newest) {
@@ -47,10 +47,10 @@
               }
             </div>
           </div>
-          <div class="webhook-actions">
-            <button grButton label="Test" icon="play_arrow" severity="secondary" size="small" [loading]="webhookIdWithTestDeliveryInFlight() === hook.id" (click)="test(hook)"></button>
-            <button grButton label="Deliveries" icon="list" severity="secondary" size="small" (click)="openDeliveries(hook)"></button>
-            <button grButton label="Edit" icon="edit" severity="secondary" size="small" (click)="startEdit(hook)"></button>
+          <div class="webhook-actions phone-icon-buttons">
+            <button grButton label="Test" icon="play_arrow" severity="secondary" size="small" [attr.aria-label]="'Test ' + hook.name" [loading]="webhookIdWithTestDeliveryInFlight() === hook.id" (click)="test(hook)"></button>
+            <button grButton label="Deliveries" icon="list" severity="secondary" size="small" [attr.aria-label]="'Deliveries of ' + hook.name" (click)="openDeliveries(hook)"></button>
+            <button grButton label="Edit" icon="edit" severity="secondary" size="small" [attr.aria-label]="'Edit ' + hook.name" (click)="startEdit(hook)"></button>
             <button grButton icon="more_vert" severity="secondary" size="small" text [loading]="togglingId() === hook.id" [attr.aria-label]="'Actions for ' + hook.name" (click)="openWebhookOverflowMenuAtButton($event, hook, webhookOverflowMenu)"></button>
           </div>
         </div>

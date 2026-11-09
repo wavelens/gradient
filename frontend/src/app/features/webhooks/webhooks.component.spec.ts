@@ -117,6 +117,14 @@ describe('WebhooksComponent', () => {
     expect(items).toEqual(['Rotate secret', 'Disable', 'Delete']);
   });
 
+  it('names the webhook in each row action and keeps a token in the URL off the card', () => {
+    const { root } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([{ ...hook, url: 'https://example.com/hook?token=s3cret#x' }]));
+    const names = Array.from(root.querySelectorAll('.webhook-actions button')).slice(0, 3).map((b) => b.getAttribute('aria-label'));
+    expect(names).toEqual(['Test ci', 'Deliveries of ci', 'Edit ci']);
+    expect(root.querySelector('.webhook-meta code')?.textContent).toBe('https://example.com/hook');
+    expect(root.textContent).not.toContain('s3cret');
+  });
+
   it.each([
     { scope: 'project', trail: ['Projects', 'Acme', 'Settings', 'Event notifications'] },
     { scope: 'cache', trail: ['Caches', 'Main', 'Settings', 'Event notifications'] },

@@ -222,6 +222,15 @@ export class WebhooksComponent implements OnInit {
     });
   }
 
+  urlWithoutQuery(url: string): string {
+    try {
+      const parsed = new URL(url);
+      return parsed.origin + parsed.pathname;
+    } catch {
+      return url.split(/[?#]/)[0];
+    }
+  }
+
   getWebhookCardStatusChip(hook: WebhookResponse): { label: string; severity: BadgeSeverity } {
     const state: WebhookCardState = !hook.active ? 'inactive' : hook.last_delivery?.success === false ? 'failing' : 'active';
     return webhookCardStateBadgeLabelAndColorSeverityByState[state];
