@@ -16,7 +16,7 @@ import {
 import { TaskRepositoryResponse } from '@core/models';
 import { TasksService } from '@core/services/tasks.service';
 import { NotifyService } from '@core/services/notify.service';
-import { apiErrorMessage } from '@core/services/api.service';
+import { ApiError, apiErrorMessage } from '@core/services/api.service';
 import { RepositoryFetchBannerComponent, gitHostSettingsLinks, repositoryHost } from '@shared/git';
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { RelativeTimePipe } from '@shared/text';
@@ -87,40 +87,63 @@ export class RepositoryAccessComponent {
 
   saveUrl(): void {
     if (this.urlError() || this.saving()) return;
+    const url = this.draftUrl().trim();
     this.saving.set(true);
-    this.tasks.updateTask(this.project(), this.task(), { repository: this.draftUrl().trim() }).subscribe({
+    this.tasks.updateTask(this.project(), this.task(), { repository: url }).subscribe({
       next: () => {
         this.saving.set(false);
         this.cancelEdit();
         this.notify.success('Repository URL saved');
         this.changed.emit();
+        this.checkSavedUrl(url);
       },
       error: (error: unknown) => {
         this.saving.set(false);
-        this.notify.failure('Failed to save repository URL', error);
+        this.notify.failure("Couldn't save repository URL", error);
       },
     });
   }
 
   testAccess(): void {
-    const draft = this.editing();
-    if (draft && this.urlError()) return;
-    this.testing.set(true);
-    this.testError.set(null);
-    this.unsavedRepositoryUrlAccessTestPassed.set(false);
-    const url = draft ? this.draftUrl().trim() : this.state().repository;
-    this.tasks.checkRepository(this.project(), this.task(), url).subscribe({
+    if (!this.editing()) {
+      this.checkSavedUrl(this.state().repository);
+      return;
+    }
+    if (this.urlError()) return;
+    this.startCheck();
+    this.tasks.checkRepository(this.project(), this.task(), this.draftUrl().trim()).subscribe({
       next: () => {
         this.testing.set(false);
-        if (draft) this.unsavedRepositoryUrlAccessTestPassed.set(true);
-        else this.changed.emit();
+        this.unsavedRepositoryUrlAccessTestPassed.set(true);
       },
       error: (error: unknown) => {
         this.testing.set(false);
-        this.testError.set(apiErrorMessage(error, 'Failed to test access'));
-        if (!draft) this.changed.emit();
+        this.testError.set(apiErrorMessage(error, "Couldn't test access"));
       },
     });
+  }
+
+  private checkSavedUrl(url: string): void {
+    this.startCheck();
+    this.tasks.checkRepository(this.project(), this.task(), url).subscribe({
+      next: () => {
+        this.testing.set(false);
+        this.changed.emit();
+      },
+      error: (error: unknown) => {
+        this.testing.set(false);
+        if (!(error instanceof ApiError && error.code === 'repository_unreachable')) {
+          this.testError.set(apiErrorMessage(error, "Couldn't test access"));
+        }
+        this.changed.emit();
+      },
+    });
+  }
+
+  private startCheck(): void {
+    this.testing.set(true);
+    this.testError.set(null);
+    this.unsavedRepositoryUrlAccessTestPassed.set(false);
   }
 
   installDeployKey(): void {

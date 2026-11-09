@@ -48,14 +48,36 @@ describe('RepositoryAccessComponent', () => {
   });
 
   it('tests access to the saved URL and reloads the state either way', () => {
-    const checkRepository = vi.fn(() => throwError(() => new ApiError('Permission denied (publickey)', 400)));
+    const checkRepository = vi.fn(() => throwError(() => new ApiError('Task not found', 404)));
     const fixture = render({}, { checkRepository });
     const changed = vi.fn();
     fixture.componentInstance.changed.subscribe(changed);
     fixture.componentInstance.testAccess();
     expect(checkRepository).toHaveBeenCalledWith('acme', 'app', 'git@forgejo.example.com:acme/app.git');
-    expect(fixture.componentInstance.testError()).toContain('Permission denied');
+    expect(fixture.componentInstance.testError()).toContain('Task not found');
     expect(changed).toHaveBeenCalled();
+  });
+
+  it('leaves a failed fetch of the saved URL to the banner instead of repeating it', () => {
+    const checkRepository = vi.fn(() => throwError(() => new ApiError('Permission denied (publickey)', 400, 'repository_unreachable')));
+    const fixture = render({}, { checkRepository });
+    fixture.componentInstance.testAccess();
+    expect(fixture.componentInstance.testError()).toBeNull();
+  });
+
+  it('checks a changed URL right after saving it', () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const checkRepository = vi.fn(() => of('1a2b'));
+    const fixture = render({}, { updateTask, checkRepository });
+    const comp = fixture.componentInstance;
+    const changed = vi.fn();
+    comp.changed.subscribe(changed);
+    comp.startEdit();
+    comp.draftUrl.set('git://gradient.local/states');
+    comp.saveUrl();
+    expect(updateTask).toHaveBeenCalledWith('acme', 'app', { repository: 'git://gradient.local/states' });
+    expect(checkRepository).toHaveBeenCalledWith('acme', 'app', 'git://gradient.local/states');
+    expect(changed).toHaveBeenCalledTimes(2);
   });
 
   it('tests the unsaved URL while editing without touching the saved state', () => {
