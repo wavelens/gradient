@@ -30,6 +30,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 
 const revokeInvitation = vi.fn().mockReturnValue(of('Invitation revoked'));
 const getMembers = vi.fn();
+const getRoles = vi.fn();
 const removeMember = vi.fn();
 const addMember = vi.fn();
 const deleteRole = vi.fn();
@@ -41,6 +42,10 @@ function setup(access: AccessState, permissions?: Permission[], role?: string | 
   deleteRole.mockReset().mockReturnValue(of(true));
   revokeInvitation.mockReset().mockReturnValue(of('Invitation revoked'));
   getMembers.mockReset().mockReturnValue(of([{ id: 'alice', name: 'Admin' }]));
+  getRoles.mockReset().mockReturnValue(of({
+    roles: [{ id: 'r1', name: 'Admin', builtin: true, permissions: [], project: null }],
+    available_permissions: [],
+  }));
   removeMember.mockReset().mockReturnValue(of('ok'));
   addMember.mockReset().mockReturnValue(of('ok'));
   notify.success.mockClear();
@@ -60,11 +65,7 @@ function setup(access: AccessState, permissions?: Permission[], role?: string | 
         useValue: {
           getProject: () => of({ display_name: 'Acme' }),
           getMembers,
-          getRoles: () =>
-            of({
-              roles: [{ id: 'r1', name: 'Admin', builtin: true, permissions: [], project: null }],
-              available_permissions: [],
-            }),
+          getRoles,
           getInvitations: () =>
             of([
               {
@@ -270,16 +271,42 @@ describe('MembersRolesComponent - writes', () => {
     expect(loadInvitations).toHaveBeenCalled();
   });
 
-  it('preselects no role, so adding a member needs a deliberate role choice', async () => {
+  it('lists roles from lowest to highest access and preselects the lowest for a new member', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    getRoles.mockReturnValue(of({
+      roles: [
+        { id: 'r1', name: 'Admin', builtin: true, permissions: [], project: null },
+        { id: 'r2', name: 'releaser', builtin: false, permissions: [], project: 'o' },
+        { id: 'r3', name: 'View', builtin: true, permissions: [], project: null },
+      ],
+      available_permissions: [],
+    }));
     await settled(fixture);
     fixture.componentInstance.openAddMemberDialog();
-    fixture.componentInstance.newMember.user = 'dave';
-    fixture.detectChanges();
 
-    expect(fixture.componentInstance.newMember.role).toBe('');
-    const add = Array.from(document.querySelectorAll<HTMLButtonElement>('.gr-dialog button')).find((b) => b.textContent?.trim() === 'Invite');
-    expect(add?.disabled).toBe(true);
+    expect(fixture.componentInstance.roleNames()).toEqual(['View', 'Admin', 'releaser']);
+    expect(fixture.componentInstance.newMember.role).toBe('View');
+  });
+
+  it('counts the members of each role and blocks deleting a role that members still have', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    getMembers.mockReturnValue(of([{ id: 'alice', name: 'releaser' }, { id: 'bob', name: 'releaser' }]));
+    getRoles.mockReturnValue(of({
+      roles: [
+        { id: 'r2', name: 'releaser', builtin: false, permissions: [], project: 'o' },
+        { id: 'r4', name: 'auditor', builtin: false, permissions: [], project: 'o' },
+      ],
+      available_permissions: [],
+    }));
+    await settled(fixture);
+    const root: HTMLElement = fixture.nativeElement;
+    const rowText = (name: string) => Array.from(root.querySelectorAll('gr-row')).find((row) => row.textContent?.includes(name) && row.querySelector('[aria-label^="Delete role"]'));
+    const deleteButton = (name: string) => root.querySelector<HTMLButtonElement>(`[aria-label="Delete role ${name}"]`)!;
+
+    expect(rowText('releaser')?.textContent).toContain('2 members');
+    expect(rowText('auditor')?.textContent).toContain('0 members');
+    expect(deleteButton('releaser').disabled).toBe(true);
+    expect(deleteButton('auditor').disabled).toBe(false);
   });
 });
 

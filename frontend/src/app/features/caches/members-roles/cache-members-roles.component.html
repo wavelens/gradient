@@ -127,12 +127,13 @@
       >
           <gr-row-list>
             @for (role of roles(); track role.id) {
+              @let memberCount = memberCountByRoleName()[role.name] ?? 0;
               <gr-row icon="shield">
                 {{ role.name }}
                 @if (role.builtin) {
                   <gr-badge>Built-in</gr-badge>
                 }
-                <span slot="meta">{{ rolePermissionLabel(role) }}</span>
+                <span slot="meta">{{ plural(memberCount, 'member') }} · {{ rolePermissionLabel(role) }}</span>
                 <div slot="actions">
                   @if (!role.builtin) {
                     <button
@@ -153,7 +154,8 @@
                       icon="delete"
                       severity="danger"
                       [attr.aria-label]="'Delete role ' + role.name"
-                      [disabled]="savingRole() || deletingRole()"
+                      [disabled]="savingRole() || deletingRole() || memberCount > 0"
+                      [grTooltip]="memberCount > 0 ? 'Assign another role to members of this role before deleting.' : ''"
                       [appManagedDisable]="roleAccess()"
                       (click)="deleteRole(role)"
                     ></button>

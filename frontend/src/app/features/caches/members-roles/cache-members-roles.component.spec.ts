@@ -237,6 +237,15 @@ describe('CacheMembersRolesComponent - confirmed removals', () => {
     expect(deleteRole).toHaveBeenCalledWith('my-cache', 'r2');
     expect(notify.success).toHaveBeenCalledWith('Role deleted');
   });
+
+  it('counts the members of each role and preselects the lowest role for a new member', async () => {
+    const fixture = setup(true);
+    await settled(fixture);
+    fixture.componentInstance.openAddMemberDialog();
+    const roleRow = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-row')).find((row) => row.textContent?.includes('Built-in'));
+    expect(roleRow?.textContent).toContain('1 member ·');
+    expect(fixture.componentInstance.newMember.role).toBe('Admin');
+  });
 });
 
 describe('CacheMembersRolesComponent - role change', () => {

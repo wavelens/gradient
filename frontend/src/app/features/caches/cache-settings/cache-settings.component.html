@@ -181,8 +181,8 @@
               slot="actions"
               grButton
               [label]="c.active ? 'Deactivate' : 'Activate'"
-              [icon]="c.active ? 'close' : 'check'"
-              [severity]="c.active ? 'danger' : 'secondary'"
+              [icon]="c.active ? 'pause' : 'play_arrow'"
+              severity="secondary"
               (click)="toggleActive()"
               [loading]="toggling()"
             ></button>

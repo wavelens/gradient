@@ -27,10 +27,20 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
+  TooltipDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, createNoAccessLoadStateError, isViewerCacheMember, requestIfCacheMember } from '@shared/access';
+import {
+  WritableDirective,
+  ManagedDisableDirective,
+  ServerConfigurationManagedBannerComponent,
+  compareRoleNamesByBuiltInAccessThenName,
+  countMembersByRoleName,
+  createNoAccessLoadStateError,
+  isViewerCacheMember,
+  requestIfCacheMember,
+} from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, finalize, merge, tap } from 'rxjs';
@@ -43,7 +53,7 @@ import {
   PermissionEntry,
   PendingInvitationItem,
 } from '@core/models';
-import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { permissionLabel, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 
 interface RoleFormState {
   name: string;
@@ -75,6 +85,7 @@ interface RoleFormState {
     RowComponent,
     BadgeComponent,
     SelectComponent,
+    TooltipDirective,
   ],
   templateUrl: './cache-members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -125,13 +136,8 @@ export class CacheMembersRolesComponent implements OnInit {
   newMember = { user: '', role: '' };
   roleForm: RoleFormState = { name: '', permissions: {} };
 
-  roleNameById = computed(() => {
-    const map: Record<string, string> = {};
-    for (const role of this.roles()) {
-      map[role.name] = role.name;
-    }
-    return map;
-  });
+  memberCountByRoleName = computed(() => countMembersByRoleName(this.members()));
+  readonly plural = plural;
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => merge(
@@ -200,7 +206,7 @@ export class CacheMembersRolesComponent implements OnInit {
     this.rolesLoadError.set(null);
     requestIfCacheMember(this.cache(), () => this.cachesService.getRoles(this.cacheName)).subscribe({
       next: (response) => {
-        this.roles.set(response.roles);
+        this.roles.set([...response.roles].sort((a, b) => compareRoleNamesByBuiltInAccessThenName(a.name, b.name)));
         this.availablePermissions.set(response.available_permissions);
         this.rolesLoading.set(false);
       },
@@ -223,7 +229,7 @@ export class CacheMembersRolesComponent implements OnInit {
   }
 
   openAddMemberDialog(): void {
-    this.newMember = { user: '', role: '' };
+    this.newMember = { user: '', role: this.roles()[0]?.name ?? '' };
     this.memberError.set(null);
     this.showAddMemberDialog.set(true);
   }

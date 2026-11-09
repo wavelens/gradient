@@ -221,12 +221,14 @@ describe('TeamMembersComponent', () => {
     expect(dialog.getAttribute('aria-busy')).toBe('true');
   });
 
-  it('reports a refused role change', () => {
+  it('reports a saved and a refused role change', () => {
     const { fixture, updateMember, notify } = setup();
+    fixture.componentInstance.updateRole('bob', 'admin');
+    expect(notify.success).toHaveBeenCalledWith('Member role saved');
     const failure = new ApiError('Forbidden', 403);
     updateMember.mockReturnValue(throwError(() => failure));
     fixture.componentInstance.updateRole('bob', 'admin');
-    expect(notify.failure).toHaveBeenCalledWith('Role change failed', failure);
+    expect(notify.failure).toHaveBeenCalledWith("Couldn't change the member's role", failure);
   });
 
   it('shows the picked role while saving and the saved role again after a failure', () => {

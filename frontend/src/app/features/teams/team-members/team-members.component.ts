@@ -64,8 +64,8 @@ export class TeamMembersComponent implements OnInit {
   private auth = inject(AuthService);
 
   readonly roles: { label: string; value: TeamRole }[] = [
-    { label: 'Admin', value: 'admin' },
     { label: 'Member', value: 'member' },
+    { label: 'Admin', value: 'admin' },
   ];
 
   team = input.required<TeamResponse>();
@@ -188,11 +188,12 @@ export class TeamMembersComponent implements OnInit {
       next: () => {
         this.members.update((members) => members.map((member) => (member.user === user ? { ...member, role } : member)));
         this.pendingMemberRoleSelection.set(null);
+        this.notify.success('Member role saved');
         if (this.isSignedInUser(user)) this.currentUserTeamAccessChanged.emit(false);
       },
       error: (err: unknown) => {
         this.pendingMemberRoleSelection.set(null);
-        this.notify.failure('Role change failed', err);
+        this.notify.failure("Couldn't change the member's role", err);
       },
     });
   }

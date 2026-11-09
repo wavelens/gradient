@@ -12,3 +12,4 @@ export * from './team-access';
 export * from './missing-permission';
 export * from './request-if-member';
 export * from './settings-access';
+export * from './role-order';
