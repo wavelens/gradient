@@ -11,7 +11,7 @@ import { LoadStateComponent, PageLayoutComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { formatBytes, formatCount, formatDuration, monthDayClockTime } from '@shared/text';
+import { formatBytes, formatCount, formatDuration, monthDayClockTime, plural } from '@shared/text';
 import { TaskMetricPoint, TaskMetricsResponse } from '@core/models';
 
 const CHART_COLORS = {
@@ -93,5 +93,5 @@ export class TaskMetricsComponent implements OnInit {
 
   readonly formatDuration = formatDuration;
   readonly formatBytes = formatBytes;
-  readonly formatDeps = (v: number) => `${formatCount(v)} deps`;
+  readonly formatDeps = (v: number) => (v === 1 ? plural(v, 'dep') : `${formatCount(v)} deps`);
 }

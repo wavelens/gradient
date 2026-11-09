@@ -38,6 +38,12 @@ describe('TaskMetricsComponent', () => {
     expect(root.textContent).not.toContain('No completed or failed evaluations yet.');
   });
 
+  it('counts dependencies in the singular for one', () => {
+    const { fixture } = render(() => of({ points: [], keep_evaluations: 30 }));
+    const format = fixture.componentInstance.formatDeps;
+    expect([0, 1, 1200].map(format)).toEqual(['0 deps', '1 dep', '1.2k deps']);
+  });
+
   it('loads the metrics again on Try Again', () => {
     const { root, metrics, fixture } = render(() => throwError(() => new Error('down')));
     metrics.mockImplementation(() => of({ points: [], keep_evaluations: 30 }));
