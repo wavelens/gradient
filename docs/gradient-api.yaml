@@ -3072,7 +3072,7 @@ paths:
       tags:
       - caches
       summary: List caches
-      description: Get a paginated list of binary caches for the current user. Include caches that belong to the user, caches shared with the user as a member, and caches available through a project subscription. Sort the list by display name.
+      description: Get a paginated list of binary caches for the current user. Include caches that belong to the user, caches that other members share with the user, and caches that project subscriptions make available. Sort the list by display name. An API key pinned to one project can return only caches for subscriptions of that project.
       operationId: listCaches
       parameters:
       - name: page
@@ -5965,7 +5965,7 @@ paths:
         dependency failed is not listed; it is counted under the build that
         caused it.
 
-        `newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present.
+        `newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present. Exec entry points don't count as packages. Exec jobs report them.
       operationId: getEvaluationSummary
       parameters:
       - name: evaluation
@@ -6868,7 +6868,7 @@ paths:
       tags:
       - projects
       summary: List projects
-      description: Return all projects where the current user is a member, along with the caller's role and `permissions`.
+      description: Return all projects with current user as member, and caller's role and `permissions`. An API key for one project can list only that project.
       operationId: listProjects
       parameters:
       - name: page
@@ -11240,7 +11240,7 @@ paths:
       tags:
       - teams
       summary: Change team
-      description: Needs Admin in the team. Only superusers set `oidc_group`, `scim_group` and the `new_project_*` fields. State-managed teams refuse changes.
+      description: Callers need Admin access in the team. Only superusers set the `oidc_group`, `scim_group`, and `new_project_*` fields. Set `new_project_users` only together with `new_project_role`. Teams under state management reject changes.
       operationId: patchTeam
       parameters:
       - name: team
@@ -15417,12 +15417,15 @@ components:
       required:
       - id
       - name
+      - display_name
       - mode
       - status
       properties:
         id:
           $ref: '#/components/schemas/CacheId'
         name:
+          type: string
+        display_name:
           type: string
         mode:
           $ref: '#/components/schemas/CacheSubscriptionMode'
@@ -17159,6 +17162,11 @@ components:
         started_at:
           type: string
           format: date-time
+        program_started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
         ended_at:
           type:
           - string
@@ -18428,6 +18436,10 @@ components:
           type: string
         invited_by:
           type: string
+        invited_by_display_name:
+          type:
+          - string
+          - 'null'
         created_at:
           type: string
           format: date-time
@@ -20223,6 +20235,7 @@ components:
       - created_by
       - created_at
       - running_evaluations
+      - waiting_evaluations
       - permissions
       properties:
         id:
@@ -20251,6 +20264,9 @@ components:
           type: string
           format: date-time
         running_evaluations:
+          type: integer
+          format: int64
+        waiting_evaluations:
           type: integer
           format: int64
         role:
@@ -20305,6 +20321,10 @@ components:
           enable_build:
             type: boolean
           team:
+            type:
+            - string
+            - 'null'
+          team_display_name:
             type:
             - string
             - 'null'

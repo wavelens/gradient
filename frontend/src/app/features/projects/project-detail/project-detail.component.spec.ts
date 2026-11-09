@@ -52,9 +52,9 @@ function render(
 
 describe('ProjectDetailComponent subscribed caches', () => {
   const caches: CacheSubscriptionItem[] = [
-    { id: 'c1', name: 'main', mode: 'ReadWrite', status: 'active' },
-    { id: 'c2', name: 'research', mode: 'ReadOnly', status: 'active' },
-    { id: 'c3', name: 'waiting', mode: 'ReadOnly', status: 'pending' },
+    { id: 'c1', name: 'main', display_name: 'Main', mode: 'ReadWrite', status: 'active' },
+    { id: 'c2', name: 'research', display_name: 'Research', mode: 'ReadOnly', status: 'active' },
+    { id: 'c3', name: 'waiting', display_name: 'Waiting', mode: 'ReadOnly', status: 'pending' },
   ];
 
   it('names the active caches in the header and links to the cache subscriptions', () => {

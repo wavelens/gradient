@@ -441,6 +441,7 @@ export interface CacheSubscribersResponse {
 export interface CacheSubscriptionItem {
   id: CacheId;
   name: string;
+  display_name: string;
   mode: CacheSubscriptionMode;
   status: SubscriptionStatus;
 }
@@ -1048,6 +1049,7 @@ export interface ExecJobAttemptView {
   number: number;
   worker: string;
   started_at: string;
+  program_started_at?: string | null;
   ended_at?: string | null;
   end_reason?: AttemptEndReason | null;
   message?: string | null;
@@ -1470,6 +1472,7 @@ export interface InviteItem {
   scope_display_name: string;
   role: string;
   invited_by: string;
+  invited_by_display_name?: string | null;
   created_at: string;
   expires_at: string;
 }
@@ -2094,6 +2097,7 @@ export interface ProjectSummary {
   created_by: UserId;
   created_at: string;
   running_evaluations: number;
+  waiting_evaluations: number;
   role?: string | null;
   permissions: Permission[];
 }
@@ -2111,6 +2115,7 @@ export type ProjectWorkerEntry = WorkerConnection & {
   enable_eval: boolean;
   enable_build: boolean;
   team?: string | null;
+  team_display_name?: string | null;
   gradient_ci: boolean;
   live?: WorkerLiveInfo | null;
 };
