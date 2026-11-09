@@ -65,5 +65,19 @@
   padding: $spacing-md;
   border-top: 1px solid var(--gr-border-subtle);
 
-  &:empty { display: none; }
+  &:empty, &[hidden] { display: none; }
+}
+
+.gr-dialog__discard {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $spacing-sm;
+  padding: $spacing-md;
+  border-top: 1px solid var(--gr-border-subtle);
+}
+
+.gr-dialog__discard-question {
+  margin: 0 auto 0 0;
+  font-weight: 600;
 }

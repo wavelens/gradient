@@ -20,6 +20,7 @@ import { DialogComponent } from './dialog.component';
       [closable]="closable()"
       [error]="error()"
       [busy]="busy()"
+      [confirmDiscard]="discard()"
       width="500px"
       (hide)="hidden.set(hidden() + 1)"
     >
@@ -40,6 +41,7 @@ class HostComponent {
   closable = signal(true);
   error = signal<string | null>(null);
   busy = signal(false);
+  discard = signal(false);
   hidden = signal(0);
   confirmDisabled = signal(false);
   withField = signal(false);
@@ -141,6 +143,40 @@ describe('DialogComponent', () => {
     vi.advanceTimersByTime(500);
     expect(host.hidden()).toBe(0);
     expect([...warn.mock.calls, ...error.mock.calls]).toEqual([]);
+  });
+
+  it('asks before Escape, backdrop or close button drop unsaved edits', () => {
+    const fixture = render();
+    const prompt = () => panel()?.querySelector('.gr-dialog__discard');
+    const promptButton = (label: string) =>
+      Array.from(prompt()?.querySelectorAll<HTMLButtonElement>('button') ?? []).find((b) => b.textContent?.trim() === label)!;
+    fixture.componentInstance.discard.set(true);
+    fixture.componentInstance.open.set(true);
+    fixture.detectChanges();
+
+    escape();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.open()).toBe(true);
+    expect(prompt()?.textContent).toContain('Discard changes?');
+    expect(panel()!.querySelector<HTMLElement>('.gr-dialog__footer')!.hidden).toBe(true);
+
+    escape();
+    fixture.detectChanges();
+    expect(prompt()).toBeNull();
+
+    (document.querySelector('.gr-dialog-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    promptButton('Continue editing').click();
+    fixture.detectChanges();
+    expect(prompt()).toBeNull();
+    expect(fixture.componentInstance.open()).toBe(true);
+
+    (panel()!.querySelector('.gr-dialog__close') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    promptButton('Discard').click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.open()).toBe(false);
+    expect(fixture.componentInstance.hidden()).toBe(1);
   });
 
   it('hides the close button when it is not closable', () => {
