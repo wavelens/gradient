@@ -49,6 +49,12 @@ describe('gr-page-layout', () => {
     expect(root.querySelector('.breadcrumb-current')?.textContent).toContain('Integrations');
   });
 
+  it('keeps the full name of every crumb in its title', async () => {
+    const root = await renderCrumbs([{ label: 'a-very-long-project-name', link: ['/project', 'a'] }, { label: 'Settings' }]);
+    const titles = Array.from(root.querySelectorAll('.breadcrumb > :not(.breadcrumb-separator)')).map((crumb) => crumb.getAttribute('title'));
+    expect(titles).toEqual(['a-very-long-project-name', 'Settings']);
+  });
+
   async function render() {
     const fixture = TestBed.createComponent(Host);
     fixture.detectChanges();

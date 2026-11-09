@@ -22,11 +22,11 @@ export interface Crumb {
     <nav class="breadcrumb" aria-label="Breadcrumb">
       @for (crumb of trail(); track $index; let last = $last) {
         @if (last || !crumb.link) {
-          <span class="breadcrumb-current" [attr.aria-current]="last ? 'page' : null" [attr.title]="last ? crumb.label : null">
+          <span class="breadcrumb-current" [attr.aria-current]="last ? 'page' : null" [attr.title]="crumb.label">
             @if (crumb.label === null) { <gr-skeleton width="8ch" /> } @else { {{ crumb.label }} }
           </span>
         } @else {
-          <a class="breadcrumb-link" [routerLink]="crumb.link">
+          <a class="breadcrumb-link" [routerLink]="crumb.link" [attr.title]="crumb.label">
             @if (crumb.label === null) { <gr-skeleton width="8ch" /> } @else { {{ crumb.label }} }
           </a>
         }

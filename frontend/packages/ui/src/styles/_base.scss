@@ -88,15 +88,13 @@ a {
 
   > :not(.breadcrumb-separator) {
     min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
-  > [aria-current='page'] {
-    max-width: 100%;
+    max-width: 20rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  > [aria-current='page'] { max-width: 100%; }
 }
 
 .breadcrumb-link,
