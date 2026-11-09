@@ -11,7 +11,7 @@
   <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="shownGrants().length === 0"
     loadingMessage="Loading teams..." errorTitle="Failed to load teams" (retry)="load()"
     emptyIcon="groups" emptyTitle="No teams"
-    [emptyMessage]="part() === 'workers' ? 'Grant a team to run this project\'s builds on the team\'s workers.' : 'Grant a team to give its members a role here.'">
+    [emptyMessage]="emptyMessage()">
     <gr-row-list>
       @for (grant of shownGrants(); track grant.team) {
         <gr-row icon="groups" [link]="teamLink(grant.team)" [linkLabel]="'Open team ' + grant.display_name">
@@ -24,7 +24,7 @@
               <gr-badge severity="warning">Pending</gr-badge>
             }
             @if (canEdit()) {
-              <button grButton label="Remove" icon="close" severity="danger" [attr.aria-label]="'Remove team access ' + grant.display_name" (click)="remove(grant)"></button>
+              <button grButton label="Remove" icon="close" severity="danger" [attr.aria-label]="(part() === 'workers' ? 'Stop using workers of ' : 'Remove role of ') + grant.display_name" (click)="remove(grant)"></button>
             }
           </div>
         </gr-row>

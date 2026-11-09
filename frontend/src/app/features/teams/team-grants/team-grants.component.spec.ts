@@ -83,6 +83,38 @@ describe('TeamGrantsComponent', () => {
     expect(text()).not.toContain('No teams');
   });
 
+  it.each([
+    ['users', true, 'Grant a team to give its members a role here.'],
+    ['users', false, 'No team has a role here.'],
+    ['workers', true, "Grant a team to run this project's builds on the team's workers."],
+    ['workers', false, "No team's workers run this project's builds."],
+  ] as const)('tells the %s part with edit access %s what an empty list means', (part, canEdit, message) => {
+    const { fixture, service, component, text } = setup('project', part);
+    service.projectGrants = () => of([]);
+    fixture.componentRef.setInput('canEdit', canEdit);
+    component.load();
+    fixture.detectChanges();
+    expect(text()).toContain(message);
+  });
+
+  it('names what Remove takes away on each part', () => {
+    const users = setup('project', 'users');
+    expect(users.fixture.nativeElement.querySelector('[aria-label="Remove role of Platform"]')).not.toBeNull();
+    TestBed.resetTestingModule();
+    const workers = setup('project', 'workers');
+    expect(workers.fixture.nativeElement.querySelector('[aria-label^="Stop using workers of "]')).not.toBeNull();
+  });
+
+  it('drops a grants answer that arrives after the page closed', () => {
+    const late = new Subject<TeamGrantEntry[]>();
+    const { fixture, service, component } = setup('project', 'users');
+    service.projectGrants = () => late;
+    component.load();
+    fixture.destroy();
+    late.next([]);
+    expect(late.observed).toBe(false);
+  });
+
   it('shows a cache visitor without a cache role no access and asks the server nothing', () => {
     const { service, text } = setup('cache', undefined, false, []);
     expect(service.cacheGrants).not.toHaveBeenCalled();

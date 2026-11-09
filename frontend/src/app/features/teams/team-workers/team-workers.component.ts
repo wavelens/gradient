@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -73,8 +73,6 @@ export class TeamWorkersComponent implements OnInit {
   config = inject(ConfigService);
 
   team = input.required<TeamResponse>();
-  hideNoWorkersCardWhenCombinedTeamAccessCardIsShown = input(false);
-  allWorkerCountChange = output<number>();
   workers = signal<TeamWorkerEntry[]>([]);
   showOffline = signal(false);
   loading = signal(true);
@@ -115,7 +113,7 @@ export class TeamWorkersComponent implements OnInit {
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => this.loading() || this.loadError() !== null ? EMPTY :
-      this.teams.workers(this.teamName).pipe(tap((workers) => this.setTeamWorkersAndEmitCount(workers))));
+      this.teams.workers(this.teamName).pipe(tap((workers) => this.workers.set(workers))));
   }
 
   ngOnInit(): void {
@@ -127,7 +125,7 @@ export class TeamWorkersComponent implements OnInit {
     this.loadError.set(null);
     this.teams.workers(this.teamName).subscribe({
       next: (workers) => {
-        this.setTeamWorkersAndEmitCount(workers);
+        this.workers.set(workers);
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -135,11 +133,6 @@ export class TeamWorkersComponent implements OnInit {
         this.loading.set(false);
       },
     });
-  }
-
-  private setTeamWorkersAndEmitCount(workers: TeamWorkerEntry[]): void {
-    this.workers.set(workers);
-    this.allWorkerCountChange.emit(workers.length);
   }
 
   openRegister(): void {

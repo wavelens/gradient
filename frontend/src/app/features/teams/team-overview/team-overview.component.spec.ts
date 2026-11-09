@@ -92,7 +92,7 @@ function headings(element: HTMLElement): string[] {
 describe('TeamOverviewComponent', () => {
   it('manages members and workers on the team page itself, workers below projects and caches', () => {
     const sections = headings(setup('admin').root).filter((heading) => !heading.startsWith('No '));
-    expect(sections).toEqual(['Requests', 'Members', 'Team Access', 'Workers']);
+    expect(sections).toEqual(['Requests', 'Members', 'Projects and Caches', 'Workers']);
   });
 
   it('picks up new grants, members and workers while the page stays open', () => {
@@ -114,12 +114,14 @@ describe('TeamOverviewComponent', () => {
     }
   });
 
-  it('shows a new team one access card with the project and cache links instead of two empty states', () => {
+  it('keeps one section title for a new team and gives workers their own empty state', () => {
     const { fixture, root } = setup('admin');
     fixture.detectChanges();
-    expect(headings(root)).toContain('Team Access');
+    expect(headings(root)).toContain('Projects and Caches');
+    expect(headings(root)).not.toContain('Team Access');
     expect(root.textContent).toContain('Members & Roles');
-    expect(root.textContent).not.toContain('No online workers');
+    expect(root.textContent).not.toContain('or workers');
+    expect(root.textContent).toContain('No online workers');
     const links = Array.from(root.querySelectorAll<HTMLAnchorElement>('a[grButton]')).map((link) => link.getAttribute('href'));
     expect(links).toEqual(expect.arrayContaining(['/projects', '/caches']));
   });

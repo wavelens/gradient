@@ -7,6 +7,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   OnInit,
   computed,
   inject,
@@ -16,6 +17,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule, type UrlTree } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable } from 'rxjs';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -73,6 +75,7 @@ export class TeamGrantsComponent implements OnInit {
   private authService = inject(AuthService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private destroyRef = inject(DestroyRef);
 
   kind = input.required<'project' | 'cache'>();
   name = input.required<string>();
@@ -89,6 +92,11 @@ export class TeamGrantsComponent implements OnInit {
   loading = signal(true);
   loadError = signal<unknown>(null);
   shownGrants = computed(() => this.allGrants().filter((grant) => grant[this.part()]));
+  emptyMessage = computed(() => {
+    const workers = this.part() === 'workers';
+    if (this.canEdit()) return workers ? "Grant a team to run this project's builds on the team's workers." : 'Grant a team to give its members a role here.';
+    return workers ? "No team's workers run this project's builds." : 'No team has a role here.';
+  });
   myTeams = signal<TeamSummary[]>([]);
   suggestions = signal<AutoCompleteSuggestion[]>([]);
   grantError = signal<string | null>(null);
@@ -102,7 +110,7 @@ export class TeamGrantsComponent implements OnInit {
 
   ngOnInit(): void {
     this.load();
-    this.teams.list().subscribe({ next: (mine) => this.myTeams.set(mine) });
+    this.teams.list().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({ next: (mine) => this.myTeams.set(mine) });
   }
 
   teamLink(team: string): UrlTree | undefined {
@@ -115,7 +123,7 @@ export class TeamGrantsComponent implements OnInit {
       : requestIfCacheMember(this.cacheWithViewerPermissions(), () => this.teams.cacheGrants(this.name()), 'viewCache');
     this.loadError.set(null);
     this.loading.set(this.allGrants().length === 0);
-    grants.subscribe({
+    grants.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (items) => {
         this.allGrants.set(items);
         this.teamGrantsWithMemberRoles.emit(items.filter((grant) => grant.users));
@@ -160,7 +168,7 @@ export class TeamGrantsComponent implements OnInit {
 
   teamCreated(team: string): void {
     this.createForGrant = false;
-    this.teams.list().subscribe({ next: (mine) => this.myTeams.set(mine) });
+    this.teams.list().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({ next: (mine) => this.myTeams.set(mine) });
     this.form = { ...this.form, team };
     this.showGrant.set(true);
   }

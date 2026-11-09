@@ -26,7 +26,7 @@
       loadingMessage="Loading workers..."
       errorTitle="Failed to load workers"
       emptyIcon="construction"
-      [emptyTitle]="hideNoWorkersCardWhenCombinedTeamAccessCardIsShown() ? undefined : 'No online workers'"
+      emptyTitle="No online workers"
       emptyMessage="A team worker builds for every project that grants the team's workers."
       (retry)="load()"
     >
