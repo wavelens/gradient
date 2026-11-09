@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -14,8 +14,6 @@ import { WorkersService } from '@core/services/workers.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { injectProject } from '@core/resolvers/project-access.resolver';
-import { TeamsService } from '@core/services/teams.service';
-import { AuthService } from '@core/services/auth.service';
 import {
   AccessState,
   accessTo,
@@ -26,7 +24,6 @@ import {
   gradientCiHost,
   gradientCiKeysUrl,
   listedWorkers,
-  TeamSummary,
   ProjectWorkerEntry,
   RegisterWorkerResponse,
   WorkerConnection,
@@ -55,7 +52,7 @@ import {
 import { NotifyService } from '@core/services/notify.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { AllowedCapabilitiesComponent, GradientCiConnectComponent, LabelHelpComponent } from '@shared/ui';
-import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canOpenTeam, requestIfProjectMember } from '@shared/access';
+import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { fieldChecks } from '@shared/forms';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
@@ -105,12 +102,10 @@ export class WorkersComponent implements OnInit {
   private messageService = inject(MessageService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
-  private teamsService = inject(TeamsService);
-  private authService = inject(AuthService);
   config = inject(ConfigService);
-  private myTeams = signal<TeamSummary[]>([]);
 
   access = computed(() => accessTo(this.resolvedProject(), 'manageWorkers'));
+  private teamGrants = viewChild(TeamGrantsComponent);
 
   // Activate/Deactivate and Fire Test stay available on state-managed workers:
   // state restores `active` on restart and a test changes nothing.
@@ -163,8 +158,9 @@ export class WorkersComponent implements OnInit {
     const canEdit = this.access().canEdit;
     const rowLocked = this.access().managed;
     if (worker.team) {
+      const teamLink = this.teamGrants()?.teamLink(worker.team);
       return [
-        ...(this.canOpenTeam(worker.team) ? [{ label: 'Manage on team', icon: 'groups', routerLink: links.team(worker.team) }] : []),
+        ...(teamLink ? [{ label: 'Manage on team', icon: 'groups', routerLink: teamLink }] : []),
         ...(canEdit ? [{ label: 'Fire Test', icon: 'bolt', disabled: busy, command: () => this.fireTest(worker) }] : []),
       ];
     }
@@ -207,11 +203,6 @@ export class WorkersComponent implements OnInit {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.loadWorkers();
     this.loadCacheSubscriptions();
-    this.teamsService.list().subscribe({ next: (mine) => this.myTeams.set(mine), error: () => {} });
-  }
-
-  canOpenTeam(team: string): boolean {
-    return canOpenTeam(this.authService.user(), this.myTeams(), team);
   }
 
   constructor() {
