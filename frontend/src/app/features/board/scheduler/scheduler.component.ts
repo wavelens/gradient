@@ -14,6 +14,8 @@ import { scoringRuleClassNameToReadableLabel, schedulerScoreDecimalPipeDigitsFor
 import { clockTime, formatDuration } from '@shared/text';
 import { MetricPoint, ScoringSummary, RuleDescription } from '@core/models';
 
+const WHOLE_NUMBER = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+
 @Component({
   selector: 'app-board-scheduler',
   standalone: true,
@@ -105,7 +107,7 @@ export class BoardSchedulerComponent implements OnInit {
   });
 
   histogramCategories = computed(() =>
-    (this.summary()?.histogram ?? []).map((b) => b.lo.toFixed(1))
+    (this.summary()?.histogram ?? []).map((b) => WHOLE_NUMBER.format(b.lo))
   );
   histogramSeries = computed(() => [
     { name: 'assignments', data: (this.summary()?.histogram ?? []).map((b) => b.count) },

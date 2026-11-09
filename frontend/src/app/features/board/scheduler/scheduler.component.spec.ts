@@ -39,6 +39,13 @@ describe('BoardSchedulerComponent', () => {
     expect(setup().querySelector('.kpis')?.textContent).toContain('902 / 7,600');
   });
 
+  it('labels the score histogram with whole numbers', () => {
+    setup(of({ ...SUMMARY, histogram: [{ lo: 906.04, hi: 1463.8, count: 3 }, { lo: 1463.8, hi: 2021.6, count: 1 }] }));
+    const component = TestBed.createComponent(BoardSchedulerComponent).componentInstance;
+    component.ngOnInit();
+    expect(component.histogramCategories()).toEqual(['906', '1,464']);
+  });
+
   it('prints scores with one decimal and calls the bar column Share like the job page', () => {
     const el = setup();
     expect(el.querySelector('.kpis')?.textContent).toContain('1,234.6');

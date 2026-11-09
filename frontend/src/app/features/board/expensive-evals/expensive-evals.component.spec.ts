@@ -96,6 +96,12 @@ describe('BoardExpensiveEvalsComponent', () => {
     expect(fixture.componentInstance.tabs.map((t) => t.label)).not.toContain('Peak heap');
   });
 
+  it('calls the time ranking Longest like the build tab', () => {
+    rows();
+    const fixture = TestBed.createComponent(BoardExpensiveEvalsComponent);
+    expect(fixture.componentInstance.tabs[0].label).toBe('Longest');
+  });
+
   it('falls back to the names when no display name is set', () => {
     const links = Array.from(rows()[1].cells[1].querySelectorAll('a'));
     expect(links.map((a) => a.textContent?.trim())).toEqual(['infra', 'ci']);

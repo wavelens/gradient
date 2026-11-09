@@ -68,7 +68,7 @@ export class BoardExpensiveEvalsComponent implements OnInit {
   protected first = firstLoad();
   rows = signal<ExpensiveEval[]>([]);
   tabs: { key: Tab; label: string }[] = [
-    { key: 'time', label: 'Slowest' },
+    { key: 'time', label: 'Longest' },
     { key: 'rss', label: 'Peak RSS' },
     { key: 'thunks', label: 'Thunks' },
     { key: 'fncalls', label: 'Fn calls' },
