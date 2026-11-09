@@ -241,7 +241,8 @@ export class TaskActionsComponent implements OnInit {
     this.confirm.confirm({
       title: 'Delete Action',
       target: action.name,
-      consequence: "Events no longer trigger this action. This operation can't be undone.",
+      consequence: 'Events no longer trigger this action.',
+      isIrreversible: true,
       confirmLabel: 'Delete',
       failure: 'Deleting the action failed.',
       action: () => this.actionsService.delete(this.projectName, this.taskName, action.id),

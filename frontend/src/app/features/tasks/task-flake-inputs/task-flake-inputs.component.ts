@@ -242,7 +242,8 @@ export class TaskFlakeInputsComponent implements OnInit {
     this.confirm.confirm({
       title: 'Delete Override',
       target: override.input_name,
-      consequence: "Later evaluations use this input again as flake.lock pinned it. This action can't be undone.",
+      consequence: 'Later evaluations use this input again as flake.lock pinned it.',
+      isIrreversible: true,
       confirmLabel: 'Delete',
       failure: 'Failed to delete the override.',
       action: () => this.overridesService.delete(this.projectName, this.taskName, override.id),
