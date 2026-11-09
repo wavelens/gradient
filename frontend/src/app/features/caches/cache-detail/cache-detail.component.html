@@ -39,7 +39,7 @@
         <gr-copy-field inputId="cache-netrc" multiline [value]="installNetrcCommand" />
         <span slot="hint">
           This cache is private. Run the command as root, replacing <code>&lt;YOUR_TOKEN&gt;</code> with your
-          API key or login token. It writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon
+          <a [routerLink]="links.settings('keys')">API key</a> or login token. It writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon
           can authenticate. Prefer a declarative NixOS setup? See the
           <a [href]="netrcDocsUrl" target="_blank" rel="noopener noreferrer">declarative netrc example</a>
           in the docs.

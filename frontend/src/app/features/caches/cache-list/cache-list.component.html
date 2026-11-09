@@ -17,19 +17,16 @@
       errorTitle="Failed to load caches"
       (retry)="caches.reload()"
     >
-      <div slot="empty">
-        @if (!publicLoading() && filteredPublicCaches.length === 0) {
-          <gr-empty-state
-            icon="storage"
-            title="No caches yet"
-            [message]="canCreateCache ? 'Create your first cache to store build artifacts' : 'No caches have been created yet'"
-          >
-            @if (canCreateCache) {
-              <app-create-cache-button slot="action" (create)="openCreateDialog()" />
-            }
-          </gr-empty-state>
+      <gr-empty-state
+        slot="empty"
+        icon="storage"
+        title="No caches yet"
+        [message]="canCreateCache ? 'Create your first cache to store build artifacts' : 'No cache memberships yet.'"
+      >
+        @if (canCreateCache) {
+          <app-create-cache-button slot="action" (create)="openCreateDialog()" />
         }
-      </div>
+      </gr-empty-state>
 
       @if (activeCaches.length > 0) {
         <div class="section">
@@ -43,7 +40,7 @@
               >
                 <div slot="meta">
                   @if (cache.public) {
-                    <gr-badge severity="info">Public</gr-badge>
+                    <gr-badge>Public</gr-badge>
                   }
                 </div>
               </gr-nav-card>
@@ -67,7 +64,7 @@
                 <div slot="meta">
                   <gr-badge severity="danger">Inactive</gr-badge>
                   @if (cache.public) {
-                    <gr-badge severity="info">Public</gr-badge>
+                    <gr-badge>Public</gr-badge>
                   }
                 </div>
               </gr-nav-card>
@@ -112,7 +109,7 @@
                   <gr-icon name="sort" size="sm" />
                   Priority: {{ cache.priority }}
                 </span>
-                <gr-badge severity="info">Public</gr-badge>
+                <gr-badge>Public</gr-badge>
               </div>
             </div>
             <div class="cache-arrow">

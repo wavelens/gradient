@@ -90,8 +90,9 @@ function headings(element: HTMLElement): string[] {
 }
 
 describe('TeamOverviewComponent', () => {
-  it('manages members and workers on the team page itself', () => {
-    expect(headings(render())).toEqual(expect.arrayContaining(['Members', 'Workers']));
+  it('manages members and workers on the team page itself, workers below projects and caches', () => {
+    const sections = headings(setup('admin').root).filter((heading) => !heading.startsWith('No '));
+    expect(sections).toEqual(['Requests', 'Members', 'Projects and Caches', 'Workers']);
   });
 
   it('picks up new grants, members and workers while the page stays open', () => {
@@ -115,7 +116,9 @@ describe('TeamOverviewComponent', () => {
   it('explains to team admins how a team without grants gets access to a project or cache', () => {
     const root = setup('admin').root;
     expect(headings(root)).toContain('Projects and Caches');
-    expect(root.textContent).toContain('Settings, Members and roles');
+    expect(root.textContent).toContain('Members & Roles');
+    const links = Array.from(root.querySelectorAll<HTMLAnchorElement>('a[grButton]')).map((link) => link.getAttribute('href'));
+    expect(links).toEqual(expect.arrayContaining(['/projects', '/caches']));
   });
 
   it('leaves out the empty projects and caches section and the "Team" subtitle for members', () => {

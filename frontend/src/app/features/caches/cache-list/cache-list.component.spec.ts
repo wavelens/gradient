@@ -73,9 +73,10 @@ describe('CacheListComponent', () => {
     expect(element.textContent).not.toContain('No caches yet');
   });
 
-  it('offers to create a cache when the user has none and nothing public exists', () => {
-    const { element } = setup({ authenticated: true, getCaches: () => of({ items: [] }), getPublicCaches: () => of([]) });
+  it('shows the empty state for a signed-in user without caches, also above public caches', () => {
+    const { element } = setup({ authenticated: true, getCaches: () => of({ items: [] }) });
     expect(element.textContent).toContain('No caches yet');
+    expect(element.textContent).toContain('Shared');
   });
 
   it('opens the created cache', () => {

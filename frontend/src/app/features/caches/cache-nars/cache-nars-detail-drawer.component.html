@@ -29,8 +29,8 @@
       <gr-field-row label="Deriver" [value]="d.deriver ?? '-'" mono />
       <gr-field-row label="CA" [value]="d.ca ?? '-'" mono />
       <gr-field-row label="Fetch count" [value]="d.fetch_count" />
-      <gr-field-row label="Last fetched" [value]="d.last_fetched_at ?? 'never'" />
-      <gr-field-row label="Created" [value]="d.created_at" />
+      <gr-field-row label="Last fetched" [value]="d.last_fetched_at ? (d.last_fetched_at | serverDate) : 'never'" />
+      <gr-field-row label="Created" [value]="d.created_at | serverDate" />
       <gr-field-row label="Signed">
         <gr-badge [severity]="d.signed ? 'success' : 'neutral'">
           {{ d.signed ? 'Signed' : 'Unsigned' }}

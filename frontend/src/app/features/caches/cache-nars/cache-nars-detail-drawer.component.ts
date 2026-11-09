@@ -26,13 +26,13 @@ import {
   IconComponent,
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
-import { formatBytes } from '@shared/text';
+import { formatBytes, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { NarSummary, NarDetail } from '@core/models';
 
 @Component({
   selector: 'app-cache-nars-detail-drawer',
   standalone: true,
-  imports: [CommonModule, DialogComponent, ButtonComponent, LoadingSpinnerComponent, IconComponent, FieldRowComponent, BadgeComponent],
+  imports: [CommonModule, DialogComponent, ButtonComponent, LoadingSpinnerComponent, IconComponent, FieldRowComponent, BadgeComponent, ServerTimestampToLocalDateTimePipe],
   templateUrl: './cache-nars-detail-drawer.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache-nars-detail-drawer.component.scss',

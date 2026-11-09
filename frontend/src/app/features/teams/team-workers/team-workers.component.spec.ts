@@ -82,6 +82,12 @@ describe('TeamWorkersComponent', () => {
     expect(button(root, 'Edit')).toBeUndefined();
   });
 
+  it('hides the Workers section from members while the team has no workers, but not from admins', () => {
+    expect(setup('member', []).root.textContent).not.toContain('Workers');
+    TestBed.resetTestingModule();
+    expect(setup('admin', []).root.textContent).toContain('Workers');
+  });
+
   it('saves what a Gradient.CI connection is allowed from its Edit dialog', () => {
     const { fixture, root, updateWorker } = setup();
 
@@ -209,7 +215,7 @@ describe('TeamWorkersComponent', () => {
     ['only offline workers', [offline]],
     ['no workers', []],
   ])('says no worker is online with %s', (_, workers) => {
-    const { root } = setup('member', workers);
+    const { root } = setup('admin', workers);
     expect(root.textContent).toContain('No online workers');
   });
 

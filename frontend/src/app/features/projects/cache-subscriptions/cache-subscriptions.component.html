@@ -6,7 +6,7 @@
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
   <app-server-configuration-managed-banner [access]="access()" kind="project" />
-  @if (caches().length) {
+  @if (!loading() && !loadError()) {
     @if (canCreateCache()) {
       <app-create-cache-button slot="actions"
           *appWritable="access()"
@@ -28,24 +28,7 @@
     <gr-load-state [loading]="loading()" [error]="loadError()" empty loadingMessage="Loading cache subscriptions..." errorTitle="Failed to load caches" (retry)="loadCaches()" />
   } @else {
     @if (caches().length === 0) {
-      <gr-empty-state icon="storage" title="No cache subscriptions" message="Subscribe to a Nix binary cache to have builds pushed there automatically.">
-        <button slot="action"
-          *appWritable="access()"
-          grButton
-          label="Subscribe to Cache"
-          icon="add"
-          [appManagedDisable]="access()"
-          (click)="openSubscribeDialog()"
-          ></button>
-        @if (canCreateCache()) {
-          <app-create-cache-button slot="action"
-            *appWritable="access()"
-            severity="secondary"
-            [access]="access()"
-            (create)="showCreateDialog.set(true)"
-          />
-        }
-      </gr-empty-state>
+      <gr-empty-state icon="storage" title="No cache subscriptions" message="Subscribe to a Nix binary cache to have builds pushed there automatically." />
     } @else {
       <gr-row-list>
         @for (cache of caches(); track cache.id) {

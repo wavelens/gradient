@@ -29,7 +29,6 @@
     }
 
     <app-team-members [team]="team" (currentUserTeamAccessChanged)="navigateToTeamListOrReloadTeam($event)" />
-    <app-team-workers [team]="team" />
 
     @if (isAdmin() || grantsLoadError() || grants().projects.length + grants().caches.length > 0) {
       <gr-settings-section title="Projects and Caches" [card]="false">
@@ -37,7 +36,9 @@
           [empty]="grants().projects.length + grants().caches.length === 0"
           loadingMessage="Loading projects and caches..." errorTitle="Failed to load projects and caches" (retry)="loadGrants()"
           emptyIcon="corporate_fare" emptyTitle="No projects or caches"
-          emptyMessage='This team can&apos;t access projects or caches yet. Admins of a project or cache grant access in "Settings, Members and roles".'>
+          emptyMessage="The team has no access to projects or caches yet. An admin for a project or cache grants access on the 'Members & Roles' page for that project or cache.">
+          <a slot="empty-action" grButton label="Projects" icon="corporate_fare" severity="secondary" [routerLink]="links.projects()"></a>
+          <a slot="empty-action" grButton label="Caches" icon="storage" severity="secondary" [routerLink]="links.caches()"></a>
           <gr-row-list>
             @for (grant of grants().projects; track grant.project) {
               <gr-row icon="corporate_fare" [link]="links.project(grant.project)" [linkLabel]="'Open project ' + grant.display_name">
@@ -55,5 +56,7 @@
         </gr-load-state>
       </gr-settings-section>
     }
+
+    <app-team-workers [team]="team" />
   }
 </gr-page-layout>

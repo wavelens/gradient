@@ -45,7 +45,7 @@
                 <gr-badge>{{ project.role }}</gr-badge>
               }
               @if (project.public) {
-                <gr-badge severity="info">Public</gr-badge>
+                <gr-badge>Public</gr-badge>
               }
               @if (project.running_evaluations && project.running_evaluations > 0) {
                 <gr-badge [severity]="phaseSeverity.running">{{ project.running_evaluations }} running</gr-badge>
@@ -82,7 +82,7 @@
           [description]="project.description"
           [link]="links.project(project.name)"
         >
-          <gr-badge slot="meta" severity="info">Public</gr-badge>
+          <gr-badge slot="meta">Public</gr-badge>
         </gr-nav-card>
       }
     </gr-card-grid>
