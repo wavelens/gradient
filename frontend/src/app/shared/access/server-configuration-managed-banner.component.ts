@@ -13,11 +13,13 @@ import { AccessState } from '@core/models/access.model';
   standalone: true,
   imports: [MessageBannerComponent],
   template: `
-    @if (access()?.managed && access()?.canEdit) {
-      <gr-message-banner type="info">
-        Settings for this {{ kind() }} come from the server configuration.
-        @if (kind() === 'cache' || kind() === 'team') { Deactivating and adding extra members still work here.}
-      </gr-message-banner>
+    @if (access()?.managed) {
+      @if (access()?.canEdit) {
+        <gr-message-banner type="info">
+          Settings for this {{ kind() }} come from the server configuration.
+          @if (kind() === 'cache') { Deactivating the cache still works here.}
+        </gr-message-banner>
+      }
     } @else if (showReadOnlyNote() && access() && !access()?.canEdit) {
       <gr-message-banner type="info">You can view these settings, but you can't change them. Contact an admin for this {{ settingsAdminEntityKind() }}.</gr-message-banner>
     }

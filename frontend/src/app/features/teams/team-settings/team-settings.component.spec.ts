@@ -85,7 +85,7 @@ describe('TeamSettingsComponent', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     const element = fixture.nativeElement as HTMLElement;
-    expect(element.textContent?.replace(/\s+/g, ' ')).toContain('Settings for this team come from the server configuration. Deactivating and adding extra members still work here.');
+    expect(element.textContent?.replace(/\s+/g, ' ')).toContain('Settings for this team come from the server configuration.');
     expect(input(fixture, 'team-display-name').value).toBe('Platform');
     expect(input(fixture, 'team-display-name').disabled).toBe(true);
     expect(input(fixture, 'team-oidc-group').value).toBe('ci-admins');

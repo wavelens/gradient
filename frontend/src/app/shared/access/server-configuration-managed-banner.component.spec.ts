@@ -28,14 +28,20 @@ describe('ServerConfigurationManagedBannerComponent', () => {
 
   it.each([
     ['cache', true],
-    ['team', true],
+    ['team', false],
     ['project', false],
-  ])('mentions what still works on a managed %s: %s', (kind, mentioned) => {
+  ])('names only what still works on a managed %s', (kind, mentioned) => {
     const fixture = TestBed.createComponent(ServerConfigurationManagedBannerComponent);
     fixture.componentRef.setInput('access', { managed: true, canEdit: true, canTrigger: true });
     fixture.componentRef.setInput('kind', kind);
     fixture.detectChanges();
-    expect((fixture.nativeElement as HTMLElement).textContent?.includes('Deactivating and adding extra members still work here.')).toBe(mentioned);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text.includes('Deactivating the cache still works here.')).toBe(mentioned);
+    expect(text).not.toContain('members');
+  });
+
+  it('leaves out the contact-an-admin note on managed settings', () => {
+    expect(bannerText({ managed: true, canEdit: false, canTrigger: false }, true)).toBe('');
   });
 
   it('tells a read-only settings viewer to contact the owning project admin', () => {
