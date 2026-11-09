@@ -6,7 +6,14 @@
 
 import type { ExecJobStatus, WaitingReason } from '@core/models';
 import type { StatusPhase } from '@shared/evaluation';
-import { deviceLabel, guestSizeLabel, isOpenExecJob, execJobPhase, waitingReasonText } from './exec-job-status';
+import { EMPTY } from 'rxjs';
+import { abortExecJobConfirm, deviceLabel, guestSizeLabel, isOpenExecJob, execJobPhase, waitingReasonText } from './exec-job-status';
+
+describe('abortExecJobConfirm', () => {
+  it('says how the evaluation ends', () => {
+    expect(abortExecJobConfirm('deploy', () => EMPTY).consequence).toContain('Evaluation results become Aborted');
+  });
+});
 
 describe('execJobPhase', () => {
   it.each<[ExecJobStatus, StatusPhase]>([
