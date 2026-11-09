@@ -194,3 +194,40 @@ pub async fn recent_scores<C: ConnectionTrait>(
         })
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::rows;
+
+    #[tokio::test]
+    async fn deleting_a_project_deletes_its_worker_registrations() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        let project = rows::project();
+        crate::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the owner is written");
+        crate::rows::insert::<EProject, _>(&conn, project.clone())
+            .await
+            .expect("the project is written");
+        crate::rows::insert::<EWorkerRegistration, _>(
+            &conn,
+            MWorkerRegistration {
+                peer_id: project.id,
+                created_by: None,
+                ..rows::worker_registration(true, true)
+            },
+        )
+        .await
+        .expect("the registration is written");
+
+        crate::rows::delete::<EProject, _>(&conn, project)
+            .await
+            .expect("the project is deleted");
+
+        assert!(db.rows::<EWorkerRegistration>().await.is_empty());
+        db.finish().await;
+    }
+}
