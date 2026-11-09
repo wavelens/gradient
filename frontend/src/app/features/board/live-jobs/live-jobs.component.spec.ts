@@ -111,7 +111,7 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     expect(subjectCell(fixture)).toBe('https://git.example/acme.git');
   });
 
-  it('names an exec job by task, entry point and node, with its score', () => {
+  it('names an exec job by entry point and node, with its score', () => {
     const exec_job = { id: 'x1', project: 'infra', task: 'nightly', entry_point: 'apps.x86_64-linux.train', node_index: 1, nodes: 2 };
     const fixture = setupWithAssigned(
       [{ ...ASSIGNED, kind: 2, build_id: null, score: 7.25, worker_name: 'Builder One', subject: exec_job.entry_point, exec_job }],
@@ -120,7 +120,7 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     fixture.detectChanges();
     const cells = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr td'))
       .map((cell) => cell.textContent?.trim());
-    expect(cells.slice(0, 4)).toEqual(['exec', 'Builder One', 'nightly: apps.x86_64-linux.train (node 1)', '7.3']);
+    expect(cells.slice(0, 4)).toEqual(['exec', 'Builder One', 'apps.x86_64-linux.train (node 1)', '7.3']);
   });
 
   it('hides the score column and score filters from a non-superuser and ignores a score filter', () => {
@@ -182,7 +182,7 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     const rows = (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('tbody tr');
     expect(rows.length).toBe(1);
     expect(Array.from(rows[0].querySelectorAll('td')).slice(1, 3).map((cell) => cell.textContent?.trim()))
-      .toEqual(['2 sub jobs', 'nightly: apps.x86_64-linux.train (cluster, 2 sub jobs)']);
+      .toEqual(['2 sub jobs', 'apps.x86_64-linux.train (cluster, 2 sub jobs)']);
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     rows[0].click();
     expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/board/clusters/c1');
@@ -321,7 +321,7 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
 
     const row = (fixture.nativeElement as HTMLElement).querySelector('tbody tr') as HTMLElement;
     const cells = Array.from(row.querySelectorAll('td'));
-    expect([cells[0], cells[2]].map((c) => c.textContent?.trim())).toEqual(['exec', 'nightly: apps.x86_64-linux.train']);
+    expect([cells[0], cells[2]].map((c) => c.textContent?.trim())).toEqual(['exec', 'apps.x86_64-linux.train']);
     expect(cells[2].querySelector('a')?.getAttribute('href')).toBe('/board/pending/x1');
 
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);

@@ -619,7 +619,7 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     const el = setup({ getPendingJobs: () => of({ jobs: [PENDING, pending], other_pending: 0 }) }, 'x1', true)
       .nativeElement as HTMLElement;
     expect(el.querySelector('.head .kind')?.textContent?.trim()).toBe('exec');
-    expect(el.textContent).toContain('nightly: apps.x86_64-linux.train (node 1)');
+    expect(el.querySelector('.exec-link')?.textContent?.trim()).toBe('apps.x86_64-linux.train (node 1)');
   });
 });
 

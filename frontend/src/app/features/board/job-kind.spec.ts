@@ -21,9 +21,9 @@ describe('job kind labels', () => {
     expect([0, 1, 2].map(jobKindName)).toEqual(['eval', 'build', 'exec']);
   });
 
-  it('names an exec node by task, entry point and node', () => {
-    expect(jobSubjectLabel('apps.x86_64-linux.train', NODE)).toBe('nightly: apps.x86_64-linux.train (node 1)');
-    expect(jobSubjectLabel(null, { ...NODE, node_index: 0, nodes: 1 })).toBe('nightly: apps.x86_64-linux.train');
+  it('names an exec node by entry point and node, leaving the task to its own column', () => {
+    expect(jobSubjectLabel('apps.x86_64-linux.train', NODE)).toBe('apps.x86_64-linux.train (node 1)');
+    expect(jobSubjectLabel(null, { ...NODE, node_index: 0, nodes: 1 })).toBe('apps.x86_64-linux.train');
   });
 
   it('falls back to the plain subject without an exec job', () => {

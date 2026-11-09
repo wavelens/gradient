@@ -20,7 +20,7 @@ export function jobKindName(kind: number): string {
 export function jobSubjectLabel(subject?: string | null, exec?: BoardExecJob | null): string {
   if (!exec) return subject ?? '-';
   const node = exec.nodes > 1 ? ` (node ${exec.node_index})` : '';
-  return `${exec.task}: ${exec.entry_point}${node}`;
+  return `${exec.entry_point}${node}`;
 }
 
 export interface BoardRow<T> {

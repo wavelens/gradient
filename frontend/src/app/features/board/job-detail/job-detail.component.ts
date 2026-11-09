@@ -66,7 +66,7 @@ const JOB_OUTCOME_BADGES: Record<string, { phase: StatusPhase; label: string }> 
 };
 
 export function getAssignedJobName(j: AssignedJobDetail): string {
-  if (j.kind === EXEC_KIND && j.exec_job) return jobSubjectLabel(null, j.exec_job);
+  if (j.kind === EXEC_KIND && j.exec_job) return `${j.exec_job.task}: ${jobSubjectLabel(null, j.exec_job)}`;
   if (j.kind === BUILD_KIND) return j.pname ?? j.derivations[0]?.pname ?? j.derivations[0]?.drv_path ?? j.id;
   return j.evaluation?.task ?? (j.project_display_name || j.project_name);
 }
