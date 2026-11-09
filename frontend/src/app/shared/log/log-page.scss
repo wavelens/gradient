@@ -163,6 +163,14 @@
   color: var(--gr-text-muted);
 
   .breadcrumb-sep { color: var(--gr-text-muted); }
+
+  .breadcrumb-current {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .log-sidebar-backdrop {

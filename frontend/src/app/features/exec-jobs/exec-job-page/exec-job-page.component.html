@@ -13,7 +13,7 @@
       <nav class="sidebar-breadcrumb" aria-label="Breadcrumb">
         @for (crumb of crumbs(); track $index; let last = $last) {
           @if (last) {
-            <span class="breadcrumb-current" aria-current="page">{{ crumb.label }}</span>
+            <span class="breadcrumb-current" aria-current="page" [title]="crumb.label">{{ crumb.label }}</span>
           } @else {
             <a [routerLink]="crumb.link" class="breadcrumb-link">{{ crumb.label }}</a>
             <span class="breadcrumb-sep">/</span>

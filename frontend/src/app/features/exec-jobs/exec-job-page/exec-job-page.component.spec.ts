@@ -283,6 +283,12 @@ describe('ExecJobPageComponent', () => {
     expect(fixture.componentInstance.logLines()).toEqual([]);
   });
 
+  it('keeps the full entry point of the current crumb on hover', () => {
+    const { fixture } = setup('running');
+    const current = (fixture.nativeElement as HTMLElement).querySelector('.sidebar-breadcrumb .breadcrumb-current');
+    expect(current?.getAttribute('title')).toBe('apps.x86_64-linux.train');
+  });
+
   it('labels the creation date apart from the CREATED status', () => {
     const { fixture } = setup('created');
     const labels = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.info-bar .metric-label'))
