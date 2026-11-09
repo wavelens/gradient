@@ -52,7 +52,6 @@ import {
   BuildWithOutputs,
   DependencyGraphNode,
   ExecJobSummary,
-  TriggerType,
   Permission,
 } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
@@ -72,7 +71,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDuration, buildPhase, buildStatusLabel, buildPhaseFinished, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, evaluationDuration, getEvaluationTriggerLabel, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -1285,16 +1284,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   protected readonly links = links;
 
   readonly commitLabel = commitLabel;
-
-  getTriggerLabel(type: TriggerType | null): string {
-    switch (type) {
-      case 'polling': return 'Polling';
-      case 'reporter_push': return 'Push';
-      case 'reporter_pull_request': return 'PR';
-      case 'time': return 'Schedule';
-      default: return 'Manual';
-    }
-  }
+  readonly getEvaluationTriggerLabel = getEvaluationTriggerLabel;
 
   getStatusLabel(status: string): string {
     if (status === 'Fetching') return 'Fetching';

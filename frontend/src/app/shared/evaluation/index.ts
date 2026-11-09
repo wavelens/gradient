@@ -10,6 +10,7 @@ export * from './build-progress';
 export * from './build-tally';
 export * from './commit';
 export * from './duration';
+export * from './evaluation-trigger';
 export * from './progress';
 export * from './repository';
 export * from './status-phase';

@@ -157,7 +157,7 @@
             <span class="metric-label">Triggered</span>
             <span class="metric-value">{{ ev.created_at | serverDate }}</span>
             <span class="metric-sep">via</span>
-            <gr-badge>{{ getTriggerLabel(ev.trigger?.type ?? null) }}</gr-badge>
+            <gr-badge>{{ getEvaluationTriggerLabel(ev) }}</gr-badge>
           </div>
           <div class="info-metric">
             <span class="metric-label">Commit</span>
