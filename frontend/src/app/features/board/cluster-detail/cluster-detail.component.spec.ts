@@ -15,6 +15,7 @@ const node = (index: number) => ({
   id: `x${index}`,
   project: 'infra',
   task: 'nightly',
+  task_display_name: 'Nightly',
   entry_point: 'apps.x86_64-linux.train',
   node_index: index,
   nodes: 2,

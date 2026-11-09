@@ -206,6 +206,7 @@ export interface BoardExecJob {
   project: string;
   entry_point: string;
   task: string;
+  task_display_name: string;
   node_index: number;
   nodes: number;
 }

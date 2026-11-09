@@ -11,6 +11,7 @@ const NODE: BoardExecJob = {
   id: 'x1',
   project: 'infra',
   task: 'nightly',
+  task_display_name: 'Nightly',
   entry_point: 'apps.x86_64-linux.train',
   node_index: 1,
   nodes: 2,

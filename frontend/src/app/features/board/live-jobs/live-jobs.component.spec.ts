@@ -113,7 +113,7 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
   });
 
   it('names an exec job by entry point and node, with its score', () => {
-    const exec_job = { id: 'x1', project: 'infra', task: 'nightly', entry_point: 'apps.x86_64-linux.train', node_index: 1, nodes: 2 };
+    const exec_job = { id: 'x1', project: 'infra', task: 'nightly', task_display_name: 'Nightly', entry_point: 'apps.x86_64-linux.train', node_index: 1, nodes: 2 };
     const fixture = setupWithAssigned(
       [{ ...ASSIGNED, kind: 2, build_id: null, score: 7.25, worker_name: 'Builder One', subject: exec_job.entry_point, exec_job }],
       true,
@@ -174,7 +174,7 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
   });
 
   it('lists the nodes of a multi-node job as one cluster job that opens the cluster page', () => {
-    const node = (index: number) => ({ id: `x${index}`, project: 'infra', task: 'nightly', entry_point: 'apps.x86_64-linux.train', node_index: index, nodes: 2 });
+    const node = (index: number) => ({ id: `x${index}`, project: 'infra', task: 'nightly', task_display_name: 'Nightly', entry_point: 'apps.x86_64-linux.train', node_index: index, nodes: 2 });
     const fixture = setupWithAssigned([
       { ...ASSIGNED, id: 'j0', kind: 2, build_id: null, exec_job: node(0), cluster_job: 'c1' },
       { ...ASSIGNED, id: 'j1', kind: 2, build_id: null, exec_job: node(1), cluster_job: 'c1' },
@@ -344,7 +344,7 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
   });
 
   it('lists a pending exec job and opens it by its exec job id', () => {
-    const exec_job = { id: 'x1', project: 'infra', task: 'nightly', entry_point: 'apps.x86_64-linux.train', node_index: 0, nodes: 1 };
+    const exec_job = { id: 'x1', project: 'infra', task: 'nightly', task_display_name: 'Nightly', entry_point: 'apps.x86_64-linux.train', node_index: 0, nodes: 1 };
     TestBed.configureTestingModule({
       imports: [BoardLiveJobsComponent],
       providers: [

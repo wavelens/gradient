@@ -527,6 +527,7 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     id: 'x1',
     project: 'project-one',
     task: 'nightly',
+    task_display_name: 'Nightly',
     entry_point: 'apps.x86_64-linux.train',
     node_index: 1,
     nodes: 2,
@@ -797,7 +798,7 @@ describe('BoardJobDetailComponent - #636', () => {
 
 describe('getPendingJobName', () => {
   it('names a pending job like the page of the assigned job', () => {
-    const exec = { id: 'x1', project: 'o1', entry_point: 'deploy', task: 'nightly', node_index: 0, nodes: 1 };
+    const exec = { id: 'x1', project: 'o1', entry_point: 'deploy', task: 'nightly', task_display_name: 'Nightly', node_index: 0, nodes: 1 };
     expect(getPendingJobName({ ...PENDING, kind: 2, exec_job: exec })).toBe('nightly: deploy');
     expect(getPendingJobName(PENDING)).toBe('hello-2.12.1');
     expect(getPendingJobName({ ...PENDING, kind: 0, task: 'oktask', project_name: 'sandbox' })).toBe('oktask');
