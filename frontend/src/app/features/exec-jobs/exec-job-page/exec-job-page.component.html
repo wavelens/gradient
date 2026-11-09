@@ -23,21 +23,13 @@
 
       <div class="sidebar-items">
         @for (option of views(); track option.value) {
-          @let hasMenu = option.value === 'log' && jobMenu().length > 0;
-          <div class="sidebar-item" [class.selected]="view() === option.value"
-               (contextmenu)="hasMenu && jobActions.openAt($event)">
+          <div class="sidebar-item" [class.selected]="view() === option.value">
             <button type="button" class="sidebar-row-link" [attr.aria-label]="option.label"
                     [attr.aria-pressed]="view() === option.value" (click)="showView(option.value)"></button>
             <gr-icon [name]="option.icon" size="sm" />
             <span class="sidebar-item-label">{{ option.label }}</span>
-            @if (hasMenu) {
-              <button type="button" class="sidebar-kebab" [attr.aria-label]="'Actions for ' + job.entry_point" (click)="jobActions.toggle($event)">
-                <gr-icon name="more_vert" size="sm" />
-              </button>
-            }
           </div>
         }
-        <gr-menu #jobActions [model]="jobMenu()" />
 
         @if (job.nodes > 1) {
           <div class="sidebar-group-header">
@@ -133,6 +125,9 @@
           }
         </div>
         <div class="info-bar-right">
+          @if (jobBoardEntryRouterLink(); as jobLink) {
+            <a grButton label="Show job" icon="work" severity="secondary" size="small" [routerLink]="jobLink"></a>
+          }
           @if (keepVmRunningToggleIsApplicable()) {
             <button *appWritable="triggerAccess()" grButton label="Keep VM running" icon="push_pin" size="small"
                     [severity]="keepVmRunning() ? 'primary' : 'secondary'" [attr.aria-pressed]="keepVmRunning()"

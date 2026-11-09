@@ -392,29 +392,20 @@ describe('ExecJobPageComponent', () => {
     expect(root.querySelector('app-exec-job-info')?.textContent).toContain('2 CPUs · 500 MB memory · 2048 MB disk');
   });
 
-  it('offers only Show job from the log entry, leaving Abort and Terminal to the header and the tabs', () => {
-    const { fixture } = setup('running', SSH, {}, { ...job('running'), dispatched_job: 'dj1' });
-    const root = fixture.nativeElement as HTMLElement;
-    const log = root.querySelector('.log-sidebar .sidebar-item') as HTMLElement;
-    log.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
-    fixture.detectChanges();
-    const items = Array.from(document.querySelectorAll<HTMLElement>('.gr-menu__item'))
-      .map((item) => (item.textContent ?? '').replace(item.querySelector('.gr-menu__icon')?.textContent ?? '', '').trim());
-    expect(items).toEqual(['Show job']);
-    expect(log.querySelector('button.sidebar-kebab')?.getAttribute('aria-label')).toBe('Actions for apps.x86_64-linux.train');
-  });
+  function showJobLink(root: HTMLElement): HTMLAnchorElement | undefined {
+    return Array.from(root.querySelectorAll<HTMLAnchorElement>('.info-bar-right a')).find((a) => a.textContent?.includes('Show job'));
+  }
 
-  it('hides the log entry menu while the job has no assignment to show', () => {
-    const { fixture } = setup('queued');
-    expect(fixture.componentInstance.jobMenu()).toEqual([]);
-    expect((fixture.nativeElement as HTMLElement).querySelector('.log-sidebar .sidebar-kebab')).toBeNull();
-  });
-
-  it('links a finished job to its assignment on the Job Board', () => {
+  it('links a finished job to its assignment on the Job Board from the header', () => {
     const { fixture } = setup('completed', SSH, {}, { ...job('completed'), dispatched_job: 'dj1' });
-    const item = fixture.componentInstance.jobMenu().find((i) => i.label === 'Show job');
-    expect(fixture.componentInstance.jobMenu().map((i) => i.label)).toEqual(['Show job']);
-    expect(String(item?.routerLink)).toBe('/board/jobs/dj1');
+    const root = fixture.nativeElement as HTMLElement;
+    expect(showJobLink(root)?.getAttribute('href')).toBe('/board/jobs/dj1');
+    expect(root.querySelector('.log-sidebar .sidebar-kebab')).toBeNull();
+  });
+
+  it('leaves out the job link while the job has no assignment to show', () => {
+    const { fixture } = setup('queued');
+    expect(showJobLink(fixture.nativeElement)).toBeUndefined();
   });
 
   it('asks first, naming the entry point, then aborts', () => {

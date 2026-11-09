@@ -16,8 +16,6 @@ import {
   FormFieldComponent,
   IconComponent,
   LoadingSpinnerComponent,
-  MenuComponent,
-  type MenuItem,
   MessageBannerComponent,
   DrawerDirective,
   SelectButtonComponent,
@@ -38,7 +36,7 @@ import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import type { ExecJobAttemptView, ExecJobPullRequestView, ExecJobResponse } from '@core/models';
 import {
-  abortExecJobConfirm, execJobPhase, getExecJobStatusBadgeLabel, getShowJobMenuItemForExecJob, hasExecTerminal, isExecJobWaitingToStart, isOpenExecJob,
+  abortExecJobConfirm, execJobPhase, getExecJobStatusBadgeLabel, hasExecTerminal, isExecJobWaitingToStart, isOpenExecJob,
 } from '../exec-job-status';
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
@@ -70,7 +68,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
   standalone: true,
   imports: [
     RouterModule, FormsModule, ButtonComponent, CopyFieldComponent,
-    EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MenuComponent, MessageBannerComponent,
+    EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MessageBannerComponent,
     SelectButtonComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
     LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, WaitingNoticeComponent, DrawerDirective, RelativeTimePipe,
     ServerTimestampToLocalDateTimePipe,
@@ -155,10 +153,9 @@ export class ExecJobPageComponent implements OnInit {
   waitingAccess = computed(() =>
     waitingAccessFrom(this.taskData()?.task.permissions ?? [], this.triggerAccess().canEdit, this.auth.user()?.superuser === true),
   );
-  jobMenu = computed<MenuItem[]>(() => {
+  jobBoardEntryRouterLink = computed(() => {
     const job = this.job();
-    const showJob = job && getShowJobMenuItemForExecJob(job);
-    return showJob && !showJob.disabled ? [showJob] : [];
+    return job ? links.boardJobOrCluster(job.dispatched_job, job.cluster_job) : undefined;
   });
   crumbs = computed(() => {
     const job = this.job();
