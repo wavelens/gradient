@@ -57,6 +57,7 @@ import {
   GradientCapabilities,
 } from '@core/models';
 import { links } from '@shared/routing';
+import { removeAnsiEscapeSequences } from '@shared/log';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, Observable, tap } from 'rxjs';
 
@@ -126,7 +127,11 @@ interface RuleRow {
         </div>
         <div>
           <span class="label">Log</span>
-          <a class="log-link" [routerLink]="links.evaluationLog(j.project_name, j.evaluation_id, { build: j.build_id })" [title]="j.evaluation_id">Open log</a>
+          @if (j.evaluation) {
+            <a class="log-link" [routerLink]="links.evaluationLog(j.project_name, j.evaluation_id, { build: j.build_id })" [title]="j.evaluation_id">Open log</a>
+          } @else {
+            <span class="muted">Evaluation deleted</span>
+          }
         </div>
         @if (j.cluster_job) {
           <div>
@@ -221,7 +226,7 @@ interface RuleRow {
         <section class="attempts">
           <h2>Previous Build Attempts</h2>
           <gr-table class="rules">
-            <thead><tr><th>#</th><th>Mode</th><th>Outcome</th><th>Reason</th><th>When</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Mode</th><th>Outcome</th><th>Reason</th><th>When</th><th><span class="sr-only">Open</span></th></tr></thead>
             <tbody>
               @for (a of j.previous_attempts; track a.created_at; let i = $index) {
                 @let current = a.dispatched_job_id === j.id;
@@ -231,7 +236,8 @@ interface RuleRow {
                   <td>{{ i + 1 }}</td>
                   <td>{{ a.substitute ? 'substitute' : 'build' }}</td>
                   <td class="mono">{{ attemptOutcome(a.outcome) }}</td>
-                  <td class="mono reason" [title]="a.failure_message ?? ''">{{ a.failure_message ?? '-' }}</td>
+                  @let reason = a.failure_message ? removeAnsiEscapeSequences(a.failure_message) : '';
+                  <td class="mono reason" [title]="reason">{{ reason || '-' }}</td>
                   <td>{{ a.created_at | serverDate }}</td>
                   <td>{{ opens ? '\u203a' : '' }}</td>
                 </tr>
@@ -520,6 +526,7 @@ export class BoardJobDetailComponent implements OnInit {
   protected readonly formatBytes = formatBytes;
   protected readonly formatMegabytes = formatMegabytes;
   protected readonly formatDuration = formatDuration;
+  protected readonly removeAnsiEscapeSequences = removeAnsiEscapeSequences;
 
   private static readonly WORKER_CAPS: (keyof GradientCapabilities)[] = [
     'federate',

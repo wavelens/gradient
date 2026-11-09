@@ -276,11 +276,17 @@ describe('BoardJobDetailComponent - structured context panels', () => {
   });
 
   it('labels the log link as the log, leaving "Evaluation" to the section heading', () => {
-    const el = setup().nativeElement as HTMLElement;
+    const el = setup({ getJob: () => of(EVAL_DETAIL) }).nativeElement as HTMLElement;
     const labels = Array.from(el.querySelectorAll('.ids .label')).map((l) => l.textContent?.trim());
     expect(labels).toContain('Log');
     expect(labels).not.toContain('Evaluation');
     expect(el.querySelector('.ids .log-link')?.textContent?.trim()).toBe('Open log');
+  });
+
+  it('shows plain text instead of a dead log link once the evaluation is deleted', () => {
+    const el = setup().nativeElement as HTMLElement;
+    expect(el.querySelector('.ids .log-link')).toBeNull();
+    expect(el.querySelector('.ids')?.textContent).toContain('Evaluation deleted');
   });
 
   it('falls back to the project name and marks an unnamed worker as not shared, without a link', () => {
@@ -427,6 +433,18 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     const section = el.querySelector('section.attempts') as HTMLElement;
     const rows = section.querySelectorAll('tbody tr');
     expect(rows.length).toBe(2);
+  });
+
+  it('strips terminal colour codes from the failure reason', () => {
+    const coloured: AssignedJobDetail = {
+      ...WITH_ATTEMPTS,
+      previous_attempts: [
+        { ...WITH_ATTEMPTS.previous_attempts[0], failure_message: '\u001b[35;1m/nix/store/foo.drv\u001b[0m failed' },
+        WITH_ATTEMPTS.previous_attempts[1],
+      ],
+    };
+    const el = setup({ getJob: () => of(coloured) }).nativeElement as HTMLElement;
+    expect(el.querySelector('section.attempts td.reason')?.textContent).toBe('/nix/store/foo.drv failed');
   });
 
   // An assignment the worker never reported back on used to read as 'running'
