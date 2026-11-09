@@ -48,12 +48,16 @@ export function eventNameToReadableText(name: string): string {
   return name.includes('*') ? name : readableWords(name.split('.'));
 }
 
+export function eventNameMatchesAnyPrefix(name: string, eventNamePrefixes: readonly string[]): boolean {
+  return eventNamePrefixes.some((prefix) => name === prefix || name.startsWith(`${prefix}.`));
+}
+
 /** Group durable events by their first dot-separated segment. If `eventNamePrefixes` is present, keep only names equal to the prefix or names that start with the prefix followed by a dot. */
 export function groupCatalog(entries: CatalogEntry[], eventNamePrefixes?: readonly string[]): EventGroup[] {
   const groups = new Map<string, EventGroup>();
   for (const { name, durable } of entries) {
     const [family, ...rest] = name.split('.');
-    const offered = !eventNamePrefixes || eventNamePrefixes.some((prefix) => name === prefix || name.startsWith(`${prefix}.`));
+    const offered = !eventNamePrefixes || eventNameMatchesAnyPrefix(name, eventNamePrefixes);
     if (!durable || !offered) continue;
     const group = familyLabel(family);
     if (!groups.has(group)) groups.set(group, { group, items: [] });

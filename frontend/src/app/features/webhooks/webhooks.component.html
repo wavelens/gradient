@@ -73,7 +73,7 @@
     <gr-label-help slot="label" doc="reference/events/#webhooks" title="Webhook events" />
     <app-action-events
       [selected]="events()"
-      [eventNamePrefixes]="scope.kind === 'instance' ? undefined : eventNamePrefixesByNotificationScope[scope.kind]"
+      [eventNamePrefixes]="eventNamePrefixes"
       (selectedChange)="events.set($event)"
     />
   </gr-form-field>

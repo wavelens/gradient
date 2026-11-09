@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { EMPTY, catchError, finalize } from 'rxjs';
-import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo, eventNameToReadableText, eventNamePrefixesByNotificationScope } from '@core/models';
+import { WebhookScopeRef, WebhookResponse, DeliveryListItem_WebhookDeliveryId, accessTo, eventNameToReadableText, eventNamePrefixesByNotificationScope, eventNameMatchesAnyPrefix } from '@core/models';
 import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
 import { canManageTeam, createMissingPermissionLoadStateError, createNoAccessLoadStateError } from '@shared/access';
@@ -76,7 +76,7 @@ export class WebhooksComponent implements OnInit {
   private auth = inject(AuthService);
 
   scope!: WebhookScopeRef;
-  protected readonly eventNamePrefixesByNotificationScope = eventNamePrefixesByNotificationScope;
+  eventNamePrefixes: readonly string[] | undefined;
   title = '';
   breadcrumb = computed(() => this.trail());
 
@@ -138,6 +138,7 @@ export class WebhooksComponent implements OnInit {
         this.scope = { kind: 'instance' };
         this.title = 'Instance event notifications';
     }
+    this.eventNamePrefixes = this.scope.kind === 'instance' ? undefined : eventNamePrefixesByNotificationScope[this.scope.kind];
     this.denied.set(this.missingPermission());
     this.load();
   }
@@ -222,9 +223,11 @@ export class WebhooksComponent implements OnInit {
     this.editing.set(hook);
     this.name.set(hook?.name ?? '');
     this.url.set(hook?.url ?? '');
+    const prefixes = this.eventNamePrefixes;
+    const offered = (event: string) => !event.includes('*') && (!prefixes || eventNameMatchesAnyPrefix(event, prefixes));
     const patterns = hook?.events ?? [];
-    this.events.set(patterns.filter((e) => !e.includes('*')));
-    this.globs.set(patterns.filter((e) => e.includes('*')).join(', '));
+    this.events.set(patterns.filter(offered));
+    this.globs.set(patterns.filter((event) => !offered(event)).join(', '));
     this.active.set(hook?.active ?? true);
     this.formOpen.set(true);
   }

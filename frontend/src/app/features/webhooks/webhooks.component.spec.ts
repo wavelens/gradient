@@ -147,6 +147,19 @@ describe('WebhooksComponent', () => {
     );
   });
 
+  it('keeps subscribed events outside the scope visible in the globs field', () => {
+    const { component, service } = setup({ webhookScope: 'team' }, { team: 'platform' });
+    component.startEdit({ ...hook, events: ['team.worker.create', 'evaluation.completed', 'build.*'] });
+    expect(component.events()).toEqual(['team.worker.create']);
+    expect(component.globs()).toBe('evaluation.completed, build.*');
+    component.save();
+    expect(service.update).toHaveBeenCalledWith(
+      { kind: 'team', name: 'platform' },
+      'w1',
+      expect.objectContaining({ events: ['team.worker.create', 'evaluation.completed', 'build.*'] }),
+    );
+  });
+
   it.each([
     { scope: 'project', groups: ['Build', 'Project', 'Cache'] },
     { scope: 'cache', groups: ['Cache'] },
