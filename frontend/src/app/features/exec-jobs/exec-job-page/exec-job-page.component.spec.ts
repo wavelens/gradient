@@ -188,6 +188,15 @@ describe('ExecJobPageComponent', () => {
     expect(keepButton(fixture.nativeElement)).toBeUndefined();
   });
 
+  it.each([
+    ['running', 1, '1 retry left'],
+    ['running', 0, undefined],
+    ['failed', 2, undefined],
+  ] as const)('shows the retries left of a %s job with %i left only while it can still retry', (status, left, chip) => {
+    const { fixture } = setup(status, SSH, {}, { ...job(status), retries: 2, retries_left: left });
+    expect((fixture.nativeElement as HTMLElement).querySelector('.retries-left')?.textContent?.trim()).toBe(chip);
+  });
+
   it('offers abort but no keep VM running before a VM exists', () => {
     for (const status of ['created', 'queued'] as const) {
       const { fixture } = setup(status);

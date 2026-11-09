@@ -42,7 +42,7 @@ function requestedFields(job: ExecJobResponse): RequestedField[] {
     field('Image', [job.image]),
     field('Timeout', [seconds(job.timeout_secs)]),
     field('Time without output', [seconds(job.max_silent_secs)]),
-    field('Retries', [String(job.retries)]),
+    field('Attempt', [`${job.attempts.length} of ${job.retries + 1}`]),
   ].filter((requested) => requested.values.length > 0);
 }
 

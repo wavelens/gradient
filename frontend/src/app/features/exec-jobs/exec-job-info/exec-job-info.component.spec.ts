@@ -24,6 +24,7 @@ const JOB = {
   timeout_secs: 5400,
   max_silent_secs: null,
   retries: 1,
+  attempts: [{ number: 1 }],
   waiting_reason: {
     kind: 'exec_workers',
     unmet: { labels: [], devices: [], mounts: [], nodes: 0, custom_image: false, ssh: true, ports: [6006] },
@@ -60,7 +61,7 @@ describe('ExecJobInfoComponent', () => {
       SSH: 'Yes',
       Ports: '6006, 8080',
       Timeout: '1h 30m',
-      Retries: '1',
+      Attempt: '1 of 2',
     });
   });
 
