@@ -198,11 +198,18 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
     const from = this.evaluationLogBuildOrigin();
     const job = build.dispatched_job;
+    const buildOutputExists = ['Completed', 'Substituted'].includes(build.status);
     return [
       {
-        label: 'Graph',
+        label: 'Dependency graph',
         icon: 'account_tree',
         routerLink: links.dependencyGraph(this.projectName, build.id, from),
+      },
+      {
+        label: 'Closure',
+        icon: 'hub',
+        disabled: !buildOutputExists,
+        routerLink: buildOutputExists ? links.closure(this.projectName, 'build', build.id, from) : undefined,
       },
       {
         label: 'Show job',
@@ -226,7 +233,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       {
         label: 'SBOM',
         icon: 'description',
-        disabled: !['Completed', 'Substituted'].includes(build.status),
+        disabled: !buildOutputExists,
         command: () => this.downloadSbom(build),
       },
       ...(this.canPrioritize(build)

@@ -346,18 +346,26 @@ describe('EvaluationLogComponent', () => {
       const { cmp } = setup();
       cmp.evaluation.set({ id: 'eval-1', task_name: 'ci' } as EvaluationResponse);
       const items = open(cmp, target({ dispatched_job: 'job-1' }));
-      expect(String(items.get('Graph')!.routerLink)).toBe('/project/proj/graph/b1?eval=eval-1');
+      expect(String(items.get('Dependency graph')!.routerLink)).toBe('/project/proj/graph/b1?eval=eval-1');
     });
 
     it('offers graph, job, artefacts and log download for an assigned build', () => {
       const { cmp } = setup();
       vi.spyOn(TestBed.inject(AuthService), 'isAuthenticated').mockReturnValue(true);
       const items = open(cmp, target({ dispatched_job: 'job-1', has_artefacts: true }));
-      expect([...items.keys()]).toEqual(['Graph', 'Show job', 'Artefacts', 'Download Log', 'SBOM']);
-      expect(String(items.get('Graph')!.routerLink)).toBe('/project/proj/graph/b1?eval=eval-1');
+      expect([...items.keys()]).toEqual(['Dependency graph', 'Closure', 'Show job', 'Artefacts', 'Download Log', 'SBOM']);
+      expect(String(items.get('Dependency graph')!.routerLink)).toBe('/project/proj/graph/b1?eval=eval-1');
+      expect(String(items.get('Closure')!.routerLink)).toBe('/project/proj/closure/build/b1?eval=eval-1');
       expect(String(items.get('Show job')!.routerLink)).toBe('/board/jobs/job-1');
       expect(String(items.get('Artefacts')!.routerLink)).toBe('/project/proj/artefacts/b1?eval=eval-1');
       expect([...items.values()].some((i) => i.disabled)).toBe(false);
+    });
+
+    it('disables the closure until the build output exists', () => {
+      const { cmp } = setup();
+      const closure = open(cmp, target({ status: 'Failed' })).get('Closure')!;
+      expect(closure.disabled).toBe(true);
+      expect(closure.routerLink).toBeUndefined();
     });
 
     it('disables the job entry for a build that was never assigned', () => {
@@ -425,7 +433,7 @@ describe('EvaluationLogComponent', () => {
 
       expect(cmp.contextBuild()!.id).toBe('b2');
       const labels = Array.from(document.querySelectorAll('.gr-menu__item span:last-child')).map((e) => e.textContent);
-      expect(labels).toEqual(['Graph', 'Show job', 'Artefacts', 'Download Log', 'SBOM']);
+      expect(labels).toEqual(['Dependency graph', 'Closure', 'Show job', 'Artefacts', 'Download Log', 'SBOM']);
     });
 
     it('opens the same menu from the row\'s three dots, without selecting the row', () => {
