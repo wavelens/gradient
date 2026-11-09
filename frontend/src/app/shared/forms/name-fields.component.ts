@@ -48,6 +48,7 @@ export class NameFieldsComponent {
   displayName = model('');
   name = model('');
   submitted = output();
+  nameFieldsChanged = output();
 
   protected readonly maxSlugNameCharacterCount = maxSlugNameCharacterCount;
   protected title = computed(() => this.noun().charAt(0).toUpperCase() + this.noun().slice(1));
@@ -56,11 +57,13 @@ export class NameFieldsComponent {
     this.displayName.set(value);
     const name = this.names().suggest(value);
     if (name !== null) this.name.set(name);
+    this.nameFieldsChanged.emit();
   }
 
   protected onNameChange(value: string): void {
     this.names().markEdited();
     this.name.set(value);
     this.names().check(value);
+    this.nameFieldsChanged.emit();
   }
 }

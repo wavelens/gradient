@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { nameAvailability } from './name-availability';
 
 function setup(taken: string[] = [], reserved: string[] = []) {
@@ -38,6 +38,18 @@ describe('nameAvailability', () => {
     expect(names.state()).toBe('reserved');
     expect(names.blocksSubmit()).toBe(true);
     expect(isAvailable).not.toHaveBeenCalled();
+  });
+
+  it('drops a late answer for an earlier name once the name turns invalid', () => {
+    const answer = new Subject<boolean>();
+    const names = TestBed.runInInjectionContext(() => nameAvailability(() => answer));
+    names.check('bad-name');
+    vi.advanceTimersByTime(400);
+    names.check('Bad Name!');
+    answer.next(true);
+    vi.advanceTimersByTime(400);
+    expect(names.state()).toBe('invalid');
+    expect(names.blocksSubmit()).toBe(true);
   });
 
   it('keeps checking after a failed lookup and lets the server judge that name', () => {

@@ -6,7 +6,7 @@
 
 import { Signal, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { EMPTY, Observable, Subject, catchError, debounceTime, map, of, switchMap } from 'rxjs';
+import { EMPTY, Observable, Subject, catchError, map, of, switchMap, timer } from 'rxjs';
 import { NameCheckState } from '@gradient/ui/ui';
 import { slugify } from '@shared/text';
 
@@ -34,10 +34,10 @@ export function nameAvailability(
 
   pending
     .pipe(
-      debounceTime(DEBOUNCE_MS),
       switchMap((name) =>
         name
-          ? isAvailable(name).pipe(
+          ? timer(DEBOUNCE_MS).pipe(
+              switchMap(() => isAvailable(name)),
               map((available): NameCheckState => (available ? 'available' : 'taken')),
               catchError(() => of<NameCheckState>('idle')),
             )

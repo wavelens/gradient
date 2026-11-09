@@ -105,6 +105,7 @@
       [(displayName)]="newProject.display_name"
       [(name)]="newProject.name"
       (submitted)="createProject()"
+      (nameFieldsChanged)="createError.set(null)"
     />
 
     <gr-form-field label="Description" for="description">

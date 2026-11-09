@@ -24,6 +24,7 @@ import { NameFieldsComponent } from './name-fields.component';
         [(displayName)]="form.displayName"
         [(name)]="form.name"
         (submitted)="create()"
+        (nameFieldsChanged)="error.set(null)"
       />
       <div grDialogFooter>
         <button grButton label="Cancel" severity="secondary" [disabled]="creating()" (click)="visible.set(false)"></button>

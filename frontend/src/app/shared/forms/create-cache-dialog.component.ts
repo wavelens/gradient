@@ -33,6 +33,7 @@ const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description:
         [(displayName)]="cache.display_name"
         [(name)]="cache.name"
         (submitted)="create()"
+        (nameFieldsChanged)="error.set(null)"
       />
       <gr-form-field label="Description" for="cache-desc">
         <textarea grInput id="cache-desc" [(ngModel)]="cache.description" placeholder="Describe your cache..." rows="3"></textarea>
