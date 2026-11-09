@@ -14,7 +14,7 @@
     [emptyMessage]="part() === 'workers' ? 'Grant a team to run this project\'s builds on the team\'s workers.' : 'Grant a team to give its members a role here.'">
     <gr-row-list>
       @for (grant of shownGrants(); track grant.team) {
-        <gr-row icon="groups" [link]="teamLink(grant.team)" linkLabel="Open team">
+        <gr-row icon="groups" [link]="teamLink(grant.team)" [linkLabel]="'Open team ' + grant.display_name">
           {{ grant.display_name }}
           @if (part() === 'users') {
             <span slot="meta">Role {{ grant.role }}</span>

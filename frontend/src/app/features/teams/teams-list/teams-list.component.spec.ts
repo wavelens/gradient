@@ -43,6 +43,7 @@ describe('TeamsListComponent', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent || '';
     expect(text).toContain('Platform');
     expect(text).toContain('admin');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.row-link')?.getAttribute('aria-label')).toBe('Open team Platform');
   });
 
   it('shows a failed load with Try Again instead of the empty state', () => {
