@@ -11,6 +11,7 @@ import { ESCAPE } from '@angular/cdk/keycodes';
 import { Overlay, OverlayRef } from '@angular/cdk/overlay';
 import { TemplatePortal } from '@angular/cdk/portal';
 import { detachAnimated } from '../overlay/overlay-animation';
+import { HtmlOverflowHiddenScrollStrategy } from '../overlay/scroll-strategy';
 import { FormErrors } from '../form-field/form-errors';
 import {
   Component,
@@ -124,7 +125,7 @@ export class DialogComponent implements OnDestroy {
       hasBackdrop: true,
       backdropClass: 'gr-dialog-backdrop',
       panelClass: 'gr-dialog-panel',
-      scrollStrategy: this.overlay.scrollStrategies.block(),
+      scrollStrategy: new HtmlOverflowHiddenScrollStrategy(),
       positionStrategy: this.overlay.position().global().centerHorizontally().centerVertically(),
     });
     ref.keydownEvents().subscribe((e) => {
@@ -133,6 +134,13 @@ export class DialogComponent implements OnDestroy {
     });
     ref.backdropClick().subscribe(() => this.close());
     return ref;
+  }
+
+  private restoreFocusToOpenerOrMainContent(): void {
+    const opener = this.elementFocusedBeforeDialogOpened;
+    this.elementFocusedBeforeDialogOpened = null;
+    const target = opener?.isConnected ? opener : document.getElementById('main-content');
+    target?.focus({ preventScroll: true });
   }
 
   private submit(ref: OverlayRef, event: KeyboardEvent): void {
@@ -154,8 +162,7 @@ export class DialogComponent implements OnDestroy {
     this.leaving = true;
     detachAnimated(this.ref, () => {
       this.leaving = false;
-      if (this.elementFocusedBeforeDialogOpened?.isConnected) this.elementFocusedBeforeDialogOpened.focus();
-      this.elementFocusedBeforeDialogOpened = null;
+      this.restoreFocusToOpenerOrMainContent();
       this.hide.emit();
     });
   }

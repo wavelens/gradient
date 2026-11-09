@@ -246,4 +246,32 @@ describe('DialogComponent', () => {
     fixture.detectChanges();
     expect(document.activeElement).toBe(opener);
   });
+
+  it('moves focus to the main content when the opener left the page', async () => {
+    const main = document.createElement('main');
+    main.id = 'main-content';
+    main.tabIndex = -1;
+    document.body.append(main);
+    const fixture = render();
+    const opener = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.opener')!;
+    opener.focus();
+    fixture.componentInstance.open.set(true);
+    await fixture.whenStable();
+    opener.remove();
+    escape();
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(main);
+    main.remove();
+  });
+
+  it('locks page scrolling while open without moving the page', async () => {
+    const fixture = render();
+    fixture.componentInstance.open.set(true);
+    await fixture.whenStable();
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    expect(document.documentElement.style.position).toBe('');
+    escape();
+    fixture.detectChanges();
+    expect(document.documentElement.style.overflow).toBe('');
+  });
 });
