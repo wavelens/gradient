@@ -22,6 +22,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { CacheSubscriptionItem, TaskRepositoryResponse } from '@core/models';
+import { hasActiveCacheSubscriptionWithWriteAccess } from '@features/projects/project-no-active-writable-cache-subscription-warning.component';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -203,6 +204,6 @@ export class ConnectRepositoryComponent implements OnInit {
 
   missingCache(): boolean {
     const list = this.caches();
-    return list !== null && !list.some((c) => c.status === 'active');
+    return list !== null && !hasActiveCacheSubscriptionWithWriteAccess(list);
   }
 }

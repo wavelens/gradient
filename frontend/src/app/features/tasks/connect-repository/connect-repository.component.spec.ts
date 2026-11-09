@@ -119,6 +119,11 @@ describe('ConnectRepositoryComponent', () => {
     expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="cache-missing"]')).toBeNull();
   });
 
+  it('keeps the cache warning when the only active cache is read-only', () => {
+    const fixture = render({}, {}, { getSubscribedCaches: () => of([{ name: 'main', status: 'active', mode: 'ReadOnly' }]) });
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="cache-missing"]')).not.toBeNull();
+  });
+
   it('shows the missing permission instead of the form to a role that cannot create tasks, without a request', () => {
     const getSubscribedCaches = vi.fn(() => of([]));
     const el = render({}, {}, { getSubscribedCaches }, ['viewProject']).nativeElement as HTMLElement;
