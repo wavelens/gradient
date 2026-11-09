@@ -10,6 +10,7 @@ import { TeamsService } from '@core/services/teams.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { nameAvailability } from './name-availability';
 import { NameFieldsComponent } from './name-fields.component';
+import { dialogFormChangesSinceOpen } from './unsaved-changes';
 
 @Component({
   selector: 'app-create-team-dialog',
@@ -17,7 +18,7 @@ import { NameFieldsComponent } from './name-fields.component';
   imports: [ButtonComponent, DialogComponent, NameFieldsComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    <gr-dialog header="Create Team" [(visible)]="visible" width="420px" [error]="error()" [busy]="creating()">
+    <gr-dialog #teamDialog header="Create Team" [(visible)]="visible" width="420px" [error]="error()" [busy]="creating()" [confirmDiscard]="formChanges.changed()">
       <app-name-fields
         noun="team"
         [names]="names"
@@ -27,7 +28,7 @@ import { NameFieldsComponent } from './name-fields.component';
         (nameFieldsChanged)="error.set(null)"
       />
       <div grDialogFooter>
-        <button grButton label="Cancel" severity="secondary" [disabled]="creating()" (click)="visible.set(false)"></button>
+        <button grButton label="Cancel" severity="secondary" [disabled]="creating()" (click)="teamDialog.close()"></button>
         <button grButton label="Create" [loading]="creating()" [disabled]="!canSubmit()" (click)="create()"></button>
       </div>
     </gr-dialog>
@@ -43,6 +44,7 @@ export class CreateTeamDialogComponent {
   protected form = { name: '', displayName: '' };
   protected creating = signal(false);
   protected error = signal<string | null>(null);
+  protected formChanges = dialogFormChangesSinceOpen(() => this.form);
 
   constructor() {
     effect(() => {
@@ -51,6 +53,7 @@ export class CreateTeamDialogComponent {
         this.form = { name: '', displayName: '' };
         this.names.reset();
         this.error.set(null);
+        this.formChanges.mark();
       });
     });
   }

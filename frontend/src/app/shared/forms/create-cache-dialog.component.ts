@@ -18,6 +18,7 @@ import { apiErrorMessage } from '@core/services/api.service';
 import type { MakeCacheRequest } from '@core/models';
 import { nameAvailability } from './name-availability';
 import { NameFieldsComponent } from './name-fields.component';
+import { dialogFormChangesSinceOpen } from './unsaved-changes';
 
 const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description: '', priority: 50, local_priority: null, public: false };
 
@@ -27,7 +28,7 @@ const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description:
   imports: [FormsModule, ButtonComponent, DialogComponent, FormFieldComponent, InputDirective, SelectComponent, NameFieldsComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    <gr-dialog [header]="header()" [(visible)]="visible" width="500px" [busy]="creating()" [error]="error()">
+    <gr-dialog #cacheDialog [header]="header()" [(visible)]="visible" width="500px" [busy]="creating()" [error]="error()" [confirmDiscard]="formChanges.changed()">
       <app-name-fields
         noun="cache"
         [names]="names"
@@ -49,7 +50,7 @@ const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description:
         />
       </gr-form-field>
       <div grDialogFooter>
-        <button grButton label="Cancel" severity="secondary" (click)="visible.set(false)" [disabled]="creating()"></button>
+        <button grButton label="Cancel" severity="secondary" (click)="cacheDialog.close()" [disabled]="creating()"></button>
         <button
           grButton
           [label]="submitLabel()"
@@ -77,6 +78,7 @@ export class CreateCacheDialogComponent {
   protected cache: MakeCacheRequest = { ...EMPTY_CACHE };
   protected creating = signal(false);
   protected error = signal<string | null>(null);
+  protected formChanges = dialogFormChangesSinceOpen(() => this.cache);
 
   constructor() {
     effect(() => {
@@ -85,6 +87,7 @@ export class CreateCacheDialogComponent {
         this.cache = { ...EMPTY_CACHE };
         this.names.reset();
         this.error.set(null);
+        this.formChanges.mark();
       });
     });
   }

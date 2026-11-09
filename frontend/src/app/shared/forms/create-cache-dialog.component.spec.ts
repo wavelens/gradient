@@ -48,14 +48,32 @@ async function setup(createCache: () => unknown, available = true) {
     document.querySelector(selector)!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
     await settle();
   };
+  const cancel = async () => {
+    Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.includes('Cancel'))!.click();
+    await settle();
+  };
   const pressEscape = async () => {
     document.querySelector('.gr-dialog')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
     await settle();
   };
-  return { host: fixture.componentInstance, type, submit, pressEnter, pressEscape };
+  return { host: fixture.componentInstance, type, submit, cancel, pressEnter, pressEscape };
 }
 
 describe('CreateCacheDialogComponent', () => {
+  it('asks before Cancel drops typed input', async () => {
+    const { host, type, cancel } = await setup(() => of('id'));
+    await type('#cache-display-name', 'Team Cache');
+    await cancel();
+    expect(host.visible).toBe(true);
+    expect(document.querySelector('.gr-dialog__discard-question')?.textContent).toContain('Discard changes?');
+  });
+
+  it('closes on Cancel without asking while nothing was typed', async () => {
+    const { host, cancel } = await setup(() => of('id'));
+    await cancel();
+    expect(host.visible).toBe(false);
+  });
+
   it('creates the cache, closes and reports its name', async () => {
     const createCache = vi.fn(() => of('id'));
     const { host, type, submit } = await setup(createCache);

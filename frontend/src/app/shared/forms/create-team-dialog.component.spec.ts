@@ -45,6 +45,19 @@ describe('CreateTeamDialogComponent', () => {
     expect(document.querySelector('.gr-dialog')?.textContent).toContain('Team name already taken');
   });
 
+  it('asks before Cancel drops typed input', async () => {
+    const { fixture } = setup(() => of('id'));
+    const input = document.querySelector<HTMLInputElement>('#team-display-name')!;
+    input.value = 'Ops';
+    input.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.includes('Cancel'))!.click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.visible()).toBe(true);
+    expect(document.querySelector('.gr-dialog__discard-question')).not.toBeNull();
+  });
+
   it('sends one request while the creation runs', () => {
     const { fixture, dialog, teams } = setup(() => new Subject());
     dialog.form = { name: 'ops', displayName: 'Ops' };
