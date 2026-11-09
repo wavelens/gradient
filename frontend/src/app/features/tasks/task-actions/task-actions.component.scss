@@ -23,12 +23,15 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: $spacing-md;
 }
 
 .action-info {
   display: flex;
   align-items: flex-start;
+  flex: 1 1 16rem;
+  min-width: 0;
   gap: $spacing-md;
 
   .type-icon {
@@ -38,6 +41,7 @@
 
   .action-name {
     font-weight: 500;
+    overflow-wrap: anywhere;
     color: var(--gr-text-primary);
   }
 
