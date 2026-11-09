@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::is_project_member;
+use crate::access::can_view_project;
 use crate::authorization::MaybeApiKey;
 use crate::error::WebError;
 use crate::resource::Resource;
@@ -124,7 +124,7 @@ pub async fn post_evaluation_builds(
     )
     .await?;
 
-    if !is_project_member(&state.web_db, user.id, ctx.project_id, api_key_ref).await? {
+    if !can_view_project(&state.web_db, user.id, ctx.project_id, api_key_ref).await? {
         return Err(WebError::not_found(Resource::Evaluation));
     }
 

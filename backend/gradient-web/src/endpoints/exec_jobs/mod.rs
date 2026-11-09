@@ -24,7 +24,7 @@ pub use self::query::{
     ExecJobTokenView, StartedEvaluationView, get_exec_job, list_evaluation_exec_jobs,
 };
 
-use crate::access::{is_project_member, require_project_permission};
+use crate::access::{can_view_project, require_project_permission};
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::refusal::{Refusal, RefusalStatus};
@@ -117,7 +117,7 @@ impl ExecJobAccessContext {
         let ctx = Self::load_unguarded(db, job).await?;
         let readable = ctx.project.public
             || match maybe_user {
-                Some(user) => is_project_member(db, user.id, ctx.project.id, api_key).await?,
+                Some(user) => can_view_project(db, user.id, ctx.project.id, api_key).await?,
                 None => false,
             };
         if !readable {

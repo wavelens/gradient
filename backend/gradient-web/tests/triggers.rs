@@ -76,6 +76,7 @@ fn with_task_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![task()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
 }
 
 fn with_task_edit(db: MockDatabase) -> MockDatabase {

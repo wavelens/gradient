@@ -28,6 +28,7 @@ async fn get_task_includes_sign_cache() {
         .append_query_results([vec![project()]])
         .append_query_results([vec![task_with(false)]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])

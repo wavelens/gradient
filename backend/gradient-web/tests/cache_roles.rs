@@ -45,6 +45,7 @@ async fn list_returns_builtins_and_available_permissions() {
     let db = db
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![cache_admin_role()]])
         .append_query_results([vec![
             cache_admin_role(),
             cache_view_role(),

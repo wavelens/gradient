@@ -78,6 +78,7 @@ async fn adding_an_upstream_as_viewer_in_write_only_mode_is_refused() {
     let db = managing_admin(db, &main)
         .append_query_results([vec![upstream]])
         .append_query_results([vec![viewer.clone()]])
+        .append_query_results([vec![cache_view_role()]])
         .append_query_results([vec![viewer]])
         .append_query_results([vec![cache_view_role()]]);
 

@@ -5,7 +5,7 @@
  */
 
 use super::refusal::EvaluationRefusal;
-use crate::access::is_project_member;
+use crate::access::can_view_project;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
@@ -36,7 +36,7 @@ async fn load_abortable_evaluation(
     let api_key_ref = api_key.as_ref();
     let ctx = EvalAccessContext::load(db, evaluation_id, &Some(user.clone()), api_key_ref).await?;
     // Mutations require explicit project membership even on a public project.
-    if !is_project_member(db, user.id, ctx.project_id, api_key_ref).await? {
+    if !can_view_project(db, user.id, ctx.project_id, api_key_ref).await? {
         return Err(WebError::not_found(Resource::Evaluation));
     }
 
@@ -95,7 +95,7 @@ pub async fn post_evaluation_retry(
         api_key_ref,
     )
     .await?;
-    if !is_project_member(&state.web_db, user.id, ctx.project_id, api_key_ref).await? {
+    if !can_view_project(&state.web_db, user.id, ctx.project_id, api_key_ref).await? {
         return Err(WebError::not_found(Resource::Evaluation));
     }
 

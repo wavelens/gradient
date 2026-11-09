@@ -10,7 +10,7 @@ use super::{
     BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
     FailedAttributeSummary, PaginatedEntryPoints, QueueSummary, TaskDetailsResponse,
 };
-use crate::access::{Caller, caller_project_mask, is_project_member};
+use crate::access::{Caller, caller_project_mask, can_view_project};
 use crate::api_spec::{Binary, TaskPath};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::{live_progress, live_progress_status};
@@ -871,7 +871,7 @@ pub async fn get_entry_point_download(
     if !project.public {
         match resolved_user {
             Some(ref user) => {
-                if !is_project_member(&state.web_db, user.id, project.id, resolved_key.as_ref())
+                if !can_view_project(&state.web_db, user.id, project.id, resolved_key.as_ref())
                     .await?
                 {
                     return Err(WebError::not_found(Resource::Task));

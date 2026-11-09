@@ -64,16 +64,20 @@ fn with_task_scope(db: MockDatabase, role: RoleId) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![ssh_task()]])
         .append_query_results([vec![project_member(role)]])
+        .append_query_results([vec![role_row(role)]])
 }
 
 fn with_mask(db: MockDatabase, role: RoleId) -> MockDatabase {
-    let role_row = if role == BASE_ROLE_ADMIN_ID {
+    db.append_query_results([vec![project_member(role)]])
+        .append_query_results([vec![role_row(role)]])
+}
+
+fn role_row(role: RoleId) -> gradient_entity::role::Model {
+    if role == BASE_ROLE_ADMIN_ID {
         admin_role()
     } else {
         view_role()
-    };
-    db.append_query_results([vec![project_member(role)]])
-        .append_query_results([vec![role_row]])
+    }
 }
 
 #[tokio::test]
@@ -158,8 +162,7 @@ async fn view_members_see_no_credential_state_and_cannot_edit() {
 #[tokio::test]
 async fn turning_on_push_builds_needs_a_receiving_integration() {
     let session_id = SessionId::now_v7();
-    let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_ADMIN_ID)
-        .append_query_results([vec![admin_role()]]);
+    let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_ADMIN_ID);
     let db = with_mask(db, BASE_ROLE_ADMIN_ID).append_query_results([vec![inbound()]]);
 
     let res = make_test_server(db.into_connection())
@@ -177,8 +180,7 @@ async fn turning_on_push_builds_needs_a_receiving_integration() {
 #[tokio::test]
 async fn turning_on_push_builds_creates_the_push_trigger() {
     let session_id = SessionId::now_v7();
-    let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_ADMIN_ID)
-        .append_query_results([vec![admin_role()]]);
+    let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_ADMIN_ID);
     let db = with_mask(db, BASE_ROLE_ADMIN_ID)
         .append_query_results([vec![inbound()]])
         .append_query_results([Vec::<task_trigger::Model>::new()])
@@ -226,7 +228,6 @@ fn outbound_without_token() -> integration::Model {
 async fn installing_a_deploy_key_needs_a_git_host_token() {
     let session_id = SessionId::now_v7();
     let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_ADMIN_ID)
-        .append_query_results([vec![admin_role()]])
         .append_query_results([vec![inbound(), outbound_without_token()]]);
 
     let res = make_test_server(db.into_connection())

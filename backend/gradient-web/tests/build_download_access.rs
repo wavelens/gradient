@@ -13,7 +13,7 @@ use chrono::{Duration, Utc};
 use gradient_entity::ids::*;
 use gradient_fixtures::ids::{project_id, task_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{eval_at, live_session, project, user};
+use gradient_fixtures::rows::{eval_at, live_session, project, user, view_role};
 use gradient_test_support::state::TEST_JWT_SECRET;
 use gradient_test_support::web::{make_test_server, make_token};
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -135,7 +135,8 @@ async fn a_member_of_a_project_that_built_the_derivation_downloads_without_a_tok
             project: other_project_id(),
             user: user_id(),
             role: gradient_types::consts::BASE_ROLE_VIEW_ID,
-        }]]);
+        }]])
+        .append_query_results([vec![view_role()]]);
     let server = make_test_server(no_outputs(db).into_connection());
 
     let res = server

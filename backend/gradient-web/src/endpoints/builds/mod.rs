@@ -30,7 +30,7 @@ pub use self::log_chunks::{
 };
 pub use self::query::{BuildWithOutputs, get_build};
 
-use crate::access::is_project_member;
+use crate::access::can_view_project;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::lookup::require;
@@ -113,7 +113,7 @@ impl BuildAccessContext {
             true
         } else {
             match maybe_user {
-                Some(user) => is_project_member(db, user.id, ctx.project.id, api_key).await?,
+                Some(user) => can_view_project(db, user.id, ctx.project.id, api_key).await?,
                 None => false,
             }
         };
@@ -155,7 +155,7 @@ async fn reachable_projects_accessible(
             .collect();
 
     for project_id in project_ids {
-        if is_project_member(db, user.id, project_id, api_key).await? {
+        if can_view_project(db, user.id, project_id, api_key).await? {
             return Ok(true);
         }
     }

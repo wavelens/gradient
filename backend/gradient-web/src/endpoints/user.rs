@@ -496,7 +496,7 @@ async fn resolve_project_pin(
     let project = get_any_project_by_name(db, trimmed.into())
         .await?
         .ok_or_else(unknown)?;
-    let is_member = crate::access::is_project_member(&db.web_db, user_id, project.id, None).await?;
+    let is_member = crate::access::can_view_project(&db.web_db, user_id, project.id, None).await?;
     if !is_member {
         return Err(unknown().into());
     }

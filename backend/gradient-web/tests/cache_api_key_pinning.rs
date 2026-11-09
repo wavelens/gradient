@@ -182,6 +182,7 @@ async fn create_cache_pinned_key_cannot_exceed_member_mask() {
         .append_query_results([Vec::<api::Model>::new()])
         .append_query_results([vec![private_cache_row()]])
         .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![cache_view_role()]])
         .append_query_results([vec![cache_member_in(cache_id(), BASE_CACHE_ROLE_VIEW_ID)]])
         .append_query_results([vec![cache_view_role()]]);
 

@@ -17,7 +17,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::access::is_project_member;
+use crate::access::can_view_project;
 use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
 use crate::error::WebError;
 use crate::helpers::OptionExt;
@@ -161,7 +161,7 @@ async fn check_badge_project_access(
     }
     match resolved_user {
         Some(user) => {
-            if !is_project_member(db, user.id, project.id, api_key).await? {
+            if !can_view_project(db, user.id, project.id, api_key).await? {
                 return Err(WebError::not_found(Resource::Project));
             }
         }

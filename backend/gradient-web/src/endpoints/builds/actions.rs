@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::is_project_member;
+use crate::access::can_view_project;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
@@ -26,7 +26,7 @@ async fn load_member_build(
 ) -> WebResult<BuildAccessContext> {
     let api_key_ref = api_key.as_ref();
     let ctx = BuildAccessContext::load(db, build_id, &Some(user.clone()), api_key_ref).await?;
-    if !is_project_member(db, user.id, ctx.project.id, api_key_ref).await? {
+    if !can_view_project(db, user.id, ctx.project.id, api_key_ref).await? {
         return Err(WebError::not_found(Resource::Build));
     }
 

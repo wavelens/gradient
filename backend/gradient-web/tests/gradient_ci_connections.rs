@@ -12,7 +12,7 @@ use std::sync::Arc;
 use gradient_entity::team_user::TeamRole;
 use gradient_entity::{ids::*, project_user, team_user, team_worker, worker_registration};
 use gradient_fixtures::ids::user_id;
-use gradient_fixtures::rows::{project, project_member, team};
+use gradient_fixtures::rows::{project, project_member, team, view_role};
 use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
 use gradient_types::SessionId;
 use sea_orm::{DbErr, MockDatabase, RuntimeErr, sqlx};
@@ -71,6 +71,7 @@ fn as_member(session_id: SessionId) -> MockDatabase {
     with_auth(mock_db(), session_id)
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![view_role()]])
 }
 
 async fn connect_project(
@@ -149,7 +150,8 @@ async fn a_misplaced_paste_is_a_bad_request_naming_the_prefix() {
     let (db, auth) = signed_in();
     let db = db
         .append_query_results([vec![project()]])
-        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]]);
+        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![view_role()]]);
     let server = make_test_server(db.into_connection());
 
     let res = server

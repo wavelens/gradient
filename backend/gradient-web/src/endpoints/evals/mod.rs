@@ -23,7 +23,7 @@ pub use self::report::*;
 pub use self::summary::*;
 pub use self::types::*;
 
-use crate::access::is_project_member;
+use crate::access::can_view_project;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::lookup::require;
@@ -59,7 +59,7 @@ impl EvalAccessContext {
             true
         } else {
             match maybe_user {
-                Some(user) => is_project_member(db, user.id, project.id, api_key).await?,
+                Some(user) => can_view_project(db, user.id, project.id, api_key).await?,
                 None => false,
             }
         };

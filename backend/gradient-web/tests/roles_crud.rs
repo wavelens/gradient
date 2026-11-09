@@ -36,6 +36,7 @@ async fn list_roles_returns_builtins_plus_custom() {
     let db = db
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![view_role()]])
         .append_query_results([vec![
             admin_role(),
             write_role(),

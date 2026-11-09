@@ -129,7 +129,7 @@ pub async fn load_project(
         ProjectAccess::Readable { .. } => {
             if !project.public {
                 let visible = match caller.user_id() {
-                    Some(uid) => is_project_member(&db.web_db, uid, project.id, api_key).await?,
+                    Some(uid) => can_view_project(&db.web_db, uid, project.id, api_key).await?,
                     None => false,
                 };
                 if !visible {
@@ -139,7 +139,7 @@ pub async fn load_project(
         }
         ProjectAccess::Member { reject_managed } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            if !is_project_member(&db.web_db, uid, project.id, api_key).await? {
+            if !can_view_project(&db.web_db, uid, project.id, api_key).await? {
                 return Err(WebError::not_found(label));
             }
             if reject_managed {
@@ -184,7 +184,7 @@ pub async fn load_task(
         TaskAccess::Readable => {
             if !project.public {
                 let visible = match caller.user_id() {
-                    Some(uid) => is_project_member(&db.web_db, uid, project.id, api_key).await?,
+                    Some(uid) => can_view_project(&db.web_db, uid, project.id, api_key).await?,
                     None => false,
                 };
                 if !visible {
@@ -194,7 +194,7 @@ pub async fn load_task(
         }
         TaskAccess::Member => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            if !is_project_member(&db.web_db, uid, project.id, api_key).await? {
+            if !can_view_project(&db.web_db, uid, project.id, api_key).await? {
                 return Err(WebError::not_found(label));
             }
         }
@@ -239,7 +239,7 @@ pub async fn load_cache(
             if !cache.public {
                 let visible = match caller.user_id() {
                     Some(uid) => {
-                        is_cache_member(&db.web_db, uid, cache.id, api_key).await?
+                        can_view_cache(&db.web_db, uid, cache.id, api_key).await?
                             || is_cache_project_subscriber(&db.web_db, uid, cache.id, api_key)
                                 .await?
                     }
@@ -252,7 +252,7 @@ pub async fn load_cache(
         }
         CacheAccess::Member { reject_managed } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
-            if !is_cache_member(&db.web_db, uid, cache.id, api_key).await? {
+            if !can_view_cache(&db.web_db, uid, cache.id, api_key).await? {
                 return Err(WebError::not_found(label));
             }
             if reject_managed {
@@ -301,19 +301,13 @@ pub async fn load_integration_in_project(
         .or_not_found(Resource::Integration)
 }
 
-pub async fn is_project_member(
+pub async fn can_view_project(
     db: &WebDb,
     user_id: UserId,
     project_id: ProjectId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
-    if let Some(ctx) = api_key
-        && let Some(pinned) = ctx.project
-        && pinned != project_id
-    {
-        return Ok(false);
-    }
-    Ok(gradient_db::access::reaches_project(db, project_id, user_id).await?)
+    has_permission(db, user_id, project_id, Permission::ViewProject, api_key).await
 }
 
 pub async fn load_project_membership(
@@ -417,18 +411,13 @@ fn reject_managed_project(project: &MProject) -> WebResult<()> {
     Ok(())
 }
 
-async fn is_cache_member(
+async fn can_view_cache(
     db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<bool> {
-    if request_uses_project_pinned_api_key(api_key) {
-        return Ok(false);
-    }
-    Ok(gradient_db::caches::access_of_user(db, cache_id, user_id)
-        .await?
-        .is_some())
+    has_cache_permission(db, user_id, cache_id, CachePermission::ViewCache, api_key).await
 }
 
 fn request_uses_project_pinned_api_key(api_key: Option<&ApiKeyContext>) -> bool {
@@ -928,6 +917,7 @@ mod tests {
             let db = mock_db()
                 .append_query_results([vec![project_fixture(false, false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .append_query_results([vec![view_role_row()]])
                 .into_connection();
             let state = make_state(db);
             let r = load_project(
@@ -981,6 +971,35 @@ mod tests {
             )
             .await
             .expect_err("anon must not see private project");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
+    fn project_readable_role_without_view_project_not_found() {
+        run(async {
+            let user = user_fixture();
+            let role_id = RoleId::new(uuid!("a0000000-0000-0000-0000-000000000040"));
+            let db = mock_db()
+                .append_query_results([vec![project_fixture(false, false)]])
+                .append_query_results([vec![membership_fixture(role_id)]])
+                .append_query_results([vec![role_fixture(
+                    role_id,
+                    mask_from(&[Permission::ManageWorkers]),
+                )]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_project(
+                &state.db(),
+                Caller::User(&user),
+                None,
+                "test-project".into(),
+                ProjectAccess::Readable {
+                    label: Resource::Project,
+                },
+            )
+            .await
+            .expect_err("a role without viewProject must not read the project");
             assert!(matches!(err, WebError::NotFound(..)));
         });
     }
@@ -1437,12 +1456,40 @@ mod tests {
     }
 
     #[test]
+    fn cache_readable_role_without_view_cache_not_found() {
+        run(async {
+            let user = user_fixture();
+            let db = mock_db()
+                .append_query_results([vec![cache_fixture(false)]])
+                .append_query_results([vec![cache_member_fixture()]])
+                .append_query_results([vec![gradient_entity::cache_role::Model {
+                    permission: 0,
+                    ..cache_role_view_fixture()
+                }]])
+                .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_cache(
+                &state.db(),
+                Caller::User(&user),
+                None,
+                "test-cache".into(),
+                CacheAccess::Readable,
+            )
+            .await
+            .expect_err("a role without viewCache must not read the cache");
+            assert!(matches!(err, WebError::NotFound(..)));
+        });
+    }
+
+    #[test]
     fn cache_member_allows_member() {
         run(async {
             let user = user_fixture();
             let db = mock_db()
                 .append_query_results([vec![cache_fixture(false)]])
                 .append_query_results([vec![cache_member_fixture()]])
+                .append_query_results([vec![cache_role_fixture()]])
                 .into_connection();
             let state = make_state(db);
             let r = load_cache(
@@ -1721,7 +1768,8 @@ mod tests {
                 project: project.id,
                 user: user.id,
                 role: BASE_ROLE_VIEW_ID,
-            }]]);
+            }]])
+            .append_query_results([vec![view_role_row()]]);
         let (state, db) = make_state_with_log(mock);
 
         load_project(

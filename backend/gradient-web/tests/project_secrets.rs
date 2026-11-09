@@ -181,7 +181,8 @@ async fn the_sops_recipient_of_an_ed25519_project_is_an_age_key() {
             public_key: public_key.clone(),
             ..project()
         }]])
-        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]]);
+        .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![view_role()]]);
     let server = make_test_server(db.into_connection());
 
     let res = server

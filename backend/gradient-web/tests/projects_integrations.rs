@@ -13,7 +13,7 @@ use gradient_entity::integration::IntegrationKind;
 use gradient_entity::{github_installation, ids::*, integration, project_user};
 use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
-use gradient_fixtures::rows::{admin_role, project, project_member};
+use gradient_fixtures::rows::{admin_role, project, project_member, view_role};
 use gradient_fixtures::test_date;
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, make_token, signed_in, with_auth};
@@ -87,6 +87,7 @@ fn gitea_outbound_row() -> integration::Model {
 fn with_project_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![project()]])
         .append_query_results([vec![project_member(BASE_ROLE_VIEW_ID)]])
+        .append_query_results([vec![view_role()]])
 }
 
 fn with_project_manage(db: MockDatabase) -> MockDatabase {
