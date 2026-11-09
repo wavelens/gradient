@@ -94,7 +94,8 @@ describe('TeamSettingsComponent', () => {
 
   it('leaves the new project grants to superusers', () => {
     const { fixture, update } = setup(false);
-    expect(input(fixture, 'team-oidc-group').disabled).toBe(true);
+    expect(input(fixture, 'team-oidc-group')).toBeNull();
+    expect(fixture.nativeElement.querySelector('#new-project-users')).toBeNull();
 
     const component = fixture.componentInstance;
     component.form = { ...component.form, display_name: 'Platform Team', new_project_workers: true };
@@ -110,6 +111,17 @@ describe('TeamSettingsComponent', () => {
     component.form = { ...component.form, new_project_workers: true };
     component.save();
     expect(update).toHaveBeenCalledWith('platform', { new_project_workers: true });
+  });
+
+  it('picks a role only while new projects grant the team users, starting at View', async () => {
+    const { fixture } = setup(true);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(input(fixture, 'new-project-role').disabled).toBe(true);
+
+    fixture.componentInstance.form.new_project_users = true;
+    fixture.componentInstance.setDefaultNewProjectRoleIfNoneChosen(true);
+    expect(fixture.componentInstance.form.new_project_role).toBe('View');
   });
 
   it('reports a failed save as a toast', () => {

@@ -78,10 +78,9 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
   protected accessService = inject(AccessService);
 
   readonly roleOptions = [
-    { label: 'None', value: '' },
-    { label: 'Admin', value: 'Admin' },
-    { label: 'Write', value: 'Write' },
     { label: 'View', value: 'View' },
+    { label: 'Write', value: 'Write' },
+    { label: 'Admin', value: 'Admin' },
   ];
 
   private resolvedTeam = injectTeam();
@@ -95,7 +94,6 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
 
   isSuperuser = computed(() => this.authService.user()?.superuser === true);
   access = computed(() => this.accessFor(canManageTeam(this.team(), this.authService.user())));
-  superuserAccess = computed(() => this.accessFor(this.isSuperuser()));
 
   ngOnInit(): void {
     this.teamName = this.route.snapshot.paramMap.get('team') || '';
@@ -113,6 +111,10 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
 
   canSave(): boolean {
     return !this.saving() && this.accessService.isWritable(this.access()) && this.unsaved.changed() && !this.displayNameError;
+  }
+
+  setDefaultNewProjectRoleIfNoneChosen(grantUsers: boolean): void {
+    if (grantUsers && !this.form.new_project_role) this.form.new_project_role = this.roleOptions[0].value;
   }
 
   save(): void {

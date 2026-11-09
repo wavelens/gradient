@@ -12,24 +12,27 @@
       <gr-form-field label="Display Name" for="team-display-name" [invalid]="!!displayNameError" [error]="displayNameError ?? ''">
         <input grInput id="team-display-name" [(ngModel)]="form.display_name" [appManagedDisable]="access()" (keyup.enter)="save()" />
       </gr-form-field>
-      <gr-form-field hint="Applies to projects created from now on.">
-        <gr-checkbox inputId="new-project-users" [(ngModel)]="form.new_project_users" [binary]="true"
-          label="New projects grant the team's users" [appManagedDisable]="superuserAccess()" />
-      </gr-form-field>
-      <gr-form-field label="Role of the team's users in new projects">
-        <gr-select [(ngModel)]="form.new_project_role" [options]="roleOptions" optionLabel="label" optionValue="value"
-          [appManagedDisable]="superuserAccess()" />
-      </gr-form-field>
-      <gr-form-field hint="Applies to projects created from now on.">
-        <gr-checkbox inputId="new-project-workers" [(ngModel)]="form.new_project_workers" [binary]="true"
-          label="New projects grant the team's workers" [appManagedDisable]="superuserAccess()" />
-      </gr-form-field>
-      <gr-form-field label="OIDC group" for="team-oidc-group" hint="Members of this group join the team, taken from the groups claim at each sign-in.">
-        <input grInput id="team-oidc-group" [(ngModel)]="form.oidc_group" [appManagedDisable]="superuserAccess()" (keyup.enter)="save()" />
-      </gr-form-field>
-      <gr-form-field label="SCIM group" for="team-scim-group" hint="Members of this group join the team.">
-        <input grInput id="team-scim-group" [(ngModel)]="form.scim_group" [appManagedDisable]="superuserAccess()" (keyup.enter)="save()" />
-      </gr-form-field>
+      @if (isSuperuser()) {
+        <gr-form-field hint="Applies to projects created from now on.">
+          <gr-checkbox inputId="new-project-users" [(ngModel)]="form.new_project_users" [binary]="true"
+            (ngModelChange)="setDefaultNewProjectRoleIfNoneChosen($event)"
+            label="New projects grant the team's users" [appManagedDisable]="access()" />
+        </gr-form-field>
+        <gr-form-field label="Role of the team's users in new projects" for="new-project-role">
+          <gr-select inputId="new-project-role" [(ngModel)]="form.new_project_role" [options]="roleOptions" optionLabel="label"
+            optionValue="value" [appManagedDisable]="access()" [disabled]="!form.new_project_users" />
+        </gr-form-field>
+        <gr-form-field hint="Applies to projects created from now on.">
+          <gr-checkbox inputId="new-project-workers" [(ngModel)]="form.new_project_workers" [binary]="true"
+            label="New projects grant the team's workers" [appManagedDisable]="access()" />
+        </gr-form-field>
+        <gr-form-field label="OIDC group" for="team-oidc-group" hint="Members of this group join the team, taken from the groups claim at each sign-in.">
+          <input grInput id="team-oidc-group" [(ngModel)]="form.oidc_group" [appManagedDisable]="access()" (keyup.enter)="save()" />
+        </gr-form-field>
+        <gr-form-field label="SCIM group" for="team-scim-group" hint="Members of this group join the team.">
+          <input grInput id="team-scim-group" [(ngModel)]="form.scim_group" [appManagedDisable]="access()" (keyup.enter)="save()" />
+        </gr-form-field>
+      }
 
       @if (accessService.isWritable(access())) {
         <div class="gr-form-actions">
