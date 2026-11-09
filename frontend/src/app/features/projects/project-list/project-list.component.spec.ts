@@ -148,6 +148,25 @@ describe('ProjectListComponent', () => {
     expect(cmp.showCreateDialog()).toBe(true);
   });
 
+  it('closes an untouched Create Project dialog on Cancel and asks first once something was typed', () => {
+    const { fixture } = render(() => of(EMPTY_PAGE));
+    const cmp = fixture.componentInstance;
+    const cancel = () => [...document.querySelectorAll<HTMLButtonElement>('[grDialogFooter] button')].find((b) => b.textContent?.includes('Cancel'))!;
+    cmp.openCreateDialog();
+    fixture.detectChanges();
+    cancel().click();
+    fixture.detectChanges();
+    expect(cmp.showCreateDialog()).toBe(false);
+
+    cmp.openCreateDialog();
+    cmp.newProject.description = 'Nightly builds';
+    fixture.detectChanges();
+    cancel().click();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog__discard')?.textContent).toContain('Discard changes?');
+    expect(cmp.showCreateDialog()).toBe(true);
+  });
+
   it('opens the created project', () => {
     const { fixture } = render(() => of(EMPTY_PAGE));
     (TestBed.inject(ProjectsService) as unknown as { createProject: () => unknown }).createProject = () => of('Project created');

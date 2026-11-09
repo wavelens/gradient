@@ -93,10 +93,12 @@
 
 <!-- Create Project Dialog -->
 <gr-dialog
+  #createDialog
   header="Create Project"
   [(visible)]="showCreateDialog"
   [error]="createError()"
   [busy]="creating()"
+  [confirmDiscard]="createFormChanges.changed()"
   width="500px"
 >
   <div #createForm>
@@ -136,7 +138,7 @@
       grButton
       label="Cancel"
       severity="secondary"
-      (click)="showCreateDialog.set(false)"
+      (click)="createDialog.close()"
       [disabled]="creating()"
     ></button>
     <button

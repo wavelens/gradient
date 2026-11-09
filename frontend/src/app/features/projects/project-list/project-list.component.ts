@@ -27,7 +27,7 @@ import {
   PageLayoutComponent,
   SelectComponent,
 } from '@gradient/ui/ui';
-import { NameFieldsComponent, injectRevealFirstInvalid, nameAvailability, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
+import { NameFieldsComponent, dialogFormChangesSinceOpen, injectRevealFirstInvalid, nameAvailability, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
 import { ProjectSummary, PublicProjectSummary } from '@core/models';
 import { links } from '@shared/routing';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
@@ -87,6 +87,7 @@ export class ProjectListComponent implements OnInit {
   creating = signal(false);
   createError = signal<string | null>(null);
   createAttempted = signal(false);
+  createFormChanges = dialogFormChangesSinceOpen(() => this.newProject);
 
   newProject = {
     name: '',
@@ -115,6 +116,7 @@ export class ProjectListComponent implements OnInit {
     this.names.reset();
     this.createError.set(null);
     this.createAttempted.set(false);
+    this.createFormChanges.mark();
     this.showCreateDialog.set(true);
   }
 
