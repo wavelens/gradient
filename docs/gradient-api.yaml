@@ -3203,7 +3203,7 @@ paths:
       tags:
       - caches
       summary: Get cache
-      description: Returns cache details. Public caches are visible to anyone. A private cache is visible to its cache members and to members of any project subscribed to it (matching the visibility of `GET /caches`); other callers receive `404`.
+      description: Return details of a cache. A public cache is visible to all callers. A private cache is visible to cache members and to members of a subscribed project (same visibility as ``GET /caches``). Other callers receive ``404``. Use ``permissions`` for the actions that a caller can run on this cache. Cache members get the cache role. Members of a subscribed project get ``viewCache`` and ``readStore``.
       operationId: getCache
       parameters:
       - name: cache

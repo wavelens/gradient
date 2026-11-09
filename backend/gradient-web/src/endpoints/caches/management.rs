@@ -5,7 +5,7 @@
  */
 
 use super::refusal::CacheRefusal;
-use crate::access::{Caller, caller_cache_mask};
+use crate::access::effective_cache_mask;
 use crate::api_spec::CachePath;
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
@@ -312,7 +312,7 @@ pub async fn get_public_caches(
     operation_id = "getCache",
     tag = "caches",
     summary = "Get cache",
-    description = "Returns cache details. Public caches are visible to anyone. A private cache is visible to its cache members and to members of any project subscribed to it (matching the visibility of `GET /caches`); other callers receive `404`.",
+    description = "Return details of a cache. A public cache is visible to all callers. A private cache is visible to cache members and to members of a subscribed project (same visibility as ``GET /caches``). Other callers receive ``404``. Use ``permissions`` for the actions that a caller can run on this cache. Cache members get the cache role. Members of a subscribed project get ``viewCache`` and ``readStore``.",
     params(CachePath),
     responses((status = OK, description = "Cache details", body = CacheResponse), WebError)
 )]
@@ -332,13 +332,12 @@ pub async fn get_cache(
     )
     .context("derive public key")?;
 
-    let permissions = caller_cache_mask(
-        &state.web_db,
-        Caller::from(&maybe_user),
-        cache.id,
-        api_key.as_ref(),
-    )
-    .await?;
+    let permissions = match &maybe_user {
+        Some(user) => effective_cache_mask(&state.web_db, user.id, cache.id, api_key.as_ref())
+            .await?
+            .unwrap_or(0),
+        None => 0,
+    };
 
     Ok(ok_json(CacheResponse::new(cache, public_key, permissions)))
 }
