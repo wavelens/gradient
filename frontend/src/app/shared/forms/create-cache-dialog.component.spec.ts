@@ -9,6 +9,7 @@ import { TestBed } from '@angular/core/testing';
 import { Subject, of, throwError } from 'rxjs';
 import { CachesService } from '@core/services/caches.service';
 import { ApiError } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { CreateCacheDialogComponent } from './create-cache-dialog.component';
 
 @Component({
@@ -82,6 +83,14 @@ describe('CreateCacheDialogComponent', () => {
     expect(createCache).toHaveBeenCalledWith(expect.objectContaining({ name: 'team-cache', display_name: 'Team Cache', public: false }));
     expect(host.created).toEqual(['team-cache']);
     expect(host.visible).toBe(false);
+  });
+
+  it('confirms a created cache with a toast', async () => {
+    const { type, submit } = await setup(() => of('id'));
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+    await type('#cache-display-name', 'Team Cache');
+    await submit();
+    expect(success).toHaveBeenCalledWith('Cache created');
   });
 
   it('stays open with the error when creation fails', async () => {

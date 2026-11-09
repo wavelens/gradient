@@ -8,6 +8,7 @@ import { ChangeDetectionStrategy, Component, effect, inject, model, output, sign
 import { ButtonComponent, DialogComponent } from '@gradient/ui/ui';
 import { TeamsService } from '@core/services/teams.service';
 import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import { nameAvailability } from './name-availability';
 import { NameFieldsComponent } from './name-fields.component';
 import { dialogFormChangesSinceOpen } from './unsaved-changes';
@@ -36,6 +37,7 @@ import { dialogFormChangesSinceOpen } from './unsaved-changes';
 })
 export class CreateTeamDialogComponent {
   private teams = inject(TeamsService);
+  private notify = inject(NotifyService);
 
   visible = model(false);
   created = output<string>();
@@ -70,6 +72,7 @@ export class CreateTeamDialogComponent {
       next: () => {
         this.creating.set(false);
         this.visible.set(false);
+        this.notify.success('Team created');
         this.created.emit(this.form.name);
       },
       error: (err: unknown) => {

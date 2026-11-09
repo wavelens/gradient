@@ -15,6 +15,7 @@ import {
 } from '@gradient/ui/ui';
 import { CachesService } from '@core/services/caches.service';
 import { apiErrorMessage } from '@core/services/api.service';
+import { NotifyService } from '@core/services/notify.service';
 import type { MakeCacheRequest } from '@core/models';
 import { nameAvailability } from './name-availability';
 import { NameFieldsComponent } from './name-fields.component';
@@ -64,6 +65,7 @@ const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description:
 })
 export class CreateCacheDialogComponent {
   private caches = inject(CachesService);
+  private notify = inject(NotifyService);
 
   visible = model(false);
   header = input('Create Cache');
@@ -104,6 +106,7 @@ export class CreateCacheDialogComponent {
       next: () => {
         this.creating.set(false);
         this.visible.set(false);
+        this.notify.success('Cache created');
         this.created.emit(this.cache.name);
       },
       error: (error: unknown) => {
