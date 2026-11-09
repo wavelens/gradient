@@ -26,7 +26,7 @@
     errorTitle="Failed to load actions"
     emptyIcon="notifications_active"
     emptyTitle="No actions configured"
-    emptyMessage="Create actions that post webhooks, post chat messages, or report build status to the Git host."
+    [emptyMessage]="access().canEdit ? 'Create actions that post webhooks, post chat messages, or report build status to the Git host.' : undefined"
     (retry)="loadActions()"
   >
     <button slot="empty-action"

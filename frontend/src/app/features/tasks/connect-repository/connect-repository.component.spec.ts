@@ -127,9 +127,10 @@ describe('ConnectRepositoryComponent', () => {
     expect(getSubscribedCaches).not.toHaveBeenCalled();
   });
 
-  it('tells a non-member that only project members can connect a repository', () => {
+  it('tells a visitor of a public project which permission connecting a repository needs', () => {
     const el = render({}, {}, {}, []).nativeElement as HTMLElement;
-    expect(el.querySelector('gr-load-state')?.textContent).toContain('Only the members of this project can view this.');
+    expect(el.querySelector('gr-load-state')?.textContent).toContain('The create task permission for this project is necessary.');
+    expect(el.querySelector('gr-load-state')?.textContent).not.toContain('can view this');
   });
 
   it('ends on the events step with a link to the task', () => {

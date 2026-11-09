@@ -107,6 +107,15 @@ describe('TaskActionsComponent', () => {
     expect(Array.from(el.querySelectorAll('a')).some((a) => a.textContent?.includes('Repository'))).toBe(false);
   });
 
+  it('tells only a member who can edit actions to create one', () => {
+    const viewer = setup({ managed: false, canEdit: false, canTrigger: false }, []).nativeElement as HTMLElement;
+    expect(viewer.textContent).toContain('No actions configured');
+    expect(viewer.textContent).not.toContain('Create actions');
+    TestBed.resetTestingModule();
+    const editor = setup({ managed: false, canEdit: true, canTrigger: true }, []).nativeElement as HTMLElement;
+    expect(editor.textContent).toContain('Create actions');
+  });
+
   it('lists the outbound integrations from the summary every project member can read', () => {
     setup({ managed: false, canEdit: false, canTrigger: false });
     expect(listProjectIntegrationSummaries).toHaveBeenCalledWith('acme');
