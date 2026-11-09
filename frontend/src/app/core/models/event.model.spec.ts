@@ -22,6 +22,27 @@ describe('eventNameToReadableText', () => {
     expect(eventNameToReadableText('cache.nar.fetched')).toBe('Cache NAR fetched');
     expect(eventNameToReadableText('build.*')).toBe('build.*');
   });
+
+  it('uses one verb set for every scope', () => {
+    expect(eventNameToReadableText('project.member.add')).toBe('Project member added');
+    expect(eventNameToReadableText('cache.member.create')).toBe('Cache member added');
+    expect(eventNameToReadableText('team.member.role_change')).toBe('Team member role changed');
+    expect(eventNameToReadableText('cache.member.update')).toBe('Cache member role changed');
+    expect(eventNameToReadableText('cache.member.delete')).toBe('Cache member removed');
+    expect(eventNameToReadableText('team.grant.remove')).toBe('Team access removed');
+    expect(eventNameToReadableText('team.request.approve')).toBe('Team request approved');
+    expect(eventNameToReadableText('ssh_key.create')).toBe('SSH key created');
+  });
+
+  it('calls webhooks event notifications and names system events in plain words', () => {
+    expect(eventNameToReadableText('project.webhook.create')).toBe('Project event notification created');
+    expect(eventNameToReadableText('webhook.ping')).toBe('Test delivery');
+    expect(eventNameToReadableText('auth.deny')).toBe('Access denied');
+    expect(eventNameToReadableText('login.success')).toBe('Signed in');
+    expect(groupCatalog([{ name: 'webhook.ping', durable: true }])).toEqual([
+      { group: 'Event notification', items: [{ value: 'webhook.ping', label: 'Test delivery' }] },
+    ]);
+  });
 });
 
 describe('groupCatalog', () => {
@@ -29,13 +50,13 @@ describe('groupCatalog', () => {
     expect(groupCatalog(catalog)).toEqual([
       { group: 'Build', items: [{ value: 'build.completed', label: 'Completed' }] },
       { group: 'Evaluation', items: [{ value: 'evaluation.failed', label: 'Failed' }] },
-      { group: 'Task', items: [{ value: 'task.star', label: 'Star' }] },
+      { group: 'Task', items: [{ value: 'task.star', label: 'Starred' }] },
     ]);
   });
 
   it('labels a family with an underscore in words', () => {
     expect(groupCatalog([{ name: 'exec_job.completed', durable: true }])).toEqual([
-      { group: 'Exec Job', items: [{ value: 'exec_job.completed', label: 'Completed' }] },
+      { group: 'Exec job', items: [{ value: 'exec_job.completed', label: 'Completed' }] },
     ]);
   });
 
@@ -52,7 +73,7 @@ describe('groupCatalog', () => {
       { name: 'login.success', durable: true },
     ];
     expect(groupCatalog(entries, undefined, false).map((g) => g.group)).toEqual(['Login']);
-    expect(groupCatalog(entries).map((g) => g.group)).toEqual(['SSH Key', 'Login']);
+    expect(groupCatalog(entries).map((g) => g.group)).toEqual(['SSH key', 'Login']);
   });
 
   it('keeps a whole-name prefix without matching longer segments', () => {
@@ -63,7 +84,7 @@ describe('groupCatalog', () => {
       { name: 'taskforce.created', durable: true },
     ];
     expect(groupCatalog(entries, ['cache.subscription', 'task'])).toEqual([
-      { group: 'Cache', items: [{ value: 'cache.subscription.approve', label: 'Subscription approve' }] },
+      { group: 'Cache', items: [{ value: 'cache.subscription.approve', label: 'Subscription approved' }] },
     ]);
   });
 });
