@@ -427,7 +427,7 @@ describe('EvaluationLogComponent', () => {
       cmp.visibleBuilds.set([target({ id: 'b1' }), target({ id: 'b2', dispatched_job: 'job-2' })]);
       fixture.detectChanges();
 
-      expect(fixture.nativeElement.querySelector('.sidebar-builds-heading')?.textContent).toBe('Builds');
+      expect(fixture.nativeElement.querySelector('.sidebar-builds-heading')?.textContent?.trim()).toBe('Builds');
       const rows = fixture.nativeElement.querySelectorAll('.build-item') as NodeListOf<HTMLElement>;
       rows[1].dispatchEvent(new MouseEvent('contextmenu', { clientX: 9, clientY: 9, bubbles: true, cancelable: true }));
       fixture.detectChanges();
@@ -883,6 +883,21 @@ describe('EvaluationLogComponent', () => {
       expect(root.querySelector('.log-area')?.textContent).toContain('Failed to load log');
       expect(root.querySelector('.log-area')?.textContent).toContain('log store is down');
       expect(root.querySelector('gr-log-viewer')).toBeNull();
+      fixture.destroy();
+    });
+
+    it('says the build list is partial and loads the next page on request', () => {
+      const getBuilds = vi.fn((..._args: unknown[]) => of({ builds: [build('ok', 'hash-zlib.drv')], total: 3, active_count: 0 }));
+      const fixture = setupEvaluationLogPageFixture([], getBuilds as never);
+      fixture.detectChanges();
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.querySelector('.sidebar-builds-heading')?.textContent?.trim()).toBe('1 of 3 builds');
+      getBuilds.mockReturnValue(of({ builds: [build('a', 'hash-a.drv'), build('b', 'hash-b.drv')], total: 3, active_count: 0 }));
+      (root.querySelector('gr-load-more button') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(getBuilds.mock.lastCall?.[2]).toBe(1);
+      expect(root.querySelector('.sidebar-builds-heading')?.textContent?.trim()).toBe('Builds');
+      expect(root.querySelector('gr-load-more button')).toBeNull();
       fixture.destroy();
     });
 

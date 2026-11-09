@@ -37,7 +37,7 @@ import { ExecJobListComponent } from '@features/exec-jobs/exec-job-list/exec-job
 import { ConfirmService } from '@shared/confirm';
 import { AccessService, WritableDirective } from '@shared/access';
 import { BuildOrigin, links } from '@shared/routing';
-import { CurrentTimeSignal, formatDuration, packageNameFromDerivationPath, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { CurrentTimeSignal, formatDuration, packageNameFromDerivationPath, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
 import {
   BuildProgress,
@@ -63,6 +63,7 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  LoadMoreComponent,
   MenuComponent,
   MenuItem,
   MessageBannerComponent,
@@ -79,7 +80,7 @@ import { saveResponse } from '@shared/download';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, ExecJobListComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, LoadingSpinnerComponent, LoadMoreComponent,LoadStateComponent, ButtonComponent, IconComponent, BadgeComponent, SkeletonComponent, BuildProgressComponent, EvalStatusBadgeComponent, ExecJobListComponent, InputDirective, InputFetchListComponent, LiveStatusComponent, LogViewerComponent, MenuComponent, MessageBannerComponent, ThunkProgressComponent, WaitingNoticeComponent, WritableDirective, DrawerDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -270,8 +271,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private pendingLogLines: string[] = [];
   private logDrainTimer?: ReturnType<typeof setInterval>;
   private readonly PAGE_SIZE = 1000;
-  private totalBuilds = 0;
-  private loadingMore = false;
+  protected readonly totalBuilds = signal(0);
+  protected readonly loadingMore = signal(false);
+  protected readonly plural = plural;
 
   logLines = signal<readonly string[]>([]);
   logPaused = signal(false);
@@ -500,12 +502,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     // are never left in `beyondFirstPage` with a stale status.
     const limit = this.isInitialBuildsLoad
       ? this.PAGE_SIZE
-      : Math.max(this.PAGE_SIZE, this.totalBuilds, this.activeBuildsCount());
+      : Math.max(this.PAGE_SIZE, this.totalBuilds(), this.activeBuildsCount());
     this.evalService.getBuilds(this.evaluationId, limit, 0, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.buildListError.set(null);
         this.hasLoadedFirstBuildPage.set(true);
-        this.totalBuilds = result.total;
+        this.totalBuilds.set(result.total);
         this.activeBuildsCount.set(result.active_count);
         if (!this.isRunning() && result.active_count === 0) this.stopLiveUpdates();
         const prevSelected = this.selectedBuild();
@@ -600,7 +602,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
         // Auto-fetch more pages until all active builds are in memory.
         // This ensures status transitions and log streaming work for every build.
-        if (this.builds().length < result.active_count && !this.loadingMore) {
+        if (this.builds().length < result.active_count && !this.loadingMore()) {
           this.doLoadMore();
         }
       },
@@ -610,19 +612,19 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   /** Triggered by scroll proximity - pre-fetches next page before user hits bottom. */
   loadMoreBuilds(): void {
-    if (this.loadingMore || this.builds().length >= this.totalBuilds) return;
+    if (this.loadingMore() || this.builds().length >= this.totalBuilds()) return;
     this.doLoadMore();
   }
 
   private doLoadMore(): void {
-    if (this.loadingMore || this.builds().length >= this.totalBuilds) return;
-    this.loadingMore = true;
+    if (this.loadingMore() || this.builds().length >= this.totalBuilds()) return;
+    this.loadingMore.set(true);
     const offset = this.builds().length;
 
     this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, offset, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         // Don't update activeBuildsCount here. loadBuilds() is the only owner of this signal, so a response that comes back at the same time can't change the value unexpectedly.
-        this.totalBuilds = result.total;
+        this.totalBuilds.set(result.total);
         if (result.builds.length > 0) {
           const existingIds = new Set(this.builds().map(b => b.id));
           const newBuilds = result.builds.filter(b => !existingIds.has(b.id));
@@ -631,7 +633,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             this.visibleBuilds.update(current => this.sortBuilds([...current, ...newBuilds]));
           }
         }
-        this.loadingMore = false;
+        this.loadingMore.set(false);
 
         // A build paged in here may be the one we deep-linked to.
         this.resolveInitialBuild();
@@ -642,7 +644,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         }
       },
       error: () => {
-        this.loadingMore = false;
+        this.loadingMore.set(false);
       },
     });
   }
