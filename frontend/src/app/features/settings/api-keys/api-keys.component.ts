@@ -372,7 +372,7 @@ export class ApiKeysComponent implements OnInit {
       .confirm({
         title: 'Revoke API key',
         target: key.name,
-        consequence: `${key.name} stops working immediately. Scripts and pipelines that use the key lose access.`,
+        consequence: 'The key is invalid right away. Scripts and pipelines that use this key lose access.',
         confirmLabel: 'Revoke',
         failure: 'Revoking the API key failed.',
         severity: 'danger',
@@ -389,7 +389,7 @@ export class ApiKeysComponent implements OnInit {
       .confirm({
         title: 'Delete API key',
         target: key.name,
-        consequence: `${key.name} no longer appears in the list and stops working. Scripts and pipelines that use the key lose access.`,
+        consequence: 'It stops working and the list no longer shows it. Scripts and pipelines that use this key lose access.',
         confirmLabel: 'Delete',
         failure: 'Deleting the API key failed.',
         action: () => this.userService.deleteApiKey(key.name),
