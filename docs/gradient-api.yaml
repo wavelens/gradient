@@ -18437,6 +18437,7 @@ components:
           type: string
         role:
           type: string
+          description: The role name for project and cache invitations. For team invitations this is the team role value, `admin` or `member`.
         invited_by:
           type: string
         invited_by_display_name:

@@ -53,6 +53,7 @@ pub struct InviteItem {
     pub token: String,
     pub scope: String,
     pub scope_display_name: String,
+    /// The role name for project and cache invitations. For team invitations this is the team role value, `admin` or `member`.
     pub role: String,
     pub invited_by: String,
     pub invited_by_display_name: Option<String>,

@@ -32,6 +32,15 @@ pub enum TeamRole {
     Member,
 }
 
+impl TeamRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::Member => "member",
+        }
+    }
+}
+
 #[derive(
     Clone,
     Copy,

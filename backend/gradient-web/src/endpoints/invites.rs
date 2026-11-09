@@ -5,7 +5,6 @@
  */
 
 use crate::audit::Audit;
-use crate::endpoints::teams::members::role_label;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{ok_json, role_names};
 use crate::invite_policy::{
@@ -153,7 +152,7 @@ pub async fn get_user_invites(
                         InviteKind::Team,
                         &team.name,
                         &team.display_name,
-                        role_label(i.role).to_string(),
+                        i.role.as_str().to_string(),
                     )
                 }
             };
