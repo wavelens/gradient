@@ -67,6 +67,7 @@ function setup(
   health: BoardHealth = HEALTH,
   setDraining = vi.fn(() => of({ draining: true })),
   confirmed = true,
+  tasks: AdminTaskDto[] = [TASK],
 ): ComponentFixture<BoardHealthComponent> {
   confirm = vi.fn((request: ConfirmRequest): Observable<unknown> => (confirmed ? request.action() : EMPTY));
   startDeepGc = vi.fn(() => of({ task_id: 't2', status: 'pending' }));
@@ -80,7 +81,7 @@ function setup(
       {
         provide: AdminService,
         useValue: {
-          listTasks: () => of([TASK]),
+          listTasks: () => of(tasks),
           startDeepGc,
           setDraining,
         },
@@ -241,6 +242,12 @@ describe('BoardHealthComponent', () => {
       adminButton(fixture, 'Run Deep GC').click();
       expect(startDeepGc).not.toHaveBeenCalled();
     });
+  });
+
+  it('leaves the step of a completed round empty', () => {
+    const fixture = setup(true, HEALTH, undefined, true, [{ ...TASK, status: 'completed' }]);
+    expect(fixture.nativeElement.textContent).not.toContain('NARs');
+    TestBed.resetTestingModule();
   });
 
   it('lists only the supervised loops that restarted or failed', () => {

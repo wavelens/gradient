@@ -117,7 +117,7 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
             <tr>
               <td>{{ taskKindLabel(t.kind) }}</td>
               <td>{{ t.status }}</td>
-              <td class="muted">{{ t.checkpoint ? checkpointLabel(t.checkpoint) : '-' }}</td>
+              <td class="muted">{{ t.checkpoint && t.status !== 'completed' ? checkpointLabel(t.checkpoint) : '-' }}</td>
               <td>{{ t.created_at | serverDate }}</td>
               <td>{{ t.finished_at ? (t.finished_at | serverDate) : '-' }}</td>
               <td [class.bad]="!!t.error">{{ t.error ?? '' }}</td>
