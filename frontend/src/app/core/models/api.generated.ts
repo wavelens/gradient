@@ -2506,6 +2506,7 @@ export interface SubscriptionRequestItem {
   project_display_name: string;
   mode: CacheSubscriptionMode;
   requested_by: string;
+  requested_by_display_name?: string | null;
   created_at: string;
 }
 

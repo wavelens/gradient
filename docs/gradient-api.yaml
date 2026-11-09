@@ -18882,7 +18882,7 @@ components:
           type:
           - integer
           - 'null'
-          format: int32
+          format: int64
         pull_through:
           type:
           - boolean
@@ -19730,7 +19730,7 @@ components:
           type:
           - integer
           - 'null'
-          format: int32
+          format: int64
         pull_through:
           type:
           - boolean
@@ -21359,6 +21359,10 @@ components:
           $ref: '#/components/schemas/CacheSubscriptionMode'
         requested_by:
           type: string
+        requested_by_display_name:
+          type:
+          - string
+          - 'null'
         created_at:
           type: string
           format: date-time
