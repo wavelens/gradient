@@ -6,7 +6,7 @@
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -67,6 +67,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
   protected readonly links = links;
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);
   private resolvedProject = injectProject();
@@ -94,20 +95,27 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
-    this.loadCaches();
     const preselected = this.route.snapshot.queryParamMap.get('subscribe');
-    if (preselected) this.openSubscribeDialog(preselected);
+    if (!preselected) {
+      this.loadCaches();
+      return;
+    }
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { subscribe: null }, queryParamsHandling: 'merge', replaceUrl: true });
+    this.loadCaches(() => this.openSubscribeDialog(preselected));
   }
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => (this.loading() || this.loadError() ? EMPTY : this.fetchSubscribedCaches()));
   }
 
-  loadCaches(): void {
+  loadCaches(onCacheSubscriptionsLoaded?: () => void): void {
     this.loading.set(true);
     this.loadError.set(null);
     this.fetchSubscribedCaches().subscribe({
-      next: () => this.loading.set(false),
+      next: () => {
+        this.loading.set(false);
+        onCacheSubscriptionsLoaded?.();
+      },
       error: (error: unknown) => {
         this.loadError.set(error);
         this.loading.set(false);

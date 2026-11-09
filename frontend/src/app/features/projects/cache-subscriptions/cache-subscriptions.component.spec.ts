@@ -6,7 +6,7 @@
 
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Observable, Subject, of, throwError } from 'rxjs';
@@ -73,6 +73,7 @@ function setup(access: AccessState, query: Record<string, string> = {}): Compone
       { provide: AuthService, useValue: { isAuthenticated: () => true, user: signal({ superuser: false, can_create_cache: true }) } },
     ],
   });
+  vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
   return TestBed.createComponent(CacheSubscriptionsComponent);
 }
 
@@ -163,6 +164,31 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     await settled(fixture);
     expect(fixture.componentInstance.showSubscribeDialog()).toBe(true);
     expect(fixture.componentInstance.newCacheName).toBe('nixpkgs');
+  });
+
+  it('drops the picked cache from the address and offers no subscribed cache', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, { subscribe: 'nixpkgs' });
+    TestBed.inject(CachesService).getPublicCaches = (() =>
+      of([{ name: 'nixpkgs', display_name: 'Nix Packages' }, { name: 'shared', display_name: 'Shared Cache' }])) as never;
+    await settled(fixture);
+    expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
+      [],
+      expect.objectContaining({ queryParams: { subscribe: null }, queryParamsHandling: 'merge', replaceUrl: true }),
+    );
+    fixture.componentInstance.onCacheSearch({ query: '' });
+    expect(fixture.componentInstance.cacheSuggestions()).toEqual([{ label: 'Nix Packages', value: 'nixpkgs' }]);
+  });
+
+  it('opens Subscribe for the picked cache only after the subscriptions load', async () => {
+    const subscriptions = new Subject<unknown[]>();
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, { subscribe: 'nixpkgs' });
+    TestBed.inject(ProjectsService).getSubscribedCaches = (() => subscriptions) as never;
+    await settled(fixture);
+    expect(fixture.componentInstance.showSubscribeDialog()).toBe(false);
+    subscriptions.next([]);
+    subscriptions.complete();
+    await settled(fixture);
+    expect(fixture.componentInstance.showSubscribeDialog()).toBe(true);
   });
 
   it('shows the display name of the cache picked on the cache page', async () => {
