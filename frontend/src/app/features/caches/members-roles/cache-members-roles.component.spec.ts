@@ -214,6 +214,7 @@ describe('CacheMembersRolesComponent - busy dialogs', () => {
 describe('CacheMembersRolesComponent - confirmed removals', () => {
   it('asks before removing a member, naming the member', async () => {
     const fixture = setup(true);
+    getMembers.mockReturnValue(of([{ id: 'alice', name: 'Admin' }, { id: 'erin', name: 'Admin' }]));
     await settled(fixture);
     (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('gr-row-list button.gr-button--danger')!.click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Remove member', target: 'alice' }));
@@ -236,6 +237,15 @@ describe('CacheMembersRolesComponent - confirmed removals', () => {
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete role', target: 'releaser' }));
     expect(deleteRole).toHaveBeenCalledWith('my-cache', 'r2');
     expect(notify.success).toHaveBeenCalledWith('Role deleted');
+  });
+
+  it('keeps the only admin from losing the role or being removed', async () => {
+    const fixture = setup(true);
+    getMembers.mockReturnValue(of([{ id: 'alice', name: 'Admin' }, { id: 'bob', name: 'View' }]));
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector<HTMLButtonElement>('[aria-label="Remove alice"]')!.disabled).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('[aria-label="Remove bob"]')!.disabled).toBe(false);
   });
 
   it('counts the members of each role and preselects the lowest role for a new member', async () => {

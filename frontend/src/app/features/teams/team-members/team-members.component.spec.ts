@@ -145,6 +145,14 @@ describe('TeamMembersComponent', () => {
     expect(row('dave').querySelector('button')).toBeNull();
   });
 
+  it('keeps the only admin from losing the role or being removed', () => {
+    const { fixture } = setup();
+    const element = fixture.nativeElement as HTMLElement;
+    const removeButton = (user: string) => element.querySelector<HTMLButtonElement>(`[aria-label="Remove ${user}"]`)!;
+    expect(removeButton('alice').disabled).toBe(true);
+    expect(removeButton('bob').disabled).toBe(false);
+  });
+
   it('lets a superuser outside the team add members', () => {
     const { fixture } = setup(undefined, false, undefined, [], { role: null, superuser: true });
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Invite Member');
@@ -255,7 +263,8 @@ describe('TeamMembersComponent', () => {
   });
 
   it('warns admins that removing themselves takes away their own access', () => {
-    const { fixture, confirm } = setup();
+    const secondAdmin: TeamMemberItem = { user: 'erin', name: 'Erin', role: 'admin', source: 'api' };
+    const { fixture, confirm } = setup(undefined, false, vi.fn().mockReturnValue(of([...members, secondAdmin])));
     removeButton(fixture.nativeElement, 'alice').click();
     expect(confirm).toHaveBeenCalledWith(
       expect.objectContaining({ target: 'alice', consequence: 'You lose access to this team and its settings.' }),

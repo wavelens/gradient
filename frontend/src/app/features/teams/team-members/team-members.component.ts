@@ -34,6 +34,7 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
+  TooltipDirective,
 } from '@gradient/ui/ui';
 
 @Component({
@@ -52,6 +53,7 @@ import {
     RowListComponent,
     SelectComponent,
     SettingsSectionComponent,
+    TooltipDirective,
   ],
   templateUrl: './team-members.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -85,6 +87,10 @@ export class TeamMembersComponent implements OnInit {
   readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'Server configuration', group: 'Group' };
 
   canEdit = computed(() => canManageTeam(this.team(), this.auth.user()));
+  soleAdminUsername = computed(() => {
+    const admins = this.members().filter((member) => member.role === 'admin');
+    return admins.length === 1 ? admins[0].user : null;
+  });
   readonly allMembersPhraseByMemberSource: Record<TeamMemberSource, string | null> = {
     api: null,
     state: 'from the server configuration',

@@ -137,6 +137,10 @@ export class CacheMembersRolesComponent implements OnInit {
   roleForm: RoleFormState = { name: '', permissions: {} };
 
   memberCountByRoleName = computed(() => countMembersByRoleName(this.members()));
+  soleAdminUsername = computed(() => {
+    const admins = this.members().filter((member) => member.name === 'Admin');
+    return admins.length === 1 ? admins[0].id : null;
+  });
   readonly plural = plural;
 
   constructor() {
