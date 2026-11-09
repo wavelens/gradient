@@ -74,6 +74,7 @@ const hasIsolatedNonNullValue = (data: (number | null)[]) =>
 const axisLabel = (t: ChartTheme) => ({ color: t.text, fontSize: 12, fontFamily: t.mono });
 const axisLine = (t: ChartTheme) => ({ lineStyle: { color: t.border } });
 const AXIS_TICKS = 4;
+const MAX_CATEGORY_AXIS_LABEL_WIDTH_PIXELS = 120;
 const splitLine = (t: ChartTheme) => ({ lineStyle: { color: t.grid, type: 'dashed' as const } });
 
 /// Builds the full ECharts option for `gr-metric-chart`. Kept pure and free of
@@ -117,8 +118,10 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   const kindOf = (s: MetricSeries): MetricSeriesType => s.type ?? (cfg.type === 'bar' ? 'bar' : 'line');
   const hasBars = cfg.series.some((s) => kindOf(s) === 'bar') || cfg.type === 'bar';
   const inset = cfg.horizontal ? undefined : cfg.inset;
-  const edgeLabels = cfg.compact ? { alignMinLabel: 'left' as const, alignMaxLabel: 'right' as const, hideOverlap: true } : {};
-  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], inverse: !!cfg.horizontal, boundaryGap: hasBars || !!inset, axisLabel: { ...axisLabel(theme), ...edgeLabels }, axisLine: axisLine(theme) };
+  const boundaryGap = hasBars || !!inset;
+  const edgeLabels = cfg.compact && !boundaryGap ? { alignMinLabel: 'left' as const, alignMaxLabel: 'right' as const } : {};
+  const categoryLabel = { ...axisLabel(theme), hideOverlap: true, overflow: 'truncate' as const, width: MAX_CATEGORY_AXIS_LABEL_WIDTH_PIXELS, ...edgeLabels };
+  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], inverse: !!cfg.horizontal, boundaryGap, axisLabel: categoryLabel, axisLine: axisLine(theme) };
   // Two value axes tick independently, so each draws its own grid: one set of
   // lines, and a shared tick count so the right-hand labels land on them.
   const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false, max?: number) => ({
@@ -163,7 +166,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
 }
 
 function gridOf(cfg: MetricChartConfig, inset: MetricChartConfig['inset'], secondary: boolean) {
-  if (cfg.compact) return { left: 4, right: 4, top: 8, bottom: cfg.series.length > 1 ? 32 : 4, containLabel: true };
+  if (cfg.compact) return { left: 4, right: 4, top: 8, bottom: cfg.series.length > 1 ? 44 : 4, containLabel: true };
   if (inset) return { left: inset.left, right: inset.right, top: 28, bottom: 24, containLabel: false };
   return { left: 8, right: secondary ? 8 : 12, top: 28, bottom: 4, containLabel: true };
 }

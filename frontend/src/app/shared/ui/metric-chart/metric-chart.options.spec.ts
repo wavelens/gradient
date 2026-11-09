@@ -419,4 +419,28 @@ describe('compact charts', () => {
     expect(legend.bottom).toBe(0);
     expect(legend.top).toBeUndefined();
   });
+
+  it('keeps the x labels clear of the legend below the plot', () => {
+    const grid = buildMetricChartOption(dual, THEME)['grid'] as any;
+    expect(grid.bottom).toBeGreaterThanOrEqual(40);
+  });
+
+  it('pins line labels to the plot edges', () => {
+    const label = (buildMetricChartOption(dual, THEME).xAxis as any).axisLabel;
+    expect(label).toMatchObject({ alignMinLabel: 'left', alignMaxLabel: 'right' });
+  });
+
+  it('centres bar labels in their band so two neighbours do not collide', () => {
+    const label = (buildMetricChartOption({ type: 'bar', series: one, categories: ['i686-linux', 'x86_64-linux'], compact: true }, THEME).xAxis as any).axisLabel;
+    expect(label.alignMinLabel).toBeUndefined();
+    expect(label.alignMaxLabel).toBeUndefined();
+  });
+});
+
+describe('category labels', () => {
+  it('hide overlapping and truncate long labels at every width', () => {
+    const label = (buildMetricChartOption({ type: 'bar', series: one, categories: cats }, THEME).xAxis as any).axisLabel;
+    expect(label).toMatchObject({ hideOverlap: true, overflow: 'truncate' });
+    expect(label.width).toBeGreaterThan(0);
+  });
 });
