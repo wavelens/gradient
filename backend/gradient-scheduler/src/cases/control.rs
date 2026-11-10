@@ -17,10 +17,11 @@ use gradient_entity::ids::{DerivationId, DispatchedJobId, EvaluationId, TaskTrig
 use gradient_entity::{dispatched_job, evaluation, pending_delivery, task};
 use gradient_fixtures::shape::build_assignment;
 use gradient_graph::{
-    Demotion, NarCommit, NarCommitted, RequeueScope, SignTargets, Transition, TransitionReport,
-    UpstreamHit,
+    Demotion, NarCommit, NarCommitted, RecordBatch, RequeueScope, SignTargets, Transition,
+    TransitionReport, UpstreamHit,
 };
 use gradient_pool::score::InstanceContext;
+use gradient_wire::types::DiscoveredDerivation;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
     QuerySelect,
@@ -407,6 +408,23 @@ impl SchedulerCase {
             .expect("the NAR is committed");
         self.settled().await;
         committed
+    }
+
+    pub async fn walk_evaluation_derivations_and_wait(
+        &self,
+        evaluation: EvaluationId,
+        derivations: Vec<DiscoveredDerivation>,
+    ) {
+        self.graph
+            .record(RecordBatch {
+                evaluation,
+                task: Some(self.db.task_of(evaluation).await),
+                derivations,
+                ..Default::default()
+            })
+            .await
+            .expect("the batch is written");
+        self.settled().await;
     }
 
     pub async fn project_caches(&self, evaluation: EvaluationId) -> SignTargets {
