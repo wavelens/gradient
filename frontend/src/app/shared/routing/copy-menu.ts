@@ -29,17 +29,9 @@ export class CopyMenuService {
   getFlatCopyEntries(references: CopyMenuItemCommandApiPathAndWebPageRoute): MenuItem[] {
     const link = `${globalThis.location?.origin ?? ''}${this.router.serializeUrl(references.absoluteLinkUrlTree)}`;
     return [
-      { label: 'CLI command', icon: 'terminal', command: () => this.copy(references.gradientCliCommand, 'CLI command copied') },
-      { label: 'API URL', icon: 'api', command: () => this.copy(`${this.config.apiBaseUrl}/${references.relativeApiEndpointPath}`, 'API URL copied') },
-      { label: 'Link', icon: 'link', command: () => this.copy(link, 'Link copied') },
+      { label: 'CLI command', icon: 'terminal', command: () => this.notify.copyToClipboard(references.gradientCliCommand, 'CLI command') },
+      { label: 'API URL', icon: 'api', command: () => this.notify.copyToClipboard(`${this.config.apiBaseUrl}/${references.relativeApiEndpointPath}`, 'API URL') },
+      { label: 'Link', icon: 'link', command: () => this.notify.copyToClipboard(link, 'link') },
     ];
-  }
-
-  private copy(text: string, success: string): void {
-    const written = navigator.clipboard?.writeText(text) ?? Promise.reject(new Error('Clipboard unavailable'));
-    written.then(
-      () => this.notify.success(success),
-      (error: unknown) => this.notify.failure("Couldn't copy to clipboard", error),
-    );
   }
 }

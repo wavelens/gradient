@@ -307,10 +307,7 @@ export class LogViewerComponent implements OnDestroy {
       replaceUrl: true,
     });
     const url = `${window.location.origin}${window.location.pathname}${window.location.search}#L${line}`;
-    navigator.clipboard?.writeText(url).then(
-      () => this.notify.success('Link copied'),
-      (error: unknown) => this.notify.failure("Couldn't copy link", error),
-    );
+    void this.notify.copyToClipboard(url, 'link');
   }
 
   @HostListener('document:keydown', ['$event'])

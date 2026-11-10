@@ -25,4 +25,12 @@ export class NotifyService {
     const detail = error instanceof ApiError ? error.message : undefined;
     this.messages.add({ severity: 'error', summary, detail, life: FAILURE_LIFE_MS, key: WRITE_RESULT_TOAST_KEY });
   }
+
+  copyToClipboard(text: string, thing: string): Promise<void> {
+    const written = navigator.clipboard?.writeText(text) ?? Promise.reject(new Error('Clipboard unavailable'));
+    return written.then(
+      () => this.success(`${thing.charAt(0).toUpperCase()}${thing.slice(1)} copied`),
+      (error: unknown) => this.failure(`Couldn't copy ${thing}`, error),
+    );
+  }
 }

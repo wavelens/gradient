@@ -55,4 +55,15 @@ describe('NotifyService', () => {
     notify.failure('Failed to delete webhook', new TypeError('x is undefined'));
     expect(messages.messages()[0].detail).toBeUndefined();
   });
+
+  it('copies text and names the copied thing in the toast, also when the clipboard refuses', async () => {
+    const { notify, messages } = setup();
+    const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'));
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    await notify.copyToClipboard('https://ci.example.com/project/acme', 'link');
+    expect(writeText).toHaveBeenCalledWith('https://ci.example.com/project/acme');
+    expect(messages.messages()).toEqual([expect.objectContaining({ severity: 'success', summary: 'Link copied' })]);
+    await notify.copyToClipboard('gradient evaluation wait acme/demo', 'CLI command');
+    expect(messages.messages()).toEqual([expect.objectContaining({ severity: 'error', summary: "Couldn't copy CLI command" })]);
+  });
 });
