@@ -55,7 +55,7 @@ async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
     let mut terminate = signal(SignalKind::terminate())?;
     let mut sessions = JoinSet::new();
 
-    loop {
+    let served = loop {
         tokio::select! {
             served = &mut console, if console_served => {
                 console_served = false;
@@ -63,18 +63,20 @@ async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
                     warn!(error = %format!("{e:#}"), "the guest console relay stopped");
                 }
             }
-            accepted = control.accept() => {
-                let (stream, _) = accepted?;
-                sessions.spawn(serve(Arc::clone(&host), stream));
-            }
-            _ = terminate.recv() => break,
+            accepted = control.accept() => match accepted {
+                Ok((stream, _)) => {
+                    sessions.spawn(serve(Arc::clone(&host), stream));
+                }
+                Err(e) => break Err(e),
+            },
+            _ = terminate.recv() => break Ok(()),
         }
-    }
+    };
 
     sessions.abort_all();
     host.release().await;
     info!("Guest supervisor freed the TAP and USB devices of a guest.");
-    Ok(())
+    served.context("Guest Control Socket Failure")
 }
 
 struct Host {
@@ -179,6 +181,9 @@ impl Host {
         let Some(bus_id) = usb_bus_id(Path::new(SYSFS_USB_DEVICES), vendor_product) else {
             bail!("no USB device {vendor_product} on the host");
         };
+        if usb_device_is_bound_to_usbip_host_driver(Path::new(SYSFS_USB_DEVICES), &bus_id) {
+            run("usbip", &["unbind", "-b", &bus_id]).await?;
+        }
         run("usbip", &["bind", "-b", &bus_id]).await?;
         lock(&self.usb_bus_ids).push(bus_id.clone());
         Ok(SupervisorReply::UsbBound { bus_id })
@@ -386,6 +391,11 @@ pub fn usb_bus_id(sysfs_usb_devices: &Path, vendor_product: &str) -> Option<Stri
     })
 }
 
+fn usb_device_is_bound_to_usbip_host_driver(sysfs_usb_devices: &Path, bus_id: &str) -> bool {
+    std::fs::read_link(sysfs_usb_devices.join(bus_id).join("driver"))
+        .is_ok_and(|driver| driver.file_name().is_some_and(|name| name == "usbip-host"))
+}
+
 fn owner_translation(worker_uid: u32, worker_gid: u32) -> [String; 4] {
     let all = u32::MAX;
     [
@@ -475,6 +485,33 @@ mod tests {
         if let Some(product) = product {
             std::fs::write(dir.join("idProduct"), format!("{product}\n")).unwrap();
         }
+    }
+
+    #[test]
+    fn usb_device_is_bound_only_when_driver_symlink_points_to_usbip_host() {
+        let root = tempfile::tempdir().unwrap();
+        usb_device(root.path(), "1-2", "1d6b", Some("0002"));
+        usb_device(root.path(), "1-3", "046d", Some("c52b"));
+        std::os::unix::fs::symlink(
+            "../../../bus/usb/drivers/usbip-host",
+            root.path().join("1-2").join("driver"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            "../../../bus/usb/drivers/usb",
+            root.path().join("1-3").join("driver"),
+        )
+        .unwrap();
+
+        assert!(usb_device_is_bound_to_usbip_host_driver(root.path(), "1-2"));
+        assert!(!usb_device_is_bound_to_usbip_host_driver(
+            root.path(),
+            "1-3"
+        ));
+        assert!(!usb_device_is_bound_to_usbip_host_driver(
+            root.path(),
+            "1-9"
+        ));
     }
 
     #[test]
