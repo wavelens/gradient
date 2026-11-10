@@ -35,9 +35,15 @@ export class LinkTabsComponent {
   protected activeLink = signal<HTMLElement | null>(null);
 
   constructor() {
-    afterRenderEffect(() => {
+    afterRenderEffect((onCleanup) => {
       this.tabs();
-      this.activeLink()?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+      const link = this.activeLink();
+      if (!link) return;
+      const scrollActiveTabLinkToMiddle = () => link.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+      if (typeof ResizeObserver === 'undefined') return scrollActiveTabLinkToMiddle();
+      const resizeObserver = new ResizeObserver(scrollActiveTabLinkToMiddle);
+      resizeObserver.observe(link);
+      onCleanup(() => resizeObserver.disconnect());
     });
   }
 }
