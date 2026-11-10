@@ -238,6 +238,11 @@
           before and no longer listed. Grants from the API or from new-project settings stay.
         '';
       };
+      owner_team = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "The team with ownership of the project, or `null` when no owner. The team's `new_projects` settings decide the grant for that team on the project.";
+      };
     };
   });
 
@@ -844,17 +849,17 @@
         users = mkOption {
           type = types.bool;
           default = false;
-          description = "Whether new projects that members of this team create grant `new_projects.role` to the users of this team.";
+          description = "Whether projects that belong to this team grant `new_projects.role` to users on this team. The UI label is \"Default role of members on team projects\".";
         };
         workers = mkOption {
           type = types.bool;
           default = false;
-          description = "Whether every new project grants this team's workers.";
+          description = "Whether new projects get the workers of this team, regardless of the project owner.";
         };
         role = mkOption {
           type = types.nullOr (types.enum [ "Admin" "Write" "View" ]);
           default = null;
-          description = "Project role for the team's users on new projects.";
+          description = "Project role for users of the team in projects that belong to the team.";
         };
       };
     };
@@ -1035,6 +1040,12 @@
           Teams granted on this cache. The next state apply removes grants declared here before
           and no longer listed. Grants from the API stay.
         '';
+      };
+
+      owner_team = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "The team with ownership of the cache. If `null`, the cache can have no owner team.";
       };
 
       roles = mkOption {

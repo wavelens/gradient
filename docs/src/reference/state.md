@@ -59,6 +59,7 @@ services.gradient.state = {
 | `members.*.role` | string | - | Role assigned to the user: one of the built-in `Admin`, `Write` or `View`, or a custom role declared for this project in `state.roles`. |
 | `members.*.user` | string | - | Name of the user to add as a member. |
 | `name` | string | attribute name | Unique name of the project. |
+| `owner_team` | null or string | `null` | Team with ownership of the project. Grants for that project come from the team's `new_projects` settings. |
 | `private_key_file` | string | - | Path to the SSH private key used for Git access. |
 | `public` | bool | `false` | Set to `true` to make the project visible to all users. |
 | `secret_files` | attrs of string | `{ }` | Files with the project secrets of exec jobs, one entry per secret name. The stored values stay encrypted. Secrets that leave this list vanish on the next state apply. Secrets set through the API stay untouched. |
@@ -134,6 +135,7 @@ services.gradient.state = {
 | `members.*.role` | string | - | Role assigned to the user: one of the built-in `Admin`, `Write`, `View`, or a custom role defined on this cache. |
 | `members.*.user` | string | - | User name, resolved during state application. |
 | `name` | string | attribute name | Unique name of the cache. |
+| `owner_team` | null or string | `null` | The team in charge of the cache. Cache admins can add members of that team without an invitation. |
 | `priority` | int | `10` | Priority written to `nix-cache-info`. Nix queries caches with lower values first. |
 | `projects` | list of string | `[ ]` | Names of the projects that use this cache. |
 | `pull_through` | bool | `true` | Whether this cache serves paths from its upstream caches to Nix clients. |
@@ -182,9 +184,9 @@ services.gradient.state = {
 | `members.*.role` | one of `Admin` `Member` | `"Member"` | Role of the member in the team. Admins can manage members, workers, grants and requests. |
 | `members.*.user` | string | - | Name of the user, resolved at state apply time. |
 | `name` | string | attribute name | Name of the team. A team managed here has its settings locked in the API, while other members and workers can still join through the API. |
-| `new_projects.role` | null or one of `Admin` `Write` `View` | `null` | Project role given to the team's users on new projects. |
-| `new_projects.users` | bool | `false` | Grants the team's users `new_projects.role` on new projects that team members create when enabled. |
-| `new_projects.workers` | bool | `false` | Grants the team's workers on new projects when enabled. |
+| `new_projects.role` | null or one of `Admin` `Write` `View` | `null` | Project role that a team can grant to its users on projects that belong to that team. |
+| `new_projects.users` | bool | `false` | Team users receive `new_projects.role` on projects that belong to the team with this option on. UI screens show this as "Default role of members on team projects". |
+| `new_projects.workers` | bool | `false` | Turn this on to grant permission to this team's workers on every new project, regardless of project ownership. |
 | `oidc_group` | null or string | `null` | OIDC group whose members join the team at sign-in. They leave the team once the group no longer appears in their `groups` claim. The `groups` scope must be enabled. |
 | `scim_group` | null or string | `null` | SCIM group mapped to the team's members. |
 

@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Teams
 
-A **team** bundles users and workers into one unit. A single grant on a project or cache then applies to all members of that team. Teams never own projects or caches.
+A **team** bundles users and workers into one unit. A single grant on a project or cache then applies to all members of that team. Teams can own projects and caches.
 
 ```mermaid
 flowchart LR
@@ -21,7 +21,7 @@ flowchart LR
 | Admin | Change settings, members, invitations, workers and grants. Approve requests. Delete the team |
 | Member | See the team page |
 
-- **Invitations**: An Admin can invite a user by name. To join, the user can accept the invitation under **My Invites** in the user menu of the header. A superuser can add members directly.
+- **Invitations**: Admins invite users by name. Users join when they accept an invitation at **My Invites** in the user menu in the header. Instance admins select **Add now** to add members without an invitation.
 - **Last Admin**: Every team must have at least one Admin. Removing or demoting the last Admin is refused.
 - **Creation**: `permissions.createTeam` controls who can create teams. The creator is the first Admin.
 
@@ -35,7 +35,7 @@ A grant links one team to one project or cache. Each grant controls one kind of 
 | Project | Workers | Team workers take the project's jobs |
 | Cache | Users with a role | Members receive that cache role |
 
-Roles stack. A user with both a direct role and a team role receives the permissions of both. Direct membership can be removed without affecting team access.
+Set that person's role with direct membership. Team grants apply only to people who don't have direct membership. Remove direct membership to fall back to the team role. Find every person with access and the origin of that access on the **Members** page for a project or cache.
 
 ## Requests
 
@@ -57,9 +57,13 @@ Register a team worker once in the **Workers** section of the team page. The wor
 - **Caches**: projects without a [cache subscription](caches.md) do not accept team workers.
 - **Removal**: when a grant, the team or the worker goes away, running jobs in the affected projects end.
 
-## New Projects
+## Owner Team
 
-Team settings offer two options. Assign a role to each team user on every new project that team members create. Add team workers to all new projects. Choose one option or both. Only superusers can edit these fields. The [local worker](workers.md#access) is a worker of the team `server`, declared in the system state. Every new project receives this worker through the mechanism above.
+Every project and cache can have an owner team. Choose an owner team at project or cache creation, or pass `--team` to `gradient project create`. Only team members can select that team as owner.
+
+The team setting **Default role of members on team projects** can grant every team user their role on projects that the team owns. Access has one source. One grant with the mark of the owner grant is that source. Project admins don't need an invitation to add members of the owner team. They can also add users who already have project access through team grants.
+
+**Add team workers to all new projects**: this setting can grant the team workers to all new projects regardless of the owner team. Only superusers can edit these settings. Team `server` is in system state. [local worker](workers.md#access) is the worker for that team. All new projects receive this worker through this setting.
 
 ## Single Sign-On
 
