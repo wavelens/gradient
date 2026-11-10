@@ -76,6 +76,7 @@ actions! {
     TaskActionCreate => "task.action.create",
     TaskActionUpdate => "task.action.update",
     TaskActionDelete => "task.action.delete",
+    PullRequestCreateOrUpdateFromPatch => "task.pull_request.open",
     CacheCreate => "cache.create",
     CacheUpdate => "cache.update",
     CacheDelete => "cache.delete",
