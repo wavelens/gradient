@@ -211,10 +211,53 @@ mod tests {
         }
     }
 
-    #[test]
-    fn project_status_reads_the_latest_evaluation_of_each_task() {
-        let sql = rail_projects_sql();
-        assert!(sql.contains("DISTINCT ON (e.task)"), "{sql}");
-        assert!(sql.contains("ORDER BY e.task, e.created_at DESC"), "{sql}");
+    #[tokio::test]
+    async fn project_status_reads_the_latest_evaluation_of_each_task() {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
+
+        let (older_failed, newer_completed) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(older_failed)
+            .evaluation_status(EvaluationStatus::Failed)
+            .evaluation(newer_completed)
+            .same_task_as(older_failed)
+            .evaluation_status(EvaluationStatus::Completed)
+            .into_database()
+            .await;
+        let conn = db.connection();
+        EEvaluation::update_many()
+            .col_expr(
+                CEvaluation::CreatedAt,
+                Expr::cust("created_at - interval '1 hour'"),
+            )
+            .filter(CEvaluation::Id.eq(older_failed))
+            .exec(&conn)
+            .await
+            .expect("the failed evaluation is moved back");
+        let project = db.rows::<EProject>().await[0].id;
+        crate::rows::insert::<ERole, _>(&conn, gradient_fixtures::rows::admin_role())
+            .await
+            .expect("the role is written");
+        let member = crate::rows::insert::<EProjectUser, _>(
+            &conn,
+            MProjectUser {
+                project,
+                ..gradient_fixtures::rows::project_member(
+                    gradient_types::consts::BASE_ROLE_ADMIN_ID,
+                )
+            },
+        )
+        .await
+        .expect("the member is written");
+
+        let rows = rail_projects(&conn, member.user)
+            .await
+            .expect("the rail query runs");
+
+        assert_eq!(
+            rows.iter().map(|row| row.status).collect::<Vec<_>>(),
+            [Some(EvaluationStatus::Completed)]
+        );
+        db.finish().await;
     }
 }

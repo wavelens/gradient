@@ -227,14 +227,40 @@ mod tests {
         assert_eq!(ilike_contains(r"50%_a\b"), r"%50\%\_a\\b%");
     }
 
-    #[test]
-    fn commit_search_returns_one_row_per_commit_and_task() {
-        let sql = SEARCH_COMMITS.text();
-        assert!(sql.contains("DISTINCT ON (c.hash, t.id)"), "{sql}");
-        assert!(
-            sql.contains("ORDER BY c.hash, t.id, e.created_at DESC"),
-            "{sql}"
-        );
+    #[tokio::test]
+    async fn commit_search_returns_one_row_per_commit_and_task() {
+        use sea_orm::{EntityTrait, sea_query::Expr};
+
+        let first = EvaluationId::now_v7();
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(first)
+            .evaluation_status(gradient_entity::evaluation::EvaluationStatus::Completed)
+            .evaluation(EvaluationId::now_v7())
+            .same_task_as(first)
+            .into_database()
+            .await;
+        let conn = db.connection();
+        EProject::update_many()
+            .col_expr(CProject::Public, Expr::value(true))
+            .exec(&conn)
+            .await
+            .expect("the project is made public");
+
+        let zero_hash = "00".repeat(20);
+        let hits = search_commits(
+            &conn,
+            &zero_hash,
+            &zero_hash,
+            Viewer {
+                user: UserId::now_v7(),
+                public_listing: true,
+            },
+        )
+        .await
+        .expect("the search runs");
+
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        db.finish().await;
     }
 
     #[tokio::test]

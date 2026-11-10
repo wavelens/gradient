@@ -267,23 +267,61 @@ mod tests {
         }
     }
 
-    #[test]
-    fn expensive_resources_link_the_newest_evaluation_of_their_project() {
-        let sql = expensive_by_resource_sql("dm.cpu_time_ms::double precision", 30, None);
-        assert!(sql.contains("p.name AS project_slug"), "sql = {sql}");
-        assert!(sql.contains("ORDER BY bj.created_at DESC"), "sql = {sql}");
-        assert!(sql.contains("r.evaluation"), "sql = {sql}");
-    }
+    #[tokio::test]
+    async fn expensive_resources_rank_the_latest_metric_and_link_the_newest_evaluation() {
+        use gradient_fixtures::shape::shape;
+        use gradient_types::EvaluationId;
 
-    #[test]
-    fn expensive_resources_rank_the_latest_metric_per_derivation() {
-        let sql = expensive_by_resource_sql("dm.cpu_time_ms::double precision", 30, None);
-        let latest = sql.find("SELECT DISTINCT ON (dm.derivation)").expect(&sql);
-        let ranked = sql.find("ORDER BY value DESC").expect(&sql);
-        assert!(latest < ranked, "sql = {sql}");
-        assert!(
-            sql.contains("ORDER BY dm.derivation, dm.created_at DESC"),
-            "sql = {sql}"
+        const HEAVY: &str = "/nix/store/aaaa-heavy.drv";
+        let now = chrono::Utc::now().naive_utc();
+        let (older, newer) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = shape()
+            .evaluation(older)
+            .derivation(HEAVY)
+            .job()
+            .job_option(|j| j.created_at = now - chrono::Duration::hours(2))
+            .derivation_metric(|m| {
+                m.peak_ram_mb = Some(900);
+                m.created_at = now - chrono::Duration::hours(2);
+            })
+            .derivation_metric(|m| {
+                m.peak_ram_mb = Some(300);
+                m.created_at = now;
+            })
+            .evaluation(newer)
+            .derivation(HEAVY)
+            .job()
+            .job_option(|j| j.created_at = now - chrono::Duration::hours(1))
+            .into_database()
+            .await;
+        let newer_task = db
+            .rows::<gradient_entity::evaluation::Entity>()
+            .await
+            .into_iter()
+            .find(|e| e.id == newer)
+            .and_then(|e| e.task)
+            .expect("the newer evaluation has a task");
+        let project_of_newer = db
+            .rows::<gradient_entity::task::Entity>()
+            .await
+            .into_iter()
+            .find(|t| t.id == newer_task)
+            .expect("the task is written")
+            .project;
+        let ram = ResourceMetric::of_build("ram").expect("ram is a build metric");
+
+        let rows = expensive_derivations(&db.connection(), ram, 30, None)
+            .await
+            .expect("the expensive derivations read");
+
+        let read: Vec<_> = rows
+            .iter()
+            .map(|r| (r.evaluation, r.project, r.value))
+            .collect();
+        assert_eq!(
+            read,
+            [(newer.into_inner(), project_of_newer.into_inner(), 300.0)]
         );
+        db.finish().await;
     }
 }

@@ -314,19 +314,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn expensive_jobs_carry_the_project_slug_and_evaluation() {
-        let sql = expensive_jobs_sql(30, None);
-        assert!(sql.contains("p.name AS project_slug"), "sql = {sql}");
-        assert!(sql.contains("r.evaluation"), "sql = {sql}");
-        assert!(
-            sql.contains(
-                "p.display_name AS project_display_name, r.task_name, r.task_display_name"
-            ),
-            "sql = {sql}"
-        );
-    }
-
     #[tokio::test]
     async fn expensive_jobs_credit_the_evaluation_that_dispatched_the_build() {
         use gradient_entity::build::BuildStatus;
@@ -360,8 +347,47 @@ mod tests {
             .await
             .expect("the expensive builds read");
 
-        let evaluations: Vec<_> = builds.iter().map(|b| b.evaluation).collect();
-        assert_eq!(evaluations, vec![first.into_inner()]);
+        let first_task = db
+            .rows::<gradient_entity::evaluation::Entity>()
+            .await
+            .into_iter()
+            .find(|e| e.id == first)
+            .and_then(|e| e.task)
+            .expect("the first evaluation has a task");
+        let task = db
+            .rows::<gradient_entity::task::Entity>()
+            .await
+            .into_iter()
+            .find(|t| t.id == first_task)
+            .expect("the task is written");
+        let project = db
+            .rows::<gradient_entity::project::Entity>()
+            .await
+            .into_iter()
+            .find(|p| p.id == task.project)
+            .expect("the project is written");
+        let credited: Vec<_> = builds
+            .iter()
+            .map(|b| {
+                (
+                    b.evaluation,
+                    b.project_slug.as_str(),
+                    b.project_display_name.as_str(),
+                    b.task_name.as_str(),
+                    b.task_display_name.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            credited,
+            vec![(
+                first.into_inner(),
+                project.name.as_str(),
+                project.display_name.as_str(),
+                task.name.as_str(),
+                task.display_name.as_str(),
+            )]
+        );
         db.finish().await;
     }
 

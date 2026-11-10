@@ -606,11 +606,45 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_build_count_counts_each_shared_build_once_for_multiple_evaluations() {
-        for sql in build_counts().iter().map(build_count_sql) {
-            assert!(sql.contains("count(DISTINCT b.id)::bigint"), "{sql}");
-        }
+    #[tokio::test]
+    async fn test_build_count_counts_each_shared_build_once_for_multiple_evaluations() {
+        use gradient_entity::evaluation::EvaluationStatus;
+        use gradient_types::EvaluationId;
+        use sea_orm::ConnectionTrait;
+
+        const A: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";
+        let first = EvaluationId::now_v7();
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(first)
+            .evaluation_status(EvaluationStatus::Completed)
+            .derivation(A)
+            .job()
+            .shared_build_option(|b| b.created_at = chrono::Utc::now().naive_utc())
+            .evaluation(EvaluationId::now_v7())
+            .same_task_as(first)
+            .derivation(A)
+            .job()
+            .into_database()
+            .await;
+        let created = build_counts()
+            .into_iter()
+            .find(|m| m.name == metric::BUILDS_CREATED)
+            .expect("builds created is counted");
+
+        db.connection()
+            .execute_unprepared(&build_count_sql(&created))
+            .await
+            .expect("the build count rollup runs");
+
+        let counts: Vec<i64> = db
+            .rows::<gradient_entity::metric_rollup::Entity>()
+            .await
+            .into_iter()
+            .filter(|row| row.metric == metric::BUILDS_CREATED)
+            .map(|row| row.count)
+            .collect();
+        assert_eq!(counts, [1]);
+        db.finish().await;
     }
 
     #[test]

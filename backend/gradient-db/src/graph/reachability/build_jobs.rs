@@ -199,40 +199,70 @@ pub async fn derivation_is_reachable<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_entity::cluster_job::ClusterJobStatus;
+    use gradient_fixtures::shape::{Shape, shape};
 
-    #[test]
-    fn aborted_shared_build_ends_evaluation_aborted_and_sql_reads_aborted_separately_from_failed() {
-        let sql = SELECT_SHARED_BUILD_FAILED_AND_ABORTED_FLAGS_SQL.as_str();
-        let failed = crate::sql::status::build_in(&[
-            BuildStatus::FailedPermanent,
-            BuildStatus::FailedTimeout,
-        ]);
-        let aborted = crate::sql::status::build(BuildStatus::Aborted);
-        let unfinished = crate::sql::status::build_in(&BuildStatus::REQUEUEABLE);
+    const A: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";
+    const B: &str = "/nix/store/[hash4862]-b.drv";
 
-        assert!(sql.contains(&format!("db.status IN ({failed})")), "{sql}");
-        assert!(sql.contains(&format!("db.status = {aborted}")), "{sql}");
-        assert!(
-            sql.contains(&format!("db.status IN ({unfinished})")),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("failed OR (dependency_failed AND NOT aborted) AS failed"),
-            "{sql}"
-        );
-        for ok in BuildStatus::TERMINAL_SUCCESS {
-            assert!(!BuildStatus::REQUEUEABLE.contains(&ok), "{ok:?}");
-        }
+    async fn flags_of(
+        evaluation: EvaluationId,
+        given: Shape,
+    ) -> EvaluationItemFailureAndAbortFlags {
+        let db = given.into_database().await;
+        let flags = read_shared_build_failure_and_abort_flags(&db.connection(), evaluation)
+            .await
+            .expect("the flags are read");
+        db.finish().await;
+        flags
     }
 
-    #[test]
-    fn aborted_cluster_companion_is_neither_aborted_nor_failed() {
-        let sql = SELECT_SHARED_BUILD_FAILED_AND_ABORTED_FLAGS_SQL.as_str();
+    fn one_build(evaluation: EvaluationId, status: BuildStatus) -> Shape {
+        shape()
+            .evaluation(evaluation)
+            .derivation(A)
+            .job()
+            .build_status(status)
+    }
 
-        assert!(sql.contains("FROM cluster_member cm"), "{sql}");
-        assert!(
-            sql.contains("AND NOT EXISTS (SELECT 1 FROM cluster_member cm"),
-            "{sql}"
+    #[tokio::test]
+    async fn aborted_shared_build_ends_evaluation_aborted_and_sql_reads_aborted_separately_from_failed()
+     {
+        let e = EvaluationId::now_v7();
+        let aborted_with_dependent = one_build(e, BuildStatus::Aborted)
+            .derivation(B)
+            .job()
+            .build_status(BuildStatus::DependencyFailed);
+        let only_dependent = one_build(e, BuildStatus::DependencyFailed);
+
+        let read = [
+            flags_of(e, aborted_with_dependent).await,
+            flags_of(e, only_dependent).await,
+            flags_of(e, one_build(e, BuildStatus::FailedPermanent)).await,
+            flags_of(e, one_build(e, BuildStatus::Completed)).await,
+        ]
+        .map(|f| (f.failed, f.aborted));
+
+        assert_eq!(
+            read,
+            [(false, true), (true, false), (true, false), (false, false)]
         );
+    }
+
+    #[tokio::test]
+    async fn aborted_cluster_companion_is_neither_aborted_nor_failed() {
+        let e = EvaluationId::now_v7();
+        let companion = |status| {
+            let cluster = ClusterJobId::now_v7();
+            one_build(e, BuildStatus::Aborted)
+                .build_member_of(cluster, "node", false, None)
+                .cluster(cluster, false, 2, status, 1, gradient_fixtures::test_date())
+        };
+
+        let completed = flags_of(e, companion(ClusterJobStatus::Completed)).await;
+        let running = flags_of(e, companion(ClusterJobStatus::Running)).await;
+
+        assert_eq!((completed.failed, completed.aborted), (false, false));
+        assert_eq!((running.failed, running.aborted), (false, true));
     }
 }
