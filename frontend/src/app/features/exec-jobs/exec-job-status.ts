@@ -9,6 +9,7 @@ import type { MenuItem } from '@gradient/ui/ui';
 import type { ConfirmRequest } from '@shared/confirm';
 import type { Observable } from 'rxjs';
 import { links } from '@shared/routing';
+import { buildAttemptEndReasonLabel } from '@shared/evaluation';
 
 export function abortExecJobConfirm<T>(target: string, action: () => Observable<T>): ConfirmRequest<T> {
   return {
@@ -32,7 +33,8 @@ export const EXEC_JOB_STATUS_LABEL: Record<ExecJobStatus, string> = {
   aborted: 'Aborted',
 };
 
-export function getExecJobStatusBadgeLabel(job: Pick<ExecJobSummary, 'status' | 'waiting_reason'>): string {
+export function getExecJobStatusBadgeLabel(job: Pick<ExecJobSummary, 'status' | 'waiting_reason' | 'end_reason'>): string {
+  if (job.status === 'failed' && job.end_reason) return buildAttemptEndReasonLabel(job.end_reason);
   return job.waiting_reason?.kind === 'manual_start' ? 'Manual' : EXEC_JOB_STATUS_LABEL[job.status];
 }
 

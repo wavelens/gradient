@@ -31,6 +31,11 @@ describe('getExecJobStatusBadgeLabel', () => {
   it('names the status of a job that waits for its builds', () => {
     expect(getExecJobStatusBadgeLabel({ status: 'created', waiting_reason: null })).toBe('Waiting for builds');
   });
+
+  it('names why a failed job ended', () => {
+    expect(getExecJobStatusBadgeLabel({ status: 'failed', waiting_reason: null, end_reason: 'timeout' })).toBe('Timed out');
+    expect(getExecJobStatusBadgeLabel({ status: 'failed', waiting_reason: null, end_reason: null })).toBe('Failed');
+  });
 });
 
 describe('guestSizeLabel', () => {

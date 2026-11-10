@@ -120,7 +120,7 @@ export class ExecJobListComponent implements OnChanges {
       case 'queued': return waitingReasonText(job.waiting_reason) ?? label;
       case 'running':
       case 'completed': return job.last_phase ? `${label}, phase ${job.last_phase}` : label;
-      case 'failed': return job.message ?? label;
+      case 'failed': return job.message ?? getExecJobStatusBadgeLabel(job);
       default: return label;
     }
   }
