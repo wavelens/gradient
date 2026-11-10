@@ -161,6 +161,12 @@ pub struct TeamPath {
     pub team: String,
 }
 
+#[derive(IntoParams)]
+#[into_params(parameter_in = Path)]
+pub struct UserPath {
+    pub user: String,
+}
+
 pub(crate) fn operations_mut(spec: &mut Spec) -> impl Iterator<Item = &mut Operation> {
     spec.paths
         .paths

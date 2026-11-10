@@ -282,7 +282,8 @@ impl<'a> StateApplicator<'a> {
                     .one(self.db)
                     .await?;
                 match existing {
-                    Some(row) if row.role == role && row.grant_source == TeamGrantSource::State => {}
+                    Some(row) if row.role == role && row.grant_source == TeamGrantSource::State => {
+                    }
                     Some(row) => {
                         let mut active: team_cache::ActiveModel = row.into();
                         active.role = Set(role);

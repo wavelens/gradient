@@ -206,7 +206,7 @@ pub async fn delete_user_memberships_and_pending_invitations_skipping_configured
             CProjectUser::Project.not_in_subquery(
                 Query::select()
                     .column(CProject::Id)
-                    .from(EProject)
+                    .from(EProject::default())
                     .and_where(CProject::Managed.eq(true))
                     .to_owned(),
             ),
@@ -220,7 +220,7 @@ pub async fn delete_user_memberships_and_pending_invitations_skipping_configured
             CCacheUser::Cache.not_in_subquery(
                 Query::select()
                     .column(CCache::Id)
-                    .from(ECache)
+                    .from(ECache::default())
                     .and_where(CCache::Managed.eq(true))
                     .to_owned(),
             ),
@@ -255,6 +255,120 @@ pub async fn delete_user_memberships_and_pending_invitations_skipping_configured
         teams,
         invitations,
     })
+}
+
+#[derive(Debug, Default)]
+pub struct DirectMembershipsOfUser {
+    pub projects: Vec<MProjectUser>,
+    pub caches: Vec<MCacheUser>,
+}
+
+pub async fn direct_memberships_of_user<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+) -> Result<DirectMembershipsOfUser, DbErr> {
+    Ok(DirectMembershipsOfUser {
+        projects: EProjectUser::find()
+            .filter(CProjectUser::User.eq(user))
+            .all(db)
+            .await?,
+        caches: ECacheUser::find()
+            .filter(CCacheUser::User.eq(user))
+            .all(db)
+            .await?,
+    })
+}
+
+pub async fn superusers<C: ConnectionTrait>(db: &C) -> Result<Vec<MUser>, DbErr> {
+    EUser::find().filter(CUser::Superuser.eq(true)).all(db).await
+}
+
+async fn team_members<C: ConnectionTrait>(
+    db: &C,
+    teams: impl IntoIterator<Item = TeamId>,
+) -> Result<Vec<MTeamUser>, DbErr> {
+    ETeamUser::find()
+        .filter(CTeamUser::Team.is_in(teams))
+        .all(db)
+        .await
+}
+
+async fn teams_of_user<C: ConnectionTrait>(db: &C, user: UserId) -> Result<Vec<TeamId>, DbErr> {
+    Ok(ETeamUser::find()
+        .filter(CTeamUser::User.eq(user))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|membership| membership.team)
+        .collect())
+}
+
+fn pair_with_members<G>(
+    grants: Vec<G>,
+    members: &[MTeamUser],
+    team: impl Fn(&G) -> TeamId,
+) -> Vec<(G, UserId)>
+where
+    G: Clone,
+{
+    grants
+        .into_iter()
+        .flat_map(|grant| {
+            members
+                .iter()
+                .filter(|member| member.team == team(&grant))
+                .map(|member| (grant.clone(), member.user))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+pub async fn list_team_project_grants_with_users<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+) -> Result<Vec<(MTeamProject, UserId)>, DbErr> {
+    let grants = ETeamProject::find()
+        .filter(CTeamProject::Project.eq(project))
+        .filter(CTeamProject::IncludesUsers.eq(true))
+        .filter(CTeamProject::Role.is_not_null())
+        .all(db)
+        .await?;
+    let members = team_members(db, grants.iter().map(|grant| grant.team)).await?;
+    Ok(pair_with_members(grants, &members, |grant| grant.team))
+}
+
+pub async fn list_team_cache_grants_with_users<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+) -> Result<Vec<(MTeamCache, UserId)>, DbErr> {
+    let grants = ETeamCache::find()
+        .filter(CTeamCache::Cache.eq(cache))
+        .all(db)
+        .await?;
+    let members = team_members(db, grants.iter().map(|grant| grant.team)).await?;
+    Ok(pair_with_members(grants, &members, |grant| grant.team))
+}
+
+pub async fn team_project_grants_reaching_user<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+) -> Result<Vec<MTeamProject>, DbErr> {
+    ETeamProject::find()
+        .filter(CTeamProject::Team.is_in(teams_of_user(db, user).await?))
+        .filter(CTeamProject::IncludesUsers.eq(true))
+        .filter(CTeamProject::Role.is_not_null())
+        .all(db)
+        .await
+}
+
+pub async fn team_cache_grants_reaching_user<C: ConnectionTrait>(
+    db: &C,
+    user: UserId,
+) -> Result<Vec<MTeamCache>, DbErr> {
+    ETeamCache::find()
+        .filter(CTeamCache::Team.is_in(teams_of_user(db, user).await?))
+        .all(db)
+        .await
 }
 
 #[cfg(test)]
@@ -557,8 +671,8 @@ mod tests {
                  VALUES ('{user}', 'u{}', 'U', 'u{}@example.com', now(), now()); \
                  INSERT INTO team_user (id, team, \"user\", role) VALUES ('{}', '{team}', '{user}', 1); \
                  INSERT INTO project_user (id, project, \"user\", role) VALUES ('{}', '{project}', '{user}', '{role}');",
-                user.simple(),
-                user.simple(),
+                user.into_inner().simple(),
+                user.into_inner().simple(),
                 uuid::Uuid::now_v7(),
                 uuid::Uuid::now_v7(),
             ))

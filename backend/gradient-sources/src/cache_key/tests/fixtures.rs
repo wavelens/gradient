@@ -19,6 +19,7 @@ pub fn temp_secret_file() -> (tempfile::NamedTempFile, String) {
 
 pub fn make_cache(name: &str, public_key: &str, private_key: &str) -> MCache {
     MCache {
+        owner_team: None,
         id: gradient_types::ids::CacheId::nil(),
         name: name.to_string(),
         display_name: name.to_string(),

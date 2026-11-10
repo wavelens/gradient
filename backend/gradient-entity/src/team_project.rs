@@ -24,7 +24,7 @@ use crate::ids::{ProjectId, RoleId, TeamId, TeamProjectId};
     utoipa::ToSchema,
 )]
 #[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum TeamGrantSource {
     #[default]
     #[sea_orm(num_value = 0)]
@@ -33,6 +33,8 @@ pub enum TeamGrantSource {
     Owner,
     #[sea_orm(num_value = 2)]
     State,
+    #[sea_orm(num_value = 3)]
+    EveryProjectWorkerGrant,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

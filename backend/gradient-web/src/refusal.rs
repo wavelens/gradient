@@ -106,6 +106,12 @@ pub enum SharedRefusal {
         "Gradient can't read the latest commit of the repository. Check the repository URL, branch and the project's access key (deploy key), then try again."
     )]
     RepositoryStateFetchFailed,
+    #[error("Only members of a team can set that team as the owner of a project or cache.")]
+    NotMemberOfOwnerTeam,
+    #[error(
+        "Only instance admins can add a member without an invitation, unless the person is in the owner team or already has access through a team. Send an invitation instead."
+    )]
+    AddingMemberWithoutInvitationNotAllowed,
 }
 
 impl Refusal for SharedRefusal {
@@ -115,7 +121,9 @@ impl Refusal for SharedRefusal {
             | Self::BuiltinRole(_)
             | Self::SourceIpNotAllowed
             | Self::AccountDeactivated
-            | Self::MissingPermission => RefusalStatus::Forbidden,
+            | Self::MissingPermission
+            | Self::NotMemberOfOwnerTeam
+            | Self::AddingMemberWithoutInvitationNotAllowed => RefusalStatus::Forbidden,
             Self::RoleAssignedToMembers
             | Self::RoleGrantedToTeam
             | Self::NotAMember(_)

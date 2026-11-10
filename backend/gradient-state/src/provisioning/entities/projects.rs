@@ -21,10 +21,16 @@ impl<'a> StateApplicator<'a> {
     pub(crate) async fn apply_projects_without_members(
         &self,
         state_projects: &HashMap<String, StateProject>,
+        team_ids: &HashMap<String, TeamId>,
     ) -> Result<(), DynError> {
         let user_map = self.user_lookup().await?;
 
         for state_project in state_projects.values() {
+            let owner_team = state_project
+                .owner_team
+                .as_deref()
+                .map(|team| lookup_id(team_ids, team, "Team"))
+                .transpose()?;
             let (private_key, _) = read_credential(
                 self.credentials_dir,
                 "project",
@@ -82,12 +88,18 @@ impl<'a> StateApplicator<'a> {
                 project.extra_allowed_uri_prefixes =
                     Set(state_project.extra_allowed_uri_prefixes.clone());
                 project.managed = Set(true);
+                project.owner_team = Set(owner_team);
                 project.update(self.db).await?;
+                gradient_db::teams::grants::upsert_project_owner_team_grant(
+                    self.db, project_id, owner_team,
+                )
+                .await?;
                 tracing::info!(name = %state_project.name, "Updated managed project");
                 project_id
             } else {
                 let project_id = declared_id.unwrap_or_else(ProjectId::now_v7);
                 let project = project::Model {
+                    owner_team,
                     id: project_id,
                     name: state_project.name.clone(),
                     display_name: state_project.display_name.clone(),
@@ -108,10 +120,12 @@ impl<'a> StateApplicator<'a> {
                 project.insert(self.db).await?;
                 // No worker can be connected yet. State is applied before the proto endpoint is
                 // serving, and no re-auth request is needed.
-                gradient_db::teams::grants::apply_new_project_grants(
-                    self.db,
-                    project_id,
-                    created_by_id,
+                gradient_db::teams::grants::upsert_project_owner_team_grant(
+                    self.db, project_id, owner_team,
+                )
+                .await?;
+                gradient_db::teams::grants::insert_worker_grants_for_teams_that_grant_workers_on_every_new_project(
+                    self.db, project_id,
                 )
                 .await?;
                 tracing::info!(name = %state_project.name, "Created managed project");

@@ -6,7 +6,7 @@
 
 use super::{
     Actions, InvitationFields, InvitationTable, MemberFields, MemberTable, NewInvitation, Owner,
-    RoleFields, RoleTable, Table,
+    RoleFields, RoleTable, Table, AccessSummaryRowLabel, TeamMembershipRoleGrant,
 };
 use crate::error::WebResult;
 use crate::permissions::{
@@ -16,7 +16,10 @@ use crate::permissions::{
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Member, Requires, RequiresUnmanaged, can};
+use gradient_db::WebDb;
+use gradient_db::access::DirectMembershipsOfUser;
 use gradient_notify::InviteScope;
+use std::collections::HashMap;
 use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -178,6 +181,16 @@ impl RoleTable for ECacheRole {
     }
 }
 
+fn cache_grant_row(grant: MTeamCache, user: UserId) -> TeamMembershipRoleGrant<CacheId> {
+    TeamMembershipRoleGrant {
+        owner: grant.cache,
+        user,
+        team: grant.team,
+        role: grant.role,
+        source: grant.grant_source,
+    }
+}
+
 impl Owner for CacheOwner {
     type Id = CacheId;
     type ListMembersScope = CacheScope<Requires<can::ViewCache>>;
@@ -212,6 +225,67 @@ impl Owner for CacheOwner {
 
     fn is_builtin_role(role: RoleId) -> bool {
         is_builtin_cache_role(role)
+    }
+
+    fn role_rank(role: RoleId) -> u8 {
+        gradient_db::access::cache_role_rank(role)
+    }
+
+    fn select_direct_memberships_from_user(
+        memberships: &DirectMembershipsOfUser,
+    ) -> Vec<(CacheId, RoleId)> {
+        memberships
+            .caches
+            .iter()
+            .map(|member| (member.cache, member.role))
+            .collect()
+    }
+
+    async fn list_team_grants_with_members(
+        db: &WebDb,
+        owner: CacheId,
+    ) -> WebResult<Vec<TeamMembershipRoleGrant<CacheId>>> {
+        Ok(
+            gradient_db::access::list_team_cache_grants_with_users(db, owner)
+                .await?
+                .into_iter()
+                .map(|(grant, user)| cache_grant_row(grant, user))
+                .collect(),
+        )
+    }
+
+    async fn list_team_grants_reaching_person_through_team_memberships(
+        db: &WebDb,
+        user: UserId,
+    ) -> WebResult<Vec<TeamMembershipRoleGrant<CacheId>>> {
+        Ok(
+            gradient_db::access::team_cache_grants_reaching_user(db, user)
+                .await?
+                .into_iter()
+                .map(|grant| cache_grant_row(grant, user))
+                .collect(),
+        )
+    }
+
+    async fn load_project_name_display_name_owner_team_and_managed_flag_by_ids(
+        db: &WebDb,
+        ids: &[CacheId],
+    ) -> WebResult<HashMap<CacheId, AccessSummaryRowLabel>> {
+        Ok(gradient_db::lookup::by_ids::<ECache, _>(db, ids)
+            .await?
+            .into_iter()
+            .map(|(id, cache)| {
+                (
+                    id,
+                    AccessSummaryRowLabel {
+                        name: cache.name,
+                        display_name: cache.display_name,
+                        owner_team: cache.owner_team,
+                        managed: cache.managed,
+                    },
+                )
+            })
+            .collect())
     }
 
     fn permission_names(mask: PermissionMask) -> Vec<&'static str> {

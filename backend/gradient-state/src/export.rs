@@ -13,6 +13,7 @@ use super::{
 use gradient_ci::IntegrationKind;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::ids::*;
+use gradient_entity::team_project::TeamGrantSource;
 use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::permissions::{
@@ -54,6 +55,10 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         .all(db)
         .await?;
     let team_projects = gradient_entity::team_project::Entity::find()
+        .filter(
+            gradient_entity::team_project::Column::GrantSource
+                .is_in([TeamGrantSource::Manual, TeamGrantSource::State]),
+        )
         .all(db)
         .await?;
     let team_caches = gradient_entity::team_cache::Entity::find().all(db).await?;
@@ -146,6 +151,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             })
             .collect();
         let mut project = export_project(o, &username, members, teams);
+        project.owner_team = o.owner_team.and_then(|team| team_name.get(&team).cloned());
         project.secret_files = managed_secrets
             .iter()
             .filter(|s| s.project == o.id)
@@ -250,6 +256,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 roles,
                 members,
                 teams,
+                owner_team: c.owner_team.and_then(|team| team_name.get(&team).cloned()),
             },
         );
     }
@@ -392,6 +399,7 @@ fn export_project(
         created_by: name_or_blank(username, project.created_by),
         members,
         teams,
+        owner_team: None,
     }
 }
 

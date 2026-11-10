@@ -766,6 +766,28 @@ fn a_project_grant_with_users_needs_a_role() {
 }
 
 #[test]
+fn an_unknown_owner_team_is_rejected() {
+    let json = r#"{
+        "users": { "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" } },
+        "projects": {
+            "acme": {
+                "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null",
+                "public": false, "created_by": "alice", "owner_team": "ghosts"
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let v = cfg.validate();
+    assert!(
+        v.errors
+            .iter()
+            .any(|e| e.field == "projects.acme.owner_team"),
+        "{:?}",
+        v.errors
+    );
+}
+
+#[test]
 fn a_worker_belongs_to_a_team_or_to_projects() {
     let json = r#"{
         "teams": { "platform": { "name": "platform", "display_name": "Platform" } },

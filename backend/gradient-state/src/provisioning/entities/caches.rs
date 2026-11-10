@@ -23,11 +23,17 @@ impl<'a> StateApplicator<'a> {
     pub(crate) async fn apply_caches(
         &self,
         state_caches: &HashMap<String, StateCache>,
+        team_ids: &HashMap<String, TeamId>,
     ) -> Result<(), DynError> {
         let user_map = self.user_lookup().await?;
         let project_map = self.project_lookup().await?;
 
         for state_cache in state_caches.values() {
+            let owner_team = state_cache
+                .owner_team
+                .as_deref()
+                .map(|team| lookup_id(team_ids, team, "Team"))
+                .transpose()?;
             let (signing_key, _) = read_credential(
                 self.credentials_dir,
                 "cache",
@@ -82,12 +88,14 @@ impl<'a> StateApplicator<'a> {
                 cache_model.created_by = Set(created_by_id);
                 cache_model.public = Set(state_cache.public);
                 cache_model.managed = Set(true);
+                cache_model.owner_team = Set(owner_team);
                 cache_model.update(self.db).await?;
                 tracing::info!(name = %state_cache.name, "Updated managed cache");
                 existing.id
             } else {
                 let cache_id = CacheId::now_v7();
                 let cache_model = cache::Model {
+                    owner_team,
                     id: cache_id,
                     name: state_cache.name.clone(),
                     display_name: state_cache.display_name.clone(),

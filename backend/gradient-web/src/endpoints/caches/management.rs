@@ -5,10 +5,12 @@
  */
 
 use super::refusal::CacheRefusal;
-use crate::access::effective_cache_role_and_mask;
+use crate::access::{effective_cache_role_and_mask, has_cache_permission};
 use crate::api_spec::CachePath;
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
+use crate::endpoints::access::{TeamNameAndDisplayName, team_names};
+use crate::endpoints::teams::management::lookup_owner_team_id_and_check_user_is_member_or_admin;
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{CreatedEntityResponse, ok_json};
 use crate::json_body::JsonBody;
@@ -16,6 +18,7 @@ use crate::names::{CacheDisplayName, CacheName};
 use crate::permissions::{
     CachePermission, Permission, cache_mask_grants, cache_mask_to_vec, mask_grants,
 };
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
@@ -51,6 +54,8 @@ pub struct MakeCacheRequest {
     pub max_storage_gb: Option<i64>,
     #[serde(default)]
     pub pull_through: Option<bool>,
+    #[serde(default)]
+    pub owner_team: Option<String>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -69,16 +74,23 @@ pub struct CacheResponse {
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
+    pub owner_team: Option<TeamNameAndDisplayName>,
     pub can_edit: bool,
     pub permissions: Vec<CachePermission>,
     pub role: Option<String>,
 }
 
 impl CacheResponse {
-    fn new(cache: MCache, public_key: String, access: Option<CacheRoleAndPermissionMask>) -> Self {
+    fn new(
+        cache: MCache,
+        owner_team: Option<TeamNameAndDisplayName>,
+        public_key: String,
+        access: Option<CacheRoleAndPermissionMask>,
+    ) -> Self {
         let (role, permissions) =
             access.map_or((None, 0), |access| (access.role, access.permissions));
         Self {
+            owner_team,
             id: cache.id,
             name: cache.name,
             display_name: cache.display_name,
@@ -110,6 +122,12 @@ pub struct PatchCacheRequest {
     pub local_priority: Option<i32>,
     pub max_storage_gb: Option<i64>,
     pub pull_through: Option<bool>,
+    /// Omitted fields leave the owner team unchanged. A team name can set the owner team. JSON null can clear the owner team.
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::deserialize_optional_field"
+    )]
+    pub owner_team: Option<Option<String>>,
 }
 
 fn validate_max_storage_gb(value: i64) -> WebResult<i32> {
@@ -197,7 +215,7 @@ pub async fn get(
     operation_id = "createCache",
     tag = "caches",
     summary = "Create cache",
-    description = "Create a new binary cache with an auto-generated signing key. Only signed-in sessions can call this endpoint. API keys cannot create caches.",
+    description = "Create a new binary cache with an auto-generated signing key. Only signed-in sessions can call this endpoint. API keys cannot create caches. `owner_team` can place the cache in a team with the caller as a member.",
     request_body = MakeCacheRequest,
     responses((status = OK, description = "Cache created", body = CreatedEntityResponse), WebError)
 )]
@@ -227,6 +245,14 @@ pub async fn put(
         return Err(WebError::already_exists(Resource::CacheName));
     }
 
+    let owner_team = match body.owner_team.as_deref() {
+        Some(name) => Some(
+            lookup_owner_team_id_and_check_user_is_member_or_admin(&state.web_db, &user, name)
+                .await?,
+        ),
+        None => None,
+    };
+
     let (private_key, public_key) =
         generate_signing_key(&state.config.secrets.crypt_file).context("generate signing key")?;
 
@@ -245,6 +271,7 @@ pub async fn put(
             public_key,
             private_key,
             public: body.public.unwrap_or(false),
+            owner_team,
             created_by: user.id,
             created_at: gradient_types::now(),
             max_storage_gb,
@@ -347,8 +374,14 @@ pub async fn get_cache(
         }
         None => None,
     };
+    let owner_team = team_names(&state.web_db, cache.owner_team)
+        .await?
+        .into_values()
+        .next();
 
-    Ok(ok_json(CacheResponse::new(cache, public_key, access)))
+    Ok(ok_json(CacheResponse::new(
+        cache, owner_team, public_key, access,
+    )))
 }
 
 #[utoipa::path(
@@ -357,20 +390,53 @@ pub async fn get_cache(
     operation_id = "patchCache",
     tag = "caches",
     summary = "Update cache",
-    description = "Updates one or more cache fields. Requires `manageCacheSettings`. Managed caches cannot be edited via the API.",
+    description = "Updates one or more cache fields. Requires `manageCacheSettings`. Managed caches cannot be edited via the API. `manageCacheMembers` and membership in the new team are also necessary for a change to `owner_team`.",
     params(CachePath),
     request_body = PatchCacheRequest,
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn patch_cache(
-    CacheScope { cache, .. }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
+    CacheScope {
+        cache,
+        user,
+        api_key,
+        ..
+    }: CacheScope<RequiresUnmanaged<can::ManageCacheSettings>>,
     state: State<Arc<ServerState>>,
     audit: Audit,
     JsonBody(body): JsonBody<PatchCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache_id = cache.id;
     let prev_max_storage_gb = cache.max_storage_gb;
+    let owner_team = match &body.owner_team {
+        None => None,
+        Some(owner_team) => {
+            if !has_cache_permission(
+                &state.web_db,
+                user.id,
+                cache_id,
+                CachePermission::ManageCacheMembers,
+                api_key.as_ref(),
+            )
+            .await?
+            {
+                return Err(SharedRefusal::MissingPermission.into());
+            }
+            Some(match owner_team.as_deref() {
+                Some(name) => Some(
+                    lookup_owner_team_id_and_check_user_is_member_or_admin(
+                        &state.web_db,
+                        &user,
+                        name,
+                    )
+                    .await?,
+                ),
+                None => None,
+            })
+        }
+    };
     let fields = changed_fields([
+        ("owner_team", owner_team.is_some()),
         ("name", body.name.is_some()),
         ("display_name", body.display_name.is_some()),
         ("description", body.description.is_some()),
@@ -410,6 +476,10 @@ pub async fn patch_cache(
 
     if let Some(pull_through) = body.pull_through {
         acache.pull_through = Set(pull_through);
+    }
+
+    if let Some(owner_team) = owner_team {
+        acache.owner_team = Set(owner_team);
     }
 
     let mut raised_limit = false;

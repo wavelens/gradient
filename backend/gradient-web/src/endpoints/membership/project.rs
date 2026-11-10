@@ -6,7 +6,7 @@
 
 use super::{
     Actions, InvitationFields, InvitationTable, MemberFields, MemberTable, NewInvitation, Owner,
-    RoleFields, RoleTable, Table,
+    RoleFields, RoleTable, Table, AccessSummaryRowLabel, TeamMembershipRoleGrant,
 };
 use crate::error::WebResult;
 use crate::permissions::{
@@ -16,7 +16,10 @@ use crate::permissions::{
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Readable, Requires, RequiresUnmanaged, can};
+use gradient_db::WebDb;
+use gradient_db::access::DirectMembershipsOfUser;
 use gradient_notify::InviteScope;
+use std::collections::HashMap;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
@@ -177,6 +180,16 @@ impl RoleTable for ERole {
     }
 }
 
+fn project_grant_row(grant: MTeamProject, user: UserId) -> Option<TeamMembershipRoleGrant<ProjectId>> {
+    Some(TeamMembershipRoleGrant {
+        owner: grant.project,
+        user,
+        team: grant.team,
+        role: grant.role?,
+        source: grant.grant_source,
+    })
+}
+
 impl Owner for ProjectOwner {
     type Id = ProjectId;
     type ListMembersScope = ProjectScope<Readable>;
@@ -211,6 +224,67 @@ impl Owner for ProjectOwner {
 
     fn is_builtin_role(role: RoleId) -> bool {
         is_builtin_role(role)
+    }
+
+    fn role_rank(role: RoleId) -> u8 {
+        gradient_db::access::role_rank(role)
+    }
+
+    fn select_direct_memberships_from_user(
+        memberships: &DirectMembershipsOfUser,
+    ) -> Vec<(ProjectId, RoleId)> {
+        memberships
+            .projects
+            .iter()
+            .map(|member| (member.project, member.role))
+            .collect()
+    }
+
+    async fn list_team_grants_with_members(
+        db: &WebDb,
+        owner: ProjectId,
+    ) -> WebResult<Vec<TeamMembershipRoleGrant<ProjectId>>> {
+        Ok(
+            gradient_db::access::list_team_project_grants_with_users(db, owner)
+                .await?
+                .into_iter()
+                .filter_map(|(grant, user)| project_grant_row(grant, user))
+                .collect(),
+        )
+    }
+
+    async fn list_team_grants_reaching_person_through_team_memberships(
+        db: &WebDb,
+        user: UserId,
+    ) -> WebResult<Vec<TeamMembershipRoleGrant<ProjectId>>> {
+        Ok(
+            gradient_db::access::team_project_grants_reaching_user(db, user)
+                .await?
+                .into_iter()
+                .filter_map(|grant| project_grant_row(grant, user))
+                .collect(),
+        )
+    }
+
+    async fn load_project_name_display_name_owner_team_and_managed_flag_by_ids(
+        db: &WebDb,
+        ids: &[ProjectId],
+    ) -> WebResult<HashMap<ProjectId, AccessSummaryRowLabel>> {
+        Ok(gradient_db::lookup::by_ids::<EProject, _>(db, ids)
+            .await?
+            .into_iter()
+            .map(|(id, project)| {
+                (
+                    id,
+                    AccessSummaryRowLabel {
+                        name: project.name,
+                        display_name: project.display_name,
+                        owner_team: project.owner_team,
+                        managed: project.managed,
+                    },
+                )
+            })
+            .collect())
     }
 
     fn permission_names(mask: PermissionMask) -> Vec<&'static str> {

@@ -54,6 +54,8 @@ pub struct StateProject {
     pub members: Vec<StateProjectMemberEntry>,
     #[serde(default)]
     pub teams: Vec<StateProjectTeam>,
+    #[serde(default)]
+    pub owner_team: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +203,8 @@ pub struct StateCache {
     pub members: Vec<StateCacheMemberEntry>,
     #[serde(default)]
     pub teams: Vec<StateCacheTeam>,
+    #[serde(default)]
+    pub owner_team: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

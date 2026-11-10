@@ -171,6 +171,21 @@ async fn take_workers(
     Ok(())
 }
 
+pub(crate) async fn apply_owner_team_grant_change_to_workers(
+    db: &WebDb,
+    scheduler: &Scheduler,
+    project: ProjectId,
+    change: gradient_db::teams::grants::OwnerTeamGrantChange,
+) -> WebResult<()> {
+    for grant in change.removed.iter().filter(|grant| grant.includes_workers) {
+        take_workers(db, scheduler, grant.team, project).await?;
+    }
+    if let Some(grant) = change.added.filter(|grant| grant.includes_workers) {
+        grant_workers(db, scheduler, grant.team, project).await?;
+    }
+    Ok(())
+}
+
 fn project_role_name(roles: &HashMap<RoleId, String>, role: Option<RoleId>) -> Option<String> {
     role.and_then(|id| roles.get(&id).cloned())
 }

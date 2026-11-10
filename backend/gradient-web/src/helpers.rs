@@ -39,6 +39,14 @@ impl CreatedEntityResponse {
     }
 }
 
+pub fn deserialize_optional_field<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(<Option<T> as serde::Deserialize>::deserialize(de)?))
+}
+
 pub trait OptionExt<T> {
     fn or_not_found(self, resource: Resource) -> WebResult<T>;
 }

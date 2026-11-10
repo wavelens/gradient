@@ -21,6 +21,7 @@ use axum::extract::FromRequestParts;
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::lookup::by_ids;
+use gradient_db::access::DirectMembershipsOfUser;
 use gradient_db::{DbContext, WebDb};
 use gradient_notify::InviteScope;
 use gradient_types::events::EventOwner;
@@ -36,12 +37,12 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 pub trait OwnerId:
-    Copy + PartialEq + Display + Into<sea_orm::Value> + Send + Sync + 'static
+    Copy + Eq + std::hash::Hash + Display + Into<sea_orm::Value> + Send + Sync + 'static
 {
 }
 
 impl<T> OwnerId for T where
-    T: Copy + PartialEq + Display + Into<sea_orm::Value> + Send + Sync + 'static
+    T: Copy + Eq + std::hash::Hash + Display + Into<sea_orm::Value> + Send + Sync + 'static
 {
 }
 
@@ -119,6 +120,21 @@ pub trait InvitationTable: Table {
     fn new(invitation: NewInvitation<Self::Id>) -> Self::Row;
 }
 
+pub struct TeamMembershipRoleGrant<I> {
+    pub owner: I,
+    pub user: UserId,
+    pub team: TeamId,
+    pub role: RoleId,
+    pub source: TeamGrantSource,
+}
+
+pub struct AccessSummaryRowLabel {
+    pub name: String,
+    pub display_name: String,
+    pub owner_team: Option<TeamId>,
+    pub managed: bool,
+}
+
 pub trait OwnerScope:
     FromRequestParts<Arc<ServerState>, Rejection = WebError> + Send + Sync
 {
@@ -126,6 +142,8 @@ pub trait OwnerScope:
 
     fn id(&self) -> Self::Id;
     fn display_name(&self) -> &str;
+    fn owner_team(&self) -> Option<TeamId>;
+    fn managed(&self) -> bool;
     fn db(&self) -> &DbContext;
     fn params(&self) -> &PathParams;
 }
@@ -143,6 +161,14 @@ impl<R: ProjectRule> OwnerScope for ProjectScope<R> {
 
     fn display_name(&self) -> &str {
         &self.project.display_name
+    }
+
+    fn owner_team(&self) -> Option<TeamId> {
+        self.project.owner_team
+    }
+
+    fn managed(&self) -> bool {
+        self.project.managed
     }
 
     fn db(&self) -> &DbContext {
@@ -169,6 +195,14 @@ impl<R: CacheRule> OwnerScope for CacheScope<R> {
 
     fn display_name(&self) -> &str {
         &self.cache.display_name
+    }
+
+    fn owner_team(&self) -> Option<TeamId> {
+        self.cache.owner_team
+    }
+
+    fn managed(&self) -> bool {
+        self.cache.managed
     }
 
     fn db(&self) -> &DbContext {
@@ -222,6 +256,22 @@ pub trait Owner: Send + Sync + 'static {
 
     fn event_owner(id: Self::Id) -> EventOwner;
     fn is_builtin_role(role: RoleId) -> bool;
+    fn role_rank(role: RoleId) -> u8;
+    fn select_direct_memberships_from_user(
+        memberships: &DirectMembershipsOfUser,
+    ) -> Vec<(Self::Id, RoleId)>;
+    async fn list_team_grants_with_members(
+        db: &WebDb,
+        owner: Self::Id,
+    ) -> WebResult<Vec<TeamMembershipRoleGrant<Self::Id>>>;
+    async fn list_team_grants_reaching_person_through_team_memberships(
+        db: &WebDb,
+        user: UserId,
+    ) -> WebResult<Vec<TeamMembershipRoleGrant<Self::Id>>>;
+    async fn load_project_name_display_name_owner_team_and_managed_flag_by_ids(
+        db: &WebDb,
+        ids: &[Self::Id],
+    ) -> WebResult<HashMap<Self::Id, AccessSummaryRowLabel>>;
     fn permission_names(mask: PermissionMask) -> Vec<&'static str>;
     fn available_permissions() -> Vec<PermissionEntry>;
     fn parse_permissions(wire: &[String]) -> WebResult<PermissionMask>;

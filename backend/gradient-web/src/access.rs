@@ -1927,6 +1927,7 @@ mod tests {
         let mock = mock_db()
             .append_query_results([vec![project.clone()]])
             .append_query_results([vec![MProjectAccess {
+                team: None,
                 project: project.id,
                 user: user.id,
                 role: BASE_ROLE_VIEW_ID,

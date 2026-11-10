@@ -72,6 +72,7 @@ mod tests {
 
     fn state_project(secret_files: &[&str]) -> StateProject {
         StateProject {
+            owner_team: None,
             name: "test-project".into(),
             display_name: "Test Project".into(),
             id: None,

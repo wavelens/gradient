@@ -29,6 +29,7 @@ fn shared_build_id() -> DerivationBuildId {
 fn with_membership(db: MockDatabase, role: &role::Model, lookups: usize) -> MockDatabase {
     (0..lookups).fold(db, |db, _| {
         db.append_query_results([vec![project_access::Model {
+            team: None,
             project: project_id(),
             user: user().id,
             role: role.id,

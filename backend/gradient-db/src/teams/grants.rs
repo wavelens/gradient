@@ -10,7 +10,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter,
 };
-use std::collections::HashSet;
 
 pub async fn project_role_granted_to_a_team<C: ConnectionTrait>(
     db: &C,
@@ -82,8 +81,7 @@ pub async fn upsert_project_owner_team_grant<C: ConnectionTrait>(
         });
     };
     let users = team.new_project_users && team.new_project_role.is_some();
-    if (!users && !team.new_project_workers) || project_grant(db, owner, project).await?.is_some()
-    {
+    if (!users && !team.new_project_workers) || project_grant(db, owner, project).await?.is_some() {
         return Ok(OwnerTeamGrantChange {
             added: None,
             removed,
@@ -106,6 +104,42 @@ pub async fn upsert_project_owner_team_grant<C: ConnectionTrait>(
         added: Some(added),
         removed,
     })
+}
+
+pub async fn insert_worker_grants_for_teams_that_grant_workers_on_every_new_project<
+    C: ConnectionTrait,
+>(
+    db: &C,
+    project: ProjectId,
+) -> Result<Vec<MTeamProject>, DbErr> {
+    let granted: Vec<TeamId> = grants_of_project(db, project)
+        .await?
+        .into_iter()
+        .map(|grant| grant.team)
+        .collect();
+    let teams = ETeam::find()
+        .filter(CTeam::NewProjectWorkers.eq(true))
+        .filter(CTeam::Id.is_not_in(granted))
+        .all(db)
+        .await?;
+    let mut inserted = Vec::with_capacity(teams.len());
+    for team in teams {
+        inserted.push(
+            ATeamProject {
+                id: Set(TeamProjectId::now_v7()),
+                team: Set(team.id),
+                project: Set(project),
+                role: Set(None),
+                includes_users: Set(false),
+                includes_workers: Set(true),
+                grant_source: Set(TeamGrantSource::EveryProjectWorkerGrant),
+                created_at: Set(gradient_types::now()),
+            }
+            .insert(db)
+            .await?,
+        );
+    }
+    Ok(inserted)
 }
 
 pub async fn project_grant<C: ConnectionTrait>(
@@ -335,6 +369,36 @@ mod tests {
                 TeamGrantSource::Owner
             )]
         );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn every_team_with_the_workers_setting_gets_a_workers_only_grant_once() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        let (owner, other, project) = two_teams_and_a_project(&db).await;
+        upsert_project_owner_team_grant(&conn, project, Some(owner.id))
+            .await
+            .expect("the owner grant is written");
+
+        let inserted =
+            insert_worker_grants_for_teams_that_grant_workers_on_every_new_project(&conn, project)
+                .await
+                .expect("the worker grants are written");
+
+        assert_eq!(
+            inserted
+                .iter()
+                .map(|g| (g.team, g.role, g.includes_users, g.grant_source))
+                .collect::<Vec<_>>(),
+            [(
+                other.id,
+                None,
+                false,
+                TeamGrantSource::EveryProjectWorkerGrant
+            )]
+        );
+        assert_eq!(db.rows::<ETeamProject>().await.len(), 2);
         db.finish().await;
     }
 

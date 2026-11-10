@@ -223,6 +223,7 @@ async fn a_member_without_task_write_cannot_open_a_shell() {
     let db = with_job(db, ExecJobStatus::Running)
         .append_query_results([vec![project()]])
         .append_query_results([vec![project_access::Model {
+            team: None,
             project: project().id,
             user: user().id,
             role: view_role().id,
@@ -249,6 +250,7 @@ async fn a_member_without_trigger_permission_cannot_control_an_exec_job() {
         let db = with_job(db, ExecJobStatus::Running)
             .append_query_results([vec![project()]])
             .append_query_results([vec![project_access::Model {
+                team: None,
                 project: project().id,
                 user: user().id,
                 role: view_role().id,

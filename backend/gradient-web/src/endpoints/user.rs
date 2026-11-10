@@ -159,18 +159,13 @@ pub struct PatchApiKeyRequest {
     pub name: Option<String>,
     pub permissions: Option<Vec<String>>,
     /// An omitted field leaves the pin unchanged. A name pins the key, and JSON null unpins it.
-    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::deserialize_optional_field"
+    )]
     pub project: Option<Option<String>>,
     #[serde(default)]
     pub allowed_ips: Option<Vec<String>>,
-}
-
-fn deserialize_optional_field<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
-where
-    T: serde::Deserialize<'de>,
-    D: serde::Deserializer<'de>,
-{
-    Ok(Some(Option::<T>::deserialize(de)?))
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]

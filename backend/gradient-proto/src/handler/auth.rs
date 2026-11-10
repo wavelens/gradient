@@ -421,6 +421,7 @@ mod tests {
 
     fn project_row(id: ProjectId) -> ProjectModel {
         ProjectModel {
+            owner_team: None,
             id,
             name: format!("o-{}", id),
             display_name: "test".into(),

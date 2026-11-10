@@ -40,7 +40,7 @@ fn grant(users: bool, workers: bool) -> team_project::Model {
         role: users.then_some(BASE_ROLE_WRITE_ID),
         includes_users: users,
         includes_workers: workers,
-        managed: false,
+        grant_source: gradient_types::TeamGrantSource::Manual,
         created_at: test_date(),
     }
 }

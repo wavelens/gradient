@@ -111,6 +111,24 @@ pub fn builtin_role_name(id: RoleId) -> Option<&'static str> {
         .find(|name| builtin_role_id(name) == Some(id))
 }
 
+pub(crate) async fn lookup_owner_team_id_and_check_user_is_member_or_admin(
+    db: &gradient_db::WebDb,
+    user: &MUser,
+    name: &str,
+) -> WebResult<TeamId> {
+    let team = gradient_db::teams::by_name(db, name)
+        .await?
+        .ok_or_else(|| WebError::not_found(Resource::Team))?;
+    if !user.superuser
+        && gradient_db::teams::team_role_of(db, team.id, user.id)
+            .await?
+            .is_none()
+    {
+        return Err(crate::refusal::SharedRefusal::NotMemberOfOwnerTeam.into());
+    }
+    Ok(team.id)
+}
+
 fn blank_to_none(value: String) -> Option<String> {
     let trimmed = value.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())

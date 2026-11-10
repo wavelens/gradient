@@ -116,6 +116,7 @@ mod tests {
 
     fn make_project(name: &str, public_key: &str) -> MProject {
         MProject {
+            owner_team: None,
             id: gradient_types::ids::ProjectId::nil(),
             name: name.to_string(),
             display_name: name.to_string(),

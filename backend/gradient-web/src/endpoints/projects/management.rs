@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, caller_project_mask, key_limited_project_mask};
+use crate::access::{Caller, caller_project_mask, has_permission, key_limited_project_mask};
 use crate::api_spec::ProjectPath;
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::MaybeApiKey;
+use crate::endpoints::access::{TeamNameAndDisplayName, team_names};
+use crate::endpoints::teams::grants::{apply_owner_team_grant_change_to_workers, grant_workers};
+use crate::endpoints::teams::management::lookup_owner_team_id_and_check_user_is_member_or_admin;
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{CreatedEntityResponse, ok_json, paginate};
 use crate::json_body::JsonBody;
@@ -43,6 +46,8 @@ pub struct MakeProjectRequest {
     pub description: String,
     pub public: Option<bool>,
     pub hide_build_requests: Option<bool>,
+    #[serde(default)]
+    pub owner_team: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -54,6 +59,12 @@ pub struct PatchProjectRequest {
     pub allow_exec_in_build_requests: Option<bool>,
     pub restrict_evaluation_fetches: Option<bool>,
     pub extra_allowed_uri_prefixes: Option<Vec<String>>,
+    /// Omitted fields leave the owner team unchanged. A team name can set the owner team. JSON null can clear the owner team.
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::deserialize_optional_field"
+    )]
+    pub owner_team: Option<Option<String>>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -69,6 +80,7 @@ pub struct ProjectSummary {
     pub restrict_evaluation_fetches: bool,
     pub extra_allowed_uri_prefixes: Vec<String>,
     pub managed: bool,
+    pub owner_team: Option<TeamNameAndDisplayName>,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
     pub running_evaluations: i64,
@@ -80,11 +92,13 @@ pub struct ProjectSummary {
 impl ProjectSummary {
     fn new(
         project: MProject,
+        owner_team: Option<TeamNameAndDisplayName>,
         evaluations: ProjectEvaluationProgressCounts,
         role: Option<String>,
         permissions: PermissionMask,
     ) -> Self {
         Self {
+            owner_team,
             id: project.id,
             name: project.name,
             display_name: project.display_name,
@@ -140,6 +154,7 @@ pub struct ProjectResponse {
     pub restrict_evaluation_fetches: bool,
     pub extra_allowed_uri_prefixes: Vec<String>,
     pub managed: bool,
+    pub owner_team: Option<TeamNameAndDisplayName>,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
     pub github_app_available: bool,
@@ -151,12 +166,14 @@ pub struct ProjectResponse {
 impl ProjectResponse {
     fn new(
         project: MProject,
+        owner_team: Option<TeamNameAndDisplayName>,
         role: Option<String>,
         permissions: PermissionMask,
         github_app_available: bool,
         github_app_install_url: Option<String>,
     ) -> Self {
         Self {
+            owner_team,
             id: project.id,
             name: project.name,
             display_name: project.display_name,
@@ -236,8 +253,19 @@ pub async fn get(
 
     let mut grants =
         gradient_db::access::project_grants(&state.web_db, user.id, project_ids).await?;
+    let owner_teams = team_names(
+        &state.web_db,
+        listing
+            .items
+            .iter()
+            .filter_map(|project| project.owner_team),
+    )
+    .await?;
 
     let listing = listing.map(|project| {
+        let owner_team = project
+            .owner_team
+            .and_then(|team| owner_teams.get(&team).cloned());
         let evaluations = evaluations_per_project
             .get(&project.id)
             .copied()
@@ -249,7 +277,7 @@ pub async fn get(
             ),
             None => (None, 0),
         };
-        ProjectSummary::new(project, evaluations, role, permissions)
+        ProjectSummary::new(project, owner_team, evaluations, role, permissions)
     });
 
     Ok(ok_json(listing))
@@ -261,7 +289,7 @@ pub async fn get(
     operation_id = "createProject",
     tag = "projects",
     summary = "Create project",
-    description = "Create a new project for the current user. Return the UUID, the name, and the URL of the web page. Signed-in sessions can call this endpoint. API keys that have `createProject` and no project pinning can call this endpoint too.",
+    description = "Create a new project for the current user. The response fields list the project UUID, the project name, and the URL of the web page for the project. A signed-in session can call this endpoint. An API key with `createProject` and no project pinning can also call this endpoint. Use the `owner_team` field to name a team with the caller as a member. Place the project in that team. Members of that team receive the default role for members of team projects.",
     request_body = MakeProjectRequest,
     responses((status = OK, description = "Project created", body = CreatedEntityResponse), WebError)
 )]
@@ -287,6 +315,14 @@ pub async fn put(
         return Err(WebError::already_exists(Resource::ProjectName));
     }
 
+    let owner_team = match body.owner_team.as_deref() {
+        Some(name) => Some(
+            lookup_owner_team_id_and_check_user_is_member_or_admin(&state.web_db, &user, name)
+                .await?,
+        ),
+        None => None,
+    };
+
     let (private_key, public_key) =
         generate_ssh_key(&state.config.secrets.crypt_file).map_err(|e| {
             tracing::error!(error = %e, "Failed to generate SSH key");
@@ -306,6 +342,7 @@ pub async fn put(
             private_key,
             public: body.public.unwrap_or(false),
             hide_build_requests: body.hide_build_requests.unwrap_or(false),
+            owner_team,
             created_by: user.id,
             created_at: gradient_types::now(),
             ..Default::default()
@@ -325,8 +362,14 @@ pub async fn put(
     )
     .await?;
 
-    let granted_teams =
-        gradient_db::teams::grants::apply_new_project_grants(&tx, project.id, user.id).await?;
+    let owner_grant =
+        gradient_db::teams::grants::upsert_project_owner_team_grant(&tx, project.id, owner_team)
+            .await?;
+    let worker_grants =
+        gradient_db::teams::grants::insert_worker_grants_for_teams_that_grant_workers_on_every_new_project(
+            &tx, project.id,
+        )
+        .await?;
 
     tx.commit().await?;
 
@@ -339,14 +382,15 @@ pub async fn put(
         .await;
 
     // A connected worker is learning about the new project only when it re-auths.
-    for team in granted_teams {
-        match gradient_db::teams::team_worker_ids(&state.web_db, team).await {
-            Ok(workers) => {
-                crate::endpoints::teams::workers::reauth_team_workers(&scheduler, &workers).await;
-            }
-            Err(e) => {
-                tracing::warn!(team = %team, error = %e, "Failed to read the workers of the team to request re-authentication for the new project");
-            }
+    if let Err(e) =
+        apply_owner_team_grant_change_to_workers(&state.web_db, &scheduler, project.id, owner_grant)
+            .await
+    {
+        tracing::warn!(project = %project.id, error = %e, "Failed to read the workers of the team to request re-authentication for the new project");
+    }
+    for grant in worker_grants {
+        if let Err(e) = grant_workers(&state.web_db, &scheduler, grant.team, project.id).await {
+            tracing::warn!(team = %grant.team, error = %e, "Failed to read the workers of the team to request re-authentication for the new project");
         }
     }
 
@@ -419,9 +463,14 @@ pub async fn get_project(
         &state.memory.github_app_install_url,
     )
     .await;
+    let owner_team = team_names(&state.web_db, project.owner_team)
+        .await?
+        .into_values()
+        .next();
 
     Ok(ok_json(ProjectResponse::new(
         project,
+        owner_team,
         role,
         permissions,
         state.config.github_app.is_some(),
@@ -461,17 +510,48 @@ async fn github_app_install_url(
     operation_id = "patchProject",
     tag = "projects",
     summary = "Update project",
-    description = "Updates one or more project fields. Managed projects cannot\nbe edited via the API. Requires the caller to hold the **admin** role\nin the project.",
+    description = "Update one or more fields of a project. The API can't edit managed projects. API calls need an admin role for the project. Changes to `owner_team` also need the `manageMembers` permission. Callers need to be members of the new team.",
     params(ProjectPath),
     request_body = PatchProjectRequest,
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn patch_project(
-    ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
+    ProjectScope {
+        project,
+        db,
+        user,
+        api_key,
+        ..
+    }: ProjectScope<RequiresUnmanaged<can::ManageProjectSettings>>,
     audit: Audit,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     JsonBody(body): JsonBody<PatchProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    let owner_team = match &body.owner_team {
+        None => None,
+        Some(owner_team) => {
+            if !has_permission(
+                &db.web_db,
+                user.id,
+                project.id,
+                Permission::ManageMembers,
+                api_key.as_ref(),
+            )
+            .await?
+            {
+                return Err(SharedRefusal::MissingPermission.into());
+            }
+            Some(match owner_team.as_deref() {
+                Some(name) => Some(
+                    lookup_owner_team_id_and_check_user_is_member_or_admin(&db.web_db, &user, name)
+                        .await?,
+                ),
+                None => None,
+            })
+        }
+    };
     let fields = changed_fields([
+        ("owner_team", owner_team.is_some()),
         ("name", body.name.is_some()),
         ("display_name", body.display_name.is_some()),
         ("description", body.description.is_some()),
@@ -522,10 +602,28 @@ pub async fn patch_project(
             .collect::<Result<Vec<_>, _>>()?;
         aproject.extra_allowed_uri_prefixes = Set(prefixes);
     }
+    if let Some(owner_team) = owner_team {
+        aproject.owner_team = Set(owner_team);
+    }
 
-    let project = gradient_db::rows::update::<EProject, _>(&db.web_db, aproject)
+    let tx = db.web_db.inner().begin().await?;
+    let project = gradient_db::rows::update::<EProject, _>(&tx, aproject)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::ProjectName))?;
+    let owner_grant = match owner_team {
+        Some(owner_team) => Some(
+            gradient_db::teams::grants::upsert_project_owner_team_grant(
+                &tx, project.id, owner_team,
+            )
+            .await?,
+        ),
+        None => None,
+    };
+    tx.commit().await?;
+    if let Some(owner_grant) = owner_grant {
+        apply_owner_team_grant_change_to_workers(&db.web_db, &scheduler, project.id, owner_grant)
+            .await?;
+    }
 
     audit
         .write(

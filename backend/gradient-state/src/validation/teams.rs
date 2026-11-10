@@ -57,6 +57,14 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             .filter(|r| r.project == project.name)
             .map(|r| r.name.as_str())
             .collect();
+        if let Some(team) = project.owner_team.as_deref()
+            && !lookup.team_exists(team)
+        {
+            errors.push(
+                format!("projects.{}.owner_team", project.name),
+                format!("Team '{team}' does not exist"),
+            );
+        }
         for grant in &project.teams {
             let field = format!("projects.{}.teams.{}", project.name, grant.team);
             if !lookup.team_exists(&grant.team) {
@@ -89,6 +97,14 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
 
     for cache in config.caches.values() {
         let declared: HashSet<&str> = cache.roles.iter().map(|r| r.name.as_str()).collect();
+        if let Some(team) = cache.owner_team.as_deref()
+            && !lookup.team_exists(team)
+        {
+            errors.push(
+                format!("caches.{}.owner_team", cache.name),
+                format!("Team '{team}' does not exist"),
+            );
+        }
         for grant in &cache.teams {
             let field = format!("caches.{}.teams.{}", cache.name, grant.team);
             if !lookup.team_exists(&grant.team) {

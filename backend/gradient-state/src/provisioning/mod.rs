@@ -56,7 +56,8 @@ pub(super) async fn apply_state_to_database(
     app.apply_users(&config.users).await?;
     // Teams must exist before projects, for their new-project grants (the local worker's `server`).
     let team_ids = app.apply_teams(&config.teams).await?;
-    app.apply_projects_without_members(&config.projects).await?;
+    app.apply_projects_without_members(&config.projects, &team_ids)
+        .await?;
     app.apply_project_secrets(&config.projects).await?;
     app.apply_roles(&config.roles).await?;
     app.apply_project_members(&config.projects, &pending)
@@ -65,7 +66,7 @@ pub(super) async fn apply_state_to_database(
     // resolving integrations by name at apply time (#332).
     app.apply_integrations(&config.integrations).await?;
     app.apply_tasks(&config.tasks).await?;
-    app.apply_caches(&config.caches).await?;
+    app.apply_caches(&config.caches, &team_ids).await?;
     app.apply_project_teams(&config.projects, &team_ids).await?;
     app.apply_cache_teams(&config.caches, &team_ids).await?;
     app.apply_api_keys(&config.api_keys).await?;
