@@ -11,6 +11,8 @@ use gradient_db::{DbContext, WorkerDb};
 use gradient_graph::{GcRequest, Graph};
 use gradient_types::events::gc::{Pass, Swept};
 use gradient_types::*;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::info;
 
@@ -32,6 +34,24 @@ impl CachedPathIndex for ExpiredCachedPaths<'_> {
         gradient_db::maintenance::gc::scan_deletable_path_hashes(self.db, self.unused_since)
             .await
             .context("select expired cached paths")
+    }
+
+    async fn filter_nar_hashes_with_cached_path_again(
+        &self,
+        keys: &[String],
+    ) -> Result<HashSet<String>> {
+        if keys.is_empty() {
+            return Ok(HashSet::new());
+        }
+        ECachedPath::find()
+            .select_only()
+            .column(CCachedPath::Hash)
+            .filter(CCachedPath::Hash.is_in(keys.iter().cloned()))
+            .into_tuple::<String>()
+            .all(self.db)
+            .await
+            .map(|hashes| hashes.into_iter().collect())
+            .context("Search for cache paths that were uploaded again")
     }
 
     async fn retire(&self, keys: &[String]) -> Result<Vec<String>> {

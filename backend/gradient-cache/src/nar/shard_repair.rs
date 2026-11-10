@@ -178,17 +178,21 @@ const UNREFERENCED_PROBE_BATCH: usize = 5000;
 /// Reclaiming it would strand a zombie `cached_path` that the dispatch gate is trusting. A grace of
 /// `<= 0` is for tests only.
 fn past_upload_grace(config: &RuntimeConfig, on_disk: &[(String, i64)]) -> Vec<String> {
-    let grace_secs = i64::from(config.gc.nar_upload_grace_hours) * 3600;
-    let cutoff = if grace_secs > 0 {
-        now().and_utc().timestamp() - grace_secs
-    } else {
-        i64::MAX
-    };
+    let cutoff = orphan_delete_cutoff_timestamp(config);
     on_disk
         .iter()
         .filter(|(_, modified)| *modified < cutoff)
         .map(|(hash, _)| hash.clone())
         .collect()
+}
+
+pub(crate) fn orphan_delete_cutoff_timestamp(config: &RuntimeConfig) -> i64 {
+    let grace_secs = i64::from(config.gc.nar_upload_grace_hours) * 3600;
+    if grace_secs > 0 {
+        now().and_utc().timestamp() - grace_secs
+    } else {
+        i64::MAX
+    }
 }
 
 async fn unreferenced_hashes(db: &WorkerDb, candidates: &[String]) -> Result<Vec<String>> {

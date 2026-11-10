@@ -81,7 +81,7 @@ pub(super) async fn run(
         anyhow::bail!("unknown deep GC unit {unit}");
     };
     match pass {
-        Pass::Blobs => pass_blobs(&db.worker_db, &db.storage.nar_storage, report).await,
+        Pass::Blobs => pass_blobs(&db.worker_db, &db.config, &db.storage.nar_storage, report).await,
         Pass::ExecOutputs => {
             pass_exec_outputs(&db.worker_db, &db.storage.nar_storage, report).await
         }
@@ -115,12 +115,22 @@ async fn pass_nars(
 
 async fn pass_blobs(
     db: &WorkerDb,
+    config: &RuntimeConfig,
     nar_storage: &NarStore,
     report: &mut DeepGcReport,
 ) -> Result<()> {
     let on_disk = nar_storage.list_blobs().await.context("list_blobs")?;
     report.blobs_scanned += on_disk.len() as u64;
-    let on_disk_set: HashSet<(uuid::Uuid, [u8; 32])> = on_disk.iter().copied().collect();
+    let cutoff = crate::nar::shard_repair::orphan_delete_cutoff_timestamp(config);
+    let on_disk_set: HashSet<(uuid::Uuid, [u8; 32])> = on_disk
+        .iter()
+        .map(|&(project, hash, _)| (project, hash))
+        .collect();
+    let old_enough: HashSet<(uuid::Uuid, [u8; 32])> = on_disk
+        .iter()
+        .filter(|&&(_, _, modified)| modified < cutoff)
+        .map(|&(project, hash, _)| (project, hash))
+        .collect();
 
     let rows = EBuildRequestBlob::find()
         .all(db)
@@ -155,7 +165,7 @@ async fn pass_blobs(
         }
     }
 
-    for key in &on_disk_set {
+    for key in &old_enough {
         if !row_keys.contains(key) {
             if let Err(e) = nar_storage.delete_blob(key.0, &key.1).await {
                 warn!(error = %e, "deep_gc: failed to delete orphan blob");
@@ -328,7 +338,9 @@ mod tests {
         log: Arc<dyn LogStorage>,
         db: sea_orm::DatabaseConnection,
     ) -> Arc<ServerState> {
-        test_server_state_with_log(nar, log, db, |_| {})
+        test_server_state_with_log(nar, log, db, |config| {
+            config.gc.nar_upload_grace_hours = 0;
+        })
     }
 
     #[tokio::test]
@@ -350,9 +362,14 @@ mod tests {
         let state = make_state(nar, Arc::new(NoopLogStorage), db);
 
         let mut report = DeepGcReport::default();
-        pass_blobs(&state.worker_db, &state.nar_storage, &mut report)
-            .await
-            .unwrap();
+        pass_blobs(
+            &state.worker_db,
+            &state.config,
+            &state.nar_storage,
+            &mut report,
+        )
+        .await
+        .unwrap();
         assert_eq!(report.orphan_blobs_removed, 1);
         assert!(
             state
@@ -361,6 +378,42 @@ mod tests {
                 .await
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn pass_blobs_keeps_a_fresh_orphan_blob() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nar = NarStore::local(tmp.path()).unwrap();
+        let project = ProjectId::now_v7();
+        let hash = [0x22u8; 32];
+        nar.put_blob(project.into_inner(), &hash, b"x".to_vec())
+            .await
+            .unwrap();
+        let db = mock_db()
+            .append_query_results([Vec::<gradient_entity::build_request_blob::Model>::new()])
+            .into_connection();
+        let state = test_server_state_with_log(nar, Arc::new(NoopLogStorage), db, |config| {
+            config.gc.nar_upload_grace_hours = 24;
+        });
+
+        let mut report = DeepGcReport::default();
+        pass_blobs(
+            &state.worker_db,
+            &state.config,
+            &state.nar_storage,
+            &mut report,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.orphan_blobs_removed, 0);
+        assert!(
+            state
+                .nar_storage
+                .get_blob(project.into_inner(), &hash)
+                .await
+                .unwrap()
+                .is_some()
         );
     }
 
@@ -389,9 +442,14 @@ mod tests {
         let state = make_state(nar, Arc::new(NoopLogStorage), db);
 
         let mut report = DeepGcReport::default();
-        pass_blobs(&state.worker_db, &state.nar_storage, &mut report)
-            .await
-            .unwrap();
+        pass_blobs(
+            &state.worker_db,
+            &state.config,
+            &state.nar_storage,
+            &mut report,
+        )
+        .await
+        .unwrap();
         assert_eq!(report.zombie_blob_rows_purged, 1);
     }
 

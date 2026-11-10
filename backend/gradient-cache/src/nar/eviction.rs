@@ -5,12 +5,17 @@
  */
 
 use gradient_storage::NarStore;
+use std::collections::HashSet;
 use tracing::warn;
 
 #[async_trait::async_trait]
 pub trait CachedPathIndex: Send + Sync {
     async fn expired(&self) -> anyhow::Result<Vec<String>>;
     async fn retire(&self, keys: &[String]) -> anyhow::Result<Vec<String>>;
+    async fn filter_nar_hashes_with_cached_path_again(
+        &self,
+        keys: &[String],
+    ) -> anyhow::Result<HashSet<String>>;
 }
 
 pub async fn evict(
@@ -21,11 +26,18 @@ pub async fn evict(
     let expired = index.expired().await?;
     let mut evicted = 0u64;
     for keys in expired.chunks(chunk.max(1)) {
-        for key in index.retire(keys).await? {
+        let retired = index.retire(keys).await?;
+        let stored_again = index
+            .filter_nar_hashes_with_cached_path_again(&retired)
+            .await?;
+        for key in retired {
+            evicted += 1;
+            if stored_again.contains(&key) {
+                continue;
+            }
             if let Err(e) = store.delete(&key).await {
                 warn!(error = %e, %key, "failed to remove an evicted NAR");
             }
-            evicted += 1;
         }
     }
     Ok(evicted)
@@ -33,7 +45,6 @@ pub async fn evict(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::Mutex;
 
     use gradient_storage::NarStore;
@@ -44,6 +55,7 @@ mod tests {
     struct Index {
         expired: Vec<String>,
         kept: HashSet<String>,
+        uploaded_again: HashSet<String>,
         chunks: Mutex<Vec<usize>>,
     }
 
@@ -58,6 +70,17 @@ mod tests {
             Ok(keys
                 .iter()
                 .filter(|k| !self.kept.contains(*k))
+                .cloned()
+                .collect())
+        }
+
+        async fn filter_nar_hashes_with_cached_path_again(
+            &self,
+            keys: &[String],
+        ) -> anyhow::Result<HashSet<String>> {
+            Ok(keys
+                .iter()
+                .filter(|k| self.uploaded_again.contains(*k))
                 .cloned()
                 .collect())
         }
@@ -78,6 +101,7 @@ mod tests {
         let index = Index {
             expired: vec!["aa1".into(), "bb2".into(), "cc3".into()],
             kept: HashSet::from(["bb2".to_owned()]),
+            uploaded_again: HashSet::new(),
             chunks: Mutex::default(),
         };
 
@@ -89,11 +113,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_path_uploaded_again_after_retiring_keeps_its_object() {
+        let (_dir, store) = store_with(&["aa1", "bb2"]).await;
+        let index = Index {
+            expired: vec!["aa1".into(), "bb2".into()],
+            kept: HashSet::new(),
+            uploaded_again: HashSet::from(["bb2".to_owned()]),
+            chunks: Mutex::default(),
+        };
+
+        assert_eq!(evict(&index, &store, 10).await.expect("evict"), 2);
+        assert!(!store.exists("aa1").await.expect("exists"));
+        assert!(store.exists("bb2").await.expect("exists"));
+    }
+
+    #[tokio::test]
     async fn nothing_expired_touches_nothing() {
         let (_dir, store) = store_with(&["aa1"]).await;
         let index = Index {
             expired: Vec::new(),
             kept: HashSet::new(),
+            uploaded_again: HashSet::new(),
             chunks: Mutex::default(),
         };
 

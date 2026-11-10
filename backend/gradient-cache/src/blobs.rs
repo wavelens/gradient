@@ -38,6 +38,15 @@ pub async fn cleanup_unused_build_request_blobs(db: &DbContext) -> Result<()> {
             warn!(error = %e, %blob_id, "failed to delete build_request_blob row");
             continue;
         }
+        let uploaded_again = EBuildRequestBlob::find()
+            .filter(CBuildRequestBlob::Project.eq(project_id))
+            .filter(CBuildRequestBlob::Hash.eq(hash.to_vec()))
+            .one(&db.worker_db)
+            .await;
+        if !matches!(uploaded_again, Ok(None)) {
+            removed += 1;
+            continue;
+        }
         if let Err(e) = db
             .storage
             .nar_storage
@@ -114,6 +123,7 @@ mod tests {
 
         let db = mock_db()
             .append_query_results([vec![stale.clone()]])
+            .append_query_results([Vec::<gradient_entity::build_request_blob::Model>::new()])
             .append_exec_results([sea_orm::MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -139,6 +149,55 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "stale blob payload must be removed from storage"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_blob_uploaded_again_during_the_sweep_keeps_its_payload() {
+        use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let project = ProjectId::now_v7();
+        let hash = [0xCDu8; 32];
+        let stale = gradient_entity::build_request_blob::Model {
+            id: BuildRequestBlobId::now_v7(),
+            project,
+            hash: hash.to_vec(),
+            size: 1,
+            created_at: now() - chrono::Duration::days(30),
+            last_used_at: now() - chrono::Duration::days(30),
+        };
+        let fresh = gradient_entity::build_request_blob::Model {
+            id: BuildRequestBlobId::now_v7(),
+            last_used_at: now(),
+            ..stale.clone()
+        };
+        let db = mock_db()
+            .append_query_results([vec![stale]])
+            .append_query_results([vec![fresh]])
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+        let state = state_with_worker_db(tmp.path(), db);
+        state
+            .nar_storage
+            .put_blob(project.into_inner(), &hash, b"payload".to_vec())
+            .await
+            .unwrap();
+
+        cleanup_unused_build_request_blobs(&state.db())
+            .await
+            .unwrap();
+
+        assert!(
+            state
+                .nar_storage
+                .get_blob(project.into_inner(), &hash)
+                .await
+                .unwrap()
+                .is_some()
         );
     }
 

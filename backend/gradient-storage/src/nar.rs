@@ -489,6 +489,7 @@ impl NarStore {
     }
 
     pub async fn delete(&self, hash: &str) -> Result<()> {
+        self.hot.invalidate(hash);
         self.delete_object(&self.object_path(hash)).await
     }
 
@@ -842,7 +843,7 @@ impl NarStore {
         Ok(())
     }
 
-    pub async fn list_blobs(&self) -> Result<Vec<(uuid::Uuid, [u8; 32])>> {
+    pub async fn list_blobs(&self) -> Result<Vec<(uuid::Uuid, [u8; 32], i64)>> {
         let prefix = Path::from(format!("{}build-request-blobs", self.prefix));
         let mut stream = self.inner.list(Some(&prefix));
         let mut out = Vec::new();
@@ -869,7 +870,7 @@ impl NarStore {
             }
             let mut hash = [0u8; 32];
             hash.copy_from_slice(&hash_vec);
-            out.push((project, hash));
+            out.push((project, hash, meta.last_modified.timestamp()));
         }
         Ok(out)
     }
