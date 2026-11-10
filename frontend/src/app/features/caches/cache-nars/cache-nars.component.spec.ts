@@ -64,7 +64,7 @@ describe('CacheNarsComponent loading', () => {
   it('names the cache in the breadcrumb at once from the name the resolver remembered', () => {
     const { root, getCache } = render(() => NEVER);
     const crumbs = Array.from(root.querySelectorAll('.breadcrumb-link, .breadcrumb-current'));
-    expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Caches', 'Main', 'NARs']);
+    expect(crumbs.map((crumb) => crumb.textContent?.trim())).toEqual(['Caches', 'Main', 'Packages']);
     expect(getCache).not.toHaveBeenCalled();
   });
 
@@ -94,10 +94,10 @@ describe('CacheNarsComponent loading', () => {
     const { fixture, query, root } = render(() => (++calls === 2 ? throwError(() => ({ status: 500, message: 'database is down' })) : of(PAGE)));
     query.next(convertToParamMap({ page: '2' }));
     fixture.detectChanges();
-    expect(root.textContent).toContain('Failed to load NARs');
+    expect(root.textContent).toContain('Failed to load packages');
     expect(root.textContent).toContain('database is down');
     expect(root.querySelector('tbody')).toBeNull();
-    expect(root.textContent).not.toContain('No NARs found');
+    expect(root.textContent).not.toContain('No packages found');
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
     fixture.detectChanges();
     expect(root.querySelector('tbody')?.textContent).toContain('abc123');
@@ -151,7 +151,7 @@ describe('CacheNarsComponent delete', () => {
     const service = TestBed.inject(CachesService) as unknown as { deleteCacheNar: () => unknown };
     service.deleteCacheNar = vi.fn(() => of('ok'));
     fixture.componentInstance.askDelete(NAR);
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete NAR', target: 'hello (abc123)' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete package', target: 'hello (abc123)' }));
     expect(service.deleteCacheNar).toHaveBeenCalledWith('main', 'abc123');
     expect(fixture.componentInstance.rows()).toEqual([]);
   });

@@ -131,11 +131,11 @@ describe('CacheDetailComponent loading', () => {
     const root = fixture.nativeElement as HTMLElement;
 
     expect(root.textContent).toContain('Failed to load cache stats');
-    expect(root.textContent).not.toContain('Packages');
+    expect(root.querySelector('gr-stat-card')).toBeNull();
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
     fixture.detectChanges();
     expect(getCacheStats).toHaveBeenCalledTimes(2);
-    expect(root.textContent).toContain('Packages');
+    expect(root.querySelector('gr-stat-card')?.textContent).toContain('Packages');
   });
 });
 

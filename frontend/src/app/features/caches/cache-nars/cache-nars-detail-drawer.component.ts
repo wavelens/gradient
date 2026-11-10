@@ -78,7 +78,7 @@ export class CacheNarsDetailDrawerComponent implements OnChanges {
         this.loading.set(false);
       },
       error: (error: unknown) => {
-        this.error.set(apiErrorMessage(error, 'Failed to load NAR details.'));
+        this.error.set(apiErrorMessage(error, 'Failed to load package details.'));
         this.loading.set(false);
       },
     });

@@ -70,7 +70,7 @@ export class CacheNarsComponent implements OnInit {
   access = injectCacheAccessTo('writeStore');
 
   cacheName = '';
-  breadcrumb = computed(() => this.crumbs.cache(this.cacheName, { label: 'NARs' }));
+  breadcrumb = computed(() => this.crumbs.cache(this.cacheName, { label: 'Packages' }));
 
   search = signal('');
   hasSearchFilterFromUrl = signal(false);
@@ -203,19 +203,19 @@ export class CacheNarsComponent implements OnInit {
   askDelete(row: NarSummary): void {
     this.confirm
       .confirm({
-        title: 'Delete NAR',
+        title: 'Delete package',
         target: `${row.package} (${row.hash})`,
         consequence:
-          "If other caches still hold this NAR, only this cache's signature is removed. Otherwise the NAR blob is deleted permanently.",
+          "Other caches can still contain this package. Then the system can remove only this cache's signature. If other caches contain no copy, the system can delete the package completely.",
         confirmLabel: 'Delete',
-        failure: 'Failed to delete NAR.',
+        failure: 'Failed to delete package.',
         action: () => this.cachesService.deleteCacheNar(this.cacheName, row.hash),
       })
       .subscribe(() => {
         this.rows.update((rows) => rows?.filter((r) => r.hash !== row.hash) ?? rows);
         this.total.set(Math.max(0, this.total() - 1));
         if (!this.rows()?.length && this.page() > 1) this.goToPage(this.page() - 1);
-        this.notify.success('NAR removed');
+        this.notify.success('Package deleted');
         this.loadStats();
       });
   }

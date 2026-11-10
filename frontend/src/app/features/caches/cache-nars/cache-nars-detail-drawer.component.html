@@ -5,13 +5,13 @@
 -->
 
 <gr-dialog
-  header="NAR details"
+  header="Package details"
   [visible]="visible()"
   (visibleChange)="onVisibleChange($event)"
   width="640px"
 >
   @if (loading()) {
-    <gr-loading-spinner message="Loading NAR..." />
+    <gr-loading-spinner message="Loading package..." />
   } @else if (error()) {
     <div class="dialog-error">
       <gr-icon name="error" />

@@ -45,7 +45,7 @@
             <span class="row">
               <gr-star-button [target]="{ kind: 'cache', cache: c.name }" [starredItemDisplayName]="c.display_name" [(starred)]="c.starred" />
               <a class="n" [routerLink]="links.cache(c.name)" [title]="c.display_name">{{ c.display_name }}</a>
-              <span class="count">{{ count(c.nar_count) }} NARs</span>
+              <span class="count">{{ count(c.nar_count) }} packages</span>
             </span>
           </li>
         }

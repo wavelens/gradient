@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="breadcrumb()" title="NARs" subtitle="Browse and manage Nix archives stored in this cache.">
+<gr-page-layout [breadcrumb]="breadcrumb()" title="Packages" subtitle="Browse and manage the packages stored in this cache (Nix archives, NAR).">
   @if (stats()?.total_nars === 0) {
     <p class="text-secondary" data-testid="no-packages">No packages yet. See <a [routerLink]="links.cache(cacheName)">How to Use This Cache</a>.</p>
   } @else {
@@ -24,7 +24,7 @@
     <input
       grInput
       type="search"
-      aria-label="Search NARs"
+      aria-label="Search packages"
       [ngModel]="search()"
       (ngModelChange)="search.set($event)"
       name="search"
@@ -38,9 +38,9 @@
   <gr-load-state
     [error]="loadError()"
     [empty]="rows()?.length === 0"
-    errorTitle="Failed to load NARs"
+    errorTitle="Failed to load packages"
     emptyIcon="inbox"
-    emptyTitle="No NARs found"
+    emptyTitle="No packages found"
     [emptyMessage]="hasSearchFilterFromUrl() ? 'No archives match the current filters.' : 'This cache has no archives yet.'"
     (retry)="refresh()"
   >

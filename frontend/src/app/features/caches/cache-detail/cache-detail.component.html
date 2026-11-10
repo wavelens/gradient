@@ -11,7 +11,7 @@
     [subtitle]="c.description"
   >
     <div slot="actions">
-      <a grButton label="NARs" icon="database" severity="secondary" [routerLink]="links.cachePage(cacheName, 'nars')"></a>
+      <a grButton label="Packages" icon="database" severity="secondary" [routerLink]="links.cachePage(cacheName, 'nars')"></a>
       @if (c.can_edit) {
         <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.cachePage(cacheName, 'settings')"></a>
       }
