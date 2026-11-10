@@ -15,6 +15,7 @@ use axum_streams::StreamBodyAs;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_db::lookup::{by_id, by_ids};
+use gradient_db::status::log_tail::LogTail;
 use gradient_entity::build::BuildStatus;
 use gradient_storage::LogStorage;
 use gradient_types::*;
@@ -56,7 +57,7 @@ async fn eval_shared_build_jobs(
 }
 
 struct Followed {
-    offset: usize,
+    tail: LogTail,
     lines: PrefixedLines,
     done: bool,
 }
@@ -64,7 +65,7 @@ struct Followed {
 impl Followed {
     fn new(name: String) -> Self {
         Self {
-            offset: 0,
+            tail: LogTail::default(),
             lines: PrefixedLines::new(name),
             done: false,
         }
@@ -78,17 +79,17 @@ async fn read_new_lines(
     followed: &mut Followed,
     finished: bool,
 ) -> anyhow::Result<Vec<String>> {
-    let log =
+    let mut lines =
         match gradient_db::scheduling::build_attempt::latest_attempt_id(db, shared_build).await? {
-            Some(key) => log_storage.read(key).await?,
-            None => String::new(),
+            Some(attempt) => {
+                let appended = followed
+                    .tail
+                    .appended(db, log_storage.as_ref(), attempt)
+                    .await?;
+                followed.lines.push(&appended)
+            }
+            None => Vec::new(),
         };
-
-    let mut lines = log
-        .get(followed.offset..)
-        .map(|new| followed.lines.push(new))
-        .unwrap_or_default();
-    followed.offset = log.len();
     if finished {
         lines.extend(followed.lines.finish());
         followed.done = true;
@@ -158,7 +159,10 @@ pub async fn post_evaluation_builds(
                     .entry(shared_build.id)
                     .or_insert_with(|| Followed::new(name));
                 if entry.done {
-                    continue;
+                    if finished {
+                        continue;
+                    }
+                    entry.done = false;
                 }
 
                 match read_new_lines(&state.web_db, &state.log_storage, shared_build.id, entry, finished).await {
@@ -199,27 +203,59 @@ mod tests {
     use super::*;
     use gradient_entity::build_attempt;
     use gradient_fixtures::mock::mock_db;
-    use gradient_test_support::log_storage::ReadErrorLogStorage;
+    use gradient_test_support::log_storage::{InMemoryLogStorage, ReadErrorLogStorage};
+
+    fn attempt_row(id: BuildAttemptId, shared_build: DerivationBuildId) -> build_attempt::Model {
+        build_attempt::Model {
+            id,
+            derivation_build: shared_build,
+            ..Default::default()
+        }
+    }
 
     #[tokio::test]
-    async fn read_new_lines_error_keeps_followed_byte_offset_unchanged() {
+    async fn read_new_lines_error_leaves_the_build_unfinished() {
         let shared_build = DerivationBuildId::now_v7();
         let db = WebDb::new(
             mock_db()
-                .append_query_results([vec![build_attempt::Model {
-                    derivation_build: shared_build,
-                    ..Default::default()
-                }]])
+                .append_query_results([vec![attempt_row(BuildAttemptId::now_v7(), shared_build)]])
                 .into_connection(),
         );
         let log_storage: Arc<dyn LogStorage> = Arc::new(ReadErrorLogStorage);
         let mut followed = Followed::new("hello".into());
-        followed.offset = 5;
 
         let result = read_new_lines(&db, &log_storage, shared_build, &mut followed, true).await;
 
         assert!(result.is_err());
-        assert_eq!(followed.offset, 5);
         assert!(!followed.done);
+    }
+
+    #[tokio::test]
+    async fn a_retried_build_streams_the_new_attempt_from_its_start() {
+        let shared_build = DerivationBuildId::now_v7();
+        let (first, retry) = (BuildAttemptId::now_v7(), BuildAttemptId::now_v7());
+        let db = WebDb::new(
+            mock_db()
+                .append_query_results([vec![attempt_row(first, shared_build)]])
+                .append_query_results([vec![attempt_row(retry, shared_build)]])
+                .into_connection(),
+        );
+        let storage = InMemoryLogStorage::new();
+        storage.seed(first, "a long first attempt\n");
+        storage.seed(retry, "retry\n");
+        let log_storage: Arc<dyn LogStorage> = Arc::new(storage);
+        let mut followed = Followed::new("pkg".into());
+
+        let first_lines = read_new_lines(&db, &log_storage, shared_build, &mut followed, false)
+            .await
+            .unwrap();
+        let retry_lines = read_new_lines(&db, &log_storage, shared_build, &mut followed, false)
+            .await
+            .unwrap();
+
+        assert_eq!(first_lines.len(), 1);
+        assert!(first_lines[0].ends_with("a long first attempt"));
+        assert_eq!(retry_lines.len(), 1);
+        assert!(retry_lines[0].ends_with("retry"));
     }
 }
