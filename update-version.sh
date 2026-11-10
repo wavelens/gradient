@@ -49,23 +49,15 @@ CARGO_WORKSPACES=(
 )
 
 for ws in "${CARGO_WORKSPACES[@]}"; do
-    cargo update --manifest-path "$REPO_ROOT/$ws/Cargo.toml"
+    cargo update --workspace --manifest-path "$REPO_ROOT/$ws/Cargo.toml"
     echo "updated $ws/Cargo.lock"
 done
-
-# ── Flake inputs ─────────────────────────────────────────────────────────────
-
-nix flake update --flake "$REPO_ROOT"
-echo "updated flake.lock"
 
 # ── frontend/package.json ─────────────────────────────────────────────────────
 
 PACKAGE_JSON="$REPO_ROOT/frontend/package.json"
 sed -i "0,/\"version\": \"[^\"]*\"/{s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/}" "$PACKAGE_JSON"
 echo "updated frontend/package.json"
-
-pnpm --dir "$REPO_ROOT/frontend" update --recursive
-echo "updated frontend/pnpm-lock.yaml"
 
 # ── Nix packages ─────────────────────────────────────────────────────────────
 
