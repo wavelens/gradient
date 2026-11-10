@@ -117,10 +117,23 @@ export interface ApiKeyInfo {
 export interface ApiKeyPermissionsResponse {
   available_permissions: PermissionEntry[];
   availableCache: PermissionEntry[];
+  server_wide_permissions: PermissionEntry[];
 }
 
 export interface ApiKeyRequest {
   name: string;
+}
+
+export interface ApiKeyVisibleProjectOrCacheWithPermissions {
+  name: string;
+  display_name: string;
+  permissions: string[];
+}
+
+export interface ApiKeyVisibleProjectsAndCachesWithPermissionsResponse {
+  projects: ApiKeyVisibleProjectOrCacheWithPermissions[];
+  caches: ApiKeyVisibleProjectOrCacheWithPermissions[];
+  create_project: boolean;
 }
 
 export interface ArtefactTree {
@@ -722,6 +735,12 @@ export interface CreateWebhookRequest {
 export interface CreateWebhookResponse {
   webhook: WebhookResponse;
   secret: string;
+}
+
+export interface CreatedEntityResponse {
+  id: string;
+  name: string;
+  url: string;
 }
 
 export interface DashboardStats {
@@ -2086,7 +2105,7 @@ export interface PendingJobsResponse {
   other_pending: number;
 }
 
-export type Permission = "viewProject" | "manageProjectSettings" | "deleteProject" | "manageMembers" | "manageRoles" | "manageIntegrations" | "manageActions" | "manageWorkers" | "manageSubscriptions" | "manageSshKey" | "createTask" | "editTask" | "triggerEvaluation" | "manageTriggers" | "manageWebhooks";
+export type Permission = "viewProject" | "manageProjectSettings" | "deleteProject" | "manageMembers" | "manageRoles" | "manageIntegrations" | "manageActions" | "manageWorkers" | "manageSubscriptions" | "manageSshKey" | "createTask" | "editTask" | "triggerEvaluation" | "manageTriggers" | "manageWebhooks" | "createProject";
 
 export interface PermissionEntry {
   id: string;
