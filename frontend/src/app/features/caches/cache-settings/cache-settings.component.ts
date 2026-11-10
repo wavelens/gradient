@@ -17,6 +17,7 @@ import {
   BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
+  CopyFieldComponent,
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
@@ -36,12 +37,13 @@ import {
 } from '@shared/access';
 import { injectCacheAccess, injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
-import { CacheResponse, CacheSubscribersResponse, PatchCacheRequest } from '@core/models';
+import { CachePublicKeyHistory, CacheResponse, CacheSubscribersResponse, PatchCacheRequest } from '@core/models';
+import { ConfigService } from '@core/services/config.service';
 import { LabelHelpComponent, formatEntityLabel } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { links } from '@shared/routing';
-import { plural } from '@shared/text';
+import { plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { injectPendingSubscriptionRequestCount } from '../pending-subscription-request-count';
 
 const CACHE_DELETE_CONSEQUENCE = 'All store paths in this cache are deleted with the cache.';
@@ -99,13 +101,22 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
     SelectComponent,
     RowListComponent,
     CheckboxComponent,
+    CopyFieldComponent,
     LabelHelpComponent,
+    ServerTimestampToLocalDateTimePipe,
   ],
   templateUrl: './cache-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styles: `
     .save-hint {
       align-self: center;
+    }
+    .retired-key {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      overflow-wrap: anywhere;
+      margin-top: 0.5rem;
     }
   `,
 })
@@ -119,6 +130,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  protected config = inject(ConfigService);
   private saveSettingsWithPrivateToPublicConfirmation = injectSaveSettingsWithPrivateToPublicConfirmation();
 
   private resolved = injectCacheAccessData();
@@ -126,6 +138,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   deleteAccess = injectCacheAccessTo('deleteCache');
   manageCacheSubscriptionsAccess = injectCacheAccessTo('manageCacheSubscriptions');
   webhooksAccess = injectCacheAccessTo('manageCacheWebhooks');
+  manageKeysAccess = injectCacheAccessTo('manageCacheKeys');
   pendingSubscriptionRequestCount = injectPendingSubscriptionRequestCount();
 
   loading = signal(true);
@@ -134,6 +147,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   toggling = signal(false);
 
   cache = signal<CacheResponse | null>(null);
+  cachePublicKeyHistory = signal<CachePublicKeyHistory | null>(null);
   saveError = signal<string | null>(null);
 
   cacheName = '';
@@ -165,6 +179,32 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
     const resolved = this.resolved()?.cache;
     if (resolved) this.applyCacheRecord(resolved);
     else this.loadCache();
+    this.loadPublicKeys();
+  }
+
+  private loadPublicKeys(): void {
+    this.cachesService.getPublicKeysWithDates(this.cacheName).subscribe({
+      next: (keys) => this.cachePublicKeyHistory.set(keys),
+      error: () => this.cachePublicKeyHistory.set(null),
+    });
+  }
+
+  confirmRotateCacheSigningKeyAndReloadKeyList(): void {
+    this.confirm
+      .confirm({
+        title: 'Rotate Signing Key',
+        target: this.cache()?.display_name ?? this.cacheName,
+        consequence:
+          'Cache signatures now come from a new key. Store paths keep the old signatures, so Nix clients that trust the old key continue to work. Add the new key to trusted-public-keys on all clients.',
+        confirmLabel: 'Rotate Key',
+        failure: 'Signing key rotation failed',
+        severity: 'danger',
+        action: () => this.cachesService.rotateCacheKeyAndReturnNewPublicKey(this.cacheName),
+      })
+      .subscribe(() => {
+        this.notify.success('Rotated the signing key');
+        this.loadPublicKeys();
+      });
   }
 
   loadCache(): void {

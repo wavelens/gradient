@@ -99,7 +99,7 @@ export class BreadcrumbsService {
   }
 
   admin(...tail: Crumb[]): Crumb[] {
-    return [{ label: 'Admin', link: links.admin('webhooks') }, ...tail];
+    return [{ label: 'Admin', link: links.admin('overview') }, ...tail];
   }
 
   rememberProject(project: string, displayName: string): void {

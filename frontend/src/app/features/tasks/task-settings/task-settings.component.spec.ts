@@ -427,3 +427,60 @@ describe('TaskSettingsComponent - duplicate task', () => {
     expect(component.duplicateTaskDialogErrorMessage()).toBe('Task name already exists');
   });
 });
+
+describe('TaskSettingsComponent - old evaluations', () => {
+  const admin: AccessCase = { managed: false, canEdit: true };
+  afterEach(() => TestBed.resetTestingModule());
+
+  function arm(fixture: ComponentFixture<TaskSettingsComponent>, confirmed = true) {
+    const deleteTaskEvaluationsBeforeDate = vi.fn(() => of(3));
+    Object.assign(TestBed.inject(TasksService), { deleteTaskEvaluationsBeforeDate });
+    const confirm = vi.spyOn(TestBed.inject(ConfirmService), 'confirm')
+      .mockImplementation(((request: ConfirmRequest) => (confirmed ? request.action() : EMPTY)) as ConfirmService['confirm']);
+    const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
+    const date = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#task-delete-before')!;
+    date.value = '2026-11-01';
+    date.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    return { deleteTaskEvaluationsBeforeDate, confirm, success };
+  }
+
+  function deleteButton(fixture: ComponentFixture<TaskSettingsComponent>): HTMLButtonElement {
+    return (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.delete-before button')!;
+  }
+
+  it('asks first, naming the date, then deletes and reports the count', () => {
+    const fixture = setup(admin);
+    const { deleteTaskEvaluationsBeforeDate, confirm, success } = arm(fixture);
+    deleteButton(fixture).click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete Old Evaluations', consequence: expect.stringContaining('2026-11-01') }));
+    expect(deleteTaskEvaluationsBeforeDate).toHaveBeenCalledWith('acme', 'demo', '2026-11-01T00:00:00.000Z');
+    expect(success).toHaveBeenCalledWith('Deleted 3 evaluations');
+  });
+
+  it('sends nothing when the confirmation is cancelled', () => {
+    const fixture = setup(admin);
+    const { deleteTaskEvaluationsBeforeDate } = arm(fixture, false);
+    deleteButton(fixture).click();
+    expect(deleteTaskEvaluationsBeforeDate).not.toHaveBeenCalled();
+  });
+
+  it('keeps the delete button disabled until a date is picked', () => {
+    const fixture = setup(admin);
+    expect(deleteButton(fixture).getAttribute('aria-disabled') ?? String(deleteButton(fixture).disabled)).toBe('true');
+  });
+
+  it('hides the row under read-only access', () => {
+    const fixture = setup({ managed: false, canEdit: false });
+    expect((fixture.nativeElement as HTMLElement).querySelector('.delete-before')).toBeNull();
+  });
+
+  it('names the instance limit under Keep Evaluations', () => {
+    const fixture = setup(admin);
+    TestBed.inject(ConfigService).maxKeepEvaluationsPerTask = 50;
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    const field = (fixture.nativeElement as HTMLElement).querySelector('#task-keep')!.closest('gr-form-field')!;
+    expect(field.querySelector('.hint')?.textContent).toContain('Instance limit: 50');
+  });
+});

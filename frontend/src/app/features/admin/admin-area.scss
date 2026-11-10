@@ -1,0 +1,28 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '@gradient/ui/styles/variables' as *;
+
+.admin { padding: $spacing-md; max-width: $content-width-detail; margin: 0 auto; }
+h1 { color: var(--gr-text-primary); font-size: $font-size-xxl; margin: 0 0 $spacing-lg; }
+.admin-nav { display: block; margin-bottom: $spacing-lg; }
+h2 { color: var(--gr-text-primary); font-size: $font-size-lg; margin: 1.5rem 0 0.75rem; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+.tile { background: var(--gr-surface-raised); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-md; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.25rem; color: var(--gr-text-primary); font-size: $font-size-lg; text-decoration: none; }
+a.tile:hover { border-color: var(--gr-border); }
+.tile .label { color: var(--gr-text-secondary); font-size: $font-size-xs; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin: 0 0 1rem; }
+gr-table { display: block; margin-bottom: 1rem; }
+td.number, th.number { text-align: right; white-space: nowrap; }
+td.actions-cell { text-align: right; white-space: nowrap; }
+.muted { color: var(--gr-text-muted); }
+.hint { color: var(--gr-text-secondary); font-size: $font-size-sm; margin: 0 0 0.75rem; }
+.bad { color: var(--gr-status-danger); }
+.drain-banner { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); border: 1px solid var(--gr-status-danger); color: var(--gr-status-danger-text); border-radius: $border-radius-md; padding: 0.6rem 0.9rem; margin-bottom: 1rem; font-size: $font-size-sm; }
+
+@media (max-width: $breakpoint-sm) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $spacing-sm; }
+}

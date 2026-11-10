@@ -67,6 +67,10 @@ export class TasksService {
     return this.api.delete<string>(`tasks/${project}/${task}`);
   }
 
+  deleteTaskEvaluationsBeforeDate(project: string, task: string, before: string): Observable<number> {
+    return this.api.delete<number>(`tasks/${project}/${task}/evaluations?before=${encodeURIComponent(before)}`);
+  }
+
   getEntryPoints(project: string, task: string, evaluationId?: string, limit?: number, offset?: number, search?: string): Observable<PaginatedEntryPoints> {
     const params: string[] = [];
     if (evaluationId) params.push(`evaluation_id=${evaluationId}`);

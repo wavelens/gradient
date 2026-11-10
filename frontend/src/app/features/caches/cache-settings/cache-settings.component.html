@@ -69,6 +69,7 @@
       <gr-form-field
         label="Max Storage (GB)"
         for="max-storage"
+        [hint]="config.maxCachedNarStorageGb != null ? 'Instance limit: ' + config.maxCachedNarStorageGb + ' GB' : undefined"
         [invalid]="!!fieldError('max_storage_gb')"
         [error]="fieldError('max_storage_gb') ?? ''"
       >
@@ -127,6 +128,27 @@
             [loading]="saving()"
             [disabled]="!unsaved.changed()"
           ></button>
+        </div>
+      }
+    </gr-settings-section>
+
+    <gr-settings-section title="Signing Key">
+      <p class="text-secondary">The Nix client can use this public key to verify store paths from this cache.</p>
+      @if (cachePublicKeyHistory(); as keys) {
+        <gr-form-field label="Public Key" [hint]="'In use since ' + (keys.created_at | serverDate)">
+          <gr-copy-field [value]="keys.public_key" />
+        </gr-form-field>
+        @for (retired of keys.retired; track retired.public_key + retired.retired_at) {
+          <div class="retired-key text-secondary">
+            <code>{{ retired.public_key }}</code>
+            <span>Used from {{ retired.created_at | serverDate }} to {{ retired.retired_at | serverDate }}</span>
+          </div>
+        }
+      }
+      @if (manageKeysAccess().canEdit) {
+        <div class="gr-form-actions">
+          <button grButton label="Rotate Key" icon="autorenew" severity="secondary" [appManagedDisable]="manageKeysAccess()"
+            (click)="confirmRotateCacheSigningKeyAndReloadKeyList()"></button>
         </div>
       }
     </gr-settings-section>

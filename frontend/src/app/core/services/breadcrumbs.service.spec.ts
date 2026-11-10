@@ -63,7 +63,7 @@ describe('BreadcrumbsService', () => {
     const trail = crumbs.admin({ label: 'Webhooks' });
 
     expect(labels(trail)).toEqual(['Admin', 'Webhooks']);
-    expect(String(trail[0].link)).toBe('/admin/webhooks');
+    expect(String(trail[0].link)).toBe('/admin/overview');
   });
 
   it('starts cache and team trails at the list pages', () => {

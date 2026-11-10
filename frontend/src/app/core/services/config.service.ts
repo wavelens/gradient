@@ -43,6 +43,7 @@ export class ConfigService {
   execEnabled = false;
   publicListing = true;
   maxKeepEvaluationsPerTask: number | null = null;
+  maxCachedNarStorageGb: number | null = null;
 
   get apiBaseUrl(): string {
     return `${this.serveUrl}${environment.apiUrl}`;
@@ -94,6 +95,7 @@ export class ConfigService {
           this.execEnabled = res.message.exec_enabled;
           this.publicListing = res.message.public_listing;
           this.maxKeepEvaluationsPerTask = res.message.max_keep_evaluations_per_task ?? null;
+          this.maxCachedNarStorageGb = res.message.max_cached_nar_storage_gb ?? null;
         }
       })
       .catch(() => this.fetchFailed.set(true));

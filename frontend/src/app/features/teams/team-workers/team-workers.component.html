@@ -51,6 +51,7 @@
                 <gr-badge severity="neutral">Inactive</gr-badge>
               }
               <gr-badge [severity]="worker.connected ? 'success' : 'neutral'">{{ worker.connected ? 'Connected' : 'Offline' }}</gr-badge>
+              <app-worker-drain-badge [draining]="!!worker.live?.draining" [requestedByAdmin]="worker.requested_by_admin" />
               @if (worker.gradient_ci) {
                 <a grButton [label]="gradientCiHost" icon="open_in_new" severity="secondary" size="small"
                   [href]="config.gradientCiUrl" target="_blank" rel="noopener"></a>
@@ -58,12 +59,19 @@
               @if (isAdmin()) {
                 <button grButton label="Edit" icon="edit" severity="secondary" size="small"
                   [disabled]="busy() === worker.worker_id" [disabledReason]="worker.managed ? managedItemDisabledReason : null" (click)="openEdit(worker)"></button>
+                @if (worker.requested_by_admin) {
+                  <button grButton label="Undrain" icon="play_arrow" severity="secondary" size="small"
+                    [loading]="busy() === worker.worker_id" (click)="cancelAdminRequestedWorkerDrain(worker)"></button>
+                } @else if (worker.live && !worker.live.draining) {
+                  <button grButton label="Drain" icon="hourglass_bottom" severity="secondary" size="small"
+                    [disabled]="busy() === worker.worker_id" (click)="confirmAndStartWorkerDrain(worker)"></button>
+                }
                 @if (worker.active) {
                   <button grButton label="Deactivate" icon="pause" severity="secondary" size="small"
-                    [loading]="busy() === worker.worker_id" (click)="setActive(worker, false)"></button>
+                    [disabled]="busy() === worker.worker_id" (click)="confirmDeactivateTeamWorkerAndReloadList(worker)"></button>
                 } @else {
                   <button grButton label="Activate" icon="play_arrow" severity="secondary" size="small"
-                    [loading]="busy() === worker.worker_id" (click)="setActive(worker, true)"></button>
+                    [loading]="busy() === worker.worker_id" (click)="reactivateWorker(worker)"></button>
                 }
                 <button grButton label="Delete" icon="delete" severity="danger" size="small" [attr.aria-label]="'Delete worker ' + worker.display_name" [disabled]="busy() === worker.worker_id" [disabledReason]="worker.managed ? managedItemDisabledReason : null"
                   (click)="remove(worker)"></button>

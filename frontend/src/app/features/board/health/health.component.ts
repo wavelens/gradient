@@ -6,46 +6,22 @@
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { EMPTY, Observable, tap } from 'rxjs';
-import { ButtonComponent, CardGridComponent, LoadStateComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
+import { RouterLink } from '@angular/router';
+import { CardGridComponent, LoadStateComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { BoardService } from '@core/services/board.service';
-import { AdminService } from '@core/services/admin.service';
-import { NotifyService } from '@core/services/notify.service';
-import { ConfirmService } from '@shared/confirm';
+import { AuthService } from '@core/services/auth.service';
+import { links } from '@shared/routing';
 import { formatBytes, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
-import { BoardHealth, AdminTaskDto } from '@core/models';
-import { runReloadIntervalWhileTabVisible } from '@shared/paging';
-
-const adminTaskListPollIntervalMs = 5_000;
-const TASK_KIND_LABELS: Record<string, string> = { deep_gc: 'Deep GC' };
-const DEEP_GC_PASS_LABELS: Record<string, string> = {
-  blobs: 'Blobs',
-  'exec-outputs': 'Exec output',
-  logs: 'Logs',
-  nars: 'NARs',
-  partials: 'Partial uploads',
-};
-
-export function formatMaintenanceTaskKindLabel(kind: string): string {
-  return TASK_KIND_LABELS[kind] ?? kind.replace(/_/g, ' ');
-}
-
-export function formatDeepGcCheckpointLabel(checkpoint: string): string {
-  const [pass] = checkpoint.split('/');
-  return DEEP_GC_PASS_LABELS[pass] ?? pass;
-}
+import { BoardHealth } from '@core/models';
 
 @Component({
   selector: 'app-board-health',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, ButtonComponent, CardGridComponent, StatCardComponent, TableComponent, LoadStateComponent],
+  imports: [CommonModule, RouterLink, ServerTimestampToLocalDateTimePipe, CardGridComponent, StatCardComponent, TableComponent, LoadStateComponent],
   template: `
     <gr-load-state [loading]="healthLoading()" [error]="healthError()" [empty]="!health()"
                    loadingMessage="Loading system health..." errorTitle="Failed to load health" (retry)="refreshHealth()">
     @if (health(); as h) {
-      @if (h.draining) {
-        <div class="drain-banner">Instance is draining: scheduling is paused and in-flight evaluations are parked. Clears on restart.</div>
-      }
       <gr-card-grid class="kpis" min="180px">
         <gr-stat-card compact label="Version" [value]="h.version" />
         <gr-stat-card compact label="Uptime" [value]="seconds(h.uptime_seconds)" />
@@ -96,36 +72,9 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
         </tbody>
       </gr-table>
 
-      <h2>Admin</h2>
-      <div class="admin-actions">
-        <button grButton severity="secondary" size="small" label="Run Deep GC" (click)="runDeepGc()"></button>
-        @if (h.draining) {
-          <button grButton severity="secondary" size="small" label="Disable Draining" [loading]="drainBusy()" (click)="disableDraining()"></button>
-        } @else {
-          <button grButton severity="danger" size="small" label="Enable Draining" (click)="enableDraining()"></button>
-        }
-      </div>
-
-      <gr-load-state [loading]="tasks() === null && taskListLoadError() === null" [empty]="tasks() === null" [error]="taskListLoadError()"
-                     errorTitle="Failed to load admin tasks" flat (retry)="loadTasks()">
-        <gr-table class="http">
-          <thead><tr><th>Task</th><th>Status</th><th>Step</th><th>Created</th><th>Finished</th><th>Error</th></tr></thead>
-          <tbody>
-            @for (t of tasks() ?? []; track t.id) {
-              <tr>
-                <td>{{ taskKindLabel(t.kind) }}</td>
-                <td>{{ t.status }}</td>
-                <td class="muted">{{ t.checkpoint && t.status !== 'completed' ? checkpointLabel(t.checkpoint) : '-' }}</td>
-                <td>{{ t.created_at | serverDate }}</td>
-                <td>{{ t.finished_at ? (t.finished_at | serverDate) : '-' }}</td>
-                <td [class.bad]="!!t.error">{{ t.error ?? '' }}</td>
-              </tr>
-            } @empty {
-              <tr><td colspan="6" class="muted">No admin tasks yet.</td></tr>
-            }
-          </tbody>
-        </gr-table>
-      </gr-load-state>
+      @if (superuser()) {
+        <p class="muted admin-note"><a [routerLink]="links.admin('overview')">Deep GC, instance draining, and maintenance tasks are in the Admin area.</a></p>
+      }
     }
     </gr-load-state>
   `,
@@ -134,84 +83,20 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
 })
 export class BoardHealthComponent implements OnInit {
   private board = inject(BoardService);
-  private admin = inject(AdminService);
-  private confirm = inject(ConfirmService);
-  private notify = inject(NotifyService);
+  private auth = inject(AuthService);
 
   health = signal<BoardHealth | null>(null);
   healthLoading = signal(true);
   healthError = signal<unknown>(null);
-  tasks = signal<AdminTaskDto[] | null>(null);
-  taskListLoadError = signal<unknown>(null);
-  private hasPendingOrRunningMaintenanceTasks = computed(() =>
-    (this.tasks() ?? []).some((t) => t.status === 'pending' || t.status === 'running'));
-  drainBusy = signal(false);
   readonly supervisedLoopsThatHaveRestartsErrorsOrTimeouts = computed(() =>
     (this.health()?.supervised ?? []).filter((l) => l.restarts > 0 || l.pass_errors > 0 || l.pass_timeouts > 0 || !!l.last_error));
 
   readonly bytes = formatBytes;
-  protected readonly taskKindLabel = formatMaintenanceTaskKindLabel;
-  protected readonly checkpointLabel = formatDeepGcCheckpointLabel;
+  protected readonly links = links;
+  protected readonly superuser = computed(() => this.auth.user()?.superuser === true);
 
   seconds(value: number): string {
     return formatDuration(value * 1000);
-  }
-
-  constructor() {
-    runReloadIntervalWhileTabVisible(
-      () => (this.hasPendingOrRunningMaintenanceTasks() ? this.requestAdminMaintenanceTasks() : EMPTY),
-      adminTaskListPollIntervalMs,
-    );
-  }
-
-  private requestAdminMaintenanceTasks(): Observable<AdminTaskDto[]> {
-    return this.admin.listTasks().pipe(tap((t) => this.tasks.set(t)));
-  }
-
-  loadTasks(): void {
-    this.taskListLoadError.set(null);
-    this.requestAdminMaintenanceTasks().subscribe({ error: (error: unknown) => this.taskListLoadError.set(error) });
-  }
-
-  runDeepGc(): void {
-    this.confirm.confirm({
-      title: 'Run Deep GC',
-      target: 'All storage backends',
-      consequence: 'Deep GC runs delete stored files that no row in the database references. A round already in progress can start again from the beginning.',
-      confirmLabel: 'Run Deep GC',
-      failure: 'Failed to start deep GC.',
-      severity: 'danger',
-      action: () => this.admin.startDeepGc(),
-    }).subscribe(() => {
-      this.notify.success('Deep GC started');
-      this.loadTasks();
-    });
-  }
-
-  enableDraining(): void {
-    this.confirm.confirm({
-      title: 'Enable Draining',
-      target: 'All projects on this instance',
-      consequence: 'No new evaluations or builds start and in-flight evaluations wait. A disable or a server restart can end draining.',
-      confirmLabel: 'Enable Draining',
-      failure: 'Failed to enable draining.',
-      severity: 'danger',
-      action: () => this.admin.setDraining(true),
-    }).subscribe(() => {
-      this.notify.success('Draining enabled');
-      this.refreshHealth();
-    });
-  }
-
-  disableDraining(): void {
-    this.drainBusy.set(true);
-    this.admin.setDraining(false).subscribe({
-      next: () => { this.drainBusy.set(false); this.refreshHealth(); },
-      error: (error: unknown) => {
-        this.drainBusy.set(false);
-        this.notify.failure('Failed to disable draining', error);
-      },
-    });
   }
 
   refreshHealth(): void {
@@ -231,6 +116,5 @@ export class BoardHealthComponent implements OnInit {
 
   ngOnInit(): void {
     this.refreshHealth();
-    this.loadTasks();
   }
 }

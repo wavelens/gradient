@@ -30,7 +30,8 @@
       <input grInput id="task-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
 
-    <gr-form-field label="Keep Evaluations" for="task-keep" required [invalid]="!!keepEvaluationsError" [error]="keepEvaluationsError ?? ''">
+    <gr-form-field label="Keep Evaluations" for="task-keep" required
+      [hint]="config.maxKeepEvaluationsPerTask != null ? 'Instance limit: ' + config.maxKeepEvaluationsPerTask : undefined" [invalid]="!!keepEvaluationsError" [error]="keepEvaluationsError ?? ''">
       <gr-label-help slot="label" doc="concepts/projects-and-tasks/#task" title="Number of completed evaluations to retain for metrics and history" />
       <input grInput id="task-keep" type="number" min="1" step="1" [attr.max]="config.maxKeepEvaluationsPerTask" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" (keyup.enter)="saveSettings()" />
     </gr-form-field>
@@ -213,6 +214,23 @@
             severity="danger"
             (click)="openTransferOwnershipDialogAndLoadTargetProjects()"
         ></button>
+      </gr-row>
+      <gr-row>
+        Delete old evaluations
+        <span slot="meta">Delete completed evaluations that were created before a specified date. Running evaluations and the latest completed evaluation stay.</span>
+        <div slot="actions" class="delete-before">
+          <label for="task-delete-before">Created before</label>
+          <input grInput id="task-delete-before" type="date" [(ngModel)]="deleteCompletedEvaluationsBeforeDate" />
+          <button
+              grButton
+              label="Delete"
+              icon="delete_sweep"
+              severity="danger"
+              aria-label="Delete old evaluations"
+              [disabled]="!deleteCompletedEvaluationsBeforeDate"
+              (click)="deleteCompletedEvaluationsCreatedBeforeDate()"
+          ></button>
+        </div>
       </gr-row>
       <gr-row>
         Delete task

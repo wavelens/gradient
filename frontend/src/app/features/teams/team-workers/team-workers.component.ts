@@ -22,7 +22,7 @@ import {
   WorkerConnection,
   PatchWorkerRequest,
 } from '@core/models';
-import { AllowedCapabilitiesComponent, GradientCiConnectComponent } from '@shared/ui';
+import { AllowedCapabilitiesComponent, confirmAndDrainWorker, GradientCiConnectComponent, WorkerDrainingBadgeComponent } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { MANAGED_ITEM_DISABLED_REASON, canManageTeam } from '@shared/access';
 import { fieldChecks } from '@shared/forms';
@@ -61,6 +61,7 @@ const DISPLAY_NAME_REQUIRED = 'Enter a display name.';
     RowComponent,
     RowListComponent,
     SettingsSectionComponent,
+    WorkerDrainingBadgeComponent,
   ],
   templateUrl: './team-workers.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -185,17 +186,58 @@ export class TeamWorkersComponent implements OnInit {
     });
   }
 
-  setActive(worker: TeamWorkerEntry, active: boolean): void {
+  reactivateWorker(worker: TeamWorkerEntry): void {
     this.busy.set(worker.worker_id);
-    this.teams.updateWorker(this.teamName, worker.worker_id, { active }).subscribe({
+    this.teams.updateWorker(this.teamName, worker.worker_id, { active: true }).subscribe({
       next: () => {
         this.busy.set(null);
-        this.notify.success(active ? 'Worker activated' : 'Worker deactivated');
+        this.notify.success('Worker activated');
         this.load();
       },
       error: (err: unknown) => {
         this.busy.set(null);
-        this.notify.failure(active ? 'Failed to activate worker' : 'Failed to deactivate worker', err);
+        this.notify.failure('Failed to activate worker', err);
+      },
+    });
+  }
+
+  confirmDeactivateTeamWorkerAndReloadList(worker: TeamWorkerEntry): void {
+    this.confirm
+      .confirm({
+        title: 'Disable Worker',
+        target: worker.display_name,
+        consequence: 'Workers stop at once and abort running jobs. Drain first to let jobs finish.',
+        confirmLabel: 'Deactivate',
+        failure: 'Failed to deactivate worker',
+        severity: 'danger',
+        action: () => this.teams.updateWorker(this.teamName, worker.worker_id, { active: false }),
+      })
+      .subscribe(() => {
+        this.notify.success('Worker deactivated');
+        this.load();
+      });
+  }
+
+  confirmAndStartWorkerDrain(worker: TeamWorkerEntry): void {
+    confirmAndDrainWorker(this.confirm, worker.display_name, () =>
+      this.teams.updateWorker(this.teamName, worker.worker_id, { draining: true }),
+    ).subscribe(() => {
+      this.notify.success('Drain started');
+      this.load();
+    });
+  }
+
+  cancelAdminRequestedWorkerDrain(worker: TeamWorkerEntry): void {
+    this.busy.set(worker.worker_id);
+    this.teams.updateWorker(this.teamName, worker.worker_id, { draining: false }).subscribe({
+      next: () => {
+        this.busy.set(null);
+        this.notify.success('Drain stopped');
+        this.load();
+      },
+      error: (err: unknown) => {
+        this.busy.set(null);
+        this.notify.failure('Failed to stop drain', err);
       },
     });
   }

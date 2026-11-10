@@ -133,6 +133,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
 
   projectName = '';
   taskName = '';
+  deleteCompletedEvaluationsBeforeDate = '';
   breadcrumb = computed(() => this.crumbs.task(this.projectName, this.taskName, { label: 'Settings' }));
 
   formData: TaskForm = {
@@ -359,6 +360,23 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     }).subscribe(() => {
       this.notify.success('Task deleted');
       this.router.navigateByUrl(links.project(this.projectName));
+    });
+  }
+
+  deleteCompletedEvaluationsCreatedBeforeDate(): void {
+    const date = this.deleteCompletedEvaluationsBeforeDate;
+    if (!date) return;
+    this.confirm.confirm({
+      title: 'Delete Old Evaluations',
+      target: this.task()?.display_name || this.taskName,
+      consequence: `Cleanup runs remove completed evaluations that were created before ${date}, along with their builds and the cached outputs that only they use.`,
+      isIrreversible: true,
+      confirmLabel: 'Delete',
+      failure: 'Failed to delete evaluation',
+      action: () => this.tasksService.deleteTaskEvaluationsBeforeDate(this.projectName, this.taskName, new Date(date).toISOString()),
+    }).subscribe((count) => {
+      this.deleteCompletedEvaluationsBeforeDate = '';
+      this.notify.success(`Deleted ${count} evaluations`);
     });
   }
 }

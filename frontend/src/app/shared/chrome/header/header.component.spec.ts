@@ -192,6 +192,19 @@ describe('AppHeaderComponent - public listing', () => {
   });
 });
 
+describe('AppHeaderComponent - admin area', () => {
+  function adminNavLink(superuser: boolean): HTMLAnchorElement | undefined {
+    const root = setup(false, true, true, false, superuser).nativeElement as HTMLElement;
+    return Array.from(root.querySelectorAll<HTMLAnchorElement>('a')).find((a) => a.getAttribute('href') === '/admin');
+  }
+
+  it('shows the Admin link to superusers only', () => {
+    expect(adminNavLink(true)?.textContent?.trim()).toBe('Admin');
+    TestBed.resetTestingModule();
+    expect(adminNavLink(false)).toBeUndefined();
+  });
+});
+
 describe('AppHeaderComponent - search', () => {
   it('opens the command palette from the header search field', () => {
     const root = setup(false, true).nativeElement as HTMLElement;

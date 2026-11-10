@@ -9,6 +9,7 @@ import { Observable, tap } from 'rxjs';
 import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
 import {
+  CachePublicKeyHistory,
   Paginated,
   RoleListResponse_CacheRoleOwner,
   RoleResponse_CacheRoleOwner,
@@ -79,6 +80,14 @@ export class CachesService {
 
   updateCache(cache: string, data: PatchCacheRequest): Observable<string> {
     return this.api.patch<string>(`caches/${cache}`, data);
+  }
+
+  rotateCacheKeyAndReturnNewPublicKey(cache: string): Observable<string> {
+    return this.api.post<string>(`caches/${cache}/key/rotate`);
+  }
+
+  getPublicKeysWithDates(cache: string): Observable<CachePublicKeyHistory> {
+    return this.api.get<CachePublicKeyHistory>(`caches/${cache}/keys`);
   }
 
   deleteCache(cache: string): Observable<void> {

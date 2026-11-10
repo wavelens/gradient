@@ -518,7 +518,6 @@ export const routes: Routes = [
     ],
   },
 
-  { path: 'admin', pathMatch: 'full', redirectTo: 'admin/webhooks' },
   {
     path: 'admin/webhooks',
     title: 'Event notifications (admin)',
@@ -544,6 +543,11 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/admin/user-access/admin-user-access.component').then((m) => m.AdminUserAccessComponent),
   })),
+  {
+    path: 'admin',
+    canActivate: [authGuard, adminGuard],
+    loadChildren: () => import('./features/admin/admin.routes').then((m) => m.ADMIN_ROUTES),
+  },
 
   // Style guide: reference for developers. No links point to this route. Production builds omit the route.
   ...(typeof ngDevMode === 'undefined' || ngDevMode

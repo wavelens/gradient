@@ -8,7 +8,10 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from '@core/services/api.service';
 import {
+  AdminStorageResponse,
+  AdminWorkerListEntry,
   DrainingResponse,
+  EffectiveConfigOption,
   GithubAppManifestResponse,
   ManifestResult,
   StartDeepGcResponse,
@@ -47,5 +50,25 @@ export class AdminService {
 
   removeUserMembershipsAndInvitationsAndReturnCounts(user: string): Observable<RevokedUserAccessCounts> {
     return this.api.post<RevokedUserAccessCounts>(`users/${encodeURIComponent(user)}/revoke-access`, {});
+  }
+
+  listWorkers(): Observable<AdminWorkerListEntry[]> {
+    return this.api.get<AdminWorkerListEntry[]>('admin/workers');
+  }
+
+  setWorkerDraining(worker: string, draining: boolean): Observable<AdminWorkerListEntry> {
+    return this.api.patch<AdminWorkerListEntry>(`admin/workers/${encodeURIComponent(worker)}`, { draining });
+  }
+
+  getDiskAndStorageUsageByCacheProjectAndTask(): Observable<AdminStorageResponse> {
+    return this.api.get<AdminStorageResponse>('admin/storage');
+  }
+
+  startGcRound(): Observable<void> {
+    return this.api.post<void>('admin/maintenance/gc', {});
+  }
+
+  getServerOptionsWithValuesAndSources(): Observable<EffectiveConfigOption[]> {
+    return this.api.get<EffectiveConfigOption[]>('admin/config');
   }
 }

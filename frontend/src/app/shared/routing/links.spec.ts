@@ -73,10 +73,10 @@ const every: UrlTree[] = [
   links.boardExecJob({ project: 'p', task: 't', id: 'x', node_index: 0 }),
   links.createApiKeyPageForCache('c'),
   ...(['profile', 'keys', 'ssh-keys', 'sessions', 'invites', 'access'] as const).map((page) => links.settings(page)),
-  links.admin('webhooks'),
-  links.admin('github-app'),
+  ...(['overview', 'workers', 'storage', 'settings', 'webhooks', 'github-app'] as const).map((page) => links.admin(page)),
   links.userAccessPageUrl(),
   links.userAccessPageUrl('carol'),
+  links.jobBoardPendingViewUrl(),
 ];
 
 describe('links', () => {

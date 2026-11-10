@@ -18,8 +18,14 @@ import { AccessState } from '@core/models/access.model';
 import type { CachePermission } from '@core/models';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
+import { ConfigService } from '@core/services/config.service';
 
 const notify = { success: vi.fn(), failure: vi.fn() };
+const KEYS = {
+  public_key: 'demo:current',
+  created_at: '2026-11-01T10:00:00',
+  retired: [{ public_key: 'demo:old', created_at: '2026-01-01T10:00:00', retired_at: '2026-11-01T10:00:00' }],
+};
 const confirm = vi.fn();
 
 function cacheFor(access: AccessState) {
@@ -66,7 +72,7 @@ function setup(access: AccessState, permissions?: CachePermission[]): ComponentF
       provideHttpClient(),
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access, permissions) },
-      { provide: CachesService, useValue: { getCache: vi.fn(() => of(cacheFor(access))), getSubscribers: () => of({ projects: [], hidden: 0 }), getSubscriptionRequests: () => of([{ project: 'p1' }, { project: 'p2' }]) } },
+      { provide: CachesService, useValue: { getCache: vi.fn(() => of(cacheFor(access))), getSubscribers: () => of({ projects: [], hidden: 0 }), getSubscriptionRequests: () => of([{ project: 'p1' }, { project: 'p2' }]), getPublicKeysWithDates: vi.fn(() => of(KEYS)), rotateCacheKeyAndReturnNewPublicKey: vi.fn(() => of('demo-2:new')) } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
     ],
@@ -341,5 +347,49 @@ describe('CacheSettingsComponent - edits', () => {
     edit(fixture, { display_name: 'Renamed' });
     expect(fixture.componentInstance.canDeactivate()).not.toBe(true);
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Cache Settings' }));
+  });
+});
+
+describe('CacheSettingsComponent - signing key', () => {
+  const admin: AccessState = { managed: false, canEdit: true, canTrigger: true };
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('shows the current public key with its start date and the retired keys', () => {
+    const root = setup(admin).nativeElement as HTMLElement;
+    expect(root.querySelector<HTMLInputElement>('gr-copy-field input')?.value).toBe('demo:current');
+    expect(root.textContent).toContain('In use since');
+    expect(root.querySelector('.retired-key')?.textContent).toContain('demo:old');
+    expect(root.querySelector('.retired-key')?.textContent).toContain('Used from');
+  });
+
+  it('asks first, then rotates the key and loads the keys again', () => {
+    const fixture = setup(admin);
+    const caches = TestBed.inject(CachesService);
+    findByText(fixture.nativeElement, 'rotate key')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Rotate Signing Key', target: 'Demo' }));
+    expect(caches.rotateCacheKeyAndReturnNewPublicKey).toHaveBeenCalledWith('demo');
+    expect(caches.getPublicKeysWithDates).toHaveBeenCalledTimes(2);
+    expect(notify.success).toHaveBeenCalledWith('Rotated the signing key');
+  });
+
+  it('sends no rotation when the confirmation is cancelled', () => {
+    const fixture = setup(admin);
+    confirm.mockImplementation(() => EMPTY);
+    findByText(fixture.nativeElement, 'rotate key')!.click();
+    expect(TestBed.inject(CachesService).rotateCacheKeyAndReturnNewPublicKey).not.toHaveBeenCalled();
+  });
+
+  it('offers no rotation without the permission to manage cache keys', () => {
+    const fixture = setup(admin, ['viewCache']);
+    expect(findByText(fixture.nativeElement, 'rotate key')).toBeNull();
+  });
+
+  it('names the instance storage limit under Max Storage', () => {
+    const fixture = setup(admin);
+    TestBed.inject(ConfigService).maxCachedNarStorageGb = 100;
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+    const field = (fixture.nativeElement as HTMLElement).querySelector('#max-storage')!.closest('gr-form-field')!;
+    expect(field.querySelector('.hint')?.textContent).toContain('Instance limit: 100 GB');
   });
 });

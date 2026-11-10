@@ -34,7 +34,10 @@ const connection: TeamWorkerEntry = {
   enable_eval: true,
   enable_build: true,
   connected: true,
+  requested_by_admin: false,
 };
+
+const live = { capabilities: {}, architectures: [], system_features: [], max_concurrent_builds: 2, assigned_job_count: 1, draining: false } as unknown as NonNullable<TeamWorkerEntry['live']>;
 
 const WORKER_ID = '3f2b8c1e-9a4d-4e6f-b7c2-1d5e8f9a0b3c';
 
@@ -176,14 +179,43 @@ describe('TeamWorkersComponent', () => {
     expect(root.textContent).not.toContain('Worker is managed');
   });
 
-  it('reports a failed deactivation as a toast', () => {
-    const { fixture, root, updateWorker, notify } = setup();
-    const failure = new ApiError('database is down', 500);
-    updateWorker.mockReturnValue(throwError(() => failure));
+  it('asks before deactivating a worker, since it aborts running jobs', () => {
+    const { root, updateWorker, notify, confirm } = setup();
     button(root, 'Deactivate')!.click();
-    fixture.detectChanges();
-    expect(notify.failure).toHaveBeenCalledWith('Failed to deactivate worker', failure);
-    expect(fixture.componentInstance.busy()).toBeNull();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Disable Worker', target: 'Gradient.CI Servers' }));
+    expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { active: false });
+    expect(notify.success).toHaveBeenCalledWith('Worker deactivated');
+  });
+
+  it('sends no deactivation when the confirmation is cancelled', () => {
+    const { root, updateWorker, confirm } = setup();
+    confirm.mockImplementation(() => EMPTY);
+    button(root, 'Deactivate')!.click();
+    expect(updateWorker).not.toHaveBeenCalled();
+  });
+
+  it('asks first, then drains a connected worker', () => {
+    const { root, updateWorker, notify, confirm } = setup('admin', [{ ...connection, live }]);
+    button(root, 'Drain')!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Worker Drain', target: 'Gradient.CI Servers' }));
+    expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { draining: true });
+    expect(notify.success).toHaveBeenCalledWith('Drain started');
+  });
+
+  it('offers Undrain on an admin drain and shows the Draining badge', () => {
+    const { root, updateWorker, notify, confirm } = setup('admin', [{ ...connection, live: { ...live, draining: true }, requested_by_admin: true }]);
+    expect(root.querySelector('app-worker-drain-badge')?.textContent).toContain('Draining');
+    expect(button(root, 'Drain')).toBeUndefined();
+    button(root, 'Undrain')!.click();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(updateWorker).toHaveBeenCalledWith('platform', 'g1', { draining: false });
+    expect(notify.success).toHaveBeenCalledWith('Drain stopped');
+  });
+
+  it('offers no drain on a worker that drains itself or is offline', () => {
+    expect(button(setup('admin', [{ ...connection, live: { ...live, draining: true } }]).root, 'Drain')).toBeUndefined();
+    TestBed.resetTestingModule();
+    expect(button(setup('admin', [connection]).root, 'Drain')).toBeUndefined();
   });
 
   it('asks before deleting a worker, naming it, then confirms the deletion', () => {

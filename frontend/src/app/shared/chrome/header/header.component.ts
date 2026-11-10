@@ -15,12 +15,13 @@ import { UserMenuComponent } from './user-menu.component';
 import { getInAppReturnPathIfNotErrorPage, links } from '@shared/routing';
 
 const BRAND: Brand = { label: 'Gradient', href: String(links.dashboard()) };
-const NAV: (NavLink & { signedIn?: true; publicList?: true })[] = [
+const NAV: (NavLink & { signedIn?: true; publicList?: true; superuser?: true })[] = [
   { label: 'Dashboard', href: String(links.dashboard()), exact: true, signedIn: true },
   { label: 'Projects', href: String(links.projects()), activePathPrefixes: ['/project'], publicList: true },
   { label: 'Caches', href: String(links.caches()), publicList: true },
   { label: 'Teams', href: String(links.teams()), activePathPrefixes: ['/team'], signedIn: true },
   { label: 'Job Board', href: '/board', signedIn: true },
+  { label: 'Admin', href: '/admin', activePathPrefixes: ['/admin'], signedIn: true, superuser: true },
 ];
 
 @Component({
@@ -42,7 +43,8 @@ export class AppHeaderComponent {
   protected nav = computed(() => {
     const signedIn = this.authService.isAuthenticated();
     const listed = this.config.publicListing;
-    return NAV.filter((link) => signedIn || (!link.signedIn && (listed || !link.publicList)));
+    const superuser = this.authService.user()?.superuser === true;
+    return NAV.filter((link) => (superuser || !link.superuser) && (signedIn || (!link.signedIn && (listed || !link.publicList))));
   });
 
   protected userMenu = viewChild<UserMenuComponent>('userMenu');

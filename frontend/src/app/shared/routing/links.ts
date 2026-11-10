@@ -15,7 +15,7 @@ export type BoardTab =
   | 'overview' | 'live' | 'scheduler' | 'throughput' | 'durations' | 'workers' | 'cache'
   | 'network' | 'health' | 'storage' | 'expensive';
 export type MembersPageTab = 'people' | 'teams' | 'pending' | 'roles';
-export type AdminPage = 'webhooks' | 'github-app';
+export type AdminPage = 'overview' | 'workers' | 'storage' | 'settings' | 'webhooks' | 'github-app';
 export type ClosureKind = 'build' | 'eval';
 export type LoginReason = 'expired' | 'deleted';
 
@@ -102,6 +102,7 @@ export const links = {
     url([kind === 'cache' ? 'caches' : kind, name, 'members', tab]),
 
   board: (tab: BoardTab = 'overview') => url(['board', tab]),
+  jobBoardPendingViewUrl: () => url(['board', 'live'], { view: 'pending' }),
   boardJob: (job: string) => url(['board', 'jobs', job]),
   boardCluster: (cluster: string) => url(['board', 'clusters', cluster]),
   boardJobOrCluster: (job?: string | null, cluster?: string | null): UrlTree | undefined => {
