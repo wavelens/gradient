@@ -80,7 +80,6 @@ pub async fn revoke<C: ConnectionTrait>(
     active.update(db).await
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -88,9 +88,9 @@ pub enum WebError {
     #[error("Bad Request [{0}]: {1}")]
     BadRequest(ErrorCode, String),
     #[error("Unauthorized [{0}]: {1}")]
-    Unauthorized(ErrorCode, String),
+    Unauthorized(ErrorCode, String, Vec<&'static str>),
     #[error("Forbidden [{0}]: {1}")]
-    Forbidden(ErrorCode, String),
+    Forbidden(ErrorCode, String, Vec<&'static str>),
     #[error("Not Found [{0}]: {1}")]
     NotFound(ErrorCode, String),
     #[error("Conflict [{0}]: {1}")]
@@ -123,6 +123,9 @@ pub(crate) struct ErrorResponseBody<'a> {
     #[schema(value_type = String)]
     code: ErrorCode,
     message: &'a str,
+    /// Wire names of the permissions that the signed-in caller does not have for this request (for example, `readStore`). Only 401 and 403 responses to authenticated callers include this field. The names match the values of `permissions` on the API key.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    missing_permissions: &'a [&'static str],
 }
 
 impl WebError {
@@ -147,8 +150,8 @@ impl WebError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::BadRequest(c, _)
-            | Self::Unauthorized(c, _)
-            | Self::Forbidden(c, _)
+            | Self::Unauthorized(c, ..)
+            | Self::Forbidden(c, ..)
             | Self::NotFound(c, _)
             | Self::Conflict(c, _)
             | Self::Gone(c, _)
@@ -229,8 +232,8 @@ impl WebError {
         match self {
             Self::Internal(_) | Self::DataInconsistency(_) => "Internal server error".to_string(),
             Self::BadRequest(_, m)
-            | Self::Unauthorized(_, m)
-            | Self::Forbidden(_, m)
+            | Self::Unauthorized(_, m, _)
+            | Self::Forbidden(_, m, _)
             | Self::NotFound(_, m)
             | Self::Conflict(_, m)
             | Self::Gone(_, m)
@@ -252,10 +255,15 @@ impl IntoResponse for WebError {
             tracing::error!(error = format!("{err:#}"), "Internal error");
         }
 
+        let missing_permissions = match &self {
+            Self::Unauthorized(.., missing) | Self::Forbidden(.., missing) => missing.as_slice(),
+            _ => &[],
+        };
         let body = Json(ErrorResponseBody {
             error: true,
             code,
             message: &message,
+            missing_permissions,
         });
 
         match self {
@@ -295,6 +303,7 @@ impl WebError {
         Self::Unauthorized(
             ErrorCode::INVALID_CREDENTIALS,
             "Invalid credentials".to_string(),
+            Vec::new(),
         )
     }
 
@@ -309,6 +318,7 @@ impl WebError {
         Self::Unauthorized(
             ErrorCode::OAUTH_REQUIRED,
             "Please login via OAuth".to_string(),
+            Vec::new(),
         )
     }
 
@@ -384,6 +394,7 @@ pub fn require_superuser(user: &gradient_types::MUser) -> Result<(), WebError> {
         Err(WebError::Forbidden(
             ErrorCode::SUPERUSER_REQUIRED,
             "superuser required".into(),
+            Vec::new(),
         ))
     }
 }
@@ -399,6 +410,7 @@ pub fn require_create_permission(
         CreatePermission::None => Err(WebError::Forbidden(
             ErrorCode::CREATION_DISABLED,
             "creation is managed by the declarative state".into(),
+            Vec::new(),
         )),
     }
 }

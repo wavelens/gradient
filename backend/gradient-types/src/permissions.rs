@@ -125,6 +125,27 @@ impl Permission {
         }
     }
 
+    pub const fn permission_label(self) -> &'static str {
+        match self {
+            Permission::ViewProject => "view project",
+            Permission::ManageProjectSettings => "project settings",
+            Permission::DeleteProject => "delete project",
+            Permission::ManageMembers => "members",
+            Permission::ManageRoles => "roles",
+            Permission::ManageIntegrations => "integrations",
+            Permission::ManageActions => "actions",
+            Permission::ManageWorkers => "workers",
+            Permission::ManageSubscriptions => "subscriptions",
+            Permission::ManageSshKey => "ssh keys",
+            Permission::CreateTask => "create task",
+            Permission::EditTask => "edit task",
+            Permission::TriggerEvaluation => "trigger evaluation",
+            Permission::ManageTriggers => "triggers",
+            Permission::ManageWebhooks => "webhooks",
+            Permission::CreateProject => "create project",
+        }
+    }
+
     pub fn from_wire_name(s: &str) -> Option<Self> {
         Permission::ALL
             .iter()

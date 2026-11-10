@@ -1046,6 +1046,7 @@ export interface ErrorResponseBody {
   error: boolean;
   code: string;
   message: string;
+  missing_permissions?: string[];
 }
 
 export type EvalCapability = "network" | "secrets" | "eval" | "exec";

@@ -185,13 +185,14 @@ async fn require_store_permissions_to_link_upstream_cache(
         return Ok(());
     }
     let mask = caller_cache_mask(db, Caller::User(user), upstream.id, api_key).await?;
-    match needed
+    let missing: Vec<CachePermission> = needed
         .into_iter()
-        .find(|&permission| !crate::permissions::cache_mask_grants(mask, permission))
-    {
-        Some(permission) => Err(AccessRefusal::MissingUpstreamCachePermission(permission).into()),
-        None => Ok(()),
+        .filter(|&permission| !crate::permissions::cache_mask_grants(mask, permission))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
     }
+    Err(AccessRefusal::MissingUpstreamCacheStorePermissions(missing).into())
 }
 
 #[utoipa::path(

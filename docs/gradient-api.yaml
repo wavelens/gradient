@@ -17654,6 +17654,11 @@ components:
           type: string
         message:
           type: string
+        missing_permissions:
+          type: array
+          items:
+            type: string
+          description: Wire names of the permissions that the signed-in caller does not have for this request (for example, `readStore`). Only 401 and 403 responses to authenticated callers include this field. The names match the values of `permissions` on the API key.
     EvalCapability:
       type: string
       enum:

@@ -98,7 +98,7 @@ async fn require_cache_auth(
     if unpinned_key && can_read_store(db, &user, cache, None).await? {
         return Err(CacheRefusal::ApiKeyNotPinnedToCache.into());
     }
-    Err(CacheRefusal::AuthenticationRequired.into())
+    Err(CacheRefusal::ReadCachePermissionRequired.into())
 }
 
 async fn can_read_store(

@@ -47,6 +47,10 @@ pub trait Refusal: Display {
     fn code(&self) -> ErrorCode {
         self.status().default_code()
     }
+
+    fn missing_permission_wire_names(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,8 +157,12 @@ impl<R: Refusal> From<R> for WebError {
         let message = refusal.to_string();
         match refusal.status() {
             RefusalStatus::BadRequest => Self::BadRequest(code, message),
-            RefusalStatus::Unauthorized => Self::Unauthorized(code, message),
-            RefusalStatus::Forbidden => Self::Forbidden(code, message),
+            RefusalStatus::Unauthorized => {
+                Self::Unauthorized(code, message, refusal.missing_permission_wire_names())
+            }
+            RefusalStatus::Forbidden => {
+                Self::Forbidden(code, message, refusal.missing_permission_wire_names())
+            }
             RefusalStatus::NotFound => Self::NotFound(code, message),
             RefusalStatus::Conflict => Self::Conflict(code, message),
             RefusalStatus::Gone => Self::Gone(code, message),

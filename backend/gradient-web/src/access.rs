@@ -34,15 +34,33 @@ pub(crate) enum AccessRefusal {
     ProjectPinnedKeyOnAllProjectsEndpoint,
     #[error("API key is pinned to a different cache.")]
     KeyPinnedToDifferentCache,
+    #[error("Requests to this project need the \"{}\" permission.", .0.permission_label())]
+    MissingProjectPermission(Permission),
     #[error("Requests to this cache need the \"{}\" permission.", .0.permission_label())]
     MissingCachePermission(CachePermission),
-    #[error("The \"{}\" permission on that cache is mandatory for linking this upstream cache.", .0.permission_label())]
-    MissingUpstreamCachePermission(CachePermission),
+    #[error(
+        "Link this upstream cache after granting these permissions on that cache - {}.",
+        .0.iter().map(|p| format!("\"{}\"", p.permission_label())).collect::<Vec<_>>().join(", ")
+    )]
+    MissingUpstreamCacheStorePermissions(Vec<CachePermission>),
 }
 
 impl Refusal for AccessRefusal {
     fn status(&self) -> RefusalStatus {
         RefusalStatus::Forbidden
+    }
+
+    fn missing_permission_wire_names(&self) -> Vec<&'static str> {
+        match self {
+            Self::MissingProjectPermission(permission) => vec![permission.as_wire_name()],
+            Self::MissingCachePermission(permission) => vec![permission.as_wire_name()],
+            Self::MissingUpstreamCacheStorePermissions(permissions) => {
+                permissions.iter().map(|p| p.as_wire_name()).collect()
+            }
+            Self::CachePinnedKeyOnEndpoint
+            | Self::ProjectPinnedKeyOnAllProjectsEndpoint
+            | Self::KeyPinnedToDifferentCache => Vec::new(),
+        }
     }
 }
 
@@ -418,7 +436,7 @@ pub(crate) async fn require_project_permission(
         .ok_or_else(|| WebError::not_found(not_found_label))?;
 
     if !mask_grants(mask, permission) {
-        return Err(SharedRefusal::MissingPermission.into());
+        return Err(AccessRefusal::MissingProjectPermission(permission).into());
     }
 
     Ok(())
@@ -1097,6 +1115,39 @@ mod tests {
             .await
             .expect_err("view-only must be rejected");
             assert!(matches!(err, WebError::Forbidden(..)));
+        });
+    }
+
+    #[test]
+    fn api_key_without_trigger_evaluation_permission_is_refused_on_project_action_with_403_and_missing_permission()
+     {
+        run(async {
+            let user = user_fixture();
+            let api_key = api_key_ctx(mask_from(&[Permission::ViewProject]), None);
+            let db = mock_db()
+                .append_query_results([vec![project_fixture(false, false)]])
+                .append_query_results([vec![task_fixture(false)]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .append_query_results([vec![admin_role_row()]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_task(
+                &state.db(),
+                Caller::User(&user),
+                Some(&api_key),
+                "test-project".into(),
+                "test-task".into(),
+                TaskAccess::Require {
+                    permission: Permission::TriggerEvaluation,
+                    reject_managed: false,
+                },
+            )
+            .await
+            .expect_err("the key lacks triggerEvaluation");
+            assert!(
+                matches!(&err, WebError::Forbidden(_, _, missing) if missing == &["triggerEvaluation"]),
+                "{err:?}"
+            );
         });
     }
 

@@ -156,6 +156,7 @@ mod tests {
         let refused: WebResult<IncomingWebhookResponse> = Err(WebError::Unauthorized(
             crate::error::ErrorCode::UNAUTHORIZED,
             "invalid webhook signature".into(),
+            Vec::new(),
         ));
         let entry = entry(Some("push"), &refused);
         assert_eq!(entry.result, DeliveryResult::Refused);
@@ -168,6 +169,7 @@ mod tests {
         let refused: WebResult<IncomingWebhookResponse> = Err(WebError::Unauthorized(
             crate::error::ErrorCode::UNAUTHORIZED,
             "no webhook secret".into(),
+            Vec::new(),
         ));
         let entry = entry(Some(&"x".repeat(10_000)), &refused);
         assert_eq!(entry.event.chars().count(), MAX_EVENT_NAME_LENGTH);

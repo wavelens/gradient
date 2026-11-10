@@ -5,6 +5,7 @@
  */
 
 use crate::error::ErrorCode;
+use crate::permissions::CachePermission;
 use crate::refusal::{Refusal, RefusalStatus};
 
 #[derive(Debug, thiserror::Error)]
@@ -15,6 +16,8 @@ pub(crate) enum CacheRefusal {
         "This API key has no pin to this cache. Create an API key with a pin to this cache to read from this cache."
     )]
     ApiKeyNotPinnedToCache,
+    #[error("Downloads from this cache need the \"{}\" permission.", CachePermission::ReadStore.permission_label())]
+    ReadCachePermissionRequired,
     #[error("Signature not yet computed")]
     SignaturePending,
     #[error("{0} not recorded")]
@@ -82,9 +85,9 @@ pub(crate) enum CacheRefusal {
 impl Refusal for CacheRefusal {
     fn status(&self) -> RefusalStatus {
         match self {
-            Self::AuthenticationRequired | Self::ApiKeyNotPinnedToCache => {
-                RefusalStatus::Unauthorized
-            }
+            Self::AuthenticationRequired
+            | Self::ApiKeyNotPinnedToCache
+            | Self::ReadCachePermissionRequired => RefusalStatus::Unauthorized,
             Self::AnonymousAccessDisabled | Self::CacheLimitReached => RefusalStatus::Forbidden,
             Self::SignaturePending | Self::NotRecorded(_) => RefusalStatus::NotFound,
             Self::NarTooLarge { .. } => RefusalStatus::PayloadTooLarge,
@@ -129,6 +132,13 @@ impl Refusal for CacheRefusal {
             | Self::NegativeNarInfoSize => ErrorCode::INPUT_VALIDATION,
             Self::CacheLimitReached => ErrorCode::CACHE_LIMIT_REACHED,
             other => other.status().default_code(),
+        }
+    }
+
+    fn missing_permission_wire_names(&self) -> Vec<&'static str> {
+        match self {
+            Self::ReadCachePermissionRequired => vec![CachePermission::ReadStore.as_wire_name()],
+            _ => Vec::new(),
         }
     }
 }

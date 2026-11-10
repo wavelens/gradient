@@ -38,6 +38,7 @@ Responses use the envelope `{ "error": false, "message": <payload> }`. Set `erro
 - Every project key includes `viewProject`.
 - `createProject` is valid only on a key without a pin. A key with it can call `PUT /projects` when its owner can create projects.
 - `GET /user/keys/{id}/reach` lists the projects and caches a key can reach, with its permissions on each.
+- 401 and 403 responses to signed-in callers list the missing permissions in `missing_permissions` (for example, `["readStore"]`). Add these names to the key's `permissions` to allow the request.
 
 ```sh
 curl -X POST https://gradient.example.com/api/v1/user/keys \

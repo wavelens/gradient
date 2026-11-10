@@ -5,7 +5,9 @@
  */
 
 use super::refusal::TeamRefusal;
-use crate::access::{Caller, ProjectAccess, has_cache_permission, has_permission, load_project};
+use crate::access::{
+    AccessRefusal, Caller, ProjectAccess, has_cache_permission, has_permission, load_project,
+};
 use crate::api_spec::{CachePath, ProjectPath};
 use crate::audit::Audit;
 use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
@@ -291,7 +293,7 @@ pub async fn post_project_team(
         )
         .await?
     {
-        return Err(SharedRefusal::MissingPermission.into());
+        return Err(AccessRefusal::MissingProjectPermission(Permission::ManageWorkers).into());
     }
 
     let team = find_team(&state.web_db, &body.team).await?;

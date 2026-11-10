@@ -24,10 +24,10 @@ pub use self::query::{
     ExecJobTokenView, StartedEvaluationView, get_exec_job, list_evaluation_exec_jobs,
 };
 
-use crate::access::{can_view_project, load_membership_with_permissions};
+use crate::access::{AccessRefusal, can_view_project, load_membership_with_permissions};
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
-use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
+use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
 use gradient_db::WebDb;
 use gradient_db::exec_jobs::reads::{self, ExecJobDetail, ExecNodeDetail};
@@ -104,7 +104,9 @@ impl ExecJobAccessContext {
             return Err(WebError::not_found(Resource::ExecJob));
         }
         if !mask_grants(mask, Permission::TriggerEvaluation) {
-            return Err(SharedRefusal::MissingPermission.into());
+            return Err(
+                AccessRefusal::MissingProjectPermission(Permission::TriggerEvaluation).into(),
+            );
         }
         Ok(ctx)
     }

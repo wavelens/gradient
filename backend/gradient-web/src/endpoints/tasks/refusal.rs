@@ -5,6 +5,7 @@
  */
 
 use crate::error::ErrorCode;
+use crate::permissions::Permission;
 use crate::refusal::{Refusal, RefusalStatus};
 
 #[derive(Debug, thiserror::Error)]
@@ -158,6 +159,13 @@ impl Refusal for TaskRefusal {
             }
             Self::ActionNameTaken => ErrorCode::ALREADY_EXISTS,
             _ => self.status().default_code(),
+        }
+    }
+
+    fn missing_permission_wire_names(&self) -> Vec<&'static str> {
+        match self {
+            Self::TransferNotPermitted => vec![Permission::EditTask.as_wire_name()],
+            _ => Vec::new(),
         }
     }
 }

@@ -372,3 +372,41 @@ async fn session_token_pulls_from_a_member_cache() {
         StatusCode::OK
     );
 }
+
+#[tokio::test]
+async fn api_key_without_read_cache_permission_is_refused_download_from_cache_with_401_and_missing_read_store()
+ {
+    let raw = "s".repeat(64);
+    let key = key_row(
+        &raw,
+        cache_mask_from(&[CachePermission::ViewCache, CachePermission::WriteStore]),
+        Some(cache_id()),
+    );
+    let db = with_key(
+        mock_db().append_query_results([vec![private_cache()]]),
+        &key,
+    )
+    .append_query_results([vec![cache_member(BASE_CACHE_ROLE_VIEW_ID)]])
+    .append_query_results([vec![cache_view_role()]]);
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/cache/test-cache/nix-cache-info")
+        .add_header("authorization", basic(&format!("GRAD{raw}")))
+        .await;
+    res.assert_status(StatusCode::UNAUTHORIZED);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["missing_permissions"], json!(["readStore"]), "{body}");
+}
+
+#[tokio::test]
+async fn anonymous_private_cache_request_returns_401_without_missing_permission_list() {
+    let server = make_test_server(
+        mock_db()
+            .append_query_results([vec![private_cache()]])
+            .into_connection(),
+    );
+    let res = server.get("/cache/test-cache/nix-cache-info").await;
+    res.assert_status(StatusCode::UNAUTHORIZED);
+    let body: serde_json::Value = res.json();
+    assert!(body.get("missing_permissions").is_none(), "{body}");
+}

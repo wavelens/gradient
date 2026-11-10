@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::permissions::Permission;
 use crate::refusal::{Refusal, RefusalStatus};
 
 #[derive(Debug, thiserror::Error)]
@@ -25,6 +26,13 @@ impl Refusal for EvaluationRefusal {
                 RefusalStatus::Conflict
             }
             Self::ManageWorkersRequired => RefusalStatus::Forbidden,
+        }
+    }
+
+    fn missing_permission_wire_names(&self) -> Vec<&'static str> {
+        match self {
+            Self::ManageWorkersRequired => vec![Permission::ManageWorkers.as_wire_name()],
+            Self::StillRunning | Self::WithoutTask | Self::TaskAlreadyEvaluating => Vec::new(),
         }
     }
 }
