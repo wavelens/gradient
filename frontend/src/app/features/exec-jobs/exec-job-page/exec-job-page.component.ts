@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DOCUMENT, DestroyRef, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { ActivatedRoute, NavigationEnd, Router, RouterModule } from '@angular/router';
 import { Title } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { EMPTY, Subscription, catchError, filter, forkJoin, interval, map, of, startWith, switchMap, takeWhile } from 'rxjs';
+import { EMPTY, Subscription, catchError, filter, forkJoin, map, of, switchMap, takeWhile } from 'rxjs';
 import {
   ButtonComponent,
   CopyFieldComponent,
@@ -26,7 +26,9 @@ import { LabelHelpComponent, StatusBadgeComponent, StatusIconComponent, WaitingN
 import { AuthService } from '@core/services/auth.service';
 import { JobTimelineComponent } from '@features/board/job-detail/job-timeline.component';
 import { TerminalComponent, type TerminalSource, terminalSocket } from '@shared/terminal';
-import { LogViewerComponent, splitLogLines } from '@shared/log';
+import { LogViewerComponent, appendLogChunkToSplitLines } from '@shared/log';
+import { refreshImmediatelyThenOnIntervalAndOnTabVisibleWhileTabVisible } from '@shared/paging';
+import { ApiError } from '@core/services/api.service';
 import { WritableDirective, AccessService } from '@shared/access';
 import { formatDuration, plural, RelativeTimePipe, serverTime, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { buildAttemptEndReasonLabel, evaluationPhase, execJobPhase, waitingAccessFrom } from '@shared/evaluation';
@@ -46,6 +48,7 @@ import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.co
 import { ExecJobInfoComponent } from '../exec-job-info/exec-job-info.component';
 
 const POLL_MS = 2000;
+const execJobPollingStopOnServerRefusal = Symbol('refused');
 
 type JobView = 'log' | 'info' | 'timeline' | 'terminal';
 type TerminalMode = 'console' | 'attach' | 'shell';
@@ -94,6 +97,7 @@ export class ExecJobPageComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private destroyRef = inject(DestroyRef);
+  private document = inject(DOCUMENT);
   private execJobs = inject(ExecJobsService);
   private breadcrumbs = inject(BreadcrumbsService);
   private auth = inject(AuthService);
@@ -109,7 +113,8 @@ export class ExecJobPageComponent implements OnInit {
   taskName = '';
   private jobId = '';
   private poll?: Subscription;
-  private log = '';
+  private logFinishedLines: string[] = [];
+  private logUnfinishedLine = '';
   private logSource: string | null = null;
   private logBytes = 0;
   private now = signal(Date.now());
@@ -251,8 +256,7 @@ export class ExecJobPageComponent implements OnInit {
 
   private watch(): void {
     this.poll?.unsubscribe();
-    this.poll = interval(POLL_MS).pipe(
-      startWith(0),
+    this.poll = refreshImmediatelyThenOnIntervalAndOnTabVisibleWhileTabVisible(this.document, POLL_MS).pipe(
       switchMap(() => forkJoin({
         job: this.execJobs.get(this.jobId),
         pullRequests: this.execJobs.pullRequests(this.jobId),
@@ -268,12 +272,14 @@ export class ExecJobPageComponent implements OnInit {
         }),
         catchError((error: Error) => {
           this.errorMessage.set(error.message);
-          return EMPTY;
+          return error instanceof ApiError && !error.unreachable ? of(execJobPollingStopOnServerRefusal) : EMPTY;
         }),
       )),
-      takeWhile(({ job }) => isOpenExecJob(job.status), true),
+      takeWhile((update) => update !== execJobPollingStopOnServerRefusal && isOpenExecJob(update.job.status), true),
       takeUntilDestroyed(this.destroyRef),
-    ).subscribe(({ job, log, pullRequests }) => {
+    ).subscribe((update) => {
+      if (update === execJobPollingStopOnServerRefusal) return;
+      const { job, log, pullRequests } = update;
       this.errorMessage.set(null);
       this.now.set(Date.now());
       this.job.set(job);
@@ -289,12 +295,18 @@ export class ExecJobPageComponent implements OnInit {
   }
 
   private showLog(update: { source: string; chunk: ExecJobLog } | null): void {
-    const log = update === null ? '' : update.chunk.offset === 0 ? update.chunk.log : this.log + update.chunk.log;
+    const continues = update !== null && update.chunk.offset !== 0;
     this.logSource = update?.source ?? null;
     this.logBytes = update?.chunk.total_bytes ?? 0;
-    if (log === this.log) return;
-    this.log = log;
-    this.logLines.set(splitLogLines(log));
+    if (!update?.chunk.log && (continues || this.logLines().length === 0)) return;
+    const appended = appendLogChunkToSplitLines(
+      continues ? this.logFinishedLines : [],
+      continues ? this.logUnfinishedLine : '',
+      update?.chunk.log ?? '',
+    );
+    this.logFinishedLines = appended.finished;
+    this.logUnfinishedLine = appended.unfinished;
+    this.logLines.set(appended.lines);
   }
 
   showView(view: JobView): void {

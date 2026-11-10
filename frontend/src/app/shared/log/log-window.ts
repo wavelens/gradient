@@ -18,6 +18,17 @@ export function splitLogLines(text: string): string[] {
   return lines.map(lastRewrite);
 }
 
+export function appendLogChunkToSplitLines(
+  finished: readonly string[],
+  unfinished: string,
+  chunk: string,
+): { finished: string[]; unfinished: string; lines: string[] } {
+  const pieces = (unfinished + chunk).split('\n');
+  const rest = pieces.pop() ?? '';
+  const all = [...finished, ...pieces.map(lastRewrite)];
+  return { finished: all, unfinished: rest, lines: rest ? [...all, lastRewrite(rest)] : all };
+}
+
 export function parseLineFragment(fragment: string | null | undefined): number | null {
   if (!fragment) return null;
   const m = /^L?(\d+)$/i.exec(fragment.trim());

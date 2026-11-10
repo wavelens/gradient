@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DOCUMENT, computed, inject, input } from '@angular/core';
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
-import { EMPTY, Observable, catchError, interval, of, startWith, switchMap } from 'rxjs';
+import { EMPTY, Observable, catchError, of, switchMap, takeWhile } from 'rxjs';
 import { formatBytes, ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { refreshImmediatelyThenOnIntervalAndOnTabVisibleWhileTabVisible } from '@shared/paging';
+import { ApiError } from '@core/services/api.service';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import type { ExecJobOutputView, ExecJobResponse } from '@core/models';
 import { isOpenExecJob } from '../exec-job-status';
@@ -32,6 +34,7 @@ const sameTarget = (a: PollTarget, b: PollTarget): boolean => a.id === b.id && a
 })
 export class ExecJobOutputsComponent {
   private execJobs = inject(ExecJobsService);
+  private document = inject(DOCUMENT);
 
   job = input.required<ExecJobResponse>();
   node = input<number>();
@@ -52,7 +55,12 @@ export class ExecJobOutputsComponent {
   }
 
   private watch({ id, node, open }: PollTarget): Observable<ExecJobOutputView[]> {
-    const ticks = open ? interval(POLL_MS).pipe(startWith(0)) : of(0);
-    return ticks.pipe(switchMap(() => this.execJobs.outputs(id, node).pipe(catchError(() => EMPTY))));
+    const ticks = open ? refreshImmediatelyThenOnIntervalAndOnTabVisibleWhileTabVisible(this.document, POLL_MS) : of(0);
+    return ticks.pipe(
+      switchMap(() => this.execJobs.outputs(id, node).pipe(
+        catchError((error: unknown) => (error instanceof ApiError && !error.unreachable ? of(null) : EMPTY)),
+      )),
+      takeWhile((outputs): outputs is ExecJobOutputView[] => outputs !== null),
+    );
   }
 }

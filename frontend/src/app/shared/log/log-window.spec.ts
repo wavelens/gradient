@@ -5,7 +5,20 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseLineFragment, windowAround, searchLines, splitLogLines } from './log-window';
+import { appendLogChunkToSplitLines, parseLineFragment, windowAround, searchLines, splitLogLines } from './log-window';
+
+describe('appendLogChunkToSplitLines', () => {
+  it('Split each appended chunk the same way as the whole log and finish the line that the previous chunk left open.', () => {
+    const chunks = ['a\npa', 'rt\r\nb', '\rc\n', '', 'tail'];
+    let state = { finished: [] as string[], unfinished: '', lines: [] as string[] };
+    let text = '';
+    for (const chunk of chunks) {
+      state = appendLogChunkToSplitLines(state.finished, state.unfinished, chunk);
+      text += chunk;
+      expect(state.lines).toEqual(splitLogLines(text));
+    }
+  });
+});
 
 describe('splitLogLines', () => {
   it('keeps blank lines and drops only the end of the final newline', () => {

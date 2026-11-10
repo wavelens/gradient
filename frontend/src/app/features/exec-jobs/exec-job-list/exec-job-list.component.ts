@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, DestroyRef, OnChanges, SimpleChanges, booleanAttribute, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DOCUMENT, DestroyRef, OnChanges, SimpleChanges, booleanAttribute, computed, inject, input, output, signal } from '@angular/core';
 import { RouterModule, type UrlTree } from '@angular/router';
-import { Subscription, catchError, interval, of, startWith, switchMap, takeWhile } from 'rxjs';
+import { Subscription, catchError, of, switchMap, takeWhile } from 'rxjs';
 import { BadgeComponent, IconComponent, MenuComponent, type MenuItem } from '@gradient/ui/ui';
 import { StatusIconComponent } from '@shared/ui';
 import { execJobPhase, waitingReasonText } from '@shared/evaluation';
@@ -16,6 +16,7 @@ import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
+import { refreshImmediatelyThenOnIntervalAndOnTabVisibleWhileTabVisible } from '@shared/paging';
 import { EXEC_JOB_STATUS_LABEL, abortExecJobConfirm, deviceLabel, execJobMenu, execJobsMayStillAppear, getExecJobStatusBadgeLabel, isOpenExecJob } from '../exec-job-status';
 
 const POLL_MS = 4000;
@@ -29,6 +30,7 @@ const POLL_MS = 4000;
   styleUrls: ['../../../shared/evaluation/entry-rows.scss', '../../../shared/log/log-sidebar.scss', './exec-job-list.component.scss'],
 })
 export class ExecJobListComponent implements OnChanges {
+  private document = inject(DOCUMENT);
   private execJobs = inject(ExecJobsService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
@@ -67,8 +69,7 @@ export class ExecJobListComponent implements OnChanges {
   private watch(): void {
     this.poll?.unsubscribe();
     const evaluation = this.evaluation();
-    this.poll = interval(POLL_MS).pipe(
-      startWith(0),
+    this.poll = refreshImmediatelyThenOnIntervalAndOnTabVisibleWhileTabVisible(this.document, POLL_MS).pipe(
       switchMap(() => this.execJobs.forEvaluation(evaluation).pipe(
         catchError((error: unknown) => of(error instanceof ApiError && !error.unreachable ? 'refused' as const : null)),
       )),

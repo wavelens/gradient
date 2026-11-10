@@ -539,6 +539,42 @@ describe('ExecJobPageComponent', () => {
     }
   });
 
+  it('Stop polling after a job rejection from the server.', async () => {
+    vi.useFakeTimers();
+    try {
+      const { fixture } = setup('running');
+      const service = TestBed.inject(ExecJobsService) as unknown as { get: () => Observable<ExecJobResponse> };
+      const get = vi.fn(() => throwError(() => new ApiError('Exec job not found.', 404)));
+      service.get = get;
+      await vi.advanceTimersByTimeAsync(2000);
+      fixture.detectChanges();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(get).toHaveBeenCalledOnce();
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Exec job not found.');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Pause polling while the browser tab is hidden', async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      const { logAfter } = setup('running');
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(logAfter).not.toHaveBeenCalled();
+
+      visibility.mockReturnValue('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(logAfter).toHaveBeenCalledOnce();
+    } finally {
+      visibility.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('lists the phases of the log in the sidebar and jumps to one on click', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     const { fixture } = setup('completed');
