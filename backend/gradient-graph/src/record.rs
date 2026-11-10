@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use anyhow::{Context, Result, anyhow};
 use gradient_db::{
     DbContext, MissingRow, WorkerDb,
-    status::{EvaluationFailure, report_worker_message, update_evaluation_status_with_error},
+    status::{EvaluationFailure, insert_worker_message, update_evaluation_status_with_error},
 };
 use gradient_entity::StorePath;
 use gradient_entity::build::BuildStatus;
@@ -929,7 +929,7 @@ impl BatchWriter<'_> {
         &self,
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, DerivationId>,
-    ) {
+    ) -> Result<()> {
         let mut derivation_feature_ids: Vec<uuid::Uuid> = Vec::new();
         let mut derivation_ids_for_feature_links: Vec<uuid::Uuid> = Vec::new();
         let mut feature_names_per_derivation_feature_link_row: Vec<String> = Vec::new();
@@ -945,7 +945,7 @@ impl BatchWriter<'_> {
         }
 
         if derivation_feature_ids.is_empty() {
-            return;
+            return Ok(());
         }
 
         let required_system_feature_names: Vec<String> = BTreeSet::from_iter(
@@ -960,29 +960,22 @@ impl BatchWriter<'_> {
             .map(|_| FeatureId::now_v7().into_inner())
             .collect();
 
-        if let Err(e) = self
-            .db()
+        self.db()
             .execute_raw(SYSTEM_REQUIREMENT_FEATURE_NAME_INSERT_IF_ABSENT.bind([
                 new_uuid_v7_ids_for_feature_names.into(),
                 required_system_feature_names.into(),
             ]))
             .await
-        {
-            error!(error = %e, "failed to insert system features");
-            return;
-        }
-
-        if let Err(e) = self
-            .db()
+            .context("insert system features")?;
+        self.db()
             .execute_raw(DERIVATION_FEATURE_INSERT_SQL.bind([
                 derivation_feature_ids.into(),
                 derivation_ids_for_feature_links.into(),
                 feature_names_per_derivation_feature_link_row.into(),
             ]))
             .await
-        {
-            error!(error = %e, "failed to link derivations to their corresponding system features");
-        }
+            .context("link a derivation to a system feature")?;
+        Ok(())
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -997,28 +990,23 @@ impl BatchWriter<'_> {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn record_eval_messages(&self, warnings: &[String], errors: &[String]) {
-        for warning in warnings {
-            report_worker_message(
-                self.ctx,
+    async fn record_eval_messages(&self, warnings: &[String], errors: &[String]) -> Result<()> {
+        let messages = warnings
+            .iter()
+            .map(|warning| (MessageLevel::Warning, warning))
+            .chain(errors.iter().map(|error| (MessageLevel::Error, error)));
+        for (level, message) in messages {
+            insert_worker_message(
+                self.db(),
                 self.evaluation_id,
-                MessageLevel::Warning,
-                warning.clone(),
+                level,
+                message.clone(),
                 "nix-eval".to_owned(),
             )
-            .await;
+            .await
+            .context("Recording of Evaluation Messages")?;
         }
-
-        for error in errors {
-            report_worker_message(
-                self.ctx,
-                self.evaluation_id,
-                MessageLevel::Error,
-                error.clone(),
-                "nix-eval".to_owned(),
-            )
-            .await;
-        }
+        Ok(())
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -1073,7 +1061,7 @@ impl BatchWriter<'_> {
                     exec_entry_points += inserted.iter().filter(|id| exec_ids.contains(id)).count();
                 }
                 Err(sea_orm::DbErr::RecordNotInserted) => {}
-                Err(e) => error!(error = %e, "failed to insert entry points"),
+                Err(e) => return Err(e).context("insert entry points"),
             }
         }
 
@@ -1107,7 +1095,7 @@ impl BatchWriter<'_> {
             }
             match exec_refusal(instance_enabled, task_switch) {
                 Some(message) => {
-                    self.refuse_exec(&d.attr, message).await;
+                    self.refuse_exec(&d.attr, message).await?;
                     refused.insert(d.attr.clone());
                 }
                 None => {
@@ -1166,15 +1154,16 @@ impl BatchWriter<'_> {
         ))
     }
 
-    async fn refuse_exec(&self, attr: &str, message: &str) {
-        report_worker_message(
-            self.ctx,
+    async fn refuse_exec(&self, attr: &str, message: &str) -> Result<()> {
+        insert_worker_message(
+            self.db(),
             self.evaluation_id,
             MessageLevel::Error,
             message.to_owned(),
             attr_eval_source(attr),
         )
-        .await;
+        .await
+        .context("record the exec refusal")
     }
 }
 
@@ -1270,7 +1259,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
         writer
             .resolve_shared_builds(ids, &batch.derivations, &stored)
             .await?;
-        writer.add_system_features(&batch.derivations, ids).await;
+        writer.add_system_features(&batch.derivations, ids).await?;
         let adopted = writer.adopt_references(&resolved, &newly_walked).await?;
         (report.entry_points, report.exec_entry_points) = match batch.task {
             Some(task) => {
@@ -1319,7 +1308,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
 
     writer
         .record_eval_messages(&batch.warnings, &batch.errors)
-        .await;
+        .await?;
     Ok(report)
 }
 
@@ -1678,9 +1667,9 @@ async fn persist_narinfo(
             am.ca = Set(hit.ca.clone());
         }
 
-        if let Err(e) = am.update(db).await {
-            error!(hash = ?o.hash, error = %e, "failed to persist upstream availability");
-        }
+        am.update(db)
+            .await
+            .with_context(|| format!("Persist upstream availability of `{:?}`", o.hash))?;
     }
 
     for (derivation, tokens) in &learned {
