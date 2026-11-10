@@ -62,7 +62,7 @@ export class OutgoingWebhookDeliveryListDialog implements OnInit {
   expandedDeliveryDetailByDeliveryId = signal<ReadonlyMap<string, RecordedOutgoingDelivery | 'loading' | 'error'>>(new Map());
   offset = signal(0);
   hasMore = signal(false);
-  pagingSummary = computed(() => `Page ${this.offset() / DELIVERIES_PER_PAGE + 1} · row range ${this.offset() + 1}–${this.offset() + this.deliveries().length}`);
+  pagingSummary = computed(() => `Showing ${this.offset() + 1}–${this.offset() + this.deliveries().length}`);
 
   ngOnInit(): void {
     this.loadPage();

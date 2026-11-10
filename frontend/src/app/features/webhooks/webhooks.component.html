@@ -60,7 +60,7 @@
   </gr-load-state>
 </gr-page-layout>
 
-<gr-dialog #webhookDialog [header]="editing() ? 'Edit Event Notification' : 'New Event Notification'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px" [error]="formError()" [busy]="saving()" [confirmDiscard]="formChanges.changed()">
+<gr-dialog #webhookDialog [header]="editing() ? 'Edit event notification' : 'New event notification'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px" [error]="formError()" [busy]="saving()" [confirmDiscard]="formChanges.changed()">
   <div #webhookForm>
   <gr-form-field label="Name" for="webhook-name" [invalid]="!!nameError()" [error]="nameError() ?? ''">
     <input grInput id="webhook-name" [ngModel]="name()" (ngModelChange)="name.set($event)" (keyup.enter)="save()" />
@@ -69,7 +69,7 @@
     <input grInput id="webhook-url" [ngModel]="url()" (ngModelChange)="url.set($event)" placeholder="https://example.com/gradient" (keyup.enter)="save()" />
   </gr-form-field>
   <gr-form-field label="Events" hint="Nothing selected receives every event in this scope.">
-    <gr-label-help slot="label" doc="reference/events/#webhooks" title="Webhook events" />
+    <gr-label-help slot="label" doc="reference/events/#webhooks" title="Events" />
     <app-action-events [(selected)]="events" [eventNamePrefixes]="eventNamePrefixes" />
   </gr-form-field>
   <gr-form-field label="Event globs (optional)" for="webhook-globs" [hint]="eventGlobsExamplesHint" [invalid]="!!globsError()" [error]="globsError() ?? ''">
@@ -85,7 +85,7 @@
 
 <gr-dialog header="Save this secret now" [visible]="revealedSecret() !== null" [closable]="false" width="520px">
   <p>Use it to verify <code>X-Gradient-Signature</code>. It will not be displayed again.</p>
-  <gr-copy-field label="Webhook Secret" [value]="revealedSecret() ?? ''" />
+  <gr-copy-field label="Event notification secret" [value]="revealedSecret() ?? ''" />
   <div grDialogFooter>
     <button grButton label="I've copied it" icon="check" (click)="revealedSecret.set(null)"></button>
   </div>

@@ -107,13 +107,13 @@ describe('OutgoingWebhookDeliveryListDialog', () => {
     const summary = () => document.querySelector('.gr-dialog .paging-summary')?.textContent?.trim();
     expect(loadDeliveryPage).toHaveBeenLastCalledWith(51, 0);
     expect(rows()).toHaveLength(50);
-    expect(summary()).toBe('Page 1 · row range 1–50');
+    expect(summary()).toBe('Showing 1–50');
     expect(footerButton('Previous').disabled).toBe(true);
     footerButton('Next').click();
     fixture.detectChanges();
     expect(loadDeliveryPage).toHaveBeenLastCalledWith(51, 50);
     expect(rows()).toHaveLength(1);
-    expect(summary()).toBe('Page 2 · row range 51–51');
+    expect(summary()).toBe('Showing 51–51');
     expect(footerButton('Next').disabled).toBe(true);
     footerButton('Previous').click();
     expect(loadDeliveryPage).toHaveBeenLastCalledWith(51, 0);

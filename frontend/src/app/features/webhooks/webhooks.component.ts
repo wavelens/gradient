@@ -59,7 +59,7 @@ type WebhookCardState = 'active' | 'failing' | 'inactive';
 
 const webhookCardStateBadgeLabelAndColorSeverityByState: Record<WebhookCardState, { label: string; severity: BadgeSeverity }> = {
   active: { label: 'Active', severity: 'success' },
-  failing: { label: 'Failing', severity: 'danger' },
+  failing: { label: 'Failed', severity: 'danger' },
   inactive: { label: 'Inactive', severity: 'warning' },
 };
 
@@ -313,7 +313,7 @@ export class WebhooksComponent implements OnInit {
       this.saving.set(false);
       const field = getWebhookFormFieldForServerError(err);
       if (!field || !(err instanceof ApiError)) {
-        this.formError.set(apiErrorMessage(err, 'Failed to save webhook.'));
+        this.formError.set(apiErrorMessage(err, 'Saving the event notification failed.'));
         return;
       }
       const value = { name: body.name, url: body.url, globs: this.globs().trim() }[field];
@@ -358,7 +358,7 @@ export class WebhooksComponent implements OnInit {
   rotate(hook: WebhookResponse): void {
     this.confirm
       .confirm({
-        title: 'Rotate Event Notification Secret',
+        title: 'Rotate event notification secret',
         target: hook.name,
         consequence: 'The current secret can no longer verify deliveries. Pass the new secret to the receiving service.',
         confirmLabel: 'Rotate',
@@ -394,7 +394,7 @@ export class WebhooksComponent implements OnInit {
   startDelete(hook: WebhookResponse): void {
     this.confirm
       .confirm({
-        title: 'Delete Event Notification',
+        title: 'Delete event notification',
         target: hook.name,
         consequence: 'Deletes the event notification and its delivery history. The deletion is permanent.',
         confirmLabel: 'Delete',

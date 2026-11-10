@@ -275,7 +275,7 @@ describe('WebhooksComponent', () => {
       vi.advanceTimersByTime(15_000);
       fixture.detectChanges();
       expect(service.list).toHaveBeenCalledTimes(2);
-      expect(root.textContent).toContain('Failing');
+      expect(root.textContent).toContain('Failed');
     } finally {
       vi.useRealTimers();
     }
@@ -374,8 +374,8 @@ describe('WebhooksComponent', () => {
   });
 
   it.each([
-    { action: 'delete', label: 'Delete', title: 'Delete Event Notification', method: 'delete' as const },
-    { action: 'rotate', label: 'Rotate secret', title: 'Rotate Event Notification Secret', method: 'rotateSecret' as const },
+    { action: 'delete', label: 'Delete', title: 'Delete event notification', method: 'delete' as const },
+    { action: 'rotate', label: 'Rotate secret', title: 'Rotate event notification secret', method: 'rotateSecret' as const },
   ])('asks before the $action, naming the webhook', ({ label, title, method }) => {
     const { root, service, confirm } = setup({ webhookScope: 'project' }, { project: 'p' });
     rowMenuItem(root, label).click();
@@ -513,7 +513,7 @@ describe('WebhooksComponent', () => {
     const failed = { ...newestDelivery, success: false, response_status: null, error_message: 'send HTTP request: connection refused' };
     const { root, service } = setup({ webhookScope: 'project' }, { project: 'p' }, () => of([withLastDelivery(hook, failed)]));
     expect(service.deliveries).not.toHaveBeenCalled();
-    expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe('Failing');
+    expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe('Failed');
     expect(root.querySelector('.newest-delivery')?.textContent).toContain('connection refused');
   });
 
@@ -522,7 +522,7 @@ describe('WebhooksComponent', () => {
     service.test.mockReturnValue(of({ ...newestDelivery, id: 'd2', success: false, response_status: 404 }));
     rowButton(root, 'Test').click();
     fixture.detectChanges();
-    expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe('Failing');
+    expect(root.querySelector('.webhook-meta gr-badge')?.textContent?.trim()).toBe('Failed');
     expect(root.querySelector('.newest-delivery')?.textContent).toContain('HTTP 404');
     expect(rowButton(root, 'Test').disabled).toBe(false);
     expect(notify.failure).toHaveBeenCalledWith("Couldn't deliver test event: HTTP 404", null);
