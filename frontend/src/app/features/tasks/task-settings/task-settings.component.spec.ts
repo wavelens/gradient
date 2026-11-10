@@ -121,6 +121,12 @@ describe('TaskSettingsComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'transfer ownership')).toBeNull();
   });
 
+  it('explains why the name is locked and points to the display name', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const field = (fixture.nativeElement as HTMLElement).querySelector('#task-name')?.closest('gr-form-field');
+    expect(field?.textContent).toContain('Edit the Display Name instead.');
+  });
+
   it('describes the active status by what triggers do', () => {
     const fixture = setup({ managed: false, canEdit: true });
     expect(fixture.nativeElement.textContent).toContain('Triggers start an evaluation.');

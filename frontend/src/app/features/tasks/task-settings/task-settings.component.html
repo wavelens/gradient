@@ -13,7 +13,7 @@
                errorTitle="Failed to load task settings" (retry)="loadTask()">
 @if (task(); as proj) {
   <gr-settings-section title="General">
-    <gr-form-field label="Name" for="task-name">
+    <gr-form-field label="Name" for="task-name" hint="The name is part of every URL and stays locked here. Edit the Display Name instead.">
       <input grInput id="task-name" [value]="proj.name" disabled />
     </gr-form-field>
 
