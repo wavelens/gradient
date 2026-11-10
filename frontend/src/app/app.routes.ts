@@ -537,6 +537,13 @@ export const routes: Routes = [
         (m) => m.GithubAppComponent,
       ),
   },
+  ...['admin/users', 'admin/users/:username/access'].map((path) => ({
+    path,
+    title: 'User access (admin)',
+    canActivate: [authGuard, adminGuard],
+    loadComponent: () =>
+      import('./features/admin/user-access/admin-user-access.component').then((m) => m.AdminUserAccessComponent),
+  })),
 
   // Style guide: reference for developers. No links point to this route. Production builds omit the route.
   ...(typeof ngDevMode === 'undefined' || ngDevMode

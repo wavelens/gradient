@@ -75,6 +75,8 @@ const every: UrlTree[] = [
   ...(['profile', 'keys', 'ssh-keys', 'sessions', 'invites', 'access'] as const).map((page) => links.settings(page)),
   links.admin('webhooks'),
   links.admin('github-app'),
+  links.userAccessPageUrl(),
+  links.userAccessPageUrl('carol'),
 ];
 
 describe('links', () => {

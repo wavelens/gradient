@@ -118,6 +118,7 @@ export const links = {
   settings: (page: SettingsPage = 'profile') => url(['settings', page]),
   createApiKeyPageForCache: (cache: string) => url(['settings', 'keys'], { cache }),
   admin: (page: AdminPage) => url(['admin', page]),
+  userAccessPageUrl: (username?: string) => url(username ? ['admin', 'users', username, 'access'] : ['admin', 'users']),
 } as const;
 
 export function readBuildOrigin(query: { get(name: string): string | null }): BuildOrigin {

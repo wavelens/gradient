@@ -36,6 +36,7 @@ export class UserMenuComponent {
           { separator: true },
           { label: 'Event notifications', icon: 'webhook', routerLink: links.admin('webhooks') },
           { label: 'GitHub App', icon: 'hub', routerLink: links.admin('github-app') },
+          { label: 'User access', icon: 'manage_accounts', routerLink: links.userAccessPageUrl() },
         ]
       : []),
     { separator: true },
