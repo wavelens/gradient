@@ -46,7 +46,7 @@ use crate::executor::timeline::PhaseGuard;
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
 use crate::proto::progress::{Progress, Tally};
-use crate::proto::{credentials::CredentialStore, job::JobUpdater};
+use crate::proto::{credentials::JobCredentials, job::JobUpdater};
 use crate::worker::cluster::ClusterStart;
 use gradient_wire::messages::CachedPath;
 use gradient_wire::traits::WorkerStore;
@@ -339,7 +339,7 @@ impl JobExecutor {
         &self,
         job: FlakeJob,
         updater: &mut JobUpdater,
-        credentials: &CredentialStore,
+        credentials: &JobCredentials,
         abort: AbortSignal,
         split: Option<eval_split::SplitMember>,
     ) -> Result<()> {
@@ -386,7 +386,7 @@ impl JobExecutor {
         member: eval_split::SplitMember,
         job: &FlakeJob,
         updater: &mut JobUpdater,
-        credentials: &CredentialStore,
+        credentials: &JobCredentials,
         abort: &AbortSignal,
     ) -> Result<()> {
         let context = eval_split::SplitContext {
@@ -457,7 +457,7 @@ impl JobExecutor {
         &self,
         job: &FlakeJob,
         updater: &mut JobUpdater,
-        credentials: &CredentialStore,
+        credentials: &JobCredentials,
         abort: &AbortSignal,
     ) -> Result<fetch::FetchOutcome> {
         let _fetch = updater.phase(JobPhase::Fetch);
@@ -687,7 +687,7 @@ impl JobExecutor {
         &self,
         job: BuildJob,
         updater: &mut JobUpdater,
-        _credentials: &CredentialStore,
+        _credentials: &JobCredentials,
         mut abort: AbortSignal,
     ) -> Result<()> {
         let mut gc_handles: Vec<GcRootHandle> = Vec::new();
@@ -713,7 +713,7 @@ impl JobExecutor {
         &self,
         job: ExecJob,
         updater: &mut JobUpdater,
-        credentials: &CredentialStore,
+        credentials: &JobCredentials,
         abort: AbortSignal,
         inbox: ExecInbox,
         cluster: Option<ClusterStart>,

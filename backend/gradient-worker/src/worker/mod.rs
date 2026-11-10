@@ -24,7 +24,6 @@ use crate::exec::host::ExecHost;
 use crate::exec::reattach::ResumedJob;
 use crate::executor::{JobExecutor, WorkerEvaluator};
 use crate::nix::store::LocalNixStore;
-use crate::proto::credentials::CredentialStore;
 use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::ProtoConnection;
 use gradient_worker_client::connection::handshake::{perform_dialed_handshake, perform_handshake};
@@ -44,7 +43,6 @@ pub struct Worker<S> {
     config: WorkerConfig,
     executor: JobExecutor,
     scorer: JobScorer,
-    credentials: CredentialStore,
     jobs: Arc<WorkerJobs>,
     conn_state: S,
     _marker: PhantomData<S>,
@@ -88,7 +86,6 @@ impl Worker<Connected> {
             config,
             executor,
             scorer,
-            credentials: CredentialStore::new(),
             conn_state: Connected { conn },
             _marker: PhantomData,
         }
@@ -110,7 +107,6 @@ impl Worker<Disconnected> {
             config,
             executor,
             scorer,
-            credentials: CredentialStore::new(),
             jobs,
             conn_state: Disconnected,
             _marker: PhantomData,
@@ -135,7 +131,6 @@ impl Worker<Disconnected> {
             config,
             executor,
             scorer,
-            credentials,
             jobs,
             ..
         } = self;
@@ -144,7 +139,6 @@ impl Worker<Disconnected> {
             config,
             executor,
             scorer,
-            credentials,
             jobs,
             conn_state: Connected { conn },
             _marker: PhantomData,
@@ -158,7 +152,6 @@ impl Worker<Connected> {
             config,
             executor,
             scorer,
-            credentials,
             jobs,
             conn_state: Connected { conn },
             ..
@@ -179,7 +172,6 @@ impl Worker<Connected> {
             config.clone(),
             executor.clone(),
             scorer,
-            credentials.clone(),
         );
         let outcome =
             message_loop::run_message_loop(state, reader, job_session, stop.clone()).await;
@@ -198,7 +190,6 @@ impl Worker<Connected> {
             config,
             executor,
             scorer,
-            credentials,
             jobs,
             conn_state: Disconnected,
             _marker: PhantomData,
@@ -412,7 +403,6 @@ mod tests {
             jobs: Arc::new(WorkerJobs::new(&config)),
             executor: test_executor(base),
             scorer: JobScorer::new(),
-            credentials: CredentialStore::new(),
             config,
             conn_state: Disconnected,
             _marker: PhantomData,

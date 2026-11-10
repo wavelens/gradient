@@ -44,7 +44,7 @@ use crate::executor::AbortSignal;
 use crate::executor::failure::{BuildError, JobAborted};
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
-use crate::proto::credentials::CredentialStore;
+use crate::proto::credentials::JobCredentials;
 use crate::proto::job::{JobUpdater, push_exec_output};
 use crate::worker::cluster::ClusterStart;
 
@@ -196,20 +196,14 @@ pub async fn execute(
     nix: StoreAccess<'_>,
     mut job: ExecJob,
     updater: &mut JobUpdater,
-    credentials: &CredentialStore,
+    credentials: &JobCredentials,
     abort: AbortSignal,
     inbox: ExecInbox,
     cluster: Option<ClusterStart>,
 ) -> Result<()> {
     let (cluster, held_address) = cluster_member(cluster, job.context.master_port)?;
     let token = SecretString::new(std::mem::take(&mut job.context.token));
-    let secrets = job_secrets(
-        &updater.job_id,
-        &job.secrets,
-        credentials,
-        &host.secrets,
-        &host.worker_id,
-    )?;
+    let secrets = job_secrets(&job.secrets, credentials, &host.secrets, &host.worker_id)?;
     let redactor = job_redactor(&secrets, token.expose());
     let mut run = ExecRun {
         host,
@@ -258,16 +252,15 @@ pub(crate) fn guest_source(
 }
 
 pub(crate) fn job_secrets(
-    job_id: &str,
     names: &[String],
-    credentials: &CredentialStore,
+    credentials: &JobCredentials,
     worker: &WorkerSecrets,
     worker_id: &str,
 ) -> Result<Vec<GuestSecret>, BuildError> {
     names
         .iter()
         .map(|name| {
-            let value = match (credentials.job_secret(job_id, name), worker.value(name)) {
+            let value = match (credentials.secret_value_by_name(name), worker.value(name)) {
                 (Some(value), None) | (None, Some(value)) => value,
                 (Some(_), Some(_)) => {
                     return Err(BuildError::permanent(anyhow!(
@@ -716,7 +709,7 @@ impl ExecRun<'_> {
         guest: &mut Guest,
         devices: &DeviceHold,
         address: Option<&AddressLease>,
-        credentials: &CredentialStore,
+        credentials: &JobCredentials,
         inbox: ExecInbox,
     ) -> Result<()> {
         let abort = self.abort.clone();
@@ -755,7 +748,7 @@ impl ExecRun<'_> {
         guest: &mut Guest,
         devices: &DeviceHold,
         address: Option<&AddressLease>,
-        credentials: &CredentialStore,
+        credentials: &JobCredentials,
     ) -> Result<AgentClient> {
         guest
             .record_job(&self.stored_job(false))
@@ -798,7 +791,7 @@ impl ExecRun<'_> {
     async fn check_out(
         &mut self,
         guest: &Guest,
-        credentials: &CredentialStore,
+        credentials: &JobCredentials,
     ) -> Result<PathBuf, BuildError> {
         let staging = guest.dir().join(WORK_STAGING);
         std::fs::create_dir_all(&staging)
@@ -1408,8 +1401,8 @@ mod tests {
         assert_eq!(reported, [Reported::Exited(2)]);
     }
 
-    fn credential(name: &str, value: &[u8]) -> CredentialStore {
-        let store = CredentialStore::new();
+    fn credential(name: &str, value: &[u8]) -> JobCredentials {
+        let mut store = crate::proto::credentials::CredentialStore::default();
         store.store(
             CredentialKind::JobSecret {
                 job_id: "exec:1".into(),
@@ -1417,7 +1410,7 @@ mod tests {
             },
             value.into(),
         );
-        store
+        store.take_credentials_for_job("exec:1")
     }
 
     fn worker_sops() -> std::sync::Arc<WorkerSecrets> {
@@ -1438,7 +1431,6 @@ mod tests {
     fn secrets_come_from_the_credential_or_the_worker_sops() {
         let credentials = credential("wandb-token", b"s3cr3t-value");
         let secrets = job_secrets(
-            "exec:1",
             &names(&["lab-key", "wandb-token"]),
             &credentials,
             &worker_sops(),
@@ -1465,7 +1457,6 @@ mod tests {
     fn a_name_in_the_credential_and_the_worker_sops_fails() {
         let credentials = credential("lab-key", b"other-value");
         let error = job_secrets(
-            "exec:1",
             &names(&["lab-key"]),
             &credentials,
             &worker_sops(),
@@ -1483,9 +1474,8 @@ mod tests {
     #[test]
     fn a_missing_secret_names_itself() {
         let error = job_secrets(
-            "exec:1",
             &names(&["hf-token"]),
-            &CredentialStore::new(),
+            &JobCredentials::default(),
             &worker_sops(),
             "worker-7",
         )

@@ -28,7 +28,7 @@ use crate::executor::eval_split::SplitMember;
 use crate::executor::timeline::{JobTimeline, TimelineSnapshot};
 use crate::executor::{AbortSignal, JobExecutor};
 use crate::exit_clock;
-use crate::proto::credentials::CredentialStore;
+use crate::proto::credentials::{CredentialStore, JobCredentials};
 use crate::proto::job::JobUpdater;
 use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
@@ -187,7 +187,6 @@ impl MessageLoopState {
         config: WorkerConfig,
         executor: JobExecutor,
         scorer: JobScorer,
-        credentials: CredentialStore,
     ) -> Self {
         let channels = ClusterChannels::new(writer.clone());
         Self {
@@ -197,7 +196,7 @@ impl MessageLoopState {
             channels,
             max_eval: config.eval.max_concurrent.get(),
             max_build: config.build.max_concurrent.get(),
-            credentials,
+            credentials: CredentialStore::default(),
             scorer,
             downloader: Arc::new(SubprocessDownloader(
                 executor.evaluator.resolver().config().clone(),
@@ -559,7 +558,6 @@ impl MessageLoopState {
         }
         self.jobs.forget_job(&job_id);
         job.log.remove();
-        self.credentials.clear();
 
         let completed_kind = job.kind;
         let assignment_id = job.assignment_id.get();
@@ -744,6 +742,7 @@ impl MessageLoopState {
         job: Job,
         cluster: Option<ClusterMembership>,
     ) -> Result<()> {
+        let credentials = self.credentials.take_credentials_for_job(&job_id);
         let readoption = self.jobs.registry.lock().readopt(&job_id, &assignment_id);
         match readoption {
             Readoption::Readopted => {
@@ -830,7 +829,7 @@ impl MessageLoopState {
                 assignment_id,
                 job,
                 kind: kind.clone(),
-                credentials: self.credentials.snapshot(),
+                credentials,
                 address,
             };
             let accepted = self.holds.hold(membership, held, std::time::Instant::now());
@@ -860,7 +859,6 @@ impl MessageLoopState {
             })
             .await?;
 
-        let credentials = self.credentials.snapshot();
         self.spawn_job(
             job_id.clone(),
             kind.clone(),
@@ -906,7 +904,7 @@ impl MessageLoopState {
         cluster: Option<String>,
         split: Option<SplitMember>,
         exec_member: Option<ClusterStart>,
-        credentials: CredentialStore,
+        credentials: JobCredentials,
     ) {
         let registered = self
             .jobs
@@ -1217,7 +1215,7 @@ async fn run_job(
     executor: JobExecutor,
     job: Job,
     updater: &mut JobUpdater,
-    credentials: &CredentialStore,
+    credentials: &JobCredentials,
     abort: AbortSignal,
     split: Option<SplitMember>,
     exec_inbox: ExecInbox,
@@ -1363,7 +1361,6 @@ mod tests {
             config,
             super::super::test_executor(gcroots.path()),
             JobScorer::new(),
-            CredentialStore::new(),
         );
         state.downloader = Arc::new(OfflineDownloader);
         let _running = state.jobs.register(
@@ -1431,7 +1428,6 @@ mod tests {
             config,
             super::super::test_executor(gcroots.path()),
             JobScorer::new(),
-            CredentialStore::new(),
         );
         state.downloader = Arc::new(StalledDownloader);
         let _running = state.jobs.register(

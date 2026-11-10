@@ -20,7 +20,7 @@ use super::AbortSignal;
 use super::dependencies::InputSource;
 use super::progress_report::ChangeReporter;
 use crate::error::WorkerError;
-use crate::proto::credentials::CredentialStore;
+use crate::proto::credentials::JobCredentials;
 
 pub struct FetchOutcome {
     pub source_path: String,
@@ -39,7 +39,7 @@ struct FetchedInputs {
 pub async fn fetch_repository(
     job: &FlakeJob,
     updater: &mut dyn JobReporter,
-    credentials: &CredentialStore,
+    credentials: &JobCredentials,
     store: &dyn WorkerStore,
     mut abort: AbortSignal,
 ) -> Result<FetchOutcome> {
@@ -726,7 +726,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_reports_fetching_and_succeeds() {
         let job = make_flake_job();
-        let credentials = crate::proto::credentials::CredentialStore::new();
+        let credentials = crate::proto::credentials::JobCredentials::default();
         let mut reporter = RecordingJobReporter::new();
 
         let result = fetch_repository(
@@ -759,7 +759,7 @@ mod tests {
             run_overrides: None,
             nix_evaluation_fetch_url_access: Default::default(),
         };
-        let credentials = crate::proto::credentials::CredentialStore::new();
+        let credentials = crate::proto::credentials::JobCredentials::default();
         let mut reporter = RecordingJobReporter::new();
         let result = fetch_repository(
             &job,
@@ -828,7 +828,7 @@ mod tests {
     }
 
     async fn fetch(job: &FlakeJob, store: &FakeWorkerStore) -> Result<FetchOutcome> {
-        let credentials = crate::proto::credentials::CredentialStore::new();
+        let credentials = crate::proto::credentials::JobCredentials::default();
         let mut reporter = RecordingJobReporter::new();
         fetch_repository(job, &mut reporter, &credentials, store, no_abort()).await
     }
@@ -841,7 +841,7 @@ mod tests {
         assert!(sha.len() == 40, "expected 40-char SHA, got: {sha}");
         let job = repository_job(&repo_dir, sha);
 
-        let credentials = crate::proto::credentials::CredentialStore::new();
+        let credentials = crate::proto::credentials::JobCredentials::default();
         let mut reporter = RecordingJobReporter::new();
         let store = FakeWorkerStore::new();
 

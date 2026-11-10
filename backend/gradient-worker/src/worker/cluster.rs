@@ -20,7 +20,7 @@ use gradient_wire::messages::{
 use gradient_worker_client::connection::ProtoWriter;
 
 use crate::count::clamp_to_u32;
-use crate::proto::credentials::CredentialStore;
+use crate::proto::credentials::JobCredentials;
 use tokio::sync::mpsc;
 
 pub(super) struct HeldJob {
@@ -28,7 +28,7 @@ pub(super) struct HeldJob {
     pub assignment_id: String,
     pub job: Job,
     pub kind: JobKind,
-    pub credentials: CredentialStore,
+    pub credentials: JobCredentials,
     pub address: Option<AddressLease>,
 }
 
@@ -239,7 +239,7 @@ mod tests {
                 requirement: Default::default(),
             }),
             kind: JobKind::Build,
-            credentials: CredentialStore::new(),
+            credentials: JobCredentials::default(),
             address: None,
         }
     }

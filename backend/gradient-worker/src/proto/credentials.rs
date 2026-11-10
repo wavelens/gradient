@@ -4,71 +4,58 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Credentials are intentionally NOT persisted to disk and are dropped when the
-//! connection is closing. [`SecretBytes`] is locking its pages with `mlock(2)` and zeroing
-//! them on drop.
+//! Credentials never land on disk. They arrive as separate frames right before the job assignment that they belong to. CredentialStore can buffer them for a single connection. Each job assignment can retrieve its own set, so a completed job won't delete credentials of another job. SecretBytes can lock memory pages with mlock(2) and zero them on drop.
 
 use gradient_types::SecretBytes;
-use gradient_util::sync::Mutex;
 use gradient_wire::messages::CredentialKind;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 #[derive(Default)]
-struct Inner {
+pub struct CredentialStore {
     ssh_key: Option<SecretBytes>,
     job_secrets: BTreeMap<(String, String), SecretBytes>,
 }
 
-#[derive(Clone, Default)]
-pub struct CredentialStore {
-    inner: Arc<Mutex<Inner>>,
-}
-
 impl CredentialStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn store(&self, kind: CredentialKind, data: SecretBytes) {
-        let mut inner = self.inner.lock();
+    pub fn store(&mut self, kind: CredentialKind, data: SecretBytes) {
         match kind {
             CredentialKind::SshKey => {
-                inner.ssh_key = Some(data);
+                self.ssh_key = Some(data);
             }
             CredentialKind::JobSecret { job_id, name } => {
-                inner.job_secrets.insert((job_id, name), data);
+                self.job_secrets.insert((job_id, name), data);
             }
         }
     }
 
-    pub fn ssh_key(&self) -> Option<SecretBytes> {
-        self.inner.lock().ssh_key.clone()
-    }
-
-    pub fn job_secret(&self, job_id: &str, name: &str) -> Option<SecretBytes> {
-        self.inner
-            .lock()
-            .job_secrets
-            .get(&(job_id.to_owned(), name.to_owned()))
-            .cloned()
-    }
-
-    pub fn snapshot(&self) -> Self {
-        let inner = self.inner.lock();
-        let copied = Inner {
-            ssh_key: inner.ssh_key.clone(),
-            job_secrets: inner.job_secrets.clone(),
-        };
-        Self {
-            inner: Arc::new(Mutex::new(copied)),
+    pub fn take_credentials_for_job(&mut self, job_id: &str) -> JobCredentials {
+        let (own, others) = std::mem::take(&mut self.job_secrets)
+            .into_iter()
+            .partition(|((owner, _), _)| owner == job_id);
+        self.job_secrets = others;
+        JobCredentials {
+            ssh_key: self.ssh_key.take(),
+            secrets: own
+                .into_iter()
+                .map(|((_, name), value)| (name, value))
+                .collect(),
         }
     }
+}
 
-    pub fn clear(&self) {
-        let mut inner = self.inner.lock();
-        inner.ssh_key = None;
-        inner.job_secrets.clear();
+#[derive(Clone, Default)]
+pub struct JobCredentials {
+    ssh_key: Option<SecretBytes>,
+    secrets: BTreeMap<String, SecretBytes>,
+}
+
+impl JobCredentials {
+    pub fn ssh_key(&self) -> Option<SecretBytes> {
+        self.ssh_key.clone()
+    }
+
+    pub fn secret_value_by_name(&self, name: &str) -> Option<SecretBytes> {
+        self.secrets.get(name).cloned()
     }
 }
 
@@ -84,25 +71,17 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_keeps_its_key_after_the_store_moves_on() {
-        let store = CredentialStore::new();
+    fn a_job_keeps_its_credentials_after_the_store_moves_on() {
+        let mut store = CredentialStore::default();
         store.store(CredentialKind::SshKey, b"p1".to_vec().into());
+        store.store(job_secret("exec:1", "wandb-token"), b"v1".to_vec().into());
 
-        let held = store.snapshot();
-        store.clear();
+        let held = store.take_credentials_for_job("exec:1");
         store.store(CredentialKind::SshKey, b"p2".to_vec().into());
 
         assert_eq!(held.ssh_key().expect("kept").expose(), b"p1");
-    }
-
-    #[test]
-    fn a_snapshot_keeps_the_job_secrets() {
-        let store = CredentialStore::new();
-        store.store(job_secret("exec:1", "wandb-token"), b"v1".to_vec().into());
-        let held = store.snapshot();
-        store.clear();
         assert_eq!(
-            held.job_secret("exec:1", "wandb-token")
+            held.secret_value_by_name("wandb-token")
                 .expect("kept")
                 .expose(),
             b"v1"
@@ -110,9 +89,30 @@ mod tests {
     }
 
     #[test]
-    fn job_secrets_of_one_job_stay_out_of_another() {
-        let store = CredentialStore::new();
+    fn a_later_job_without_a_key_gets_none_of_the_previous_key() {
+        let mut store = CredentialStore::default();
+        store.store(CredentialKind::SshKey, b"p1".to_vec().into());
+        let _first = store.take_credentials_for_job("exec:1");
+
+        assert!(store.take_credentials_for_job("exec:2").ssh_key().is_none());
+    }
+
+    #[test]
+    fn taking_one_job_leaves_the_secrets_of_another_job() {
+        let mut store = CredentialStore::default();
         store.store(job_secret("exec:1", "wandb-token"), b"v1".to_vec().into());
-        assert!(store.job_secret("exec:2", "wandb-token").is_none());
+        store.store(job_secret("exec:2", "wandb-token"), b"v2".to_vec().into());
+
+        let first = store.take_credentials_for_job("exec:1");
+        let second = store.take_credentials_for_job("exec:2");
+
+        assert_eq!(
+            first.secret_value_by_name("wandb-token").unwrap().expose(),
+            b"v1"
+        );
+        assert_eq!(
+            second.secret_value_by_name("wandb-token").unwrap().expose(),
+            b"v2"
+        );
     }
 }

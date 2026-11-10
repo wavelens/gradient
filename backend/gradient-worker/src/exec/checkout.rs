@@ -15,7 +15,7 @@ use gradient_wire::types::JobContext;
 
 use super::job::StoreAccess;
 use crate::executor::failure::BuildError;
-use crate::proto::credentials::CredentialStore;
+use crate::proto::credentials::JobCredentials;
 use crate::proto::job::JobUpdater;
 use crate::proto::prefetch::{MissingInputs, SubstituteNotOnUpstream, ensure_path};
 
@@ -44,7 +44,7 @@ pub async fn checkout_work(
     work: &Path,
     source: WorkSource<'_>,
     nix: &StoreAccess<'_>,
-    credentials: &CredentialStore,
+    credentials: &JobCredentials,
     updater: &mut JobUpdater,
 ) -> Result<(), BuildError> {
     match source {
@@ -67,7 +67,7 @@ async fn clone_commit(
     work: &Path,
     url: &str,
     commit: &str,
-    credentials: &CredentialStore,
+    credentials: &JobCredentials,
 ) -> Result<()> {
     let ssh_key = project_ssh_key(credentials)?;
     let (dir, url, commit) = (work.to_path_buf(), url.to_owned(), commit.to_owned());
@@ -141,7 +141,7 @@ fn git_failure(error: anyhow::Error) -> BuildError {
     }
 }
 
-fn project_ssh_key(credentials: &CredentialStore) -> Result<Option<SecretString>> {
+fn project_ssh_key(credentials: &JobCredentials) -> Result<Option<SecretString>> {
     credentials
         .ssh_key()
         .map(|key| SecretString::from_utf8(key).context("project SSH key is not UTF-8"))
