@@ -1230,8 +1230,12 @@ impl Actor for CoreActor {
                 reply,
             } => {
                 core.pool.release_job(&worker, &job_id);
-                core.return_to_pending(std::slice::from_ref(&job_id));
-                info!(%worker, %job_id, "job rejected; re-queued");
+                if core.tracker.is_active_job_on_worker(&worker, &job_id) {
+                    core.return_to_pending(std::slice::from_ref(&job_id));
+                    info!(%worker, %job_id, "job rejected; re-queued");
+                } else {
+                    warn!(%worker, %job_id, "Rejection from a worker that doesn't run the job. Ignored.");
+                }
                 let _ = reply.send(());
             }
             SchedulerMsg::Release {
@@ -1240,7 +1244,11 @@ impl Actor for CoreActor {
                 reply,
             } => {
                 let worker_idle = core.pool.release_job(&worker, &job_id);
-                let job = core.tracker.remove_active(&job_id);
+                let job = core
+                    .tracker
+                    .is_active_job_on_worker(&worker, &job_id)
+                    .then(|| core.tracker.remove_active(&job_id))
+                    .flatten();
                 let _ = reply.send(Released { job, worker_idle });
             }
             SchedulerMsg::AbortJob {

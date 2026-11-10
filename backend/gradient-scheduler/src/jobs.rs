@@ -1425,6 +1425,12 @@ impl JobTracker {
             .is_some_and(|a| a.worker == worker_id && a.assignment_id == assignment_id)
     }
 
+    pub fn is_active_job_on_worker(&self, worker_id: &str, job_id: &str) -> bool {
+        self.active
+            .get(job_id)
+            .is_some_and(|a| a.worker == worker_id)
+    }
+
     pub fn active_build_dispatch(
         &self,
         worker_id: &str,

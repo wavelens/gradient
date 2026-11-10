@@ -2211,3 +2211,38 @@ async fn c31_a_restricted_worker_takes_only_substitutions_its_job_policy_allows(
     case.check("step 3").await;
     case.finish().await;
 }
+
+#[tokio::test]
+async fn c32_a_reject_or_release_from_a_worker_that_does_not_run_the_job_keeps_the_job_running_on_its_real_worker()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().one(e1, A, A_OUT)).await;
+    case.connect(W1, w_all(), &[]).await;
+    case.connect(W2, w_all(), &[]).await;
+    let a = case.key(A).await;
+    case.admit_startable_moves().await;
+    case.offers_full(W1).await;
+    case.score_all(W1).await;
+    case.request_job(W1, JobKind::Build)
+        .await
+        .expect("after 1: W1 gets build:A");
+    case.check("step 1").await;
+
+    case.scheduler.job_rejected(W2, &a).await;
+    assert_eq!(
+        case.active(&a).await.as_deref(),
+        Some(W1),
+        "after 2: active(build:A)"
+    );
+    assert!(!case.pending(&a).await, "after 2: pending(build:A)");
+    case.check("step 2").await;
+
+    case.scheduler.drop_assignment(W2, &a).await;
+    assert_eq!(
+        case.active(&a).await.as_deref(),
+        Some(W1),
+        "after 3: active(build:A)"
+    );
+    case.check("step 3").await;
+    case.finish().await;
+}
