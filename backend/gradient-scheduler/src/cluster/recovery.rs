@@ -77,11 +77,7 @@ impl Scheduler {
         )
         .await;
         let requeued = match resolved {
-            Ok(Some(requeued)) => requeued,
-            Ok(None) => {
-                warn!(%attempt, "cluster attempt already closed; settling its members without a retry");
-                false
-            }
+            Ok(requeued) => requeued,
             Err(e) => {
                 self.cluster.book.abort_resolving(attempt).await;
                 return Err(e.into());

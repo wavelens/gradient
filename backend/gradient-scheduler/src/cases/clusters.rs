@@ -1253,6 +1253,56 @@ async fn k32_an_oldest_cluster_pinned_to_an_offline_worker_lets_a_younger_one_re
     case.finish().await;
 }
 
+#[tokio::test]
+async fn k33_a_resolve_retried_after_its_write_committed_still_requeues_the_cluster() {
+    let (c, e1, e2) = cluster_ids();
+    let case = SchedulerCase::start(shape().cl2(c, e1, e2, A, A_OUT)).await;
+    let (eval, build) = (eval_key(e1), case.key(A).await);
+    let started = start(&case, c, e1).await;
+    case.report_building(W2, &build).await;
+    let requeued = gradient_db::scheduling::cluster::resolve_cluster_attempt(
+        &case.db.connection(),
+        c,
+        started.attempt,
+        ClusterAttemptOutcome::Failed,
+        gradient_db::scheduling::cluster::Requeue::WithinBudget,
+        ClusterJobStatus::Failed,
+    )
+    .await
+    .expect("the first resolve commits");
+    assert!(requeued, "after 0: the committed write requeued C");
+
+    case.fail(
+        W2,
+        &build,
+        started.build.assignment_id,
+        failure(BuildFailureKind::Transient).elapsed_ms(2),
+    )
+    .await;
+    assert_eq!(
+        cluster_state(&case, c).await,
+        (ClusterJobStatus::Queued, 1),
+        "after 1: cluster_job(C)"
+    );
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Queued,
+        "after 1: evaluation(E1).status"
+    );
+    assert!(
+        !case.tracked(&eval).await && !case.tracked(&build).await,
+        "after 1: tracked(eval:E1) and tracked(build:A) are false"
+    );
+    case.check("step 1").await;
+
+    case.assign_queued_evals().await;
+    case.admit_startable_moves().await;
+    assert_members_return(&case, c, &eval, &build, "after 2").await;
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
 fn split_of_three(
     cluster: ClusterJobId,
     evaluation: EvaluationId,

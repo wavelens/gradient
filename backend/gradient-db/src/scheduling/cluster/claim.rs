@@ -169,6 +169,7 @@ where
     Ok(closed)
 }
 
+/// Return whether the cluster job is in the queue for another attempt. Read the saved state instead if an earlier call already closed the attempt - for example, a call whose commit acknowledgement never arrived.
 pub async fn resolve_cluster_attempt<C>(
     db: &C,
     cluster: ClusterJobId,
@@ -176,14 +177,20 @@ pub async fn resolve_cluster_attempt<C>(
     outcome: ClusterAttemptOutcome,
     requeue: Requeue,
     finished: ClusterJobStatus,
-) -> Result<Option<bool>, DbErr>
+) -> Result<bool, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
     let txn = db.begin().await?;
     if !close_attempt(&txn, attempt, outcome).await? {
+        let stored = EClusterJob::find_by_id(cluster).one(&txn).await?;
         txn.rollback().await?;
-        return Ok(None);
+        return Ok(stored.is_some_and(|job| {
+            matches!(
+                job.status,
+                ClusterJobStatus::Queued | ClusterJobStatus::Running
+            )
+        }));
     }
     let requeued = requeue_cluster_job(&txn, cluster, requeue).await?;
     if !requeued {
@@ -191,7 +198,7 @@ where
     }
     txn.commit().await?;
 
-    Ok(Some(requeued))
+    Ok(requeued)
 }
 
 pub async fn fail_prepare_attempt<C>(
@@ -502,7 +509,7 @@ mod tests {
         .await
         .expect("resolve");
 
-        assert_eq!(resolved, Some(true));
+        assert!(resolved);
         let statements = all_statements(db.into_transaction_log());
         assert_eq!(statements.first().map(|s| s.sql.as_str()), Some("BEGIN"));
         assert_eq!(statements.last().map(|s| s.sql.as_str()), Some("COMMIT"));
@@ -516,13 +523,20 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn resolving_a_closed_attempt_writes_nothing() {
-        let db = mock_db().append_exec_results([exec(0)]).into_connection();
+    async fn resolve_closed(status: ClusterJobStatus) -> (bool, Vec<Statement>) {
+        let cluster = ClusterJobId::now_v7();
+        let db = mock_db()
+            .append_exec_results([exec(0)])
+            .append_query_results([vec![gradient_entity::cluster_job::Model {
+                id: cluster,
+                status,
+                ..Default::default()
+            }]])
+            .into_connection();
 
         let resolved = resolve_cluster_attempt(
             &db,
-            ClusterJobId::now_v7(),
+            cluster,
             ClusterAttemptId::now_v7(),
             ClusterAttemptOutcome::Failed,
             Requeue::WithinBudget,
@@ -531,12 +545,23 @@ mod tests {
         .await
         .expect("resolve");
 
-        assert_eq!(resolved, None);
-        assert!(
-            all_statements(db.into_transaction_log())
-                .iter()
-                .any(|s| s.sql == "ROLLBACK")
-        );
+        (resolved, all_statements(db.into_transaction_log()))
+    }
+
+    #[tokio::test]
+    async fn resolving_a_closed_attempt_writes_nothing_and_reports_the_stored_requeue() {
+        let (requeued, statements) = resolve_closed(ClusterJobStatus::Queued).await;
+
+        assert!(requeued);
+        assert!(statements.iter().any(|s| s.sql == "ROLLBACK"));
+        assert!(!statements.iter().any(|s| s.sql.starts_with("UPDATE")));
+    }
+
+    #[tokio::test]
+    async fn resolving_a_closed_attempt_of_a_finished_cluster_reports_no_requeue() {
+        let (requeued, _) = resolve_closed(ClusterJobStatus::Failed).await;
+
+        assert!(!requeued);
     }
 
     #[tokio::test]
