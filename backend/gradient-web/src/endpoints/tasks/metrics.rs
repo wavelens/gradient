@@ -48,7 +48,7 @@ pub struct TaskMetricsResponse {
     operation_id = "getTaskMetrics",
     tag = "tasks",
     summary = "Get task metrics",
-    description = "Return the metrics points for each evaluation in the latest `keep_evaluations` evaluations that completed or failed. `eval_time_ms` runs from the start of the fetch to the finish, without the time in the queue and is `null` if the evaluation never started fetching.",
+    description = "Return metric points for each of the latest `keep_evaluations` evaluations that completed or failed. Measure `eval_time_ms` from fetch start to finish and exclude queue time. Retries skip fetching and start their `eval_time_ms` at build start. Evaluations that never started use `null` for `eval_time_ms`.",
     params(("project" = String, Path), ("task" = String, Path)),
     responses((status = OK, description = "Task metrics", body = TaskMetricsResponse), WebError)
 )]
@@ -109,7 +109,7 @@ pub async fn get_task_metrics(
     let mut points = Vec::new();
     for evaluation in evaluations {
         let eval_time_ms = evaluation
-            .fetch_started_at
+            .started_at()
             .zip(evaluation.finished_at)
             .map(|(started, finished)| round_time_delta_to_millis(finished - started));
 
@@ -217,7 +217,7 @@ pub struct EntryPointMetricsResponse {
     operation_id = "getEntryPointMetrics",
     tag = "tasks",
     summary = "Get entry point metrics",
-    description = "Returns per-evaluation build metrics for a single entry point identified by its\nNix attribute path (`eval`), for the most recent `keep_evaluations` completed or failed evaluations.\n\nThe `eval` value is the full Nix attribute path as stored in the database, which may\ncontain double-quoted segments for attribute names with special characters\n(e.g. `packages.\"x86_64-linux\".hello`). URL-encode `\"` as `%22` in query strings.",
+    description = "Returns per-evaluation build metrics for a single entry point identified by its\nNix attribute path (`eval`), for the most recent `keep_evaluations` completed or failed evaluations.\n\nThe `eval` value is the full Nix attribute path as stored in the database, which may\ncontain double-quoted segments for attribute names with special characters\n(e.g. `packages.\"x86_64-linux\".hello`). URL-encode `\"` as `%22` in query strings.\n\nReturn 404 if none of the evaluations of the task contain an entry point with this `eval`.",
     params(("project" = String, Path), ("task" = String, Path), EntryPointMetricsQuery),
     responses((status = OK, description = "Entry point metrics", body = EntryPointMetricsResponse), WebError)
 )]
@@ -250,6 +250,16 @@ pub async fn get_entry_point_metrics(
         task.keep_evaluations as u64,
     )
     .await?;
+    if entry_points.is_empty()
+        && !gradient_db::entry_points::any_evaluation_ever_has_entry_point_with_attribute(
+            &state.web_db,
+            task.id,
+            &params.eval,
+        )
+        .await?
+    {
+        return Err(WebError::not_found(Resource::EntryPoint));
+    }
 
     let eval_ids: Vec<EvaluationId> = entry_points.iter().map(|ep| ep.evaluation).collect();
     let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();

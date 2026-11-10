@@ -440,6 +440,10 @@ impl RunOptions {
 }
 
 impl Model {
+    pub fn started_at(&self) -> Option<NaiveDateTime> {
+        self.fetch_started_at.or(self.building_started_at)
+    }
+
     pub fn walk_finished(&self) -> bool {
         self.building_started_at.is_some_and(|building| {
             [

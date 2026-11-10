@@ -138,6 +138,7 @@ pub async fn get_evaluation(
         }
         None => None,
     };
+    let started_at = evaluation.started_at();
     let res = BaseResponse {
         error: false,
         message: EvaluationResponse {
@@ -156,7 +157,7 @@ pub async fn get_evaluation(
             previous: evaluation.previous,
             next: evaluation.next,
             created_at: evaluation.created_at,
-            started_at: evaluation.fetch_started_at,
+            started_at,
             finished_at: evaluation.finished_at,
             updated_at: evaluation.updated_at,
             error_count,

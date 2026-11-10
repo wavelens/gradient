@@ -77,7 +77,7 @@ pub async fn post_evaluation(
     operation_id = "retryEvaluation",
     tag = "evaluations",
     summary = "Retry evaluation",
-    description = "Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Requires project membership. Answers 409 while the evaluation or another evaluation of its task is running.",
+    description = "Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Requires project membership. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.",
     params(("evaluation" = EvaluationId, Path)),
     responses((status = OK, description = "UUID of the new evaluation", body = String, content_type = "application/json"), WebError)
 )]
@@ -109,14 +109,15 @@ pub async fn post_evaluation_retry(
     }
     .ok_or(EvaluationRefusal::WithoutTask)?;
 
-    let retried = gradient_ci::trigger_evaluation_retry(&state.web_db, &task, &ctx.evaluation)
-        .await
-        .map_err(|e| match e {
-            gradient_ci::TriggerError::AlreadyInProgress => {
-                WebError::from(EvaluationRefusal::TaskAlreadyEvaluating)
-            }
-            gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
-        })?;
+    let retried =
+        gradient_ci::trigger_evaluation_retry(&state.web_db, &task, &ctx.evaluation, user.id)
+            .await
+            .map_err(|e| match e {
+                gradient_ci::TriggerError::AlreadyInProgress => {
+                    WebError::from(EvaluationRefusal::TaskAlreadyEvaluating)
+                }
+                gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
+            })?;
     if retried.status == EvaluationStatus::Building {
         state
             .graph

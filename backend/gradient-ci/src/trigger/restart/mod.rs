@@ -24,6 +24,7 @@ pub async fn trigger_evaluation_retry<C>(
     db: &C,
     task: &MTask,
     prev_eval: &MEvaluation,
+    started_by: UserId,
 ) -> Result<MEvaluation, TriggerError>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -56,6 +57,10 @@ where
         updated_at: now,
         flake_source: prev_eval.flake_source.clone(),
         only_evaluate: prev_eval.only_evaluate,
+        trigger: prev_eval.trigger,
+        started_by: Some(started_by),
+        building_started_at: Some(now),
+        finished_at: (initial_status == EvaluationStatus::Completed).then_some(now),
         ..Default::default()
     }
     .into_active_model();

@@ -44,6 +44,14 @@ describe('EntryPointMetricsComponent', () => {
     expect(root.textContent).not.toContain(EMPTY_TITLE);
   });
 
+  it('shows an unknown entry point as not found, without empty charts or Try Again', () => {
+    const { root } = render(() => throwError(() => ({ status: 404, message: 'Entry point not found' })));
+    expect(root.textContent).toContain('Not found or access denied');
+    expect(root.textContent).toContain('Entry point not found');
+    expect(root.querySelector('.gr-load-state__error button')).toBeNull();
+    expect(root.querySelector('gr-metric-chart')).toBeNull();
+  });
+
   it('Display one card per build status and show the total.', () => {
     const point = (build_status: string) => ({ evaluation_id: 'e', build_id: 'b', created_at: '2026-01-01 00:00:00', build_status, dependencies_count: 0 });
     const statuses = ['Completed', 'DependencyFailed', 'Completed', 'FailedTransient', 'Aborted'];

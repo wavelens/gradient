@@ -54,7 +54,19 @@ async fn trigger_records_the_requested_walk_mode() {
     .await
     .unwrap();
 
-    let log = raw_statements(db.into_transaction_log());
+    assert_eq!(
+        find_evaluation_insert_value_for_column(
+            &raw_statements(db.into_transaction_log()),
+            "walk_mode"
+        ),
+        sea_orm::Value::Int(Some(i32::from(WalkMode::Full)))
+    );
+}
+
+fn find_evaluation_insert_value_for_column(
+    log: &[sea_orm::Statement],
+    column: &str,
+) -> sea_orm::Value {
     let insert = log
         .iter()
         .find(|s| s.sql.starts_with(r#"INSERT INTO "evaluation""#))
@@ -65,12 +77,10 @@ async fn trigger_records_the_requested_walk_mode() {
         .collect();
     let at = columns
         .iter()
-        .position(|c| *c == r#""walk_mode""#)
-        .expect("the insert names walk_mode");
-    assert_eq!(
-        insert.values.as_ref().unwrap().0[at],
-        sea_orm::Value::Int(Some(i32::from(WalkMode::Full)))
-    );
+        .position(|c| *c == format!("\"{column}\""))
+        .expect("the insert names the column");
+
+    insert.values.as_ref().unwrap().0[at].clone()
 }
 
 #[tokio::test]
@@ -193,7 +203,7 @@ async fn restart_with_all_cached_inserts_completed_eval() {
         }])
         .into_connection();
 
-    let result = trigger_evaluation_retry(&db, &task, &prev_eval).await;
+    let result = trigger_evaluation_retry(&db, &task, &prev_eval, UserId::now_v7()).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(
         result.unwrap().status,
@@ -206,7 +216,12 @@ async fn restart_with_all_cached_inserts_completed_eval() {
 async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() {
     let task = make_task();
     let prev_eval_id = EvaluationId::now_v7();
-    let prev_eval = make_eval(prev_eval_id, EvaluationStatus::Failed);
+    let trigger = TaskTriggerId::now_v7();
+    let prev_eval = evaluation::Model {
+        trigger: Some(trigger),
+        ..make_eval(prev_eval_id, EvaluationStatus::Failed)
+    };
+    let retried_by = UserId::now_v7();
     let new_eval_id = EvaluationId::now_v7();
 
     let drv_a = DerivationId::now_v7();
@@ -249,10 +264,22 @@ async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() 
         }])
         .into_connection();
 
-    let result = trigger_evaluation_retry(&db, &task, &prev_eval).await;
+    let result = trigger_evaluation_retry(&db, &task, &prev_eval, retried_by).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(result.unwrap().status, EvaluationStatus::Building);
     let log = raw_statements(db.into_transaction_log());
+    assert_eq!(
+        find_evaluation_insert_value_for_column(&log, "trigger"),
+        sea_orm::Value::Uuid(Some(trigger.into_inner()))
+    );
+    assert_eq!(
+        find_evaluation_insert_value_for_column(&log, "started_by"),
+        sea_orm::Value::Uuid(Some(retried_by.into_inner()))
+    );
+    assert!(matches!(
+        find_evaluation_insert_value_for_column(&log, "building_started_at"),
+        sea_orm::Value::ChronoDateTime(Some(_))
+    ));
     assert!(
         log.iter().any(|s| s.sql.contains("INSERT INTO build_job")
             && s.sql.contains("FROM build_job bj WHERE bj.evaluation = $1")),

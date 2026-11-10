@@ -172,7 +172,7 @@ pub(super) async fn evaluations_to_summaries(
             prioritized: with_qos.contains(&evaluation.id),
             only_evaluate: evaluation.only_evaluate,
             created_at: evaluation.created_at,
-            started_at: evaluation.fetch_started_at,
+            started_at: evaluation.started_at(),
             finished_at: evaluation.finished_at,
             updated_at: evaluation.updated_at,
             progress: live_progress(

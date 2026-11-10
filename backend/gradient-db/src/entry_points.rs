@@ -88,6 +88,19 @@ pub async fn by_attribute<C: ConnectionTrait>(
         .await
 }
 
+pub async fn any_evaluation_ever_has_entry_point_with_attribute<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+    attribute: &str,
+) -> Result<bool, DbErr> {
+    Ok(EEntryPoint::find()
+        .filter(CEntryPoint::Task.eq(task))
+        .filter(CEntryPoint::Eval.eq(attribute))
+        .one(db)
+        .await?
+        .is_some())
+}
+
 fn self_finished_for_path(task: TaskId, attribute: &str) -> Select<EEntryPoint> {
     let self_finished = Query::select()
         .column(CEvaluation::Id)
