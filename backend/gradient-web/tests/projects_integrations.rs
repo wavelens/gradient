@@ -351,6 +351,8 @@ async fn inbound_create_without_secret_returns_generated_secret_once() {
     let session_id = SessionId::now_v7();
     let db = with_project_manage(with_auth(mock_db(), session_id))
         .append_query_results([Vec::<integration::Model>::new()])
+        .append_query_results([vec![gitea_inbound_row()]])
+        .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![gitea_inbound_row()]]);
 
     let res = server_with_crypt_key(db)
@@ -491,6 +493,8 @@ async fn inbound_create_with_secret_returns_no_generated_secret() {
     let session_id = SessionId::now_v7();
     let db = with_project_manage(with_auth(mock_db(), session_id))
         .append_query_results([Vec::<integration::Model>::new()])
+        .append_query_results([vec![gitea_inbound_row()]])
+        .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![gitea_inbound_row()]]);
 
     let res = server_with_crypt_key(db)
@@ -510,6 +514,30 @@ async fn inbound_create_with_secret_returns_no_generated_secret() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert!(body["message"]["generated_secret"].is_null());
+}
+
+#[tokio::test]
+async fn a_failed_task_lookup_after_create_is_reported_as_an_error() {
+    let session_id = SessionId::now_v7();
+    let db = with_project_manage(with_auth(mock_db(), session_id))
+        .append_query_results([Vec::<integration::Model>::new()])
+        .append_query_results([vec![gitea_inbound_row()]])
+        .append_query_errors([sea_orm::DbErr::Custom("connection lost".into())]);
+
+    let res = server_with_crypt_key(db)
+        .put("/api/v1/projects/test-project/integrations")
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&serde_json::json!({
+            "name": "my-gitea-hook",
+            "kind": "inbound",
+            "git_host_type": "gitea",
+        }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]

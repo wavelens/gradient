@@ -370,7 +370,9 @@ pub async fn put_integration(
         txn.commit().await?;
 
         let mut response = integration_response(&state.web_db, &base, created).await?;
-        response.connected_tasks = connect_tasks(&state.web_db, project.id).await;
+        if link.created_any_integration {
+            response.connected_tasks = connect_tasks(&state.web_db, project.id).await?;
+        }
         return Ok(ok_json(response));
     }
 
@@ -508,7 +510,7 @@ async fn create_integrations_and_attach_matching_tasks(
     }
     txn.commit().await?;
 
-    let connected_tasks = connect_tasks(db, shared.project).await;
+    let connected_tasks = connect_tasks(db, shared.project).await?;
     let mut responses = Vec::with_capacity(created.len());
     for (integration, generated_secret) in created {
         let mut response = integration_response(db, base, integration).await?;
@@ -519,13 +521,9 @@ async fn create_integrations_and_attach_matching_tasks(
     Ok(responses)
 }
 
-async fn connect_tasks(db: &gradient_db::WebDb, project: ProjectId) -> Vec<String> {
-    let (Ok(tasks), Ok(integrations)) = (
-        gradient_db::tasks::of_project(project).all(db).await,
-        gradient_db::integrations::of_project(db, project).await,
-    ) else {
-        return Vec::new();
-    };
+async fn connect_tasks(db: &gradient_db::WebDb, project: ProjectId) -> WebResult<Vec<String>> {
+    let tasks = gradient_db::tasks::of_project(project).all(db).await?;
+    let integrations = gradient_db::integrations::of_project(db, project).await?;
     let mut connected = Vec::new();
     for task in tasks.iter().filter(|t| !t.managed) {
         match crate::endpoints::tasks::auto_attach::apply(db, task, &integrations).await {
@@ -536,7 +534,7 @@ async fn connect_tasks(db: &gradient_db::WebDb, project: ProjectId) -> Vec<Strin
             }
         }
     }
-    connected
+    Ok(connected)
 }
 
 fn http_endpoint_url(url: &str) -> WebResult<String> {
