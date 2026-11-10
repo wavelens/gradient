@@ -20,11 +20,19 @@ pub enum DrvOutputSpec<'a> {
     InputAddressed {
         path: &'a str,
     },
+
+    ImpureOutput {
+        hash_algo: &'a str,
+    },
 }
 
 impl DerivationOutput {
     pub fn as_spec(&self) -> DrvOutputSpec<'_> {
-        if !self.hash_algo.is_empty() && !self.hash.is_empty() {
+        if self.hash == "impure" {
+            DrvOutputSpec::ImpureOutput {
+                hash_algo: &self.hash_algo,
+            }
+        } else if !self.hash_algo.is_empty() && !self.hash.is_empty() {
             DrvOutputSpec::FixedOutput {
                 hash_algo: &self.hash_algo,
                 hash: &self.hash,
@@ -82,6 +90,17 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn impure_output_is_not_fixed_output() {
+        let o = output("out", "", "r:sha256", "impure");
+        assert_eq!(
+            o.as_spec(),
+            DrvOutputSpec::ImpureOutput {
+                hash_algo: "r:sha256"
+            }
+        );
     }
 
     #[test]

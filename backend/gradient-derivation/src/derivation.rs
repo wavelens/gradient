@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::drv_output_spec::DrvOutputSpec;
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 
@@ -142,7 +143,10 @@ impl Derivation {
         let prefer_local_build =
             Self::attr_bool(attrs.as_ref(), env("preferLocalBuild"), "preferLocalBuild")
                 .unwrap_or(false);
-        let is_fixed_output = self.outputs.iter().any(|o| !o.hash.is_empty());
+        let is_fixed_output = self
+            .outputs
+            .iter()
+            .any(|o| matches!(o.as_spec(), DrvOutputSpec::FixedOutput { .. }));
         BuildMeta {
             timeout_secs: Self::attr_u64(attrs.as_ref(), env("timeout"), "timeout"),
             max_silent_secs: Self::attr_u64(attrs.as_ref(), env("maxSilent"), "maxSilent"),
@@ -433,6 +437,9 @@ mod tests {
         let fod = br#"Derive([("out","/nix/store/abc-src","sha256","1q2w3e")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","src")])"#;
         assert!(parse_drv(fod).unwrap().build_meta().is_fixed_output);
         assert!(!parse_drv(EXAMPLE).unwrap().build_meta().is_fixed_output);
+
+        let impure = br#"Derive([("out","","r:sha256","impure")],[],[],"x86_64-linux","/bin/sh",[],[("builder","/bin/sh"),("name","impure-probe"),("out","/1rz4g4znpzjwh1xymhjpm42vipw92pr73vdgl6xs1hycac8kf2n9"),("system","x86_64-linux")])"#;
+        assert!(!parse_drv(impure).unwrap().build_meta().is_fixed_output);
     }
 
     const STRUCTURED_ATTRS_DRV: &[u8] = br#"Derive([("out","/nix/store/cbir-git-minimal-2.54.0","","")],[],["/nix/store/src"],"x86_64-linux","/nix/store/bash",["-e","/nix/store/builder.sh"],[("__json","{\"requiredSystemFeatures\":[\"gccarch-skylake\"],\"preferLocalBuild\":true,\"timeout\":3600,\"allowSubstitutes\":false}"),("__structuredAttrs","1"),("name","git-minimal-2.54.0"),("out","/nix/store/cbir-git-minimal-2.54.0"),("system","x86_64-linux")])"#;
