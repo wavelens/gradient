@@ -12,7 +12,7 @@ import { AuthService } from '@core/services/auth.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
 import { ConfigService } from '@core/services/config.service';
 import { UserMenuComponent } from './user-menu.component';
-import { links } from '@shared/routing';
+import { getInAppReturnPathIfNotErrorPage, links } from '@shared/routing';
 
 const BRAND: Brand = { label: 'Gradient', href: String(links.dashboard()) };
 const NAV: (NavLink & { signedIn?: true; publicList?: true })[] = [
@@ -51,7 +51,9 @@ export class AppHeaderComponent {
   get registrationDisabled() { return this.config.registrationDisabled; }
   protected readonly urlToReturnToAfterSignIn = computed(() => {
     const finalUrl = this.router.lastSuccessfulNavigation()?.finalUrl;
-    return finalUrl ? this.router.serializeUrl(finalUrl) : this.router.url;
+    const current = finalUrl ? this.router.serializeUrl(finalUrl) : this.router.url;
+    if (!current.startsWith('/error/')) return current;
+    return getInAppReturnPathIfNotErrorPage(finalUrl?.queryParamMap.get('from')) ?? '/';
   });
   protected readonly isAccountRoute = computed(() => this.urlToReturnToAfterSignIn().startsWith('/account/'));
 

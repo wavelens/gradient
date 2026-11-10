@@ -43,6 +43,10 @@ export function readInAppNextPathFromRouteSnapshot(route: ActivatedRouteSnapshot
   return next?.startsWith('/') && !next.startsWith('//') && !next.includes('\\') ? next : null;
 }
 
+export function getInAppReturnPathIfNotErrorPage(from: string | null | undefined): string | null {
+  return from?.startsWith('/') && !from.startsWith('//') && !from.startsWith('/error/') ? from : null;
+}
+
 // All navigation targets in the app originate in this file. The tests in links.spec.ts check each one against app.routes.ts.
 export const links = {
   dashboard: () => url([]),

@@ -83,6 +83,17 @@ describe('AppHeaderComponent - registration visibility', () => {
     expect(registerLink(fixture.nativeElement)?.getAttribute('href')).toBe('/account/register?next=%2Fprojects');
   });
 
+  it('returns to the refused page, never to the error page, after signing in', async () => {
+    const fixture = setup(false);
+    await TestBed.inject(Router).navigateByUrl('/error/403?only=admin&from=%2Fadmin%2Fwebhooks');
+    fixture.detectChanges();
+    expect(registerLink(fixture.nativeElement)?.getAttribute('href')).toBe('/account/register?next=%2Fadmin%2Fwebhooks');
+
+    await TestBed.inject(Router).navigateByUrl('/error/404');
+    fixture.detectChanges();
+    expect(registerLink(fixture.nativeElement)?.getAttribute('href')).toBe('/account/register?next=%2F');
+  });
+
   it('shows the custom logo of the instance in the header', () => {
     TestBed.overrideProvider(ConfigService, { useValue: { registrationDisabled: false, publicListing: true, logoUrl: '/brand.svg' } });
     const root = setup(false).nativeElement as HTMLElement;
