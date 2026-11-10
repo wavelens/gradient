@@ -38,6 +38,7 @@ tempfile                       = { workspace = true }
 thiserror                      = { workspace = true }
 tokio                          = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
 tokio-util                     = { workspace = true, features = ["io"] }
+nix                            = { workspace = true }
 tracing                        = { workspace = true }
 uuid                           = { workspace = true }
 zstd                           = { workspace = true }

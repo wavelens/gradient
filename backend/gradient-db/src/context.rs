@@ -147,6 +147,7 @@ impl HeldEvaluations {
 pub struct Wakeups {
     pub delivery: Arc<Notify>,
     pub eval_assign: Arc<Notify>,
+    pub run_cache_maintenance_now: Arc<Notify>,
 }
 
 #[derive(Clone, Debug, Default)]

@@ -24,6 +24,7 @@ gradient-ci = { workspace = true }
 gradient-sources = { workspace = true }
 gradient-sops = { workspace = true }
 gradient-git-host = { workspace = true }
+gradient-cache = { workspace = true }
 gradient-db = { workspace = true }
 gradient-graph = { workspace = true }
 gradient-storage = { workspace = true }

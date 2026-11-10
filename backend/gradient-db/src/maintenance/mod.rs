@@ -9,3 +9,4 @@ pub mod gc;
 pub mod recovery;
 pub mod retention;
 pub mod storage_migrations;
+pub mod storage_usage;

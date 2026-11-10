@@ -17,6 +17,21 @@ use serde::Serialize;
 use std::sync::Arc;
 use tracing::info;
 
+#[utoipa::path(
+    post,
+    path = "/maintenance/gc",
+    operation_id = "startGcRound",
+    tag = "admin",
+    summary = "Run a GC round now",
+    description = "Start one normal GC round now, without waiting for the next interval. Delete evaluations that exceed the keep limit for each task. Delete orphaned derivations. Discard expired cached paths. Return `202` immediately. This round can run on the server instance for cache maintenance. Include `superuser` in the request.",
+    responses((status = ACCEPTED, description = "A round request arrived."), WebError)
+)]
+pub async fn start_gc_round_now(State(state): State<Arc<ServerState>>) -> StatusCode {
+    state.wake.run_cache_maintenance_now.notify_one();
+    info!("cache maintenance: round requested");
+    StatusCode::ACCEPTED
+}
+
 #[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct StartDeepGcResponse {
     pub task_id: AdminTaskId,

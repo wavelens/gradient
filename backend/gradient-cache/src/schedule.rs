@@ -16,6 +16,7 @@ use gradient_util::supervision::{ChildSpec, Pass, PassError};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Notify;
 use tracing::error;
 
 pub(crate) fn child_specs(state: &ServerState) -> Vec<ChildSpec> {
@@ -97,6 +98,10 @@ impl Pass for CacheMaintenance {
 
     fn period(&self) -> Duration {
         self.period
+    }
+
+    fn wake(&self) -> Option<Arc<Notify>> {
+        Some(Arc::clone(&self.db.wake.run_cache_maintenance_now))
     }
 
     async fn run(&self) -> Result<(), PassError> {

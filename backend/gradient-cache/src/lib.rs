@@ -28,6 +28,9 @@ mod test_support;
 mod units;
 
 #[cfg(feature = "server")]
+pub use evaluations::delete_evaluations;
+
+#[cfg(feature = "server")]
 pub async fn start_cache(state: std::sync::Arc<gradient_core::ServerState>) -> std::io::Result<()> {
     for spec in schedule::child_specs(&state) {
         state

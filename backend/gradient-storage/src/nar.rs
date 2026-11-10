@@ -132,6 +132,12 @@ impl NarStore {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiskSpace {
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+}
+
 impl NarStore {
     pub fn local(base_path: &std::path::Path) -> Result<Self> {
         std::fs::create_dir_all(base_path)
@@ -508,6 +514,19 @@ impl NarStore {
 
     pub fn local_base(&self) -> Option<&std::path::Path> {
         self.local_base.as_deref()
+    }
+
+    pub fn local_disk_total_and_free_bytes(&self) -> Result<Option<DiskSpace>> {
+        let Some(base) = &self.local_base else {
+            return Ok(None);
+        };
+        let stats = nix::sys::statvfs::statvfs(base.as_path())
+            .with_context(|| format!("statvfs of NAR storage: {}", base.display()))?;
+        let block = stats.fragment_size();
+        Ok(Some(DiskSpace {
+            total_bytes: stats.blocks() * block,
+            free_bytes: stats.blocks_available() * block,
+        }))
     }
 
     pub fn presigner_available(&self) -> bool {
@@ -1045,6 +1064,23 @@ mod tests {
     use crate::eval_cache_segment::eval_cache_segment_key;
     use futures::TryStreamExt as _;
     use tempfile::TempDir;
+
+    #[test]
+    fn a_local_store_reports_its_disk_and_s3_reports_none() {
+        let dir = TempDir::new().unwrap();
+        let disk = NarStore::local(dir.path())
+            .unwrap()
+            .local_disk_total_and_free_bytes()
+            .unwrap()
+            .expect("a local disk");
+        assert!(disk.total_bytes > 0 && disk.free_bytes <= disk.total_bytes);
+        assert_eq!(
+            NarStore::over(Arc::new(object_store::memory::InMemory::new()))
+                .local_disk_total_and_free_bytes()
+                .unwrap(),
+            None
+        );
+    }
 
     #[tokio::test]
     async fn a_shard_lists_only_its_own_nars_by_full_hash() {

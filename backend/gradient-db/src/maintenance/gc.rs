@@ -102,6 +102,30 @@ pub async fn evaluation_gc_plan(
         .collect())
 }
 
+pub async fn finished_evaluations_of_task_created_before<C: ConnectionTrait>(
+    db: &C,
+    task_id: TaskId,
+    before: NaiveDateTime,
+) -> Result<Vec<MEvaluation>> {
+    let finished = EEvaluation::find()
+        .filter(CEvaluation::Task.eq(task_id))
+        .filter(CEvaluation::Status.is_in([
+            EvaluationStatus::Completed,
+            EvaluationStatus::Failed,
+            EvaluationStatus::Aborted,
+        ]))
+        .order_by_desc(CEvaluation::CreatedAt)
+        .all(db)
+        .await
+        .context("query finished evaluations of task")?;
+
+    Ok(finished
+        .into_iter()
+        .skip(1)
+        .filter(|evaluation| evaluation.created_at < before)
+        .collect())
+}
+
 pub async fn after_evaluation_delete(ctx: &DbContext, deleted: &[MEvaluation]) -> Result<()> {
     if deleted.is_empty() {
         return Ok(());
@@ -405,5 +429,46 @@ mod tests {
                 && log[4].contains("SET status = 0"),
             "{log:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_delete_before_a_date_spares_running_and_the_newest_finished_evaluation() {
+        let day = |n: i64| gradient_fixtures::test_date() + ChronoDuration::days(n);
+        let [running, oldest, older, newest] = std::array::from_fn(|_| EvaluationId::now_v7());
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(running)
+            .evaluation_option(|e| e.created_at = day(0))
+            .evaluation(oldest)
+            .same_task_as(running)
+            .evaluation_status(Failed)
+            .evaluation_option(|e| e.created_at = day(1))
+            .evaluation(older)
+            .same_task_as(running)
+            .evaluation_status(Completed)
+            .evaluation_option(|e| e.created_at = day(2))
+            .evaluation(newest)
+            .same_task_as(running)
+            .evaluation_status(Completed)
+            .evaluation_option(|e| e.created_at = day(3))
+            .into_database()
+            .await;
+        let conn = db.connection();
+        let task = EEvaluation::find_by_id(running)
+            .one(&conn)
+            .await
+            .expect("the evaluation reads")
+            .and_then(|e| e.task)
+            .expect("a task");
+
+        let ids = |rows: Vec<MEvaluation>| rows.into_iter().map(|e| e.id).collect::<Vec<_>>();
+        let everything = finished_evaluations_of_task_created_before(&conn, task, day(10))
+            .await
+            .expect("the evaluations read");
+        assert_eq!(ids(everything), vec![older, oldest]);
+        let before_older = finished_evaluations_of_task_created_before(&conn, task, day(2))
+            .await
+            .expect("the evaluations read");
+        assert_eq!(ids(before_older), vec![oldest]);
+        db.finish().await;
     }
 }

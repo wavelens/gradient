@@ -142,7 +142,7 @@ pub async fn get_cache_stats(
     Query(TrafficParams { traffic }): Query<TrafficParams>,
 ) -> WebResult<Json<BaseResponse<CacheStatsResponse>>> {
     let sent = traffic.metric();
-    let size = gradient_db::cached_paths::size_of_cache(&state.web_db, cache.id)
+    let totals = gradient_db::cached_paths::totals_of_cache(&state.web_db, cache.id)
         .await
         .map_err(WebError::from)?;
 
@@ -188,9 +188,9 @@ pub async fn get_cache_stats(
         )?;
 
     Ok(ok_json(CacheStatsResponse {
-        total_bytes: size.total_bytes,
-        total_nar_bytes: size.total_nar_bytes,
-        total_packages: size.total_packages,
+        total_bytes: totals.as_ref().and_then(|t| t.total_file_size).unwrap_or(0),
+        total_nar_bytes: totals.as_ref().and_then(|t| t.total_nar_size).unwrap_or(0),
+        total_packages: totals.as_ref().map_or(0, |t| t.total_nars),
         storage_minutes,
         storage_hours,
         storage_days,

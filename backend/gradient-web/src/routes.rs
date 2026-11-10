@@ -197,6 +197,9 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     tasks::triggers::get_project_repository_trigger_suggestions
                 ))
                 .routes(routes!(tasks::evaluations::post_task_evaluate))
+                .routes(routes!(
+                    tasks::evaluations::delete_finished_evaluations_before_date
+                ))
                 .routes(limited(
                     routes!(tasks::pull_requests::post_task_pull_request),
                     gradient_ci::pull_requests::MAX_PULL_REQUEST_PATCH_BYTES,

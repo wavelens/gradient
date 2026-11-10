@@ -92,6 +92,18 @@ pub async fn list_recent<C: ConnectionTrait>(conn: &C, limit: u64) -> Result<Vec
         .context("list recent admin_task")
 }
 
+pub async fn find_latest_finished_deep_gc_admin_task<C: ConnectionTrait>(
+    conn: &C,
+) -> Result<Option<MAdminTask>> {
+    EAdminTask::find()
+        .filter(CAdminTask::Kind.eq(AdminTaskKind::DeepGc))
+        .filter(CAdminTask::Status.eq(AdminTaskStatus::Completed))
+        .order_by_desc(CAdminTask::FinishedAt)
+        .one(conn)
+        .await
+        .context("latest finished deep_gc admin_task")
+}
+
 pub async fn get<C: ConnectionTrait>(conn: &C, id: AdminTaskId) -> Result<Option<MAdminTask>> {
     EAdminTask::find_by_id(id)
         .one(conn)

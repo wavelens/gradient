@@ -82,6 +82,7 @@ actions! {
     TaskUpdate => "task.update",
     TaskDelete => "task.delete",
     TaskMoveToProject => "task.move",
+    TaskEvaluationDeleteBeforeDate => "task.evaluations.delete",
     TaskStar => "task.star",
     TaskUnstar => "task.unstar",
     TaskActionCreate => "task.action.create",

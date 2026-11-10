@@ -9,6 +9,7 @@ pub mod github_app;
 pub mod maintenance;
 mod refusal;
 pub mod state;
+pub mod storage;
 pub mod tasks;
 pub mod workers;
 
@@ -40,6 +41,8 @@ pub fn admin_router() -> OpenApiRouter<Arc<ServerState>> {
         .routes(routes!(github_app::request_manifest))
         .routes(routes!(github_app::credentials))
         .routes(routes!(maintenance::start_deep_gc))
+        .routes(routes!(maintenance::start_gc_round_now))
+        .routes(routes!(storage::get_storage))
         .routes(routes!(draining::set_draining))
         .routes(routes!(tasks::list_tasks))
         .routes(routes!(tasks::get_task))

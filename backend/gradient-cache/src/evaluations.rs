@@ -35,30 +35,9 @@ pub(crate) async fn cleanup_old_evaluations(db: &DbContext, graph: &Graph) -> Re
             }
         };
 
-        for chunk in plan.chunks(gradient_db::IN_CHUNK_SIZE) {
-            let request = GcRequest::Evaluations {
-                ids: chunk.iter().map(|e| e.id).collect(),
-            };
-            let report = match graph.gc(request).await {
-                Ok(report) => report,
-                Err(e) => {
-                    warn!(error = %e, task_id = %task.id, "Evaluation GC failed for task");
-                    break;
-                }
-            };
-
-            delete_exec_outputs_of(&db.storage.nar_storage, &report).await;
-            removed += report.deleted_evaluations.len() as u64;
-            let deleted: Vec<MEvaluation> = chunk
-                .iter()
-                .filter(|e| report.deleted_evaluations.contains(&e.id))
-                .cloned()
-                .collect();
-            if let Err(e) =
-                gradient_db::maintenance::gc::after_evaluation_delete(db, &deleted).await
-            {
-                warn!(error = %e, task_id = %task.id, "Evaluation GC cleanup failed for task");
-            }
+        match delete_evaluations(db, graph, &plan).await {
+            Ok(deleted) => removed += deleted,
+            Err(e) => warn!(error = %e, task_id = %task.id, "Evaluation GC failed for task"),
         }
     }
 
@@ -70,6 +49,32 @@ pub(crate) async fn cleanup_old_evaluations(db: &DbContext, graph: &Graph) -> Re
         .await;
     }
     Ok(())
+}
+
+pub async fn delete_evaluations(
+    db: &DbContext,
+    graph: &Graph,
+    evaluations: &[MEvaluation],
+) -> Result<u64> {
+    let mut removed = 0u64;
+    for chunk in evaluations.chunks(gradient_db::IN_CHUNK_SIZE) {
+        let request = GcRequest::Evaluations {
+            ids: chunk.iter().map(|e| e.id).collect(),
+        };
+        let report = graph.gc(request).await.context("delete evaluations")?;
+
+        delete_exec_outputs_of(&db.storage.nar_storage, &report).await;
+        removed += report.deleted_evaluations.len() as u64;
+        let deleted: Vec<MEvaluation> = chunk
+            .iter()
+            .filter(|e| report.deleted_evaluations.contains(&e.id))
+            .cloned()
+            .collect();
+        if let Err(e) = gradient_db::maintenance::gc::after_evaluation_delete(db, &deleted).await {
+            warn!(error = %e, "Evaluation GC cleanup failed");
+        }
+    }
+    Ok(removed)
 }
 
 async fn delete_exec_outputs_of(nar_storage: &NarStore, report: &GcReport) {

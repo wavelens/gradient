@@ -12,6 +12,7 @@ use super::{
 };
 use crate::access::{Caller, caller_project_mask, can_view_project};
 use crate::api_spec::{Binary, TaskPath};
+use crate::audit::Audit;
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::{live_progress, live_progress_status};
 use crate::endpoints::{archive_headers, build_product_headers};
@@ -41,6 +42,8 @@ use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
 use gradient_types::branch_key;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::input::{hex_to_vec, vec_to_hex};
 use gradient_types::*;
 use sea_orm::Iterable;
@@ -475,6 +478,48 @@ pub struct EvaluationsQuery {
     pub commit: Option<String>,
     pub status: Option<String>,
     pub attr: Option<String>,
+}
+
+#[derive(Deserialize, Debug, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct DeleteEvaluationsBeforeQuery {
+    pub before: chrono::DateTime<chrono::Utc>,
+}
+
+#[utoipa::path(
+    delete,
+    path = "/tasks/{project}/{task}/evaluations",
+    operation_id = "deleteTaskEvaluations",
+    tag = "tasks",
+    summary = "Delete old evaluations",
+    description = "Delete completed evaluations of a task created before `before`, together with their builds and the cached outputs that only those evaluations referenced. Running evaluations and the latest completed evaluation stay. The response body is the number of deleted evaluations. Callers need permission to edit the task.",
+    params(TaskPath, DeleteEvaluationsBeforeQuery),
+    responses((status = OK, description = "Number of deleted evaluations", body = u64), WebError)
+)]
+pub async fn delete_finished_evaluations_before_date(
+    TaskScope {
+        project, task, db, ..
+    }: TaskScope<Requires<can::EditTask>>,
+    state: State<Arc<ServerState>>,
+    audit: Audit,
+    Query(query): Query<DeleteEvaluationsBeforeQuery>,
+) -> WebResult<Json<BaseResponse<u64>>> {
+    let before = query.before.naive_utc();
+    let evaluations = gradient_db::maintenance::gc::finished_evaluations_of_task_created_before(
+        &db.web_db, task.id, before,
+    )
+    .await?;
+    let deleted =
+        gradient_cache::delete_evaluations(&state.db(), &state.graph, &evaluations).await?;
+
+    audit
+        .write(
+            Action::TaskEvaluationDeleteBeforeDate,
+            EventOwner::task(project.id, task.id),
+            serde_json::json!({ "before": before, "deleted": deleted }),
+        )
+        .await;
+    Ok(ok_json(deleted))
 }
 
 pub(super) const COMMIT_HASH_BYTES: usize = 20;
