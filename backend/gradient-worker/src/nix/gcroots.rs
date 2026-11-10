@@ -8,8 +8,9 @@
 //! push. Leftover symlinks are coming from a crashed prior worker, and the keeper is purging them
 //! at startup.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use gradient_util::store_path::strip_store_prefix;
@@ -26,6 +27,7 @@ pub struct GcRootKeeper {
 struct KeeperInner {
     dir: Option<PathBuf>,
     store: Arc<LocalNixStore>,
+    next_gc_root_symlink_number: AtomicU64,
 }
 
 impl GcRootKeeper {
@@ -36,7 +38,11 @@ impl GcRootKeeper {
             Some(PathBuf::from(gcroots_dir))
         };
         Self {
-            inner: Arc::new(KeeperInner { dir, store }),
+            inner: Arc::new(KeeperInner {
+                dir,
+                store,
+                next_gc_root_symlink_number: AtomicU64::new(0),
+            }),
         }
     }
 
@@ -68,14 +74,21 @@ impl GcRootKeeper {
         Ok(())
     }
 
+    fn new_gc_root_symlink_path(&self, store_path: &str) -> Option<PathBuf> {
+        let dir = self.inner.dir.as_ref()?;
+        let number = self
+            .inner
+            .next_gc_root_symlink_number
+            .fetch_add(1, Ordering::Relaxed);
+        Some(dir.join(format!("{}-{number}", strip_store_prefix(store_path))))
+    }
+
     pub async fn add(&self, store_path: &str) -> GcRootHandle {
-        let Some(dir) = self.inner.dir.as_ref() else {
+        let Some(symlink) = self.new_gc_root_symlink_path(store_path) else {
             return GcRootHandle::inert();
         };
-        let hash_name = strip_store_prefix(store_path);
-        let symlink = dir.join(hash_name);
 
-        if let Err(e) = create_symlink_idempotent(&symlink, store_path).await {
+        if let Err(e) = fs::symlink(store_path, &symlink).await {
             warn!(path = %store_path, error = %e, "gcroot: symlink create failed; build proceeds unpinned");
             return GcRootHandle::inert();
         }
@@ -89,16 +102,6 @@ impl GcRootKeeper {
         GcRootHandle {
             symlink: Some(symlink),
         }
-    }
-}
-
-async fn create_symlink_idempotent(symlink: &Path, target: &str) -> Result<()> {
-    match fs::symlink_metadata(symlink).await {
-        Ok(_) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => fs::symlink(target, symlink)
-            .await
-            .with_context(|| format!("symlink {} -> {target}", symlink.display())),
-        Err(e) => Err(anyhow::anyhow!("stat {}: {e}", symlink.display())),
     }
 }
 
@@ -193,17 +196,17 @@ mod tests {
         assert!(symlink.symlink_metadata().is_err());
     }
 
-    #[tokio::test]
-    async fn create_symlink_idempotent_skips_existing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let symlink = tmp.path().join("link");
-        tokio::fs::symlink("/nix/store/existing", &symlink)
-            .await
-            .unwrap();
-        create_symlink_idempotent(&symlink, "/nix/store/other")
-            .await
-            .unwrap();
-        let target = tokio::fs::read_link(&symlink).await.unwrap();
-        assert_eq!(target, std::path::PathBuf::from("/nix/store/existing"));
+    #[test]
+    fn two_holders_of_one_store_path_get_their_own_symlinks() {
+        let keeper = GcRootKeeper::new(
+            "/var/empty/gcroots",
+            Arc::new(LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap()),
+        );
+
+        let first = keeper.new_gc_root_symlink_path("/nix/store/abc-foo");
+        let second = keeper.new_gc_root_symlink_path("/nix/store/abc-foo");
+
+        assert_eq!(first, Some(PathBuf::from("/var/empty/gcroots/abc-foo-0")));
+        assert_eq!(second, Some(PathBuf::from("/var/empty/gcroots/abc-foo-1")));
     }
 }
