@@ -45,6 +45,15 @@ pub async fn run(cli: Cli, extensions: ServerExtensions) -> std::io::Result<()> 
         return validate_state_and_exit(cli.state.file.as_deref());
     }
 
+    let _guard = if cli.sentry.enable {
+        let dsn = gradient_types::cli::effective_sentry_dsn(&cli.sentry);
+        info!(dsn, "Error reporting enabled - initializing Sentry");
+        Some(sentry::init(dsn.to_string()))
+    } else {
+        info!("Error reporting disabled");
+        None
+    };
+
     let state = match init_state(cli, extensions).await {
         Ok(s) => s,
         Err(e) => {
@@ -64,15 +73,6 @@ pub async fn run(cli: Cli, extensions: ServerExtensions) -> std::io::Result<()> 
         scheduler_log_level = state.config.log.level_scheduler.as_deref().unwrap_or("(default)"),
         "Starting Gradient server"
     );
-
-    let _guard = if state.config.sentry.enable {
-        let dsn = gradient_types::cli::effective_sentry_dsn(&state.config.sentry);
-        info!(dsn, "Error reporting enabled - initializing Sentry");
-        Some(sentry::init(dsn.to_string()))
-    } else {
-        info!("Error reporting disabled");
-        None
-    };
 
     let listener = gradient_web::bind_http_server_tcp_listener(&state).await?;
     state

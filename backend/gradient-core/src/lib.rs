@@ -36,9 +36,8 @@ use gradient_storage::{FileLogStorage, S3LogStorage};
 use gradient_storage::{HotNarCache, NarStore};
 use gradient_types::*;
 use gradient_util::shutdown::Shutdown;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -59,6 +58,8 @@ pub enum InitError {
     LogStorage(#[source] anyhow::Error),
     #[error("http client build failed: {0}")]
     HttpClient(#[source] anyhow::Error),
+    #[error("failed to load encryption key file: {0}")]
+    EncryptionKeyFile(#[source] anyhow::Error),
     #[error("failed to load JWT secret: {0}")]
     JwtSecret(#[source] anyhow::Error),
     #[error("email service init failed: {0}")]
@@ -69,68 +70,21 @@ pub enum InitError {
     LocalStorage(String),
 }
 
-pub async fn init_state(
-    cli: Cli,
-    extensions: ServerExtensions,
-) -> Result<Arc<ServerState>, InitError> {
-    if cli.secrets.crypt_file.is_empty() || cli.secrets.jwt_file.is_empty() {
-        return Err(InitError::MissingSecrets);
-    }
+struct ValidatedStartupSettings {
+    http: reqwest::Client,
+    jwt_secret: SecretString,
+    email: Arc<dyn gradient_notify::EmailSender>,
+    nar_storage: NarStore,
+    log_storage: Arc<dyn gradient_storage::LogStorage>,
+}
 
-    tracing::info!(
-        ip = %cli.server.listen_addr,
-        port = cli.server.port,
-        state_file = ?cli.state.file,
-        "Starting Gradient server bootstrap",
-    );
-
-    let config = Arc::new(
-        RuntimeConfig::from_cli(&cli).map_err(|e| InitError::NetworkConfig(e.to_string()))?,
-    );
-
-    let db = connect_db(&cli).await.map_err(InitError::Database)?;
-    let web_db = connect_web_db(&cli).await.map_err(InitError::WebDatabase)?;
-    let cache_db = connect_cache_db(&cli)
-        .await
-        .map_err(InitError::CacheDatabase)?;
-
-    let state_result = load_and_apply_state(
-        &db,
-        cli.state.file.as_deref(),
-        &cli.secrets.crypt_file,
-        &cli.server.credentials_dir,
-        cli.state.delete,
-        cli.email.enable,
-    )
-    .await
-    .map_err(|e| InitError::StateLoad(e.to_string()))?;
-    let pending_project_memberships = state_result.pending;
-
-    if let Some(max) = cli.eval.keep_evaluations_max() {
-        let over_limit = ETask::find()
-            .filter(CTask::KeepEvaluations.gt(max))
-            .all(&db)
-            .await;
-
-        match over_limit {
-            Ok(tasks) => {
-                let count = tasks.len();
-                for task in tasks {
-                    let mut active = task.into_active_model();
-                    active.keep_evaluations = Set(max);
-                    if let Err(e) = active.update(&db).await {
-                        tracing::error!(error = %e, "Failed to cap keep_evaluations for task");
-                    }
-                }
-                if count > 0 {
-                    tracing::info!(max, count, "Capped keep_evaluations on tasks");
-                }
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to query tasks for keep_evaluations cap");
-            }
-        }
-    }
+async fn load_and_check_secret_files_and_external_endpoints_before_database(
+    cli: &Cli,
+) -> Result<ValidatedStartupSettings, InitError> {
+    gradient_types::input::load_secret_bytes(&cli.secrets.crypt_file)
+        .map_err(InitError::EncryptionKeyFile)?;
+    let jwt_secret =
+        gradient_types::input::load_secret(&cli.secrets.jwt_file).map_err(InitError::JwtSecret)?;
 
     let local_log_storage = FileLogStorage::new(&cli.server.base_dir)
         .await
@@ -138,13 +92,9 @@ pub async fn init_state(
 
     let http = gradient_util::http::build_client().map_err(|e| InitError::HttpClient(e.into()))?;
 
-    let jwt_secret =
-        gradient_types::input::load_secret(&cli.secrets.jwt_file).map_err(InitError::JwtSecret)?;
-
     let email_service = EmailService::new(cli.email_config())
         .await
         .map_err(InitError::Email)?;
-    let email: Arc<dyn gradient_notify::EmailSender> = Arc::new(email_service);
 
     let nar_storage = if let Some(s3) = cli.s3_config() {
         let secret = match s3.secret_access_key_file.as_deref() {
@@ -211,6 +161,72 @@ pub async fn init_state(
         Arc::new(local_log_storage)
     };
 
+    Ok(ValidatedStartupSettings {
+        http,
+        jwt_secret,
+        email: Arc::new(email_service),
+        nar_storage,
+        log_storage,
+    })
+}
+
+pub async fn init_state(
+    cli: Cli,
+    extensions: ServerExtensions,
+) -> Result<Arc<ServerState>, InitError> {
+    if cli.secrets.crypt_file.is_empty() || cli.secrets.jwt_file.is_empty() {
+        return Err(InitError::MissingSecrets);
+    }
+
+    tracing::info!(
+        ip = %cli.server.listen_addr,
+        port = cli.server.port,
+        state_file = ?cli.state.file,
+        "Starting Gradient server bootstrap",
+    );
+
+    let config = Arc::new(
+        RuntimeConfig::from_cli(&cli).map_err(|e| InitError::NetworkConfig(e.to_string()))?,
+    );
+    let ValidatedStartupSettings {
+        http,
+        jwt_secret,
+        email,
+        nar_storage,
+        log_storage,
+    } = load_and_check_secret_files_and_external_endpoints_before_database(&cli).await?;
+
+    let db = connect_db(&cli).await.map_err(InitError::Database)?;
+    let web_db = connect_web_db(&cli).await.map_err(InitError::WebDatabase)?;
+    let cache_db = connect_cache_db(&cli)
+        .await
+        .map_err(InitError::CacheDatabase)?;
+
+    let state_result = load_and_apply_state(
+        &db,
+        cli.state.file.as_deref(),
+        &cli.secrets.crypt_file,
+        &cli.server.credentials_dir,
+        cli.state.delete,
+        cli.email.enable,
+    )
+    .await
+    .map_err(|e| InitError::StateLoad(e.to_string()))?;
+    let pending_project_memberships = state_result.pending;
+
+    if let Some(max) = cli.eval.keep_evaluations_max() {
+        let capped = ETask::update_many()
+            .col_expr(CTask::KeepEvaluations, Expr::value(max))
+            .filter(CTask::KeepEvaluations.gt(max))
+            .exec(&db)
+            .await
+            .map_err(|e| InitError::Database(e.into()))?
+            .rows_affected;
+        if capped > 0 {
+            tracing::info!(max, count = capped, "Capped keep_evaluations on tasks");
+        }
+    }
+
     let upstream_query_concurrency = config.cache.upstream_query_concurrency.get();
     let nar_downloads = config.nar.max_concurrent_downloads.get();
     let upload_limits = gradient_storage::admission::Limits {
@@ -255,4 +271,20 @@ pub async fn init_state(
             upload_admission: gradient_storage::admission::UploadAdmission::new(upload_limits),
         },
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_missing_secret_file_fails_init_state_before_database_connection() {
+        let mut cli = gradient_test_support::cli::test_cli();
+        cli.secrets.crypt_file = "/nonexistent/gradient-crypt".into();
+        cli.database.url = Some("postgres://127.0.0.1:1/unreachable".into());
+        let error = init_state(cli, ServerExtensions::default())
+            .await
+            .expect_err("bootstrap fails");
+        assert!(matches!(error, InitError::EncryptionKeyFile(_)), "{error}");
+    }
 }
