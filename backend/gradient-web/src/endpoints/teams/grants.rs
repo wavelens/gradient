@@ -8,7 +8,7 @@ use super::refusal::TeamRefusal;
 use crate::access::{Caller, ProjectAccess, has_cache_permission, has_permission, load_project};
 use crate::api_spec::{CachePath, ProjectPath};
 use crate::audit::Audit;
-use crate::authorization::{MaybeApiKey, reject_api_key_authentication};
+use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
 use crate::endpoints::teams::workers::{reauth_team_workers, withdraw_team_workers};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -96,17 +96,30 @@ fn grant_permission(includes_users: bool) -> Permission {
     }
 }
 
-async fn removes_as_team_admin(
-    db: &WebDb,
-    user: &MUser,
-    api_key: &MaybeApiKey,
-    team: TeamId,
-) -> WebResult<bool> {
-    Ok(reject_api_key_authentication(api_key.as_ref()).is_ok()
-        && is_team_admin(db, user, team).await?)
+fn required_permissions_for_team_project_grant_patch(
+    body: &PatchProjectGrantRequest,
+) -> Vec<Permission> {
+    let changes_users = body.role.is_some() || body.users.is_some();
+    let changes_workers = body.workers.is_some();
+    let mut permissions = Vec::new();
+    if changes_users || !changes_workers {
+        permissions.push(Permission::ManageMembers);
+    }
+    if changes_workers {
+        permissions.push(Permission::ManageWorkers);
+    }
+    permissions
 }
 
-async fn is_team_admin(db: &WebDb, user: &MUser, team: TeamId) -> WebResult<bool> {
+async fn caller_has_team_admin_authority_without_api_key(
+    db: &WebDb,
+    user: &MUser,
+    api_key: Option<&ApiKeyContext>,
+    team: TeamId,
+) -> WebResult<bool> {
+    if reject_api_key_authentication(api_key).is_err() {
+        return Ok(false);
+    }
     Ok(user.superuser
         || gradient_db::teams::team_role_of(db, team, user.id).await? == Some(TeamRole::Admin))
 }
@@ -285,7 +298,14 @@ pub async fn post_project_team(
         serde_json::json!({ "team_id": team.id.to_string(), "project_id": project.id.to_string() });
     let owner = EventOwner::project(project.id);
 
-    if !is_team_admin(&state.web_db, &user, team.id).await? {
+    if !caller_has_team_admin_authority_without_api_key(
+        &state.web_db,
+        &user,
+        api_key.as_ref(),
+        team.id,
+    )
+    .await?
+    {
         gradient_db::teams::requests::add_project_request(
             &state.web_db,
             MTeamProjectRequest {
@@ -351,33 +371,54 @@ pub async fn patch_project_team(
     Json(body): Json<PatchProjectGrantRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let db = state.db();
-    let permission = if body.workers.is_some() && body.users.is_none() && body.role.is_none() {
-        Permission::ManageWorkers
-    } else {
-        Permission::ManageMembers
-    };
+    let permissions = required_permissions_for_team_project_grant_patch(&body);
     let project = load_project(
         &db,
         Caller::User(&user),
         api_key.as_ref(),
         project,
         ProjectAccess::Require {
-            permission,
+            permission: permissions[0],
             reject_managed: true,
         },
     )
     .await?;
+    for &permission in &permissions[1..] {
+        if !has_permission(
+            &state.web_db,
+            user.id,
+            project.id,
+            permission,
+            api_key.as_ref(),
+        )
+        .await?
+        {
+            return Err(SharedRefusal::MissingPermission.into());
+        }
+    }
     let team = find_team(&state.web_db, &team).await?;
     let grant = gradient_db::teams::grants::project_grant(&state.web_db, team.id, project.id)
         .await?
         .or_not_found(Resource::TeamGrant)?;
+    if grant.managed {
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::TeamGrant).into());
+    }
 
     let users = body.users.unwrap_or(grant.includes_users);
     let workers = body.workers.unwrap_or(grant.includes_workers);
     if !users && !workers {
         return Err(TeamRefusal::EmptyGrantAfterUpdate.into());
     }
-    if workers && !grant.includes_workers && !is_team_admin(&state.web_db, &user, team.id).await? {
+    if workers
+        && !grant.includes_workers
+        && !caller_has_team_admin_authority_without_api_key(
+            &state.web_db,
+            &user,
+            api_key.as_ref(),
+            team.id,
+        )
+        .await?
+    {
         return Err(TeamRefusal::WorkersNeedTeamAdmin.into());
     }
     let role = match (users, body.role.as_deref()) {
@@ -455,17 +496,35 @@ pub async fn delete_project_team(
         api_key.as_ref(),
     )
     .await?
-        || removes_as_team_admin(&state.web_db, &user, &api_key, team.id).await?;
+        || caller_has_team_admin_authority_without_api_key(
+            &state.web_db,
+            &user,
+            api_key.as_ref(),
+            team.id,
+        )
+        .await?;
     if !allowed {
         return Err(WebError::not_found(Resource::TeamGrant));
     }
     if project.managed {
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Project).into());
     }
+    if grant.as_ref().is_some_and(|grant| grant.managed) {
+        return Err(SharedRefusal::StateManaged(Change::Delete, Resource::TeamGrant).into());
+    }
 
+    let payload =
+        serde_json::json!({ "team_id": team.id.to_string(), "project_id": project.id.to_string() });
     let Some(grant) = grant else {
         if let Some(request) = request {
             gradient_db::teams::requests::remove_project_request(&state.web_db, request).await?;
+            audit
+                .write(
+                    Action::TeamRequestWithdraw,
+                    EventOwner::project(project.id),
+                    payload,
+                )
+                .await;
         }
         return Ok(ok_json("Request withdrawn".to_string()));
     };
@@ -475,8 +534,13 @@ pub async fn delete_project_team(
         take_workers(&state.web_db, &scheduler, team.id, project.id).await?;
     }
 
-    audit.write(Action::TeamGrantRemove, EventOwner::project(project.id), serde_json::json!({ "team_id": team.id.to_string(), "project_id": project.id.to_string() }))
-    .await;
+    audit
+        .write(
+            Action::TeamGrantRemove,
+            EventOwner::project(project.id),
+            payload,
+        )
+        .await;
     Ok(ok_json("Team grant removed".to_string()))
 }
 
@@ -544,7 +608,11 @@ pub async fn get_cache_teams(
 )]
 pub async fn post_cache_team(
     CacheScope {
-        cache, user, db, ..
+        cache,
+        user,
+        api_key,
+        db,
+        ..
     }: CacheScope<RequiresUnmanaged<can::ManageCacheMembers>>,
     audit: Audit,
     Json(body): Json<GrantCacheRequest>,
@@ -562,7 +630,14 @@ pub async fn post_cache_team(
         serde_json::json!({ "team_id": team.id.to_string(), "cache_id": cache.id.to_string() });
     let owner = EventOwner::cache(cache.id);
 
-    if !is_team_admin(&db.web_db, &user, team.id).await? {
+    if !caller_has_team_admin_authority_without_api_key(
+        &db.web_db,
+        &user,
+        api_key.as_ref(),
+        team.id,
+    )
+    .await?
+    {
         gradient_db::teams::requests::add_cache_request(
             &db.web_db,
             MTeamCacheRequest {
@@ -624,6 +699,9 @@ pub async fn patch_cache_team(
     let grant = gradient_db::teams::grants::cache_grant(&db.web_db, team.id, cache.id)
         .await?
         .or_not_found(Resource::TeamGrant)?;
+    if grant.managed {
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::TeamGrant).into());
+    }
     let role = cache_role(&db.web_db, cache.id, &body.role).await?;
 
     let mut active: ATeamCache = grant.into();
@@ -680,17 +758,35 @@ pub async fn delete_cache_team(
         api_key.as_ref(),
     )
     .await?
-        || removes_as_team_admin(&state.web_db, &user, &api_key, team.id).await?;
+        || caller_has_team_admin_authority_without_api_key(
+            &state.web_db,
+            &user,
+            api_key.as_ref(),
+            team.id,
+        )
+        .await?;
     if !allowed {
         return Err(WebError::not_found(Resource::TeamGrant));
     }
     if cache.managed {
         return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Cache).into());
     }
+    if grant.as_ref().is_some_and(|grant| grant.managed) {
+        return Err(SharedRefusal::StateManaged(Change::Delete, Resource::TeamGrant).into());
+    }
 
+    let payload =
+        serde_json::json!({ "team_id": team.id.to_string(), "cache_id": cache.id.to_string() });
     let Some(grant) = grant else {
         if let Some(request) = request {
             gradient_db::teams::requests::remove_cache_request(&state.web_db, request).await?;
+            audit
+                .write(
+                    Action::TeamRequestWithdraw,
+                    EventOwner::cache(cache.id),
+                    payload,
+                )
+                .await;
         }
         return Ok(ok_json("Request withdrawn".to_string()));
     };
@@ -700,8 +796,57 @@ pub async fn delete_cache_team(
         .write(
             Action::TeamGrantRemove,
             EventOwner::cache(cache.id),
-            serde_json::json!({ "team_id": team.id.to_string(), "cache_id": cache.id.to_string() }),
+            payload,
         )
         .await;
     Ok(ok_json("Team grant removed".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn patch(
+        role: Option<&str>,
+        users: Option<bool>,
+        workers: Option<bool>,
+    ) -> PatchProjectGrantRequest {
+        PatchProjectGrantRequest {
+            role: role.map(str::to_owned),
+            users,
+            workers,
+        }
+    }
+
+    #[test]
+    fn changing_workers_with_a_role_needs_both_permissions() {
+        assert_eq!(
+            required_permissions_for_team_project_grant_patch(&patch(Some("x"), None, Some(false))),
+            [Permission::ManageMembers, Permission::ManageWorkers]
+        );
+        assert_eq!(
+            required_permissions_for_team_project_grant_patch(&patch(
+                None,
+                Some(true),
+                Some(false)
+            )),
+            [Permission::ManageMembers, Permission::ManageWorkers]
+        );
+    }
+
+    #[test]
+    fn each_part_alone_needs_only_its_permission() {
+        assert_eq!(
+            required_permissions_for_team_project_grant_patch(&patch(None, None, Some(true))),
+            [Permission::ManageWorkers]
+        );
+        assert_eq!(
+            required_permissions_for_team_project_grant_patch(&patch(Some("x"), Some(true), None)),
+            [Permission::ManageMembers]
+        );
+        assert_eq!(
+            required_permissions_for_team_project_grant_patch(&patch(None, None, None)),
+            [Permission::ManageMembers]
+        );
+    }
 }

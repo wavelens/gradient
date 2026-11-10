@@ -120,6 +120,7 @@ actions! {
     TeamRequestCreate => "team.request.create",
     TeamRequestApprove => "team.request.approve",
     TeamRequestDeny => "team.request.deny",
+    TeamRequestWithdraw => "team.request.withdraw",
     TeamWorkerCreate => "team.worker.create",
     TeamWorkerUpdate => "team.worker.update",
     TeamWorkerDelete => "team.worker.delete",
