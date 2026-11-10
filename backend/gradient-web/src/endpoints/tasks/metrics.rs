@@ -284,8 +284,7 @@ pub async fn get_entry_point_metrics(
     let shared_build_ids: Vec<DerivationBuildId> = shared_builds.values().map(|a| a.id).collect();
     let attempts =
         gradient_db::scheduling::build_attempt::latest_attempts(&state.web_db, &shared_build_ids)
-            .await
-            .unwrap_or_default();
+            .await?;
 
     let mut by_derivation: HashMap<DerivationId, DerivationMetrics> = HashMap::new();
     let mut points = Vec::new();

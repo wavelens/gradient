@@ -328,7 +328,10 @@ pub async fn get_task_evaluations(
     state: State<Arc<ServerState>>,
     Query(params): Query<EvaluationsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
-    let limit = params.limit.unwrap_or(task.keep_evaluations as u64);
+    let limit = params
+        .limit
+        .unwrap_or(task.keep_evaluations as u64)
+        .min(TASK_EVALUATION_LIST_MAX_LIMIT);
     let attr = params.attr.as_deref().map(parse_attr_filter).transpose()?;
 
     let mut filter = TaskEvaluationFilter::default();
@@ -450,6 +453,8 @@ pub struct EvaluationsQuery {
 pub(super) const COMMIT_HASH_BYTES: usize = 20;
 
 const ATTR_SCAN_LIMIT: u64 = 1000;
+
+const TASK_EVALUATION_LIST_MAX_LIMIT: u64 = 1000;
 
 fn parse_attr_filter(attr: &str) -> WebResult<&str> {
     let unquoted_has = |c: char| attr.split('"').step_by(2).any(|part| part.contains(c));
