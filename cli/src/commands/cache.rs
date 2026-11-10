@@ -11,7 +11,7 @@ use crate::commands::cache_upstream;
 use crate::commands::completion;
 use crate::commands::webhook::{WebhookSubcommands, run_webhook_subcommand};
 use crate::error::CliError;
-use crate::input::{ask_for_secret, client_from_config, handle_input};
+use crate::input::{CommandLineFormField, ask_for_secret, client_from_config, handle_input};
 use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
@@ -181,18 +181,16 @@ pub async fn handle(cmd: Commands, out: Output) {
             priority,
             max_storage_gb,
         } => {
-            let input_fields = [
-                ("Name", name),
-                ("Display Name", display_name),
-                ("Description", description),
-                ("Priority", priority.map(|p| p.to_string())),
-                ("Max Storage (GB)", Some(max_storage_gb.to_string())),
-            ]
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
+            let input_fields = vec![
+                CommandLineFormField::new_non_empty("Name", name),
+                CommandLineFormField::new_non_empty("Display Name", display_name),
+                CommandLineFormField::new_optional_form_field("Description", description),
+                CommandLineFormField::new_non_empty("Priority", priority.map(|p| p.to_string())),
+                CommandLineFormField::new_non_empty("Max Storage (GB)", None)
+                    .default_value(max_storage_gb.to_string()),
+            ];
 
-            let input = handle_input(input_fields, true, out);
+            let input = handle_input(input_fields, false, out);
             let name = input.get("Name");
 
             let priority = match input.get("Priority").parse::<i32>() {
@@ -255,33 +253,21 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Err(e) => out.fail(e),
             };
 
-            let input_fields = [
-                (
-                    "Display Name",
-                    Some(display_name.unwrap_or(current.display_name)),
-                ),
-                (
-                    "Description",
-                    Some(description.unwrap_or(current.description)),
-                ),
-                (
-                    "Priority",
-                    Some(priority.unwrap_or(current.priority).to_string()),
-                ),
-                (
+            let input_fields = vec![
+                CommandLineFormField::new_non_empty("Display Name", display_name)
+                    .default_value(current.display_name),
+                CommandLineFormField::new_optional_form_field("Description", description)
+                    .default_value(current.description),
+                CommandLineFormField::new_non_empty("Priority", priority.map(|p| p.to_string()))
+                    .default_value(current.priority.to_string()),
+                CommandLineFormField::new_non_empty(
                     "Max Storage (GB)",
-                    Some(
-                        max_storage_gb
-                            .unwrap_or(i64::from(current.max_storage_gb))
-                            .to_string(),
-                    ),
-                ),
-            ]
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
+                    max_storage_gb.map(|gb| gb.to_string()),
+                )
+                .default_value(current.max_storage_gb.to_string()),
+            ];
 
-            let input = handle_input(input_fields, false, out);
+            let input = handle_input(input_fields, pull_through.is_some(), out);
 
             let priority = match input.get("Priority").parse::<i32>() {
                 Ok(p) => p,

@@ -359,11 +359,12 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
 
             server_base(out);
 
-            let input_fields = [("Username", username), ("Name", name), ("Email", email)]
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.clone()))
-                .collect();
-            let input = handle_input(input_fields, true, out);
+            let input_fields = vec![
+                CommandLineFormField::new_non_empty("Username", username),
+                CommandLineFormField::new_non_empty("Name", name),
+                CommandLineFormField::new_non_empty("Email", email),
+            ];
+            let input = handle_input(input_fields, false, out);
 
             let pw = password.unwrap_or_else(|| ask_for_password(out));
 

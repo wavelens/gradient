@@ -11,8 +11,8 @@ use crate::commands::webhook::{
 use crate::config::*;
 use crate::error::CliError;
 use crate::input::{
-    ask_for_choice, ask_for_secret, client_from_config, handle_input, is_interactive,
-    selected_project,
+    CommandLineFormField, ask_for_choice, ask_for_secret, client_from_config, handle_input,
+    is_interactive, selected_project,
 };
 use crate::output::{ExitKind, Output};
 use clap::Subcommand;
@@ -253,16 +253,13 @@ pub async fn handle(cmd: Commands, out: Output) {
             display_name,
             description,
         } => {
-            let input_fields = [
-                ("Name", name),
-                ("Display Name", display_name),
-                ("Description", description),
-            ]
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
+            let input_fields = vec![
+                CommandLineFormField::new_non_empty("Name", name),
+                CommandLineFormField::new_non_empty("Display Name", display_name),
+                CommandLineFormField::new_optional_form_field("Description", description),
+            ];
 
-            let input = handle_input(input_fields, true, out);
+            let input = handle_input(input_fields, false, out);
             let name = input.get("Name");
 
             let client = client_from_config(out);
@@ -332,22 +329,15 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Err(e) => out.fail(e),
             };
 
-            let input_fields = [
-                ("Name", Some(new_name.unwrap_or(current.name))),
-                (
-                    "Display Name",
-                    Some(display_name.unwrap_or(current.display_name)),
-                ),
-                (
-                    "Description",
-                    Some(description.unwrap_or(current.description)),
-                ),
-            ]
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
+            let input_fields = vec![
+                CommandLineFormField::new_non_empty("Name", new_name).default_value(current.name),
+                CommandLineFormField::new_non_empty("Display Name", display_name)
+                    .default_value(current.display_name),
+                CommandLineFormField::new_optional_form_field("Description", description)
+                    .default_value(current.description),
+            ];
 
-            let input = handle_input(input_fields, true, out);
+            let input = handle_input(input_fields, false, out);
 
             match client
                 .projects()

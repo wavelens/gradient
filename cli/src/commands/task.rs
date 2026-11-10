@@ -6,7 +6,9 @@
 
 use crate::commands::{completion, task_subcommands};
 use crate::config::*;
-use crate::input::{client_from_config, handle_input, selected_project, selected_task};
+use crate::input::{
+    CommandLineFormField, client_from_config, handle_input, selected_project, selected_task,
+};
 use crate::output::{Color, ExitKind, Output};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
@@ -417,18 +419,15 @@ pub async fn handle(cmd: Commands, out: Output) {
         } => {
             let project = selected_project(out);
 
-            let input_fields = [
-                ("Name", name),
-                ("Display Name", display_name),
-                ("Description", description),
-                ("Repository", repository),
-                ("Wildcard", wildcard),
-            ]
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
+            let input_fields = vec![
+                CommandLineFormField::new_non_empty("Name", name),
+                CommandLineFormField::new_non_empty("Display Name", display_name),
+                CommandLineFormField::new_optional_form_field("Description", description),
+                CommandLineFormField::new_non_empty("Repository", repository),
+                CommandLineFormField::new_non_empty("Wildcard", wildcard),
+            ];
 
-            let input = handle_input(input_fields, true, out);
+            let input = handle_input(input_fields, false, out);
             let name = input.get("Name");
 
             let client = client_from_config(out);
@@ -496,22 +495,17 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Err(e) => out.fail(e),
             };
 
-            let input_fields = [
-                ("Name", Some(new_name.unwrap_or(current.name))),
-                (
-                    "Display Name",
-                    Some(display_name.unwrap_or(current.display_name)),
-                ),
-                (
-                    "Description",
-                    Some(description.unwrap_or(current.description)),
-                ),
-                ("Repository", Some(repository.unwrap_or(current.repository))),
-                ("Wildcard", Some(wildcard.unwrap_or(current.wildcard))),
-            ]
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
+            let input_fields = vec![
+                CommandLineFormField::new_non_empty("Name", new_name).default_value(current.name),
+                CommandLineFormField::new_non_empty("Display Name", display_name)
+                    .default_value(current.display_name),
+                CommandLineFormField::new_optional_form_field("Description", description)
+                    .default_value(current.description),
+                CommandLineFormField::new_non_empty("Repository", repository)
+                    .default_value(current.repository),
+                CommandLineFormField::new_non_empty("Wildcard", wildcard)
+                    .default_value(current.wildcard),
+            ];
 
             let input = handle_input(input_fields, false, out);
 

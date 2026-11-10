@@ -5,7 +5,7 @@
  */
 
 use crate::commands::webhook::{WebhookSubcommands, run_webhook_subcommand};
-use crate::input::{client_from_config, handle_input};
+use crate::input::{CommandLineFormField, client_from_config, handle_input};
 use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
 use connector::api::{
@@ -302,10 +302,10 @@ pub async fn handle(cmd: Commands, out: Output) {
         Commands::Create { name, display_name } => {
             let input = handle_input(
                 vec![
-                    ("Name".to_owned(), name),
-                    ("Display Name".to_owned(), display_name),
+                    CommandLineFormField::new_non_empty("Name", name),
+                    CommandLineFormField::new_non_empty("Display Name", display_name),
                 ],
-                true,
+                false,
                 out,
             );
             let name = input.get("Name");

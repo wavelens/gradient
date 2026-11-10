@@ -83,44 +83,107 @@ impl Inputs {
     }
 }
 
-pub fn handle_input(fields: Vec<(String, Option<String>)>, skip: bool, out: Output) -> Inputs {
+pub struct CommandLineFormField {
+    label: &'static str,
+    command_line_flag_value: Option<String>,
+    current_value: Option<String>,
+    can_be_empty: bool,
+}
+
+impl CommandLineFormField {
+    pub fn new_non_empty(label: &'static str, command_line_flag_value: Option<String>) -> Self {
+        Self {
+            label,
+            command_line_flag_value,
+            current_value: None,
+            can_be_empty: false,
+        }
+    }
+
+    pub fn new_optional_form_field(
+        label: &'static str,
+        command_line_flag_value: Option<String>,
+    ) -> Self {
+        Self {
+            can_be_empty: true,
+            ..Self::new_non_empty(label, command_line_flag_value)
+        }
+    }
+
+    pub fn default_value(self, current_value: impl Into<String>) -> Self {
+        Self {
+            current_value: Some(current_value.into()),
+            ..self
+        }
+    }
+
+    fn value(&self) -> Option<&String> {
+        self.command_line_flag_value
+            .as_ref()
+            .or(self.current_value.as_ref())
+    }
+
+    fn is_missing(&self) -> bool {
+        !self.can_be_empty && self.value().is_none_or(|value| value.is_empty())
+    }
+}
+
+/// Open `$EDITOR` only in a terminal. Do so when no flags are present, or required fields are still missing.
+pub fn handle_input(
+    fields: Vec<CommandLineFormField>,
+    has_non_form_field_command_line_flag: bool,
+    out: Output,
+) -> Inputs {
     if fields.is_empty() {
         out.err(ExitKind::Usage, "No input fields.");
     }
 
-    if skip {
-        let prefilled: Option<HashMap<String, String>> = fields
+    let any_flag_given = has_non_form_field_command_line_flag
+        || fields
             .iter()
-            .map(|(field, value)| value.clone().map(|value| (field.clone(), value)))
-            .collect();
+            .any(|field| field.command_line_flag_value.is_some());
+    let any_field_missing = fields.iter().any(CommandLineFormField::is_missing);
+    let interactive = !out.is_json() && io::stdin().is_terminal();
 
-        if let Some(values) = prefilled {
-            return Inputs { values, out };
-        }
-    }
-
-    if out.is_json() || !io::stdin().is_terminal() {
-        if let Some((field, _)) = fields.iter().find(|(_, value)| value.is_none()) {
-            let flag = field.to_lowercase().replace(' ', "-");
+    if !interactive || (any_flag_given && !any_field_missing) {
+        if let Some(field) = fields.iter().find(|field| field.is_missing()) {
+            let flag = field.label.to_lowercase().replace(' ', "-");
             out.err(ExitKind::Usage, format!("No argument: --{flag}."));
         }
         let values = fields
-            .into_iter()
-            .map(|(field, value)| (field, value.unwrap_or_default()))
+            .iter()
+            .map(|field| {
+                (
+                    field.label.to_owned(),
+                    field.value().cloned().unwrap_or_default(),
+                )
+            })
             .collect();
         return Inputs { values, out };
     }
 
     let draft: String = fields
         .iter()
-        .map(|(field, value)| format!("{}: {}\n", field, value.clone().unwrap_or_default()))
+        .map(|field| {
+            format!(
+                "{}: {}\n",
+                field.label,
+                field.value().map(String::as_str).unwrap_or_default()
+            )
+        })
         .collect();
 
-    let path = std::env::temp_dir().join(format!("gradient-configurator-{}", std::process::id()));
     let editor =
         std::env::var("EDITOR").unwrap_or_else(|_| out.err(ExitKind::Usage, "EDITOR is not set."));
 
-    fs::write(&path, draft)
+    let mut draft_file = tempfile::Builder::new()
+        .prefix("gradient-form-")
+        .tempfile()
+        .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Write, std::env::temp_dir(), e)));
+    let path = draft_file.path().to_path_buf();
+    draft_file
+        .write_all(draft.as_bytes())
+        .and_then(|()| draft_file.flush())
         .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Write, &path, e)));
 
     let status = Command::new(&editor)
@@ -139,7 +202,6 @@ pub fn handle_input(fields: Vec<(String, Option<String>)>, skip: bool, out: Outp
 
     let edited = fs::read_to_string(&path)
         .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Read, &path, e)));
-    let _ = fs::remove_file(&path);
 
     let values = parse_edited(&fields, &edited).unwrap_or_else(|e| out.err(ExitKind::Usage, e));
 
@@ -147,32 +209,38 @@ pub fn handle_input(fields: Vec<(String, Option<String>)>, skip: bool, out: Outp
 }
 
 fn parse_edited(
-    fields: &[(String, Option<String>)],
+    fields: &[CommandLineFormField],
     edited: &str,
 ) -> Result<HashMap<String, String>, String> {
     let mut values: HashMap<String, String> = HashMap::new();
 
     for line in edited.lines().filter(|line| !line.trim().is_empty()) {
-        let (field, value) = line
+        let (label, value) = line
             .split_once(':')
             .ok_or_else(|| format!("Invalid input line: {}", line))?;
-        let (field, value) = (field.trim(), value.trim());
+        let (label, value) = (label.trim(), value.trim());
 
-        if !fields.iter().any(|(declared, _)| declared == field) {
-            return Err(format!("Invalid input field: {}", field));
+        let field = fields
+            .iter()
+            .find(|field| field.label == label)
+            .ok_or_else(|| format!("Invalid input field: {}", label))?;
+
+        if value.is_empty() && !field.can_be_empty {
+            return Err(CliError::EmptyField(label.to_owned()).to_string());
         }
 
-        if value.is_empty() {
-            return Err(CliError::EmptyField(field.to_owned()).to_string());
+        values.insert(label.to_string(), value.to_string());
+    }
+
+    for field in fields {
+        if !values.contains_key(field.label) {
+            if !field.can_be_empty {
+                return Err(CliError::EmptyField(field.label.to_owned()).to_string());
+            }
+            values.insert(field.label.to_owned(), String::new());
         }
-
-        values.insert(field.to_string(), value.to_string());
     }
-
-    match fields.iter().find(|(field, _)| !values.contains_key(field)) {
-        Some((missing, _)) => Err(CliError::EmptyField(missing.clone()).to_string()),
-        None => Ok(values),
-    }
+    Ok(values)
 }
 
 pub fn ask_for_secret(prompt: &str, out: Output) -> String {
@@ -269,8 +337,11 @@ pub fn flush_stdout(out: Output) {
 mod tests {
     use super::*;
 
-    fn fields(names: &[&str]) -> Vec<(String, Option<String>)> {
-        names.iter().map(|n| (n.to_string(), None)).collect()
+    fn fields(names: &[&'static str]) -> Vec<CommandLineFormField> {
+        names
+            .iter()
+            .map(|n| CommandLineFormField::new_non_empty(n, None))
+            .collect()
     }
 
     #[test]
@@ -335,6 +406,30 @@ mod tests {
     fn an_emptied_value_is_rejected() {
         let err = parse_edited(&fields(&["Name"]), "Name:   \n").unwrap_err();
         assert_eq!(err, "Name cannot be empty.");
+    }
+
+    #[test]
+    fn an_optional_field_may_be_emptied_or_deleted() {
+        let fields = vec![
+            CommandLineFormField::new_non_empty("Name", None),
+            CommandLineFormField::new_optional_form_field("Description", None),
+            CommandLineFormField::new_optional_form_field("Wildcard", None),
+        ];
+        let parsed = parse_edited(&fields, "Name: a\nDescription:\n").unwrap();
+        assert_eq!(parsed["Description"], "");
+        assert_eq!(parsed["Wildcard"], "");
+    }
+
+    #[test]
+    fn a_required_field_is_missing_without_flag_or_current_value() {
+        assert!(CommandLineFormField::new_non_empty("Name", None).is_missing());
+        assert!(CommandLineFormField::new_non_empty("Name", Some(String::new())).is_missing());
+        assert!(
+            !CommandLineFormField::new_non_empty("Name", None)
+                .default_value("a")
+                .is_missing()
+        );
+        assert!(!CommandLineFormField::new_optional_form_field("Description", None).is_missing());
     }
 
     #[test]
