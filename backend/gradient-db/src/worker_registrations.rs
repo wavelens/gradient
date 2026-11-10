@@ -169,7 +169,8 @@ fn scoring_summary_sql(window_hours: i64, limit: u64) -> String {
 
 crate::sql_fn! {
     SCORING_SUMMARY = || scoring_summary_sql(24, 2000),
-        params = [];
+        params = [],
+        tier = Bulk;
 }
 
 pub struct DispatchScore {

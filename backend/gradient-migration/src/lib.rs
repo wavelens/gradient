@@ -60,6 +60,7 @@ mod m20261124_000000_case_insensitive_username_unique_index;
 mod m20261125_000000_add_program_started_at_to_exec_job_attempt;
 mod m20261126_000000_delete_pending_requests_for_granted_access;
 mod m20261127_000000_delete_worker_registration_for_deleted_project_and_add_project_foreign_key;
+mod m20261128_000000_add_dispatched_at_desc_index_to_dispatched_job;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -145,6 +146,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261125_000000_add_program_started_at_to_exec_job_attempt::Migration),
             Box::new(m20261126_000000_delete_pending_requests_for_granted_access::Migration),
             Box::new(m20261127_000000_delete_worker_registration_for_deleted_project_and_add_project_foreign_key::Migration),
+            Box::new(m20261128_000000_add_dispatched_at_desc_index_to_dispatched_job::Migration),
         ]
     }
 }
