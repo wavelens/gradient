@@ -377,29 +377,11 @@ pub async fn put_integration(
     }
 
     let kind = parse_kind(&body.kind)?;
-
-    let existing =
-        gradient_db::integrations::by_name(&state.web_db, project.id, kind, body.name.as_str())
-            .await?;
-    if existing.is_some() {
-        return Err(WebError::already_exists(Resource::IntegrationName));
-    }
-
-    let supplied_secret = body
+    let secret = body
         .secret
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
-    let generated_secret =
-        (kind == IntegrationKind::Inbound && supplied_secret.is_none()).then(new_webhook_secret);
-    let encrypted_secret = match supplied_secret.or(generated_secret.as_deref()) {
-        Some(s) => Some(
-            encrypt_secret_with_file(&state.config.secrets.crypt_file, s)
-                .context("encrypt secret")?,
-        ),
-        None => None,
-    };
-
     let access_token = body
         .access_token
         .as_deref()
@@ -419,14 +401,6 @@ pub async fn put_integration(
         return Err(SharedRefusal::EmptyField("access_token").into());
     }
 
-    let encrypted_token = match access_token {
-        Some(t) => Some(
-            encrypt_secret_with_file(&state.config.secrets.crypt_file, t)
-                .context("encrypt token")?,
-        ),
-        None => None,
-    };
-
     let display_name = body
         .display_name
         .as_deref()
@@ -434,34 +408,117 @@ pub async fn put_integration(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .unwrap_or_else(|| body.name.to_string());
-
     let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?.filter(|v| !v.is_empty());
-    let integration = gradient_db::rows::insert::<EIntegration, _>(
+
+    let created = create_integrations_and_attach_matching_tasks(
         &state.web_db,
-        MIntegration {
-            id: IntegrationId::now_v7(),
+        &state.config.secrets.crypt_file,
+        &base,
+        SharedIntegrationCreationFields {
             project: project.id,
             name: body.name.into_inner(),
             display_name,
-            kind,
-            git_host_type: git_host,
-            secret: encrypted_secret,
+            git_host,
             endpoint_url,
-            access_token: encrypted_token,
-            allowed_ips,
-            github_installation: None,
             created_by: user.id,
+        },
+        vec![IntegrationToCreate {
+            kind,
+            secret,
+            access_token,
+            allowed_ips,
+        }],
+    )
+    .await?;
+    let response = created
+        .into_iter()
+        .next()
+        .context("The integration insert returned no rows.")?;
+    Ok(ok_json(response))
+}
+
+struct SharedIntegrationCreationFields {
+    project: ProjectId,
+    name: String,
+    display_name: String,
+    git_host: GitHostType,
+    endpoint_url: Option<String>,
+    created_by: UserId,
+}
+
+struct IntegrationToCreate<'a> {
+    kind: IntegrationKind,
+    secret: Option<&'a str>,
+    access_token: Option<&'a str>,
+    allowed_ips: Option<Vec<String>>,
+}
+
+async fn create_integrations_and_attach_matching_tasks(
+    db: &gradient_db::WebDb,
+    crypt_file: &str,
+    base: &WebhookBase<'_>,
+    shared: SharedIntegrationCreationFields,
+    rows: Vec<IntegrationToCreate<'_>>,
+) -> WebResult<Vec<IntegrationResponse>> {
+    for row in &rows {
+        if gradient_db::integrations::by_name(db, shared.project, row.kind, &shared.name)
+            .await?
+            .is_some()
+        {
+            return Err(WebError::already_exists(Resource::IntegrationName));
+        }
+    }
+
+    let mut prepared = Vec::with_capacity(rows.len());
+    for row in rows {
+        let generated_secret =
+            (row.kind == IntegrationKind::Inbound && row.secret.is_none()).then(new_webhook_secret);
+        let secret = match row.secret.or(generated_secret.as_deref()) {
+            Some(s) => Some(encrypt_secret_with_file(crypt_file, s).context("encrypt secret")?),
+            None => None,
+        };
+        let access_token = match row.access_token {
+            Some(t) => Some(encrypt_secret_with_file(crypt_file, t).context("encrypt token")?),
+            None => None,
+        };
+        let integration = MIntegration {
+            id: IntegrationId::now_v7(),
+            project: shared.project,
+            name: shared.name.clone(),
+            display_name: shared.display_name.clone(),
+            kind: row.kind,
+            git_host_type: shared.git_host,
+            secret,
+            endpoint_url: shared.endpoint_url.clone(),
+            access_token,
+            allowed_ips: row.allowed_ips,
+            github_installation: None,
+            created_by: shared.created_by,
             created_at: gradient_types::now(),
             managed: false,
-        },
-    )
-    .await
-    .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?;
+        };
+        prepared.push((integration, generated_secret));
+    }
 
-    let mut response = integration_response(&state.web_db, &base, integration).await?;
-    response.generated_secret = generated_secret;
-    response.connected_tasks = connect_tasks(&state.web_db, project.id).await;
-    Ok(ok_json(response))
+    let txn = db.inner().begin().await?;
+    let mut created = Vec::with_capacity(prepared.len());
+    for (integration, generated_secret) in prepared {
+        let integration = gradient_db::rows::insert::<EIntegration, _>(&txn, integration)
+            .await
+            .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?;
+        created.push((integration, generated_secret));
+    }
+    txn.commit().await?;
+
+    let connected_tasks = connect_tasks(db, shared.project).await;
+    let mut responses = Vec::with_capacity(created.len());
+    for (integration, generated_secret) in created {
+        let mut response = integration_response(db, base, integration).await?;
+        response.generated_secret = generated_secret;
+        response.connected_tasks = connected_tasks.clone();
+        responses.push(response);
+    }
+    Ok(responses)
 }
 
 async fn connect_tasks(db: &gradient_db::WebDb, project: ProjectId) -> Vec<String> {
@@ -506,7 +563,7 @@ fn new_webhook_secret() -> String {
     operation_id = "connectGitHost",
     tag = "integrations",
     summary = "Connect a Git host",
-    description = "Create a webhook receiver for a Gitea, Forgejo, or GitLab host and a status reporter with `access_token` present, in one call. Both integrations share `name`. Fields `inbound.generated_secret` and `inbound.webhook_url` in the response contain the generated webhook secret once and the address to enter into the Git host.",
+    description = "Create a webhook receiver for a Gitea, Forgejo, or GitLab host and a status reporter with `access_token` present, in one call. Both integrations share `name`. Fields `inbound.generated_secret` and `inbound.webhook_url` in the response contain the generated webhook secret once and the address to enter into the Git host. Existing tasks with repositories on this Git host connect to the new integration. Their task names appear in `connected_tasks`.",
     params(ProjectPath),
     request_body = ConnectGitHostRequest,
     responses((status = OK, description = "Created Integration", body = ConnectGitHostResponse), WebError)
@@ -535,71 +592,44 @@ pub async fn post_connect_git_host(
         .map(str::trim)
         .filter(|t| !t.is_empty());
 
-    for kind in [IntegrationKind::Inbound, IntegrationKind::Outbound] {
-        if gradient_db::integrations::by_name(&state.web_db, project.id, kind, &name)
-            .await?
-            .is_some()
-        {
-            return Err(WebError::already_exists(Resource::IntegrationName));
-        }
-    }
-
-    let crypt_file = &state.config.secrets.crypt_file;
-    let secret = new_webhook_secret();
-    let row = |kind, secret: Option<String>, access_token: Option<String>| MIntegration {
-        id: IntegrationId::now_v7(),
-        project: project.id,
-        name: name.clone(),
-        display_name: display_name.clone(),
-        kind,
-        git_host_type: git_host,
-        secret,
-        endpoint_url: Some(endpoint_url.clone()),
-        access_token,
+    let mut rows = vec![IntegrationToCreate {
+        kind: IntegrationKind::Inbound,
+        secret: None,
+        access_token: None,
         allowed_ips: None,
-        github_installation: None,
-        created_by: user.id,
-        created_at: gradient_types::now(),
-        managed: false,
-    };
-    let inbound_row = row(
-        IntegrationKind::Inbound,
-        Some(encrypt_secret_with_file(crypt_file, &secret).context("encrypt secret")?),
-        None,
-    );
-    let outbound_row = match token {
-        Some(t) => Some(row(
-            IntegrationKind::Outbound,
-            None,
-            Some(encrypt_secret_with_file(crypt_file, t).context("encrypt token")?),
-        )),
-        None => None,
-    };
-
-    let txn = state.web_db.inner().begin().await?;
-    let inbound = gradient_db::rows::insert::<EIntegration, _>(&txn, inbound_row)
-        .await
-        .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?;
-    let outbound = match outbound_row {
-        Some(r) => Some(
-            gradient_db::rows::insert::<EIntegration, _>(&txn, r)
-                .await
-                .map_err(|e| WebError::from_db_err(e, Resource::IntegrationName))?,
-        ),
-        None => None,
-    };
-    txn.commit().await?;
-
+    }];
+    if let Some(token) = token {
+        rows.push(IntegrationToCreate {
+            kind: IntegrationKind::Outbound,
+            secret: None,
+            access_token: Some(token),
+            allowed_ips: None,
+        });
+    }
     let base = WebhookBase {
         serve_url: &state.config.server.serve_url,
         project: &project.name,
     };
-    let mut inbound = integration_response(&state.web_db, &base, inbound).await?;
-    inbound.generated_secret = Some(secret);
-    let outbound = match outbound {
-        Some(o) => Some(integration_response(&state.web_db, &base, o).await?),
-        None => None,
-    };
+    let mut created = create_integrations_and_attach_matching_tasks(
+        &state.web_db,
+        &state.config.secrets.crypt_file,
+        &base,
+        SharedIntegrationCreationFields {
+            project: project.id,
+            name,
+            display_name,
+            git_host,
+            endpoint_url: Some(endpoint_url),
+            created_by: user.id,
+        },
+        rows,
+    )
+    .await?
+    .into_iter();
+    let inbound = created
+        .next()
+        .context("The integration insert returned no rows.")?;
+    let outbound = created.next();
     Ok(ok_json(ConnectGitHostResponse { inbound, outbound }))
 }
 
