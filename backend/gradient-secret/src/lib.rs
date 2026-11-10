@@ -10,6 +10,7 @@ use std::fmt;
 use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
 use page_locks::PageLockCounts;
+use subtle::ConstantTimeEq;
 
 pub struct SecretString(Box<str>);
 
@@ -45,12 +46,8 @@ impl SecretString {
 
 impl Drop for SecretString {
     fn drop(&mut self) {
-        // SAFETY: `Drop` is holding the only reference to `self.0`. The `String` buffer is `len`
-        // initialized bytes. One exclusive `&mut [u8]` over it is sound. Nothing is reading the
-        // contents afterwards.
-        zeroize_slice(unsafe {
-            std::slice::from_raw_parts_mut(self.0.as_ptr() as *mut u8, self.0.len())
-        });
+        // SAFETY: Zero bytes fill the buffer. All-zero buffers are valid UTF-8.
+        zeroize_slice(unsafe { self.0.as_bytes_mut() });
         munlock_slice(self.0.as_bytes());
     }
 }
@@ -63,7 +60,7 @@ impl Clone for SecretString {
 
 impl PartialEq for SecretString {
     fn eq(&self, other: &Self) -> bool {
-        self.expose() == other.expose()
+        self.expose().as_bytes().ct_eq(other.expose().as_bytes()).into()
     }
 }
 
@@ -128,7 +125,7 @@ impl Clone for SecretBytes {
 
 impl PartialEq for SecretBytes {
     fn eq(&self, other: &Self) -> bool {
-        self.expose() == other.expose()
+        self.expose().ct_eq(other.expose()).into()
     }
 }
 
@@ -257,6 +254,16 @@ mod tests {
         let text = SecretString::from_utf8(bytes).expect("UTF-8");
         assert_eq!(text.expose(), "s3cr3t-value");
         assert!(SecretString::from_utf8(SecretBytes::from(&[0xff, 0xfe][..])).is_none());
+    }
+
+    #[test]
+    fn secrets_compare_by_content() {
+        let text = SecretString::new("s3cr3t-value".to_owned());
+        assert_eq!(text, SecretString::new("s3cr3t-value".to_owned()));
+        assert_ne!(text, SecretString::new("s3cr3t-valuf".to_owned()));
+        assert_ne!(text, SecretString::new("s3cr3t".to_owned()));
+        assert_eq!(SecretBytes::from(&[1, 2][..]), SecretBytes::from(&[1, 2][..]));
+        assert_ne!(SecretBytes::from(&[1, 2][..]), SecretBytes::from(&[1, 3][..]));
     }
 
     #[test]

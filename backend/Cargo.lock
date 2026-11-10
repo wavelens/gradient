@@ -3244,6 +3244,7 @@ name = "gradient-secret"
 version = "2.0.1"
 dependencies = [
  "libc",
+ "subtle",
  "tracing",
 ]
 

@@ -19,4 +19,5 @@ workspace = true
 
 [dependencies]
 libc    = { workspace = true }
+subtle  = { workspace = true }
 tracing = { workspace = true }
