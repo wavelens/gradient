@@ -101,27 +101,25 @@ pub async fn any_evaluation_ever_has_entry_point_with_attribute<C: ConnectionTra
         .is_some())
 }
 
-fn self_finished_for_path(task: TaskId, attribute: &str) -> Select<EEntryPoint> {
-    let self_finished = Query::select()
-        .column(CEvaluation::Id)
-        .from(gradient_entity::evaluation::Entity)
-        .and_where(CEvaluation::Task.eq(task))
-        .and_where(CEvaluation::Status.is_in(EvaluationStatus::RUN_TIME_AVERAGE_STATUSES))
-        .to_owned();
-    EEntryPoint::find()
-        .filter(CEntryPoint::Task.eq(task))
-        .filter(CEntryPoint::Eval.eq(attribute))
-        .filter(CEntryPoint::Evaluation.in_subquery(self_finished))
-        .order_by_desc(CEntryPoint::CreatedAt)
-}
-
-pub async fn latest_self_finished_for_path<C: ConnectionTrait>(
+pub async fn newest_entry_points_for_task_attribute_path<C: ConnectionTrait>(
     db: &C,
     task: TaskId,
     attribute: &str,
     limit: u64,
 ) -> Result<Vec<MEntryPoint>, DbErr> {
-    self_finished_for_path(task, attribute)
+    let completed_or_failed = Query::select()
+        .column(CEvaluation::Id)
+        .from(gradient_entity::evaluation::Entity)
+        .and_where(CEvaluation::Task.eq(task))
+        .and_where(
+            CEvaluation::Status.is_in(EvaluationStatus::AVERAGE_RUN_TIME_EVALUATION_STATUSES),
+        )
+        .to_owned();
+    EEntryPoint::find()
+        .filter(CEntryPoint::Task.eq(task))
+        .filter(CEntryPoint::Eval.eq(attribute))
+        .filter(CEntryPoint::Evaluation.in_subquery(completed_or_failed))
+        .order_by_desc(CEntryPoint::CreatedAt)
         .limit(limit)
         .all(db)
         .await
@@ -154,12 +152,46 @@ mod tests {
         assert!(str::contains(&sql, r#""eval" ILIKE '%Hello%'"#), "{sql}");
     }
 
-    #[test]
-    fn metrics_read_entry_points_of_completed_and_failed_evaluations_only() {
-        let sql = self_finished_for_path(TaskId::now_v7(), "packages.hello")
-            .build(DatabaseBackend::Postgres)
-            .to_string();
-        assert!(str::contains(&sql, r#""status" IN (5, 6)"#), "{sql}");
+    #[tokio::test]
+    async fn metrics_read_entry_points_of_completed_and_failed_evaluations_only() {
+        const HELLO: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
+        let [completed, failed, aborted] = [(); 3].map(|_| EvaluationId::now_v7());
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(completed)
+            .evaluation_status(EvaluationStatus::Completed)
+            .derivation(HELLO)
+            .entry_point("packages.hello")
+            .evaluation(failed)
+            .same_task_as(completed)
+            .evaluation_status(EvaluationStatus::Failed)
+            .derivation(HELLO)
+            .entry_point("packages.hello")
+            .evaluation(aborted)
+            .same_task_as(completed)
+            .evaluation_status(EvaluationStatus::Aborted)
+            .derivation(HELLO)
+            .entry_point("packages.hello")
+            .into_database()
+            .await;
+        let task = db.rows::<EEntryPoint>().await[0].task;
+
+        let mut read: Vec<EvaluationId> = newest_entry_points_for_task_attribute_path(
+            &db.connection(),
+            task,
+            "packages.hello",
+            10,
+        )
+        .await
+        .expect("the entry points are read")
+        .into_iter()
+        .map(|entry_point| entry_point.evaluation)
+        .collect();
+        read.sort();
+
+        let mut expected = vec![completed, failed];
+        expected.sort();
+        assert_eq!(read, expected);
+        db.finish().await;
     }
 
     #[test]

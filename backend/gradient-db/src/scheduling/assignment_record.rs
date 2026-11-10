@@ -179,7 +179,7 @@ pub async fn latest_eval_jobs<C: ConnectionTrait>(
     Ok(rows.into_iter().collect())
 }
 
-pub async fn latest_assignment_id_for_job_keys<C: ConnectionTrait>(
+pub async fn find_newest_dispatched_job_assignment_for_job_keys<C: ConnectionTrait>(
     db: &C,
     job_keys: Vec<String>,
 ) -> Result<Option<(DispatchedJobId, EvaluationId, ProjectId)>, DbErr> {

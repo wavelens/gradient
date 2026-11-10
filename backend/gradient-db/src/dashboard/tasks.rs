@@ -47,7 +47,8 @@ fn task_facts_sql() -> String {
                 WHERE e.task = t.id AND {NON_PR} AND e.status IN ({run_time}) AND e.finished_at IS NOT NULL AND e.fetch_started_at IS NOT NULL \
                 ORDER BY e.created_at DESC LIMIT 30) r) sp ON true",
         term = terminal(),
-        run_time = crate::sql::status::eval_in(&EvaluationStatus::RUN_TIME_AVERAGE_STATUSES),
+        run_time =
+            crate::sql::status::eval_in(&EvaluationStatus::AVERAGE_RUN_TIME_EVALUATION_STATUSES),
     )
 }
 

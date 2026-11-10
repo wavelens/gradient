@@ -282,14 +282,16 @@ pub async fn get_latest_dispatched_job_for_pending_job_page(
     Path(id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<LatestAssignmentForEvaluationResponse>>> {
     use gradient_db::scheduling::assignment_record::{
-        BUILD_KEY_PREFIX, EVAL_KEY_PREFIX, EXEC_KEY_PREFIX, latest_assignment_id_for_job_keys,
+        BUILD_KEY_PREFIX, EVAL_KEY_PREFIX, EXEC_KEY_PREFIX,
+        find_newest_dispatched_job_assignment_for_job_keys,
     };
 
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let job_keys = [EVAL_KEY_PREFIX, BUILD_KEY_PREFIX, EXEC_KEY_PREFIX]
         .map(|prefix| format!("{prefix}{id}"))
         .to_vec();
-    let latest = latest_assignment_id_for_job_keys(&state.web_db, job_keys).await?;
+    let latest =
+        find_newest_dispatched_job_assignment_for_job_keys(&state.web_db, job_keys).await?;
     let evaluation = match latest {
         Some((_, evaluation, _)) => evaluation,
         None => by_id::<gradient_entity::exec_job::Entity, _>(&state.web_db, ExecJobId::from(id))

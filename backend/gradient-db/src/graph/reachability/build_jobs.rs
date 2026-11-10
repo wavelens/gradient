@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::evaluations::EvaluationItemFailureAndAbortBooleans;
+use crate::evaluations::EvaluationItemFailureAndAbortFlags;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
@@ -70,8 +70,8 @@ pub async fn eval_blocked<C: ConnectionTrait>(
 pub async fn read_shared_build_failure_and_abort_flags<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<EvaluationItemFailureAndAbortBooleans, DbErr> {
-    EvaluationItemFailureAndAbortBooleans::read(
+) -> Result<EvaluationItemFailureAndAbortFlags, DbErr> {
+    EvaluationItemFailureAndAbortFlags::read(
         db,
         &SELECT_SHARED_BUILD_FAILED_AND_ABORTED_FLAGS,
         evaluation,

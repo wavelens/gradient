@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
 
-use crate::error_with_causes_line_formatting::error_chain;
+use crate::error_cause_chain_formatting::error_chain;
 
 pub type PassError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type PassFuture = Pin<Box<dyn Future<Output = Result<(), PassError>> + Send>>;

@@ -6,7 +6,7 @@
 
 use super::evaluation_status::update_evaluation_status;
 use crate::DbContext;
-use crate::evaluations::EvaluationItemFailureAndAbortBooleans;
+use crate::evaluations::EvaluationItemFailureAndAbortFlags;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
@@ -56,7 +56,7 @@ pub async fn check_evaluation_done(
         crate::graph::reachability::read_shared_build_failure_and_abort_flags(db, evaluation_id)
             .await?;
     let exec_jobs = if shared_builds.failed {
-        EvaluationItemFailureAndAbortBooleans::default()
+        EvaluationItemFailureAndAbortFlags::default()
     } else {
         crate::exec_jobs::read_exec_jobs_failure_and_abort_flags(db, evaluation_id).await?
     };

@@ -202,9 +202,7 @@ pub fn counts(rows: &[TaskRow]) -> Counts {
     }
 }
 
-fn dashboard_task_row_project_and_task_display_name_and_slug_tie_break_sort_tuple(
-    row: &TaskRow,
-) -> (&str, &str, &str, &str) {
+fn task_row_tie_break_key(row: &TaskRow) -> (&str, &str, &str, &str) {
     (
         &row.project_display_name,
         &row.task_display_name,
@@ -221,14 +219,7 @@ pub fn rank(rows: &mut [TaskRow]) {
                 Reverse(a.latest.as_ref().map(|l| l.created_at))
                     .cmp(&Reverse(b.latest.as_ref().map(|l| l.created_at)))
             })
-            .then_with(|| {
-                dashboard_task_row_project_and_task_display_name_and_slug_tie_break_sort_tuple(a)
-                    .cmp(
-                    &dashboard_task_row_project_and_task_display_name_and_slug_tie_break_sort_tuple(
-                        b,
-                    ),
-                )
-            })
+            .then_with(|| task_row_tie_break_key(a).cmp(&task_row_tie_break_key(b)))
     });
 }
 

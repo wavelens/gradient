@@ -28,7 +28,7 @@ use gradient_types::{BuildAttemptId, EvaluationId, ExecJobAttemptId, MExecJob, W
 use sea_orm::{ConnectionTrait, DbErr};
 use std::sync::LazyLock;
 
-use crate::evaluations::EvaluationItemFailureAndAbortBooleans;
+use crate::evaluations::EvaluationItemFailureAndAbortFlags;
 use crate::sql::status::exec_in;
 
 pub fn exec_job_waiting_reason(job: &MExecJob) -> Option<WaitingReason> {
@@ -102,8 +102,8 @@ pub async fn count_waiting_exec_jobs<C: ConnectionTrait>(
 pub async fn read_exec_jobs_failure_and_abort_flags<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<EvaluationItemFailureAndAbortBooleans, DbErr> {
-    EvaluationItemFailureAndAbortBooleans::read(
+) -> Result<EvaluationItemFailureAndAbortFlags, DbErr> {
+    EvaluationItemFailureAndAbortFlags::read(
         db,
         &SELECT_EXEC_JOB_FAILED_AND_ABORTED_FLAGS,
         evaluation,

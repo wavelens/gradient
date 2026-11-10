@@ -12,7 +12,7 @@ use futures::stream::BoxStream;
 use gradient_entity::cache_upstream::{CacheUpstreamKind, Model as MCacheUpstream};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::CacheUpstreamId;
-use gradient_util::error_with_causes_line_formatting::error_chain;
+use gradient_util::error_cause_chain_formatting::error_chain;
 use gradient_util::http::{HttpVersion, build_version_download_client, upstream_download_client};
 
 use crate::upstream::{SampleKind, breakers};

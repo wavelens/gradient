@@ -5,7 +5,7 @@
  */
 
 pub mod debounce;
-pub mod error_with_causes_line_formatting;
+pub mod error_cause_chain_formatting;
 pub mod glob;
 pub mod http;
 pub mod http_validation;

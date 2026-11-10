@@ -73,7 +73,7 @@ pub async fn get_task_metrics(
         .await?
         .or_not_found(Resource::Task)?;
 
-    let evaluations = gradient_db::evaluations::latest_self_finished_evaluations_of_task(
+    let evaluations = gradient_db::evaluations::get_newest_completed_or_failed_task_evaluations(
         &state.web_db,
         task.id,
         task.keep_evaluations as u64,
@@ -243,7 +243,7 @@ pub async fn get_entry_point_metrics(
         .await?
         .or_not_found(Resource::Task)?;
 
-    let entry_points = gradient_db::entry_points::latest_self_finished_for_path(
+    let entry_points = gradient_db::entry_points::newest_entry_points_for_task_attribute_path(
         &state.web_db,
         task.id,
         &params.eval,

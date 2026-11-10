@@ -89,7 +89,7 @@ impl EvaluationStatus {
 
     pub const TERMINAL: [Self; 3] = [Self::Completed, Self::Failed, Self::Aborted];
 
-    pub const RUN_TIME_AVERAGE_STATUSES: [Self; 2] = [Self::Completed, Self::Failed];
+    pub const AVERAGE_RUN_TIME_EVALUATION_STATUSES: [Self; 2] = [Self::Completed, Self::Failed];
 
     pub const fn is_terminal(self) -> bool {
         matches!(self, Self::Completed | Self::Failed | Self::Aborted)
@@ -230,7 +230,10 @@ mod status_tests {
         );
         assert!(!EvaluationStatus::DOING_WORK_STATUSES.contains(&EvaluationStatus::Queued));
         assert!(!EvaluationStatus::DOING_WORK_STATUSES.contains(&EvaluationStatus::Waiting));
-        assert!(!EvaluationStatus::RUN_TIME_AVERAGE_STATUSES.contains(&EvaluationStatus::Aborted));
+        assert!(
+            !EvaluationStatus::AVERAGE_RUN_TIME_EVALUATION_STATUSES
+                .contains(&EvaluationStatus::Aborted)
+        );
     }
 
     #[test]

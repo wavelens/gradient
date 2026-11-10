@@ -59,12 +59,12 @@ pub async fn list_waiting_evaluations_with_a_task<C: ConnectionTrait>(
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct EvaluationItemFailureAndAbortBooleans {
+pub struct EvaluationItemFailureAndAbortFlags {
     pub failed: bool,
     pub aborted: bool,
 }
 
-impl EvaluationItemFailureAndAbortBooleans {
+impl EvaluationItemFailureAndAbortFlags {
     pub(crate) async fn read<C: ConnectionTrait>(
         db: &C,
         query: &crate::sql::Query,
@@ -151,14 +151,14 @@ pub async fn latest_completed_of_task<C: ConnectionTrait>(
         .await
 }
 
-pub async fn latest_self_finished_evaluations_of_task<C: ConnectionTrait>(
+pub async fn get_newest_completed_or_failed_task_evaluations<C: ConnectionTrait>(
     db: &C,
     task: TaskId,
     limit: u64,
 ) -> Result<Vec<MEvaluation>, DbErr> {
     EEvaluation::find()
         .filter(CEvaluation::Task.eq(task))
-        .filter(CEvaluation::Status.is_in(EvaluationStatus::RUN_TIME_AVERAGE_STATUSES))
+        .filter(CEvaluation::Status.is_in(EvaluationStatus::AVERAGE_RUN_TIME_EVALUATION_STATUSES))
         .order_by_desc(CEvaluation::CreatedAt)
         .limit(limit)
         .all(db)
