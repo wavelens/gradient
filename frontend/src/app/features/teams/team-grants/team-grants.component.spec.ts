@@ -219,6 +219,39 @@ describe('TeamGrantsComponent', () => {
     });
   });
 
+  it('splits approved grants from team requests that await approval', () => {
+    const pendingGrant: TeamGrantEntry = { team: 'design', display_name: 'Design', role: 'View', users: true, workers: false, pending: true };
+    const { fixture, service, text } = setup('project', 'users');
+    service.projectGrants = () => of([...grants, pendingGrant]);
+    fixture.componentRef.setInput('whichGrantsToShow', 'approved');
+    fixture.componentInstance.load();
+    fixture.detectChanges();
+    expect(text()).toContain('Platform');
+    expect(text()).not.toContain('Design');
+    expect(text()).toContain('Grant Team');
+    fixture.componentRef.setInput('whichGrantsToShow', 'pending');
+    fixture.detectChanges();
+    expect(text()).toContain('Team Requests');
+    expect(text()).toContain('Design');
+    expect(text()).not.toContain('Platform');
+    expect(text()).not.toContain('Grant Team');
+  });
+
+  it('says so when no team request awaits approval', () => {
+    const { fixture, text } = setup('project', 'users');
+    fixture.componentRef.setInput('whichGrantsToShow', 'pending');
+    fixture.detectChanges();
+    expect(text()).toContain('No team requests await approval.');
+  });
+
+  it('names the people who get their role through each team', () => {
+    const { fixture, text } = setup('project', 'users');
+    fixture.componentRef.setInput('teamGrantUsernamesByTeamName', { platform: ['carol', 'dave'] });
+    fixture.detectChanges();
+    expect(text()).toContain('Role Write · Members: carol, dave');
+    expect(text()).not.toMatch(/Role View\s*·/);
+  });
+
   it('hands the grants with member roles to the page after each load', () => {
     const { component } = setup('project');
     const received = vi.fn();

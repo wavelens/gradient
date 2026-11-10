@@ -1,0 +1,106 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Members">
+  <gr-link-tabs slot="banner" ariaLabel="Members" [tabs]="tabs()" />
+  @if (!shouldShowNoAccessStateOnCachePage()) {
+    <button
+      slot="actions"
+      *appWritable="access()"
+      grButton
+      label="Invite Member"
+      icon="person_add"
+      [appManagedDisable]="access()"
+      (click)="showAddMemberDialog.set(true)"
+    ></button>
+  }
+  <app-server-configuration-managed-banner [access]="access()" [kind]="kind" />
+  @if (tabContentNoAccessError(); as noAccessError) {
+    <gr-load-state [error]="noAccessError" />
+  } @else {
+    @switch (tab) {
+      @case ('people') {
+        <gr-settings-section
+          title="People"
+          [description]="kind === 'team' ? '' : 'Direct roles set that person\'s role here. Team grants apply only to people with no direct role.'"
+          [card]="false"
+        >
+          <gr-load-state
+            [loading]="peopleLoading()"
+            [error]="peopleLoadError()"
+            [empty]="rows().length === 0"
+            loadingMessage="Loading members..."
+            errorTitle="Couldn't load members"
+            emptyIcon="group"
+            emptyTitle="No members"
+            emptyMessage="Invite people to grant access."
+            (retry)="loadMembers()"
+          >
+            <app-project-members-access-list
+              [rows]="rows()"
+              [roleOptions]="roleOptions()"
+              [access]="access()"
+              [pendingMemberRoleSelection]="pendingMemberRoleSelection()"
+              [memberOnlyAdminDisabledReason]="memberOnlyAdminDisabledReason()"
+              (personRoleChange)="updateMemberRole($event)"
+              (removeMember)="removeMember($event)"
+            />
+          </gr-load-state>
+        </gr-settings-section>
+      }
+      @case ('teams') {
+        @if (kind !== 'team') {
+          <app-team-grants
+            [kind]="kind"
+            [name]="name"
+            [roles]="roleNames()"
+            [cacheWithViewerPermissions]="cache()"
+            [canEdit]="access().canEdit && !access().managed"
+            [teamGrantUsernamesByTeamName]="teamGrantUsernamesByTeamName()"
+            whichGrantsToShow="approved"
+          />
+        }
+      }
+      @case ('pending') {
+        <app-pending-invitations-and-team-grant-requests
+          [kind]="kind"
+          [name]="name"
+          [requests]="requests"
+          [access]="access()"
+          [roleNames]="roleNames()"
+          [cache]="cache()"
+        />
+      }
+      @case ('roles') {
+        @if (kind !== 'team' && roleRequests) {
+          <app-project-or-cache-roles-list
+            [kind]="kind"
+            [name]="name"
+            [roleRequests]="roleRequests"
+            [requests]="requests"
+            [roleAccess]="roleAccess()"
+            [canManageMembers]="access().canEdit"
+            [roles]="roles()"
+            [availablePermissions]="availablePermissions()"
+            [rolesLoading]="rolesLoading()"
+            [rolesLoadError]="rolesLoadError()"
+            [rows]="rows()"
+            (roleListChanged)="loadRoles()"
+          />
+        }
+      }
+    }
+  }
+</gr-page-layout>
+
+<app-invite-person-dialog
+  [(visible)]="showAddMemberDialog"
+  [kind]="kind"
+  [requests]="requests"
+  [roleOptions]="roleOptions()"
+  [rows]="rows()"
+  (personAddedOrInvited)="reloadPeopleRowsInBackgroundKeepingOldRowsOnFailure()"
+/>

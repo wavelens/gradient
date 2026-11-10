@@ -9,7 +9,7 @@ import { EMPTY, Observable, catchError } from 'rxjs';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 
-type MemberPlace = 'project' | 'cache' | 'team';
+export type MemberPlace = 'project' | 'cache' | 'team';
 
 export interface OwnRoleChangeDialogInput<T> {
   place: MemberPlace;

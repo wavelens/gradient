@@ -6,6 +6,7 @@
 
 <gr-page-layout [breadcrumb]="breadcrumb()" [title]="team()?.display_name || teamName">
   <gr-copy-field slot="meta" inline [value]="teamName" copyLabel="Copy team name for CLI" />
+  <a slot="actions" grButton label="Members" icon="group" severity="secondary" [routerLink]="links.membersPage('team', teamName)"></a>
   @if (isAdmin()) {
     <a slot="actions" grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.teamPage(teamName, 'settings')"></a>
   }
@@ -29,15 +30,13 @@
       </gr-settings-section>
     }
 
-    <app-team-members [team]="team" (currentUserTeamAccessChanged)="navigateToTeamListOrReloadTeam($event)" />
-
     @if (isAdmin() || grantsLoadError() || grants().projects.length + grants().caches.length > 0) {
       <gr-settings-section title="Projects and Caches" [card]="false">
         <gr-load-state flat [loading]="grantsLoading()" [error]="grantsLoadError()"
           [empty]="grants().projects.length + grants().caches.length === 0"
           loadingMessage="Loading projects and caches..." errorTitle="Failed to load projects and caches" (retry)="loadGrants()"
           [emptyIcon]="entityKindToIconName.project" emptyTitle="No projects or caches"
-          emptyMessage="The team has no access to projects or caches yet. An admin of a project or cache grants access on the 'Members & Roles' page of that project or cache.">
+          emptyMessage="This team can't access projects or caches yet. Project or cache admins grant access on the Teams tab of the Members page of that project or cache.">
           <a slot="empty-action" grButton label="Projects" [icon]="entityKindToIconName.project" severity="secondary" [routerLink]="links.projects()"></a>
           <a slot="empty-action" grButton label="Caches" [icon]="entityKindToIconName.cache" severity="secondary" [routerLink]="links.caches()"></a>
           <gr-row-list>

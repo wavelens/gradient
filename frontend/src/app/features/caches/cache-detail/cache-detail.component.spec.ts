@@ -195,7 +195,7 @@ describe('CacheDetailComponent empty and inactive caches', () => {
 });
 
 describe('CacheDetailComponent header', () => {
-  function render(authenticated: boolean, permissions: string[] = []) {
+  function render(authenticated: boolean, permissions: string[] = [], role: string | null = null, superuser = false) {
     const starred = vi.fn(() => of(true));
     TestBed.configureTestingModule({
       imports: [CacheDetailComponent],
@@ -212,8 +212,8 @@ describe('CacheDetailComponent header', () => {
             getSubscriptionRequests: () => of([{ project: 'p1' }, { project: 'p2' }]),
           },
         },
-        { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) }, parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', public_key: OWN_KEY, public: true, active: true, permissions } } }) } } },
-        { provide: AuthService, useValue: { isAuthenticated: () => authenticated, user: () => null } },
+        { provide: ActivatedRoute, useValue: { snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) }, parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', public_key: OWN_KEY, public: true, active: true, permissions, role } } }) } } },
+        { provide: AuthService, useValue: { isAuthenticated: () => authenticated, user: () => (authenticated ? { superuser } : null) } },
         { provide: StarsService, useValue: { starred, set: () => of(true) } },
       ],
     });
@@ -230,6 +230,15 @@ describe('CacheDetailComponent header', () => {
 
   it('shows no star to a guest', () => {
     expect(render(false).root.querySelector('gr-star-button')).toBeNull();
+  });
+
+  it('links cache members and instance administrators to the Members page, but not guests', () => {
+    const membersLink = (root: HTMLElement) => root.querySelector('[slot="actions"] a[href="/caches/main/members/people"]');
+    expect(membersLink(render(true, ['viewCache'], 'View').root)).not.toBeNull();
+    TestBed.resetTestingModule();
+    expect(membersLink(render(false).root)).toBeNull();
+    TestBed.resetTestingModule();
+    expect(membersLink(render(true, [], null, true).root)).not.toBeNull();
   });
 
   it('show projects that use the cache as links and omit private projects', () => {

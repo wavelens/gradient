@@ -39,7 +39,7 @@ const every: UrlTree[] = [
   links.register(),
   links.projects(),
   links.project('p'),
-  ...(['settings', 'members', 'workers', 'integrations', 'secrets', 'webhooks', 'caches'] as const)
+  ...(['settings', 'workers', 'integrations', 'secrets', 'webhooks', 'caches'] as const)
     .map((page) => links.projectPage('p', page)),
   links.workerMetrics('p', 'w'),
   links.subscribeToCache('p', 'c'),
@@ -56,12 +56,15 @@ const every: UrlTree[] = [
   links.closure('p', 'build', 'b'),
   links.caches(),
   links.cache('c'),
-  ...(['settings', 'upstream-caches', 'nars', 'members-roles', 'subscriptions', 'webhooks'] as const)
+  ...(['settings', 'upstream-caches', 'nars', 'subscriptions', 'webhooks'] as const)
     .map((page) => links.cachePage('c', page)),
   links.teams(),
   links.team('t'),
   links.teamPage('t', 'settings'),
   links.teamPage('t', 'webhooks'),
+  ...(['people', 'teams', 'pending', 'roles'] as const).flatMap((tab) => [links.membersPage('project', 'p', tab), links.membersPage('cache', 'c', tab)]),
+  links.membersPage('team', 't'),
+  links.membersPage('team', 't', 'pending'),
   ...(['overview', 'live', 'scheduler', 'throughput', 'durations', 'workers', 'cache', 'network', 'health', 'storage',
     'expensive'] as const).map((tab) => links.board(tab)),
   links.boardJob('j'),
@@ -79,6 +82,12 @@ describe('links', () => {
     const config = await awaitLoadChildrenCallbacksAndReturnRoutesWithPlainChildren(routes);
     const missing = every.map(String).filter((_, i) => !matches(config, path(every[i])));
     expect(missing).toEqual([]);
+  });
+
+  it('opens the Members page of a project, cache or team on the given tab, People by default', () => {
+    expect(String(links.membersPage('project', 'p'))).toBe('/project/p/members/people');
+    expect(String(links.membersPage('cache', 'c', 'teams'))).toBe('/caches/c/members/teams');
+    expect(String(links.membersPage('team', 't', 'pending'))).toBe('/team/t/members/pending');
   });
 
   it('opens a board exec job on its page under the task', () => {

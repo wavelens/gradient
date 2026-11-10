@@ -22,6 +22,7 @@ import {
   ApiKeyPermissionsResponse,
   ApiKeyVisibleProjectsAndCachesWithPermissionsResponse,
   UserSearchResult,
+  UserAccessSummary,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -126,5 +127,9 @@ export class UserService {
 
   searchUsers(query: string): Observable<UserSearchResult[]> {
     return this.api.get<UserSearchResult[]>(`user/search?q=${encodeURIComponent(query)}`);
+  }
+
+  getProjectsCachesAndTeamsCurrentUserCanReach(): Observable<UserAccessSummary> {
+    return this.api.get<UserAccessSummary>('user/access');
   }
 }

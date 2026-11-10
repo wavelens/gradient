@@ -54,6 +54,7 @@ import { injectPendingSubscriptionRequestCount } from '../pending-subscription-r
 import { oneOf, queryParamSignal } from '@shared/routing';
 import { FormsModule } from '@angular/forms';
 import { links } from '@shared/routing';
+import { isViewerCacheMember } from '@shared/access';
 
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';
 
@@ -110,6 +111,7 @@ export class CacheDetailComponent implements OnInit {
   private access = injectCacheAccessData();
   protected editAccess = injectCacheAccess();
   cache = computed<CacheResponse | null>(() => this.access()?.cache ?? null);
+  canOpenMembers = computed(() => isViewerCacheMember(this.cache()) || this.authService.user()?.superuser === true);
   statsLoading = signal(true);
   stats = signal<CacheStatsResponse | null>(null);
   statsError = signal<unknown>(null);

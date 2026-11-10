@@ -32,7 +32,6 @@ import {
   ManagedDisableDirective,
   ServerConfigurationManagedBannerComponent,
   AccessService,
-  isViewerCacheMember,
   injectSaveSettingsWithPrivateToPublicConfirmation,
 } from '@shared/access';
 import { injectCacheAccess, injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
@@ -128,7 +127,6 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   manageCacheSubscriptionsAccess = injectCacheAccessTo('manageCacheSubscriptions');
   webhooksAccess = injectCacheAccessTo('manageCacheWebhooks');
   pendingSubscriptionRequestCount = injectPendingSubscriptionRequestCount();
-  viewerIsCacheMember = computed(() => isViewerCacheMember(this.resolved()?.cache));
 
   loading = signal(true);
   loadError = signal<unknown>(null);

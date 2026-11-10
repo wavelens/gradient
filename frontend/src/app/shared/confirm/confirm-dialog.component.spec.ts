@@ -5,7 +5,9 @@
  */
 
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
+import { links } from '@shared/routing';
 import { ApiError } from '@core/services/api.service';
 import { ConfirmDialogComponent } from './confirm-dialog.component';
 import { ConfirmRequest, ConfirmService } from './confirm.service';
@@ -112,5 +114,33 @@ describe('ConfirmDialogComponent', () => {
     fixture.detectChanges();
     expect(attempts).toBe(2);
     expect(asked.results).toEqual(['removed']);
+  });
+
+  it('links the consequence to a related page and cancels the action when followed', async () => {
+    TestBed.configureTestingModule({ imports: [ConfirmDialogComponent], providers: [provideRouter([{ path: '**', children: [] }])] });
+    const fixture = TestBed.createComponent(ConfirmDialogComponent);
+    fixture.detectChanges();
+    const action = vi.fn(() => of('removed'));
+    TestBed.inject(ConfirmService)
+      .confirm({
+        title: 'Remove member',
+        target: 'carol',
+        consequence: 'Roles for carol still include View through Alice Team.',
+        consequenceLink: { label: 'Open Alice Team', link: links.team('alice-team') },
+        confirmLabel: 'Remove',
+        failure: "Couldn't delete member",
+        action,
+      })
+      .subscribe();
+    fixture.detectChanges();
+
+    const link = document.querySelector<HTMLAnchorElement>('.gr-dialog a');
+    expect(link?.textContent).toBe('Open Alice Team');
+    expect(link?.getAttribute('href')).toBe('/team/alice-team');
+    link!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(TestBed.inject(ConfirmService).pending()).toBeNull();
+    expect(action).not.toHaveBeenCalled();
   });
 });

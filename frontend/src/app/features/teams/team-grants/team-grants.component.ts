@@ -44,6 +44,7 @@ import {
 import { links } from '@shared/routing';
 
 export type GrantedPart = 'users' | 'workers';
+export type TeamGrantStatusFilter = 'all' | 'approved' | 'pending';
 
 interface GrantForm {
   team: string;
@@ -87,6 +88,8 @@ export class TeamGrantsComponent implements OnInit {
   grants = input<GrantedPart>('users');
   roles = input<string[]>([]);
   canEdit = input(false);
+  whichGrantsToShow = input<TeamGrantStatusFilter>('all');
+  teamGrantUsernamesByTeamName = input<Record<string, readonly string[]>>({});
   changed = output<void>();
   teamGrantsWithMemberRoles = output<TeamGrantEntry[]>();
 
@@ -95,8 +98,14 @@ export class TeamGrantsComponent implements OnInit {
   allGrants = signal<TeamGrantEntry[]>([]);
   loading = signal(true);
   loadError = signal<unknown>(null);
-  shownGrants = computed(() => this.allGrants().filter((grant) => grant[this.part()]));
+  shownGrants = computed(() => {
+    const status = this.whichGrantsToShow();
+    return this.allGrants()
+      .filter((grant) => grant[this.part()])
+      .filter((grant) => status === 'all' || grant.pending === (status === 'pending'));
+  });
   emptyMessage = computed(() => {
+    if (this.whichGrantsToShow() === 'pending') return 'No team requests await approval.';
     const workers = this.part() === 'workers';
     if (workers) return this.canEdit() ? "Grant a team to run this project's builds on the team's workers." : "No team's workers run this project's builds.";
     const base = this.canEdit() ? 'Grant a team to give its members a role here.' : 'No team has a role here.';

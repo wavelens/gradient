@@ -24,6 +24,7 @@ function render(
   getTasks: () => Observable<unknown> = () => of(NO_TASKS),
   access: Partial<ProjectResponse> = { role: 'Admin', permissions: EVERY_PERMISSION },
   subscribedCaches: CacheSubscriptionItem[] = [],
+  superuser = false,
 ) {
   const starred = vi.fn(() => of(true));
   const tasks = vi.fn(getTasks);
@@ -41,7 +42,7 @@ function render(
           },
         },
       },
-      { provide: AuthService, useValue: { isAuthenticated: () => authenticated } },
+      { provide: AuthService, useValue: { isAuthenticated: () => authenticated, user: () => (authenticated ? { superuser } : null) } },
       { provide: TasksService, useValue: { getTasks: tasks } },
       { provide: StarsService, useValue: { starred, set: () => of(true) } },
       { provide: ProjectsService, useValue: { getSubscribedCaches, getProject: () => NEVER } },
@@ -156,6 +157,15 @@ describe('ProjectDetailComponent header', () => {
     const copy = render(false).root.querySelector('gr-copy-field[slot="meta"]');
     expect(copy?.querySelector('code')?.textContent).toBe('acme');
     expect(copy?.querySelector('button')?.getAttribute('aria-label')).toBe('Copy project name for CLI');
+  });
+
+  it('links members and instance administrators to the Members page, but not visitors without a role', () => {
+    const membersLink = (root: HTMLElement) => root.querySelector('[slot="actions"] a[href="/project/acme/members/people"]');
+    expect(membersLink(render(true, undefined, { role: 'View', permissions: ['viewProject'] }).root)).not.toBeNull();
+    TestBed.resetTestingModule();
+    expect(membersLink(render(true, undefined, { role: null, permissions: [] }).root)).toBeNull();
+    TestBed.resetTestingModule();
+    expect(membersLink(render(true, undefined, { role: null, permissions: [] }, [], true).root)).not.toBeNull();
   });
 
   it('offers a viewer neither Settings nor Connect repository, like the task header', () => {

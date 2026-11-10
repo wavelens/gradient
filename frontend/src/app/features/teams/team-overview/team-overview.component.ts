@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, linkedSignal, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -24,7 +24,6 @@ import {
   RowListComponent,
   SettingsSectionComponent,
 } from '@gradient/ui/ui';
-import { TeamMembersComponent } from '../team-members/team-members.component';
 import { TeamWorkersComponent } from '../team-workers/team-workers.component';
 import { links } from '@shared/routing';
 import { EMPTY, merge, tap } from 'rxjs';
@@ -39,7 +38,6 @@ import { runReloadIntervalWhileTabVisible } from '@shared/paging';
     ButtonComponent,
     CopyFieldComponent,
     LoadStateComponent,
-    TeamMembersComponent,
     TeamWorkersComponent,
     PageLayoutComponent,
     RowComponent,
@@ -54,7 +52,6 @@ export class TeamOverviewComponent implements OnInit {
   protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
   private route = inject(ActivatedRoute);
-  private router = inject(Router);
   private teams = inject(TeamsService);
   private crumbs = inject(BreadcrumbsService);
   private authService = inject(AuthService);
@@ -65,7 +62,7 @@ export class TeamOverviewComponent implements OnInit {
 
   teamName = '';
   breadcrumb = computed(() => this.crumbs.team(this.teamName));
-  team = linkedSignal<TeamResponse | null>(() => this.resolvedTeam() ?? null);
+  team = computed<TeamResponse | null>(() => this.resolvedTeam() ?? null);
   grants = signal<TeamGrants>({ projects: [], caches: [] });
   grantsLoading = signal(true);
   grantsLoadError = signal<unknown>(null);
@@ -122,17 +119,6 @@ export class TeamOverviewComponent implements OnInit {
         action: () => this.teams.denyRequest(this.teamName, request.id),
       })
       .subscribe(() => this.decided('Request denied'));
-  }
-
-  navigateToTeamListOrReloadTeam(removed: boolean): void {
-    if (removed && !this.authService.user()?.superuser) {
-      void this.router.navigateByUrl(links.teams());
-      return;
-    }
-    this.teams.get(this.teamName).subscribe({
-      next: (team) => this.team.set(team),
-      error: () => void this.router.navigateByUrl(links.teams()),
-    });
   }
 
   private decided(done: string): void {

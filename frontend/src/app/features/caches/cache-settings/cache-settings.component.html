@@ -141,16 +141,6 @@
           Upstream Caches
           <span slot="meta">External and internal caches this cache pulls through from</span>
         </gr-row>
-        @if (viewerIsCacheMember()) {
-          <gr-row
-            icon="group"
-            linkLabel="Members and roles"
-            [link]="links.cachePage(cacheName, 'members-roles')"
-          >
-            Members &amp; Roles
-            <span slot="meta">Who has access to this cache, and what they can do</span>
-          </gr-row>
-        }
         @if (manageCacheSubscriptionsAccess().canEdit) {
           <gr-row
             icon="hub"

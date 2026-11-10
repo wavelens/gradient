@@ -10,7 +10,6 @@ import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
 import {
   Paginated,
-  MemberItem,
   RoleListResponse_CacheRoleOwner,
   RoleResponse_CacheRoleOwner,
   Cache,
@@ -32,6 +31,8 @@ import {
   PatchUpstreamRequest,
   CreateRoleRequest,
   PatchRoleRequest,
+  PersonWithAccessToProjectOrCache,
+  AddMemberRequest,
 } from '@core/models';
 
 export interface NarListQuery {
@@ -170,12 +171,13 @@ export class CachesService {
     return this.api.delete<string>(`caches/${cache}/subscription-requests/${project}`);
   }
 
-  getMembers(cache: string): Observable<MemberItem[]> {
-    return this.api.get<MemberItem[]>(`caches/${cache}/members`);
+  getAccess(cache: string): Observable<PersonWithAccessToProjectOrCache[]> {
+    return this.api.get<PersonWithAccessToProjectOrCache[]>(`caches/${cache}/access`);
   }
 
-  addMember(cache: string, user: string, role: string): Observable<string> {
-    return this.api.post<string>(`caches/${cache}/members`, { user, role });
+  addMember(cache: string, user: string, role: string, addNow: boolean): Observable<string> {
+    const request: AddMemberRequest = { user, role, add_as_member_immediately: addNow };
+    return this.api.post<string>(`caches/${cache}/members`, request);
   }
 
   updateMember(cache: string, user: string, role: string): Observable<string> {

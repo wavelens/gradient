@@ -5,10 +5,10 @@
  */
 
 import { inject } from '@angular/core';
-import { Routes } from '@angular/router';
+import { Route, Routes } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
-import { links } from '@shared/routing';
+import { links, type MembersPageTab } from '@shared/routing';
 import { authGuard, redirectSignedInUserToDashboardGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
 import { publicListingGuard } from '@core/guards/public-listing.guard';
@@ -24,6 +24,21 @@ import { cacheAccessResolver, shouldRefetchCacheRecordOnCacheNameOrCacheRecordPa
 import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
 import { evaluationAccessResolver } from '@core/resolvers/evaluation-access.resolver';
 import { teamAccessResolver } from '@core/resolvers/team-access.resolver';
+
+const projectAndCacheMembersPageTabs: MembersPageTab[] = ['people', 'teams', 'pending', 'roles'];
+
+function getMembersPageTabRoutesForPathPrefix(prefix: string, tabs: MembersPageTab[], extra: Route): Route[] {
+  return [
+    { path: prefix, pathMatch: 'full', redirectTo: `${prefix}/people` },
+    ...tabs.map((tab): Route => ({
+      path: `${prefix}/${tab}`,
+      title: 'Members',
+      data: { membersPageTab: tab },
+      loadComponent: () => import('./shared/members-page/members-page.component').then((m) => m.MembersPageComponent),
+      ...extra,
+    })),
+  ];
+}
 
 export const routes: Routes = [
   // Authentication routes (public)
@@ -281,15 +296,7 @@ export const routes: Routes = [
             (m) => m.CacheNarsComponent,
           ),
       },
-      {
-        path: 'members-roles',
-        title: 'Cache Members & Roles',
-        canActivate: [authGuard],
-        loadComponent: () =>
-          import('./features/caches/members-roles/cache-members-roles.component').then(
-            (m) => m.CacheMembersRolesComponent,
-          ),
-      },
+      ...getMembersPageTabRoutesForPathPrefix('members', projectAndCacheMembersPageTabs, { canActivate: [authGuard] }),
       {
         path: 'subscriptions',
         title: 'Cache Subscriptions',
@@ -359,15 +366,9 @@ export const routes: Routes = [
             (m) => m.ProjectSettingsComponent
           ),
       },
-      {
-        path: 'project/:project/members',
-        title: 'Members & Roles',
+      ...getMembersPageTabRoutesForPathPrefix('project/:project/members', projectAndCacheMembersPageTabs, {
         resolve: { projectAccess: projectAccessResolver },
-        loadComponent: () =>
-          import('./features/projects/members-roles/members-roles.component').then(
-            (m) => m.MembersRolesComponent
-          ),
-      },
+      }),
 
       // Workers
       {
@@ -412,6 +413,9 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/teams/team-settings/team-settings.component').then((m) => m.TeamSettingsComponent),
       },
+      ...getMembersPageTabRoutesForPathPrefix('team/:team/members', ['people', 'pending'], {
+        resolve: { teamAccess: teamAccessResolver },
+      }),
       {
         path: 'team/:team/webhooks',
         title: 'Team event notifications',

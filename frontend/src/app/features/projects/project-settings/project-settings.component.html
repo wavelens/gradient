@@ -124,10 +124,6 @@
   @if (isViewerProjectMember()) {
   <gr-settings-section title="More Settings" [card]="false">
     <gr-row-list>
-      <gr-row icon="group" linkLabel="Members and roles" [link]="links.projectPage(projectName, 'members')">
-        Members &amp; Roles
-        <span slot="meta">Who is in this project and what they can do</span>
-      </gr-row>
       <gr-row icon="construction" linkLabel="Workers" [link]="links.projectPage(projectName, 'workers')">
         Workers
         <span slot="meta">Build workers registered to this project</span>

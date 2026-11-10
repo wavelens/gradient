@@ -1,0 +1,93 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-settings-section title="Roles" [card]="false">
+  <button
+    slot="actions"
+    *appWritable="roleAccess()"
+    grButton
+    label="New Role"
+    icon="add"
+    severity="secondary"
+    (click)="openCreateRoleDialog()"
+    [disabled]="rolesLoading() || availablePermissions().length === 0"
+    [appManagedDisable]="roleAccess()"
+  ></button>
+  <gr-load-state
+    [loading]="rolesLoading()"
+    [error]="rolesLoadError()"
+    [empty]="roles().length === 0"
+    loadingMessage="Loading roles..."
+    errorTitle="Couldn't load roles"
+    emptyIcon="shield"
+    emptyTitle="No roles"
+    emptyMessage="Create a role to describe what members may do."
+    (retry)="roleListChanged.emit()"
+  >
+    <gr-row-list>
+      @for (role of roles(); track role.id) {
+        @let holders = holderSummaryByRoleName()[role.name];
+        <gr-row icon="shield">
+          {{ role.name }}
+          @if (role.builtin) {
+            <gr-badge>Built-in</gr-badge>
+          }
+          <span slot="meta">{{ holders.text }} · {{ rolePermissionLabel(role) }}</span>
+          <div slot="actions">
+            @if (!role.builtin) {
+              <button
+                *appWritable="roleAccess()"
+                grButton
+                label="Edit"
+                icon="edit"
+                severity="secondary"
+                [attr.aria-label]="'Edit role ' + role.name"
+                [disabled]="savingRole() || deletingRole()"
+                [appManagedDisable]="roleAccess()"
+                (click)="openEditRoleDialog(role)"
+              ></button>
+              <button
+                *appWritable="roleAccess()"
+                grButton
+                label="Delete"
+                icon="delete"
+                severity="danger"
+                [attr.aria-label]="'Delete role ' + role.name"
+                [disabled]="savingRole() || deletingRole()"
+                [disabledReason]="holders.total > 0 ? 'Assign another role to the members, teams and invitations of this role before deletion.' : null"
+                [appManagedDisable]="roleAccess()"
+                (click)="deleteRole(role)"
+              ></button>
+            }
+          </div>
+        </gr-row>
+      }
+    </gr-row-list>
+  </gr-load-state>
+</gr-settings-section>
+
+<gr-dialog
+  #roleDialog
+  [header]="editingRole() ? 'Edit Role' : 'New Role'"
+  [(visible)]="showRoleDialog"
+  [error]="roleError()"
+  [busy]="savingRole()"
+  [confirmDiscard]="formChanges.changed()"
+  width="520px"
+>
+  <gr-form-field label="Name" for="role-name" required hint="Lowercase letters, digits and hyphens."
+    [invalid]="(roleAttempted() || roleNameModel.dirty) && !!roleNameError()" [error]="roleNameError() ?? ''">
+    <input grInput id="role-name" [(ngModel)]="roleForm.name" #roleNameModel="ngModel" placeholder="e.g. releaser" (keyup.enter)="saveRole()" />
+  </gr-form-field>
+  <gr-form-field label="Permissions">
+    <gr-label-help slot="label" [doc]="kind() === 'project' ? 'ui/members-and-roles/#project-roles' : 'ui/members-and-roles/#cache-roles'" [title]="kind() === 'project' ? 'Project permissions' : 'Cache permissions'" />
+    <app-permission-picker [permissions]="availablePermissions()" viewPermissionIsRequired [(selection)]="roleForm.permissions" />
+  </gr-form-field>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="roleDialog.close()" [disabled]="savingRole()"></button>
+    <button grButton [label]="editingRole() ? 'Save' : 'Create'" (grSubmit)="saveRole()" [loading]="savingRole()"></button>
+  </div>
+</gr-dialog>

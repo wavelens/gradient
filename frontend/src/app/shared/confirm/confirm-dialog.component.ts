@@ -5,6 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, effect, inject, signal, untracked } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { defaultIfEmpty, take } from 'rxjs';
 import { ButtonComponent, DialogComponent } from '@gradient/ui/ui';
 import { apiErrorMessage } from '@core/services/api.service';
@@ -13,7 +14,7 @@ import { ConfirmService } from './confirm.service';
 @Component({
   selector: 'app-confirm-dialog',
   standalone: true,
-  imports: [ButtonComponent, DialogComponent],
+  imports: [RouterLink, ButtonComponent, DialogComponent],
   template: `
     @let current = confirm.pending();
     <gr-dialog
@@ -28,6 +29,9 @@ import { ConfirmService } from './confirm.service';
       @if (current; as pending) {
         <p><strong>{{ pending.request.target }}</strong></p>
         <p>{{ pending.request.consequence }}@if (pending.request.isIrreversible) { This action is permanent.}</p>
+        @if (pending.request.consequenceLink; as consequenceLink) {
+          <p><a [routerLink]="consequenceLink.link" (click)="cancel()">{{ consequenceLink.label }}</a></p>
+        }
       }
       <div grDialogFooter>
         <button grButton label="Cancel" severity="secondary" [disabled]="running()" (click)="cancel()"></button>

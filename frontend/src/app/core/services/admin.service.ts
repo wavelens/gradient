@@ -13,6 +13,8 @@ import {
   ManifestResult,
   StartDeepGcResponse,
   AdminTaskDto,
+  RevokedUserAccessCounts,
+  UserAccessSummary,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -37,5 +39,13 @@ export class AdminService {
 
   listTasks(): Observable<AdminTaskDto[]> {
     return this.api.get<AdminTaskDto[]>('admin/tasks');
+  }
+
+  getUserAccessToAllProjectsCachesAndTeams(user: string): Observable<UserAccessSummary> {
+    return this.api.get<UserAccessSummary>(`users/${encodeURIComponent(user)}/access`);
+  }
+
+  removeUserMembershipsAndInvitationsAndReturnCounts(user: string): Observable<RevokedUserAccessCounts> {
+    return this.api.post<RevokedUserAccessCounts>(`users/${encodeURIComponent(user)}/revoke-access`, {});
   }
 }

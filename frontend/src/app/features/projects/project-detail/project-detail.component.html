@@ -14,6 +14,9 @@
     @if (canCreateTask() && tasks.items().length) {
       <a grButton label="Connect repository" icon="add" [routerLink]="links.projectPage(projectName, 'connect')"></a>
     }
+    @if (canOpenMembers()) {
+      <a grButton label="Members" icon="group" severity="secondary" [routerLink]="links.membersPage('project', projectName)"></a>
+    }
     @if (canOpenSettings()) {
       <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
     }

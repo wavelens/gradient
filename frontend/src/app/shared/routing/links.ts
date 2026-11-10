@@ -6,14 +6,15 @@
 
 import { ActivatedRouteSnapshot, PRIMARY_OUTLET, Params, UrlSegment, UrlSegmentGroup, UrlTree } from '@angular/router';
 
-export type ProjectPage = 'settings' | 'connect' | 'members' | 'workers' | 'integrations' | 'secrets' | 'webhooks' | 'caches';
+export type ProjectPage = 'settings' | 'connect' | 'workers' | 'integrations' | 'secrets' | 'webhooks' | 'caches';
 export type TaskPage = 'settings' | 'repository' | 'triggers' | 'actions' | 'flake-inputs' | 'metrics';
-export type CachePage = 'settings' | 'upstream-caches' | 'nars' | 'members-roles' | 'subscriptions' | 'webhooks';
+export type CachePage = 'settings' | 'upstream-caches' | 'nars' | 'subscriptions' | 'webhooks';
 export type TeamPage = 'settings' | 'webhooks';
 export type SettingsPage = 'profile' | 'keys' | 'ssh-keys' | 'sessions' | 'invites';
 export type BoardTab =
   | 'overview' | 'live' | 'scheduler' | 'throughput' | 'durations' | 'workers' | 'cache'
   | 'network' | 'health' | 'storage' | 'expensive';
+export type MembersPageTab = 'people' | 'teams' | 'pending' | 'roles';
 export type AdminPage = 'webhooks' | 'github-app';
 export type ClosureKind = 'build' | 'eval';
 export type LoginReason = 'expired' | 'deleted';
@@ -97,6 +98,8 @@ export const links = {
   teams: () => url(['teams']),
   team: (team: string) => url(['team', team]),
   teamPage: (team: string, page: TeamPage) => url(['team', team, page]),
+  membersPage: (kind: 'project' | 'cache' | 'team', name: string, tab: MembersPageTab = 'people') =>
+    url([kind === 'cache' ? 'caches' : kind, name, 'members', tab]),
 
   board: (tab: BoardTab = 'overview') => url(['board', tab]),
   boardJob: (job: string) => url(['board', 'jobs', job]),

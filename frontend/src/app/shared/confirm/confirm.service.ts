@@ -6,12 +6,14 @@
 
 import { Injectable, signal } from '@angular/core';
 import { Observable, Subscriber } from 'rxjs';
+import type { UrlTree } from '@angular/router';
 import type { ButtonSeverity } from '@gradient/ui/ui';
 
 export interface ConfirmRequest<T = unknown> {
   title: string;
   target: string;
   consequence: string;
+  consequenceLink?: { label: string; link: UrlTree };
   confirmLabel: string;
   failure: string;
   severity?: ButtonSeverity;

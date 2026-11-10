@@ -202,7 +202,7 @@ describe('ProjectSettingsComponent - access gating', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [], { role: null });
     await settled(fixture);
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).not.toContain('Members & Roles');
+    expect(text).not.toContain('Members');
     expect(text).not.toContain('Workers');
     expect(text).not.toContain('SSH Key');
   });
@@ -239,7 +239,7 @@ describe('ProjectSettingsComponent - permissions', () => {
     const fixture = setup(writable, ['viewProject', 'manageMembers', 'manageWebhooks']);
     await settled(fixture);
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('Members & Roles');
+    expect(text).not.toContain('Members');
     expect(text).toContain('Event notifications');
     expect(text).not.toContain('Integrations');
   });

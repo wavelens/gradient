@@ -13,6 +13,9 @@
     <gr-copy-field slot="meta" inline [value]="cacheName" copyLabel="Copy cache name for the CLI" />
     <div slot="actions">
       <a grButton label="Packages" icon="database" severity="secondary" [routerLink]="links.cachePage(cacheName, 'nars')"></a>
+      @if (canOpenMembers()) {
+        <a grButton label="Members" icon="group" severity="secondary" [routerLink]="links.membersPage('cache', cacheName)"></a>
+      }
       @if (editAccess().canEdit) {
         <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.cachePage(cacheName, 'settings')"></a>
       }

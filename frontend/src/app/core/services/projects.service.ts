@@ -9,7 +9,6 @@ import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import {
   Paginated,
-  MemberItem,
   RoleListResponse_ProjectRoleOwner,
   RoleResponse_ProjectRoleOwner,
   ProjectSummary,
@@ -22,6 +21,8 @@ import {
   PatchRoleRequest,
   PublicProjectSummary,
   CreatedEntityResponse,
+  PersonWithAccessToProjectOrCache,
+  AddMemberRequest,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -63,12 +64,13 @@ export class ProjectsService {
     return this.api.delete<string>(`projects/${name}`);
   }
 
-  getMembers(project: string): Observable<MemberItem[]> {
-    return this.api.get<MemberItem[]>(`projects/${project}/users`);
+  getAccess(project: string): Observable<PersonWithAccessToProjectOrCache[]> {
+    return this.api.get<PersonWithAccessToProjectOrCache[]>(`projects/${project}/access`);
   }
 
-  addMember(project: string, user: string, role: string): Observable<string> {
-    return this.api.post<string>(`projects/${project}/users`, { user, role });
+  addMember(project: string, user: string, role: string, addNow: boolean): Observable<string> {
+    const request: AddMemberRequest = { user, role, add_as_member_immediately: addNow };
+    return this.api.post<string>(`projects/${project}/users`, request);
   }
 
   updateMemberRole(project: string, user: string, role: string): Observable<string> {

@@ -6,7 +6,7 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Observable, of, throwError } from 'rxjs';
@@ -90,25 +90,31 @@ function headings(element: HTMLElement): string[] {
 }
 
 describe('TeamOverviewComponent', () => {
-  it('manages members and workers on the team page itself, workers below projects and caches', () => {
+  it('lists workers below projects and caches and leaves members to the Members page', () => {
     const sections = headings(setup('admin').root).filter((heading) => !heading.startsWith('No '));
-    expect(sections).toEqual(['Requests', 'Members', 'Projects and Caches', 'Workers']);
+    expect(sections).toEqual(['Requests', 'Projects and Caches', 'Workers']);
   });
 
-  it('picks up new grants, members and workers while the page stays open', () => {
+  it('links every team member to the Members page next to the admin-only Settings', () => {
+    const memberHrefs = Array.from(render().querySelectorAll('a[slot="actions"]'), (link) => link.getAttribute('href'));
+    expect(memberHrefs).toEqual(['/team/platform/members/people']);
+    TestBed.resetTestingModule();
+    const adminHrefs = Array.from(setup('admin').root.querySelectorAll('a[slot="actions"]'), (link) => link.getAttribute('href'));
+    expect(adminHrefs).toEqual(['/team/platform/members/people', '/team/platform/settings']);
+  });
+
+  it('picks up new grants and workers while the page stays open', () => {
     vi.useFakeTimers();
     try {
       const { fixture } = setup();
-      const teams = TestBed.inject(TeamsService) as unknown as Record<'grants' | 'members' | 'workers', () => Observable<unknown>>;
+      const teams = TestBed.inject(TeamsService) as unknown as Record<'grants' | 'workers', () => Observable<unknown>>;
       teams.grants = () => of({ projects: [{ project: 'acme', display_name: 'Acme', users: true, workers: false, role: 'View' }], caches: [] });
-      teams.members = () => of([{ user: 'bob', name: 'Bob', role: 'member', source: 'manual' }]);
       teams.workers = () => of([]);
       vi.advanceTimersByTime(15_000);
       fixture.detectChanges();
       const text = (fixture.nativeElement as HTMLElement).textContent;
       expect(text).toContain('Acme');
       expect(text).toContain('Members get View');
-      expect(text).toContain('Bob');
     } finally {
       vi.useRealTimers();
     }
@@ -119,7 +125,7 @@ describe('TeamOverviewComponent', () => {
     fixture.detectChanges();
     expect(headings(root)).toContain('Projects and Caches');
     expect(headings(root)).not.toContain('Team Access');
-    expect(root.textContent).toContain('Members & Roles');
+    expect(root.textContent).toContain('Teams tab of the Members page');
     expect(root.textContent).not.toContain('or workers');
     expect(root.textContent).toContain('No online workers');
     const links = Array.from(root.querySelectorAll<HTMLAnchorElement>('a[grButton]')).map((link) => link.getAttribute('href'));
@@ -137,24 +143,6 @@ describe('TeamOverviewComponent', () => {
     const root = render();
     expect(headings(root)).not.toContain('Projects and Caches');
     expect(root.querySelector('gr-page-layout')?.textContent).not.toMatch(/^\s*Team\s*$/m);
-  });
-
-  it('drops admin controls after an admin demotes themselves', () => {
-    const { fixture, root } = setup('admin');
-    expect(root.querySelector('a[href$="/settings"]')).not.toBeNull();
-    const teams = TestBed.inject(TeamsService) as unknown as { get: () => Observable<TeamResponse> };
-    teams.get = () => of({ ...team, role: 'member' });
-    fixture.componentInstance.navigateToTeamListOrReloadTeam(false);
-    fixture.detectChanges();
-    expect(root.querySelector('a[href$="/settings"]')).toBeNull();
-    expect(root.textContent).not.toContain('Approve');
-  });
-
-  it('returns to the team list after a member removes themselves', () => {
-    const { fixture } = setup('admin');
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
-    fixture.componentInstance.navigateToTeamListOrReloadTeam(true);
-    expect(String(navigate.mock.calls[0][0])).toBe('/teams');
   });
 
   it('shows a failed grants request as an error with retry, not as no projects', () => {

@@ -72,6 +72,7 @@ export class ProjectDetailComponent implements OnInit {
   project = signal<ProjectResponse>((this.route.snapshot.data['projectAccess'] as ProjectAccessData).project);
   canCreateTask = computed(() => !this.project().managed && this.project().permissions.includes('createTask'));
   canOpenSettings = computed(() => canOpenProjectSettings(this.project()));
+  canOpenMembers = computed(() => isViewerProjectMember(this.project()) || this.authService.user()?.superuser === true);
   tasks = pagedList<TaskResponse>('tasks', (page) => this.tasksService.getTasks(this.projectName, page, 50));
   starred = signal(false);
   cacheSubscriptions = signal<CacheSubscriptionItem[] | null>(null);

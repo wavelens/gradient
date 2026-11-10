@@ -4,8 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-settings-section title="Teams" [card]="false">
-  @if (canEdit()) {
+<gr-settings-section [title]="whichGrantsToShow() === 'pending' ? 'Team Requests' : 'Teams'" [card]="false">
+  @if (canEdit() && whichGrantsToShow() !== 'pending') {
     <button slot="actions" grButton severity="secondary" label="Grant Team" icon="add" (click)="openGrant()"></button>
   }
   <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="shownGrants().length === 0"
@@ -17,7 +17,8 @@
         <gr-row [icon]="entityKindToIconName.team" [link]="teamLink(grant.team)" [linkLabel]="'Open team ' + formatEntityLabel({ display_name: grant.display_name, name: grant.team })">
           <gr-entity-name [displayName]="grant.display_name" [name]="grant.team" />
           @if (part() === 'users') {
-            <span slot="meta">Role {{ grant.role }}</span>
+            @let usernames = teamGrantUsernamesByTeamName()[grant.team] ?? [];
+            <span slot="meta">Role {{ grant.role }}@if (usernames.length) { · Members: {{ usernames.join(', ') }} }</span>
           }
           <div slot="actions">
             @if (grant.pending) {

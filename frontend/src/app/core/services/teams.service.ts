@@ -24,6 +24,8 @@ import {
   GrantProjectRequest,
   RegisteredTeamWorker,
   PatchProjectGrantRequest,
+  TeamGrantPickerRow,
+  AddTeamMemberRequest,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -58,8 +60,13 @@ export class TeamsService {
     return this.api.get<TeamMemberItem[]>(`teams/${team}/members`);
   }
 
-  addMember(team: string, user: string, role: TeamRole): Observable<string> {
-    return this.api.post<string>(`teams/${team}/members`, { user, role });
+  listAllTeamsWithCountsForGrantTeamPicker(): Observable<TeamGrantPickerRow[]> {
+    return this.api.get<TeamGrantPickerRow[]>('teams/all');
+  }
+
+  addMember(team: string, user: string, role: TeamRole, addNow: boolean): Observable<string> {
+    const request: AddTeamMemberRequest = { user, role, add_as_member_immediately: addNow };
+    return this.api.post<string>(`teams/${team}/members`, request);
   }
 
   updateMember(team: string, user: string, role: TeamRole): Observable<string> {
