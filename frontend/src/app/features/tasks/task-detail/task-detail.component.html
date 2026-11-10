@@ -152,6 +152,7 @@
                     <b>{{ tally.done }} / {{ plural(tally.total, 'build') }}</b>
                     @if (tally.failed > 0) { · <span class="tally-failed">{{ tally.failed }} failed</span> }
                     @if (tally.notBuilt > 0) { · <span class="tally-not-built">{{ tally.notBuilt }} not built</span> }
+                    @if (tally.aborted > 0) { · <span class="tally-aborted">{{ tally.aborted }} aborted</span> }
                     @if (tally.overall > tally.total) { · <span class="tally-overall">{{ tally.overall }} total</span> }
                   </span>
                 }
@@ -218,7 +219,7 @@
                     @if (!sel.only_evaluate) {
                       <gr-segmented-bar class="pkg-bar" [counts]="counts" />
                       @let depTally = buildTally(counts);
-                      <span class="pkg-deps" [title]="'Builds in total, including substituted ones: ' + depTally.overall">{{ depTally.done }} / {{ plural(depTally.total, 'build') }}@if (depTally.failed > 0) { · <span class="tally-failed">{{ depTally.failed }} failed</span> }@if (depTally.notBuilt > 0) { · <span class="tally-not-built">{{ depTally.notBuilt }} not built</span> }</span>
+                      <span class="pkg-deps" [title]="'Builds in total, including substituted ones: ' + depTally.overall">{{ depTally.done }} / {{ plural(depTally.total, 'build') }}@if (depTally.failed > 0) { · <span class="tally-failed">{{ depTally.failed }} failed</span> }@if (depTally.notBuilt > 0) { · <span class="tally-not-built">{{ depTally.notBuilt }} not built</span> }@if (depTally.aborted > 0) { · <span class="tally-aborted">{{ depTally.aborted }} aborted</span> }</span>
                       <span class="pkg-time">
                         {{ pkgDuration(sel, ep) }}
                         @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }

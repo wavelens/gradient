@@ -252,7 +252,7 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
   flex-wrap: wrap;
 
   b { color: var(--gr-text-primary); }
-  .tally-overall, .tally-not-built { color: var(--gr-text-muted); }
+  .tally-overall, .tally-not-built, .tally-aborted { color: var(--gr-text-muted); }
   .tally-failed { color: var(--gr-status-danger-text); font-weight: 600; }
   .eval-only { display: inline-flex; align-items: center; gap: $spacing-xs; color: var(--gr-text-secondary); }
   .dur { display: inline-flex; align-items: center; gap: $spacing-xs; gr-icon { color: var(--gr-text-muted); } }

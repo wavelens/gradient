@@ -35,6 +35,12 @@ describe('SegmentedBarComponent', () => {
     ]);
   });
 
+  it('names aborted and not built builds apart in the gray segment hint', () => {
+    fixture.componentRef.setInput('counts', counts({ completed: 1, aborted: 2, dependency_failed: 1 }));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.shown().find((s) => s.tone === 'aborted')?.label).toBe('2 aborted, 1 not built');
+  });
+
   /// An endless animation on a segment without width cannot leave the main thread,
   /// and then repaints the page on every frame.
   it('pulses the building segment only while it has width', () => {

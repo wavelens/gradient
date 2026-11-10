@@ -12,14 +12,14 @@ export interface BuildTally {
   overall: number;
   failed: number;
   notBuilt: number;
+  aborted: number;
 }
 
-/** The numbers next to the bar match the fill and count the builds that gr-segmented-bar can draw. Aborted builds and builds with a failed dependency count as done. Substituted builds count only toward the overall total. */
+/** The numbers next to the bar match the fill and count the builds that gr-segmented-bar can draw. Canceled builds and builds that a dependency failure left unbuilt count as complete. Substitute builds add to the overall total only. */
 export function buildTally(c: BuildStatusCounts): BuildTally {
   const done = c.completed + c.failed + c.aborted + c.dependency_failed;
   const total = done + c.building + c.queued;
   const overall = total + c.substituted;
-  const failed = c.failed;
-  const notBuilt = c.aborted;
-  return total === 0 ? { done: c.substituted, total: c.substituted, overall, failed, notBuilt } : { done, total, overall, failed, notBuilt };
+  const counted = { overall, failed: c.failed, notBuilt: c.dependency_failed, aborted: c.aborted };
+  return total === 0 ? { done: c.substituted, total: c.substituted, ...counted } : { done, total, ...counted };
 }

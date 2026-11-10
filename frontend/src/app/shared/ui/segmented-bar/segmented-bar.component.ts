@@ -21,7 +21,11 @@ function countSegments(counts: BuildStatusCounts): CountSegment[] {
   if (total === 0) {
     return counts.substituted > 0 ? [{ tone: 'completed', pct: 100, label: `${counts.substituted} substituted` }] : [];
   }
-  return ORDER.map(tone => ({ tone, pct: (c[tone] / total) * 100, label: `${c[tone]} ${tone}` }));
+  return ORDER.map(tone => ({
+    tone,
+    pct: (c[tone] / total) * 100,
+    label: tone === 'aborted' && counts.dependency_failed > 0 ? `${counts.aborted} aborted, ${counts.dependency_failed} not built` : `${c[tone]} ${tone}`,
+  }));
 }
 
 @Component({
