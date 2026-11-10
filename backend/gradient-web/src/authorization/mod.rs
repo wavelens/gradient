@@ -14,6 +14,7 @@ mod middleware;
 mod oidc;
 mod provider_flow;
 mod scim;
+mod websocket_credential_recheck;
 
 pub use self::api_key::{ApiKeyContext, DecodedRequest, JobPrincipal, MaybeApiKey, Principal};
 pub use self::external_login::{PasswordLogin, sign_in_external};
@@ -33,3 +34,4 @@ pub use self::provider_flow::{
     ProviderCallback, ProviderPurpose, provider_authorize, provider_callback,
 };
 pub use self::scim::authorize_scim;
+pub use self::websocket_credential_recheck::LiveStreamAuthToken;

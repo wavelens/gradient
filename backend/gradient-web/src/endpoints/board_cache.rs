@@ -5,8 +5,9 @@
  */
 
 use crate::access::board_cache_condition;
-use crate::authorization::MaybeUser;
+use crate::authorization::{LiveStreamAuthToken, MaybeUser};
 use crate::endpoints::board_metrics::{SeriesPoint, WindowParams, infra_series, window_clause};
+use crate::endpoints::live::revoked_session_or_api_key_close_message;
 use crate::endpoints::metrics::{Observations, collect};
 use crate::endpoints::stats::{TrafficKind, TrafficParams};
 use crate::error::{WebError, WebResult};
@@ -169,6 +170,7 @@ pub async fn cache_live_ws(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Query(params): Query<WindowParams>,
     Query(TrafficParams { traffic }): Query<TrafficParams>,
+    credentials: LiveStreamAuthToken,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
     let feed = CacheFeed {
@@ -186,7 +188,7 @@ pub async fn cache_live_ws(
     let shutdown = state.shutdown.clone();
     Ok(ws.on_upgrade(move |socket| async move {
         let _ = shutdown
-            .spawn(stream_snapshots(socket, rx, feed, cancel))
+            .spawn(stream_snapshots(socket, rx, feed, credentials, cancel))
             .await;
     }))
 }
@@ -406,6 +408,7 @@ async fn stream_snapshots(
     socket: WebSocket,
     mut rx: EventRx,
     feed: CacheFeed,
+    credentials: LiveStreamAuthToken,
     cancel: CancellationToken,
 ) {
     use futures::{SinkExt, StreamExt};
@@ -416,9 +419,15 @@ async fn stream_snapshots(
     gap.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut stale = true;
     let mut last = None;
+    let revoked = credentials.wait_until_session_or_api_key_is_revoked();
+    tokio::pin!(revoked);
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
+            _ = &mut revoked => {
+                let _ = sink.send(revoked_session_or_api_key_close_message()).await;
+                break;
+            }
             incoming = stream.next() => match incoming {
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
                 Some(Ok(_)) => {}

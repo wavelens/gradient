@@ -11,7 +11,7 @@ use super::board_subjects::{
 use super::exec_jobs::query::{ExecJobAttemptView, attempt_view};
 use super::exec_jobs::timeline::with_reported_phases;
 use crate::access::{can_view_project, key_limited_project_mask};
-use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
+use crate::authorization::{ApiKeyContext, LiveStreamAuthToken, MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
@@ -1526,6 +1526,7 @@ pub async fn board_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
+    credentials: LiveStreamAuthToken,
     ws: WebSocketUpgrade,
 ) -> Response {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user)
@@ -1546,7 +1547,14 @@ pub async fn board_live_ws(
     let shutdown = state.shutdown.clone();
     ws.on_upgrade(move |socket| async move {
         let _ = shutdown
-            .spawn(board_live_loop(socket, rx, scope, initial, cancel))
+            .spawn(board_live_loop(
+                socket,
+                rx,
+                scope,
+                initial,
+                credentials,
+                cancel,
+            ))
             .await;
     })
 }
@@ -1556,6 +1564,7 @@ async fn board_live_loop(
     rx: EventRx,
     scope: MetricsScope,
     initial: Envelope,
+    credentials: LiveStreamAuthToken,
     cancel: CancellationToken,
 ) {
     if let Some(text) = mask_event(&initial, &scope)
@@ -1569,6 +1578,7 @@ async fn board_live_loop(
         rx,
         move |env| mask_event(env, &scope),
         super::live::skip_lag,
+        credentials,
         cancel,
     )
     .await;

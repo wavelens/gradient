@@ -5,11 +5,11 @@
  */
 
 use crate::api_spec::TaskPath;
-use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::authorization::{LiveStreamAuthToken, MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::scope::{Readable, TaskScope};
 use axum::Extension;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
 use axum::extract::{Path, State};
 use axum::response::Response;
 use gradient_core::ServerState;
@@ -29,6 +29,7 @@ pub async fn live_stream<F, L>(
     mut rx: EventRx,
     mut select: F,
     lagged: L,
+    credentials: LiveStreamAuthToken,
     cancel: CancellationToken,
 ) where
     F: FnMut(&Envelope) -> Option<String> + Send + 'static,
@@ -38,9 +39,15 @@ pub async fn live_stream<F, L>(
     use tokio::sync::broadcast::error::RecvError;
 
     let (mut sink, mut stream) = socket.split();
+    let revoked = credentials.wait_until_session_or_api_key_is_revoked();
+    tokio::pin!(revoked);
     loop {
         let text = tokio::select! {
             _ = cancel.cancelled() => break,
+            _ = &mut revoked => {
+                let _ = sink.send(revoked_session_or_api_key_close_message()).await;
+                break;
+            }
             incoming = stream.next() => match incoming {
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
                 Some(Ok(_)) => continue,
@@ -57,6 +64,13 @@ pub async fn live_stream<F, L>(
             break;
         }
     }
+}
+
+pub fn revoked_session_or_api_key_close_message() -> Message {
+    Message::Close(Some(CloseFrame {
+        code: close_code::POLICY,
+        reason: "Session or API key no longer valid".into(),
+    }))
 }
 
 pub fn skip_lag(_: u64) -> Option<String> {
@@ -80,6 +94,7 @@ fn frame(env: &Envelope) -> Option<String> {
 pub async fn task_live_ws(
     TaskScope { task, .. }: TaskScope<Readable>,
     State(state): State<Arc<ServerState>>,
+    credentials: LiveStreamAuthToken,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
     let task_id = task.id;
@@ -104,6 +119,7 @@ pub async fn task_live_ws(
                 rx,
                 move |env| task_frame(env, task_id, &mut known),
                 skip_lag,
+                credentials,
                 cancel,
             ))
             .await;
@@ -153,6 +169,7 @@ pub async fn evaluation_live_ws(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
+    credentials: LiveStreamAuthToken,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
     let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
@@ -168,6 +185,7 @@ pub async fn evaluation_live_ws(
                 rx,
                 move |env| eval_frame(env, eval_id),
                 skip_lag,
+                credentials,
                 cancel,
             ))
             .await;
@@ -189,6 +207,7 @@ pub async fn build_live_ws(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
+    credentials: LiveStreamAuthToken,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
     let ctx =
@@ -205,6 +224,7 @@ pub async fn build_live_ws(
                 rx,
                 move |env| build_frame(env, eval_id, shared_build),
                 skip_lag,
+                credentials,
                 cancel,
             ))
             .await;

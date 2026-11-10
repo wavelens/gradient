@@ -31,6 +31,7 @@ async fn live_route(
             rx,
             |env| Some(env.to_line()),
             gradient_web::endpoints::live::skip_lag,
+            gradient_web::authorization::LiveStreamAuthToken::anonymous(),
             shutdown.token(),
         )
         .await;

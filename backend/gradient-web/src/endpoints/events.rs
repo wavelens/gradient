@@ -5,6 +5,7 @@
  */
 
 use super::live::live_stream;
+use crate::authorization::LiveStreamAuthToken;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use axum::extract::ws::{WebSocketUpgrade, rejection::WebSocketUpgradeRejection};
@@ -38,6 +39,7 @@ pub async fn firehose_ws(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Query(query): Query<FirehoseQuery>,
+    credentials: LiveStreamAuthToken,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> WebResult<Response> {
     require_superuser(&user)?;
@@ -51,7 +53,14 @@ pub async fn firehose_ws(
     let shutdown = state.shutdown.clone();
     Ok(ws.on_upgrade(move |socket| async move {
         let _ = shutdown
-            .spawn(live_stream(socket, rx, select, lag_frame, cancel))
+            .spawn(live_stream(
+                socket,
+                rx,
+                select,
+                lag_frame,
+                credentials,
+                cancel,
+            ))
             .await;
     }))
 }
