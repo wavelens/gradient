@@ -16,15 +16,17 @@ use super::progress_report::report_thunks_during;
 use crate::nix::wildcard_walk;
 use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, FutureExt as _};
 use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
 use gradient_eval::pool::MemoryGuard;
 use gradient_sources::{
     AttrError, DerivationResolver, FlakeDiscovery, Resolved, ResolvedDerivation, ShardSpec,
 };
+use gradient_wire::codec;
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
+    PROTO_VERSIONS,
 };
 use gradient_wire::types::{
     EvalMessageLevel, ExecSpec, License, attr_eval_source, exec_image_attr,
@@ -139,7 +141,7 @@ fn unmatched_target_errors(wildcards: &[String], failed: &[AttrError]) -> Vec<St
 }
 
 const DRV_READ_CONCURRENCY: usize = 256;
-const KNOWN_QUERIES_IN_FLIGHT: usize = 2;
+const KNOWN_QUERIES_IN_FLIGHT: usize = 8;
 
 use crate::proto::job::JobUpdater;
 use crate::traits::{DrvReader, FsDrvReader, JobReporter};
@@ -204,7 +206,12 @@ pub fn required_local_source(source: &FlakeSource) -> Option<&str> {
     }
 }
 
-const EVAL_BATCH_SIZE: usize = 50;
+const EVAL_BATCH_SIZE: usize = 500;
+const EVAL_RESULT_BATCH_MAX_ENCODED_BYTE_SIZE: usize = 1024 * 1024;
+
+fn discovered_derivation_encoded_size(derivation: &DiscoveredDerivation) -> usize {
+    codec::to_bytes(derivation, *PROTO_VERSIONS.end()).map_or(0, |bytes| bytes.len())
+}
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn evaluate_derivations(
@@ -596,6 +603,7 @@ struct ClosureWalker<'a> {
     imports: Imports<'a>,
     known_queries: FuturesOrdered<BoxFuture<'a, KnownAnswer>>,
     batch: Vec<DiscoveredDerivation>,
+    batch_encoded_byte_count: usize,
     visited: HashSet<String>,
     rooted: HashSet<String>,
     pending: VecDeque<Queued>,
@@ -611,6 +619,7 @@ impl<'a> ClosureWalker<'a> {
             imports,
             known_queries: FuturesOrdered::new(),
             batch: Vec::new(),
+            batch_encoded_byte_count: 0,
             visited: HashSet::new(),
             rooted: HashSet::new(),
             pending: VecDeque::new(),
@@ -666,6 +675,9 @@ impl<'a> ClosureWalker<'a> {
         if abort.is_aborted() {
             return Err(abort_err());
         }
+        while let Some(Some(answer)) = self.known_queries.next().now_or_never() {
+            self.enqueue_unknown(answer);
+        }
         if self.known_queries.len() < KNOWN_QUERIES_IN_FLIGHT {
             let wave = self.next_wave();
             if !wave.is_empty() {
@@ -692,6 +704,7 @@ impl<'a> ClosureWalker<'a> {
             remaining = self.pending.len(),
             "flushing eval batch"
         );
+        self.batch_encoded_byte_count = 0;
         let flush = Flush {
             paths: std::mem::take(&mut self.paths),
             derivations: std::mem::take(&mut self.batch),
@@ -803,7 +816,8 @@ impl<'a> ClosureWalker<'a> {
                 .push((queued.drv_path().to_owned(), Some(nar_size)));
             self.paths
                 .extend(drv.input_sources.iter().map(|src| (src.clone(), None)));
-            self.batch.push(queued.discovered(&drv, produced));
+            self.add_derivation_record_to_batch_and_send_if_full(queued.discovered(&drv, produced))
+                .await?;
             self.walked += 1;
 
             if self.walked.is_multiple_of(500) {
@@ -814,12 +828,29 @@ impl<'a> ClosureWalker<'a> {
                     "closure walk progress"
                 );
             }
-
-            if self.batch.len() >= EVAL_BATCH_SIZE {
-                self.flush().await?;
-            }
         }
 
+        Ok(())
+    }
+
+    async fn add_derivation_record_to_batch_and_send_if_full(
+        &mut self,
+        derivation_record: DiscoveredDerivation,
+    ) -> Result<()> {
+        let encoded_record_size = discovered_derivation_encoded_size(&derivation_record);
+        if !self.batch.is_empty()
+            && self.batch_encoded_byte_count + encoded_record_size
+                > EVAL_RESULT_BATCH_MAX_ENCODED_BYTE_SIZE
+        {
+            self.flush().await?;
+        }
+        self.batch.push(derivation_record);
+        self.batch_encoded_byte_count += encoded_record_size;
+        if self.batch.len() >= EVAL_BATCH_SIZE
+            || self.batch_encoded_byte_count >= EVAL_RESULT_BATCH_MAX_ENCODED_BYTE_SIZE
+        {
+            self.flush().await?;
+        }
         Ok(())
     }
 }
@@ -2301,8 +2332,183 @@ mod tests {
             "every derivation is reported exactly once"
         );
         let peak = reporter.peak_known_queries_in_flight();
-        assert!(peak > 1, "the walk waited on every answer alone");
+        assert!(
+            peak > 2,
+            "At most 2 known-derivation queries overlap at a time."
+        );
         assert!(peak <= KNOWN_QUERIES_IN_FLIGHT, "{peak} queries in flight");
+    }
+
+    fn reported_eval_result_derivations_per_batch(
+        reporter: &RecordingJobReporter,
+    ) -> Vec<Vec<DiscoveredDerivation>> {
+        reporter
+            .events()
+            .into_iter()
+            .filter_map(|event| match event {
+                ReportedEvent::EvalResult { derivations, .. } => Some(derivations),
+                _ => None,
+            })
+            .collect()
+    }
+
+    async fn walk_and_publish_fake_raw_derivations_from_entry_paths_as_attribute_names_to_recording_reporter(
+        reporter: &RecordingJobReporter,
+        drvs: std::collections::HashMap<String, Vec<u8>>,
+        roots: &[&str],
+    ) {
+        let reader = FakeDrvReader::from_raw_drvs(drvs);
+        walk_and_publish(
+            &Imports::new(reporter, &reader, never_abort()),
+            roots
+                .iter()
+                .map(|root| Root {
+                    drv_path: (*root).to_owned(),
+                    attr: (*root).to_owned(),
+                    ifd: false,
+                    licenses: vec![],
+                    exec: None,
+                })
+                .collect(),
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn walk_more_than_500_derivations_reports_eval_result_batches_of_at_most_500_derivations()
+    {
+        let wide: Vec<String> = (1..=1200).map(numbered_drv).collect();
+        let root = numbered_drv(1_000_000);
+        let mut drvs: std::collections::HashMap<String, Vec<u8>> = wide
+            .iter()
+            .map(|path| (path.clone(), drv_needing(&[])))
+            .collect();
+        drvs.insert(root.clone(), drv_needing(&wide));
+        let reporter = RecordingJobReporter::new();
+
+        walk_and_publish_fake_raw_derivations_from_entry_paths_as_attribute_names_to_recording_reporter(
+            &reporter,
+            drvs,
+            &[&root],
+        )
+        .await;
+
+        let derivation_counts_per_reported_eval_result_batch: Vec<usize> =
+            reported_eval_result_derivations_per_batch(&reporter)
+                .iter()
+                .map(Vec::len)
+                .collect();
+        assert_eq!(
+            derivation_counts_per_reported_eval_result_batch
+                .iter()
+                .sum::<usize>(),
+            1201
+        );
+        assert_eq!(
+            derivation_counts_per_reported_eval_result_batch
+                .iter()
+                .max(),
+            Some(&500),
+            "Number of derivations per batch: {derivation_counts_per_reported_eval_result_batch:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn derivation_batch_sends_at_byte_limit_before_500_derivations() {
+        let known_derivation_paths_used_only_as_unwalked_dependencies: Vec<String> =
+            (1..=100).map(numbered_drv).collect();
+        let parents: Vec<String> = (1001..=1400).map(numbered_drv).collect();
+        let root = numbered_drv(1_000_000);
+        let mut drvs: std::collections::HashMap<String, Vec<u8>> = parents
+            .iter()
+            .map(|parent| {
+                (
+                    parent.clone(),
+                    drv_needing(&known_derivation_paths_used_only_as_unwalked_dependencies),
+                )
+            })
+            .collect();
+        drvs.insert(root.clone(), drv_needing(&parents));
+        let reporter = RecordingJobReporter::new().with_known_drv_paths(
+            known_derivation_paths_used_only_as_unwalked_dependencies.clone(),
+        );
+
+        walk_and_publish_fake_raw_derivations_from_entry_paths_as_attribute_names_to_recording_reporter(
+            &reporter,
+            drvs,
+            &[&root],
+        )
+        .await;
+
+        let reported_eval_result_batches = reported_eval_result_derivations_per_batch(&reporter);
+        assert_eq!(reported_eval_result_batches.concat().len(), 401);
+        for two_consecutive_reported_batches in reported_eval_result_batches.windows(2) {
+            let reported_batch_encoded_byte_size_sum: usize = two_consecutive_reported_batches[0]
+                .iter()
+                .map(discovered_derivation_encoded_size)
+                .sum();
+            assert!(
+                reported_batch_encoded_byte_size_sum <= EVAL_RESULT_BATCH_MAX_ENCODED_BYTE_SIZE,
+                "Batch of {reported_batch_encoded_byte_size_sum} bytes is above the byte limit"
+            );
+            assert!(
+                reported_batch_encoded_byte_size_sum
+                    + discovered_derivation_encoded_size(&two_consecutive_reported_batches[1][0])
+                    > EVAL_RESULT_BATCH_MAX_ENCODED_BYTE_SIZE,
+                "The code sent a batch of {reported_batch_encoded_byte_size_sum} bytes even though the next record still had room."
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_record_stays_in_own_batch() {
+        let known_derivation_paths_used_only_as_unwalked_dependencies: Vec<String> =
+            (1..=25_000).map(numbered_drv).collect();
+        let small_entry_derivation_path_before_oversized = numbered_drv(1_000_000);
+        let entry_derivation_path_with_oversized_record = numbered_drv(2_000_000);
+        let drvs = std::collections::HashMap::from([
+            (
+                small_entry_derivation_path_before_oversized.clone(),
+                drv_needing(&[]),
+            ),
+            (
+                entry_derivation_path_with_oversized_record.clone(),
+                drv_needing(&known_derivation_paths_used_only_as_unwalked_dependencies),
+            ),
+        ]);
+        let reporter = RecordingJobReporter::new()
+            .with_known_drv_paths(known_derivation_paths_used_only_as_unwalked_dependencies);
+
+        walk_and_publish_fake_raw_derivations_from_entry_paths_as_attribute_names_to_recording_reporter(
+            &reporter,
+            drvs,
+            &[
+                &small_entry_derivation_path_before_oversized,
+                &entry_derivation_path_with_oversized_record,
+            ],
+        )
+        .await;
+
+        let reported_eval_result_batches = reported_eval_result_derivations_per_batch(&reporter);
+        let reported_batch_with_oversized_derivation_record = reported_eval_result_batches
+            .iter()
+            .find(|batch| {
+                batch
+                    .iter()
+                    .any(|d| d.drv_path == entry_derivation_path_with_oversized_record)
+            })
+            .unwrap();
+        assert_eq!(
+            reported_batch_with_oversized_derivation_record.len(),
+            1,
+            "A record over the size limit is in the same batch as other records."
+        );
+        assert!(
+            discovered_derivation_encoded_size(&reported_batch_with_oversized_derivation_record[0])
+                > EVAL_RESULT_BATCH_MAX_ENCODED_BYTE_SIZE
+        );
     }
 
     const DYNAMIC: &str = "/nix/store/ddddddddddddddddddddddddddddddd1-dynamic.drv";
