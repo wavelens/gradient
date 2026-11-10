@@ -14,7 +14,7 @@ import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
-import type { CachePermission, TeamGrantEntry, TeamSummary } from '@core/models';
+import type { CachePermission, TeamGrantEntry, TeamGrantPickerRow, TeamSummary } from '@core/models';
 import { By } from '@angular/platform-browser';
 import { CreateTeamDialogComponent } from '@shared/forms';
 
@@ -30,9 +30,16 @@ const myTeams: TeamSummary[] = [
   { name: 'infra', display_name: 'Build Farm', role: 'admin' },
 ];
 
+const allTeams: TeamGrantPickerRow[] = [
+  { name: 'platform', display_name: 'Platform', member_count: 2, worker_count: 0, caller_is_admin: false },
+  { name: 'infra', display_name: 'Build Farm', member_count: 4, worker_count: 1, caller_is_admin: true },
+  { name: 'design', display_name: 'Design Crew', member_count: 1, worker_count: 0, caller_is_admin: false },
+];
+
 function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false, cachePermissions: CachePermission[] = ['viewCache']) {
   const service = {
     list: () => of(myTeams),
+    listAllTeamsWithCountsForGrantTeamPicker: vi.fn(() => of(allTeams)),
     projectGrants: () => of(grants),
     cacheGrants: vi.fn(() => of(grants.filter((g) => g.users))),
     grantProject: vi.fn().mockReturnValue(of('Team granted')),
@@ -273,26 +280,39 @@ describe('TeamGrantsComponent', () => {
     expect((fixture.nativeElement as HTMLElement).querySelectorAll('a.row-link').length).toBe(2);
   });
 
-  it('suggests teams by their display name', () => {
+  it('suggests teams by their display name with their member and worker counts', () => {
     const { component } = setup('project', 'users');
+    component.openGrant();
     component.search({ query: 'farm' });
-    expect(component.suggestions()).toEqual([{ label: 'Build Farm (infra)', value: 'infra' }]);
+    expect(component.suggestions()).toEqual([{ label: 'Build Farm (infra)', value: 'infra', textBelowLabel: '4 members · 1 worker' }]);
+  });
+
+  it('suggests teams the user is not in and says that those teams must approve the grant', () => {
+    const { component, service } = setup('project', 'users');
+    component.openGrant();
+    expect(service.listAllTeamsWithCountsForGrantTeamPicker).toHaveBeenCalled();
+    component.search({ query: 'design' });
+    expect(component.suggestions()).toEqual([
+      { label: 'Design Crew (design)', value: 'design', textBelowLabel: '1 member · 0 workers · The grant needs approval from that team.' },
+    ]);
   });
 
   it('leaves teams that already have member roles out of the suggestions', () => {
     const { component } = setup('project', 'users');
+    component.openGrant();
     component.search({ query: '' });
-    expect(component.suggestions()).toEqual([{ label: 'Build Farm (infra)', value: 'infra' }]);
+    expect(component.suggestions().map((suggestion) => suggestion.value)).toEqual(['infra', 'design']);
   });
 
   it('suggests adding workers to a granted team only to its Admins', () => {
     const { component } = setup('project', 'workers');
+    component.openGrant();
     component.allGrants.set([
       { team: 'platform', display_name: 'Platform', role: 'View', users: true, workers: false, pending: false },
       { team: 'infra', display_name: 'Build Farm', role: 'View', users: true, workers: false, pending: false },
     ]);
     component.search({ query: '' });
-    expect(component.suggestions()).toEqual([{ label: 'Build Farm (infra)', value: 'infra' }]);
+    expect(component.suggestions().map((suggestion) => suggestion.value)).toEqual(['infra', 'design']);
   });
 
   it('shows the server answer after a grant, which can be a request to the team', () => {
@@ -303,11 +323,16 @@ describe('TeamGrantsComponent', () => {
     expect(notify.success).toHaveBeenCalledWith('Request sent');
   });
 
-  it('grants the team whose display name was typed', () => {
+  it('grants the team whose display name was typed, also when the user is not in it', () => {
     const { component, service } = setup('project', 'users');
+    component.openGrant();
     component.form = { team: 'build farm', role: 'View' };
     component.grant();
     expect(service.grantProject).toHaveBeenCalledWith('acme', { team: 'infra', role: 'View', users: true, workers: false });
+    component.openGrant();
+    component.form = { team: 'Design Crew', role: 'View' };
+    component.grant();
+    expect(service.grantProject).toHaveBeenLastCalledWith('acme', { team: 'design', role: 'View', users: true, workers: false });
   });
 
   it.each(['project', 'cache'] as const)('asks for a team on the %s grant dialog instead of ignoring the click', (kind) => {

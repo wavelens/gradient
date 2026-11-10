@@ -15,7 +15,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { doesSearchQueryMatchEntityNameOrSlug, EntityNameComponent, entityKindToIconName, formatEntityLabel, entityToPickerOption } from '@shared/ui';
+import { doesSearchQueryMatchEntityNameOrSlug, EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { FormsModule } from '@angular/forms';
 import { RouterModule, type UrlTree } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -24,7 +24,7 @@ import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
-import type { CacheResponse, TeamGrantEntry, TeamSummary } from '@core/models';
+import type { CacheResponse, TeamGrantEntry, TeamGrantPickerRow, TeamSummary } from '@core/models';
 import { canOpenTeam, requestIfCacheMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { CreateTeamDialogComponent, injectCanCreateTeam } from '@shared/forms';
@@ -42,6 +42,7 @@ import {
   type AutoCompleteSuggestion,
 } from '@gradient/ui/ui';
 import { links } from '@shared/routing';
+import { plural } from '@shared/text';
 
 export type GrantedPart = 'users' | 'workers';
 export type TeamGrantStatusFilter = 'all' | 'approved' | 'pending';
@@ -115,6 +116,7 @@ export class TeamGrantsComponent implements OnInit {
     return teams.length ? `${base} ${teams.join(', ')} still run this project's builds on their own workers.` : base;
   });
   myTeams = signal<TeamSummary[]>([]);
+  allTeamsForGrantPicker = signal<TeamGrantPickerRow[]>([]);
   suggestions = signal<AutoCompleteSuggestion[]>([]);
   grantError = signal<string | null>(null);
   granting = signal(false);
@@ -155,25 +157,41 @@ export class TeamGrantsComponent implements OnInit {
 
   search(event: { query: string }): void {
     this.suggestions.set(
-      this.myTeams()
+      this.allTeamsForGrantPicker()
         .filter((team) => this.canOfferTeamInGrantPicker(team))
         .filter((team) => doesSearchQueryMatchEntityNameOrSlug(team, event.query))
-        .map((team) => entityToPickerOption(team)),
+        .map((team) => ({
+          label: formatEntityLabel(team),
+          value: team.name,
+          textBelowLabel: [
+            plural(team.member_count, 'member'),
+            plural(team.worker_count, 'worker'),
+            ...(team.caller_is_admin ? [] : ['The grant needs approval from that team.']),
+          ].join(' · '),
+        })),
     );
   }
 
-  private canOfferTeamInGrantPicker(team: TeamSummary): boolean {
+  private canOfferTeamInGrantPicker(team: TeamGrantPickerRow): boolean {
     const grant = this.allGrants().find((entry) => entry.team === team.name);
     if (!grant) return true;
     if (grant[this.part()]) return false;
-    return this.part() === 'users' || (!grant.pending && team.role === 'admin');
+    return this.part() === 'users' || (!grant.pending && team.caller_is_admin);
   }
 
   openGrant(): void {
     this.form = { team: '', role: this.roles()[0] ?? '' };
     this.grantError.set(null);
     this.grantAttempted.set(false);
+    this.loadAllTeamsForGrantTeamPicker();
     this.showGrant.set(true);
+  }
+
+  private loadAllTeamsForGrantTeamPicker(): void {
+    this.teams
+      .listAllTeamsWithCountsForGrantTeamPicker()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ next: (teams) => this.allTeamsForGrantPicker.set(teams) });
   }
 
   createInsteadOfPick(): void {
@@ -185,6 +203,7 @@ export class TeamGrantsComponent implements OnInit {
   teamCreated(team: string): void {
     this.createForGrant = false;
     this.teams.list().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({ next: (mine) => this.myTeams.set(mine) });
+    this.loadAllTeamsForGrantTeamPicker();
     this.form = { ...this.form, team };
     this.showGrant.set(true);
   }
@@ -266,10 +285,10 @@ export class TeamGrantsComponent implements OnInit {
 
   private teamNamed(typed: string): string {
     const text = typed.trim();
-    const mine = this.myTeams();
+    const teams = this.allTeamsForGrantPicker();
     const match =
-      mine.find((team) => team.name === text) ??
-      mine.find((team) => team.display_name.toLowerCase() === text.toLowerCase());
+      teams.find((team) => team.name === text) ??
+      teams.find((team) => team.display_name.toLowerCase() === text.toLowerCase());
     return match?.name ?? text;
   }
 
