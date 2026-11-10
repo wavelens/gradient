@@ -21,8 +21,9 @@ use gradient_wire::types::{
 
 use super::{
     A, A_DEV, A_OUT, ARM, B, B_OUT, C, C_OUT, CaseShapes, D, D_OUT, REPOSITORY, SchedulerCase,
-    SlotKind, X, X_OUT, X86, ago, attr_of, build_output, drv_nar, drv_path, eval_key, failure,
+    SlotKind, X, X_OUT, X86, ago, attr_of, build_output, drv, drv_nar, drv_path, eval_key, failure,
     from_now, is_recent, job_ids, narinfo, output_nar, span, store_path, w_all, w_network_build,
+    with_attr, with_output,
 };
 use crate::actor::Offer;
 use crate::jobs::Assignment;
@@ -1040,7 +1041,15 @@ async fn c13_a_claim_whose_assigned_transition_fails_closes_its_row_and_keeps_th
 
 #[tokio::test]
 async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
-    let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::EvaluatingDerivation)
+            .startable(A, A_OUT)
+            .startable(B, B_OUT),
+    )
+    .await;
     case.connect(W1, w_all(), &[]).await;
     let (a, b) = (case.key(A).await, case.key(B).await);
 
@@ -1066,24 +1075,36 @@ async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
     case.commit_nar(drv_nar(B)).await;
     assert_eq!(
         case.sb(B).await.status,
-        BuildStatus::Queued,
+        BuildStatus::Created,
         "after 3: sb(B).status"
     );
     case.check("step 3").await;
 
-    case.admit_startable_moves().await;
-    assert!(case.pending(&b).await, "after 4: pending(build:B)");
-    assert!(case.pending(&a).await, "after 4: pending(build:A)");
+    case.walk_evaluation_derivations_and_wait(
+        e1,
+        vec![with_attr(with_output(drv(B, &[]), B_OUT), &attr_of(B))],
+    )
+    .await;
     assert_eq!(
-        case.signals(W1),
-        vec![SessionSignal::Offers(3)],
-        "after 4: signals(W1)"
+        case.sb(B).await.status,
+        BuildStatus::Queued,
+        "after 4: sb(B).status"
     );
     case.check("step 4").await;
 
-    let offer = case.offers_delta(W1).await;
-    assert_eq!(job_ids(&offer), vec![b], "after 5: candidates");
+    case.admit_startable_moves().await;
+    assert!(case.pending(&b).await, "after 5: pending(build:B)");
+    assert!(case.pending(&a).await, "after 5: pending(build:A)");
+    assert_eq!(
+        case.signals(W1),
+        vec![SessionSignal::Offers(3)],
+        "after 5: signals(W1)"
+    );
     case.check("step 5").await;
+
+    let offer = case.offers_delta(W1).await;
+    assert_eq!(job_ids(&offer), vec![b], "after 6: candidates");
+    case.check("step 6").await;
 
     case.finish().await;
 }
@@ -1091,7 +1112,14 @@ async fn c14_admission_enqueues_a_build_that_left_and_reentered_queued_once() {
 #[tokio::test]
 async fn c15_a_resync_drops_unstartable_builds_and_enqueues_startable_ones_again() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
-    let case = SchedulerCase::start(shape().one(e1, A, A_OUT).evalq(e2)).await;
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::EvaluatingDerivation)
+            .startable(A, A_OUT)
+            .evalq(e2),
+    )
+    .await;
     let (a, eval) = (case.key(A).await, eval_key(e2));
 
     case.assign_queued_evals().await;
@@ -1117,15 +1145,27 @@ async fn c15_a_resync_drops_unstartable_builds_and_enqueues_startable_ones_again
     case.commit_nar(drv_nar(A)).await;
     assert_eq!(
         case.sb(A).await.status,
-        BuildStatus::Queued,
+        BuildStatus::Created,
         "after 4: sb(A).status"
     );
     case.check("step 4").await;
 
-    case.resync_startable_set().await;
-    assert!(case.pending(&a).await, "after 5: pending(build:A)");
-    assert!(case.pending(&eval).await, "after 5: pending(eval:E2)");
+    case.walk_evaluation_derivations_and_wait(
+        e1,
+        vec![with_attr(with_output(drv(A, &[]), A_OUT), &attr_of(A))],
+    )
+    .await;
+    assert_eq!(
+        case.sb(A).await.status,
+        BuildStatus::Queued,
+        "after 5: sb(A).status"
+    );
     case.check("step 5").await;
+
+    case.resync_startable_set().await;
+    assert!(case.pending(&a).await, "after 6: pending(build:A)");
+    assert!(case.pending(&eval).await, "after 6: pending(eval:E2)");
+    case.check("step 6").await;
 
     case.finish().await;
 }
