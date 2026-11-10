@@ -15,8 +15,15 @@ describe('relativeTime', () => {
     expect(relativeTime(undefined, NOW)).toBe('never');
   });
 
-  it('counts seconds under a minute', () => {
+  it('says just now for the first seconds, then counts seconds under a minute', () => {
+    expect(relativeTime(ago(0), NOW)).toBe('just now');
+    expect(relativeTime(ago(4_000), NOW)).toBe('just now');
     expect(relativeTime(ago(20_000), NOW)).toBe('20s ago');
+  });
+
+  it('rounds hours to the nearest one', () => {
+    expect(relativeTime(ago(116 * 60_000), NOW)).toBe('2h ago');
+    expect(relativeTime(ago(23.8 * 3_600_000), NOW)).toBe('23h ago');
   });
 
   it('counts minutes under an hour', () => {

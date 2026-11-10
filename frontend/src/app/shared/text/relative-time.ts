@@ -6,6 +6,7 @@
 
 import { serverTime } from './clock-time';
 
+const JUST_NOW = 5;
 const MINUTE = 60;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -22,10 +23,10 @@ export function relativeTime(iso: string | null | undefined, now = Date.now()): 
   if (Number.isNaN(then)) return 'never';
 
   const secs = Math.floor((now - then) / 1000);
-  if (secs < 0) return 'just now';
+  if (secs < JUST_NOW) return 'just now';
   if (secs < MINUTE) return `${secs}s ago`;
   if (secs < HOUR) return `${Math.floor(secs / MINUTE)}m ago`;
-  if (secs < DAY) return `${Math.floor(secs / HOUR)}h ago`;
+  if (secs < DAY) return `${Math.min(Math.round(secs / HOUR), 23)}h ago`;
   if (secs < MONTH) return `${Math.floor(secs / DAY)}d ago`;
   if (secs < YEAR) return `${Math.floor(secs / MONTH)}mo ago`;
   return `${Math.floor(secs / YEAR)}y ago`;
