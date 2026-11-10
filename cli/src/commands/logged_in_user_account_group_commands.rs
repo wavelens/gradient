@@ -13,6 +13,7 @@ use connector::Client;
 use connector::api::{
     ApiKeyInfo, CreateApiKeyRequest, CreateSshKeyRequest, DeleteUserRequest, PatchApiKeyRequest,
 };
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 
 #[derive(Subcommand, Debug)]
@@ -90,7 +91,7 @@ pub enum LoggedInUserApiKeyCommands {
         permissions: Vec<String>,
         /// Expire the key after this number of days
         #[arg(long)]
-        expires_in_days: Option<i32>,
+        expires_in_days: Option<NonZeroU32>,
         /// Limit the key to this project
         #[arg(long, conflicts_with = "cache")]
         api_key_project: Option<String>,
