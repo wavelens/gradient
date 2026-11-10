@@ -28,6 +28,7 @@ pub use self::management::{
 };
 pub use self::metrics::{EntryPointMetricsQuery, get_entry_point_metrics, get_task_metrics};
 
+use crate::endpoints::evals::task_run_history::HistoryBar;
 use crate::permissions::{Permission, PermissionMask, mask_grants, mask_to_vec};
 use gradient_types::ids::*;
 
@@ -50,6 +51,7 @@ pub struct TaskResponse {
     pub wildcard: String,
     pub last_evaluation: Option<EvaluationId>,
     pub last_evaluation_status: Option<EvaluationStatus>,
+    pub recent_evaluations: Vec<HistoryBar>,
     pub force_evaluation: bool,
     pub created_by: UserId,
     pub created_at: chrono::NaiveDateTime,
@@ -99,6 +101,7 @@ impl TaskResponse {
     pub fn new(
         task: MTask,
         last_evaluation_status: Option<EvaluationStatus>,
+        recent_evaluations: Vec<HistoryBar>,
         permissions: PermissionMask,
     ) -> Self {
         let repository_fetch =
@@ -114,6 +117,7 @@ impl TaskResponse {
             wildcard: task.wildcard,
             last_evaluation: task.last_evaluation,
             last_evaluation_status,
+            recent_evaluations,
             force_evaluation: task.force_evaluation,
             created_by: task.created_by,
             created_at: task.created_at,

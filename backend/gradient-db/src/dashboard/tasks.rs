@@ -78,7 +78,7 @@ fn outcomes_sql() -> String {
 
 fn history_sql() -> String {
     format!(
-        "SELECT l.id AS latest, h.id, h.status, h.created_at, \
+        "SELECT l.id AS latest, h.id, h.status, h.created_at, h.fetch_started_at AS started_at, h.finished_at, \
             (extract(epoch FROM (h.finished_at - h.fetch_started_at)) * 1000)::bigint AS duration_ms \
         FROM evaluation l CROSS JOIN LATERAL (SELECT e.id, e.status, e.created_at, e.fetch_started_at, e.finished_at \
             FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
@@ -131,6 +131,8 @@ pub struct HistoryRow {
     pub id: EvaluationId,
     pub status: EvaluationStatus,
     pub created_at: NaiveDateTime,
+    pub started_at: Option<NaiveDateTime>,
+    pub finished_at: Option<NaiveDateTime>,
     pub duration_ms: Option<i64>,
 }
 
@@ -223,6 +225,8 @@ fn history_row(r: &QueryResult) -> Result<HistoryRow, DbErr> {
         id: EvaluationId::new(r.try_get("", "id")?),
         status: eval_status(r.try_get("", "status")?)?,
         created_at: r.try_get("", "created_at")?,
+        started_at: r.try_get("", "started_at")?,
+        finished_at: r.try_get("", "finished_at")?,
         duration_ms: r.try_get("", "duration_ms")?,
     })
 }

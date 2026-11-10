@@ -5,14 +5,15 @@
  */
 
 use super::rank::{
-    Counts, Filter, HistoryBar, Outcomes, Paging, TaskFacts, TaskRow, counts, history_len, rank,
+    Counts, Filter, Outcomes, Paging, TaskFacts, TaskRow, counts, history_len, rank,
 };
+use crate::endpoints::evals::task_run_history::get_last_n_evaluation_runs_by_latest_evaluation_id;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::dashboard::{entry_point_outcomes, histories, task_facts};
+use gradient_db::dashboard::{entry_point_outcomes, task_facts};
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr};
 use serde::{Deserialize, Serialize};
@@ -73,18 +74,10 @@ async fn attach_history<C: ConnectionTrait>(
         .iter()
         .filter_map(|r| r.latest.as_ref().map(|l| l.id))
         .collect();
-    if latest.is_empty() {
-        return Ok(());
-    }
-    let mut by_latest = histories(db, &latest, n).await?;
+    let mut by_latest = get_last_n_evaluation_runs_by_latest_evaluation_id(db, &latest, n).await?;
     for row in rows.iter_mut() {
         if let Some(l) = &row.latest {
-            row.history = by_latest
-                .remove(&l.id)
-                .unwrap_or_default()
-                .into_iter()
-                .map(HistoryBar::from)
-                .collect();
+            row.history = by_latest.remove(&l.id).unwrap_or_default();
         }
     }
     Ok(())

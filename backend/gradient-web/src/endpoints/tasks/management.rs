@@ -11,6 +11,7 @@ use crate::access::{Caller, ProjectAccess, caller_project_mask, has_permission, 
 use crate::api_spec::{ProjectPath, TaskPath};
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::MaybeApiKey;
+use crate::endpoints::evals::task_run_history::get_last_n_evaluation_runs_by_latest_evaluation_id;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::json_body::JsonBody;
@@ -39,6 +40,8 @@ use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+const TASK_RECENT_EVALUATION_RUN_COUNT: u64 = 5;
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct MakeTaskRequest {
@@ -167,12 +170,22 @@ pub async fn get(
             .into_iter()
             .map(|(id, e)| (id, e.status))
             .collect();
+    let mut recent_evaluations = get_last_n_evaluation_runs_by_latest_evaluation_id(
+        db,
+        &eval_ids,
+        TASK_RECENT_EVALUATION_RUN_COUNT,
+    )
+    .await?;
 
     let listing = listing.map(|p| {
         let last_evaluation_status = p
             .last_evaluation
             .and_then(|id| eval_status_map.get(&id).cloned());
-        TaskResponse::new(p, last_evaluation_status, permissions)
+        let recent_evaluations = p
+            .last_evaluation
+            .and_then(|id| recent_evaluations.remove(&id))
+            .unwrap_or_default();
+        TaskResponse::new(p, last_evaluation_status, recent_evaluations, permissions)
     });
 
     Ok(ok_json(listing))
@@ -323,17 +336,27 @@ pub async fn get_task(
     )
     .await?;
 
-    let last_evaluation_status = if let Some(eval_id) = task.last_evaluation {
-        by_id::<EEvaluation, _>(&db.web_db, eval_id)
+    let (last_evaluation_status, recent_evaluations) = match task.last_evaluation {
+        Some(eval_id) => (
+            by_id::<EEvaluation, _>(&db.web_db, eval_id)
+                .await?
+                .map(|e| e.status),
+            get_last_n_evaluation_runs_by_latest_evaluation_id(
+                &db.web_db,
+                &[eval_id],
+                TASK_RECENT_EVALUATION_RUN_COUNT,
+            )
             .await?
-            .map(|e| e.status)
-    } else {
-        None
+            .remove(&eval_id)
+            .unwrap_or_default(),
+        ),
+        None => (None, Vec::new()),
     };
 
     Ok(ok_json(TaskResponse::new(
         task,
         last_evaluation_status,
+        recent_evaluations,
         permissions,
     )))
 }

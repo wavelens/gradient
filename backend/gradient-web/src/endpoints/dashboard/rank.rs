@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::endpoints::evals::task_run_history::HistoryBar;
 use chrono::NaiveDateTime;
-use gradient_db::dashboard::{HistoryRow, TaskFactsRow};
+use gradient_db::dashboard::TaskFactsRow;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::{EvaluationId, WaitingReason};
 use serde::{Deserialize, Serialize};
@@ -94,25 +95,6 @@ impl From<TaskFactsRow> for TaskFacts {
             recent_14d: r.recent_14d,
             team: r.team,
             speed_ms: r.speed_ms,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, utoipa::ToSchema)]
-pub struct HistoryBar {
-    pub id: EvaluationId,
-    pub status: EvaluationStatus,
-    pub duration_ms: Option<i64>,
-    pub created_at: NaiveDateTime,
-}
-
-impl From<HistoryRow> for HistoryBar {
-    fn from(h: HistoryRow) -> Self {
-        Self {
-            id: h.id,
-            status: h.status,
-            duration_ms: h.duration_ms,
-            created_at: h.created_at,
         }
     }
 }
