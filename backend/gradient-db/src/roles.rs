@@ -157,6 +157,17 @@ mod tests {
         )
         .await
         .expect("the custom cache role is written");
+        let viewer = crate::rows::insert::<ECacheRole, _>(
+            &db.connection(),
+            MCacheRole {
+                id: RoleId::now_v7(),
+                name: "viewer".into(),
+                permission: cache_mask_from(&[CachePermission::ViewCache]),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the custom cache role is written");
 
         let migration = Migrator::migrations()
             .into_iter()
@@ -187,6 +198,18 @@ mod tests {
         assert!(cache_mask_grants(
             uploader.permission,
             CachePermission::WriteStore
+        ));
+        assert!(!cache_mask_grants(
+            uploader.permission,
+            CachePermission::ReadStore
+        ));
+        let viewer = db
+            .find::<ECacheRole>(viewer.id)
+            .await
+            .expect("the cache role exists");
+        assert!(cache_mask_grants(
+            viewer.permission,
+            CachePermission::ReadStore
         ));
         db.finish().await;
     }

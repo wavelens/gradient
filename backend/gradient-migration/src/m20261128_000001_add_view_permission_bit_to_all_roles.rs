@@ -8,6 +8,7 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
 const UP: &str = "UPDATE public.role SET permission = permission | 1 WHERE permission & 1 = 0; \
+    UPDATE public.cache_role SET permission = permission | 2 WHERE permission & 1 = 1; \
     UPDATE public.cache_role SET permission = permission | 1 WHERE permission & 1 = 0;";
 
 #[derive(DeriveMigrationName)]
