@@ -153,7 +153,7 @@ pub async fn latest_attempt<C: ConnectionTrait>(
 
 crate::sql! {
     LATEST_ATTEMPTS = "SELECT DISTINCT ON (derivation_build) * FROM build_attempt \
-         WHERE derivation_build = ANY() ORDER BY derivation_build, created_at DESC",
+         WHERE derivation_build = ANY($1) ORDER BY derivation_build, created_at DESC",
         params = [SharedBuildIds(64)];
 }
 
