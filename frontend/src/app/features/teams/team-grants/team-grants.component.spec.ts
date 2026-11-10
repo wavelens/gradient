@@ -343,6 +343,15 @@ describe('TeamGrantsComponent', () => {
       expect(notify.success).toHaveBeenCalledWith('Team workers removed');
     });
 
+    it('says the shared workers stay when only the member roles go', () => {
+      const both: TeamGrantEntry = { team: 'lab', display_name: 'Lab', role: 'View', users: true, workers: true, pending: false };
+      const { component, confirm } = setup('project', 'users');
+      component.remove(both);
+      expect(confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ consequence: 'Members of Lab lose their role on this project. The workers granted to the project remain.' }),
+      );
+    });
+
     it('warns that removing one part of a pending grant withdraws the whole request', () => {
       const pendingBoth: TeamGrantEntry = { team: 'lab', display_name: 'Lab', role: 'View', users: true, workers: true, pending: true };
       const { component, service, confirm, notify } = setup('project', 'users');

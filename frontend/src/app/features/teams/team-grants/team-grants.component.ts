@@ -241,6 +241,7 @@ export class TeamGrantsComponent implements OnInit {
         : `The pending request for ${team} can no longer get approval.`;
     }
     if (this.kind() === 'cache') return `Members of ${team} lose their role on this cache.`;
+    if (users && otherPart) return `Members of ${team} lose their role on this project. The workers granted to the project remain.`;
     return users
       ? `Members of ${team} lose their role on this project.`
       : `This project can no longer run builds on ${team} workers.`;
