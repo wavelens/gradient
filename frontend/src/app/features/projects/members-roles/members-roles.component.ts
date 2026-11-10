@@ -28,6 +28,7 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
+  TooltipDirective,
   type AutoCompleteSuggestion,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent, PermissionPickerComponent } from '@shared/ui';
@@ -92,6 +93,7 @@ interface RoleFormState {
     RowComponent,
     BadgeComponent,
     SelectComponent,
+    TooltipDirective,
   ],
   templateUrl: './members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -150,6 +152,10 @@ export class MembersRolesComponent implements OnInit {
       invitations: this.invitations(),
     }),
   );
+  soleAdminUsername = computed(() => {
+    const admins = this.members().filter((member) => member.name === 'Admin');
+    return admins.length === 1 ? admins[0].id : null;
+  });
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';

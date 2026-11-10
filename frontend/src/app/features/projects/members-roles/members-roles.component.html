@@ -33,6 +33,8 @@
         <gr-row-list>
           @let pending = pendingMemberRoleSelection();
           @for (member of members(); track member.id) {
+            @let isSoleAdmin = member.id === soleAdminUsername();
+            @let soleAdminReason = isSoleAdmin ? 'Make another member an Admin first. Every project needs at least one Admin.' : '';
             <gr-row icon="person">
               <span class="mono">{{ member.id }}</span>
               @if (member.user_display_name && member.user_display_name !== member.id) {
@@ -48,8 +50,9 @@
                   [options]="roles()"
                   optionLabel="name"
                   optionValue="name"
-                  [disabled]="pending !== null || rolesLoading()"
+                  [disabled]="pending !== null || rolesLoading() || isSoleAdmin"
                   [appManagedDisable]="access()"
+                  [grTooltip]="soleAdminReason"
                   [ariaLabel]="'Role: ' + member.id"
                   (ngModelChange)="updateMemberRole(member.id, $event)"
                 />
@@ -61,6 +64,7 @@
                   severity="danger"
                   [attr.aria-label]="'Remove ' + member.id"
                   [disabled]="pending !== null"
+                  [disabledReason]="soleAdminReason"
                   [appManagedDisable]="access()"
                   (click)="removeMember(member.id)"
                 ></button>

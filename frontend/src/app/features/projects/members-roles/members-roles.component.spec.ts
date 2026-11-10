@@ -205,12 +205,23 @@ describe('MembersRolesComponent - pending invitations', () => {
 describe('MembersRolesComponent - writes', () => {
   it('asks before removing a member, naming the member by display name and username', async () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    getMembers.mockReturnValue(of([{ id: 'alice', user_display_name: 'Alice Admin', name: 'Admin' }]));
+    getMembers.mockReturnValue(of([{ id: 'alice', user_display_name: 'Alice Admin', name: 'Admin' }, { id: 'bob', name: 'Admin' }]));
     await settled(fixture);
     (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('gr-row-list button.gr-button--danger')!.click();
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Remove member', target: 'Alice Admin (alice)' }));
     expect(removeMember).toHaveBeenCalledWith('acme', 'alice');
     expect(notify.success).toHaveBeenCalledWith('Member removed');
+  });
+
+  it('keeps the only Admin from losing the role or being removed', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    getMembers.mockReturnValue(of([{ id: 'alice', name: 'Admin' }, { id: 'bob', name: 'View' }]));
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('[aria-label="Remove alice"]')!.getAttribute('aria-disabled')).toBe('true');
+    expect(root.querySelector('[aria-label="Remove bob"]')!.getAttribute('aria-disabled')).toBeNull();
+    const roleTriggers = root.querySelectorAll<HTMLButtonElement>('gr-row gr-select .gr-select__trigger');
+    expect([roleTriggers[0].disabled, roleTriggers[1].disabled]).toEqual([true, false]);
   });
 
   it('sends no member removal when the confirmation is cancelled', async () => {
