@@ -1046,7 +1046,7 @@ pub async fn patch_settings(
         }
 
         if requires_verification && !email.eq_ignore_ascii_case(&previous_email_address) {
-            let token = gradient_notify::generate_verification_token();
+            let token = gradient_notify::generate_token();
             auser.email_verified = Set(false);
             auser.email_verification_token = Set(Some(token.clone()));
             auser.email_verification_token_expires =

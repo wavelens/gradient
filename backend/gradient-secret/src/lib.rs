@@ -60,7 +60,10 @@ impl Clone for SecretString {
 
 impl PartialEq for SecretString {
     fn eq(&self, other: &Self) -> bool {
-        self.expose().as_bytes().ct_eq(other.expose().as_bytes()).into()
+        self.expose()
+            .as_bytes()
+            .ct_eq(other.expose().as_bytes())
+            .into()
     }
 }
 
@@ -262,8 +265,14 @@ mod tests {
         assert_eq!(text, SecretString::new("s3cr3t-value".to_owned()));
         assert_ne!(text, SecretString::new("s3cr3t-valuf".to_owned()));
         assert_ne!(text, SecretString::new("s3cr3t".to_owned()));
-        assert_eq!(SecretBytes::from(&[1, 2][..]), SecretBytes::from(&[1, 2][..]));
-        assert_ne!(SecretBytes::from(&[1, 2][..]), SecretBytes::from(&[1, 3][..]));
+        assert_eq!(
+            SecretBytes::from(&[1, 2][..]),
+            SecretBytes::from(&[1, 2][..])
+        );
+        assert_ne!(
+            SecretBytes::from(&[1, 2][..]),
+            SecretBytes::from(&[1, 3][..])
+        );
     }
 
     #[test]

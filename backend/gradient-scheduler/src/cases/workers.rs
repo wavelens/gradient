@@ -1881,7 +1881,7 @@ async fn w38_a_restarted_core_still_requeues_a_held_build_after_the_grace() {
 }
 
 #[tokio::test]
-async fn w39_a_reconnected_worker_that_never_lists_running_jobs_has_its_build_requeued_after_the_grace_period()
+async fn w42_a_reconnected_worker_that_never_lists_running_jobs_has_its_build_requeued_after_the_grace_period()
  {
     let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
     case.connect_reclaiming(W1, w_all(), &[]).await;
