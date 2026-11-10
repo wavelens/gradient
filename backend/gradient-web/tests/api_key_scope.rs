@@ -12,7 +12,7 @@
 use axum::http::StatusCode;
 use base64::Engine;
 use gradient_entity::{api, cache, ids::*};
-use gradient_fixtures::ids::{cache_id, user_id};
+use gradient_fixtures::ids::{cache_id, project_id, user_id};
 use gradient_fixtures::mock::{exec_ok, mock_db};
 use gradient_fixtures::rows::{cache_member, cache_view_role, user};
 use gradient_test_support::web::{make_test_server, make_token, with_auth};
@@ -200,6 +200,25 @@ async fn cache_scope_key_is_refused_outside_cache_routes() {
         "/api/v1/dashboard/tasks",
         "/api/v1/projects/test-project",
         "/api/v1/user/stars",
+    ] {
+        let db = with_key(mock_db(), &key);
+        let status = refused_with_key(db, &raw, |s| s.get(path)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn project_scope_key_is_refused_on_routes_reading_all_projects() {
+    let raw = "q".repeat(64);
+    let key = api::Model {
+        project: Some(project_id()),
+        ..key_row(&raw, mask_from(Permission::ALL), None)
+    };
+    for path in [
+        "/api/v1/dashboard/tasks",
+        "/api/v1/search?q=nightly",
+        "/api/v1/board/jobs/pending",
+        "/api/v1/metrics/catalog",
     ] {
         let db = with_key(mock_db(), &key);
         let status = refused_with_key(db, &raw, |s| s.get(path)).await;

@@ -28,6 +28,10 @@ use sea_orm::sea_query::Expr;
 pub(crate) enum AccessRefusal {
     #[error("Cache-pinned API key cannot be used on this endpoint.")]
     CachePinnedKeyOnEndpoint,
+    #[error(
+        "An API key pinned to one project can't use this endpoint. This endpoint can show data from all projects."
+    )]
+    ProjectPinnedKeyOnAllProjectsEndpoint,
     #[error("API key is pinned to a different cache.")]
     KeyPinnedToDifferentCache,
     #[error("Requests to this cache need the \"{}\" permission.", .0.permission_label())]
