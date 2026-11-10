@@ -167,6 +167,7 @@ impl ParsedDerivation {
         updater: &mut JobUpdater,
         drv_path: &str,
         log_fetch_from_store: bool,
+        log_limits: crate::executor::log_limit::LogRateLimits,
     ) -> Result<(Vec<BuildOutput>, bool), BuildError> {
         match result {
             BuildResultInner::Success(s) => {
@@ -190,7 +191,7 @@ impl ParsedDerivation {
                          protocol); recovering input-addressed/FOD paths from .drv"
                     );
                     if log_fetch_from_store {
-                        forward_store_build_log(updater, drv_path).await;
+                        forward_store_build_log(updater, drv_path, log_limits).await;
                     }
                 }
                 let mut outputs = Vec::with_capacity(pairs.len());
@@ -350,6 +351,7 @@ pub async fn build_derivation(
                     updater,
                     &task.drv_path,
                     log_fetch_from_store,
+                    log_limits,
                 )
                 .await
         }
@@ -369,18 +371,42 @@ pub async fn build_derivation(
     Ok(outputs)
 }
 
-pub(super) async fn forward_store_build_log(updater: &mut JobUpdater, drv_path: &str) {
-    let log_dir = crate::nix::log::nix_log_dir();
-    match crate::nix::log::read_store_build_log(&log_dir, drv_path) {
-        Ok(Some(text)) if !text.is_empty() => {
-            if let Err(e) = updater.send_log_chunk(text.into_bytes()).await {
-                warn!(error = %e, "failed to forward stored build log; continuing");
-            }
-            debug!(drv = %drv_path, "forwarded stored nix build log for already-built derivation");
+pub(super) async fn forward_store_build_log(
+    updater: &mut JobUpdater,
+    drv_path: &str,
+    log_limits: crate::executor::log_limit::LogRateLimits,
+) {
+    let max_bytes = log_limits.burst_bytes_per_min;
+    let drv = drv_path.to_owned();
+    let read = tokio::task::spawn_blocking(move || {
+        crate::nix::log::read_store_build_log(&crate::nix::log::nix_log_dir(), &drv, max_bytes)
+    })
+    .await;
+    let log = match read {
+        Ok(Ok(Some(log))) if !log.text.is_empty() => log,
+        Ok(Ok(_)) => {
+            debug!(drv = %drv_path, "no stored nix build log for already-built derivation");
+            return;
         }
-        Ok(_) => debug!(drv = %drv_path, "no stored nix build log for already-built derivation"),
-        Err(e) => debug!(drv = %drv_path, error = %e, "failed to read stored nix build log"),
+        Ok(Err(e)) => {
+            debug!(drv = %drv_path, error = %e, "failed to read stored nix build log");
+            return;
+        }
+        Err(e) => {
+            debug!(drv = %drv_path, error = %e, "stored nix build log reader ended early");
+            return;
+        }
+    };
+    if let Err(e) = updater.send_log_chunk(log.text).await {
+        warn!(error = %e, "failed to forward stored build log; continuing");
     }
+    if log.truncated {
+        let note = format!(
+            "\x1b[0m[gradient: stored build log truncated at {max_bytes} bytes (rate limit for the log)]\n"
+        );
+        let _ = updater.send_log_chunk(note.into_bytes()).await;
+    }
+    debug!(drv = %drv_path, truncated = log.truncated, "forwarded stored nix build log for already-built derivation");
 }
 
 const LOG_PAUSED: &[u8] =

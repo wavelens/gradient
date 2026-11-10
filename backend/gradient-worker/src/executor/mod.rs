@@ -513,7 +513,7 @@ impl JobExecutor {
         gc_handles: &mut Vec<GcRootHandle>,
     ) -> Result<Vec<compress::OutputNar<'a>>> {
         if self.log_fetch_from_store {
-            build::forward_store_build_log(updater, &build.drv_path).await;
+            build::forward_store_build_log(updater, &build.drv_path, self.log_limits).await;
         }
         for (_, path) in &realised {
             gc_handles.push(self.gcroots.add(path).await);

@@ -332,8 +332,7 @@ pub struct LogArgs {
     #[arg(default_value_t = 512 * 1024 * 1024)]
     pub sustained_bytes_per_hour: u64,
 
-    /// Whether to forward the stored build log of a derivation already built locally and
-    /// therefore producing no new log.
+    /// Whether to forward saved build logs for derivations that already built locally and produce no new logs. Forwarded logs get a cutoff at burstBytesPerMin.
     #[arg(default_value = "true")]
     pub fetch_from_store: bool,
 
