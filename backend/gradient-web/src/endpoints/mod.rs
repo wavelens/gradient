@@ -221,10 +221,14 @@ pub async fn get_config(
             create_team: state.config.permissions.create_team,
             create_cache: state.config.permissions.create_cache,
             github_app_enabled: state.config.github_app.is_some(),
-            gitea_oauth_app: state.config.gitea_app.as_ref().map(|app| GiteaOAuthAppConfig {
-                git_host_type: app.git_host_type.as_path_segment().to_owned(),
-                instance_base_url: app.instance_base_url.clone(),
-            }),
+            gitea_oauth_app: state
+                .config
+                .gitea_app
+                .as_ref()
+                .map(|app| GiteaOAuthAppConfig {
+                    git_host_type: app.git_host_type.as_path_segment().to_owned(),
+                    instance_base_url: app.instance_base_url.clone(),
+                }),
             ssh_enabled: state.config.ssh.enable,
             ssh_port: state.config.ssh.enable.then_some(state.config.ssh.port),
             gradient_ci_enabled: state.config.gradient_ci.enable,

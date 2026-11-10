@@ -149,8 +149,8 @@ async fn connect_is_refused_for_a_taken_integration_name() {
         name: "codeberg".into(),
         ..Default::default()
     };
-    let db = with_project_manage(with_auth(mock_db(), session_id))
-        .append_query_results([vec![taken]]);
+    let db =
+        with_project_manage(with_auth(mock_db(), session_id)).append_query_results([vec![taken]]);
 
     let res = with_gitea_app(TestState::new().web_db(db.into_connection()))
         .server()

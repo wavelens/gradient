@@ -27,13 +27,13 @@ pub use self::jwt::{
     decode_download_token, decode_jwt, encode_download_token, generate_api_key, hash_api_key,
     jwt_cookie, renew_session_expiry_and_sign_token, session_claims,
 };
+pub(crate) use self::jwt::{sign_claims, verify_claims};
 pub use self::middleware::{
     MaybeUser, authorize, authorize_optional, reject_api_key_authentication,
     require_session_authentication, update_last_login,
 };
-pub use self::oidc::{OidcAuthRequest, oidc_login_create, oidc_login_verify};
-pub(crate) use self::jwt::{sign_claims, verify_claims};
 pub(crate) use self::oidc::random_url_safe;
+pub use self::oidc::{OidcAuthRequest, oidc_login_create, oidc_login_verify};
 pub use self::provider_flow::{
     ProviderCallback, ProviderPurpose, provider_authorize, provider_callback,
 };

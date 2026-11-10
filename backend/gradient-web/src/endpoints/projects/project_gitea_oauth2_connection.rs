@@ -225,14 +225,13 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
             (None, None) => return Err("failed"),
         };
 
-        let signed_in =
-            gradient_db::lookup::by_id::<ESession, _>(&state.web_db, claims.session_id)
-                .await
-                .is_ok_and(|session| {
-                    session.is_some_and(|s| {
-                        s.user_id == claims.user_id && s.is_usable_at(gradient_types::now())
-                    })
-                });
+        let signed_in = gradient_db::lookup::by_id::<ESession, _>(&state.web_db, claims.session_id)
+            .await
+            .is_ok_and(|session| {
+                session.is_some_and(|s| {
+                    s.user_id == claims.user_id && s.is_usable_at(gradient_types::now())
+                })
+            });
         if !signed_in {
             return Err("signed_out");
         }

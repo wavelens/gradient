@@ -83,7 +83,12 @@ pub async fn refresh_and_get_usable_decrypted_access_token(
 
     let tokens = get_new_tokens_from_git_host_with_refresh_token(http, app, refresh_token.expose())
         .await
-        .with_context(|| format!("Refresh OAuth2 access token for integration {id}", id = locked.id))?;
+        .with_context(|| {
+            format!(
+                "Refresh OAuth2 access token for integration {id}",
+                id = locked.id
+            )
+        })?;
     let mut active: AIntegration = locked.into_active_model();
     active.access_token = Set(Some(encrypt_secret_with_file(
         crypt_file,
@@ -107,10 +112,7 @@ pub async fn refresh_and_get_usable_decrypted_access_token(
 mod tests {
     use super::*;
 
-    fn integration(
-        refresh: Option<&str>,
-        expires_at: Option<NaiveDateTime>,
-    ) -> MIntegration {
+    fn integration(refresh: Option<&str>, expires_at: Option<NaiveDateTime>) -> MIntegration {
         MIntegration {
             id: IntegrationId::now_v7(),
             project: ProjectId::now_v7(),
@@ -139,7 +141,10 @@ mod tests {
         let check = integration_refreshable_oauth2_token_is_expired_or_expires_within_one_minute;
 
         assert!(check(&integration(Some("r"), soon), now));
-        assert!(check(&integration(Some("r"), Some(now - Duration::hours(1))), now));
+        assert!(check(
+            &integration(Some("r"), Some(now - Duration::hours(1))),
+            now
+        ));
         assert!(!check(&integration(Some("r"), later), now));
         assert!(!check(&integration(None, soon), now));
         assert!(!check(&integration(Some("r"), None), now));
@@ -152,6 +157,9 @@ mod tests {
             access_token_expires_at_from_lifetime_seconds(now, Some(3600)),
             Some(now + Duration::hours(1))
         );
-        assert_eq!(access_token_expires_at_from_lifetime_seconds(now, None), None);
+        assert_eq!(
+            access_token_expires_at_from_lifetime_seconds(now, None),
+            None
+        );
     }
 }

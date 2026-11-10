@@ -85,7 +85,10 @@ async fn post_client_credentials_and_grant_fields_to_token_endpoint_and_parse_to
     form.extend_from_slice(grant_fields);
 
     let resp = http
-        .post(format!("{}/login/oauth/access_token", app.instance_base_url))
+        .post(format!(
+            "{}/login/oauth/access_token",
+            app.instance_base_url
+        ))
         .header(reqwest::header::ACCEPT, "application/json")
         .form(&form)
         .send()
@@ -162,7 +165,7 @@ mod tests {
 
         let secret = secret_file();
         let tokens = exchange_authorization_code_for_tokens(
-            &reqwest::Client::new(),
+            &gradient_util::http::build_client().expect("build test http client"),
             &app(&server.uri(), &secret),
             "code",
             "https://ci.example/callback",
@@ -190,7 +193,7 @@ mod tests {
 
         let secret = secret_file();
         let err = get_new_tokens_from_git_host_with_refresh_token(
-            &reqwest::Client::new(),
+            &gradient_util::http::build_client().expect("build test http client"),
             &app(&server.uri(), &secret),
             "stale",
         )
