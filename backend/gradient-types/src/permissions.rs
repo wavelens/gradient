@@ -102,6 +102,29 @@ impl Permission {
         matches!(self, Permission::CreateProject)
     }
 
+    pub const fn permission_explanation(self) -> &'static str {
+        match self {
+            Permission::ViewProject => "View project, its tasks, evaluations and build logs.",
+            Permission::ManageProjectSettings => "Change project name, description and settings.",
+            Permission::DeleteProject => "Delete the project and all tasks and builds.",
+            Permission::ManageMembers => "Invite and remove members and change roles.",
+            Permission::ManageRoles => "Create, edit and delete custom roles.",
+            Permission::ManageIntegrations => "Connect Git hosts and external services.",
+            Permission::ManageActions => "Set actions to run on task events.",
+            Permission::ManageWorkers => "Register, enable and disable project workers.",
+            Permission::ManageSubscriptions => {
+                "Subscribe the project to a cache or remove the subscription."
+            }
+            Permission::ManageSshKey => "Update the project SSH key for repository clones.",
+            Permission::CreateTask => "Add a new task to the project.",
+            Permission::EditTask => "Change the task repository, branch and settings.",
+            Permission::TriggerEvaluation => "Start an evaluation manually.",
+            Permission::ManageTriggers => "Pick when tasks run (e.g., on push, on schedule)",
+            Permission::ManageWebhooks => "Send event notifications to an external URL.",
+            Permission::CreateProject => "Create a new project on the server.",
+        }
+    }
+
     pub fn from_wire_name(s: &str) -> Option<Self> {
         Permission::ALL
             .iter()
@@ -253,6 +276,26 @@ impl CachePermission {
         }
     }
 
+    pub const fn permission_explanation(self) -> &'static str {
+        match self {
+            CachePermission::ViewCache => "Show the cache, its members and roles in Gradient.",
+            CachePermission::ReadStore => "Download packages from the cache in Nix.",
+            CachePermission::WriteStore => "Upload build outputs to the cache.",
+            CachePermission::ManageCacheSettings => {
+                "Change the cache name, visibility and settings."
+            }
+            CachePermission::ManageCacheKeys => "Read the secret signing key for cache packages",
+            CachePermission::ManageUpstreamCaches => "Select other caches to fetch packages from.",
+            CachePermission::ManageCacheMembers => "Invite or remove members and change roles.",
+            CachePermission::ManageCacheRoles => "Create, edit and delete custom roles.",
+            CachePermission::ManageCacheSubscriptions => {
+                "Approve or deny projects that request use of the cache."
+            }
+            CachePermission::DeleteCache => "Delete the cache along with all packages.",
+            CachePermission::ManageCacheWebhooks => "Send event notifications to an external URL.",
+        }
+    }
+
     pub fn from_wire_name(s: &str) -> Option<Self> {
         CachePermission::ALL
             .iter()
@@ -401,6 +444,24 @@ mod tests {
             cache_view,
             CachePermission::ManageCacheKeys
         ));
+    }
+
+    #[test]
+    fn all_project_and_cache_permissions_have_short_non_empty_descriptions_within_length_limit() {
+        let explanations = Permission::ALL
+            .iter()
+            .map(|p| (p.as_wire_name(), p.permission_explanation()))
+            .chain(
+                CachePermission::ALL
+                    .iter()
+                    .map(|p| (p.as_wire_name(), p.permission_explanation())),
+            );
+        for (id, explanation) in explanations {
+            assert!(
+                (1..=60).contains(&explanation.len()),
+                "{id}: {explanation:?}"
+            );
+        }
     }
 
     #[test]

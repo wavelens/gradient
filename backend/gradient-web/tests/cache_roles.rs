@@ -10,6 +10,7 @@ use gradient_fixtures::rows::{cache_admin_role, cache_member, cache_view_role};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
+use gradient_types::permissions::CachePermission;
 use serde_json::{Value, json};
 
 fn cache_row() -> cache::Model {
@@ -77,6 +78,14 @@ async fn list_returns_builtins_and_available_permissions() {
         .as_array()
         .expect("available_permissions");
     assert!(perms.iter().any(|p| p["id"] == "manageCacheMembers"));
+    let read_cache = perms
+        .iter()
+        .find(|p| p["id"] == "readStore")
+        .expect("readStore entry");
+    assert_eq!(
+        read_cache["permission_explanation"],
+        CachePermission::ReadStore.permission_explanation()
+    );
 }
 
 #[tokio::test]

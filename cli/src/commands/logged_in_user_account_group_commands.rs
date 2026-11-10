@@ -334,7 +334,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                     Ok(catalogue) => {
                         out.ok(&catalogue);
                         for permission in &catalogue.available_permissions {
-                            out.human(&permission.id);
+                            out.human(format!(
+                                "{}: {}",
+                                permission.id, permission.permission_explanation
+                            ));
                         }
                     }
                     Err(e) => out.fail(e),

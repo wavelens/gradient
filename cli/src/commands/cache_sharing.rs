@@ -320,12 +320,13 @@ pub async fn apply_cache_role_command(cmd: CacheRoleCommand, out: Output) {
                 Ok(roles) => {
                     out.ok(&roles);
                     roles.roles.iter().for_each(print_role);
-                    let permissions: Vec<&str> = roles
-                        .available_permissions
-                        .iter()
-                        .map(|permission| permission.id.as_str())
-                        .collect();
-                    out.human(format!("Available permissions: {}", permissions.join(",")));
+                    out.human("Available permissions:");
+                    for permission in &roles.available_permissions {
+                        out.human(format!(
+                            "  {}: {}",
+                            permission.id, permission.permission_explanation
+                        ));
+                    }
                 }
                 Err(e) => out.fail(e),
             }

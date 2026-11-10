@@ -229,9 +229,9 @@ async fn key_permissions_returns_the_catalogue() {
     Mock::given(method("GET"))
         .and(path("/api/v1/user/keys/permissions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok(json!({
-            "available_permissions": [{"id": "viewProject", "mutating": false}],
+            "available_permissions": [{"id": "viewProject", "mutating": false, "permission_explanation": "View project"}],
             "availableCache": [],
-            "server_wide_permissions": [{"id": "createProject", "mutating": true}]
+            "server_wide_permissions": [{"id": "createProject", "mutating": true, "permission_explanation": "Create project"}]
         }))))
         .mount(&server)
         .await;

@@ -31,7 +31,7 @@ fieldset {
 
   label {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: $spacing-sm;
     padding: $spacing-xs 0;
     font-size: $font-size-sm;
@@ -39,6 +39,18 @@ fieldset {
     cursor: pointer;
 
     input[type='checkbox'] { cursor: pointer; }
+  }
+
+  .item-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+
+    small {
+      font-size: $font-size-xs;
+      color: var(--gr-text-secondary);
+      line-height: 1.35;
+    }
   }
 
   &:disabled label { opacity: 0.5; cursor: not-allowed; }

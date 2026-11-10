@@ -40,6 +40,7 @@ export class PermissionPickerComponent {
     const item = (p: PermissionEntry) => ({
       value: p.id,
       label: permissionLabelWithCapitalizedFirstLetter(p.id),
+      description: p.permission_explanation,
       disabled: !this.selectable(p.id) || this.locked(p.id),
     });
     const group = (label: string, role: 'View' | 'Write' | 'Admin'): CheckGroup => ({

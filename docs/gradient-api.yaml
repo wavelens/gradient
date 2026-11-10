@@ -21027,11 +21027,14 @@ components:
       required:
       - id
       - mutating
+      - permission_explanation
       properties:
         id:
           type: string
         mutating:
           type: boolean
+        permission_explanation:
+          type: string
     PersonAccessReason:
       type: object
       required:

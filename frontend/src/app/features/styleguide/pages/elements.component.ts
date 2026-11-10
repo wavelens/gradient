@@ -76,9 +76,9 @@ function counts(c: Partial<BuildStatusCounts>): BuildStatusCounts {
 export class ElementsComponent {
   readonly refusedExample = createMissingPermissionLoadStateError('project');
   readonly demoPermissions = [
-    { id: 'viewProject', mutating: false },
-    { id: 'createTask', mutating: true },
-    { id: 'deleteProject', mutating: true },
+    { id: 'viewProject', mutating: false, permission_explanation: 'View project, its tasks, evaluations and build logs.' },
+    { id: 'createTask', mutating: true, permission_explanation: 'Add a new task to the project.' },
+    { id: 'deleteProject', mutating: true, permission_explanation: 'Delete the project and all tasks and builds.' },
   ];
   demoSelection: Record<string, boolean> = { viewProject: true };
   readonly demoGroups = [

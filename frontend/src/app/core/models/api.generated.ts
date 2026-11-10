@@ -2165,6 +2165,7 @@ export type Permission = "viewProject" | "manageProjectSettings" | "deleteProjec
 export interface PermissionEntry {
   id: string;
   mutating: boolean;
+  permission_explanation: string;
 }
 
 export interface PersonAccessReason {

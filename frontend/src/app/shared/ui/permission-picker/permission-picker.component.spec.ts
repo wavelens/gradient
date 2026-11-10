@@ -15,13 +15,13 @@ import { PermissionPickerComponent } from './permission-picker.component';
 })
 class Host {
   permissions = [
-    { id: 'viewProject', mutating: false },
-    { id: 'editTask', mutating: true },
-    { id: 'deleteProject', mutating: true },
+    { id: 'viewProject', mutating: false, permission_explanation: 'See the project.' },
+    { id: 'editTask', mutating: true, permission_explanation: 'Change a task.' },
+    { id: 'deleteProject', mutating: true, permission_explanation: 'Delete the project.' },
   ];
   selection = signal<Record<string, boolean>>({ viewProject: true });
   viewRequired = signal(false);
-  serverWide = signal<{ id: string; mutating: boolean }[]>([]);
+  serverWide = signal<{ id: string; mutating: boolean; permission_explanation: string }[]>([]);
   selectable = signal<string[] | null>(null);
 }
 
@@ -35,7 +35,12 @@ describe('PermissionPickerComponent', () => {
   it('groups the permissions by the lowest built-in role that grants them', () => {
     const { root } = render();
     const groups = Array.from(root.querySelectorAll('fieldset')).map((r) => r.textContent?.replace(/\s+/g, ' ').trim());
-    expect(groups).toEqual(['Read View project', 'Write Edit task', 'Admin Delete project']);
+    expect(groups).toEqual(['Read View project See the project.', 'Write Edit task Change a task.', 'Admin Delete project Delete the project.']);
+  });
+
+  it('shows the server explanation under each permission label', () => {
+    const { root } = render();
+    expect(Array.from(root.querySelectorAll('.item-text small')).map((r) => r.textContent)).toEqual(['See the project.', 'Change a task.', 'Delete the project.']);
   });
 
   it('keeps permissions outside the selectable list visible but disabled and unselected', () => {
@@ -50,10 +55,10 @@ describe('PermissionPickerComponent', () => {
 
   it('shows server-wide permissions in their own group and includes them in the selection', async () => {
     const { fixture, root } = render();
-    fixture.componentInstance.serverWide.set([{ id: 'createProject', mutating: true }]);
+    fixture.componentInstance.serverWide.set([{ id: 'createProject', mutating: true, permission_explanation: 'Make a project.' }]);
     fixture.detectChanges();
     const groups = Array.from(root.querySelectorAll('fieldset')).map((r) => r.textContent?.replace(/\s+/g, ' ').trim());
-    expect(groups.at(-1)).toBe('Whole Server Create project');
+    expect(groups.at(-1)).toBe('Whole Server Create project Make a project.');
     root.querySelectorAll<HTMLInputElement>('input[type=checkbox]')[3].click();
     fixture.detectChanges();
     await fixture.whenStable();

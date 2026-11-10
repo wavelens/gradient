@@ -38,6 +38,7 @@ impl Refusal for PermissionRefusal {
 pub struct PermissionEntry {
     pub id: &'static str,
     pub mutating: bool,
+    pub permission_explanation: &'static str,
 }
 
 impl From<Permission> for PermissionEntry {
@@ -45,6 +46,7 @@ impl From<Permission> for PermissionEntry {
         Self {
             id: permission.as_wire_name(),
             mutating: is_mutating(permission),
+            permission_explanation: permission.permission_explanation(),
         }
     }
 }
@@ -54,6 +56,7 @@ impl From<CachePermission> for PermissionEntry {
         Self {
             id: permission.as_wire_name(),
             mutating: is_cache_mutating(permission),
+            permission_explanation: permission.permission_explanation(),
         }
     }
 }

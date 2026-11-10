@@ -338,8 +338,8 @@ describe('ApiKeysComponent - field checks', () => {
 
   it('keeps the ticked permissions between Any project and Project and pre-ticks read for a cache', () => {
     const { component } = openCreate();
-    component.availablePermissions.set([{ id: 'viewProject', mutating: false }, { id: 'editTask', mutating: true }]);
-    component.availableCachePermissions.set([{ id: 'viewCache', mutating: false }, { id: 'readStore', mutating: false }, { id: 'writeStore', mutating: true }]);
+    component.availablePermissions.set([{ id: 'viewProject', mutating: false, permission_explanation: '' }, { id: 'editTask', mutating: true, permission_explanation: '' }]);
+    component.availableCachePermissions.set([{ id: 'viewCache', mutating: false, permission_explanation: '' }, { id: 'readStore', mutating: false, permission_explanation: '' }, { id: 'writeStore', mutating: true, permission_explanation: '' }]);
     component.formPermissions = { viewProject: true, editTask: true };
     component.formScope = 'project';
     component.onScopeChange();
@@ -388,9 +388,9 @@ describe('ApiKeysComponent - edits', () => {
     const fixture = setup([cacheKey], { updateApiKey });
     const component = fixture.componentInstance;
     component.availableCachePermissions.set([
-      { id: 'viewCache', mutating: false },
-      { id: 'readStore', mutating: false },
-      { id: 'writeStore', mutating: true },
+      { id: 'viewCache', mutating: false, permission_explanation: '' },
+      { id: 'readStore', mutating: false, permission_explanation: '' },
+      { id: 'writeStore', mutating: true, permission_explanation: '' },
     ]);
     component.openEditDialog(cacheKey);
     expect(component.formScope).toBe('cache');
