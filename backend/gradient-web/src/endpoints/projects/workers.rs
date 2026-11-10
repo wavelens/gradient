@@ -506,12 +506,15 @@ pub async fn get_project_worker_metrics(
         .or(team_name)
         .ok_or_else(|| WebError::not_found(Resource::Worker))?;
 
-    let samples =
-        gradient_db::worker_registrations::oldest_samples(&state.web_db, &worker_id, 2000)
-            .await?
-            .into_iter()
-            .map(WorkerSamplePoint::from)
-            .collect();
+    let samples = gradient_db::worker_registrations::latest_resource_samples_by_worker_id(
+        &state.web_db,
+        &worker_id,
+        2000,
+    )
+    .await?
+    .into_iter()
+    .map(WorkerSamplePoint::from)
+    .collect();
 
     let connections =
         gradient_db::worker_registrations::latest_connections(&state.web_db, &worker_id, 100)

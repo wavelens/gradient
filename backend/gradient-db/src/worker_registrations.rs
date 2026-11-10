@@ -68,17 +68,19 @@ pub async fn delete_by_project_and_worker_id<C: ConnectionTrait>(
         .rows_affected)
 }
 
-pub async fn oldest_samples<C: ConnectionTrait>(
+pub async fn latest_resource_samples_by_worker_id<C: ConnectionTrait>(
     db: &C,
     worker_id: &str,
     limit: u64,
 ) -> Result<Vec<worker_sample::Model>, DbErr> {
-    worker_sample::Entity::find()
+    let mut samples = worker_sample::Entity::find()
         .filter(worker_sample::Column::WorkerId.eq(worker_id))
-        .order_by_asc(worker_sample::Column::At)
+        .order_by_desc(worker_sample::Column::At)
         .limit(limit)
         .all(db)
-        .await
+        .await?;
+    samples.reverse();
+    Ok(samples)
 }
 
 pub async fn latest_connections<C: ConnectionTrait>(
@@ -282,6 +284,38 @@ mod tests {
             vec![visible]
         );
         assert_eq!(hidden_count, 2);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn latest_resource_samples_are_the_newest_in_time_order() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        let start = gradient_types::now();
+        for minutes in [0, 2, 1, 3] {
+            crate::rows::insert::<worker_sample::Entity, _>(
+                &conn,
+                worker_sample::Model {
+                    id: WorkerSampleId::now_v7(),
+                    worker_id: "worker".into(),
+                    at: start + chrono::Duration::minutes(minutes),
+                    capabilities: serde_json::json!({}),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the sample is written");
+        }
+
+        let samples = latest_resource_samples_by_worker_id(&conn, "worker", 2)
+            .await
+            .expect("the samples are read");
+
+        let offsets: Vec<i64> = samples
+            .iter()
+            .map(|sample| (sample.at - start).num_minutes())
+            .collect();
+        assert_eq!(offsets, [2, 3]);
         db.finish().await;
     }
 }
