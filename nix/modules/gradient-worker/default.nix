@@ -440,7 +440,7 @@ in {
         ${cfg.baseDir}.d = {
           user = "gradient-worker";
           group = "gradient-worker";
-          mode = "0755";
+          mode = "0750";
         };
       } // lib.optionalAttrs (cfg.gcrootsDir != "") {
         ${cfg.gcrootsDir}.d = {
@@ -483,6 +483,7 @@ in {
             ExecReload = lib.mkIf cfg.capabilities.exec "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
             User = "gradient-worker";
             Group = "gradient-worker";
+            UMask = "0027";
             PrivateTmp = true;
             ProtectHome = true;
             ProtectHostname = true;

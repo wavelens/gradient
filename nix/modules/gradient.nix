@@ -635,6 +635,8 @@ in {
             ExecStart = lib.getExe cfg.packages.server;
             TimeoutStartSec = "infinity";
             StateDirectory = "gradient";
+            StateDirectoryMode = "0750";
+            UMask = "0027";
             User = "gradient";
             Group = "gradient";
             PrivateTmp = true;
