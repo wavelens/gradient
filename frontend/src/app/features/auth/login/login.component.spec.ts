@@ -73,6 +73,16 @@ describe('LoginComponent', () => {
     expect(document.activeElement?.id).toBe('password');
   });
 
+  it('tells how long to wait after too many sign-in attempts', () => {
+    const fixture = setup({ loginProviders: [], passwordLoginEnabled: true });
+    const auth = TestBed.inject(AuthService) as unknown as { login: unknown };
+    auth.login = vi.fn(() => throwError(() => new ApiError('Too many requests. Try again after 6 seconds.', 429, undefined, 6)));
+    fixture.componentInstance.loginForm.setValue({ username: 'alice', password: 'secret', rememberMe: false });
+    fixture.componentInstance.onSubmit();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Too many sign-in attempts. Try again in 6 seconds.');
+  });
+
   it('confirms a new account and fills in its username', () => {
     const fixture = setup({ loginProviders: [], passwordLoginEnabled: true }, { registered: 'dora' });
     expect(fixture.nativeElement.textContent).toContain('Account created');

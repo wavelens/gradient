@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
+import { ApiError } from '@core/services/api.service';
 import { ConfigService } from '@core/services/config.service';
 import { take } from 'rxjs';
 import { environment } from '@environments/environment';
@@ -23,6 +24,7 @@ import {
 } from '@gradient/ui/ui';
 import { links, readInAppNextPathFromRouteSnapshot } from '@shared/routing';
 import { injectRevealFirstInvalid } from '@shared/forms';
+import { plural } from '@shared/text';
 
 const LOGIN_ERRORS: Record<string, string> = {
   deactivated: 'This account is deactivated.',
@@ -32,6 +34,15 @@ const LOGIN_ERRORS: Record<string, string> = {
   unusable_username: 'The username of the account cannot be used here.',
   failed: 'Sign-in failed. Please try again.',
 };
+
+function getSignInErrorBannerText(error: unknown): string {
+  if (error instanceof ApiError && error.status === 429) {
+    return error.retryAfterSeconds
+      ? `Too many sign-in attempts. Try again in ${plural(error.retryAfterSeconds, 'second')}.`
+      : 'Too many sign-in attempts. Try again later.';
+  }
+  return (error instanceof Error && error.message) || 'Login failed. Please try again.';
+}
 
 @Component({
   selector: 'app-login',
@@ -106,7 +117,7 @@ export class LoginComponent {
       },
       error: (error) => {
         this.loading.set(false);
-        this.errorMessage.set(error.message || 'Login failed. Please try again.');
+        this.errorMessage.set(getSignInErrorBannerText(error));
         const password = this.host.nativeElement.querySelector<HTMLInputElement>('#password');
         password?.focus();
         password?.select();

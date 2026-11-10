@@ -72,7 +72,7 @@ export class AuthService {
         loginname,
         password,
         remember_me: rememberMe,
-      })
+      }, asSectionRequest())
       .pipe(
         switchMap(() => this.fetchUserOrFailWhenSessionCookieMissing()),
         finalize(() => this.loadingSignal.set(false))

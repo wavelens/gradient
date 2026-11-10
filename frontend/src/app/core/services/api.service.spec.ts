@@ -58,6 +58,15 @@ describe('ApiService errors', () => {
     expect(error.message).toBe('The server failed to process the request. Try again later.');
   });
 
+  it('names the wait from Retry-After on a rate-limited request', async () => {
+    const { api, http } = setup();
+    const result = failure(firstValueFrom(api.post('auth/basic/login', {})));
+    http.expectOne(() => true).flush('Too Many Requests! Wait for 6s', { status: 429, statusText: 'Too Many Requests', headers: { 'retry-after': '6' } });
+    const error = await result;
+    expect(error.retryAfterSeconds).toBe(6);
+    expect(error.message).toBe('Too many requests. Try again after 6 seconds.');
+  });
+
   it('fails a request whose answer has no body, so the page shows an error instead of crashing', async () => {
     const { api, http } = setup();
     const result = failure(firstValueFrom(api.get('projects')));

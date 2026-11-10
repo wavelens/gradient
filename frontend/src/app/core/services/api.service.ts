@@ -10,6 +10,7 @@ import { Observable, from, throwError } from 'rxjs';
 import { map, catchError, switchMap } from 'rxjs/operators';
 import { environment } from '@environments/environment';
 import { ApiResponse } from '@core/models';
+import { plural } from '@shared/text';
 
 /// A failed request, carrying the status so a caller can tell "the server said
 /// no" from "the server never answered". Extends Error, so the many callers
@@ -19,6 +20,7 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code?: string,
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -45,7 +47,16 @@ const STATUS_MESSAGES: Record<number, string> = {
   429: 'The server is busy. Try again later.',
 };
 
-function statusMessage(status: number): string {
+export function parseRetryAfterHeaderToMilliseconds(headers: HttpHeaders | undefined): number | undefined {
+  const header = headers?.get('retry-after') ?? null;
+  if (header === null) return undefined;
+  const seconds = Number(header);
+  const milliseconds = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now();
+  return Number.isFinite(milliseconds) ? Math.max(0, milliseconds) : undefined;
+}
+
+function statusMessage(status: number, retryAfterSeconds?: number): string {
+  if (status === 429 && retryAfterSeconds) return `Too many requests. Try again after ${plural(retryAfterSeconds, 'second')}.`;
   if (STATUS_MESSAGES[status]) return STATUS_MESSAGES[status];
   return status >= 500 ? 'The server failed to process the request. Try again later.' : 'The server rejected the request.';
 }
@@ -63,7 +74,9 @@ function serverMessage(body: unknown): string | undefined {
 function toApiError(error: HttpErrorResponse, body: unknown = error.error): ApiError {
   const code = readErrorCode(body);
   const sessionEnded = error.status === 401 && (code === undefined || code === SESSION_ENDED_ERROR_CODE);
-  return new ApiError((sessionEnded ? undefined : serverMessage(body)) ?? statusMessage(error.status), error.status, code);
+  const retryAfterMilliseconds = error.status === 429 ? parseRetryAfterHeaderToMilliseconds(error.headers) : undefined;
+  const retryAfterSeconds = retryAfterMilliseconds === undefined ? undefined : Math.max(1, Math.ceil(retryAfterMilliseconds / 1000));
+  return new ApiError((sessionEnded ? undefined : serverMessage(body)) ?? statusMessage(error.status, retryAfterSeconds), error.status, code, retryAfterSeconds);
 }
 
 function parseJson(text: string): unknown {

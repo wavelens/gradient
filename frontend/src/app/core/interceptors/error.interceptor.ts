@@ -10,6 +10,7 @@ import { PRIMARY_OUTLET, Router } from '@angular/router';
 import { MessageService } from '@gradient/ui/ui';
 import { Observable, catchError, retry, throwError, timer } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
+import { parseRetryAfterHeaderToMilliseconds } from '@core/services/api.service';
 import { SECTION_REQUEST, SESSION_PROBE } from './request-context';
 import { PageRenderTracker } from './page-render-tracker.service';
 
@@ -21,10 +22,7 @@ const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const ERROR_PAGES = new Set([429, 502, 503, 504]);
 
 export function throttleWaitMs(error: HttpErrorResponse): number {
-  const header = error.headers?.get('retry-after') ?? null;
-  const seconds = Number(header);
-  const named = header === null ? 0 : Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now();
-  return Math.max(MIN_THROTTLE_WAIT_MS, Number.isFinite(named) ? named : 0);
+  return Math.max(MIN_THROTTLE_WAIT_MS, parseRetryAfterHeaderToMilliseconds(error.headers) ?? 0);
 }
 
 function pageUrl(router: Router): string {
