@@ -1168,6 +1168,9 @@ fn aggregate_worker_load(
         if w.capabilities.build {
             bump_capacity(&mut cap, "build", slots);
         }
+        if w.capabilities.exec {
+            bump_capacity(&mut cap, "exec", slots);
+        }
         for a in &w.architectures {
             bump_capacity(&mut arch, a, slots);
         }
@@ -1199,7 +1202,7 @@ fn aggregate_worker_load(
         }
     }
 
-    let by_capability = ["eval", "network", "build"]
+    let by_capability = ["eval", "network", "build", "exec"]
         .into_iter()
         .map(|k| LoadBucket::from((k.to_owned(), cap.get(k).copied().unwrap_or_default())))
         .collect();
@@ -1217,7 +1220,7 @@ fn aggregate_worker_load(
     operation_id = "getBoardWorkerLoad",
     tag = "board",
     summary = "Fleet load by capability, architecture, and feature",
-    description = "Real per-dimension fleet load: for each capability (eval/network/build), architecture, and system feature, the in-flight job count against the summed slot capacity of the workers that can serve it. Answers whether the fleet is eval-, build-, or architecture-bound rather than showing one blended busy %. Scoped to the caller's projects (superusers see the whole fleet). Each bucket carries `{ key, in_flight, capacity, workers }`; busy % = in_flight / capacity.",
+    description = "Real fleet load by dimension. These dimensions cover each capability (eval/network/build/exec), architecture, and system feature. Entries report the number of running jobs against the total slot capacity of workers that can handle the load. They show which of eval, build, or architecture is the fleet constraint, not one blended busy rate. The scope is the caller's project (superusers see the whole fleet). Buckets carry `{ key, in_flight, capacity, workers }`. Busy rate = in_flight / capacity.",
     responses((status = OK, description = "Fleet load breakdowns", body = WorkerLoad), WebError)
 )]
 pub async fn get_board_worker_load(
@@ -1862,7 +1865,7 @@ mod tests {
         let cap = &load.by_capability;
         assert_eq!(
             cap.iter().map(|b| b.key.as_str()).collect::<Vec<_>>(),
-            ["eval", "network", "build"]
+            ["eval", "network", "build", "exec"]
         );
         assert_eq!(
             *bucket(cap, "eval"),
@@ -1940,6 +1943,31 @@ mod tests {
                 in_flight: 0,
                 capacity: 0,
                 workers: 0
+            }
+        );
+    }
+
+    #[test]
+    fn live_worker_load_counts_running_exec_jobs_against_exec_worker_slots() {
+        let mut vm_host = worker(false, false, true, &["x86_64-linux"], &[], 3);
+        vm_host.capabilities.exec = true;
+        let builder = worker(false, false, true, &["x86_64-linux"], &[], 5);
+        let workers: Vec<&WorkerInfo> = vec![&vm_host, &builder];
+        let jobs = [BoardActiveJob {
+            kind: DispatchedJobKind::Exec,
+            architecture: None,
+            ..build_job("x86_64-linux", &[])
+        }];
+        let job_refs: Vec<&BoardActiveJob> = jobs.iter().collect();
+
+        let load = aggregate_worker_load(&workers, &job_refs);
+        assert_eq!(
+            *bucket(&load.by_capability, "exec"),
+            LoadBucket {
+                key: "exec".into(),
+                in_flight: 1,
+                capacity: 3,
+                workers: 1
             }
         );
     }

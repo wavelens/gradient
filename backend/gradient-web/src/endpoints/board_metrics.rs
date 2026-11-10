@@ -202,7 +202,7 @@ fn average_load(
         capacity: capacity / hours,
         workers,
     };
-    let by_capability = ["eval", "network", "build"]
+    let by_capability = ["eval", "network", "build", "exec"]
         .into_iter()
         .map(|k| {
             let totals = acc
@@ -229,7 +229,7 @@ fn average_load(
     operation_id = "getBoardWorkerLoadAverage",
     tag = "board",
     summary = "Average fleet load by capability and architecture",
-    description = "Average load over the window for each capability (eval/network/build) and architecture: `in_flight` is the mean number of running jobs from dispatched-job times, `capacity` the mean summed slot count of the workers that served it from worker samples. Busy % = in_flight / capacity. Scoped to the caller's projects.",
+    description = "Capabilities (eval/network/build/exec) and architectures each get an average load over the whole window. `in_flight` is the average number of in-flight jobs, based on the dispatch time of jobs. `capacity` is the average of total slots on the worker that processed the job. Worker samples give that total. Busy rate (%) = in_flight / capacity. Metrics cover the caller's project.",
     params(WindowParams),
     responses((status = OK, description = "Average fleet load", body = WorkerLoadAverage), WebError)
 )]
@@ -515,7 +515,7 @@ mod tests {
         let load = super::average_load(busy, capacity, 24);
 
         let keys: Vec<_> = load.by_capability.iter().map(|b| b.key.as_str()).collect();
-        assert_eq!(keys, ["eval", "network", "build"]);
+        assert_eq!(keys, ["eval", "network", "build", "exec"]);
         let build = &load.by_capability[2];
         assert_eq!(
             (build.in_flight, build.capacity, build.workers),

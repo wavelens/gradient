@@ -14,7 +14,7 @@ import { BoardWorkersComponent } from './workers.component';
 const bucket = (key: string, in_flight: number, capacity: number) => ({ key, in_flight, capacity, workers: 1 });
 
 const NOW: WorkerLoad = {
-  by_capability: [bucket('eval', 0, 4), bucket('network', 0, 4), bucket('build', 4, 4)],
+  by_capability: [bucket('eval', 0, 4), bucket('network', 0, 4), bucket('build', 4, 4), bucket('exec', 1, 2)],
   by_architecture: [bucket('x86_64-linux', 4, 4)],
   by_feature: [],
 };
@@ -53,7 +53,8 @@ describe('BoardWorkersComponent - load range', () => {
   it('shows the live load until a range is picked', () => {
     const { cmp, getWorkerLoadAverage } = setup();
     expect(getWorkerLoadAverage).not.toHaveBeenCalled();
-    expect(cmp.capLoad().series[0].data).toEqual([0, 0, 100]);
+    expect(cmp.capLoad().cats).toEqual(['eval', 'network', 'build', 'exec']);
+    expect(cmp.capLoad().series[0].data).toEqual([0, 0, 100, 50]);
   });
 
   it('keeps a tenth of a percent so a light load does not read as zero', () => {

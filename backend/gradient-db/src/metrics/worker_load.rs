@@ -33,7 +33,7 @@ fn busy_hours_sql(window_hours: i64, project_filter: Option<&str>) -> String {
              AND (finished_at IS NULL OR finished_at > {since}){scope} \
          ) j \
          CROSS JOIN LATERAL (VALUES \
-           ('capability', CASE j.kind WHEN {eval} THEN 'eval' WHEN {build} THEN 'build' END), \
+           ('capability', CASE j.kind WHEN {eval} THEN 'eval' WHEN {build} THEN 'build' WHEN {exec} THEN 'exec' END), \
            ('capability', CASE WHEN j.kind = {eval} AND j.fetches THEN 'network' END), \
            ('architecture', nullif(j.architecture, '{builtin}')) \
          ) v(dimension, key) \
@@ -45,6 +45,7 @@ fn busy_hours_sql(window_hours: i64, project_filter: Option<&str>) -> String {
             .unwrap_or_default(),
         eval = i16::from(DispatchedJobKind::Eval),
         build = i16::from(DispatchedJobKind::Build),
+        exec = i16::from(DispatchedJobKind::Exec),
         builtin = gradient_types::BUILTIN_ARCH,
     )
 }
@@ -58,6 +59,7 @@ fn capacity_hours_sql(window_hours: i64, project_filter: Option<&str>) -> String
                   bool_or(coalesce((capabilities->>'eval')::boolean, false)) AS eval, \
                   bool_or(coalesce((capabilities->>'network')::boolean, false)) AS network, \
                   bool_or(coalesce((capabilities->>'build')::boolean, false)) AS build, \
+                  bool_or(coalesce((capabilities->>'exec')::boolean, false)) AS exec, \
                   (array_agg(to_jsonb(architectures) ORDER BY at DESC))[1] AS architectures \
            FROM worker_sample \
            WHERE at >= {since}{scope} \
@@ -67,6 +69,7 @@ fn capacity_hours_sql(window_hours: i64, project_filter: Option<&str>) -> String
            SELECT 'capability', 'eval' WHERE h.eval \
            UNION ALL SELECT 'capability', 'network' WHERE h.network \
            UNION ALL SELECT 'capability', 'build' WHERE h.build \
+           UNION ALL SELECT 'capability', 'exec' WHERE h.exec \
            UNION ALL SELECT 'architecture', jsonb_array_elements_text(h.architectures) \
          ) v(dimension, key) \
          GROUP BY v.dimension, v.key",
@@ -169,6 +172,33 @@ mod tests {
             .collect();
 
         assert_eq!(architectures, ["x86_64-linux"]);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn exec_capable_worker_samples_yield_exec_capability_row_in_capacity_hours() {
+        let db = TestDatabase::create().await;
+        let exec_worker = worker_sample::Model {
+            capabilities: serde_json::json!({ "build": true, "exec": true }),
+            ..sample("vm-host", 1, &["x86_64-linux"])
+        };
+        worker_sample::Entity::insert_many(
+            [exec_worker, sample("builder", 1, &["x86_64-linux"])]
+                .map(IntoActiveModel::into_active_model),
+        )
+        .exec_without_returning(&db.connection())
+        .await
+        .expect("the samples are written");
+
+        let rows = super::capacity_hours(&db.connection(), 24, None)
+            .await
+            .expect("the capacity query runs");
+        let exec = rows
+            .iter()
+            .find(|row| row.dimension == "capability" && row.key == "exec")
+            .expect("the exec capability has capacity");
+
+        assert_eq!((exec.hours, exec.workers), (2.0, 1));
         db.finish().await;
     }
 

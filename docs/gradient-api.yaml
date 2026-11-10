@@ -2039,7 +2039,7 @@ paths:
       tags:
       - board
       summary: Fleet load by capability, architecture, and feature
-      description: 'Real per-dimension fleet load: for each capability (eval/network/build), architecture, and system feature, the in-flight job count against the summed slot capacity of the workers that can serve it. Answers whether the fleet is eval-, build-, or architecture-bound rather than showing one blended busy %. Scoped to the caller''s projects (superusers see the whole fleet). Each bucket carries `{ key, in_flight, capacity, workers }`; busy % = in_flight / capacity.'
+      description: Real fleet load by dimension. These dimensions cover each capability (eval/network/build/exec), architecture, and system feature. Entries report the number of running jobs against the total slot capacity of workers that can handle the load. They show which of eval, build, or architecture is the fleet constraint, not one blended busy rate. The scope is the caller's project (superusers see the whole fleet). Buckets carry `{ key, in_flight, capacity, workers }`. Busy rate = in_flight / capacity.
       operationId: getBoardWorkerLoad
       responses:
         '200':
@@ -2066,7 +2066,7 @@ paths:
       tags:
       - board
       summary: Average fleet load by capability and architecture
-      description: 'Average load over the window for each capability (eval/network/build) and architecture: `in_flight` is the mean number of running jobs from dispatched-job times, `capacity` the mean summed slot count of the workers that served it from worker samples. Busy % = in_flight / capacity. Scoped to the caller''s projects.'
+      description: Capabilities (eval/network/build/exec) and architectures each get an average load over the whole window. `in_flight` is the average number of in-flight jobs, based on the dispatch time of jobs. `capacity` is the average of total slots on the worker that processed the job. Worker samples give that total. Busy rate (%) = in_flight / capacity. Metrics cover the caller's project.
       operationId: getBoardWorkerLoadAverage
       parameters:
       - name: window_hours
