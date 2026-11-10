@@ -124,15 +124,12 @@ export class DashboardTaskTableComponent implements OnInit {
   selected = computed(() => this.filter() ?? this.data()?.filter ?? null);
   taskRowsWithNewestHistoryBarsThatFit = computed(() =>
     (this.data()?.tasks ?? []).map((t) => {
-      const failedEntryPointCountText = t.entry_points?.failing ? `${t.entry_points.failing} failed` : '';
-      const ratio = t.entry_points?.total ? `${t.entry_points.ok}/${t.entry_points.total}` : '';
       return {
         ...t,
         history: t.history.slice(-this.history()),
         evaluationNoNumbersText: evaluationNoNumbersText(t),
-        entryPointsPassedCountText: [ratio, failedEntryPointCountText].filter(Boolean).join(' · '),
-        entryPointsPassedRatioWithUnitText: [ratio && `${ratio} entry points`, failedEntryPointCountText].filter(Boolean).join(' · '),
-        failedEntryPointCountText,
+        entryPointsPassedCountOfTotalText: t.entry_points?.total ? `${t.entry_points.ok} of ${t.entry_points.total}` : '',
+        failedEntryPointCountText: t.entry_points?.failing ? `${t.entry_points.failing} failed` : '',
       };
     }),
   );

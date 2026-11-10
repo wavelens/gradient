@@ -93,9 +93,10 @@ describe('DashboardTaskTableComponent', () => {
     const { f, root } = render(null, () => of(PAGE));
     await settle(f);
     const passed = root.querySelector('gr-row .value')!;
-    expect(passed.textContent).toContain('41/45 · 4 failed');
-    expect(passed.classList).toContain('failing');
-    expect(root.querySelector('.meta .passed-on-phone')?.textContent).toContain('41/45 entry points · 4 failed');
+    expect(passed.querySelector('b')?.textContent).toBe('41 of 45');
+    expect(passed.querySelector('b')?.classList).not.toContain('failing');
+    expect(passed.querySelector('small.failing')?.textContent).toBe('4 failed');
+    expect(root.querySelector('.meta .passed-on-phone')?.textContent).toContain('41 of 45 entry points passed · 4 failed');
     expect(root.querySelector('.meta code')?.getAttribute('title')).toBe('a1b2c3d4');
   });
 
@@ -210,7 +211,7 @@ describe('DashboardTaskTableComponent', () => {
       c.querySelector('b')?.textContent?.trim(),
       c.querySelector('small.sr-only')?.textContent?.trim(),
     ]);
-    expect(values).toEqual([['41/45 · 4 failed', 'Entry points passed'], ['14m 00s', 'average time']]);
+    expect(values).toEqual([['41 of 45', 'Entry points passed'], ['14m 00s', 'average time']]);
   });
 
   it('names the project and task by display name and keeps slugs in the link only', () => {

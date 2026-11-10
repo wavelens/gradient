@@ -51,8 +51,8 @@
                     <code [title]="l.commit">{{ l.commit.slice(0, 7) }}</code>
                   }
                   <span class="latest-evaluation-relative-time">&nbsp;· {{ l.created_at | relativeTime }}</span>
-                  @if (t.evaluationNoNumbersText === null && t.entryPointsPassedCountText) {
-                    <span class="passed-on-phone" [class.failing]="t.failedEntryPointCountText">&nbsp;· {{ t.entryPointsPassedRatioWithUnitText }}</span>
+                  @if (t.evaluationNoNumbersText === null && t.entryPointsPassedCountOfTotalText) {
+                    <span class="passed-on-phone">&nbsp;· {{ t.entryPointsPassedCountOfTotalText }} entry points passed@if (t.failedEntryPointCountText) { · <span class="failing">{{ t.failedEntryPointCountText }}</span>}</span>
                   }
                 } @else if (t.active) {
                   No evaluations yet
@@ -66,9 +66,12 @@
                   <span class="value"><b>{{ t.evaluationNoNumbersText }}</b></span>
                   <span class="value"></span>
                 } @else {
-                  <span class="value" [class.failing]="t.failedEntryPointCountText">
-                    <b>{{ t.entryPointsPassedCountText }}</b>
+                  <span class="value">
+                    <b>{{ t.entryPointsPassedCountOfTotalText }}</b>
                     <small class="sr-only">Entry points passed</small>
+                    @if (t.failedEntryPointCountText) {
+                      <small class="failing">{{ t.failedEntryPointCountText }}</small>
+                    }
                   </span>
                   <span class="value">
                     <b>{{ duration(t.speed_ms) }}</b>
