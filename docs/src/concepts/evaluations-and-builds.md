@@ -106,7 +106,8 @@ Builds of [imported derivations](#imported-derivations) run inside the same rest
 Limitations:
 
 - Earlier unrestricted evaluations of the same locked flake fill the eval cache. Restricted evaluations still read from that cache.
-- Nix doesn't check the URL for the top-level fetch of `builtins.getFlake`.
+- Nix does not check URLs for top-level fetches of `builtins.getFlake`.
+- The restriction does not apply to flake inputs. A repository can fetch any URL for inputs that `flake.nix` or `flake.lock` specify. Nix can fetch locked inputs before any allowlist exists.
 
 ## Related
 
