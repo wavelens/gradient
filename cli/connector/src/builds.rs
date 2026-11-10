@@ -22,6 +22,22 @@ impl BuildsApi<'_> {
         http::decode(req.send().await?).await
     }
 
+    pub async fn get_build_log_without_color_codes(
+        &self,
+        id: &str,
+    ) -> Result<String, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("builds/{id}/log"),
+            true,
+        )?
+        .query(&[("format", "plain")]);
+        http::decode(req.send().await?).await
+    }
+
     pub async fn log_stream(
         &self,
         id: &str,

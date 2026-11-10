@@ -5,6 +5,7 @@
  */
 
 use crate::error::CliError;
+use connector::task_evaluation_build_reference_parser::TaskOrEvaluationReference;
 use etcetera::base_strategy::{BaseStrategy, choose_base_strategy, choose_native_strategy};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -214,8 +215,10 @@ pub fn invocation_token_is_from_env_var() -> bool {
     invocation_overrides().token.is_some()
 }
 
-fn apply_invocation_settings_to_saved_login(mut login: SavedLogin) -> SavedLogin {
-    let overrides = invocation_overrides();
+fn apply_invocation_settings_to_saved_login(
+    mut login: SavedLogin,
+    overrides: &InvocationOverrides,
+) -> SavedLogin {
     if let Some(server) = &overrides.server {
         login.set_server_url_and_clear_saved_auth_token_from_other_server(server.clone());
     }
@@ -225,7 +228,14 @@ fn apply_invocation_settings_to_saved_login(mut login: SavedLogin) -> SavedLogin
     if let Some(project) = &overrides.project {
         login.set_selected_project_and_clear_task_from_other_project(project.clone());
     }
-    if let Some(task) = &overrides.task {
+    let task_page = overrides
+        .task
+        .as_deref()
+        .and_then(|task| task.parse::<TaskOrEvaluationReference>().ok());
+    if let Some((project, task)) = task_page.as_ref().and_then(TaskOrEvaluationReference::task) {
+        login.selected_project = Some(project.to_owned());
+        login.selected_task = Some(format!("{project}/{task}"));
+    } else if let Some(task) = &overrides.task {
         login.selected_task = match (task.contains('/'), &login.selected_project) {
             (false, Some(project)) => Some(format!("{project}/{task}")),
             _ => Some(task.clone()),
@@ -270,7 +280,7 @@ fn saved_login_for_selected_account_with_overrides(file: LoginConfigFile) -> Sav
     let saved = name
         .and_then(|name| file.accounts.get(&name).cloned())
         .unwrap_or_default();
-    apply_invocation_settings_to_saved_login(saved)
+    apply_invocation_settings_to_saved_login(saved, invocation_overrides())
 }
 
 pub fn saved_login_for_invocation() -> SavedLogin {
@@ -348,13 +358,34 @@ pub fn set_or_get_by_name(
         return Err(format!("Invalid key: {key}. Valid keys: {valid}"));
     };
 
-    Ok(match value {
+    let value = match value {
         Some(value) => {
             set_value(config_key, value.clone(), quiet);
             Some(value)
         }
         None => get_value(config_key, quiet),
-    })
+    };
+    Ok(value.map(|value| config_key.value_for_display(&value)))
+}
+
+impl ConfigKey {
+    pub fn value_for_display(self, value: &str) -> String {
+        const SHOWN_TOKEN_CHARACTERS: usize = 4;
+        match self {
+            Self::AuthToken => {
+                let characters: Vec<char> = value.chars().collect();
+                if characters.len() <= 2 * SHOWN_TOKEN_CHARACTERS {
+                    return "…".to_owned();
+                }
+                let start: String = characters[..SHOWN_TOKEN_CHARACTERS].iter().collect();
+                let end: String = characters[characters.len() - SHOWN_TOKEN_CHARACTERS..]
+                    .iter()
+                    .collect();
+                format!("{start}…{end}")
+            }
+            _ => value.to_owned(),
+        }
+    }
 }
 
 pub fn set_value(key: ConfigKey, value: String, quiet: bool) {
@@ -369,7 +400,10 @@ pub fn set_value(key: ConfigKey, value: String, quiet: bool) {
     });
 
     if !quiet {
-        println!("{} set to \"{}\"", key, value);
+        match key {
+            ConfigKey::AuthToken => println!("{key} set ({})", key.value_for_display(&value)),
+            _ => println!("{key} set to \"{value}\""),
+        }
     }
 }
 
@@ -378,7 +412,7 @@ pub fn get_value(key: ConfigKey, quiet: bool) -> Option<String> {
 
     if !quiet {
         match &value {
-            Some(value) => println!("{}", value),
+            Some(value) => println!("{}", key.value_for_display(value)),
             None => println!("[unset]"),
         }
     }
@@ -403,6 +437,19 @@ mod tests {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, "Server = 'http://localhost'\n").unwrap();
         file
+    }
+
+    #[test]
+    fn the_auth_token_is_shown_only_by_its_first_and_last_characters() {
+        assert_eq!(
+            ConfigKey::AuthToken.value_for_display("GRADabcdefgh1234"),
+            "GRAD…1234"
+        );
+        assert_eq!(ConfigKey::AuthToken.value_for_display("GRAD1234"), "…");
+        assert_eq!(
+            ConfigKey::Server.value_for_display("https://ci.example"),
+            "https://ci.example"
+        );
     }
 
     #[test]
@@ -520,5 +567,34 @@ mod tests {
         };
         login.set_selected_project_and_clear_task_from_other_project("a".into());
         assert_eq!(login.selected_task.as_deref(), Some("a/web"));
+    }
+
+    #[test]
+    fn a_task_page_link_selects_its_project_and_task() {
+        let overrides = InvocationOverrides {
+            task: Some("https://ci.example/project/web/task/nightly".into()),
+            ..Default::default()
+        };
+        let saved = SavedLogin {
+            selected_project: Some("other".into()),
+            ..Default::default()
+        };
+        let login = apply_invocation_settings_to_saved_login(saved, &overrides);
+        assert_eq!(login.selected_project.as_deref(), Some("web"));
+        assert_eq!(login.selected_task.as_deref(), Some("web/nightly"));
+    }
+
+    #[test]
+    fn a_bare_task_name_stays_in_the_selected_project() {
+        let overrides = InvocationOverrides {
+            task: Some("nightly".into()),
+            ..Default::default()
+        };
+        let saved = SavedLogin {
+            selected_project: Some("web".into()),
+            ..Default::default()
+        };
+        let login = apply_invocation_settings_to_saved_login(saved, &overrides);
+        assert_eq!(login.selected_task.as_deref(), Some("web/nightly"));
     }
 }

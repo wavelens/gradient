@@ -3,12 +3,12 @@
 
 use crate::api::{
     AddMemberRequest, AddUpstreamRequest, CacheResponse, CacheStatsResponse,
-    CacheSubscribersResponse, CacheUpstreamId, ChunkReceived, CreateRoleRequest, GrantCacheRequest,
-    MakeCacheRequest, MemberItem, NarDetail, NarStats, NarinfoPart, PaginatedCache,
-    PaginatedNarSummary, PatchCacheGrantRequest, PatchCacheRequest, PatchRoleRequest,
-    PatchUpstreamRequest, PendingInvitationItem, RemoveMemberRequest, RevokeInvitationRequest,
-    RoleListResponseCacheRoleOwner, RoleResponseCacheRoleOwner, SubscriptionRequestItem,
-    TeamGrantEntry, UpstreamCacheItem, UpstreamTestResponse,
+    CacheSubscribersResponse, CacheUpstreamId, ChunkReceived, CreateRoleRequest,
+    CreatedEntityResponse, GrantCacheRequest, MakeCacheRequest, MemberItem, NarDetail, NarStats,
+    NarinfoPart, PaginatedCache, PaginatedNarSummary, PatchCacheGrantRequest, PatchCacheRequest,
+    PatchRoleRequest, PatchUpstreamRequest, PendingInvitationItem, RemoveMemberRequest,
+    RevokeInvitationRequest, RoleListResponseCacheRoleOwner, RoleResponseCacheRoleOwner,
+    SubscriptionRequestItem, TeamGrantEntry, UpstreamCacheItem, UpstreamTestResponse,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -38,7 +38,10 @@ impl CachesApi<'_> {
         })
     }
 
-    pub async fn create(&self, body: MakeCacheRequest) -> Result<String, ConnectorError> {
+    pub async fn create(
+        &self,
+        body: MakeCacheRequest,
+    ) -> Result<CreatedEntityResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

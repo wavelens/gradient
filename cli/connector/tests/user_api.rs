@@ -230,7 +230,8 @@ async fn key_permissions_returns_the_catalogue() {
         .and(path("/api/v1/user/keys/permissions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok(json!({
             "available_permissions": [{"id": "viewProject", "mutating": false}],
-            "availableCache": []
+            "availableCache": [],
+            "server_wide_permissions": [{"id": "createProject", "mutating": true}]
         }))))
         .mount(&server)
         .await;
@@ -241,6 +242,7 @@ async fn key_permissions_returns_the_catalogue() {
         .await
         .unwrap();
     assert_eq!(catalogue.available_permissions[0].id, "viewProject");
+    assert_eq!(catalogue.server_wide_permissions[0].id, "createProject");
 }
 
 #[tokio::test]

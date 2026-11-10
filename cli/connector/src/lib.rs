@@ -18,6 +18,7 @@ pub mod projects;
 pub mod pull_requests;
 pub mod search;
 pub mod server;
+pub mod task_evaluation_build_reference_parser;
 pub mod task_event_actions;
 pub mod task_repository;
 pub mod tasks;

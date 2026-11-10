@@ -5,6 +5,7 @@
  */
 
 use crate::error::CliError;
+use connector::api::EvaluationStatus;
 use serde::Serialize;
 use std::io::{self, IsTerminal, Write};
 use std::process::exit;
@@ -15,6 +16,8 @@ pub enum ExitKind {
     Api,
     Usage,
     Unauthorized,
+    EvaluationAborted,
+    EvaluationTimeout,
 }
 
 impl ExitKind {
@@ -24,7 +27,22 @@ impl ExitKind {
             Self::Api => 1,
             Self::Usage => 2,
             Self::Unauthorized => 3,
+            Self::EvaluationAborted => 4,
+            Self::EvaluationTimeout => 5,
         }
+    }
+
+    pub fn exit_kind_from_evaluation_status(status: EvaluationStatus) -> Option<Self> {
+        match status {
+            EvaluationStatus::Completed => Some(Self::Ok),
+            EvaluationStatus::Failed => Some(Self::Api),
+            EvaluationStatus::Aborted => Some(Self::EvaluationAborted),
+            _ => None,
+        }
+    }
+
+    pub fn exit_with_code_without_printing(self) -> ! {
+        exit(self.code())
     }
 }
 

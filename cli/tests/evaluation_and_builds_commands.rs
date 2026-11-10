@@ -48,7 +48,9 @@ fn parse_gradient_json_stdout_as_json_value(
 async fn retry_evaluation_prints_new_evaluation_uuid_in_json_output() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/api/v1/evals/eval-1/retry"))
+        .and(path(
+            "/api/v1/evals/6d1f0c2a-3b4e-4c5d-8e9f-0a1b2c3d4e5f/retry",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "error": false, "message": "eval-2"
         })))
@@ -60,7 +62,11 @@ async fn retry_evaluation_prints_new_evaluation_uuid_in_json_output() {
     let assert = run_gradient_json_with_temp_home_for_wiremock_in_dir(
         &server,
         dir.path(),
-        &["evaluation", "retry", "eval-1"],
+        &[
+            "evaluation",
+            "retry",
+            "6d1f0c2a-3b4e-4c5d-8e9f-0a1b2c3d4e5f",
+        ],
     )
     .success();
     assert_eq!(
@@ -73,7 +79,9 @@ async fn retry_evaluation_prints_new_evaluation_uuid_in_json_output() {
 async fn evaluation_report_default_options_without_worker_fleet_saves_output_file() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/evals/eval-1/report"))
+        .and(path(
+            "/api/v1/evals/6d1f0c2a-3b4e-4c5d-8e9f-0a1b2c3d4e5f/report",
+        ))
         .and(query_param("anonymize_identities", "true"))
         .and(query_param("anonymize_packages", "false"))
         .and(query_param("include_logs", "true"))
@@ -92,7 +100,13 @@ async fn evaluation_report_default_options_without_worker_fleet_saves_output_fil
     let assert = run_gradient_json_with_temp_home_for_wiremock_in_dir(
         &server,
         dir.path(),
-        &["evaluation", "report", "eval-1", "--output-file", "mine.db"],
+        &[
+            "evaluation",
+            "report",
+            "6d1f0c2a-3b4e-4c5d-8e9f-0a1b2c3d4e5f",
+            "--output-file",
+            "mine.db",
+        ],
     )
     .success();
     assert_eq!(
@@ -110,7 +124,9 @@ async fn evaluation_report_default_options_without_worker_fleet_saves_output_fil
 async fn gradient_builds_sbom_saves_suggested_file_name_and_prints_path_and_size_as_json() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/builds/b1/sbom"))
+        .and(path(
+            "/api/v1/builds/7e2a1d3b-4c5f-4d6e-9f0a-1b2c3d4e5f60/sbom",
+        ))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header(
@@ -126,7 +142,7 @@ async fn gradient_builds_sbom_saves_suggested_file_name_and_prints_path_and_size
     let assert = run_gradient_json_with_temp_home_for_wiremock_in_dir(
         &server,
         dir.path(),
-        &["builds", "sbom", "b1"],
+        &["builds", "sbom", "7e2a1d3b-4c5f-4d6e-9f0a-1b2c3d4e5f60"],
     )
     .success();
     assert_eq!(
@@ -143,14 +159,18 @@ async fn gradient_builds_sbom_saves_suggested_file_name_and_prints_path_and_size
 async fn abort_build_reports_server_message_and_conflict_exits_nonzero() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/api/v1/builds/b1/abort"))
+        .and(path(
+            "/api/v1/builds/7e2a1d3b-4c5f-4d6e-9f0a-1b2c3d4e5f60/abort",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "error": false, "message": "Build aborted"
         })))
         .mount(&server)
         .await;
     Mock::given(method("POST"))
-        .and(path("/api/v1/builds/done/abort"))
+        .and(path(
+            "/api/v1/builds/8f3b2e4c-5d6a-4e7f-8a9b-2c3d4e5f6071/abort",
+        ))
         .respond_with(ResponseTemplate::new(409).set_body_json(serde_json::json!({
             "error": true, "message": "Evaluation has finished"
         })))
@@ -161,7 +181,7 @@ async fn abort_build_reports_server_message_and_conflict_exits_nonzero() {
     let aborted = run_gradient_json_with_temp_home_for_wiremock_in_dir(
         &server,
         dir.path(),
-        &["builds", "abort", "b1"],
+        &["builds", "abort", "7e2a1d3b-4c5f-4d6e-9f0a-1b2c3d4e5f60"],
     )
     .success();
     assert_eq!(
@@ -172,7 +192,7 @@ async fn abort_build_reports_server_message_and_conflict_exits_nonzero() {
     let conflict = run_gradient_json_with_temp_home_for_wiremock_in_dir(
         &server,
         dir.path(),
-        &["builds", "abort", "done"],
+        &["builds", "abort", "8f3b2e4c-5d6a-4e7f-8a9b-2c3d4e5f6071"],
     )
     .failure();
     let envelope = parse_gradient_json_stdout_as_json_value(&conflict);
@@ -228,5 +248,114 @@ async fn a_quiet_build_outside_a_repository_reports_the_failure_as_json() {
             .as_str()
             .unwrap()
             .contains("Not in a git repository")
+    );
+}
+
+const WAITED_EVALUATION: &str = "9a4c3f5d-6e7b-4f80-9b1c-3d4e5f607182";
+
+fn build_evaluation_response_json_with_status(status: &str) -> serde_json::Value {
+    serde_json::json!({"error": false, "message": {
+        "id": WAITED_EVALUATION,
+        "task": "0b5d4a6e-7f8c-4091-8c2d-4e5f60718293", "project_name": "proj",
+        "repository": "r", "commit": "c", "wildcard": "*", "status": status,
+        "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00",
+        "error": null, "entry_points": [], "error_count": 0, "expected_thunks": null,
+        "finished_at": null, "next": null, "previous": null, "prioritized": false,
+        "progress": null, "started_at": null, "task_display_name": null, "task_name": null,
+        "trigger": null, "triggered_by": null, "waiting_reason": null, "warning_count": 0
+    }})
+}
+
+async fn mount_evaluation_with_status(server: &MockServer, status: &str) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/evals/{WAITED_EVALUATION}")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(build_evaluation_response_json_with_status(status)),
+        )
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn evaluation_wait_exits_with_code_for_each_end_status_and_prints_status_json() {
+    for (status, code) in [("Completed", 0), ("Failed", 1), ("Aborted", 4)] {
+        let server = MockServer::start().await;
+        mount_evaluation_with_status(&server, status).await;
+        let dir = TempDir::new().unwrap();
+
+        let assert = run_gradient_json_with_temp_home_for_wiremock_in_dir(
+            &server,
+            dir.path(),
+            &["evaluation", "wait", WAITED_EVALUATION],
+        )
+        .code(code);
+        assert_eq!(
+            parse_gradient_json_stdout_as_json_value(&assert)["message"],
+            serde_json::json!({"evaluation": WAITED_EVALUATION, "status": status, "error": null})
+        );
+    }
+}
+
+#[tokio::test]
+async fn evaluation_wait_with_zero_timeout_exits_with_code_5() {
+    let server = MockServer::start().await;
+    mount_evaluation_with_status(&server, "Building").await;
+    let dir = TempDir::new().unwrap();
+
+    run_gradient_json_with_temp_home_for_wiremock_in_dir(
+        &server,
+        dir.path(),
+        &["evaluation", "wait", WAITED_EVALUATION, "--timeout", "0"],
+    )
+    .code(5);
+}
+
+#[tokio::test]
+async fn watch_without_terminal_prints_status_lines_and_exits_with_evaluation_result_code() {
+    let server = MockServer::start().await;
+    mount_evaluation_with_status(&server, "Failed").await;
+    let dir = TempDir::new().unwrap();
+
+    let assert = run_gradient_json_with_temp_home_for_wiremock_in_dir(
+        &server,
+        dir.path(),
+        &["watch", WAITED_EVALUATION],
+    )
+    .code(1);
+    assert_eq!(
+        parse_gradient_json_stdout_as_json_value(&assert)["message"]["status"],
+        "Failed"
+    );
+}
+
+#[tokio::test]
+async fn task_evaluate_json_prints_evaluation_id_name_and_url() {
+    let created = serde_json::json!({
+        "id": WAITED_EVALUATION,
+        "name": "proj/nightly",
+        "url": format!("https://ci.example/project/proj/log/{WAITED_EVALUATION}"),
+    });
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/tasks/proj/nightly/evaluate"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"error": false, "message": created})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = TempDir::new().unwrap();
+
+    let assert = run_gradient_json_with_temp_home_for_wiremock_in_dir(
+        &server,
+        dir.path(),
+        &["--task", "proj/nightly", "task", "evaluate"],
+    )
+    .success();
+    assert_eq!(
+        parse_gradient_json_stdout_as_json_value(&assert)["message"],
+        created
     );
 }

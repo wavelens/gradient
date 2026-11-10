@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    MakeTeamRequest, PatchTeamRequest, PatchWorkerRequest, PendingInvitationItem,
-    RegisterWorkerRequest, RegisteredTeamWorker, RemoveTeamMemberRequest, RevokeInvitationRequest,
-    TeamDemand, TeamGrants, TeamMemberItem, TeamMemberRequest, TeamRequestItem, TeamResponse,
-    TeamSummary, TeamWorkerEntry,
+    CreatedEntityResponse, MakeTeamRequest, PatchTeamRequest, PatchWorkerRequest,
+    PendingInvitationItem, RegisterWorkerRequest, RegisteredTeamWorker, RemoveTeamMemberRequest,
+    RevokeInvitationRequest, TeamDemand, TeamGrants, TeamMemberItem, TeamMemberRequest,
+    TeamRequestItem, TeamResponse, TeamSummary, TeamWorkerEntry,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -34,7 +34,10 @@ impl TeamsApi<'_> {
         Self::send(self.request(Method::GET, "teams")?).await
     }
 
-    pub async fn create(&self, body: MakeTeamRequest) -> Result<String, ConnectorError> {
+    pub async fn create(
+        &self,
+        body: MakeTeamRequest,
+    ) -> Result<CreatedEntityResponse, ConnectorError> {
         Self::send(self.request(Method::PUT, "teams")?.json(&body)).await
     }
 

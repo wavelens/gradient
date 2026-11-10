@@ -70,7 +70,7 @@ async fn create_team_puts_name_and_display_name() {
         .and(path("/api/v1/teams"))
         .and(body_json(json!({"name": "ops", "display_name": "Ops"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"error": false, "message": "00000000-0000-0000-0000-000000000002"}),
+            json!({"error": false, "message": {"id": "00000000-0000-0000-0000-000000000002", "name": "ops", "url": "https://ci.example/team/ops"}}),
         ))
         .expect(1)
         .mount(&server)
@@ -88,7 +88,7 @@ async fn create_team_puts_name_and_display_name() {
         })
         .await
         .unwrap();
-    assert_eq!(id, "00000000-0000-0000-0000-000000000002");
+    assert_eq!(id.id, "00000000-0000-0000-0000-000000000002");
 }
 
 #[tokio::test]

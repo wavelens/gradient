@@ -82,7 +82,9 @@ async fn create_project_sends_body() {
         .and(body_json(
             json!({ "name": "n", "display_name": "d", "description": "x" }),
         ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok("created-id")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok(
+            json!({"id": "created-id", "name": "n", "url": "https://ci.example/project/n"}),
+        )))
         .mount(&server)
         .await;
 
@@ -102,7 +104,8 @@ async fn create_project_sends_body() {
         })
         .await
         .unwrap();
-    assert_eq!(id, "created-id");
+    assert_eq!(id.id, "created-id");
+    assert_eq!(id.url, "https://ci.example/project/n");
 }
 
 #[tokio::test]

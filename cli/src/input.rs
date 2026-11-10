@@ -7,7 +7,8 @@
 use super::config::*;
 use crate::error::{CliError, FileAction};
 use crate::output::{ExitKind, Output};
-use connector::Client;
+use connector::task_evaluation_build_reference_parser::TaskOrEvaluationReference;
+use connector::{Client, ConnectorError};
 use rpassword::read_password;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
@@ -27,6 +28,21 @@ pub fn selected_project(out: Output) -> String {
 
 pub fn selected_task(out: Output) -> (String, String) {
     selected_task_ids().unwrap_or_else(|| out.fail(CliError::NoTaskSelected))
+}
+
+pub async fn evaluation_uuid_from_reference(
+    client: &Client,
+    reference: &TaskOrEvaluationReference,
+    out: Output,
+) -> String {
+    reference
+        .get_evaluation_uuid(client)
+        .await
+        .unwrap_or_else(|e| out.fail(e))
+}
+
+pub fn parse_build_uuid_or_web_ui_log_page_url(input: &str) -> Result<String, ConnectorError> {
+    input.parse::<TaskOrEvaluationReference>()?.to_build_uuid()
 }
 
 pub fn server_base(out: Output) -> String {

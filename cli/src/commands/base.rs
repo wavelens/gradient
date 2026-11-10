@@ -15,6 +15,7 @@ use clap_complete::{CompleteEnv, Shell};
 use connector::Client;
 use connector::api::{CliDevicePollRequest, MakeLoginRequest, MakeUserRequest};
 use connector::auth::CliPollOutcome;
+use connector::task_evaluation_build_reference_parser::TaskOrEvaluationReference;
 use std::io::{self, Write};
 use std::process::Command;
 use std::time::Duration;
@@ -32,7 +33,7 @@ struct Cli {
     /// The project to run this command in, instead of the selected project. This flag doesn't save anything.
     #[arg(long = "project", global = true, value_name = "NAME", add = ArgValueCompleter::new(completion::complete_projects))]
     project_name: Option<String>,
-    /// Specify the task for this command as NAME or PROJECT/NAME instead of the selected task. No changes persist.
+    /// Set the task for this command to NAME, PROJECT/NAME, or a link to the task page copied from the Web UI. Use the value in place of the selected task. The command does not save changes.
     #[arg(long = "task", global = true, value_name = "TASK", add = ArgValueCompleter::new(completion::complete_tasks))]
     task_override: Option<String>,
     #[command(subcommand)]
@@ -53,7 +54,7 @@ enum MainCommands {
         #[arg(value_enum)]
         shell: Shell,
     },
-    /// Get or set configuration values
+    /// Get or set a config value. The environment variables `GRADIENT_SERVER` and `GRADIENT_TOKEN` override the stored server and token for a single command.
     Config { key: String, value: Option<String> },
     /// Check server connection status
     Status,
@@ -68,7 +69,7 @@ enum MainCommands {
         #[arg(short, long)]
         password: Option<String>,
     },
-    /// Login to the server
+    /// Log in to the server. Scripts can skip login. Set the server URL in `GRADIENT_SERVER` and the API key in `GRADIENT_TOKEN`.
     Login {
         /// Server URL to log in to. It is stored as the configured server, replacing a separate
         /// `gradient config server`.
@@ -153,15 +154,18 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: admin::Commands,
     },
-    /// Watch a running evaluation's live build logs and status
+    /// Monitor live build logs and status of running evaluations. Print one line per status change and exit like `gradient evaluation wait` without a terminal or with `--json`.
     Watch {
-        /// Evaluation UUID to watch
-        evaluation: String,
+        /// An evaluation UUID, `project/task` (the latest evaluation of the task), `project/task@<commit>`, or a link copied from the Web UI.
+        evaluation: TaskOrEvaluationReference,
     },
     /// Print the full logs of every build in an evaluation
     Logs {
-        /// Evaluation UUID
-        evaluation: String,
+        /// An evaluation UUID, `project/task` (the latest evaluation of the task), `project/task@<commit>`, or a link copied from the Web UI.
+        evaluation: TaskOrEvaluationReference,
+        /// Exit with the evaluation result. 0 on completion, 1 on failure, 4 on abort.
+        #[arg(long)]
+        exit_code: bool,
     },
     /// Download evaluation artefacts
     Download {
@@ -169,7 +173,7 @@ enum MainCommands {
         flake_ref: Option<String>,
         /// Skip the eval picker and use this evaluation directly
         #[arg(long)]
-        evaluation: Option<String>,
+        evaluation: Option<TaskOrEvaluationReference>,
         /// Skip the product picker with comma-separated 1-based indices, ranges (`1-3`), or `all`
         #[arg(long, conflicts_with = "flake_ref")]
         products: Option<String>,
@@ -185,12 +189,12 @@ enum MainCommands {
         #[arg(long)]
         limit: Option<u64>,
     },
-    /// Inspect builds (dependency graph)
+    /// Inspect builds (dependency graph). Pass a build as its UUID or as a link with `?build=<id>` copied from the page of the build log in the Web UI.
     Builds {
         #[command(subcommand)]
         cmd: builds::Commands,
     },
-    /// Control and inspect evaluations. Retries, cancellation, prioritization, failure summaries, diagnostic reports, closures and live events.
+    /// Evaluation control and inspection support retry, cancellation, prioritization, failure summary, diagnostic report, dependency closures, live events and waiting for results. Pass an evaluation as a UUID, as `project/task` (the latest evaluation of a task), as `project/task@<commit>`, or as a link copied from the Web UI.
     Evaluation {
         #[command(subcommand)]
         cmd: evaluation::Commands,
@@ -506,7 +510,10 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         MainCommands::ExecJob { cmd } => exec_job_commands::handle(cmd, out).await,
         MainCommands::Administration { cmd } => admin::handle(cmd, out).await,
         MainCommands::Watch { evaluation } => watch::handle_watch(&evaluation, out).await,
-        MainCommands::Logs { evaluation } => logs::handle_logs(&evaluation, out).await,
+        MainCommands::Logs {
+            evaluation,
+            exit_code,
+        } => logs::handle_logs(&evaluation, exit_code, out).await,
         MainCommands::Download {
             flake_ref,
             evaluation,

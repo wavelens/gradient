@@ -102,6 +102,7 @@ impl From<&ConnectorError> for ExitKind {
     fn from(error: &ConnectorError) -> Self {
         match error {
             ConnectorError::Unauthorized => Self::Unauthorized,
+            ConnectorError::InvalidTaskEvaluationOrBuildArgument(_) => Self::Usage,
             _ => Self::Api,
         }
     }

@@ -278,12 +278,13 @@ pub async fn handle(cmd: Commands, out: Output) {
                 })
                 .await
             {
-                Ok(_) => {
+                Ok(created) => {
                     if !out.is_json() {
                         set_value(ConfigKey::SelectedProject, name, true);
                     }
-                    out.ok(&serde_json::json!({"created": true}));
-                    out.human("Project created.");
+                    out.ok(&created);
+                    out.progress("Project created.");
+                    out.human(created.id);
                 }
                 Err(e) => out.fail(e),
             }

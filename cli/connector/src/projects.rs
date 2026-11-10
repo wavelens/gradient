@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    AddMemberRequest, CacheSubscriptionItem, CreateRoleRequest, GrantProjectRequest,
-    MakeProjectRequest, MemberItem, PaginatedProjectSummary, PatchProjectGrantRequest,
-    PatchProjectRequest, PatchRoleRequest, PendingInvitationItem, ProjectResponse,
-    ProjectSecretSummary, PutProjectSecretRequest, RemoveMemberRequest, RevokeInvitationRequest,
-    RoleResponseProjectRoleOwner, SopsRecipientResponse, TeamGrantEntry,
+    AddMemberRequest, CacheSubscriptionItem, CreateRoleRequest, CreatedEntityResponse,
+    GrantProjectRequest, MakeProjectRequest, MemberItem, PaginatedProjectSummary,
+    PatchProjectGrantRequest, PatchProjectRequest, PatchRoleRequest, PendingInvitationItem,
+    ProjectResponse, ProjectSecretSummary, PutProjectSecretRequest, RemoveMemberRequest,
+    RevokeInvitationRequest, RoleResponseProjectRoleOwner, SopsRecipientResponse, TeamGrantEntry,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -38,7 +38,10 @@ impl ProjectsApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn create(&self, body: MakeProjectRequest) -> Result<String, ConnectorError> {
+    pub async fn create(
+        &self,
+        body: MakeProjectRequest,
+    ) -> Result<CreatedEntityResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

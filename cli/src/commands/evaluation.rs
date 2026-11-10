@@ -8,27 +8,38 @@ use crate::commands::builds::{
     print_closure_size_graph, print_server_action_message_or_exit, save_downloaded_file,
 };
 use crate::commands::live_events::print_live_events_until_finished;
-use crate::input::client_from_config;
+use crate::commands::poll_evaluation_until_finished::print_status_changes_and_exit;
+use crate::input::{client_from_config, evaluation_uuid_from_reference};
 use crate::output::Output;
 use crate::tui::watch::eval_is_terminal;
 use clap::Subcommand;
 use connector::api::EvaluationFailureSummary;
 use connector::evals::EvaluationReportQueryParameters;
+use connector::task_evaluation_build_reference_parser::TaskOrEvaluationReference;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Start a new evaluation of the same commit, build the failed builds again and print the evaluation UUID.
-    Retry { evaluation: String },
+    Retry {
+        evaluation: TaskOrEvaluationReference,
+    },
     /// Abort the running evaluation
-    Abort { evaluation: String },
+    Abort {
+        evaluation: TaskOrEvaluationReference,
+    },
     /// Assign all builds of the running evaluation ahead of other work. Superuser access only.
-    Prioritize { evaluation: String },
+    Prioritize {
+        evaluation: TaskOrEvaluationReference,
+    },
     /// Show failed builds, attributes that failed to evaluate and packages fixed since the previous evaluation.
-    Summary { evaluation: String },
+    Summary {
+        evaluation: TaskOrEvaluationReference,
+    },
     /// Save a SQLite diagnostic report of the evaluation so the file can go into a bug report. Default settings anonymize identifying information and include failed build logs.
     Report {
-        evaluation: String,
+        evaluation: TaskOrEvaluationReference,
         /// Write the file to this path. Default: the server's proposed file name (in the current directory).
         #[arg(long)]
         output_file: Option<PathBuf>,
@@ -50,15 +61,29 @@ pub enum Commands {
     },
     /// Show the dependency closure for every entry point of an evaluation and the size of each store path.
     Closure {
-        evaluation: String,
+        evaluation: TaskOrEvaluationReference,
         /// Show store paths for runtime use by the built output, not build-time dependencies.
         #[arg(long)]
         runtime_closure: bool,
     },
     /// Show the flake outputs that the evaluation scanned, with type and derivation path.
-    ShowFlakeGraph { evaluation: String },
+    ShowFlakeGraph {
+        evaluation: TaskOrEvaluationReference,
+    },
     /// Print live events for an evaluation until the evaluation is complete. Pass `--json` to print one line of JSON per event.
-    Follow { evaluation: String },
+    Follow {
+        evaluation: TaskOrEvaluationReference,
+        /// Exit with the evaluation result. 0 on completion, 1 on failure, 4 on abort.
+        #[arg(long)]
+        exit_code: bool,
+    },
+    /// Wait for evaluation to complete. Print one line on each status change. Exit with 0 on completion, 1 on failure, 4 on abort and 5 after the time limit set by `--timeout`.
+    Wait {
+        evaluation: TaskOrEvaluationReference,
+        /// Stop waiting after this number of seconds and exit with code 5.
+        #[arg(long, value_name = "SECONDS")]
+        timeout: Option<u64>,
+    },
 }
 
 pub async fn handle(cmd: Commands, out: Output) {
@@ -66,6 +91,7 @@ pub async fn handle(cmd: Commands, out: Output) {
     let evals = client.evals();
     match cmd {
         Commands::Retry { evaluation } => {
+            let evaluation = evaluation_uuid_from_reference(&client, &evaluation, out).await;
             let id = evals
                 .retry(&evaluation)
                 .await
@@ -74,12 +100,15 @@ pub async fn handle(cmd: Commands, out: Output) {
             out.human(format!("Started evaluation {id}"));
         }
         Commands::Abort { evaluation } => {
+            let evaluation = evaluation_uuid_from_reference(&client, &evaluation, out).await;
             print_server_action_message_or_exit(evals.abort(&evaluation).await, out)
         }
         Commands::Prioritize { evaluation } => {
+            let evaluation = evaluation_uuid_from_reference(&client, &evaluation, out).await;
             print_server_action_message_or_exit(evals.prioritize(&evaluation).await, out)
         }
         Commands::Summary { evaluation } => {
+            let evaluation = evaluation_uuid_from_reference(&client, &evaluation, out).await;
             let summary = evals
                 .summary(&evaluation)
                 .await
@@ -96,6 +125,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             include_worker_fleet,
             include_exec_jobs,
         } => {
+            let evaluation = evaluation_uuid_from_reference(&client, &evaluation, out).await;
             let parameters = EvaluationReportQueryParameters {
                 anonymize_identities: !keep_real_identities,
                 anonymize_packages: anonymize_package_names,
@@ -113,6 +143,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             evaluation,
             runtime_closure,
         } => {
+            let evaluation = evaluation_uuid_from_reference(&client, &evaluation, out).await;
             let graph = if runtime_closure {
                 evals.runtime_closure(&evaluation).await
             } else {
@@ -121,6 +152,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             print_closure_size_graph(&graph.unwrap_or_else(|e| out.fail(e)), out);
         }
         Commands::ShowFlakeGraph { evaluation } => {
+            let evaluation = evaluation_uuid_from_reference(&client, &evaluation, out).await;
             let nodes = evals
                 .flake_graph(&evaluation)
                 .await
@@ -131,7 +163,11 @@ pub async fn handle(cmd: Commands, out: Output) {
                 out.human(format!("{}  {}  {derivation}", node.path, node.kind));
             }
         }
-        Commands::Follow { evaluation } => {
+        Commands::Follow {
+            evaluation,
+            exit_code,
+        } => {
+            let evaluation = evaluation_uuid_from_reference(&client, &evaluation, out).await;
             let events = evals
                 .live(&evaluation)
                 .await
@@ -141,7 +177,23 @@ pub async fn handle(cmd: Commands, out: Output) {
                 || async { Ok(eval_is_terminal(evals.get(&evaluation).await?.status)) },
                 out,
             )
-            .await
+            .await;
+            if exit_code {
+                print_status_changes_and_exit(&client, &evaluation, None, out).await;
+            }
+        }
+        Commands::Wait {
+            evaluation,
+            timeout,
+        } => {
+            let evaluation = evaluation_uuid_from_reference(&client, &evaluation, out).await;
+            print_status_changes_and_exit(
+                &client,
+                &evaluation,
+                timeout.map(Duration::from_secs),
+                out,
+            )
+            .await;
         }
     }
 }

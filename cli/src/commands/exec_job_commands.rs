@@ -6,9 +6,10 @@
 
 use crate::commands::run_terminal::attach_terminal_to_job_serial_console;
 use crate::error::{CliError, FileAction};
-use crate::input::{OnOffSetting, client_from_config};
+use crate::input::{OnOffSetting, client_from_config, evaluation_uuid_from_reference};
 use crate::output::{ExitKind, Output};
 use clap::Subcommand;
+use connector::task_evaluation_build_reference_parser::TaskOrEvaluationReference;
 use futures::StreamExt;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
@@ -17,8 +18,8 @@ use tokio::io::AsyncWriteExt;
 pub enum Commands {
     /// List the execution jobs of an evaluation
     List {
-        /// Evaluation UUID
-        evaluation: String,
+        /// An evaluation UUID, `project/task` (the latest evaluation of the task), `project/task@<commit>`, or a link copied from the Web UI.
+        evaluation: TaskOrEvaluationReference,
     },
     /// Show details for an exec job
     Show {
@@ -91,7 +92,10 @@ pub async fn handle(cmd: Commands, out: Output) {
     let client = client_from_config(out);
     let jobs = client.exec_jobs();
     match cmd {
-        Commands::List { evaluation } => match jobs.of_evaluation(&evaluation).await {
+        Commands::List { evaluation } => match jobs
+            .of_evaluation(&evaluation_uuid_from_reference(&client, &evaluation, out).await)
+            .await
+        {
             Ok(summaries) => {
                 out.ok(&summaries);
                 if summaries.is_empty() {

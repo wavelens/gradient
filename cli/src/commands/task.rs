@@ -456,12 +456,13 @@ pub async fn handle(cmd: Commands, out: Output) {
                 )
                 .await
             {
-                Ok(_) => {
+                Ok(created) => {
                     if !out.is_json() {
                         set_value(ConfigKey::SelectedTask, format!("{project}/{name}"), true);
                     }
-                    out.ok(&serde_json::json!({"created": true}));
-                    out.human("Task created.");
+                    out.ok(&created);
+                    out.progress("Task created.");
+                    out.human(created.id);
                 }
                 Err(e) => out.fail(e),
             }
@@ -569,9 +570,10 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let client = client_from_config(out);
             match client.tasks().evaluate(&project, &task, None).await {
-                Ok(eval_id) => {
-                    out.ok(&serde_json::json!({"evaluation_id": eval_id}));
-                    out.human("Task evaluation started.");
+                Ok(created) => {
+                    out.ok(&created);
+                    out.progress("Task evaluation started.");
+                    out.human(created.id);
                 }
                 Err(e) => out.fail(e),
             }

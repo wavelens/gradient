@@ -204,10 +204,13 @@ fn mcp_exposes_no_mutating_tools() {
 async fn mcp_get_build_log_sends_the_configured_token() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/builds/build-1/log/lines"))
+        .and(path("/api/v1/builds/build-1/log"))
         .and(header("Authorization", "Bearer seeded-token"))
-        .and(query_param("start", "1"))
-        .respond_with(ResponseTemplate::new(200).set_body_string("error: builder failed\n"))
+        .and(query_param("format", "plain"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"error": false, "message": "error: builder failed\n"})),
+        )
         .mount(&server)
         .await;
 
@@ -243,8 +246,12 @@ async fn mcp_get_build_log_saves_a_long_log_to_a_temp_file() {
     let log = (1..=11).map(|n| format!("line {n}\n")).collect::<String>();
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/builds/build-1/log/lines"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(log.clone()))
+        .and(path("/api/v1/builds/build-1/log"))
+        .and(query_param("format", "plain"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"error": false, "message": log.clone()})),
+        )
         .mount(&server)
         .await;
 
@@ -411,7 +418,7 @@ async fn mcp_start_evaluation_returns_the_new_evaluation() {
     Mock::given(method("POST"))
         .and(path("/api/v1/tasks/proj/nightly/evaluate"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "error": false, "message": "eval-9"
+            "error": false, "message": {"id": "eval-9", "name": "proj/nightly", "url": "https://ci.example/project/proj/log/eval-9"}
         })))
         .expect(1)
         .mount(&server)
@@ -431,7 +438,7 @@ async fn mcp_start_evaluation_returns_the_new_evaluation() {
         result["content"][0]["text"]
             .as_str()
             .unwrap()
-            .contains("eval-9")
+            .contains("https://ci.example/project/proj/log/eval-9")
     );
 }
 

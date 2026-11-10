@@ -65,7 +65,7 @@ async fn evaluate_pins_a_commit() {
     Mock::given(method("POST"))
         .and(path("/api/v1/tasks/proj/nightly/evaluate"))
         .and(body_json(serde_json::json!({"commit": commit})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok("eval-9")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({"id": "eval-9", "name": "proj/nightly", "url": "https://ci.example/project/proj/log/eval-9"}))))
         .expect(1)
         .mount(&server)
         .await;
@@ -80,7 +80,8 @@ async fn evaluate_pins_a_commit() {
         .evaluate("proj", "nightly", Some(commit))
         .await
         .unwrap();
-    assert_eq!(id, "eval-9");
+    assert_eq!(id.id, "eval-9");
+    assert_eq!(id.name, "proj/nightly");
 }
 
 #[tokio::test]
@@ -88,7 +89,7 @@ async fn evaluate_without_a_commit_sends_no_body() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/tasks/proj/nightly/evaluate"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok("eval-9")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({"id": "eval-9", "name": "proj/nightly", "url": "https://ci.example/project/proj/log/eval-9"}))))
         .expect(1)
         .mount(&server)
         .await;

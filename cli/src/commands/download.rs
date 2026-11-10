@@ -6,17 +6,20 @@
 
 use crate::commands::attr_spec;
 use crate::error::{CliError, FileAction};
-use crate::input::{client_from_config, flush_stdout, selected_task};
+use crate::input::{
+    client_from_config, evaluation_uuid_from_reference, flush_stdout, selected_task,
+};
 use crate::output::{ExitKind, Output};
 use connector::ConnectorError;
 use connector::api::{ArtefactTree, ProductArtefact};
+use connector::task_evaluation_build_reference_parser::TaskOrEvaluationReference;
 use futures::{Stream, StreamExt, pin_mut};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 pub async fn handle_download(
     flake_ref: Option<String>,
-    evaluation: Option<String>,
+    evaluation: Option<TaskOrEvaluationReference>,
     products: Option<String>,
     out_dir_arg: Option<String>,
     out: Output,
@@ -28,7 +31,7 @@ pub async fn handle_download(
     let client = client_from_config(out);
 
     let eval_id = match evaluation {
-        Some(id) => id,
+        Some(reference) => evaluation_uuid_from_reference(&client, &reference, out).await,
         None => pick_latest_evaluation(&client, out).await,
     };
 

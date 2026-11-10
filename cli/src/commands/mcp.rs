@@ -5,6 +5,7 @@
  */
 
 use crate::commands::base::parse_subcommand_name_chain_from_cli_args;
+use crate::commands::poll_evaluation_until_finished::poll_evaluation_until_terminal;
 use crate::config::{
     ConfigKey, load_and_migrate_login_config_file, login_name_from_flag_env_or_config,
     saved_login_for_invocation,
@@ -12,7 +13,6 @@ use crate::config::{
 use crate::input::client_from_config;
 use crate::output::Output;
 use crate::tui::watch::eval_is_terminal;
-use connector::api::EvaluationResponse;
 use connector::{Client, ConnectorError};
 use futures::StreamExt;
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -81,7 +81,7 @@ const GRADIENT_COMMAND_TIMEOUT_SECONDS: Duration = Duration::from_secs(600);
 const CLI_OUTPUT_SIZE_BEFORE_TEMP_FILE_BYTES: usize = 16 * 1024;
 
 const INLINE_LOG_LINES: usize = 10;
-const WATCH_POLL: Duration = Duration::from_secs(5);
+
 const WATCH_TIMEOUT_SECONDS: u64 = 600;
 const WATCH_MAX_TIMEOUT_SECONDS: u64 = 3600;
 const ENTRY_POINT_PAGE: u64 = 500;
@@ -233,14 +233,6 @@ fn write_text_to_kept_temp_file_with_prefix_and_suffix(
     Ok(path)
 }
 
-fn is_transient(e: &ConnectorError) -> bool {
-    match e {
-        ConnectorError::Transport(_) => true,
-        ConnectorError::Api { status, .. } => status.is_server_error(),
-        _ => false,
-    }
-}
-
 fn to_error(e: ConnectorError) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(e.to_string())])
 }
@@ -386,12 +378,12 @@ impl GradientMcp {
         Parameters(args): Parameters<BuildLogArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let start = args.start.unwrap_or(1);
-        let log = self
-            .renew_session_token_and_get_api_client()
-            .await
-            .builds()
-            .log_lines(&args.build, start, args.end)
-            .await;
+        let client = self.renew_session_token_and_get_api_client().await;
+        let builds = client.builds();
+        let log = match (args.start, args.end) {
+            (None, None) => builds.get_build_log_without_color_codes(&args.build).await,
+            _ => builds.log_lines(&args.build, start, args.end).await,
+        };
         Ok(to_log_result(log, start))
     }
 
@@ -429,7 +421,9 @@ impl GradientMcp {
 
 #[tool_router(router = control_router)]
 impl GradientMcp {
-    #[tool(description = "Start an evaluation of a task and return its UUID.")]
+    #[tool(
+        description = "Start an evaluation of the task. Return the evaluation UUID as `id`, the task as `name`, and the evaluation page as `url`."
+    )]
     async fn start_evaluation(
         &self,
         Parameters(args): Parameters<StartArgs>,
@@ -593,10 +587,14 @@ impl GradientMcp {
             .entry_points(&project, &args.task, Some(&evaluation), Some(1), Some(0))
             .await
             .map_err(to_error)?;
-        let eval = self
-            .await_terminal(&evaluation, Instant::now() + timeout)
-            .await
-            .map_err(to_error)?;
+        let eval = poll_evaluation_until_terminal(
+            &self.renew_session_token_and_get_api_client().await,
+            &evaluation,
+            Some(Instant::now() + timeout),
+            |_| {},
+        )
+        .await
+        .map_err(to_error)?;
         let entry_points = self
             .entry_point_statuses(&project, &args.task, &evaluation)
             .await
@@ -626,36 +624,6 @@ impl GradientMcp {
             .ok_or_else(|| {
                 CallToolResult::error(vec![ContentBlock::text("task has no evaluations")])
             })
-    }
-
-    async fn await_terminal(
-        &self,
-        evaluation: &str,
-        deadline: Instant,
-    ) -> Result<EvaluationResponse, ConnectorError> {
-        let mut last_read = None;
-        loop {
-            let polled = self
-                .renew_session_token_and_get_api_client()
-                .await
-                .evals()
-                .get(evaluation)
-                .await;
-            match &polled {
-                Ok(eval) if eval_is_terminal(eval.status) => return polled,
-                Err(e) if !is_transient(e) => return polled,
-                _ => {}
-            }
-
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return polled.or_else(|e| last_read.ok_or(e));
-            }
-            if let Ok(eval) = polled {
-                last_read = Some(eval);
-            }
-            tokio::time::sleep(left.min(WATCH_POLL)).await;
-        }
     }
 
     async fn entry_point_statuses(

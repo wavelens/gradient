@@ -16,7 +16,9 @@ async fn download_by_attr_filters_tree_and_writes_files() {
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
-        .and(path("/api/v1/evals/eval-1/artefacts"))
+        .and(path(
+            "/api/v1/evals/6d1f0c2a-3b4e-4c5d-8e9f-0a1b2c3d4e5f/artefacts",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "error": false,
             "message": {
@@ -72,7 +74,7 @@ async fn download_by_attr_filters_tree_and_writes_files() {
             "download",
             "#packages.x86_64-linux.my-app",
             "--evaluation",
-            "eval-1",
+            "6d1f0c2a-3b4e-4c5d-8e9f-0a1b2c3d4e5f",
             "--out",
             out_dir.path().to_str().unwrap(),
         ])

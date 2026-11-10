@@ -322,9 +322,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                 })
                 .await
             {
-                Ok(_) => {
-                    out.ok(&serde_json::json!({"created": true, "name": name}));
-                    out.human("Created team.");
+                Ok(created) => {
+                    out.ok(&created);
+                    out.progress("Created team.");
+                    out.human(created.id);
                 }
                 Err(e) => out.fail(e),
             }

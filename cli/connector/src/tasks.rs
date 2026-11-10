@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    CreateTriggerRequest, EntryPointMetricsResponse, EvaluationSummary, MakeTaskRequest,
-    PaginatedEntryPoints, PaginatedTaskResponse, PatchTaskRequest, TaskDetailsResponse,
-    TaskMetricsResponse, TaskResponse, TransferOwnershipRequest, TriggerOut, UpdateTriggerRequest,
+    CreateTriggerRequest, CreatedEntityResponse, EntryPointMetricsResponse, EvaluationSummary,
+    MakeTaskRequest, PaginatedEntryPoints, PaginatedTaskResponse, PatchTaskRequest,
+    TaskDetailsResponse, TaskMetricsResponse, TaskResponse, TransferOwnershipRequest, TriggerOut,
+    UpdateTriggerRequest,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -59,7 +60,7 @@ impl TasksApi<'_> {
         &self,
         project: &str,
         body: MakeTaskRequest,
-    ) -> Result<String, ConnectorError> {
+    ) -> Result<CreatedEntityResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -196,7 +197,7 @@ impl TasksApi<'_> {
         project: &str,
         proj: &str,
         commit: Option<&str>,
-    ) -> Result<String, ConnectorError> {
+    ) -> Result<CreatedEntityResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -233,6 +234,24 @@ impl TasksApi<'_> {
             ),
             true,
         )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn list_task_evaluations_at_commit(
+        &self,
+        project: &str,
+        task: &str,
+        commit: &str,
+    ) -> Result<Vec<EvaluationSummary>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("tasks/{project}/{task}/evaluations"),
+            true,
+        )?
+        .query(&[("commit", commit)]);
         http::decode(req.send().await?).await
     }
 

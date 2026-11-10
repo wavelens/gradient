@@ -219,9 +219,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                 })
                 .await
             {
-                Ok(_) => {
-                    out.ok(&serde_json::json!({"created": true}));
-                    out.human("Cache created.");
+                Ok(created) => {
+                    out.ok(&created);
+                    out.progress("Cache created.");
+                    out.human(created.id);
                 }
                 Err(e) => out.fail(e),
             }

@@ -14,6 +14,7 @@ pub enum ConnectorError {
     Transport(reqwest::Error),
     Decode(serde_json::Error),
     Io(std::io::Error),
+    InvalidTaskEvaluationOrBuildArgument(String),
 }
 
 impl fmt::Display for ConnectorError {
@@ -26,6 +27,7 @@ impl fmt::Display for ConnectorError {
             Self::Transport(e) => write!(f, "transport error: {}", e),
             Self::Decode(e) => write!(f, "decode error: {}", e),
             Self::Io(e) => write!(f, "io error: {}", e),
+            Self::InvalidTaskEvaluationOrBuildArgument(message) => f.write_str(message),
         }
     }
 }

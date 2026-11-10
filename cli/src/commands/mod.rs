@@ -31,6 +31,7 @@ pub mod logged_in_user_account_group_commands;
 pub mod logs;
 pub mod logstream;
 pub mod mcp;
+pub mod poll_evaluation_until_finished;
 pub mod pr;
 pub mod project;
 pub mod run;

@@ -7,7 +7,7 @@
 use crate::commands::download::human_size;
 use crate::commands::live_events::print_live_events_until_finished;
 use crate::error::{CliError, FileAction};
-use crate::input::client_from_config;
+use crate::input::{client_from_config, parse_build_uuid_or_web_ui_log_page_url};
 use crate::output::Output;
 use clap::Subcommand;
 use connector::DownloadedBinaryFile;
@@ -18,12 +18,14 @@ use std::path::{Path, PathBuf};
 pub enum Commands {
     /// Show a build's dependency graph
     Graph {
+        #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
         #[arg(short = 'i', long)]
         interactive: bool,
     },
     /// View a build's log
     Log {
+        #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
         #[arg(short = 'i', long)]
         interactive: bool,
@@ -38,13 +40,23 @@ pub enum Commands {
         case: bool,
     },
     /// Queue a failed, timed-out, aborted or dependency-failed build again, together with the builds that failed only because of it
-    Retry { id: String },
+    Retry {
+        #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
+        id: String,
+    },
     /// Abort a build of an active evaluation, whether created, queued, or running.
-    Abort { id: String },
+    Abort {
+        #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
+        id: String,
+    },
     /// Assign this build and its unresolved dependencies before other work. Only a superuser can run this command.
-    Prioritize { id: String },
+    Prioritize {
+        #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
+        id: String,
+    },
     /// Show the dependency closure of the build with the size of each store path.
     Closure {
+        #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
         /// Show store paths for runtime use by the built output, not build-time dependencies.
         #[arg(long)]
@@ -52,13 +64,17 @@ pub enum Commands {
     },
     /// Save the CycloneDX SBOM of the runtime closure of a build
     Sbom {
+        #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
         id: String,
         /// Write the file to this path. Default: the server's proposed file name (in the current directory).
         #[arg(long)]
         output_file: Option<PathBuf>,
     },
     /// Print the live status and progress events of a build until the build finishes. Use `--json` to print one JSON line per event.
-    Follow { id: String },
+    Follow {
+        #[arg(value_parser = parse_build_uuid_or_web_ui_log_page_url)]
+        id: String,
+    },
 }
 
 pub async fn handle(cmd: Commands, out: Output) {
