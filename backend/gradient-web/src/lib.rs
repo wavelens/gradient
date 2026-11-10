@@ -32,15 +32,14 @@ pub mod scope;
 mod store_paths;
 
 use axum::body::Body;
-use axum::extract::connect_info::MockConnectInfo;
-use axum::extract::{ConnectInfo, DefaultBodyLimit, FromRef, MatchedPath};
+use axum::extract::{DefaultBodyLimit, FromRef, MatchedPath};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use governor::middleware::NoOpMiddleware;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use http::{HeaderMap, HeaderValue, Request, Response};
 use ipnet::IpNet;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::IpAddr;
 use std::time::Duration;
 use tower_governor::GovernorLayer;
 use tower_governor::errors::GovernorError;
@@ -74,14 +73,12 @@ impl KeyExtractor for ClientIpKey {
     type Key = IpAddr;
 
     fn extract<T>(&self, req: &Request<T>) -> Result<Self::Key, GovernorError> {
-        let extensions = req.extensions();
-        let peer = extensions
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|c| c.0)
-            .or_else(|| extensions.get::<MockConnectInfo<SocketAddr>>().map(|m| m.0));
-        Ok(peer.map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |peer| {
-            client_ip::resolve_client_ip(req.headers(), peer.ip(), &self.trusted_proxies)
-        }))
+        let peer = client_ip::read_tcp_peer_ip_from_extensions(req.extensions());
+        Ok(client_ip::resolve_client_ip(
+            req.headers(),
+            peer,
+            &self.trusted_proxies,
+        ))
     }
 }
 
@@ -190,17 +187,7 @@ pub fn create_router_with_scheduler(
                     state.config.server.serve_url
                 ))
             })?;
-    let debug_url: http::HeaderValue =
-        format!("http://{}:8000", state.config.server.listen_addr.clone())
-            .try_into()
-            .map_err(|_| {
-                InitError::NetworkConfig(format!(
-                    "invalid debug_url from ip {}",
-                    state.config.server.listen_addr
-                ))
-            })?;
-
-    let cors_allow_origin = AllowOrigin::list(vec![serve_url, debug_url]);
+    let cors_allow_origin = AllowOrigin::exact(serve_url);
 
     let cors = CorsLayer::new()
         .allow_origin(cors_allow_origin)

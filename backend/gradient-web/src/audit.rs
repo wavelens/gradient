@@ -8,7 +8,7 @@
 //! recording.
 
 use crate::authorization::MaybeUser;
-use axum::extract::{ConnectInfo, FromRequestParts};
+use axum::extract::FromRequestParts;
 use axum::http::HeaderMap;
 use axum::http::request::Parts;
 use gradient_core::ServerState;
@@ -17,7 +17,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::{Action, Audited};
 use gradient_types::*;
 use std::convert::Infallible;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
@@ -55,11 +55,7 @@ impl FromRequestParts<Arc<ServerState>> for Audit {
         parts: &mut Parts,
         state: &Arc<ServerState>,
     ) -> Result<Self, Self::Rejection> {
-        let peer = parts
-            .extensions
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|c| c.0.ip())
-            .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        let peer = crate::client_ip::read_tcp_peer_ip_from_extensions(&parts.extensions);
         let info =
             RequestInfo::from_request(&parts.headers, peer, &state.config.network.trusted_proxies);
         let actor = parts

@@ -35,7 +35,6 @@ impl ErrorCode {
     pub const REPOSITORY_UNREACHABLE: Self = Self("repository_unreachable");
 
     pub const UNAUTHORIZED: Self = Self("unauthorized");
-    pub const AUTHENTICATION: Self = Self("authentication");
     pub const INVALID_CREDENTIALS: Self = Self("invalid_credentials");
     pub const OAUTH_REQUIRED: Self = Self("oauth_required");
     pub const CLI_AUTH_PENDING: Self = Self("cli_auth_pending");
@@ -64,8 +63,6 @@ impl ErrorCode {
     pub const UNPROCESSABLE_ENTITY: Self = Self("unprocessable_entity");
 
     pub const INTERNAL: Self = Self("internal");
-    pub const DATABASE: Self = Self("database");
-    pub const DATA_INCONSISTENCY: Self = Self("data_inconsistency");
     pub const TOKEN_GENERATION_FAILED: Self = Self("token_generation_failed");
     pub const USER_UPDATE_FAILED: Self = Self("user_update_failed");
     pub const SSH_KEY_GENERATION_FAILED: Self = Self("ssh_key_generation_failed");

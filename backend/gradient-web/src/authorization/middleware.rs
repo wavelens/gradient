@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{Request, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::header::SET_COOKIE;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use gradient_core::ServerState;
 use gradient_types::*;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use super::api_key::{ApiKeyContext, DecodedRequest, MaybeApiKey};
@@ -30,7 +30,7 @@ use super::jwt::{
     extract_bearer_or_cookie, session_cookie_token,
 };
 use crate::audit::{Audit, RequestInfo};
-use crate::client_ip::{ClientIp, resolve_client_ip};
+use crate::client_ip::{ClientIp, read_tcp_peer_ip_from_extensions, resolve_client_ip};
 use crate::error::{WebError, WebResult};
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
@@ -135,11 +135,7 @@ pub async fn authorize(
     req: Request,
     next: Next,
 ) -> WebResult<Response<Body>> {
-    let peer = req
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|c| c.0.ip())
-        .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let peer = read_tcp_peer_ip_from_extensions(req.extensions());
 
     let info =
         RequestInfo::from_request(req.headers(), peer, &state.config.network.trusted_proxies);
@@ -302,11 +298,7 @@ pub async fn authorize_optional(
     req: Request,
     next: Next,
 ) -> Response<Body> {
-    let peer = req
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|c| c.0.ip())
-        .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let peer = read_tcp_peer_ip_from_extensions(req.extensions());
 
     let client_ip = resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
     let caller = optional_caller(

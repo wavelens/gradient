@@ -9,11 +9,11 @@
 
 use axum::extract::connect_info::MockConnectInfo;
 use axum::extract::{ConnectInfo, FromRequestParts};
-use axum::http::HeaderMap;
 use axum::http::request::Parts;
+use axum::http::{Extensions, HeaderMap};
 use ipnet::IpNet;
 use std::convert::Infallible;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 pub struct OptionalPeer(pub Option<SocketAddr>);
 
@@ -21,18 +21,19 @@ impl<S: Send + Sync> FromRequestParts<S> for OptionalPeer {
     type Rejection = Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        let addr = parts
-            .extensions
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|c| c.0)
-            .or_else(|| {
-                parts
-                    .extensions
-                    .get::<MockConnectInfo<SocketAddr>>()
-                    .map(|m| m.0)
-            });
-        Ok(OptionalPeer(addr))
+        Ok(OptionalPeer(peer_socket(&parts.extensions)))
     }
+}
+
+fn peer_socket(extensions: &Extensions) -> Option<SocketAddr> {
+    extensions
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|c| c.0)
+        .or_else(|| extensions.get::<MockConnectInfo<SocketAddr>>().map(|m| m.0))
+}
+
+pub fn read_tcp_peer_ip_from_extensions(extensions: &Extensions) -> IpAddr {
+    peer_socket(extensions).map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |peer| peer.ip())
 }
 
 #[derive(Debug, Clone, Copy)]
