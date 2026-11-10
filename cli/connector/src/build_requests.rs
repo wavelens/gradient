@@ -78,6 +78,7 @@ impl BuildRequestsApi<'_> {
     pub async fn upload_source_chunk(
         &self,
         upload: &str,
+        project: &str,
         offset: u64,
         chunk: Vec<u8>,
     ) -> Result<u64, ConnectorError> {
@@ -86,7 +87,7 @@ impl BuildRequestsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PUT,
-            &format!("build-requests/source/{upload}/chunk?offset={offset}"),
+            &format!("build-requests/source/{upload}/chunk?offset={offset}&project={project}"),
             true,
         )?
         .header("Content-Type", "application/octet-stream")

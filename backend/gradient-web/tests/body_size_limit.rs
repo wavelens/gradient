@@ -104,7 +104,7 @@ async fn source_chunk_over_source_limit_returns_413() {
 
     let over = vec![b'x'; 64 * 1024];
     let response = server
-        .put("/api/v1/build-requests/source/testupload/chunk?offset=0")
+        .put("/api/v1/build-requests/source/testupload/chunk?offset=0&project=demo")
         .add_header("authorization", auth)
         .add_header("Content-Type", "application/octet-stream")
         .bytes(over.into())

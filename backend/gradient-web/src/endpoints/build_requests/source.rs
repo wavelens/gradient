@@ -130,6 +130,7 @@ pub async fn post_source(
 #[into_params(parameter_in = Query)]
 pub struct SourceChunkQuery {
     offset: u64,
+    project: String,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -163,7 +164,7 @@ fn require_safe_upload_id(upload: &str) -> WebResult<()> {
     operation_id = "putBuildRequestSourceChunk",
     tag = "build-requests",
     summary = "Append a chunk of a source NAR to a staged upload",
-    description = "Streams a large source NAR to the server in slices so no single request\nhits a body limit. `upload` is a client-chosen id (the CLI uses the NAR's\ncontent hash, which makes a retry resumable). `offset` must equal the\nbytes already received (`0` starts fresh); a mismatch appends nothing and\nreturns the authoritative `received` so the client resumes. The staged\ntotal is bounded by `max_source_upload_size`. Finalise with\n`POST /build-requests/source/{upload}/finalize`.",
+    description = "Large source NARs stream to the server in slices, so requests never hit the limit on body size.\nThe client can choose `upload`.\nThe CLI can use the content hash of the NAR as that ID, so retries can resume.\nMatch `offset` to the number of bytes already received.\nUse `0` to start a new upload.\nMismatches add no bytes.\nThe server can return the authoritative `received`, so the client can resume.\nUse `triggerEvaluation` on `project`.\nAll incomplete uploads for one user share one `max_source_upload_size` limit.\nUse `POST /build-requests/source/{upload}/finalize` to finalize the upload.",
     params(("upload" = String, Path), SourceChunkQuery),
     request_body(content = Binary, content_type = "application/octet-stream"),
     responses((status = OK, description = "Chunk staged; returns total bytes received so far.", body = ChunkReceived), WebError)
@@ -171,23 +172,43 @@ fn require_safe_upload_id(upload: &str) -> WebResult<()> {
 pub async fn source_chunk(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
     Path(upload): Path<String>,
-    Query(SourceChunkQuery { offset }): Query<SourceChunkQuery>,
+    Query(SourceChunkQuery { offset, project }): Query<SourceChunkQuery>,
     body: Bytes,
 ) -> WebResult<Json<BaseResponse<ChunkReceived>>> {
     require_safe_upload_id(&upload)?;
 
     let max = u64::try_from(state.config.http.max_source_upload_size.get()).unwrap_or(u64::MAX);
-    if offset + body.len() as u64 > max {
+    let end = offset.saturating_add(body.len() as u64);
+    if end > max {
         return Err(BuildRequestRefusal::SourceUploadTooLarge { max }.into());
     }
+
+    load_project(
+        &state.0.db(),
+        Caller::User(&user),
+        api_key.as_ref(),
+        project,
+        ProjectAccess::Require {
+            permission: Permission::TriggerEvaluation,
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let store = source_partial_store(&state.config)?;
     let key = format!("{}/{upload}", user.id);
     let staged = store.received_len(&key, &upload).await?;
+    let staged_by_user = store
+        .sum_staged_upload_bytes_with_key_prefix(&format!("{}/", user.id))
+        .await?;
+    if staged_by_user.saturating_sub(staged).saturating_add(end) > max {
+        return Err(BuildRequestRefusal::StagedSourceUploadsTooLarge { max }.into());
+    }
     let received = if offset == 0 || offset == staged {
         store.append(&key, &upload, offset, &body).await?;
-        offset + body.len() as u64
+        end
     } else {
         staged
     };

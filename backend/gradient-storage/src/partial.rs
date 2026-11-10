@@ -305,6 +305,29 @@ impl PartialStore {
         remove_if_present(&self.token_path(key)).await
     }
 
+    pub async fn sum_staged_upload_bytes_with_key_prefix(&self, prefix: &str) -> Result<u64> {
+        let stem = file_stem(prefix);
+        let mut total = 0;
+        let mut entries = tokio::fs::read_dir(&self.root)
+            .await
+            .context("read partial dir")?;
+        while let Some(entry) = entries.next_entry().await.context("partial dir entry")? {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if name.starts_with(&stem) && name.ends_with(".partial") {
+                total += entry
+                    .metadata()
+                    .await
+                    .context("partial entry metadata")?
+                    .len();
+            }
+        }
+
+        Ok(total)
+    }
+
     pub async fn gc(&self, ttl: Duration) -> Result<usize> {
         if ttl.is_zero() {
             return Ok(0);
@@ -444,6 +467,26 @@ mod tests {
         for entry in std::fs::read_dir(d.path()).unwrap() {
             assert!(entry.unwrap().file_type().unwrap().is_file());
         }
+    }
+
+    #[tokio::test]
+    async fn staged_bytes_are_summed_per_key_prefix() {
+        let (_d, s) = store();
+        s.append("user-a/one", "one", 0, b"hello").await.unwrap();
+        s.append("user-a/two", "two", 0, b"abc").await.unwrap();
+        s.append("user-b/one", "one", 0, b"ignored").await.unwrap();
+        assert_eq!(
+            s.sum_staged_upload_bytes_with_key_prefix("user-a/")
+                .await
+                .unwrap(),
+            8
+        );
+        assert_eq!(
+            s.sum_staged_upload_bytes_with_key_prefix("user-c/")
+                .await
+                .unwrap(),
+            0
+        );
     }
 
     #[tokio::test]

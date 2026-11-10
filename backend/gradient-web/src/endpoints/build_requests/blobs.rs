@@ -60,6 +60,18 @@ pub async fn post_blobs(
 ) -> WebResult<Json<BaseResponse<BlobsResponse>>> {
     let session = require::<EUploadSession>(&state.web_db, session_id).await?;
 
+    if !has_permission(
+        &state.web_db,
+        user.id,
+        session.project,
+        Permission::TriggerEvaluation,
+        api_key.as_ref(),
+    )
+    .await?
+    {
+        return Err(WebError::not_found(Resource::UploadSession));
+    }
+
     if session.dispatched_at.is_some() {
         return Err(BuildRequestRefusal::UploadSessionAlreadyDispatched.into());
     }
@@ -68,23 +80,11 @@ pub async fn post_blobs(
         return Err(BuildRequestRefusal::UploadSessionExpired.into());
     }
 
-    let api_key_ref = api_key.as_ref();
-    if !has_permission(
-        &state.web_db,
-        user.id,
-        session.project,
-        Permission::TriggerEvaluation,
-        api_key_ref,
-    )
-    .await?
-    {
-        return Err(WebError::not_found(Resource::UploadSession));
-    }
-
-    let mut missing: HashSet<String> =
+    let missing: HashSet<String> =
         serde_json::from_value(session.missing.clone()).context("corrupt session.missing JSON")?;
 
-    let missing_before = missing.len();
+    let mut uploaded = 0;
+    let mut remaining = missing.len();
     while let Some(field) =
         multipart
             .next_field()
@@ -94,18 +94,20 @@ pub async fn post_blobs(
             })?
     {
         let blob = verified_blob(field, &missing).await?;
-        missing.remove(&blob.name);
+        let name = blob.name.clone();
         store_blob(&state.web_db, &state.nar_storage, session.project, blob).await?;
+        let left = gradient_db::upload_sessions::remove_missing_blob_hash_and_count_remaining(
+            &state.web_db,
+            session.id,
+            &name,
+        )
+        .await?;
+        remaining = usize::try_from(left).unwrap_or_default();
+        uploaded += 1;
     }
 
-    let remaining = missing.len();
-    let missing_value = serde_json::to_value(missing.into_iter().collect::<Vec<String>>())
-        .context("serialise missing list")?;
-
-    gradient_db::upload_sessions::set_missing(&state.web_db, session, missing_value).await?;
-
     Ok(ok_json(BlobsResponse {
-        uploaded: missing_before - remaining,
+        uploaded,
         remaining,
     }))
 }

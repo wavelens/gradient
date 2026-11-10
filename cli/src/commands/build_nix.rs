@@ -63,7 +63,10 @@ pub async fn start_via_nar(
     while offset < total {
         let end = (offset as usize + SOURCE_UPLOAD_CHUNK_SIZE).min(nar.len());
         let chunk = nar[offset as usize..end].to_vec();
-        match requests.upload_source_chunk(&upload, offset, chunk).await {
+        match requests
+            .upload_source_chunk(&upload, project, offset, chunk)
+            .await
+        {
             Ok(received) if received > offset => offset = received,
             Ok(received) => out.err(
                 ExitKind::Api,

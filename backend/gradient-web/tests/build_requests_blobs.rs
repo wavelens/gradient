@@ -13,7 +13,7 @@ use gradient_fixtures::rows::{project_member, upload_session, write_role};
 use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use sea_orm::MockExecResult;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 fn hex_hash_of(bytes: &[u8]) -> String {
     hex::encode(blake3::hash(bytes).as_bytes())
@@ -99,10 +99,10 @@ async fn happy_path_uploads_blob_and_shrinks_missing() {
         created_at: Utc::now().naive_utc(),
         last_used_at: Utc::now().naive_utc(),
     };
-    let updated_session = gradient_entity::upload_session::Model {
-        missing: json!([]),
-        ..session_row.clone()
-    };
+    let remaining_after_update = std::collections::BTreeMap::from([(
+        "remaining".to_string(),
+        sea_orm::Value::BigInt(Some(0)),
+    )]);
 
     let db = db
         .append_query_results([vec![session_row]])
@@ -113,7 +113,7 @@ async fn happy_path_uploads_blob_and_shrinks_missing() {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        .append_query_results([vec![updated_session]])
+        .append_query_results([vec![remaining_after_update]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -144,12 +144,15 @@ async fn rejects_already_dispatched_session() {
     let payload = b"hello".to_vec();
     let payload_hex = hex_hash_of(&payload);
 
-    let db = db.append_query_results([vec![upload_session(
-        upload,
-        vec![payload_hex.clone()],
-        true,
-        false,
-    )]]);
+    let db = db
+        .append_query_results([vec![upload_session(
+            upload,
+            vec![payload_hex.clone()],
+            true,
+            false,
+        )]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
+        .append_query_results([vec![write_role()]]);
 
     let server = make_test_server(db.into_connection());
 
@@ -172,12 +175,15 @@ async fn rejects_expired_session() {
     let payload = b"hello".to_vec();
     let payload_hex = hex_hash_of(&payload);
 
-    let db = db.append_query_results([vec![upload_session(
-        upload,
-        vec![payload_hex.clone()],
-        false,
-        true,
-    )]]);
+    let db = db
+        .append_query_results([vec![upload_session(
+            upload,
+            vec![payload_hex.clone()],
+            false,
+            true,
+        )]])
+        .append_query_results([vec![project_member(BASE_ROLE_WRITE_ID)]])
+        .append_query_results([vec![write_role()]]);
 
     let server = make_test_server(db.into_connection());
 

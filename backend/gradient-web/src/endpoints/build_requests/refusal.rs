@@ -50,6 +50,10 @@ pub(crate) enum BuildRequestRefusal {
     InvalidUploadId,
     #[error("source upload exceeds max size of {max} bytes")]
     SourceUploadTooLarge { max: u64 },
+    #[error(
+        "Staged source uploads exceed {max} bytes in total. Finish them or wait for the TTL to expire before another upload."
+    )]
+    StagedSourceUploadsTooLarge { max: u64 },
     #[error("no staged source upload: {reason}")]
     NoStagedSourceUpload { reason: String },
     #[error("empty source upload")]
@@ -67,7 +71,8 @@ impl Refusal for BuildRequestRefusal {
             Self::UploadSessionExpired => RefusalStatus::Gone,
             Self::ManifestSizeOverflow
             | Self::ManifestTooLarge { .. }
-            | Self::SourceUploadTooLarge { .. } => RefusalStatus::PayloadTooLarge,
+            | Self::SourceUploadTooLarge { .. }
+            | Self::StagedSourceUploadsTooLarge { .. } => RefusalStatus::PayloadTooLarge,
             Self::ManifestEmpty
             | Self::DuplicateManifestPath { .. }
             | Self::NegativeFileSize { .. }
