@@ -3,6 +3,8 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { By } from '@angular/platform-browser';
+import { MetricChartComponent } from '@shared/ui';
 import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { BoardStorageComponent } from './storage.component';
@@ -36,6 +38,13 @@ describe('BoardStorageComponent', () => {
   it('loads a 6 hour window and renders four charts', () => {
     expect(getStorage).toHaveBeenCalledWith(6);
     expect(fixture.nativeElement.querySelectorAll('gr-metric-chart').length).toBe(4);
+  });
+
+  it('leaves the right axis untitled like the left one, since the chart title names both values', () => {
+    const charts = fixture.debugElement.queryAll(By.directive(MetricChartComponent)).map((d) => d.componentInstance as MetricChartComponent);
+    const rightAxes = charts.map((chart) => chart.secondary()).filter((axis) => axis !== undefined);
+    expect(rightAxes).toHaveLength(2);
+    expect(rightAxes.every((axis) => axis.title === undefined)).toBe(true);
   });
 
   it('refetches when the window changes', () => {
