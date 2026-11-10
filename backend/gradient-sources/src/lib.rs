@@ -15,7 +15,9 @@ pub mod secret;
 pub mod ssh_key;
 pub mod store;
 
-pub use self::build_log::strip_nix_log_tail;
+pub use self::build_log::{
+    replace_nix_log_pointer_with_web_log_link, strip_ansi_escape_sequences, strip_nix_log_tail,
+};
 pub use self::cache_key::*;
 pub use self::daemon::*;
 pub use self::error::StoreDaemonError;

@@ -69,6 +69,8 @@ Once the evaluation has resolved the attribute, the entry point carry `outputs.o
 
 Closure data live at `/builds/{build}/closure` and `/runtime-closure`, and at the same paths under `/evals`. A response contain the fields `roots`, `total_size_bytes` (always exact), `truncated`, `nodes` (`id`, `name`, `path`, `nar_size`) and `edges` (`source`, `target`). In each edge, the `target` depend on the `source`. The [closure view](../ui/closure-view.md) draw this data as a graph.
 
+`GET /api/v1/builds/{build}/log` returns the build log. Pass `format=plain` to remove color codes or `format=ansi` to keep them. Requests with `Accept: text/plain` get plain text by default. The log of a failed build ends with `Full log: <url>`, a link to the build on the web page.
+
 ## Live Updates
 
 Each path below upgrades to a WebSocket. On every resource change, the server pushes one [event envelope](events.md#envelope) per frame.
