@@ -609,11 +609,7 @@ impl MessageLoopState {
         elapsed_ms: u64,
     ) -> ClientMessage {
         let (kind, missing_paths) = crate::executor::failure::wire_failure(e);
-        let kind = if self.stopping {
-            BuildFailureKind::Canceled
-        } else {
-            kind
-        };
+        let kind = failure_kind_reported_to_server(kind, self.stopping);
 
         let error = match kind {
             BuildFailureKind::Canceled => {
@@ -1247,6 +1243,13 @@ async fn run_job(
     }
 }
 
+fn failure_kind_reported_to_server(kind: BuildFailureKind, stopping: bool) -> BuildFailureKind {
+    match (kind, stopping) {
+        (BuildFailureKind::Aborted, true) => BuildFailureKind::Canceled,
+        (kind, _) => kind,
+    }
+}
+
 fn warm_guests_due_to_stop(server_draining: bool, already_stopped: bool, exec_jobs: u32) -> bool {
     server_draining && !already_stopped && exec_jobs == 0
 }
@@ -1268,6 +1271,22 @@ pub(super) async fn until_aborted(
 mod tests {
     use super::*;
     use crate::executor::failure::JobAborted;
+
+    #[test]
+    fn only_a_failure_from_the_stop_abort_is_reported_as_canceled() {
+        assert_eq!(
+            failure_kind_reported_to_server(BuildFailureKind::Aborted, true),
+            BuildFailureKind::Canceled
+        );
+        assert_eq!(
+            failure_kind_reported_to_server(BuildFailureKind::Permanent, true),
+            BuildFailureKind::Permanent
+        );
+        assert_eq!(
+            failure_kind_reported_to_server(BuildFailureKind::Aborted, false),
+            BuildFailureKind::Aborted
+        );
+    }
 
     #[tokio::test]
     async fn an_aborted_job_stops_without_reaching_a_checkpoint() {
