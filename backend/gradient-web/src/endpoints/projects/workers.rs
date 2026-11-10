@@ -349,7 +349,7 @@ pub(crate) fn live_workers(
     operation_id = "listProjectWorkers",
     tag = "workers",
     summary = "List registered workers for a project",
-    description = "Returns all workers registered under this project (peer), merged with\nlive status from the scheduler for currently connected workers, plus the\nworkers of every team the project grants its workers (`team` set, read-only here).\nLive fields (`architectures`, `system_features`, etc.) are only populated\nfor build-capable workers that have sent `WorkerCapabilities`.",
+    description = "Return all workers registered under this project (peer). Merge live status from the scheduler for workers that are connected now. Return workers for all teams that share workers with this project (with `team` set and read-only here). Set `live` only on connected workers that presented a token for this project during the handshake. Connected workers without `live` accept no jobs for this project until those workers reconnect with a token. Set live fields (`architectures`, `system_features`, and so on) only on buildable workers that sent `WorkerCapabilities`.",
     params(ProjectPath),
     responses((status = OK, description = "Worker list", body = Vec<ProjectWorkerEntry>), WebError)
 )]

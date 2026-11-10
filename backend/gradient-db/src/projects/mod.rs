@@ -71,27 +71,25 @@ pub async fn get_running_and_waiting_evaluation_counts_by_project_id<C: Connecti
 
     let mut per_project: HashMap<ProjectId, ProjectEvaluationProgressCounts> = HashMap::new();
     if !task_ids.is_empty() {
-        let in_progress = EEvaluation::find()
+        let latest: Vec<(Option<TaskId>, EvaluationStatus)> = EEvaluation::find()
+            .select_only()
+            .columns([CEvaluation::Task, CEvaluation::Status])
+            .distinct_on([CEvaluation::Task])
             .filter(CEvaluation::Task.is_in(task_ids))
-            .filter(
-                CEvaluation::Status.is_in(
-                    EvaluationStatus::DOING_WORK_STATUSES
-                        .into_iter()
-                        .chain([EvaluationStatus::Waiting]),
-                ),
-            )
+            .order_by_asc(CEvaluation::Task)
+            .order_by_desc(CEvaluation::CreatedAt)
+            .order_by_desc(CEvaluation::Id)
+            .into_tuple()
             .all(db)
             .await?;
-        for eval in in_progress {
-            if let Some(task_id) = eval.task
-                && let Some(&project_id) = task_to_project.get(&task_id)
-            {
-                let counts = per_project.entry(project_id).or_default();
-                if eval.status == EvaluationStatus::Waiting {
-                    counts.waiting += 1;
-                } else {
-                    counts.running += 1;
-                }
+        for (task_id, status) in latest {
+            let Some(&project_id) = task_id.and_then(|task| task_to_project.get(&task)) else {
+                continue;
+            };
+            if status == EvaluationStatus::Waiting {
+                per_project.entry(project_id).or_default().waiting += 1;
+            } else if EvaluationStatus::DOING_WORK_STATUSES.contains(&status) {
+                per_project.entry(project_id).or_default().running += 1;
             }
         }
     }
@@ -233,4 +231,59 @@ pub async fn names<C: ConnectionTrait>(
             .await
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::rows;
+
+    #[tokio::test]
+    async fn test_project_running_and_waiting_evaluation_counts_use_only_latest_evaluation_per_task()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        crate::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the owner is written");
+        let project = crate::rows::insert::<EProject, _>(&conn, rows::project())
+            .await
+            .expect("the project is written");
+        crate::rows::insert::<ETask, _>(&conn, rows::task())
+            .await
+            .expect("the task is written");
+        let commit = crate::rows::insert::<ECommit, _>(&conn, rows::build_request_commit())
+            .await
+            .expect("the commit is written");
+        for (offset, branch, status) in [
+            (0, "main", EvaluationStatus::Waiting),
+            (60, "next", EvaluationStatus::Building),
+        ] {
+            crate::rows::insert::<EEvaluation, _>(
+                &conn,
+                MEvaluation {
+                    commit: commit.id,
+                    status,
+                    branch: branch.into(),
+                    ..rows::eval_at(EvaluationId::now_v7(), offset)
+                },
+            )
+            .await
+            .expect("the evaluation is written");
+        }
+
+        let counts = get_running_and_waiting_evaluation_counts_by_project_id(&conn, &[project.id])
+            .await
+            .expect("the counts load");
+
+        assert_eq!(
+            counts[&project.id],
+            ProjectEvaluationProgressCounts {
+                running: 1,
+                waiting: 0
+            }
+        );
+        db.finish().await;
+    }
 }

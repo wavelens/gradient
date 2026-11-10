@@ -6908,7 +6908,7 @@ paths:
       tags:
       - projects
       summary: List projects
-      description: Return all projects with current user as member, and caller's role and `permissions`. An API key for one project can list only that project.
+      description: List all projects where the current user is a member. Response fields include the role of the caller and `permissions`. `running_evaluations` is the number of tasks whose latest evaluation is in the running state. `waiting_evaluations` is the number of tasks whose latest evaluation is in the `waiting` state. An API key for one project can list only that project.
       operationId: listProjects
       parameters:
       - name: page
@@ -8851,12 +8851,7 @@ paths:
       tags:
       - workers
       summary: List registered workers for a project
-      description: |-
-        Returns all workers registered under this project (peer), merged with
-        live status from the scheduler for currently connected workers, plus the
-        workers of every team the project grants its workers (`team` set, read-only here).
-        Live fields (`architectures`, `system_features`, etc.) are only populated
-        for build-capable workers that have sent `WorkerCapabilities`.
+      description: Return all workers registered under this project (peer). Merge live status from the scheduler for workers that are connected now. Return workers for all teams that share workers with this project (with `team` set and read-only here). Set `live` only on connected workers that presented a token for this project during the handshake. Connected workers without `live` accept no jobs for this project until those workers reconnect with a token. Set live fields (`architectures`, `system_features`, and so on) only on buildable workers that sent `WorkerCapabilities`.
       operationId: listProjectWorkers
       parameters:
       - name: project

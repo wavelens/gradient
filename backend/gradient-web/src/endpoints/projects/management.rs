@@ -198,7 +198,7 @@ type PaginatedProjectSummary = Paginated<ProjectSummary>;
     operation_id = "listProjects",
     tag = "projects",
     summary = "List projects",
-    description = "Return all projects with current user as member, and caller's role and `permissions`. An API key for one project can list only that project.",
+    description = "List all projects where the current user is a member. Response fields include the role of the caller and `permissions`. `running_evaluations` is the number of tasks whose latest evaluation is in the running state. `waiting_evaluations` is the number of tasks whose latest evaluation is in the `waiting` state. An API key for one project can list only that project.",
     params(PaginationParams),
     responses((status = OK, description = "Project list", body = PaginatedProjectSummary), WebError)
 )]
