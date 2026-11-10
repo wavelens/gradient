@@ -131,7 +131,7 @@ pub async fn patch(
     for op in &body.operations {
         let path = op.path.as_deref().unwrap_or("").to_ascii_lowercase();
         if !path.is_empty() && !path.starts_with("members") {
-            continue;
+            return Err(ScimError::unsupported_path());
         }
 
         let member_ids = extract_member_ids(op);
@@ -142,16 +142,16 @@ pub async fn patch(
                 }
             }
             "replace" => {
-                if let Some(members) = replacement_member_ids(op, &path) {
-                    replace_members(&state.web_db, team.id, &members).await?;
-                }
+                let members =
+                    replacement_member_ids(op, &path).ok_or_else(ScimError::unsupported_path)?;
+                replace_members(&state.web_db, team.id, &members).await?;
             }
             "remove" => {
                 for uid in member_ids_for_remove(op, &member_ids) {
                     remove_member(&state.web_db, team.id, &uid).await?;
                 }
             }
-            _ => {}
+            _ => return Err(ScimError::unsupported_operation()),
         }
     }
 

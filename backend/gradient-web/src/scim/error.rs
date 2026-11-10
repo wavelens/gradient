@@ -44,6 +44,12 @@ impl ScimError {
             detail: detail.into(),
         }
     }
+    pub fn unsupported_operation() -> Self {
+        Self::bad_request("invalidSyntax", "Unsupported Patch Operation")
+    }
+    pub fn unsupported_path() -> Self {
+        Self::bad_request("invalidPath", "Unsupported Patch Path")
+    }
     pub fn conflict(detail: impl Into<String>) -> Self {
         Self {
             status: StatusCode::CONFLICT,
@@ -109,6 +115,7 @@ impl IntoResponse for ScimError {
 
 impl From<sea_orm::DbErr> for ScimError {
     fn from(e: sea_orm::DbErr) -> Self {
-        ScimError::internal(format!("database error: {e}"))
+        tracing::error!(error = %e, "Database Error in SCIM");
+        ScimError::internal("Internal server error")
     }
 }

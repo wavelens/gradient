@@ -185,6 +185,51 @@ async fn scim_patch_user_active_false() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn scim_patch_user_with_an_unsupported_path_or_operation_is_refused() {
+    for (operation, scim_type) in [
+        (
+            json!({"op": "replace", "path": "userName", "value": "new"}),
+            "invalidPath",
+        ),
+        (
+            json!({"op": "replace", "value": {"userName": "new"}}),
+            "invalidPath",
+        ),
+        (json!({"op": "remove", "path": "active"}), "invalidSyntax"),
+    ] {
+        let u = scim_user("frank@example.com", true);
+        let db = mock_db()
+            .append_query_results([vec![u.clone()]])
+            .into_connection();
+        let res = scim_server(db)
+            .patch(&format!("/scim/v2/Users/{}", u.id))
+            .add_header("Authorization", auth_header())
+            .json(&json!({
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [operation]
+            }))
+            .await;
+
+        res.assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(res.json::<Value>()["scimType"], scim_type);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scim_database_errors_do_not_reach_the_client() {
+    let db = mock_db()
+        .append_query_errors([sea_orm::DbErr::Custom("relation \"user\" secret".into())])
+        .into_connection();
+    let res = scim_server(db)
+        .get(&format!("/scim/v2/Users/{}", UserId::now_v7()))
+        .add_header("Authorization", auth_header())
+        .await;
+
+    res.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(!res.text().contains("secret"), "{}", res.text());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn scim_delete_user_soft_disables() {
     let u = scim_user("erin@example.com", true);
     // Soft delete is issuing an UPDATE (RETURNING) and never a DELETE exec. Only a query result

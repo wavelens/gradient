@@ -164,7 +164,7 @@ pub async fn create(
     };
     let u = gradient_db::users::insert(db, model).await.map_err(|e| {
         if is_unique_violation(&e) {
-            ScimError::conflict("userName already exists")
+            ScimError::conflict("Username or email address already in use")
         } else {
             e.into()
         }
@@ -214,7 +214,7 @@ pub async fn replace(
     operation_id = "scimPatchUser",
     tag = "scim",
     summary = "Patch a SCIM user",
-    description = "Applies a SCIM PatchOp. Typically toggles `active` for deactivation/reactivation.",
+    description = "A SCIM PatchOp can carry `add` or `replace` operations. These operations apply to `active`, `displayName`, `name.formatted`. Other operations and attributes produce a 400 response and leave everything unchanged.",
     params(("id" = String, Path)),
     request_body(content = PatchRequest, content_type = "application/scim+json"),
     responses((status = OK, description = "User patched", body = UserResource, content_type = "application/scim+json"), ScimError)
@@ -228,7 +228,7 @@ pub async fn patch(
     let mut active: UserActive = u.into();
     for op in &body.operations {
         if !matches!(op.op.to_ascii_lowercase().as_str(), "replace" | "add") {
-            continue;
+            return Err(ScimError::unsupported_operation());
         }
 
         apply_user_patch(&mut active, op)?;
@@ -289,23 +289,31 @@ fn apply_user_patch(active: &mut UserActive, op: &PatchOperation) -> ScimResult<
                 .ok_or_else(|| ScimError::bad_request("invalidValue", "active must be boolean"))?;
             active.active = Set(v);
         }
-        "displayname" | "name.formatted" => {
-            if let Some(s) = value.as_str() {
-                active.name = Set(s.to_string());
-            }
-        }
+        "displayname" | "name.formatted" => active.name = Set(display_name(&value)?),
         "" => {
-            if let Some(obj) = value.as_object() {
-                if let Some(a) = obj.get("active").and_then(|v| v.as_bool()) {
-                    active.active = Set(a);
-                }
-                if let Some(d) = obj.get("displayName").and_then(|v| v.as_str()) {
-                    active.name = Set(d.to_string());
+            let obj = value.as_object().ok_or_else(ScimError::unsupported_path)?;
+            for (attribute, value) in obj {
+                match attribute.as_str() {
+                    "active" => {
+                        let v = value.as_bool().ok_or_else(|| {
+                            ScimError::bad_request("invalidValue", "active must be boolean")
+                        })?;
+                        active.active = Set(v);
+                    }
+                    "displayName" => active.name = Set(display_name(value)?),
+                    _ => return Err(ScimError::unsupported_path()),
                 }
             }
         }
-        _ => {}
+        _ => return Err(ScimError::unsupported_path()),
     }
 
     Ok(())
+}
+
+fn display_name(value: &serde_json::Value) -> ScimResult<String> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| ScimError::bad_request("invalidValue", "Make `displayName` a string."))
 }
