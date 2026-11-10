@@ -189,18 +189,18 @@ describe('not-found or no-access page', () => {
 
   it('Replace a nonexistent job on the assigned job page', async () => {
     configure({ board: { getJob: () => refused(404) } });
-    expect(page(await outcome(assignedJobDetailGuard, { id: 'gone' }))).toContain('kind=job&name=gone&back=%2Fboard%2Foverview');
+    expect(page(await outcome(assignedJobDetailGuard, { id: 'gone' }))).toContain('kind=job&back=%2Fboard%2Foverview');
   });
 
   it('replaces a malformed id the server rejects with the not-found page', async () => {
     configure({ board: { getJob: () => refused(400), getClusterJob: () => refused(400) } });
-    expect(page(await outcome(assignedJobDetailGuard, { id: 'notauuid' }))).toContain('/error/404?kind=job&name=notauuid');
-    expect(page(await outcome(clusterJobBoardGuard, { id: 'notauuid' }))).toContain('/error/404?kind=clusterJob&name=notauuid');
+    expect(page(await outcome(assignedJobDetailGuard, { id: 'notauuid' }))).toContain('/error/404?kind=job&back=');
+    expect(page(await outcome(clusterJobBoardGuard, { id: 'notauuid' }))).toContain('/error/404?kind=clusterJob&back=');
   });
 
   it('replaces a missing cluster job', async () => {
     configure({ board: { getClusterJob: () => refused(404) } });
-    expect(page(await outcome(clusterJobBoardGuard, { id: 'c1' }))).toContain('kind=clusterJob&name=c1');
+    expect(page(await outcome(clusterJobBoardGuard, { id: 'c1' }))).toContain('kind=clusterJob&back=');
   });
 
   it('replaces an unknown worker', async () => {

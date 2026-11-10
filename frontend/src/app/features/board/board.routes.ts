@@ -16,7 +16,7 @@ export const assignedJobDetailGuard: CanActivateFn = (route, state) => {
   const id = route.paramMap.get('id') ?? '';
   return inject(BoardService).getJob(id).pipe(
     map(() => true as const),
-    denyOnRefusal({ kind: 'job', name: id, back: String(links.board()) }, state.url),
+    denyOnRefusal({ kind: 'job', back: String(links.board()) }, state.url),
   );
 };
 
@@ -24,7 +24,7 @@ export const clusterJobBoardGuard: CanActivateFn = (route, state) => {
   const id = route.paramMap.get('id') ?? '';
   return inject(BoardService).getClusterJob(id).pipe(
     map(() => true as const),
-    denyOnRefusal({ kind: 'clusterJob', name: id, back: String(links.board()) }, state.url),
+    denyOnRefusal({ kind: 'clusterJob', back: String(links.board()) }, state.url),
   );
 };
 
