@@ -52,7 +52,7 @@ services.gradient.worker = {
 6.  Workers send `allow` and `defaults` to the server. The server can apply both at placement.
 
 !!! warning
-Polkit rules come with the module file. The worker user can start and stop `gradient-guest@<id>` units, but nothing else. The fixed commands and settings of those units come from the module. Those units run as root. The units expose cloud-hypervisor to the worker through the API socket. The worker user can still get access equivalent to root on the host.
+    Polkit rules live in the module file. The worker user can start and stop `gradient-guest@<id>` units and nothing else. Fixed commands and settings for these units come from the module. A root supervisor for each unit can create taps, bind USB devices and run virtiofsd inside a namespace sandbox. These actions apply only to configured devices, mounts and bridges. cloud-hypervisor can run inside `gradient-guest-vm@<id>` as the worker user without capabilities.
 
 ## 2. Connect the Network
 

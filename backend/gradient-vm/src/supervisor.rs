@@ -44,13 +44,6 @@ async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
     let group = std::fs::metadata(dir)
         .with_context(|| format!("read the group of {}", dir.display()))?
         .gid();
-    let cloud_hypervisor = &config.cloud_hypervisor_bin;
-    let mut hypervisor = Command::new(cloud_hypervisor)
-        .arg("--api-socket")
-        .arg(format!("path={}", dir.join("api.sock").display()))
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("start {cloud_hypervisor}"))?;
     let host = Arc::new(Host::new(dir, config));
     let control = bind(&dir.join("control.sock"))?;
     share(&dir.join("control.sock"), group)?;
@@ -59,22 +52,11 @@ async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
     let console = serve_console(dir, console_clients);
     tokio::pin!(console);
     let mut console_served = true;
-    let api = dir.join("api.sock");
-    wait_for_socket(&api).await?;
-    share(&api, group)?;
-    let vsock = share_once_bound(dir.join("vsock.sock"), group);
-    tokio::pin!(vsock);
-    let mut vsock_shared = false;
     let mut terminate = signal(SignalKind::terminate())?;
     let mut sessions = JoinSet::new();
 
-    let status = loop {
+    loop {
         tokio::select! {
-            status = hypervisor.wait() => break status?,
-            shared = &mut vsock, if !vsock_shared => {
-                vsock_shared = true;
-                shared?;
-            }
             served = &mut console, if console_served => {
                 console_served = false;
                 if let Err(e) = served {
@@ -85,18 +67,13 @@ async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
                 let (stream, _) = accepted?;
                 sessions.spawn(serve(Arc::clone(&host), stream));
             }
-            _ = terminate.recv() => {
-                info!("guest supervisor stopping cloud-hypervisor");
-                hypervisor.start_kill()?;
-            }
+            _ = terminate.recv() => break,
         }
-    };
+    }
 
     sessions.abort_all();
     host.release().await;
-    if !status.success() {
-        bail!("cloud-hypervisor exited with {status}");
-    }
+    info!("Guest supervisor freed the TAP and USB devices of a guest.");
     Ok(())
 }
 
@@ -183,7 +160,16 @@ impl Host {
         if Path::new(SYSFS_NET).join(name).exists() {
             run("ip", &["link", "del", "dev", name]).await?;
         }
-        run("ip", &["tuntap", "add", "dev", name, "mode", "tap"]).await?;
+        let worker = std::fs::metadata(&self.dir)
+            .with_context(|| format!("read the owner of {}", self.dir.display()))?;
+        let (user, group) = (worker.uid().to_string(), worker.gid().to_string());
+        run(
+            "ip",
+            &[
+                "tuntap", "add", "dev", name, "mode", "tap", "user", &user, "group", &group,
+            ],
+        )
+        .await?;
         lock(&self.taps).push(name.to_owned());
         run("ip", &["link", "set", name, "master", bridge, "up"]).await?;
         Ok(SupervisorReply::Done)
@@ -422,7 +408,7 @@ fn spawn_virtiofsd(
     command
         .arg(format!("--socket-path={}", socket.display()))
         .arg(format!("--shared-dir={}", shared.display()))
-        .arg("--sandbox=none")
+        .arg("--sandbox=namespace")
         .arg("--cache=auto")
         .args(ids)
         .kill_on_drop(true);
@@ -444,13 +430,6 @@ fn share(socket: &Path, group: u32) -> Result<()> {
         .with_context(|| format!("hand {} to group {group}", socket.display()))?;
     std::fs::set_permissions(socket, std::fs::Permissions::from_mode(SHARED_SOCKET_MODE))
         .with_context(|| format!("open {} to group {group}", socket.display()))
-}
-
-async fn share_once_bound(socket: PathBuf, group: u32) -> Result<()> {
-    while !tokio::fs::try_exists(&socket).await.unwrap_or(false) {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    share(&socket, group)
 }
 
 async fn wait_for_socket(socket: &Path) -> Result<()> {

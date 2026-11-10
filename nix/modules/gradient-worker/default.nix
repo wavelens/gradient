@@ -58,12 +58,12 @@
           path = [ pkgs.iproute2 ] ++ lib.optional (hasDevice "usb") cfg.packages.usbip;
           environment = lib.filterAttrs (name: _: lib.hasPrefix "GRADIENT_WORKER_EXEC_" name)
             config.systemd.services.gradient-worker.environment;
+          bindsTo = [ "gradient-guest-vm@%i.service" ];
           unitConfig.CollectMode = "inactive-or-failed";
           serviceConfig = {
             ExecStart = "${lib.getExe' cfg.packages.gradient "gradient-worker"} --guest-supervisor ${cfg.baseDir}/guests/%i";
             Group = "gradient-worker";
             UMask = "0007";
-            LimitMEMLOCK = "infinity";
             KillMode = "control-group";
             Slice = "gradient-guests.slice";
             NoNewPrivileges = true;
@@ -71,6 +71,39 @@
             ProtectClock = true;
             ProtectHostname = true;
             ProtectKernelLogs = true;
+            RestrictRealtime = true;
+            RestrictSUIDSGID = true;
+          };
+        };
+
+        "gradient-guest-vm@" = {
+          description = "Unprivileged cloud-hypervisor for Gradient guest %i";
+          bindsTo = [ "gradient-guest@%i.service" ];
+          after = [ "gradient-guest@%i.service" ];
+          unitConfig.CollectMode = "inactive-or-failed";
+          serviceConfig = {
+            ExecStart = "${lib.getExe' cfg.packages.cloudHypervisor "cloud-hypervisor"} --api-socket path=${cfg.baseDir}/guests/%i/api.sock";
+            User = "gradient-worker";
+            Group = "gradient-worker";
+            SupplementaryGroups = [ "kvm" ];
+            UMask = "0007";
+            LimitMEMLOCK = "infinity";
+            KillMode = "control-group";
+            Slice = "gradient-guests.slice";
+            CapabilityBoundingSet = "";
+            NoNewPrivileges = true;
+            DevicePolicy = "closed";
+            DeviceAllow = [ "/dev/kvm rw" "/dev/net/tun rw" "/dev/vfio/vfio rw" "char-vfio rw" ];
+            ProtectSystem = "strict";
+            ReadWritePaths = [ "${cfg.baseDir}/guests/%i" ];
+            ProtectHome = true;
+            PrivateTmp = true;
+            ProtectClock = true;
+            ProtectControlGroups = true;
+            ProtectHostname = true;
+            ProtectKernelLogs = true;
+            ProtectKernelModules = true;
+            LockPersonality = true;
             RestrictRealtime = true;
             RestrictSUIDSGID = true;
           };

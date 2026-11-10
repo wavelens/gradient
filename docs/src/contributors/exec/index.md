@@ -218,7 +218,8 @@ Exec jobs start in their own cloud-hypervisor guests. Guest units, pools and dev
 ```mermaid
 flowchart LR
     worker["gradient-worker"] -- "systemd D-Bus" --> unit["gradient-guest@ID.service"]
-    unit --> ch["cloud-hypervisor"]
+unit <--> vm["gradient-guest-vm@ID.service"]
+    vm --> ch["cloud-hypervisor"]
     unit --> fs["virtiofsd"]
     worker -- "api.sock" --> ch
     worker -- "vsock.sock" --> agent["Guest agent"]
@@ -231,7 +232,7 @@ flowchart LR
 | Guest directory | `/var/lib/gradient-worker/guests/<id>/`, mode `0770` |
 | Files | `state.json`, `console.log`, `serial.sock`, `console.sock`, `api.sock`, `vsock.sock`, `control.sock`, `guest-store.sock`, `writable-store.img`, `work.img`, `mounts/<name>.sock` |
 
-- Supervisors own cloud-hypervisor, every virtiofsd, the taps and the USB/IP bindings. Guests never belong to the worker process.
+- All virtiofsd, tap and USB/IP bindings belong to the supervisor. The cloud-hypervisor can run as the worker user inside `gradient-guest-vm@<id>.service`. The two units bind to each other in both directions. The worker process does not include a guest.
 - Workers drive the cloud-hypervisor API, the supervisor control socket and the agent over hybrid vsock.
 - The supervisor can check every request against the devices, mounts and bridges in the unit environment. These values come from the NixOS module, not from the worker.
 - State files hold the unit, the vsock CID, held devices, mounts and a job record without the token.
