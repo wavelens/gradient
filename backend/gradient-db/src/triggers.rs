@@ -20,6 +20,19 @@ pub async fn of_task<C: ConnectionTrait>(db: &C, task: TaskId) -> Result<Vec<MTa
         .await
 }
 
+pub async fn of_tasks<C: ConnectionTrait>(
+    db: &C,
+    tasks: &[TaskId],
+) -> Result<Vec<MTaskTrigger>, DbErr> {
+    if tasks.is_empty() {
+        return Ok(Vec::new());
+    }
+    ETaskTrigger::find()
+        .filter(CTaskTrigger::Task.is_in(tasks.iter().copied()))
+        .all(db)
+        .await
+}
+
 pub async fn by_id_in_task<C: ConnectionTrait>(
     db: &C,
     task: TaskId,

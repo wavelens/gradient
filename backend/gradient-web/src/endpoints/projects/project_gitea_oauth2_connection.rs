@@ -6,7 +6,7 @@
 
 use super::integrations::{
     IntegrationResponse, IntegrationToCreate, SharedIntegrationCreationFields, WebhookBase,
-    create_integrations_and_attach_matching_tasks,
+    create_project_integrations_in_transaction_with_available_names_and_encrypted_secrets,
 };
 use super::refusal::ProjectRefusal;
 use crate::access::has_permission;
@@ -15,7 +15,7 @@ use crate::authorization::{
     cookie_value, random_url_safe, session_claims, sign_claims, verify_claims,
 };
 use crate::endpoints::auth::{csrf_clear_cookie, csrf_set_cookie};
-use crate::endpoints::tasks::auto_attach::url_host;
+use crate::endpoints::tasks::integration_by_repository_host::url_host;
 use crate::error::{WebError, WebResult};
 use crate::names::IntegrationName;
 use crate::permissions::Permission;
@@ -280,7 +280,7 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
         .await
         .map_err(|e| failed(&format!("{e:#}")))?;
 
-        let created = create_integrations_and_attach_matching_tasks(
+        let created = create_project_integrations_in_transaction_with_available_names_and_encrypted_secrets(
             web_db,
             &config.secrets.crypt_file,
             &WebhookBase {
@@ -363,7 +363,7 @@ async fn install_gradient_webhook_on_repositories_of_tasks_attached_to_new_integ
 
     let mut installed = 0;
     for task in tasks.iter().filter(|t| {
-        inbound.connected_tasks.contains(&t.name) && url_host(&t.repository) == app_host
+        !t.managed && url_host(&t.repository) == app_host
     }) {
         let Some(repository) = provision::repository_path(&task.repository) else {
             continue;

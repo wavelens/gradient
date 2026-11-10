@@ -351,8 +351,6 @@ async fn inbound_create_without_secret_returns_generated_secret_once() {
     let session_id = SessionId::now_v7();
     let db = with_project_manage(with_auth(mock_db(), session_id))
         .append_query_results([Vec::<integration::Model>::new()])
-        .append_query_results([vec![gitea_inbound_row()]])
-        .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![gitea_inbound_row()]]);
 
     let res = server_with_crypt_key(db)
@@ -382,33 +380,15 @@ async fn inbound_create_without_secret_returns_generated_secret_once() {
 }
 
 #[tokio::test]
-async fn connecting_a_git_host_connects_existing_tasks_of_its_host() {
+async fn connecting_a_git_host_reads_no_tasks_and_returns_its_webhook_secret() {
     let session_id = SessionId::now_v7();
     let inbound = integration::Model {
         endpoint_url: Some("https://gitea.example.com".into()),
         ..gitea_inbound_row()
     };
-    let task = gradient_entity::task::Model {
-        id: TaskId::now_v7(),
-        project: project_id(),
-        name: "app".into(),
-        repository: "git@gitea.example.com:acme/app.git".into(),
-        ..Default::default()
-    };
-    let trigger = gradient_entity::task_trigger::Model {
-        id: TaskTriggerId::now_v7(),
-        task: task.id,
-        ..Default::default()
-    };
     let db = with_project_manage(with_auth(mock_db(), session_id))
         .append_query_results([Vec::<integration::Model>::new()])
-        .append_query_results([vec![inbound.clone()]])
-        .append_query_results([vec![task]])
-        .append_query_results([vec![inbound]])
-        .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
-        .append_query_results([vec![trigger.clone()]])
-        .append_query_results([vec![trigger]])
-        .append_query_results([Vec::<gradient_entity::task_action::Model>::new()]);
+        .append_query_results([vec![inbound]]);
 
     let res = server_with_crypt_key(db)
         .post("/api/v1/projects/test-project/integrations/connect")
@@ -425,10 +405,7 @@ async fn connecting_a_git_host_connects_existing_tasks_of_its_host() {
 
     res.assert_status_ok();
     let body: Value = res.json();
-    assert_eq!(
-        body["message"]["inbound"]["connected_tasks"],
-        serde_json::json!(["app"])
-    );
+    assert!(body["message"]["inbound"].get("connected_tasks").is_none());
     assert_eq!(
         body["message"]["inbound"]["generated_secret"]
             .as_str()
@@ -439,62 +416,10 @@ async fn connecting_a_git_host_connects_existing_tasks_of_its_host() {
 }
 
 #[tokio::test]
-async fn a_new_inbound_integration_connects_existing_tasks_of_its_host() {
-    let session_id = SessionId::now_v7();
-    let inbound = integration::Model {
-        endpoint_url: Some("https://gitea.example.com".into()),
-        ..gitea_inbound_row()
-    };
-    let task = gradient_entity::task::Model {
-        id: TaskId::now_v7(),
-        project: project_id(),
-        name: "app".into(),
-        repository: "git@gitea.example.com:acme/app.git".into(),
-        ..Default::default()
-    };
-    let trigger = gradient_entity::task_trigger::Model {
-        id: TaskTriggerId::now_v7(),
-        task: task.id,
-        ..Default::default()
-    };
-    let db = with_project_manage(with_auth(mock_db(), session_id))
-        .append_query_results([Vec::<integration::Model>::new()])
-        .append_query_results([vec![inbound.clone()]])
-        .append_query_results([vec![task]])
-        .append_query_results([vec![inbound]])
-        .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
-        .append_query_results([vec![trigger.clone()]])
-        .append_query_results([vec![trigger]])
-        .append_query_results([Vec::<gradient_entity::task_action::Model>::new()]);
-
-    let res = server_with_crypt_key(db)
-        .put("/api/v1/projects/test-project/integrations")
-        .add_header(
-            "authorization",
-            format!("Bearer {}", make_token(session_id)),
-        )
-        .json(&serde_json::json!({
-            "name": "my-gitea-hook",
-            "kind": "inbound",
-            "git_host_type": "gitea",
-        }))
-        .await;
-
-    res.assert_status_ok();
-    let body: Value = res.json();
-    assert_eq!(
-        body["message"]["connected_tasks"],
-        serde_json::json!(["app"])
-    );
-}
-
-#[tokio::test]
 async fn inbound_create_with_secret_returns_no_generated_secret() {
     let session_id = SessionId::now_v7();
     let db = with_project_manage(with_auth(mock_db(), session_id))
         .append_query_results([Vec::<integration::Model>::new()])
-        .append_query_results([vec![gitea_inbound_row()]])
-        .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![gitea_inbound_row()]]);
 
     let res = server_with_crypt_key(db)
@@ -514,34 +439,6 @@ async fn inbound_create_with_secret_returns_no_generated_secret() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert!(body["message"]["generated_secret"].is_null());
-}
-
-#[tokio::test]
-async fn inbound_create_returns_200_with_generated_secret_when_project_task_lookup_fails_after_save()
- {
-    let session_id = SessionId::now_v7();
-    let db = with_project_manage(with_auth(mock_db(), session_id))
-        .append_query_results([Vec::<integration::Model>::new()])
-        .append_query_results([vec![gitea_inbound_row()]])
-        .append_query_errors([sea_orm::DbErr::Custom("connection lost".into())]);
-
-    let res = server_with_crypt_key(db)
-        .put("/api/v1/projects/test-project/integrations")
-        .add_header(
-            "authorization",
-            format!("Bearer {}", make_token(session_id)),
-        )
-        .json(&serde_json::json!({
-            "name": "my-gitea-hook",
-            "kind": "inbound",
-            "git_host_type": "gitea",
-        }))
-        .await;
-
-    res.assert_status_ok();
-    let body: Value = res.json();
-    assert!(body["message"]["generated_secret"].is_string(), "{body}");
-    assert_eq!(body["message"]["connected_tasks"], serde_json::json!([]));
 }
 
 #[tokio::test]

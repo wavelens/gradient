@@ -88,12 +88,8 @@ pub(crate) enum TaskRefusal {
     StartTaskInOtherProject,
     #[error("this integration not part of this project, or wrong direction")]
     RepositoryIntegrationMismatch,
-    #[error(
-        "builds on push or pull request need an integration to receive webhooks from the Git host"
-    )]
-    RepositoryInboundRequired,
-    #[error("commit status reports need an integration to send reports to the Git host")]
-    RepositoryOutboundRequired,
+    #[error("Push and pull request triggers need a webhook receiving integration for this project")]
+    TriggerIntegrationNotInbound,
     #[error(
         "no access token on the status reporter, add one first with admin rights on the repository"
     )]
@@ -130,8 +126,7 @@ impl Refusal for TaskRefusal {
             | Self::AttrNotConcrete
             | Self::UnknownEvaluationStatus { .. }
             | Self::RepositoryIntegrationMismatch
-            | Self::RepositoryInboundRequired
-            | Self::RepositoryOutboundRequired => RefusalStatus::BadRequest,
+            | Self::TriggerIntegrationNotInbound => RefusalStatus::BadRequest,
             Self::TransferNotPermitted => RefusalStatus::Forbidden,
             Self::ActionNameTaken
             | Self::DefaultTriggerDeletion

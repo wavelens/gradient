@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_entity::task;
+use gradient_entity::{task, task_trigger};
 use gradient_fixtures::rows::{admin_role, project, project_member, task};
 use gradient_test_support::web::{make_test_server, signed_in};
 use gradient_types::ConcurrencyPolicy;
@@ -31,8 +31,7 @@ async fn get_task_includes_sign_cache() {
         .append_query_results([vec![admin_role()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
-        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
-        .append_query_results([vec![admin_role()]]);
+        .append_query_results([Vec::<task_trigger::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
     let res = server

@@ -449,10 +449,13 @@ pub async fn get_task_details(
     )
     .await?;
 
+    let triggers = gradient_db::triggers::of_task(&state.web_db, task.id).await?;
+
     let task_details = TaskDetailsResponse::new(
         task,
         QueueSummary { building, queued },
         evaluation_summaries,
+        &triggers,
         permissions,
     );
 

@@ -5,8 +5,12 @@
  */
 
 use super::TaskResponse;
-use super::auto_attach;
+use super::integration_by_repository_host;
 use super::refusal::TaskRefusal;
+use super::triggers::{
+    build_task_trigger_row_from_config_and_flags,
+    validate_trigger_config_and_return_config_to_store,
+};
 use crate::access::{Caller, ProjectAccess, caller_project_mask, has_permission, load_project};
 use crate::api_spec::{ProjectPath, TaskPath};
 use crate::audit::{Audit, changed_fields};
@@ -19,7 +23,7 @@ use crate::names::{TaskDisplayName, TaskName};
 use crate::permissions::Permission;
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
-use crate::scope::{Member, ProjectScope, Readable, RequiresUnmanaged, TaskScope, can};
+use crate::scope::{Member, ProjectScope, Readable, Requires, RequiresUnmanaged, TaskScope, can};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_db::WebDb;
@@ -29,10 +33,11 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
 use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_sources::resolve_remote_ref;
 use gradient_types::consts::*;
 use gradient_types::input::vec_to_hex;
-use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig};
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -60,11 +65,40 @@ pub struct MakeTaskRequest {
     pub retry_failed_builds: Option<bool>,
     #[serde(default)]
     pub multi_node_evaluation: Option<bool>,
+    #[serde(default)]
+    pub exec_enabled: Option<bool>,
+    #[serde(default)]
+    pub triggers: Option<Vec<TriggerConfig>>,
 }
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct CheckRepositoryRequest {
     pub repository: Option<String>,
+}
+
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
+pub struct RepositoryAccessCheckRequest {
+    pub repository: String,
+}
+
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
+pub struct DuplicateTaskRequest {
+    pub name: TaskName,
+    pub display_name: TaskDisplayName,
+    pub branch: String,
+}
+
+async fn fetch_remote_repository_head_commit_with_project_ssh_key(
+    db: &DbContext,
+    project: &MProject,
+    repository: &str,
+) -> Result<Vec<u8>, String> {
+    resolve_remote_ref(db, project, repository, None)
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, %repository, "Repository check failed");
+            e.short_reason_for_user()
+        })
 }
 
 fn validated_repository(repository: String) -> WebResult<String> {
@@ -177,6 +211,9 @@ pub async fn get(
     )
     .await?;
 
+    let task_ids: Vec<TaskId> = listing.items.iter().map(|t| t.id).collect();
+    let triggers = gradient_db::triggers::of_tasks(db, &task_ids).await?;
+
     let listing = listing.map(|p| {
         let last_evaluation_status = p
             .last_evaluation
@@ -185,7 +222,13 @@ pub async fn get(
             .last_evaluation
             .and_then(|id| recent_evaluations.remove(&id))
             .unwrap_or_default();
-        TaskResponse::new(p, last_evaluation_status, recent_evaluations, permissions)
+        TaskResponse::new(
+            p,
+            last_evaluation_status,
+            recent_evaluations,
+            &triggers,
+            permissions,
+        )
     });
 
     Ok(ok_json(listing))
@@ -197,7 +240,7 @@ pub async fn get(
     operation_id = "createTask",
     tag = "tasks",
     summary = "Create task",
-    description = "Creates a new task in the project. `wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.",
+    description = "Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers. Project integrations add no triggers and no actions.",
     params(("project" = String, Path)),
     request_body = MakeTaskRequest,
     responses((status = OK, description = "Created a task.", body = CreatedEntityResponse), WebError)
@@ -238,6 +281,28 @@ pub async fn put(
         .map_err(|e| TaskRefusal::InvalidWildcard(e.to_string()))?
         .to_string();
 
+    let trigger_configs = match body.triggers {
+        None => vec![TriggerConfig::Polling {
+            interval_secs: 300,
+            branch: None,
+        }],
+        Some(configs) => {
+            let mut validated = Vec::with_capacity(configs.len());
+            for config in configs {
+                validated.push(
+                    validate_trigger_config_and_return_config_to_store(
+                        &state.web_db,
+                        project.id,
+                        config,
+                    )
+                    .await?,
+                );
+            }
+            validated
+        }
+    };
+
+    let now = gradient_types::now();
     let task = MTask {
         id: TaskId::now_v7(),
         project: project.id,
@@ -249,13 +314,14 @@ pub async fn put(
         wildcard,
         last_check_at: *NULL_TIME,
         created_by: user.id,
-        created_at: gradient_types::now(),
+        created_at: now,
         keep_evaluations: state.config.eval.default_keep_evaluations(),
         concurrency: body.concurrency.unwrap_or_default(),
         sign_cache: body.sign_cache.unwrap_or(true),
         wait_for_workers: body.wait_for_workers.unwrap_or(false),
         retry_failed_builds: body.retry_failed_builds.unwrap_or(true),
         multi_node_evaluation: body.multi_node_evaluation.unwrap_or(false),
+        exec_enabled: body.exec_enabled.unwrap_or(false),
         ..Default::default()
     };
 
@@ -263,35 +329,29 @@ pub async fn put(
     let task = gradient_db::tasks::insert(&txn, task)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
-
-    let now = gradient_types::now();
-    let default_cfg = TriggerConfig::Polling {
-        interval_secs: 300,
-        branch: None,
-    };
-    let default_trigger = MTaskTrigger {
-        id: TaskTriggerId::now_v7(),
-        task: task.id,
-        trigger_type: TriggerType::Polling,
-        config: default_cfg.to_db_json(),
-        active: true,
-        is_default: true,
-        created_at: now,
-        updated_at: now,
-        ..Default::default()
-    };
-    gradient_db::triggers::insert(&txn, default_trigger).await?;
+    for (position, config) in trigger_configs.iter().enumerate() {
+        let row =
+            build_task_trigger_row_from_config_and_flags(task.id, config, true, position == 0, now);
+        gradient_db::triggers::insert(&txn, row).await?;
+    }
     txn.commit().await?;
 
-    let github_app = auto_attach::configured_github_app_if_caller_can_manage_integrations(
+    let github_app =
+        integration_by_repository_host::configured_github_app_if_caller_can_manage_integrations(
+            &state.web_db,
+            state.config.github_app.as_ref(),
+            user.id,
+            project.id,
+            api_key.as_ref(),
+        )
+        .await?;
+    integration_by_repository_host::link_project_to_github_app_installation_by_repository_host(
         &state.web_db,
-        state.config.github_app.as_ref(),
-        user.id,
-        project.id,
-        api_key.as_ref(),
+        &state.http,
+        github_app,
+        &task,
     )
-    .await?;
-    auto_attach::connect_repository(&state.web_db, &state.http, github_app, &task).await;
+    .await;
 
     audit
         .write(
@@ -351,11 +411,13 @@ pub async fn get_task(
         ),
         None => (None, Vec::new()),
     };
+    let triggers = gradient_db::triggers::of_task(&db.web_db, task.id).await?;
 
     Ok(ok_json(TaskResponse::new(
         task,
         last_evaluation_status,
         recent_evaluations,
+        &triggers,
         permissions,
     )))
 }
@@ -468,7 +530,7 @@ pub async fn patch_task(
         .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
 
     if repository_changed {
-        let github_app = auto_attach::configured_github_app_if_caller_can_manage_integrations(
+        let github_app = integration_by_repository_host::configured_github_app_if_caller_can_manage_integrations(
             &db.web_db,
             state.config.github_app.as_ref(),
             user.id,
@@ -476,7 +538,13 @@ pub async fn patch_task(
             api_key.as_ref(),
         )
         .await?;
-        auto_attach::connect_repository(&state.web_db, &state.http, github_app, &updated).await;
+        integration_by_repository_host::link_project_to_github_app_installation_by_repository_host(
+            &state.web_db,
+            &state.http,
+            github_app,
+            &updated,
+        )
+        .await;
     }
 
     audit.write(Action::TaskUpdate, owner, fields).await;
@@ -665,12 +733,8 @@ pub async fn post_task_check_repository(
         .as_deref()
         .is_none_or(|url| url.trim() == task.repository);
     let repository = validated_repository(requested.unwrap_or_else(|| task.repository.clone()))?;
-    let result = resolve_remote_ref(&db, &project, &repository, None)
-        .await
-        .map_err(|e| {
-            tracing::warn!(error = %e, %repository, "Repository check failed");
-            e.short_reason_for_user()
-        });
+    let result =
+        fetch_remote_repository_head_commit_with_project_ssh_key(&db, &project, &repository).await;
     if checks_saved_url {
         gradient_db::tasks::record_fetch(
             &db.web_db,
@@ -688,6 +752,134 @@ pub async fn post_task_check_repository(
     };
 
     Ok(Json(res))
+}
+
+#[utoipa::path(
+    post,
+    path = "/projects/{project}/repository-check",
+    operation_id = "checkProjectRepository",
+    tag = "tasks",
+    summary = "Check repository access before creating a task",
+    description = "Test whether Gradient can clone `repository` with the SSH key of the project. Return the head commit of the remote. Use this check before task creation, for example in the task wizard. Callers need create-task permission. Reject state-managed projects. Return `400` with `code: \"repository_unreachable\"` and a short reason after a failed check.",
+    params(ProjectPath),
+    request_body = RepositoryAccessCheckRequest,
+    responses((status = OK, description = "Repository is accessible", body = String, content_type = "application/json"), WebError)
+)]
+pub async fn check_project_repository_can_be_cloned(
+    ProjectScope { project, db, .. }: ProjectScope<RequiresUnmanaged<can::CreateTask>>,
+    JsonBody(body): JsonBody<RepositoryAccessCheckRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let repository = validated_repository(body.repository.trim().to_owned())?;
+    let head = fetch_remote_repository_head_commit_with_project_ssh_key(&db, &project, &repository)
+        .await
+        .map_err(|reason| TaskRefusal::RepositoryCheckFailed { reason })?;
+    Ok(ok_json(vec_to_hex(&head)))
+}
+
+#[utoipa::path(
+    post,
+    path = "/tasks/{project}/{task}/duplicate",
+    operation_id = "duplicateTask",
+    tag = "tasks",
+    summary = "Duplicate task",
+    description = "Create a copy of a task with a new `name` and `display_name`. Task settings, exec settings, triggers, and actions carry over to the copy. All triggers in the copy run with `branch`. Requests need create-task permission in the project. Requests for state-managed projects fail. Return the UUID, the name, and the URL of the web page for the new task.",
+    params(TaskPath),
+    request_body = DuplicateTaskRequest,
+    responses((status = OK, description = "Created a copy of the task.", body = CreatedEntityResponse), WebError)
+)]
+pub async fn duplicate_task(
+    state: State<Arc<ServerState>>,
+    TaskScope {
+        project,
+        task,
+        user,
+        db,
+        ..
+    }: TaskScope<Requires<can::CreateTask>>,
+    audit: Audit,
+    JsonBody(body): JsonBody<DuplicateTaskRequest>,
+) -> WebResult<Json<BaseResponse<CreatedEntityResponse>>> {
+    if project.managed {
+        return Err(SharedRefusal::StateManaged(Change::Modify, Resource::Project).into());
+    }
+    let branch = body.branch.trim();
+    if branch.is_empty() {
+        return Err(SharedRefusal::EmptyField("branch").into());
+    }
+    if gradient_db::tasks::by_name(&db.web_db, project.id, body.name.as_str())
+        .await?
+        .is_some()
+    {
+        return Err(WebError::already_exists(Resource::TaskName));
+    }
+
+    let now = gradient_types::now();
+    let source_id = task.id;
+    let copy = MTask {
+        id: TaskId::now_v7(),
+        name: body.name.into_inner(),
+        display_name: body.display_name.trim().to_string(),
+        last_evaluation: None,
+        last_check_at: *NULL_TIME,
+        force_evaluation: false,
+        created_by: user.id,
+        created_at: now,
+        managed: false,
+        last_fetch_at: None,
+        last_fetch_ok_at: None,
+        last_fetch_error: None,
+        ..task
+    };
+    let triggers = gradient_db::triggers::of_task(&db.web_db, source_id).await?;
+    let actions = gradient_db::actions::of_task(&db.web_db, source_id).await?;
+
+    let txn = db.web_db.begin().await?;
+    let copy = gradient_db::tasks::insert(&txn, copy)
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
+    for trigger in triggers {
+        let config = match TriggerConfig::parse_row(trigger.trigger_type, &trigger.config) {
+            Ok(config) => config.with_branch(branch.to_owned()).to_db_json(),
+            Err(_) => trigger.config.clone(),
+        };
+        let row = MTaskTrigger {
+            id: TaskTriggerId::now_v7(),
+            task: copy.id,
+            config,
+            last_fired_at: None,
+            created_at: now,
+            updated_at: now,
+            ..trigger
+        };
+        gradient_db::triggers::insert(&txn, row).await?;
+    }
+    for action in actions {
+        let row = MTaskAction {
+            id: TaskActionId::now_v7(),
+            task: copy.id,
+            last_fired_at: None,
+            created_by: user.id,
+            created_at: now,
+            updated_at: now,
+            ..action
+        };
+        gradient_db::actions::insert(&txn, row).await?;
+    }
+    txn.commit().await?;
+
+    audit
+        .write(
+            Action::TaskCreate,
+            EventOwner::task(project.id, copy.id),
+            serde_json::json!({ "task_id": copy.id.to_string(), "name": copy.name, "duplicate_of": source_id.to_string() }),
+        )
+        .await;
+
+    Ok(ok_json(CreatedEntityResponse::new(
+        copy.id,
+        copy.name.clone(),
+        frontend_page_urls::task(&state.config.server.frontend_url, &project.name, &copy.name),
+    )))
 }
 
 #[utoipa::path(

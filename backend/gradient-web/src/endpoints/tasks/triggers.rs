@@ -5,15 +5,17 @@
  */
 
 use super::DeletedResponse;
+use super::integration_by_repository_host::suggest_push_and_pull_request_triggers_for_repository_url;
 use super::refusal::TaskRefusal;
-use crate::api_spec::TaskPath;
+use crate::api_spec::{ProjectPath, TaskPath};
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
-use crate::scope::{Member, Requires, RequiresUnmanaged, TaskScope, can};
+use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, TaskScope, can};
 use anyhow::Context;
+use axum::extract::Query;
 use axum::{Extension, Json};
 use chrono::Utc;
 use gradient_ci::IntegrationKind;
@@ -34,7 +36,7 @@ use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -106,11 +108,16 @@ pub(super) fn trigger_integration_id(
 ) -> Option<IntegrationId> {
     TriggerConfig::parse_row(trigger_type, config)
         .ok()
-        .and_then(|cfg| match cfg {
-            TriggerConfig::ReporterPush { integration_id, .. }
-            | TriggerConfig::ReporterPullRequest { integration_id, .. } => Some(integration_id),
-            _ => None,
-        })
+        .as_ref()
+        .and_then(trigger_integration_id_of)
+}
+
+fn trigger_integration_id_of(config: &TriggerConfig) -> Option<IntegrationId> {
+    match config {
+        TriggerConfig::ReporterPush { integration_id, .. }
+        | TriggerConfig::ReporterPullRequest { integration_id, .. } => Some(*integration_id),
+        _ => None,
+    }
 }
 
 fn build_trigger_audit_log_json(trigger: &MTaskTrigger) -> serde_json::Value {
@@ -135,22 +142,6 @@ async fn load_integrations_for_triggers<C: ConnectionTrait>(
     Ok(integrations)
 }
 
-async fn check_trigger_config_integration_belongs_to_project_and_is_inbound<C: ConnectionTrait>(
-    db: &C,
-    project: ProjectId,
-    config: &TriggerConfig,
-) -> WebResult<()> {
-    let integration_id = match config {
-        TriggerConfig::ReporterPush { integration_id, .. }
-        | TriggerConfig::ReporterPullRequest { integration_id, .. } => *integration_id,
-        TriggerConfig::Polling { .. } | TriggerConfig::Time { .. } => return Ok(()),
-    };
-    match gradient_db::integrations::by_id_in_project(db, project, integration_id).await? {
-        Some(integration) if integration.kind == IntegrationKind::Inbound => Ok(()),
-        _ => Err(TaskRefusal::RepositoryIntegrationMismatch.into()),
-    }
-}
-
 #[derive(Deserialize, Debug, ToSchema)]
 pub struct CreateTriggerRequest {
     pub config: TriggerConfig,
@@ -166,6 +157,32 @@ fn default_true() -> bool {
 pub struct UpdateTriggerRequest {
     pub config: Option<TriggerConfig>,
     pub active: Option<bool>,
+}
+
+#[derive(Deserialize, Debug, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct TriggerSuggestionsQuery {
+    pub repository: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/projects/{project}/trigger-suggestions",
+    operation_id = "listTriggerSuggestions",
+    tag = "triggers",
+    summary = "Suggest push and pull request triggers",
+    description = "Return the push triggers and pull request triggers that tasks with `repository` can add. Gradient can build them from the project's webhook receiver for that Git host. The list is empty if no webhook receiver can handle the host, or if several can. Gradient doesn't save the suggestions. Use the endpoint for task creation or the endpoint for trigger creation to create them.",
+    params(ProjectPath, TriggerSuggestionsQuery),
+    responses((status = OK, description = "Recommended Triggers", body = Vec<TriggerConfig>), WebError)
+)]
+pub async fn get_project_repository_trigger_suggestions(
+    ProjectScope { project, db, .. }: ProjectScope<Member>,
+    Query(query): Query<TriggerSuggestionsQuery>,
+) -> WebResult<Json<BaseResponse<Vec<TriggerConfig>>>> {
+    let integrations = gradient_db::integrations::of_project(&db.web_db, project.id).await?;
+    Ok(ok_json(
+        suggest_push_and_pull_request_triggers_for_repository_url(&query.repository, &integrations),
+    ))
 }
 
 #[utoipa::path(
@@ -202,34 +219,25 @@ pub async fn list(
     responses((status = OK, description = "Trigger created", body = TriggerOut), WebError)
 )]
 pub async fn create(
-    TaskScope { task: proj, db, .. }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
+    TaskScope {
+        project,
+        task: proj,
+        db,
+        ..
+    }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
     audit: Audit,
     Json(body): Json<CreateTriggerRequest>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
-    body.config
-        .validate()
-        .map_err(|e| TaskRefusal::InvalidTriggerConfig(e.to_string()))?;
-    check_trigger_config_integration_belongs_to_project_and_is_inbound(
-        &db.web_db,
-        proj.project,
-        &body.config,
-    )
-    .await?;
-
-    let now = Utc::now().naive_utc();
-    let trigger_type = body.config.trigger_type();
-    let config_json = body.config.to_db_json();
-
-    let trigger = MTaskTrigger {
-        id: TaskTriggerId::now_v7(),
-        task: proj.id,
-        trigger_type,
-        config: config_json,
-        active: body.active,
-        created_at: now,
-        updated_at: now,
-        ..Default::default()
-    };
+    let config =
+        validate_trigger_config_and_return_config_to_store(&db.web_db, project.id, body.config)
+            .await?;
+    let trigger = build_task_trigger_row_from_config_and_flags(
+        proj.id,
+        &config,
+        body.active,
+        false,
+        gradient_types::now(),
+    );
     let row = gradient_db::triggers::insert(&db.web_db, trigger).await?;
 
     let integrations =
@@ -243,6 +251,47 @@ pub async fn create(
         )
         .await;
     Ok(ok_json(TriggerOut::build(row, &integrations)))
+}
+
+pub(crate) async fn validate_trigger_config_and_return_config_to_store<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+    config: TriggerConfig,
+) -> WebResult<TriggerConfig> {
+    let config = config
+        .validate_and_convert_cron_to_six_fields()
+        .map_err(|e| TaskRefusal::InvalidTriggerConfig(e.to_string()))?;
+    let Some(integration_id) = trigger_integration_id_of(&config) else {
+        return Ok(config);
+    };
+    let inbound = gradient_db::integrations::of_project(db, project)
+        .await?
+        .iter()
+        .any(|i| i.id == integration_id && i.kind == IntegrationKind::Inbound);
+    if !inbound {
+        return Err(TaskRefusal::TriggerIntegrationNotInbound.into());
+    }
+    Ok(config)
+}
+
+pub(crate) fn build_task_trigger_row_from_config_and_flags(
+    task: TaskId,
+    config: &TriggerConfig,
+    active: bool,
+    is_default: bool,
+    now: chrono::NaiveDateTime,
+) -> MTaskTrigger {
+    MTaskTrigger {
+        id: TaskTriggerId::now_v7(),
+        task,
+        trigger_type: config.trigger_type(),
+        config: config.to_db_json(),
+        active,
+        is_default,
+        created_at: now,
+        updated_at: now,
+        ..Default::default()
+    }
 }
 
 #[utoipa::path(
@@ -286,6 +335,7 @@ pub async fn read(
 )]
 pub async fn update(
     TaskScope {
+        project,
         task: proj,
         db,
         params,
@@ -300,19 +350,15 @@ pub async fn update(
         .await?
         .or_not_found(Resource::Trigger)?;
 
-    if let Some(ref cfg) = body.config {
-        cfg.validate()
-            .map_err(|e| TaskRefusal::InvalidTriggerConfig(e.to_string()))?;
-        check_trigger_config_integration_belongs_to_project_and_is_inbound(
-            &db.web_db,
-            proj.project,
-            cfg,
-        )
-        .await?;
-    }
+    let config = match body.config {
+        Some(cfg) => Some(
+            validate_trigger_config_and_return_config_to_store(&db.web_db, project.id, cfg).await?,
+        ),
+        None => None,
+    };
 
     let mut active: ATaskTrigger = row.into();
-    if let Some(cfg) = body.config {
+    if let Some(cfg) = config {
         let tt = cfg.trigger_type();
         active.trigger_type = Set(tt);
         active.config = Set(cfg.to_db_json());

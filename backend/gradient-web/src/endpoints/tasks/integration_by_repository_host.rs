@@ -11,13 +11,8 @@ use crate::error::WebResult;
 use crate::permissions::Permission;
 use gradient_ci::IntegrationKind;
 use gradient_db::WebDb;
-use gradient_types::actions::{ActionConfig, ActionType};
-use gradient_types::triggers::{TriggerConfig, TriggerType};
-use gradient_types::{
-    GitHostType, GitHubAppConfig, MIntegration, MTask, MTaskAction, MTaskTrigger, ProjectId,
-    TaskActionId, TaskTriggerId, UserId,
-};
-use sea_orm::ConnectionTrait;
+use gradient_types::triggers::TriggerConfig;
+use gradient_types::{GitHostType, GitHubAppConfig, MIntegration, MTask, ProjectId, UserId};
 
 pub(crate) const STATUS_ACTION_NAME: &str = "Report status to Git host";
 
@@ -28,7 +23,7 @@ pub(crate) fn default_pull_request_trigger_actions() -> Vec<String> {
 }
 
 #[derive(Debug, Default, PartialEq)]
-struct AutoAttach {
+struct MatchedIntegrations {
     inbound: Option<MIntegration>,
     outbound: Option<MIntegration>,
 }
@@ -102,111 +97,40 @@ fn pick_one(
     matched.next().is_none().then(|| first.clone())
 }
 
-fn match_integrations_for_repo(repo: &str, integrations: &[MIntegration]) -> AutoAttach {
+fn match_integrations_for_repo(repo: &str, integrations: &[MIntegration]) -> MatchedIntegrations {
     let Some(host) = url_host(repo) else {
-        return AutoAttach::default();
+        return MatchedIntegrations::default();
     };
     let inferred = infer_git_host(&host, integrations);
 
-    AutoAttach {
+    MatchedIntegrations {
         inbound: pick_one(integrations, IntegrationKind::Inbound, &host, inferred),
         outbound: pick_one(integrations, IntegrationKind::Outbound, &host, inferred),
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
-pub(crate) struct Attached {
-    pub push: bool,
-    pub pull_request: bool,
-    pub status: bool,
-}
-
-impl Attached {
-    pub(crate) fn any(&self) -> bool {
-        self.push || self.pull_request || self.status
-    }
-}
-
-/// The function can add only the missing parts to the task. A rerun can happen after repository
-/// URL changes or new integrations appear.
-pub(crate) async fn apply<C: ConnectionTrait>(
-    db: &C,
-    task: &MTask,
+pub(crate) fn suggest_push_and_pull_request_triggers_for_repository_url(
+    repo: &str,
     integrations: &[MIntegration],
-) -> Result<Attached, sea_orm::DbErr> {
-    let attach = match_integrations_for_repo(&task.repository, integrations);
-    let now = gradient_types::now();
-    let mut attached = Attached::default();
-
-    let existing: Vec<TriggerType> = gradient_db::triggers::of_task(db, task.id)
-        .await?
-        .into_iter()
-        .map(|t| t.trigger_type)
-        .collect();
-    if let Some(inbound) = attach.inbound {
-        let wanted = [
-            TriggerConfig::ReporterPush {
-                integration_id: inbound.id,
-                branches: vec![],
-                tags: vec![],
-                releases_only: false,
-                include_flake_inputs: false,
-            },
-            TriggerConfig::ReporterPullRequest {
-                integration_id: inbound.id,
-                branches: vec![],
-                actions: default_pull_request_trigger_actions(),
-                require_approval: true,
-            },
-        ];
-        for cfg in wanted {
-            if existing.contains(&cfg.trigger_type()) {
-                continue;
-            }
-            match cfg.trigger_type() {
-                TriggerType::ReporterPush => attached.push = true,
-                _ => attached.pull_request = true,
-            }
-            let trigger = MTaskTrigger {
-                id: TaskTriggerId::now_v7(),
-                task: task.id,
-                trigger_type: cfg.trigger_type(),
-                config: cfg.to_db_json(),
-                active: true,
-                created_at: now,
-                updated_at: now,
-                ..Default::default()
-            };
-            gradient_db::triggers::insert(db, trigger).await?;
-        }
-    }
-
-    let has_status_action = gradient_db::actions::of_task(db, task.id)
-        .await?
-        .iter()
-        .any(|a| a.action_type == ActionType::GitHostStatusReport);
-    if let Some(outbound) = attach.outbound.filter(|_| !has_status_action) {
-        attached.status = true;
-        let cfg = ActionConfig::GitHostStatusReport {
-            integration_id: outbound.id,
-        };
-        let action = MTaskAction {
-            id: TaskActionId::now_v7(),
-            task: task.id,
-            name: STATUS_ACTION_NAME.into(),
-            action_type: cfg.action_type(),
-            config: cfg.to_db_json(),
-            events: serde_json::json!([]),
-            active: true,
-            created_by: task.created_by,
-            created_at: now,
-            updated_at: now,
-            ..Default::default()
-        };
-        gradient_db::actions::insert(db, action).await?;
-    }
-
-    Ok(attached)
+) -> Vec<TriggerConfig> {
+    let Some(inbound) = match_integrations_for_repo(repo, integrations).inbound else {
+        return Vec::new();
+    };
+    vec![
+        TriggerConfig::ReporterPush {
+            integration_id: inbound.id,
+            branches: vec![],
+            tags: vec![],
+            releases_only: false,
+            include_flake_inputs: false,
+        },
+        TriggerConfig::ReporterPullRequest {
+            integration_id: inbound.id,
+            branches: vec![],
+            actions: default_pull_request_trigger_actions(),
+            require_approval: true,
+        },
+    ]
 }
 
 async fn bind_github_app(
@@ -263,7 +187,7 @@ pub(crate) async fn configured_github_app_if_caller_can_manage_integrations<'a>(
     Ok(allowed.then_some(app))
 }
 
-pub(crate) async fn connect_repository(
+pub(crate) async fn link_project_to_github_app_installation_by_repository_host(
     web_db: &WebDb,
     http: &reqwest::Client,
     github_app: Option<&GitHubAppConfig>,
@@ -271,13 +195,6 @@ pub(crate) async fn connect_repository(
 ) {
     if let Err(e) = bind_github_app(web_db, http, github_app, task).await {
         tracing::warn!(task = %task.id, error = %e, "Failed to link the repository to the GitHub App's installation");
-    }
-    let attached = match gradient_db::integrations::of_project(web_db, task.project).await {
-        Ok(integrations) => apply(web_db, task, &integrations).await,
-        Err(e) => Err(e),
-    };
-    if let Err(e) = attached {
-        tracing::warn!(task = %task.id, error = %e, "Could not connect the integration to the repository");
     }
 }
 
@@ -372,6 +289,6 @@ mod tests {
             Some("https://other-gitea.example.com"),
         )];
         let m = match_integrations_for_repo("https://github.com/foo/bar", &integrations);
-        assert_eq!(m, AutoAttach::default());
+        assert_eq!(m, MatchedIntegrations::default());
     }
 }

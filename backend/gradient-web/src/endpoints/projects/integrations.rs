@@ -57,7 +57,6 @@ pub struct IntegrationResponse {
     pub managed: bool,
     pub generated_secret: Option<String>,
     pub webhook_url: Option<String>,
-    pub connected_tasks: Vec<String>,
 }
 
 impl IntegrationResponse {
@@ -85,7 +84,6 @@ impl IntegrationResponse {
             managed: integration.managed,
             generated_secret: None,
             webhook_url,
-            connected_tasks: Vec::new(),
         }
     }
 }
@@ -367,10 +365,7 @@ pub async fn put_integration(
         })?;
         txn.commit().await?;
 
-        let mut response = integration_response(&state.web_db, &base, created).await?;
-        if link.created_any_integration {
-            response.connected_tasks = connect_tasks(&state.web_db, project.id).await;
-        }
+        let response = integration_response(&state.web_db, &base, created).await?;
         audit
             .write(
                 Action::ProjectGitHostIntegrationCreatedOrReplaced,
@@ -415,7 +410,7 @@ pub async fn put_integration(
         .unwrap_or_else(|| body.name.to_string());
     let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?.filter(|v| !v.is_empty());
 
-    let created = create_integrations_and_attach_matching_tasks(
+    let created = create_project_integrations_in_transaction_with_available_names_and_encrypted_secrets(
         &state.web_db,
         &state.config.secrets.crypt_file,
         &base,
@@ -469,7 +464,7 @@ pub(super) struct IntegrationToCreate<'a> {
     pub(super) allowed_ips: Option<Vec<String>>,
 }
 
-pub(super) async fn create_integrations_and_attach_matching_tasks(
+pub(super) async fn create_project_integrations_in_transaction_with_available_names_and_encrypted_secrets(
     db: &gradient_db::WebDb,
     crypt_file: &str,
     base: &WebhookBase<'_>,
@@ -532,41 +527,13 @@ pub(super) async fn create_integrations_and_attach_matching_tasks(
     }
     txn.commit().await?;
 
-    let connected_tasks = connect_tasks(db, shared.project).await;
     let mut responses = Vec::with_capacity(created.len());
     for (integration, generated_secret) in created {
         let mut response = integration_response(db, base, integration).await?;
         response.generated_secret = generated_secret;
-        response.connected_tasks = connected_tasks.clone();
         responses.push(response);
     }
     Ok(responses)
-}
-
-async fn connect_tasks(db: &gradient_db::WebDb, project: ProjectId) -> Vec<String> {
-    let loaded = async {
-        let tasks = gradient_db::tasks::of_project(project).all(db).await?;
-        let integrations = gradient_db::integrations::of_project(db, project).await?;
-        Ok::<_, sea_orm::DbErr>((tasks, integrations))
-    };
-    let (tasks, integrations) = match loaded.await {
-        Ok(loaded) => loaded,
-        Err(e) => {
-            tracing::warn!(project = %project, error = %e, "Failed to load project tasks and integration to connect tasks to the new integration.");
-            return Vec::new();
-        }
-    };
-    let mut connected = Vec::new();
-    for task in tasks.iter().filter(|t| !t.managed) {
-        match crate::endpoints::tasks::auto_attach::apply(db, task, &integrations).await {
-            Ok(attached) if attached.any() => connected.push(task.name.clone()),
-            Ok(_) => {}
-            Err(e) => {
-                tracing::warn!(task = %task.id, error = %e, "Could not connect the task to the new integration");
-            }
-        }
-    }
-    connected
 }
 
 fn http_endpoint_url(url: &str) -> WebResult<String> {
@@ -591,7 +558,7 @@ pub(super) fn new_webhook_secret() -> String {
     operation_id = "connectGitHost",
     tag = "integrations",
     summary = "Connect a Git host",
-    description = "Create a webhook receiver for a Gitea, Forgejo, or GitLab host and a status reporter with `access_token` present, in one call. Both integrations share `name`. Fields `inbound.generated_secret` and `inbound.webhook_url` in the response contain the generated webhook secret once and the address to enter into the Git host. Existing tasks with repositories on this Git host connect to the new integration. Their task names appear in `connected_tasks`.",
+    description = "Create a webhook receiver and a status reporter for a Gitea, Forgejo or GitLab host in one call with `access_token` set. Both integrations share `name`. The `inbound.generated_secret` and `inbound.webhook_url` fields in the response contain the generated webhook secret (shown once) and the address to enter in the Git host. These integrations don't add triggers or actions to a task. Use `GET /projects/{project}/trigger-suggestions` to list the push triggers and pull request triggers that a task can add.",
     params(ProjectPath),
     request_body = ConnectGitHostRequest,
     responses((status = OK, description = "Created Integration", body = ConnectGitHostResponse), WebError)
@@ -643,22 +610,23 @@ pub async fn post_connect_git_host(
         serve_url: &state.config.server.serve_url,
         project: &project.name,
     };
-    let mut created = create_integrations_and_attach_matching_tasks(
-        &state.web_db,
-        &state.config.secrets.crypt_file,
-        &base,
-        SharedIntegrationCreationFields {
-            project: project.id,
-            name,
-            display_name,
-            git_host,
-            endpoint_url: Some(endpoint_url),
-            created_by: user.id,
-        },
-        rows,
-    )
-    .await?
-    .into_iter();
+    let mut created =
+        create_project_integrations_in_transaction_with_available_names_and_encrypted_secrets(
+            &state.web_db,
+            &state.config.secrets.crypt_file,
+            &base,
+            SharedIntegrationCreationFields {
+                project: project.id,
+                name,
+                display_name,
+                git_host,
+                endpoint_url: Some(endpoint_url),
+                created_by: user.id,
+            },
+            rows,
+        )
+        .await?
+        .into_iter();
     let inbound = created
         .next()
         .context("The integration insert returned no rows.")?;

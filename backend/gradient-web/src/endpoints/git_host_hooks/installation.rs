@@ -5,7 +5,7 @@
  */
 
 use super::payloads::GitHubInstallationPayload;
-use crate::endpoints::tasks::auto_attach::url_host;
+use crate::endpoints::tasks::integration_by_repository_host::url_host;
 use gradient_ci::parse_owner_repo;
 use gradient_db::WebDb;
 use gradient_types::*;

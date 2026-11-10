@@ -171,8 +171,7 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     projects::project_gitea_oauth2_connection::redirect_signed_in_browser_to_git_host_for_project_oauth_approval
                 ))
                 .routes(routes!(
-                    tasks::repository::get_task_repository,
-                    tasks::repository::put_task_repository
+                    tasks::repository::get_task_repository
                 ))
                 .routes(routes!(tasks::provision::post_install_webhook))
                 .routes(routes!(tasks::provision::post_install_deploy_key))
@@ -189,6 +188,13 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                 ))
                 .routes(routes!(tasks::management::post_task_transfer))
                 .routes(routes!(tasks::management::post_task_check_repository))
+                .routes(routes!(tasks::management::duplicate_task))
+                .routes(routes!(
+                    tasks::management::check_project_repository_can_be_cloned
+                ))
+                .routes(routes!(
+                    tasks::triggers::get_project_repository_trigger_suggestions
+                ))
                 .routes(routes!(tasks::evaluations::post_task_evaluate))
                 .routes(limited(
                     routes!(tasks::pull_requests::post_task_pull_request),

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::auto_attach::{integration_serves_repository, url_host};
+use super::integration_by_repository_host::{integration_serves_repository, url_host};
 use super::refusal::TaskRefusal;
 use crate::api_spec::TaskPath;
 use crate::endpoints::projects::integrations::WebhookBase;

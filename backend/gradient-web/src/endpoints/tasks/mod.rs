@@ -5,9 +5,9 @@
  */
 
 pub mod actions;
-pub(crate) mod auto_attach;
 pub mod evaluations;
 pub mod flake_inputs;
+pub(crate) mod integration_by_repository_host;
 pub mod management;
 pub mod metrics;
 pub mod provision;
@@ -35,9 +35,12 @@ use gradient_types::ids::*;
 use gradient_db::evaluations::failed_attributes::FailedAttribute;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_types::triggers::ConcurrencyPolicy;
-use gradient_types::{EvaluationProgress, MTask, TaskTriggerId, TriggerType, WaitingReason};
+use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, next_poll_time_with_jitter};
+use gradient_types::{
+    EvaluationProgress, MTask, MTaskTrigger, TaskTriggerId, TriggerType, WaitingReason,
+};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct TaskResponse {
@@ -65,9 +68,48 @@ pub struct TaskResponse {
     pub exec_enabled: bool,
     pub only_evaluate: bool,
     pub repository_fetch: Option<RepositoryFetchStatus>,
+    pub branches: Vec<Option<String>>,
+    pub next_polling_trigger_check_at: Option<chrono::NaiveDateTime>,
     pub can_edit: bool,
     pub can_trigger: bool,
     pub permissions: Vec<Permission>,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct ActiveTriggerBranchesAndNextPollTime {
+    pub branches: Vec<Option<String>>,
+    pub next_polling_trigger_check_at: Option<chrono::NaiveDateTime>,
+}
+
+impl ActiveTriggerBranchesAndNextPollTime {
+    pub(crate) fn of<'a>(
+        task: &MTask,
+        triggers: impl IntoIterator<Item = &'a MTaskTrigger>,
+    ) -> Self {
+        let mut branches = BTreeSet::new();
+        let mut next_poll: Option<chrono::NaiveDateTime> = None;
+        for trigger in triggers
+            .into_iter()
+            .filter(|t| t.active && t.task == task.id)
+        {
+            let Ok(config) = TriggerConfig::parse_row(trigger.trigger_type, &trigger.config) else {
+                continue;
+            };
+            branches.extend(config.branch_names_or_patterns_for_task_header());
+            if let TriggerConfig::Polling { interval_secs, .. } = config
+                && task.active
+            {
+                let due = trigger.last_fired_at.map_or(trigger.created_at, |t| {
+                    next_poll_time_with_jitter(trigger.id, t, interval_secs)
+                });
+                next_poll = Some(next_poll.map_or(due, |n| n.min(due)));
+            }
+        }
+        Self {
+            branches: branches.into_iter().collect(),
+            next_polling_trigger_check_at: next_poll,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
@@ -102,10 +144,15 @@ impl TaskResponse {
         task: MTask,
         last_evaluation_status: Option<EvaluationStatus>,
         recent_evaluations: Vec<HistoryBar>,
+        triggers: &[MTaskTrigger],
         permissions: PermissionMask,
     ) -> Self {
         let repository_fetch =
             RepositoryFetchStatus::of(&task, mask_grants(permissions, Permission::EditTask));
+        let ActiveTriggerBranchesAndNextPollTime {
+            branches,
+            next_polling_trigger_check_at,
+        } = ActiveTriggerBranchesAndNextPollTime::of(&task, triggers);
         Self {
             id: task.id,
             project: task.project,
@@ -131,6 +178,8 @@ impl TaskResponse {
             exec_enabled: task.exec_enabled,
             only_evaluate: task.only_evaluate,
             repository_fetch,
+            branches,
+            next_polling_trigger_check_at,
             can_edit: mask_grants(permissions, Permission::EditTask),
             can_trigger: mask_grants(permissions, Permission::TriggerEvaluation),
             permissions: mask_to_vec(permissions),
@@ -247,6 +296,8 @@ pub struct TaskDetailsResponse {
     pub keep_evaluations: i32,
     pub last_check_at: Option<chrono::NaiveDateTime>,
     pub repository_fetch: Option<RepositoryFetchStatus>,
+    pub branches: Vec<Option<String>>,
+    pub next_polling_trigger_check_at: Option<chrono::NaiveDateTime>,
     pub queue: QueueSummary,
     pub last_evaluations: Vec<EvaluationSummary>,
     pub can_edit: bool,
@@ -260,10 +311,15 @@ impl TaskDetailsResponse {
         task: MTask,
         queue: QueueSummary,
         last_evaluations: Vec<EvaluationSummary>,
+        triggers: &[MTaskTrigger],
         permissions: PermissionMask,
     ) -> Self {
         let repository_fetch =
             RepositoryFetchStatus::of(&task, mask_grants(permissions, Permission::EditTask));
+        let ActiveTriggerBranchesAndNextPollTime {
+            branches,
+            next_polling_trigger_check_at,
+        } = ActiveTriggerBranchesAndNextPollTime::of(&task, triggers);
         Self {
             id: task.id,
             name: task.name,
@@ -276,6 +332,8 @@ impl TaskDetailsResponse {
             keep_evaluations: task.keep_evaluations,
             last_check_at: checked_at(task.last_check_at),
             repository_fetch,
+            branches,
+            next_polling_trigger_check_at,
             queue,
             last_evaluations,
             can_edit: mask_grants(permissions, Permission::EditTask),
@@ -501,5 +559,97 @@ mod repository_fetch_tests {
         let viewer = RepositoryFetchStatus::of(&failed, false).unwrap_or_else(|| panic!("status"));
         assert!(viewer.failed);
         assert_eq!(viewer.error, None);
+    }
+}
+
+#[cfg(test)]
+mod trigger_summary_tests {
+    use super::*;
+
+    fn at(s: &str) -> chrono::NaiveDateTime {
+        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap()
+    }
+
+    fn trigger(task: &MTask, config: TriggerConfig, active: bool) -> MTaskTrigger {
+        MTaskTrigger {
+            id: TaskTriggerId::now_v7(),
+            task: task.id,
+            trigger_type: config.trigger_type(),
+            config: config.to_db_json(),
+            active,
+            created_at: at("2026-11-01 10:00:00"),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn branches_come_from_active_triggers_only_and_never_fired_polls_are_due_at_creation() {
+        let task = MTask {
+            id: TaskId::now_v7(),
+            active: true,
+            ..Default::default()
+        };
+        let triggers = [
+            trigger(
+                &task,
+                TriggerConfig::Polling {
+                    interval_secs: 300,
+                    branch: None,
+                },
+                true,
+            ),
+            trigger(
+                &task,
+                TriggerConfig::Time {
+                    cron: "0 0 3 * * *".into(),
+                    branch: Some("release".into()),
+                },
+                true,
+            ),
+            trigger(
+                &task,
+                TriggerConfig::Polling {
+                    interval_secs: 300,
+                    branch: Some("paused".into()),
+                },
+                false,
+            ),
+        ];
+        let summary = ActiveTriggerBranchesAndNextPollTime::of(&task, &triggers);
+        assert_eq!(summary.branches, vec![None, Some("release".to_owned())]);
+        assert_eq!(
+            summary.next_polling_trigger_check_at,
+            Some(at("2026-11-01 10:00:00"))
+        );
+    }
+
+    #[test]
+    fn a_fired_poll_is_due_one_interval_later_and_a_paused_task_never_polls() {
+        let mut task = MTask {
+            id: TaskId::now_v7(),
+            active: true,
+            ..Default::default()
+        };
+        let mut polling = trigger(
+            &task,
+            TriggerConfig::Polling {
+                interval_secs: 100,
+                branch: None,
+            },
+            true,
+        );
+        polling.last_fired_at = Some(at("2026-11-01 12:00:00"));
+        let triggers = [polling];
+        let due = ActiveTriggerBranchesAndNextPollTime::of(&task, &triggers)
+            .next_polling_trigger_check_at
+            .unwrap();
+        assert!((at("2026-11-01 12:01:40")..=at("2026-11-01 12:01:50")).contains(&due));
+
+        task.active = false;
+        assert_eq!(
+            ActiveTriggerBranchesAndNextPollTime::of(&task, &triggers)
+                .next_polling_trigger_check_at,
+            None
+        );
     }
 }
