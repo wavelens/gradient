@@ -646,7 +646,7 @@ describe('BoardJobDetailComponent - exec jobs', () => {
     const section = el.querySelector('section.exec') as HTMLElement;
     expect(section.textContent).toContain('nightly');
     expect(section.textContent).toContain('1 of 2 nodes');
-    expect(section.textContent).toContain('completed');
+    expect(section.textContent).toContain('Completed');
     const link = fixture.debugElement.query(By.css('section.exec a.exec-link'));
     expect(link.injector.get(RouterLink).urlTree?.toString()).toBe('/project/project-one/task/nightly/exec/x1?node=1');
   });
@@ -679,7 +679,13 @@ describe('BoardJobDetailComponent - exec jobs', () => {
   it('shows why a failed attempt ended next to its end reason', () => {
     const failed: AssignedJobDetail = { ...EXEC_DETAIL, exec_attempt: { ...EXEC_DETAIL.exec_attempt!, end_reason: 'failed', message: 'program exited with code 3' } };
     const cell = (setup({ getJob: () => of(failed) }).nativeElement as HTMLElement).querySelector('section.exec .end-reason');
-    expect(cell?.textContent?.replace(/\s+/g, ' ').trim()).toBe('failed program exited with code 3');
+    expect(cell?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Failed program exited with code 3');
+  });
+
+  it('labels a timed-out attempt and drops a message that only repeats the reason', () => {
+    const timedOut: AssignedJobDetail = { ...EXEC_DETAIL, exec_attempt: { ...EXEC_DETAIL.exec_attempt!, end_reason: 'timeout', message: 'timed out' } };
+    const cell = (setup({ getJob: () => of(timedOut) }).nativeElement as HTMLElement).querySelector('section.exec .end-reason');
+    expect(cell?.textContent?.trim()).toBe('Timed out');
   });
 
   it('shows the architecture of the exec job but no flake fetch', () => {

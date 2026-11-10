@@ -46,6 +46,7 @@ import {
   abortBuildConfirm,
   abortEvaluationConfirm,
   buildAbortTargetLine,
+  buildAttemptEndReasonLabel,
   buildPhase,
   buildStatusLabel,
   evaluationAbortTarget,
@@ -222,7 +223,8 @@ interface RuleRow {
                 @if (a.end_reason) {
                   <tr>
                     <td class="label">End reason</td>
-                    <td class="mono end-reason">{{ a.end_reason }}@if (a.message) { <span class="muted"> {{ a.message }}</span> }</td>
+                    @let endReason = buildAttemptEndReasonLabel(a.end_reason);
+                    <td class="end-reason">{{ endReason }}@if (a.message && a.message.toLowerCase() !== endReason.toLowerCase()) { <span class="mono muted"> {{ a.message }}</span> }</td>
                   </tr>
                 }
               }
@@ -595,6 +597,7 @@ export class BoardJobDetailComponent implements OnInit {
   protected readonly EXEC_KIND = EXEC_KIND;
   protected readonly jobSubjectLabel = jobSubjectLabel;
   protected readonly evaluationJobCommitLabel = evaluationJobCommitLabel;
+  protected readonly buildAttemptEndReasonLabel = buildAttemptEndReasonLabel;
   protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
   protected readonly scoreDigits = schedulerScoreDecimalPipeDigitsFormat;
   protected readonly formatBytes = formatBytes;
