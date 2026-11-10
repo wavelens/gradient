@@ -21,6 +21,8 @@ use gradient_core::ServerState;
 use gradient_git_host::provision::{self, ForgeAccess, ProvisionError};
 use gradient_sources::format_public_key;
 use gradient_types::*;
+use gradient_util::http::public_client;
+use gradient_util::http_validation::validate_webhook_url;
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -90,12 +92,14 @@ fn decrypt(crypt_file: &str, encrypted: &str) -> WebResult<SecretString> {
     )
 }
 
-fn forge_endpoint(outbound: &MIntegration, host: &str) -> String {
-    outbound
+fn forge_endpoint(outbound: &MIntegration, host: &str) -> WebResult<String> {
+    let endpoint = outbound
         .endpoint_url
         .clone()
         .filter(|u| !u.trim().is_empty())
-        .unwrap_or_else(|| format!("https://{host}"))
+        .unwrap_or_else(|| format!("https://{host}"));
+    validate_webhook_url(&endpoint).map_err(|e| TaskRefusal::InvalidWebhookUrl(e.to_string()))?;
+    Ok(endpoint)
 }
 
 #[utoipa::path(
@@ -126,6 +130,7 @@ pub async fn post_install_webhook(
         body.outbound_integration,
         IntegrationKind::Outbound,
     )?;
+    let endpoint_url = forge_endpoint(outbound, &target.host)?;
 
     let webhook_url = WebhookBase {
         serve_url: &state.config.server.serve_url,
@@ -147,10 +152,9 @@ pub async fn post_install_webhook(
             .as_deref()
             .ok_or(TaskRefusal::ProvisionTokenMissing)?,
     )?;
-    let endpoint_url = forge_endpoint(outbound, &target.host);
 
     provision::install_webhook(
-        state.http.clone(),
+        public_client().clone(),
         &ForgeAccess {
             git_host: outbound.git_host_type,
             endpoint_url: &endpoint_url,
@@ -186,6 +190,7 @@ pub async fn post_install_deploy_key(
         body.outbound_integration,
         IntegrationKind::Outbound,
     )?;
+    let endpoint_url = forge_endpoint(outbound, &target.host)?;
     let token = decrypt(
         &state.config.secrets.crypt_file,
         outbound
@@ -193,7 +198,6 @@ pub async fn post_install_deploy_key(
             .as_deref()
             .ok_or(TaskRefusal::ProvisionTokenMissing)?,
     )?;
-    let endpoint_url = forge_endpoint(outbound, &target.host);
     let public_key = format_public_key(scope.project.clone(), &state.config.server.serve_url);
     let title = public_key
         .rsplit(' ')
@@ -202,7 +206,7 @@ pub async fn post_install_deploy_key(
         .to_owned();
 
     provision::install_deploy_key(
-        state.http.clone(),
+        public_client().clone(),
         &ForgeAccess {
             git_host: outbound.git_host_type,
             endpoint_url: &endpoint_url,

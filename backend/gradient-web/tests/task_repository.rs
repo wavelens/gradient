@@ -243,6 +243,42 @@ async fn installing_a_deploy_key_needs_a_git_host_token() {
 }
 
 #[tokio::test]
+async fn installing_a_deploy_key_refuses_a_git_host_in_a_private_network() {
+    let session_id = SessionId::now_v7();
+    let internal_outbound = integration::Model {
+        endpoint_url: Some("http://10.0.0.5:8080".into()),
+        access_token: Some("encrypted".into()),
+        ..outbound_without_token()
+    };
+    let internal_task = task::Model {
+        repository: "http://10.0.0.5:8080/acme/app.git".into(),
+        ..gradient_fixtures::rows::task()
+    };
+    let db = with_auth(mock_db(), session_id)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![internal_task]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
+        .append_query_results([vec![internal_outbound.clone()]]);
+
+    let res = make_test_server(db.into_connection())
+        .post(&format!("{URL}/install-deploy-key"))
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&json!({ "outbound_integration": internal_outbound.id }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = res.json();
+    assert!(
+        body["message"].as_str().unwrap().contains("10.0.0.5"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
 async fn view_members_cannot_install_webhooks() {
     let session_id = SessionId::now_v7();
     let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_VIEW_ID)

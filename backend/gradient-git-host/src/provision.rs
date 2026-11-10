@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::client::HostClient;
+use crate::client::{HostClient, HostError};
 use gradient_types::GitHostType;
 use serde_json::json;
+use tracing::warn;
 
 const GITEA_EVENTS: &[&str] = &[
     "push",
@@ -25,6 +26,16 @@ pub enum ProvisionError {
     Unsupported(&'static str),
     #[error("{0}")]
     Host(String),
+}
+
+impl From<HostError> for ProvisionError {
+    fn from(e: HostError) -> Self {
+        warn!(error = %e, "The Git host rejected the provisioning request.");
+        Self::Host(match e.status() {
+            Some(status) => status.to_string(),
+            None => "No response from the Git host".to_owned(),
+        })
+    }
 }
 
 pub struct ForgeAccess<'a> {
@@ -63,7 +74,10 @@ pub fn repository_path(url: &str) -> Option<String> {
         None => url.split_once(':')?.1,
     };
     let path = path.trim_matches('/').trim_end_matches(".git");
-    (path.contains('/') && !path.starts_with('/')).then(|| path.to_owned())
+    let mut segments = path.split('/');
+    let well_formed =
+        segments.clone().count() >= 2 && segments.all(|s| !s.is_empty() && s != "." && s != "..");
+    well_formed.then(|| path.to_owned())
 }
 
 pub async fn install_webhook(
@@ -92,10 +106,7 @@ pub async fn install_webhook(
             "config": { "url": webhook_url, "content_type": "json", "secret": secret },
         }),
     };
-    client
-        .post(&path, &body)
-        .await
-        .map_err(|e| ProvisionError::Host(e.to_string()))
+    Ok(client.post(&path, &body).await?)
 }
 
 pub async fn install_deploy_key(
@@ -115,10 +126,7 @@ pub async fn install_deploy_key(
             json!({ "title": title, "key": public_key, "read_only": true }),
         ),
     };
-    client
-        .post(&path, &body)
-        .await
-        .map_err(|e| ProvisionError::Host(e.to_string()))
+    Ok(client.post(&path, &body).await?)
 }
 
 #[cfg(test)]
@@ -146,6 +154,13 @@ mod tests {
             Some("acme/app")
         );
         assert_eq!(repository_path("https://example.com/app"), None);
+        for traversal in [
+            "http://10.0.0.5:8080/a/../../admin/x",
+            "https://example.com/acme/./app",
+            "https://example.com/acme//app",
+        ] {
+            assert_eq!(repository_path(traversal), None, "{traversal}");
+        }
     }
 
     #[tokio::test]
@@ -200,7 +215,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_refusal_of_the_git_host_keeps_its_status_and_reason() {
+    async fn a_refusal_of_the_git_host_keeps_its_status_but_not_its_body_or_url() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .respond_with(ResponseTemplate::new(403).set_body_string("token lacks admin rights"))
@@ -216,10 +231,6 @@ mod tests {
         let err = install_deploy_key(http(), &access, "Gradient", "ssh-ed25519 AAAA")
             .await
             .expect_err("a 403 must fail");
-        assert!(err.to_string().contains("403"), "{err}");
-        assert!(
-            err.to_string().contains("token lacks admin rights"),
-            "{err}"
-        );
+        assert_eq!(err.to_string(), "403 Forbidden");
     }
 }
