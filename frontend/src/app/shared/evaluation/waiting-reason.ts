@@ -70,8 +70,8 @@ export function waitingReasonText(reason: WaitingReason | null | undefined): str
 
 const ASK_FOR_WORKER ='Ask a project admin to register a worker that can meet the requirement.';
 
-function workerAction(project: string): WaitingAction {
-  return { kind: 'link', label: 'Register worker', icon: 'construction', link: links.projectPage(project, 'workers') };
+function workerAction(project: string, label = 'Register worker'): WaitingAction {
+  return { kind: 'link', label, icon: 'construction', link: links.projectPage(project, 'workers') };
 }
 
 function cachesAction(project: string, label: string): WaitingAction {
@@ -180,13 +180,16 @@ export function explainWaiting(reason: WaitingReason | null | undefined, project
     }
     case 'exec_workers': {
       const missing = unmetParts(reason.unmet);
+      const hasConnectedWorkerMissingRequiredLabel = reason.connected_workers > 0 && reason.unmet.labels.length > 0;
       return {
         title: EXEC_WORKER_WAIT_TITLE,
         detail: missing.length === 0 && reason.matching_workers > 0
           ? `${freeDevicesWait(reason.matching_workers)}.`
           : 'No connected worker offers what the exec job needs.',
         requirements: missing,
-        ...forWorkerAdmin(workerAction(project), ASK_FOR_WORKER),
+        ...(hasConnectedWorkerMissingRequiredLabel
+          ? forWorkerAdmin(workerAction(project, 'Add label to workers'), 'Ask a project admin to add the missing label to a worker.')
+          : forWorkerAdmin(workerAction(project), ASK_FOR_WORKER)),
       };
     }
     case 'manual_start':

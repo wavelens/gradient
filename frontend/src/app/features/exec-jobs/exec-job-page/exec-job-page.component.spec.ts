@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { Title } from '@angular/platform-browser';
+import { AuthService } from '@core/services/auth.service';
 import { taskAccessData } from '@core/resolvers/access-route.testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { EMPTY, type Observable, of, throwError } from 'rxjs';
@@ -114,6 +117,7 @@ interface Setup {
   keepVmRunning: ReturnType<typeof vi.fn>;
   letVmStop: ReturnType<typeof vi.fn>;
   navigate: ReturnType<typeof vi.spyOn>;
+  signedIn: ReturnType<typeof signal<boolean>>;
 }
 
 function setup(
@@ -158,9 +162,11 @@ function setup(
     ],
   });
   const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+  const signedIn = signal(true);
+  vi.spyOn(TestBed.inject(AuthService), 'isAuthenticated').mockImplementation(() => signedIn());
   const fixture = TestBed.createComponent(ExecJobPageComponent);
   fixture.detectChanges();
-  return { fixture, abort, confirm, run, logAfter, keepVmRunning, letVmStop, navigate };
+  return { fixture, abort, confirm, run, logAfter, keepVmRunning, letVmStop, navigate, signedIn };
 }
 
 function toasts() {
@@ -451,6 +457,26 @@ describe('ExecJobPageComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     expect(showJobLink(root)?.getAttribute('href')).toBe('/board/jobs/dj1');
     expect(root.querySelector('.log-sidebar .sidebar-kebab')).toBeNull();
+  });
+
+  it('leaves out the job link for an anonymous visitor, since the Job Board needs a sign-in', () => {
+    const { fixture, signedIn } = setup('completed', SSH, {}, { ...job('completed'), dispatched_job: 'dj1' });
+    signedIn.set(false);
+    fixture.detectChanges();
+    expect(showJobLink(fixture.nativeElement)).toBeUndefined();
+  });
+
+  it('names the job and the shown tab in the heading and the browser tab title', () => {
+    const { fixture } = setup('completed', SSH, { view: 'timeline' });
+    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent?.trim()).toBe('apps.x86_64-linux.train · Timeline');
+    expect(TestBed.inject(Title).getTitle()).toBe('apps.x86_64-linux.train · Timeline · Gradient');
+  });
+
+  it('takes the program run time of a finished attempt from the timeline, like the Timeline tab', () => {
+    const finished = { ...job('failed'), attempts: [{ number: 1, worker: 'w1', started_at: '2026-01-01T00:00:01', program_started_at: '2026-01-01T00:00:02.000', ended_at: '2026-01-01T00:00:02.0765' }],
+      timeline: [{ seq: 0, parent_seq: null, phase: 'program', start_ms: 14861, end_ms: 14938, paths: 0, bytes: 0 }] };
+    const { fixture } = setup('failed', SSH, {}, finished);
+    expect(fixture.componentInstance.formattedProgramRunTime()).toBe('77 ms');
   });
 
   it('leaves out the job link while the job has no assignment to show', () => {

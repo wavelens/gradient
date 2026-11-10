@@ -35,10 +35,17 @@ describe('explainWaiting', () => {
     const reasons: WaitingReason[] = [
       { kind: 'workers', unmet: [], connected_workers: 0, available_architectures: [] },
       { kind: 'eval_workers', capability: 'network', connected_workers: 0 },
-      { kind: 'exec_workers', unmet: { labels: ['gpu'], devices: [], mounts: [], nodes: 0, custom_image: false }, connected_workers: 1, matching_workers: 0 },
+      { kind: 'exec_workers', unmet: { labels: [], devices: [], mounts: ['data'], nodes: 0, custom_image: false }, connected_workers: 0, matching_workers: 0 },
     ];
     for (const reason of reasons) expect(linkOf(reason, ADMIN)).toBe('/project/acme/workers');
     expect(linkOf(null, ADMIN)).toBe('/project/acme/workers');
+  });
+
+  it('asks to add a label to a connected worker instead of registering a new one', () => {
+    const reason: WaitingReason = { kind: 'exec_workers', unmet: { labels: ['gpu'], devices: [], mounts: [], nodes: 0, custom_image: false }, connected_workers: 1, matching_workers: 0 };
+    const forAdmin = explainWaiting(reason, 'acme', ADMIN);
+    expect(forAdmin.action).toEqual(expect.objectContaining({ label: 'Add label to workers' }));
+    expect(linkOf(reason, ADMIN)).toBe('/project/acme/workers');
   });
 
   it('scopes the connected worker count to the project', () => {

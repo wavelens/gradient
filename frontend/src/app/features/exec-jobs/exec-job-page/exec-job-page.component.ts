@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { ActivatedRoute, NavigationEnd, Router, RouterModule } from '@angular/router';
+import { Title } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { EMPTY, Subscription, catchError, forkJoin, interval, map, of, startWith, switchMap, takeWhile } from 'rxjs';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { EMPTY, Subscription, catchError, filter, forkJoin, interval, map, of, startWith, switchMap, takeWhile } from 'rxjs';
 import {
   ButtonComponent,
   CopyFieldComponent,
@@ -31,6 +32,7 @@ import { formatDuration, plural, RelativeTimePipe, serverTime, ServerTimestampTo
 import { buildAttemptEndReasonLabel, evaluationPhase, execJobPhase, waitingAccessFrom } from '@shared/evaluation';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
+import { composeTitle } from '@core/title/gradient-title-strategy';
 import { ExecJobsService } from '@core/services/exec-jobs.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
@@ -164,8 +166,14 @@ export class ExecJobPageComponent implements OnInit {
   );
   jobBoardEntryRouterLink = computed(() => {
     const job = this.job();
-    return job ? links.boardJobOrCluster(job.dispatched_job, job.cluster_job) : undefined;
+    return job && this.auth.isAuthenticated() ? links.boardJobOrCluster(job.dispatched_job, job.cluster_job) : undefined;
   });
+  execJobAndViewLabelTitle = computed(() => {
+    const job = this.job();
+    const viewLabel = this.views().find((option) => option.value === this.view())?.label;
+    return job ? `${job.entry_point} · ${viewLabel}` : '';
+  });
+  private routerNavigationFinished = toSignal(this.router.events.pipe(filter((event) => event instanceof NavigationEnd)));
   crumbs = computed(() => {
     const job = this.job();
     return this.breadcrumbs.taskAt(this.projectName, this.taskName, job?.evaluation, { label: job?.entry_point ?? 'Exec job' });
@@ -190,8 +198,11 @@ export class ExecJobPageComponent implements OnInit {
   formattedProgramRunTime = computed(() => {
     const attempt = this.highestNumberedAttempt();
     if (!attempt?.program_started_at) return '';
-    const end = attempt.ended_at ? serverTime(attempt.ended_at).getTime() : this.now();
-    return formatDuration(Math.max(0, end - serverTime(attempt.program_started_at).getTime()));
+    if (!attempt.ended_at) return formatDuration(Math.max(0, this.now() - serverTime(attempt.program_started_at).getTime()));
+    const programPhase = this.job()?.timeline.filter((phase) => phase.phase === 'program').at(-1);
+    return formatDuration(programPhase
+      ? programPhase.end_ms - programPhase.start_ms
+      : serverTime(attempt.ended_at).getTime() - serverTime(attempt.program_started_at).getTime());
   });
 
   protected readonly phase = execJobPhase;
@@ -199,6 +210,15 @@ export class ExecJobPageComponent implements OnInit {
   protected readonly plural = plural;
   protected readonly evaluationPhase = evaluationPhase;
   protected readonly phaseMarker = phaseMarker;
+
+  constructor() {
+    const title = inject(Title);
+    effect(() => {
+      this.routerNavigationFinished();
+      const pageTitle = this.execJobAndViewLabelTitle();
+      if (pageTitle) title.setTitle(composeTitle(pageTitle, undefined));
+    });
+  }
 
   ngOnInit(): void {
     const params = this.route.snapshot.paramMap;
