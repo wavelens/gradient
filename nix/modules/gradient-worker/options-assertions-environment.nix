@@ -208,7 +208,6 @@ in {
   environment = {
     NIX_REMOTE = "daemon";
     XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
-    RUST_LOG = cfg.log.level.default;
     GRADIENT_WORKER_SSH_BIN = lib.getExe' cfg.packages.ssh "ssh";
   } // workerOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
 }

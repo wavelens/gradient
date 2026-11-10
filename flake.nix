@@ -77,7 +77,6 @@
     packages = rec {
       inherit (pkgs) gradient-nix;
       inherit gradient-report gradient-evalbench-inspector;
-      store = pkgs.callPackage ./nix/scripts/store.nix { };
       gradient = pkgs.callPackage ./nix/packages/gradient.nix {
         inherit craneLib;
         gitRev = self.rev or self.dirtyRev or null;
@@ -154,12 +153,10 @@
       EXTRA_CCFLAGS = "-I/usr/include";
       RUST_BACKTRACE = 1;
 
-      GRADIENT_DEBUG = "true";
       GRADIENT_SERVE_URL = "http://localhost:3000";
       GRADIENT_DATABASE_URL = "postgres://postgres:postgres@localhost:54321/gradient";
       GRADIENT_WORKER_EVAL_MAX_CONCURRENT = 1;
       GRADIENT_WORKER_BUILD_MAX_CONCURRENT = 8;
-      GRADIENT_STORE_PATH = "./testing/store";
       GRADIENT_SECRETS_CRYPT_FILE = pkgs.writeText "crypt_secret_file" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK";
       GRADIENT_SECRETS_JWT_FILE = pkgs.writeText "jwt_secret_file" "8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9d";
       GRADIENT_SENTRY_ENABLE = "false";
