@@ -30,7 +30,7 @@ use gradient_types::events::audit::Action;
 use chrono::Duration;
 use email_address::EmailAddress;
 use gradient_core::ServerState;
-use gradient_notify::generate_verification_token;
+use gradient_notify::{EmailSender, generate_verification_token};
 use gradient_types::consts::*;
 use gradient_types::input::{validate_password, validate_username};
 use gradient_types::*;
@@ -135,7 +135,7 @@ pub struct CheckUsernameRequest {
     operation_id = "registerUser",
     tag = "auth",
     summary = "Register a new user",
-    description = "Creates a new user account. Fails if registration is disabled (OIDC-only mode)\nor if the username/email is already taken. When email verification is enabled,\na verification email is sent and login is blocked until the address is confirmed.",
+    description = "Create a new user account. Registration requests fail in OIDC-only mode. They also fail when a username is already in use. Verification emails go out when email verification is on. Users cannot log in until confirmation of the address. Registration requests for an email address linked to an existing account return the same response as a successful registration. Notifications go to that address instead. Response fields reveal no information about which addresses have accounts. Requests that use an email address already in use fail with `email_address_already_in_use` when email verification is off.",
     request_body = MakeUserRequest,
     responses((status = OK, description = "User created", body = String, content_type = "application/json"), WebError)
 )]
@@ -167,19 +167,32 @@ pub async fn post_basic_register(
         return Err(WebError::already_exists(Resource::Username));
     }
 
-    if gradient_db::users::by_email(&state.web_db, &body.email)
-        .await?
-        .is_some()
-    {
-        return Err(WebError::already_exists(Resource::Email));
-    }
-
-    let (email_verified, verification_token, verification_expires) = if state
+    let requires_verification = state
         .config
         .email
         .as_ref()
-        .is_some_and(|e| e.require_verification)
-    {
+        .is_some_and(|e| e.require_verification);
+
+    let password_hash = generate_hash(body.password.clone());
+    if let Some(owner) = gradient_db::users::by_email(&state.web_db, &body.email).await? {
+        if !requires_verification {
+            return Err(WebError::already_exists(Resource::Email));
+        }
+        send_registration_attempt_email_to_existing_account_owner(
+            state.email.as_ref(),
+            &state.config.server.serve_url,
+            &owner,
+        )
+        .await;
+        return Ok(
+            registration_success_json_response_for_user_id_with_email_verification_message(
+                UserId::now_v7(),
+                requires_verification,
+            ),
+        );
+    }
+
+    let (email_verified, verification_token, verification_expires) = if requires_verification {
         let token = generate_verification_token();
         let expires = gradient_types::now() + chrono::Duration::hours(24);
         (false, Some(token), Some(expires))
@@ -192,7 +205,7 @@ pub async fn post_basic_register(
         username: body.username.clone(),
         name: body.name.to_string(),
         email: body.email.clone(),
-        password: Some(generate_hash(body.password.clone())),
+        password: Some(password_hash),
         last_login_at: *NULL_TIME,
         created_at: gradient_types::now(),
         email_verified,
@@ -230,11 +243,7 @@ pub async fn post_basic_register(
         )
         .await;
 
-    if state
-        .config
-        .email
-        .as_ref()
-        .is_some_and(|e| e.require_verification)
+    if requires_verification
         && let Some(ref token) = verification_token
         && let Err(e) = state
             .email
@@ -249,26 +258,50 @@ pub async fn post_basic_register(
         tracing::warn!(error = %e, "Failed to send verification email");
     }
 
-    let message = if state
-        .config
-        .email
-        .as_ref()
-        .is_some_and(|e| e.require_verification)
-    {
-        format!(
-            "User {} created. Please check your email to verify your account.",
-            user.id
-        )
-    } else {
-        format!("User {} created successfully.", user.id)
-    };
+    Ok(
+        registration_success_json_response_for_user_id_with_email_verification_message(
+            user.id,
+            requires_verification,
+        ),
+    )
+}
 
-    let res = BaseResponse {
+fn registration_success_json_response_for_user_id_with_email_verification_message(
+    id: UserId,
+    requires_verification: bool,
+) -> Json<BaseResponse<String>> {
+    let message = if requires_verification {
+        format!("User {id} created. Please check your email to verify your account.")
+    } else {
+        format!("User {id} created successfully.")
+    };
+    Json(BaseResponse {
         error: false,
         message,
-    };
+    })
+}
 
-    Ok(Json(res))
+async fn send_registration_attempt_email_to_existing_account_owner(
+    email: &dyn EmailSender,
+    serve_url: &str,
+    owner: &MUser,
+) {
+    let body = format!(
+        "Hello {name},\n\nSomeone tried to create a new Gradient account with this email address. The account with username {username} already had this address. The signup created no new account.\n\nSign in at {url}/account/login.\n\nIgnore this email when someone else made the signup attempt.",
+        name = owner.name,
+        username = owner.username,
+        url = serve_url,
+    );
+    if let Err(e) = email
+        .send_action_mail(
+            std::slice::from_ref(&owner.email),
+            "Someone tried to sign up for Gradient with this email address",
+            &body,
+        )
+        .await
+    {
+        tracing::warn!(error = %e, "Failed to send the email about a signup attempt on an address that already has an account");
+    }
 }
 
 #[utoipa::path(
