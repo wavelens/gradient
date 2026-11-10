@@ -15,7 +15,7 @@ import { MetricPoint } from '@core/models';
 import { metricPointsTo24HourChartSeries } from '../hourly-metric-points-to-24-hour-slots';
 
 const formatJobCountWithHiddenJobs = (shown: number, hidden: number): number | string =>
-  hidden > 0 ? `${shown} (${hidden} hidden)` : shown;
+  hidden > 0 ? `${shown} (${hidden} on projects you can't view)` : shown;
 
 @Component({
   selector: 'app-board-overview',
@@ -29,8 +29,8 @@ const formatJobCountWithHiddenJobs = (shown: number, hidden: number): number | s
       }
       <gr-card-grid class="kpis" min="180px">
         <gr-stat-card compact label="Connected workers" [value]="workers() ?? failed" />
-        <gr-stat-card compact label="Jobs pending" [value]="pending() ?? failed" />
-        <gr-stat-card compact label="Jobs active" [value]="active() ?? failed" />
+        <gr-stat-card compact label="Pending jobs" [value]="pending() ?? failed" />
+        <gr-stat-card compact label="Running jobs" [value]="active() ?? failed" />
       </gr-card-grid>
 
       <gr-metric-chart
