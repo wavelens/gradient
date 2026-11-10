@@ -115,6 +115,13 @@ describe('ProjectListComponent', () => {
     expect(root.textContent).toContain('Sign in');
   });
 
+  it('leaves the Public badge off the cards under Discover Public Projects, whose heading already says so', () => {
+    const publicPage = { items: [{ id: 'p1', name: 'nixpkgs', display_name: 'Nixpkgs', description: null }], total: 1, page: 1 };
+    const { root } = render(() => of(EMPTY_PAGE), () => of(publicPage));
+    expect(root.textContent).toContain('Discover Public Projects');
+    expect(root.querySelectorAll('gr-badge').length).toBe(0);
+  });
+
   it('keeps the own empty list for a signed-in non-member next to the public projects', () => {
     const publicPage = { items: [{ id: 'p1', name: 'nixpkgs', display_name: 'Nixpkgs', description: null }], total: 1, page: 1 };
     const { root } = render(() => of(EMPTY_PAGE), () => of(publicPage));

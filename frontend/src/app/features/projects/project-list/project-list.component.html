@@ -82,9 +82,7 @@
           [title]="project.display_name || project.name"
           [description]="project.description"
           [link]="links.project(project.name)"
-        >
-          <gr-badge slot="meta">Public</gr-badge>
-        </gr-nav-card>
+        ></gr-nav-card>
       }
     </gr-card-grid>
     <gr-load-more [shown]="publicProjects.items().length" [total]="publicProjects.total()" [loading]="publicProjects.loadingMore()" (more)="publicProjects.loadMore()" />
