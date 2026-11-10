@@ -24,7 +24,7 @@ import { AuthService } from '@core/services/auth.service';
 import type { LogViewerComponent } from '@shared/log';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
-  return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, build_started_at: null, dispatched_job: null, depth, prioritized: false, ifd: false };
+  return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, build_started_at: null, dispatched_job: null, depth, prioritized: false, ifd: false, entry_points: [] };
 }
 
 function setup(): {
@@ -873,6 +873,7 @@ describe('EvaluationLogComponent', () => {
       const getBuild = vi.fn((id: string) => buildEvaluation.pipe(map((evaluation) => ({
         id, evaluation, status: 'Completed', derivation_path: `hash-${id}.drv`,
         architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, prioritized: false, ifd: false, created_at: '', updated_at: '',
+        entry_points: [`packages.x86_64-linux.${id}`],
       }))));
       const getBuilds = vi.fn((..._args: unknown[]) => of({ builds: listed, total: listed.length, active_count: 0 }));
       TestBed.configureTestingModule({
@@ -932,6 +933,15 @@ describe('EvaluationLogComponent', () => {
       expect(getBuild).toHaveBeenCalledWith('dep');
       expect(getBuilds.mock.calls[0][3]).toBe('pkg');
       expect(cmp.selectedBuildId()).toBe('dep');
+      fixture.destroy();
+    });
+
+    it('names the linked build in the log header inside another package scope', () => {
+      const { cmp, fixture } = setupScoped({ package: 'depfail', build: 'fail' });
+      cmp.logLoading.set(false);
+      fixture.detectChanges();
+      const title = (fixture.nativeElement as HTMLElement).querySelector('.log-header-title');
+      expect(title?.querySelector('.log-header-entry-points')?.textContent).toBe('packages.x86_64-linux.fail');
       fixture.destroy();
     });
 

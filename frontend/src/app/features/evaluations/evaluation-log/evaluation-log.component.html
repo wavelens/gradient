@@ -334,7 +334,14 @@
           <gr-build-progress class="download-panel" [progress]="p" />
         } @else {
           <gr-log-viewer [lines]="logLines()" [serverLog]="serverLog()" [marker]="rateLimitMarker" [shortcuts]="false">
-            <code logTitle class="log-header-title" [title]="selectedBuild()?.name ?? ''">{{ buildDisplayName(selectedBuild()?.name ?? '') }}</code>
+            <code logTitle class="log-header-title" [title]="selectedBuild()?.name ?? ''">
+              @if (selectedBuild(); as build) {
+                @if (build.entry_points.length) {
+                  <span class="log-header-entry-points">{{ build.entry_points.join(', ') }}</span> ·
+                }
+                {{ buildDisplayName(build.name) }}
+              }
+            </code>
             @if (transferProgress(); as p) {
               <gr-build-progress [progress]="p" [compact]="true" />
             }

@@ -29,6 +29,10 @@
   flex: 1;
 }
 
+.log-header-entry-points {
+  color: var(--gr-text-primary);
+}
+
 .log-line-count {
   font-size: $font-size-xs;
   color: var(--gr-text-muted);

@@ -741,6 +741,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           prioritized: b.prioritized,
           ifd: b.ifd,
           depth: 0,
+          entry_points: b.entry_points,
         };
         this.initialBuildId = null;
         this.builds.update(cur => this.sortBuilds([item, ...cur]));
