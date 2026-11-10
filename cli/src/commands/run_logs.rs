@@ -17,7 +17,7 @@ const INTERRUPTED_EXIT_CODE: i32 = 130;
 struct FollowedJob {
     id: String,
     attr: String,
-    printed: usize,
+    printed: u64,
     lines: LinePrefixer,
     finished: bool,
 }
@@ -88,23 +88,22 @@ impl FollowedJob {
     }
 
     async fn print_new_output(&mut self, client: &connector::Client, out: Output) {
-        let Ok(log) = client.exec_jobs().log(&self.id).await else {
+        let Ok(exec_job_log_after_printed_reply) =
+            client.exec_jobs().log(&self.id, self.printed).await
+        else {
             return;
         };
-        let fresh = match log.get(self.printed..) {
-            Some(fresh) => fresh,
-            None => {
-                out.progress(format!("Logs for {} resumed in a new attempt.", self.attr));
-                &log
-            }
-        };
+        if exec_job_log_after_printed_reply.offset != self.printed {
+            out.progress(format!("Logs for {} resumed in a new attempt.", self.attr));
+        }
+        self.printed = exec_job_log_after_printed_reply.total_bytes;
+        let fresh = exec_job_log_after_printed_reply.log;
         if fresh.is_empty() {
             return;
         }
         let mut stdout = std::io::stdout();
-        let _ = stdout.write_all(self.lines.prefix(fresh).as_bytes());
+        let _ = stdout.write_all(self.lines.prefix(&fresh).as_bytes());
         let _ = stdout.flush();
-        self.printed = log.len();
     }
 
     fn finish(&mut self, summary: &ExecJobSummary, prefixed: bool, out: Output) {

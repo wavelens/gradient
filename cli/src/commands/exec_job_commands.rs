@@ -125,10 +125,10 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
             Err(e) => out.fail(e),
         },
-        Commands::Logs { job } => match jobs.log(&job).await {
-            Ok(log) => {
-                out.ok(&serde_json::json!({"log": log}));
-                out.human(log);
+        Commands::Logs { job } => match jobs.log(&job, 0).await {
+            Ok(exec_job_log_reply) => {
+                out.ok(&serde_json::json!({"log": exec_job_log_reply.log}));
+                out.human(exec_job_log_reply.log);
             }
             Err(e) => out.fail(e),
         },

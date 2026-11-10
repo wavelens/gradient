@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::api::{ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary};
+use crate::api::{
+    ExecJobLog, ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary,
+};
 use crate::http::io_error;
 use crate::{Client, ConnectorError, http};
 use futures::{SinkExt, Stream, StreamExt};
@@ -25,8 +27,9 @@ impl ExecJobsApi<'_> {
         self.get_json(&format!("exec/{job}")).await
     }
 
-    pub async fn log(&self, job: &str) -> Result<String, ConnectorError> {
-        self.get_json(&format!("exec/{job}/log")).await
+    pub async fn log(&self, job: &str, offset: u64) -> Result<ExecJobLog, ConnectorError> {
+        self.get_json(&format!("exec/{job}/log?offset={offset}"))
+            .await
     }
 
     pub async fn abort(&self, job: &str) -> Result<String, ConnectorError> {

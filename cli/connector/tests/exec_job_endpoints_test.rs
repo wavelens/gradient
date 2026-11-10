@@ -126,3 +126,33 @@ async fn connector_exec_job_pull_requests_decode_test() {
         .unwrap();
     assert_eq!(pull_requests[0].number, 5);
 }
+
+#[tokio::test]
+async fn exec_job_log_sends_offset_query_parameter_and_deserializes_offset_log_and_total_bytes() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/exec/job1/log"))
+        .and(query_param("offset", "6"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
+                "offset": 6, "log": "bye\n", "total_bytes": 10
+            }))),
+        )
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    let exec_job_log_reply = client.exec_jobs().log("job1", 6).await.unwrap();
+    assert_eq!(
+        (
+            exec_job_log_reply.offset,
+            exec_job_log_reply.log.as_str(),
+            exec_job_log_reply.total_bytes
+        ),
+        (6, "bye\n", 10)
+    );
+}
