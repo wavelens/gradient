@@ -214,7 +214,7 @@ fn average_load(
         .collect();
     let by_architecture = acc
         .into_iter()
-        .filter(|((dimension, key), _)| dimension == "architecture" && !key.is_empty())
+        .filter(|((dimension, _), _)| dimension == "architecture")
         .map(|((_, key), totals)| bucket(key, totals))
         .collect();
     WorkerLoadAverage {
@@ -504,7 +504,6 @@ mod tests {
         let busy = vec![
             row("capability", "build", 12.0, 2),
             row("architecture", "aarch64-linux", 6.0, 1),
-            row("architecture", "", 3.0, 1),
         ];
         let capacity = vec![
             row("capability", "build", 48.0, 2),

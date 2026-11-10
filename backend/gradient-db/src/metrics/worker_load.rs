@@ -35,7 +35,7 @@ fn busy_hours_sql(window_hours: i64, project_filter: Option<&str>) -> String {
          CROSS JOIN LATERAL (VALUES \
            ('capability', CASE j.kind WHEN {eval} THEN 'eval' WHEN {build} THEN 'build' WHEN {exec} THEN 'exec' END), \
            ('capability', CASE WHEN j.kind = {eval} AND j.fetches THEN 'network' END), \
-           ('architecture', nullif(j.architecture, '{builtin}')) \
+           ('architecture', nullif(nullif(j.architecture, ''), '{builtin}')) \
          ) v(dimension, key) \
          WHERE v.key IS NOT NULL AND j.hours > 0 \
          GROUP BY v.dimension, v.key",
@@ -165,6 +165,34 @@ mod tests {
         let rows = super::capacity_hours(&db.connection(), 24, None)
             .await
             .expect("the capacity query runs");
+        let architectures: Vec<&str> = rows
+            .iter()
+            .filter(|row| row.dimension == "architecture")
+            .map(|row| row.key.as_str())
+            .collect();
+
+        assert_eq!(architectures, ["x86_64-linux"]);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn busy_hours_skip_empty_and_builtin_architectures() {
+        let at = chrono::Utc::now().naive_utc() - chrono::Duration::hours(2);
+        let mut seed = gradient_fixtures::shape::shape();
+        for architecture in ["", gradient_types::BUILTIN_ARCH, "x86_64-linux"] {
+            seed = seed
+                .evaluation(gradient_entity::ids::EvaluationId::now_v7())
+                .eval_assignment()
+                .dispatched_at(at)
+                .assignment_option(|job| {
+                    job.job_context = serde_json::json!({ "architecture": architecture });
+                });
+        }
+        let db = seed.into_database().await;
+
+        let rows = super::busy_hours(&db.connection(), 24, None)
+            .await
+            .expect("the busy query runs");
         let architectures: Vec<&str> = rows
             .iter()
             .filter(|row| row.dimension == "architecture")
