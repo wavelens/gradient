@@ -47,8 +47,11 @@
   </gr-load-state>
 </gr-settings-section>
 
-@if (canEdit() && invitations().length > 0) {
+@if (canEdit() && (invitations().length > 0 || pendingInvitationsLoadError())) {
   <gr-settings-section title="Pending Invitations" [card]="false">
+    @if (pendingInvitationsLoadError(); as error) {
+      <gr-message-banner type="error">{{ error }}</gr-message-banner>
+    }
     <gr-row-list>
       @for (invitation of invitations(); track invitation.user) {
         <gr-row icon="mail">

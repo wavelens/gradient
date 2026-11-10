@@ -40,6 +40,7 @@ import {
   DialogComponent,
   FormFieldComponent,
   LoadStateComponent,
+  MessageBannerComponent,
   RowComponent,
   RowListComponent,
   SelectComponent,
@@ -60,6 +61,7 @@ import {
     DialogComponent,
     FormFieldComponent,
     LoadStateComponent,
+    MessageBannerComponent,
     RowComponent,
     RowListComponent,
     SelectComponent,
@@ -87,6 +89,7 @@ export class TeamMembersComponent implements OnInit {
   loadError = signal<unknown>(null);
   members = signal<TeamMemberItem[]>([]);
   invitations = signal<PendingInvitationItem[]>([]);
+  pendingInvitationsLoadError = signal<string | null>(null);
   suggestions = signal<AutoCompleteSuggestion[]>([]);
   addError = signal<string | null>(null);
   busy = signal<string | null>(null);
@@ -131,7 +134,7 @@ export class TeamMembersComponent implements OnInit {
   constructor() {
     runReloadIntervalWhileTabVisible(() => this.loading() || this.loadError() !== null ? EMPTY : merge(
       this.teams.members(this.teamName).pipe(tap((members) => this.members.set(members))),
-      this.canEdit() ? this.teams.invitations(this.teamName).pipe(tap((invitations) => this.invitations.set(invitations))) : EMPTY,
+      this.canEdit() ? this.teams.invitations(this.teamName).pipe(tap((invitations) => this.showInvitations(invitations))) : EMPTY,
     ));
   }
 
@@ -154,9 +157,14 @@ export class TeamMembersComponent implements OnInit {
     });
     if (!this.canEdit()) return;
     this.teams.invitations(this.teamName).subscribe({
-      next: (invitations) => this.invitations.set(invitations),
-      error: () => this.invitations.set([]),
+      next: (invitations) => this.showInvitations(invitations),
+      error: (error: unknown) => this.pendingInvitationsLoadError.set(apiErrorMessage(error, 'Failed to load pending invitations.')),
     });
+  }
+
+  private showInvitations(invitations: PendingInvitationItem[]): void {
+    this.invitations.set(invitations);
+    this.pendingInvitationsLoadError.set(null);
   }
 
   search(event: { query: string }): void {

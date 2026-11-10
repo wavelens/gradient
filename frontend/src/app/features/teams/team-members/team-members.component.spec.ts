@@ -94,6 +94,15 @@ describe('TeamMembersComponent', () => {
     expect(changed).toHaveBeenLastCalledWith(true);
   });
 
+  it("Notify the team admin if pending invitations don't load.", () => {
+    TestBed.overrideProvider(TeamsService, {
+      useValue: { members: () => of(members), invitations: () => throwError(() => new ApiError('Server error.', 500)) },
+    });
+    const { fixture } = setup();
+    const banner = (fixture.nativeElement as HTMLElement).querySelector('gr-message-banner');
+    expect(banner?.textContent).toContain('Server error.');
+  });
+
   it('hides pending invitations from members who cannot manage the team', () => {
     const invitation = { user: 'carol', role: 'member', expires_at: '2026-09-12T12:00:00' } as PendingInvitationItem;
     const { fixture } = setup(undefined, false, undefined, [invitation]);
