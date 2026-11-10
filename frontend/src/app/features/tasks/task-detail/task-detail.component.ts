@@ -60,7 +60,7 @@ import {
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, removeNixErrorInternalsFromEvaluationMessage, buildTally, getBuildCountTextPieces, repositoryWebUrl, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, buildStatusLabel, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, removeNixErrorInternalsFromEvaluationMessage, buildTally, getBuildCountTextPieces, repositoryWebUrl, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 const NO_EVALUATION_SELECTED = 'No evaluation selected.';
 
@@ -111,7 +111,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   task = signal<TaskDetailsResponse | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
   selectedEvaluationExecJobsLastReportedByList = signal<ExecJobSummary[]>([]);
-  execJobStatusByEntryPointAttributePath = computed(() => new Map(this.selectedEvaluationExecJobsLastReportedByList().map((job) => [job.entry_point, job.status])));
+  selectedEvaluationLatestExecJobByEntryPointAttributePath = computed(() => new Map(this.selectedEvaluationExecJobsLastReportedByList().map((job) => [job.entry_point, job])));
   entryPointsTotal = signal(0);
   failedAttributes = signal<FailedAttributeSummary[]>([]);
   entryPointsLoading = signal(false);
@@ -672,12 +672,13 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   entryPointGroups = computed(() => groupEntryPoints(this.entryPoints(), this.matchingFailedAttributes()));
 
   protected readonly evaluationPhase = evaluationPhase;
+  protected readonly buildStatusLabel = buildStatusLabel;
   protected readonly inputFetchPhase = inputFetchPhase;
 
   protected packagePhase(evaluation: EvaluationSummary, entry: EntryPointSummary): StatusPhase {
     if (evaluation.only_evaluate) return 'success';
     if (buildStatusToShowInEvaluation({ status: entry.build_status, ...entry }, evaluation) !== entry.build_status) return 'aborted';
-    return phaseInFinishedEvaluation(entryPointPhaseWithExecJob(entry, this.execJobStatusByEntryPointAttributePath().get(entry.eval)), evaluation.status);
+    return phaseInFinishedEvaluation(entryPointPhaseWithExecJob(entry, this.selectedEvaluationLatestExecJobByEntryPointAttributePath().get(entry.eval)?.status), evaluation.status);
   }
 
   pkgMenuModel = signal<MenuItem[]>([]);

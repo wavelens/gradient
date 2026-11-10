@@ -210,16 +210,21 @@
                   @let ep = row.entry;
                   @let depTally = buildTally(barCounts(ep), sel.status);
                   @let phase = packagePhase(sel, ep);
+                  @let execJob = selectedEvaluationLatestExecJobByEntryPointAttributePath().get(ep.eval);
                   <div class="entry-row pkg" [attr.data-phase]="phase" [style.animation-delay.ms]="($index % staggeredRows) * 18"
                        (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
-                    <a class="entry-link" [routerLink]="links.evaluationLog(projectName, sel.id, { package: ep.build_id })"
+                    <a class="entry-link" [routerLink]="execJob ? links.execJob(projectName, taskName, execJob.id) : links.evaluationLog(projectName, sel.id, { package: ep.build_id })"
                        [title]="ep.eval + ' - ' + ep.derivation_path + (ep.ifd ? ' (import from derivation: evaluation waited for this build)' : '')" [attr.aria-label]="row.label + (ep.ifd ? ' (import from derivation: evaluation waited for this build)' : '')"></a>
                     <gr-status-icon class="phase-swatch" [phase]="phase" [prioritized]="ep.prioritized" size="sm" />
                     <span class="pkg-name entry-name" [title]="row.label">@if (ep.ifd) { <gr-badge class="pkg-ifd" severity="info">IFD</gr-badge> }{{ row.label }}</span>
                     <span class="chip-arch mono">{{ ep.architecture }}</span>
                     @if (!sel.only_evaluate) {
-                      <gr-segmented-bar class="pkg-bar" [counts]="depTally.counts" />
-                      <span class="pkg-deps" [title]="buildCountTitle(depTally)">@for (piece of getBuildCountTextPieces(depTally); track piece.tone) {@if (!$first) { · }<span class="tally-{{ piece.tone }}">{{ piece.text }}</span>}</span>
+                      @if (execJob) {
+                        <span class="pkg-deps">{{ buildStatusLabel(ep.build_status) }}</span>
+                      } @else {
+                        <gr-segmented-bar class="pkg-bar" [counts]="depTally.counts" />
+                        <span class="pkg-deps" [title]="buildCountTitle(depTally)">@for (piece of getBuildCountTextPieces(depTally); track piece.tone) {@if (!$first) { · }<span class="tally-{{ piece.tone }}">{{ piece.text }}</span>}</span>
+                      }
                       <span class="pkg-time">
                         {{ pkgDuration(sel, ep) }}
                         @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }

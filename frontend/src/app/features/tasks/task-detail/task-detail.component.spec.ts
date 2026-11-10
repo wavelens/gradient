@@ -926,6 +926,29 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(row()).toBe('queued');
   });
 
+  it('offers the project/task path the CLI uses for copying', () => {
+    const { fixture } = setup({ managed: false, canEdit: false, canTrigger: false });
+    const copy = (fixture.nativeElement as HTMLElement).querySelector('.pp-head gr-copy-field');
+    expect(copy?.querySelector('code')?.textContent).toBe('acme/demo');
+  });
+
+  it('shows the own build status of an app row and links it to its exec job', () => {
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      {
+        primaryStatus: 'Building',
+        getEntryPoints: () => of({ entry_points: [{ ...epSummary('app', 'apps.x86_64-linux.app'), build_status: 'Completed' }], total: 1, failed_attributes: [] }),
+      },
+    );
+    const execJobList = fixture.debugElement.query(By.directive(ExecJobListComponent)).componentInstance as ExecJobListComponent;
+    execJobList.allExecJobsLoadedOrPolled.emit([{ id: 'x1', entry_point: 'apps.x86_64-linux.app', status: 'running', nodes: 1, labels: [], devices: [], autostart: true, keep_vm_running: false }]);
+    fixture.detectChanges();
+    const row = (fixture.nativeElement as HTMLElement).querySelector('.entry-row.pkg')!;
+    expect(row.querySelector('.pkg-bar')).toBeNull();
+    expect(row.querySelector('.pkg-deps')?.textContent?.trim()).toBe('Completed');
+    expect(row.querySelector('.entry-link')?.getAttribute('href')).toBe('/project/acme/task/demo/exec/x1');
+  });
+
   it('tags the row of a derivation an evaluation imported', () => {
     const { fixture } = setup(
       { managed: false, canEdit: true, canTrigger: true },
