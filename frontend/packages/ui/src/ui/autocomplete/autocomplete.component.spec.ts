@@ -134,6 +134,17 @@ describe('AutoCompleteComponent', () => {
     expect(options().map((o) => o.textContent!.trim())).toEqual(['my-cache', 'my-other']);
   });
 
+  it('shows the text below the label in the list but writes only the label into the field', async () => {
+    const { fixture, type, input } = await render();
+    fixture.componentInstance.suggestions.set([{ label: 'QA Team', value: 'qa-team', textBelowLabel: '3 members' }]);
+    type('q');
+    expect(options()[0].querySelector('.gr-autocomplete__option-text-below-label')?.textContent).toBe('3 members');
+    options()[0].click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(input().value).toBe('QA Team');
+  });
+
   it('picks a suggestion into the model and closes the panel', async () => {
     const { fixture, type, input } = await render();
     fixture.componentInstance.suggestions.set(['my-cache']);

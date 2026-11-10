@@ -24,6 +24,7 @@ import { FormFieldComponent } from '../form-field/form-field.component';
 export interface AutoCompleteSuggestion {
   label: string;
   value: string;
+  textBelowLabel?: string;
 }
 
 let autocompleteListboxIdCounter = 0;

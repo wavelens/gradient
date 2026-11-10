@@ -32,3 +32,9 @@
 
   &:hover, &--active { background: var(--gr-surface-hover); }
 }
+
+.gr-autocomplete__option-text-below-label {
+  display: block;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+}
