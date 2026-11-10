@@ -10,7 +10,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::commit;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
-use gradient_entity::ids::{CacheId, EvaluationId};
+use gradient_entity::ids::EvaluationId;
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::vec_to_hex;
@@ -600,14 +600,14 @@ async fn q13_a_server_drain_makes_evaluations_wait_and_its_end_returns_them() {
 }
 
 #[tokio::test]
-async fn q14_the_waiting_pass_leaves_approval_and_no_cache_alone() {
+async fn q14_the_waiting_pass_leaves_approval_and_a_still_missing_cache_alone() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = SchedulerCase::start(
         shape()
             .evalq(e1)
             .evaluation_status(EvaluationStatus::Waiting)
             .waiting_reason(WaitingReason::approval(1, "author").to_json())
-            .evalq(e2)
+            .evaluation(e2)
             .evaluation_status(EvaluationStatus::Waiting)
             .waiting_reason(WaitingReason::NoCache.to_json()),
     )
@@ -624,6 +624,60 @@ async fn q14_the_waiting_pass_leaves_approval_and_no_cache_alone() {
     );
     assert_eq!(case.totals().await.pending, 0, "after 1: pending == none");
     case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn q22_the_waiting_pass_names_a_missing_cache_before_missing_workers_and_resumes_with_one() {
+    let (e1, e2, e3) = (
+        EvaluationId::now_v7(),
+        EvaluationId::now_v7(),
+        EvaluationId::now_v7(),
+    );
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Waiting)
+            .waiting_reason(WaitingReason::eval_workers(EvalCapability::Eval, 0).to_json())
+            .evalq(e2)
+            .evaluation_status(EvaluationStatus::Waiting)
+            .waiting_reason(WaitingReason::NoCache.to_json())
+            .evalq(e3)
+            .evaluation_status(EvaluationStatus::Waiting)
+            .waiting_reason(WaitingReason::NoCache.to_json()),
+    )
+    .await;
+
+    case.refresh_waiting_state().await;
+    assert_eq!(
+        waiting_state(&case, e1).await,
+        (EvaluationStatus::Waiting, Some(WaitingReason::NoCache)),
+        "after 1: evaluation(E1) names the missing cache first"
+    );
+    assert_eq!(
+        waiting_state(&case, e2).await,
+        (
+            EvaluationStatus::Waiting,
+            Some(WaitingReason::eval_workers(EvalCapability::Eval, 0)),
+        ),
+        "after 1: evaluation(E2) has a cache and now waits for workers"
+    );
+    case.check("step 1").await;
+
+    case.connect(W1, w_all(), &[]).await;
+    case.refresh_waiting_state().await;
+    assert_eq!(
+        waiting_state(&case, e2).await,
+        (EvaluationStatus::Queued, None),
+        "after 2: evaluation(E2)"
+    );
+    assert_eq!(
+        waiting_state(&case, e3).await,
+        (EvaluationStatus::Queued, None),
+        "after 2: evaluation(E3)"
+    );
+    case.check("step 2").await;
 
     case.finish().await;
 }
@@ -1002,7 +1056,7 @@ async fn q20_a_build_without_an_upstream_answer_waits_for_the_upstream_caches() 
 #[tokio::test]
 async fn q21_a_queued_evaluation_whose_caches_are_all_full_waits_instead_of_dispatching() {
     let e1 = EvaluationId::now_v7();
-    let case = SchedulerCase::start(shape().evalq(e1).into_cache(CacheId::now_v7()).full()).await;
+    let case = SchedulerCase::start(shape().evalq(e1).full()).await;
     case.connect(W1, w_all(), &[]).await;
 
     case.assign_queued_evals().await;

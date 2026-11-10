@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::ids::{ClusterJobId, EvaluationId};
+use gradient_entity::ids::{CacheId, ClusterJobId, EvaluationId};
 use gradient_graph::{NarCommit, UpstreamHit};
 use gradient_pool::WorkerProfile;
 use gradient_types::exec::ExecInventory;
@@ -287,6 +287,7 @@ impl CaseShapes for Shape {
         self.evaluation(evaluation)
             .evaluation_status(EvaluationStatus::Queued)
             .repository(REPOSITORY)
+            .into_cache(CacheId::now_v7())
     }
 
     fn cl2(

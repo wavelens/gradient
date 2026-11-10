@@ -94,6 +94,7 @@ impl WaitingRefresh<'_> {
 
         let tasks = EvalTasks::load(&self.db.worker_db, &evals).await?;
         let mut caps_by_project: HashMap<Option<ProjectId>, Vec<BuildWorkerCaps>> = HashMap::new();
+        let mut has_writable_cache_by_project: HashMap<ProjectId, bool> = HashMap::new();
         let now = gradient_types::now();
         let mut unbuildables = Vec::new();
         let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
@@ -120,53 +121,74 @@ impl WaitingRefresh<'_> {
                 && reason.as_ref().is_some_and(|r| {
                     matches!(
                         r,
-                        WaitingReason::Approval { .. }
-                            | WaitingReason::NoCache
-                            | WaitingReason::CacheStorageFull
+                        WaitingReason::Approval { .. } | WaitingReason::CacheStorageFull
                     )
                 })
             {
                 continue;
             }
 
-            let outcome = match eval.status {
-                EvaluationStatus::Waiting => match reason {
-                    Some(WaitingReason::EvalWorkers { capability, .. }) => {
-                        Some(decide_eval_recovery(capability, project_workers))
-                    }
-                    Some(WaitingReason::Draining) => Some((eval.status_after_draining(), None)),
-                    _ => match self
-                        .build_phase_decision(eval.id, eval_counters, worker_caps, reason.as_ref())
-                        .await?
-                    {
-                        BuildPhase::Pending(a) => Some((a.target, a.reason)),
-                        BuildPhase::Settled => continue,
-                        BuildPhase::Unnamed => {
-                            Some(decide_eval_recovery(EvalCapability::Eval, project_workers))
-                        }
-                    },
-                },
-                EvaluationStatus::Queued
-                | EvaluationStatus::Fetching
-                | EvaluationStatus::EvaluatingFlake
-                | EvaluationStatus::EvaluatingDerivation => decide_pre_build_target(
-                    eval.kind,
-                    eval.status,
-                    check_repository_url_is_ssh(&eval.repository),
+            let cache_outcome = self
+                .refresh_waiting_evaluation_cache_state(
+                    &eval,
+                    reason.as_ref(),
+                    project,
                     project_workers,
-                ),
-                EvaluationStatus::Building => {
-                    match self
-                        .build_phase_decision(eval.id, eval_counters, worker_caps, reason.as_ref())
-                        .await?
-                    {
-                        BuildPhase::Pending(a) => Some((a.target, a.reason)),
-                        BuildPhase::Settled | BuildPhase::Unnamed => {
-                            self.exec_jobs_wait(eval.id, reason.as_ref()).await?
+                    &mut has_writable_cache_by_project,
+                )
+                .await?;
+            let outcome = if let Some(cache_outcome) = cache_outcome {
+                Some(cache_outcome)
+            } else {
+                match eval.status {
+                    EvaluationStatus::Waiting => match reason {
+                        Some(WaitingReason::EvalWorkers { capability, .. }) => {
+                            Some(decide_eval_recovery(capability, project_workers))
+                        }
+                        Some(WaitingReason::Draining) => Some((eval.status_after_draining(), None)),
+                        _ => match self
+                            .build_phase_decision(
+                                eval.id,
+                                eval_counters,
+                                worker_caps,
+                                reason.as_ref(),
+                            )
+                            .await?
+                        {
+                            BuildPhase::Pending(a) => Some((a.target, a.reason)),
+                            BuildPhase::Settled => continue,
+                            BuildPhase::Unnamed => {
+                                Some(decide_eval_recovery(EvalCapability::Eval, project_workers))
+                            }
+                        },
+                    },
+                    EvaluationStatus::Queued
+                    | EvaluationStatus::Fetching
+                    | EvaluationStatus::EvaluatingFlake
+                    | EvaluationStatus::EvaluatingDerivation => decide_pre_build_target(
+                        eval.kind,
+                        eval.status,
+                        check_repository_url_is_ssh(&eval.repository),
+                        project_workers,
+                    ),
+                    EvaluationStatus::Building => {
+                        match self
+                            .build_phase_decision(
+                                eval.id,
+                                eval_counters,
+                                worker_caps,
+                                reason.as_ref(),
+                            )
+                            .await?
+                        {
+                            BuildPhase::Pending(a) => Some((a.target, a.reason)),
+                            BuildPhase::Settled | BuildPhase::Unnamed => {
+                                self.exec_jobs_wait(eval.id, reason.as_ref()).await?
+                            }
                         }
                     }
+                    _ => None,
                 }
-                _ => None,
             };
 
             let Some((target, new_reason)) = outcome else {
@@ -216,6 +238,57 @@ impl WaitingRefresh<'_> {
         }
 
         Ok(unbuildables)
+    }
+
+    async fn refresh_waiting_evaluation_cache_state(
+        &self,
+        eval: &MEvaluation,
+        reason: Option<&WaitingReason>,
+        project: Option<ProjectId>,
+        workers: ProjectWorkerCounts,
+        has_writable_cache_by_project: &mut HashMap<ProjectId, bool>,
+    ) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
+        let parked_for_cache = matches!(reason, Some(WaitingReason::NoCache));
+        let waits_before_evaluation = eval.status == EvaluationStatus::Queued
+            || parked_for_cache
+            || matches!(
+                reason,
+                Some(WaitingReason::EvalWorkers { capability, .. }) if *capability != EvalCapability::Exec
+            );
+        if !waits_before_evaluation {
+            return Ok(None);
+        }
+        let Some(project) = project else {
+            return Ok(parked_for_cache.then(|| (eval.status, reason.cloned())));
+        };
+
+        let has_writable_cache = match has_writable_cache_by_project.get(&project) {
+            Some(known) => *known,
+            None => {
+                let found = gradient_db::projects::caches::project_has_writable_cache(
+                    &self.db.worker_db,
+                    project,
+                )
+                .await
+                .context("check the project's writable cache")?;
+                has_writable_cache_by_project.insert(project, found);
+                found
+            }
+        };
+
+        Ok(match (has_writable_cache, parked_for_cache) {
+            (false, _) => Some((EvaluationStatus::Waiting, Some(WaitingReason::NoCache))),
+            (true, true) => Some(
+                decide_pre_build_target(
+                    eval.kind,
+                    EvaluationStatus::Queued,
+                    check_repository_url_is_ssh(&eval.repository),
+                    workers,
+                )
+                .unwrap_or((EvaluationStatus::Queued, None)),
+            ),
+            (true, false) => None,
+        })
     }
 
     async fn exec_jobs_wait(
