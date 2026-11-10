@@ -166,6 +166,47 @@ async fn api_keys_cannot_create_list_change_or_delete_teams() {
     }
 }
 
+fn cache_scope_key(raw: &str) -> api::Model {
+    key_row(raw, cache_mask_from(CachePermission::ALL), Some(cache_id()))
+}
+
+#[tokio::test]
+async fn api_keys_cannot_create_a_project() {
+    let any_project = "h".repeat(64);
+    let cache_scope = "i".repeat(64);
+    for (raw, key) in [
+        (any_project.clone(), key_row(&any_project, i64::MAX, None)),
+        (cache_scope.clone(), cache_scope_key(&cache_scope)),
+    ] {
+        let db = with_key(mock_db(), &key);
+        let status = refused_with_key(db, &raw, |s| {
+            s.put("/api/v1/projects").json(&json!({
+                "name": "new-project",
+                "display_name": "New",
+                "description": "",
+            }))
+        })
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{:?}", key.cache);
+    }
+}
+
+#[tokio::test]
+async fn cache_scope_key_is_refused_outside_cache_routes() {
+    let raw = "j".repeat(64);
+    let key = cache_scope_key(&raw);
+    for path in [
+        "/api/v1/projects",
+        "/api/v1/dashboard/tasks",
+        "/api/v1/projects/test-project",
+        "/api/v1/user/stars",
+    ] {
+        let db = with_key(mock_db(), &key);
+        let status = refused_with_key(db, &raw, |s| s.get(path)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+    }
+}
+
 async fn pull_status(db: MockDatabase, password: &str) -> StatusCode {
     let server = make_test_server(db.into_connection());
     server

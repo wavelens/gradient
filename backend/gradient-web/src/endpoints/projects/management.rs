@@ -7,7 +7,7 @@
 use crate::access::{Caller, caller_project_mask, key_limited_project_mask};
 use crate::api_spec::ProjectPath;
 use crate::audit::{Audit, changed_fields};
-use crate::authorization::MaybeApiKey;
+use crate::authorization::{MaybeApiKey, reject_api_key_authentication};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate};
 use crate::json_body::JsonBody;
@@ -249,7 +249,7 @@ pub async fn get(
     operation_id = "createProject",
     tag = "projects",
     summary = "Create project",
-    description = "Creates a new project owned by the current user.",
+    description = "Create a new project for the current user. Only signed-in sessions can call this endpoint. API keys cannot create projects.",
     request_body = MakeProjectRequest,
     responses((status = OK, description = "Project UUID", body = String, content_type = "application/json"), WebError)
 )]
@@ -258,8 +258,10 @@ pub async fn put(
     audit: Audit,
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
+    Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     JsonBody(body): JsonBody<MakeProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    reject_api_key_authentication(api_key.as_ref())?;
     require_create_permission(state.config.permissions.create_project, &user)?;
 
     let existing_project =

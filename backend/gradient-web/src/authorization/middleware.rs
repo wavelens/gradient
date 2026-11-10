@@ -23,6 +23,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use super::api_key::{ApiKeyContext, DecodedRequest, MaybeApiKey};
+use super::cache_pinned_api_key_route_scope::cache_pinned_key_scope_of_request;
 use super::job_scope::{JobScopeRefusal, job_scope_of_request};
 use super::jwt::{
     bearer_token, clear_jwt_token_cookie, decode_jwt, extract_bearer_or_cookie,
@@ -162,6 +163,9 @@ pub async fn authorize(
     if let Err(denial) = job_scope_of_caller(&mut parts, &decoded).await {
         return Err(deny(&audit, Some(user_id), method, path, denial).await);
     }
+    if let Err(denial) = cache_pinned_key_scope_of_request(&parts, api_key_context) {
+        return Err(deny(&audit, Some(user_id), method, path, denial).await);
+    }
 
     let Some(current_user) = by_id::<EUser, _>(&state.web_db, user_id).await? else {
         let denial = Denial::UnknownUser;
@@ -272,6 +276,11 @@ pub async fn authorize_optional(
     match caller {
         Some((user, decoded)) => {
             if let Err(refusal) = job_scope_of_caller(&mut parts, &decoded).await {
+                return WebError::from(refusal).into_response();
+            }
+            if let Err(refusal) =
+                cache_pinned_key_scope_of_request(&parts, decoded.api_key_context())
+            {
                 return WebError::from(refusal).into_response();
             }
             parts.extensions.insert(MaybeUser(Some(user)));

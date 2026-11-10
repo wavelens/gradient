@@ -6948,7 +6948,7 @@ paths:
       tags:
       - projects
       summary: Create project
-      description: Creates a new project owned by the current user.
+      description: Create a new project for the current user. Only signed-in sessions can call this endpoint. API keys cannot create projects.
       operationId: createProject
       requestBody:
         content:

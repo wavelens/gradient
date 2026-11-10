@@ -5,6 +5,7 @@
  */
 
 mod api_key;
+mod cache_pinned_api_key_route_scope;
 mod external_login;
 mod identity_connect;
 mod job_scope;
