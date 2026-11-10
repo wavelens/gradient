@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use anyhow::{Context, Result, bail};
+use crate::client::HostClient;
+use anyhow::{Context, Result};
 use gradient_types::GiteaOAuthConfig;
 use serde::Deserialize;
 use url::Url;
@@ -84,24 +85,11 @@ async fn post_client_credentials_and_grant_fields_to_token_endpoint_and_parse_to
     ];
     form.extend_from_slice(grant_fields);
 
-    let resp = http
-        .post(format!(
-            "{}/login/oauth/access_token",
-            app.instance_base_url
-        ))
-        .header(reqwest::header::ACCEPT, "application/json")
-        .form(&form)
-        .send()
-        .await
-        .context("OAuth2 Token Request to Git Host")?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        bail!("OAuth2 token endpoint for the Git host returned {status}: {body}");
-    }
-    resp.json::<GitHostOAuthTokenResponse>()
-        .await
-        .context("parse OAuth2 token response")
+    Ok(
+        HostClient::gitea_or_forgejo_oauth2(http.clone(), app.instance_base_url.as_str())
+            .post_form_json("/access_token", &form)
+            .await?,
+    )
 }
 
 #[cfg(test)]

@@ -31,6 +31,7 @@ use chrono::{Duration, Utc};
 use gradient_ci::IntegrationKind;
 use gradient_ci::outbound_integration_access_token::access_token_expires_at_from_lifetime_seconds;
 use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_git_host::gitea_oauth::{
     build_git_host_oauth_authorization_url, exchange_authorization_code_for_tokens,
 };
@@ -90,13 +91,9 @@ fn build_redirect_response_with_location_and_set_cookie(
         .map_err(Into::into)
 }
 
-async fn integration_name_taken(
-    state: &ServerState,
-    project: ProjectId,
-    name: &str,
-) -> WebResult<bool> {
+async fn integration_name_taken(web_db: &WebDb, project: ProjectId, name: &str) -> WebResult<bool> {
     for kind in [IntegrationKind::Inbound, IntegrationKind::Outbound] {
-        if gradient_db::integrations::by_name(&state.web_db, project, kind, name)
+        if gradient_db::integrations::by_name(web_db, project, kind, name)
             .await?
             .is_some()
         {
@@ -131,7 +128,7 @@ pub async fn redirect_signed_in_browser_to_git_host_for_project_oauth_approval(
         .filter(|claims| claims.id == user.id)
         .ok_or(ProjectRefusal::GitHostOAuthConnectNeedsSignedInBrowserSession)?;
     let name = query.name.into_inner();
-    if integration_name_taken(&state, project.id, &name).await? {
+    if integration_name_taken(&state.web_db, project.id, &name).await? {
         return Err(WebError::already_exists(Resource::IntegrationName));
     }
     let display_name = query
@@ -192,8 +189,15 @@ pub async fn get_git_host_oauth_callback(
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
-    let location =
-        complete_gitea_oauth2_callback_and_return_redirect_url(&state, &headers, &query).await;
+    let location = complete_gitea_oauth2_callback_and_return_redirect_url(
+        &state.web_db,
+        &state.http,
+        &state.config,
+        &state.jwt_secret,
+        &headers,
+        &query,
+    )
+    .await;
     build_redirect_response_with_location_and_set_cookie(
         &location,
         csrf_clear_cookie(GIT_HOST_OAUTH_CONNECT_COOKIE, state.config.server.use_tls),
@@ -201,12 +205,15 @@ pub async fn get_git_host_oauth_callback(
 }
 
 async fn complete_gitea_oauth2_callback_and_return_redirect_url(
-    state: &ServerState,
+    web_db: &WebDb,
+    http: &reqwest::Client,
+    config: &RuntimeConfig,
+    jwt_secret: &SecretString,
     headers: &HeaderMap,
     query: &HashMap<String, String>,
 ) -> String {
     let claims = cookie_value(headers, GIT_HOST_OAUTH_CONNECT_COOKIE)
-        .and_then(|cookie| verify_claims::<SignedCookieClaims>(&state.jwt_secret, cookie).ok())
+        .and_then(|cookie| verify_claims::<SignedCookieClaims>(jwt_secret, cookie).ok())
         .filter(|claims| {
             query
                 .get("state")
@@ -218,14 +225,14 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
     let page = format!("/project/{}/integrations", claims.project_name);
 
     let outcome: Result<usize, &'static str> = async {
-        let app = state.config.gitea_app.as_ref().ok_or("failed")?;
+        let app = config.gitea_app.as_ref().ok_or("failed")?;
         let code = match (query.get("code"), query.get("error")) {
             (_, Some(_)) => return Err("denied"),
             (Some(code), None) => code,
             (None, None) => return Err("failed"),
         };
 
-        let signed_in = gradient_db::lookup::by_id::<ESession, _>(&state.web_db, claims.session_id)
+        let signed_in = gradient_db::lookup::by_id::<ESession, _>(web_db, claims.session_id)
             .await
             .is_ok_and(|session| {
                 session.is_some_and(|s| {
@@ -236,12 +243,12 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
             return Err("signed_out");
         }
         let project_unmanaged =
-            gradient_db::lookup::by_id::<EProject, _>(&state.web_db, claims.project_id)
+            gradient_db::lookup::by_id::<EProject, _>(web_db, claims.project_id)
                 .await
                 .is_ok_and(|project| project.is_some_and(|p| !p.managed));
         let allowed = project_unmanaged
             && has_permission(
-                &state.web_db,
+                web_db,
                 claims.user_id,
                 claims.project_id,
                 Permission::ManageIntegrations,
@@ -252,7 +259,7 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
         if !allowed {
             return Err("forbidden");
         }
-        if integration_name_taken(state, claims.project_id, &claims.name)
+        if integration_name_taken(web_db, claims.project_id, &claims.name)
             .await
             .unwrap_or(true)
         {
@@ -264,20 +271,20 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
             "failed"
         };
         let tokens = exchange_authorization_code_for_tokens(
-            &state.http,
+            http,
             app,
             code,
-            &gitea_oauth2_redirect_uri(&state.config.server.serve_url),
+            &gitea_oauth2_redirect_uri(&config.server.serve_url),
             &claims.pkce_verifier,
         )
         .await
         .map_err(|e| failed(&format!("{e:#}")))?;
 
         let created = create_integrations_and_attach_matching_tasks(
-            &state.web_db,
-            &state.config.secrets.crypt_file,
+            web_db,
+            &config.secrets.crypt_file,
             &WebhookBase {
-                serve_url: &state.config.server.serve_url,
+                serve_url: &config.server.serve_url,
                 project: &claims.project_name,
             },
             SharedIntegrationCreationFields {
@@ -316,7 +323,7 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
 
         Ok(
             install_gradient_webhook_on_repositories_of_tasks_attached_to_new_integration(
-                state,
+                web_db,
                 app,
                 claims.project_id,
                 inbound,
@@ -337,7 +344,7 @@ async fn complete_gitea_oauth2_callback_and_return_redirect_url(
 }
 
 async fn install_gradient_webhook_on_repositories_of_tasks_attached_to_new_integration(
-    state: &ServerState,
+    web_db: &WebDb,
     app: &GiteaOAuthConfig,
     project: ProjectId,
     inbound: &IntegrationResponse,
@@ -349,10 +356,7 @@ async fn install_gradient_webhook_on_repositories_of_tasks_attached_to_new_integ
     ) else {
         return 0;
     };
-    let Ok(tasks) = gradient_db::tasks::of_project(project)
-        .all(&state.web_db)
-        .await
-    else {
+    let Ok(tasks) = gradient_db::tasks::of_project(project).all(web_db).await else {
         return 0;
     };
     let app_host = url_host(&app.instance_base_url);

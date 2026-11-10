@@ -22,14 +22,16 @@ enum TokenHeader {
     AuthorizationToken,
     AuthorizationBearer,
     PrivateToken,
+    NoAuthHeader,
 }
 
 impl TokenHeader {
-    fn pair(self, token: &str) -> (&'static str, String) {
+    fn pair(self, token: &str) -> Option<(&'static str, String)> {
         match self {
-            Self::AuthorizationToken => ("Authorization", format!("token {token}")),
-            Self::AuthorizationBearer => ("Authorization", format!("Bearer {token}")),
-            Self::PrivateToken => ("PRIVATE-TOKEN", token.to_owned()),
+            Self::AuthorizationToken => Some(("Authorization", format!("token {token}"))),
+            Self::AuthorizationBearer => Some(("Authorization", format!("Bearer {token}"))),
+            Self::PrivateToken => Some(("PRIVATE-TOKEN", token.to_owned())),
+            Self::NoAuthHeader => None,
         }
     }
 }
@@ -86,6 +88,20 @@ impl HostClient {
             token,
             TokenHeader::AuthorizationToken,
             &[],
+        )
+    }
+
+    pub(crate) fn gitea_or_forgejo_oauth2(
+        http: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            http,
+            base_url,
+            "/login/oauth",
+            "",
+            TokenHeader::NoAuthHeader,
+            &[("Accept", "application/json")],
         )
     }
 
@@ -198,6 +214,21 @@ impl HostClient {
         Ok(())
     }
 
+    pub(crate) async fn post_form_json<T: DeserializeOwned, F: Serialize + ?Sized>(
+        &self,
+        path: &str,
+        form: &F,
+    ) -> Result<T, HostError> {
+        let url = self.url(path);
+        let request = self.request(Method::POST, &url).form(form);
+        Self::send(Method::POST, url, request)
+            .await?
+            .into_success()
+            .await?
+            .json()
+            .await
+    }
+
     async fn succeed<B: Serialize + ?Sized>(
         &self,
         method: Method,
@@ -213,12 +244,23 @@ impl HostClient {
         path: &str,
         body: Option<&B>,
     ) -> Result<Reply, HostError> {
-        let url = format!("{}{}{}", self.base_url, self.api_prefix, path);
+        let url = self.url(path);
         let mut request = self.request(method.clone(), &url);
         if let Some(body) = body {
             request = request.json(body);
         }
+        Self::send(method, url, request).await
+    }
 
+    fn url(&self, path: &str) -> String {
+        format!("{}{}{}", self.base_url, self.api_prefix, path)
+    }
+
+    async fn send(
+        method: Method,
+        url: String,
+        request: reqwest::RequestBuilder,
+    ) -> Result<Reply, HostError> {
         match request.send().await {
             Ok(response) => Ok(Reply {
                 method,
@@ -234,8 +276,10 @@ impl HostClient {
     }
 
     fn request(&self, method: Method, url: &str) -> reqwest::RequestBuilder {
-        let (name, value) = self.token_header.pair(&self.token);
-        let mut request = self.http.request(method, url).header(name, value);
+        let mut request = self.http.request(method, url);
+        if let Some((name, value)) = self.token_header.pair(&self.token) {
+            request = request.header(name, value);
+        }
         for (name, value) in self.headers {
             request = request.header(*name, *value);
         }
