@@ -144,13 +144,10 @@ pub(super) async fn get_nar_by_hash(
         .as_deref()
         .map(normalize_nar_hash)
         .ok_or(CacheRefusal::NotRecorded("FileHash"))?;
-    let file_size = u32::try_from(
-        cached_path_row
-            .file_size
-            .ok_or(CacheRefusal::NotRecorded("FileSize"))?
-            .max(0),
-    )
-    .unwrap_or(u32::MAX);
+    let file_size = cached_path_row
+        .file_size
+        .and_then(|size| u64::try_from(size).ok())
+        .ok_or(CacheRefusal::NotRecorded("FileSize"))?;
     let nar_hash = cached_path_row
         .nar_hash
         .as_deref()
@@ -158,7 +155,8 @@ pub(super) async fn get_nar_by_hash(
         .ok_or(CacheRefusal::NotRecorded("NarHash"))?;
     let nar_size = cached_path_row
         .nar_size
-        .ok_or(CacheRefusal::NotRecorded("NarSize"))? as u64;
+        .and_then(|size| u64::try_from(size).ok())
+        .ok_or(CacheRefusal::NotRecorded("NarSize"))?;
     let references =
         gradient_db::graph::runtime_closure::references_for_hash(db, &cached_path_row.hash).await?;
 

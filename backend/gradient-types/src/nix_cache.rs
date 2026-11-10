@@ -41,7 +41,7 @@ pub struct NixPathInfo {
     #[serde(rename = "FileHash")]
     pub file_hash: String,
     #[serde(rename = "FileSize")]
-    pub file_size: u32,
+    pub file_size: u64,
     #[serde(rename = "NarHash")]
     pub nar_hash: String,
     #[serde(rename = "NarSize")]
@@ -159,7 +159,7 @@ pub fn parse_narinfo_body(body: &str) -> Result<NixPathInfo, NarInfoParseError> 
     let compression = get("Compression")?.to_string();
     let file_hash = get("FileHash")?.to_string();
     let file_size_raw = get("FileSize")?;
-    let file_size: u32 = file_size_raw
+    let file_size: u64 = file_size_raw
         .parse()
         .map_err(|_| NarInfoParseError::InvalidValue {
             field: "FileSize",
@@ -372,6 +372,19 @@ mod tests {
         assert_eq!(parsed.sig, original.sig);
         assert_eq!(parsed.deriver, original.deriver);
         assert_eq!(parsed.ca, original.ca);
+    }
+
+    #[test]
+    fn a_nar_over_4_gib_keeps_its_file_size() {
+        let large = NixPathInfo {
+            file_size: 5_000_000_000,
+            ..path_info()
+        };
+        let text = large.to_nix_string();
+
+        assert!(text.contains("FileSize: 5000000000\n"));
+        let parsed = parse_narinfo_body(&text).expect("parse must succeed");
+        assert_eq!(parsed.file_size, 5_000_000_000);
     }
 
     #[test]

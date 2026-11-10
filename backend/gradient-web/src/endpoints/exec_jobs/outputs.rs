@@ -6,7 +6,7 @@
 
 use crate::api_spec::Binary;
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::endpoints::untrusted_content_headers;
+use crate::endpoints::{attachment_name, untrusted_content_headers};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::resource::Resource;
@@ -125,21 +125,6 @@ fn limited_to(
         });
         futures::future::ready(Some(chunk))
     })
-}
-
-fn attachment_name(path: &str) -> String {
-    path.rsplit('/')
-        .next()
-        .unwrap_or(path)
-        .chars()
-        .map(|c| {
-            if c == '"' || c == '\\' || c.is_control() {
-                '_'
-            } else {
-                c
-            }
-        })
-        .collect()
 }
 
 fn unsatisfiable(size: u64) -> WebResult<Response> {

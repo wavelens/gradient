@@ -80,7 +80,7 @@ pub fn build_product_headers(
     let disposition = if subtype == "html" {
         "inline".to_string()
     } else {
-        format!("attachment; filename=\"{filename}\"")
+        format!("attachment; filename=\"{}\"", attachment_name(filename))
     };
     hardened(content_type_for_filename(filename), disposition)
 }
@@ -88,8 +88,23 @@ pub fn build_product_headers(
 pub fn archive_headers(archive_name: &str) -> [(axum::http::HeaderName, String); 4] {
     hardened(
         "application/zstd",
-        format!("attachment; filename=\"{archive_name}\""),
+        format!("attachment; filename=\"{}\"", attachment_name(archive_name)),
     )
+}
+
+pub(crate) fn attachment_name(path: &str) -> String {
+    path.rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .chars()
+        .map(|c| {
+            if c == '"' || c == '\\' || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 fn hardened(content_type: &str, disposition: String) -> [(axum::http::HeaderName, String); 4] {
@@ -311,6 +326,25 @@ mod tests {
                         && v == UNTRUSTED_CONTENT_CSP)
             );
         }
+    }
+
+    #[test]
+    fn a_quote_or_newline_in_a_build_filename_cannot_break_the_header() {
+        let disposition = |headers: [(axum::http::HeaderName, String); 4]| {
+            headers
+                .into_iter()
+                .find(|(h, _)| *h == axum::http::header::CONTENT_DISPOSITION)
+                .map(|(_, v)| v)
+        };
+
+        assert_eq!(
+            disposition(build_product_headers("a\"b\r\nX: y.bin", "file")).as_deref(),
+            Some("attachment; filename=\"a_b__X: y.bin\"")
+        );
+        assert_eq!(
+            disposition(archive_headers("x\\\".tar.zst")).as_deref(),
+            Some("attachment; filename=\"x__.tar.zst\"")
+        );
     }
 
     #[test]

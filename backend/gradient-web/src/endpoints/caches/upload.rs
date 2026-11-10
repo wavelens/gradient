@@ -152,7 +152,7 @@ async fn read_multipart_form_stage_nar_to_temp_file_and_import(
     let narinfo = narinfo.ok_or(CacheRefusal::MissingPart("narinfo"))?;
     let upload = MappedUpload::new(narinfo, &state.cache_mapper(cache))?;
     let staged_size = staged_size.ok_or(CacheRefusal::MissingPart("nar"))?;
-    if staged_size as i64 != upload.narinfo.file_size {
+    if staged_size != upload.file_size {
         return Err(CacheRefusal::UploadedNarSizeMismatch {
             declared: upload.narinfo.file_size,
             got: staged_size,
@@ -181,21 +181,17 @@ async fn verify_admit_import_sign_and_publish_staged_nar(
 ) -> WebResult<bool> {
     let narinfo = &upload.narinfo;
     let verify_reader = store.open_read(key).await.context("read staged NAR")?;
-    gradient_storage::verify_nar_reader(
-        verify_reader,
-        &narinfo.file_hash,
-        narinfo.file_size as u64,
-    )
-    .await
-    .map_err(|e| CacheRefusal::NarVerificationFailed {
-        reason: e.to_string(),
-    })?;
+    gradient_storage::verify_nar_reader(verify_reader, &narinfo.file_hash, upload.file_size)
+        .await
+        .map_err(|e| CacheRefusal::NarVerificationFailed {
+            reason: e.to_string(),
+        })?;
 
     let claim = admit_nar(
         &state.config,
         &state.memory.upload_admission,
         &upload.stored_hash,
-        narinfo.file_size as u64,
+        upload.file_size,
     )
     .await?;
     let nar_reader = store.open_read(key).await.context("read staged NAR")?;
@@ -246,11 +242,17 @@ struct MappedUpload {
     client_path: String,
     original_hash: String,
     stored_hash: String,
+    file_size: u64,
     narinfo: NarinfoPart,
 }
 
 impl MappedUpload {
     fn new(narinfo: NarinfoPart, mapper: &StorePathMapper) -> WebResult<Self> {
+        let file_size =
+            u64::try_from(narinfo.file_size).map_err(|_| CacheRefusal::NegativeNarInfoSize)?;
+        if narinfo.nar_size < 0 {
+            return Err(CacheRefusal::NegativeNarInfoSize.into());
+        }
         let original = OriginalStorePath::parse(&narinfo.store_path)
             .map_err(|_| CacheRefusal::InvalidStoreHash)?;
         let client_path = narinfo.store_path.clone();
@@ -260,6 +262,7 @@ impl MappedUpload {
             client_path,
             original_hash: original.hash().to_string(),
             stored_hash: mapper.inbound_hash(original.hash().clone()).to_string(),
+            file_size,
             narinfo,
         })
     }
@@ -321,6 +324,10 @@ fn stored_segment(segment: &str, mapper: &StorePathMapper) -> WebResult<String> 
     Ok(stored)
 }
 
+fn segment_names_stored_hash(segment: &str, stored_hash: &str) -> bool {
+    segment.split_once('-').map_or(segment, |(hash, _)| hash) == stored_hash
+}
+
 fn require_safe_hash(store_hash: &str) -> WebResult<()> {
     if store_hash.is_empty() || store_hash.contains('/') || store_hash.contains("..") {
         return Err(CacheRefusal::InvalidStoreHash.into());
@@ -352,9 +359,10 @@ pub async fn nar_chunk(
     )?;
 
     let max = u64::try_from(state.config.nar.max_upload_size.get()).unwrap_or(u64::MAX);
-    if offset + body.len() as u64 > max {
-        return Err(CacheRefusal::NarTooLarge { max }.into());
-    }
+    let end = offset
+        .checked_add(body.len() as u64)
+        .filter(|end| *end <= max)
+        .ok_or(CacheRefusal::NarTooLarge { max })?;
 
     let store = upload_partial_store(&state.config)?;
     let key = format!("{}/{store_hash}", cache.id);
@@ -373,7 +381,7 @@ pub async fn nar_chunk(
         .await?;
         store.append(&key, &store_hash, offset, &body).await?;
         permit.committed();
-        offset + body.len() as u64
+        end
     } else {
         staged
     };
@@ -401,14 +409,16 @@ pub async fn nar_finalize(
     let mapper = state.cache_mapper(cache.id);
     let store_hash = stored_segment(&params.param::<String>("hash")?, &mapper)?;
     let upload = MappedUpload::new(narinfo, &mapper)?;
-    let narinfo = &upload.narinfo;
+    if !segment_names_stored_hash(&store_hash, &upload.stored_hash) {
+        return Err(CacheRefusal::UrlPathStoreHashNarInfoStorePathHashMismatch.into());
+    }
 
     let store = upload_partial_store(&state.config)?;
     let key = format!("{}/{store_hash}", cache.id);
     let staged = store.staged_len(&key).await;
-    if staged as i64 != narinfo.file_size {
+    if staged != upload.file_size {
         return Err(CacheRefusal::StagedNarSizeMismatch {
-            declared: narinfo.file_size,
+            declared: upload.narinfo.file_size,
             staged,
         }
         .into());
@@ -433,7 +443,9 @@ pub async fn nar_finalize(
 
 #[cfg(test)]
 mod tests {
-    use super::{NarinfoPart, require_safe_hash, stored_narinfo};
+    use super::{
+        MappedUpload, NarinfoPart, require_safe_hash, segment_names_stored_hash, stored_narinfo,
+    };
     use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
     use gradient_types::{CacheId, StorePathMapper};
     use std::sync::Arc;
@@ -484,6 +496,38 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn a_negative_declared_size_is_refused() {
+        let path = format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-hello");
+        for (file_size, nar_size) in [(-1, 5), (5, -1)] {
+            let narinfo = NarinfoPart {
+                file_size,
+                nar_size,
+                ..part(path.clone(), Vec::new())
+            };
+            assert!(MappedUpload::new(narinfo, &rotated()).is_err());
+        }
+    }
+
+    #[test]
+    fn a_finalize_url_must_name_the_narinfo_store_path() {
+        let path = format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-hello");
+        let upload = MappedUpload::new(part(path, Vec::new()), &rotated()).unwrap();
+
+        assert!(segment_names_stored_hash(
+            EXAMPLE_STORED_HASH,
+            &upload.stored_hash
+        ));
+        assert!(segment_names_stored_hash(
+            &format!("{EXAMPLE_STORED_HASH}-hello"),
+            &upload.stored_hash
+        ));
+        assert!(!segment_names_stored_hash(
+            EXAMPLE_ORIGINAL_HASH,
+            &upload.stored_hash
+        ));
     }
 
     #[test]

@@ -69,6 +69,10 @@ pub(crate) enum CacheRefusal {
     NarTooLarge { max: u64 },
     #[error("invalid store hash")]
     InvalidStoreHash,
+    #[error("The store hash in the URL doesn't match the store path in the narinfo.")]
+    UrlPathStoreHashNarInfoStorePathHashMismatch,
+    #[error("Keep `file_size` and `nar_size` non-negative.")]
+    NegativeNarInfoSize,
     #[error(
         "This account reached the maximum number of caches. Ask an administrator to raise the limit."
     )]
@@ -106,7 +110,9 @@ impl Refusal for CacheRefusal {
             | Self::UploadedNarSizeMismatch { .. }
             | Self::StagedNarSizeMismatch { .. }
             | Self::NarVerificationFailed { .. }
-            | Self::InvalidStoreHash => RefusalStatus::BadRequest,
+            | Self::InvalidStoreHash
+            | Self::UrlPathStoreHashNarInfoStorePathHashMismatch
+            | Self::NegativeNarInfoSize => RefusalStatus::BadRequest,
         }
     }
 
@@ -118,7 +124,9 @@ impl Refusal for CacheRefusal {
             | Self::UploadedNarSizeMismatch { .. }
             | Self::StagedNarSizeMismatch { .. }
             | Self::NarVerificationFailed { .. }
-            | Self::InvalidStoreHash => ErrorCode::INPUT_VALIDATION,
+            | Self::InvalidStoreHash
+            | Self::UrlPathStoreHashNarInfoStorePathHashMismatch
+            | Self::NegativeNarInfoSize => ErrorCode::INPUT_VALIDATION,
             Self::CacheLimitReached => ErrorCode::CACHE_LIMIT_REACHED,
             other => other.status().default_code(),
         }
