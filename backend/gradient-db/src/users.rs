@@ -32,7 +32,7 @@ pub async fn by_username_or_email<C: ConnectionTrait>(
         .filter(
             Condition::any()
                 .add(username_equals_ignoring_case_sql_filter(username))
-                .add(CUser::Email.eq(email)),
+                .add(email_equals_ignoring_case_sql_filter(email)),
         )
         .one(db)
         .await
@@ -43,22 +43,18 @@ fn username_equals_ignoring_case_sql_filter(username: &str) -> SimpleExpr {
         .eq(username.to_lowercase())
 }
 
-pub async fn by_email<C: ConnectionTrait>(db: &C, email: &str) -> Result<Option<MUser>, DbErr> {
-    EUser::find().filter(CUser::Email.eq(email)).one(db).await
+fn email_equals_ignoring_case_sql_filter(email: &str) -> SimpleExpr {
+    Expr::expr(Func::lower(Expr::col((EUser::default(), CUser::Email)))).eq(email.to_lowercase())
 }
 
-pub async fn by_email_ignoring_case<C: ConnectionTrait>(
-    db: &C,
-    email: &str,
-) -> Result<Option<MUser>, DbErr> {
+pub async fn by_email<C: ConnectionTrait>(db: &C, email: &str) -> Result<Option<MUser>, DbErr> {
     EUser::find()
-        .filter(
-            Expr::expr(Func::lower(Expr::col((EUser::default(), CUser::Email))))
-                .eq(email.to_lowercase()),
-        )
+        .filter(email_equals_ignoring_case_sql_filter(email))
         .one(db)
         .await
 }
+
+pub use self::by_email as by_email_ignoring_case;
 
 pub async fn by_email_verification_token<C: ConnectionTrait>(
     db: &C,
@@ -316,6 +312,122 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn emails_differing_only_in_case_are_one_account() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let account = |username: &str, email: &str| MUser {
+            id: UserId::now_v7(),
+            username: username.into(),
+            name: username.into(),
+            email: email.into(),
+            active: true,
+            ..Default::default()
+        };
+        crate::rows::insert::<EUser, _>(&db.connection(), account("alice", "alice@example.com"))
+            .await
+            .expect("the first account is written");
+        crate::rows::insert::<EUser, _>(&db.connection(), account("bob", ""))
+            .await
+            .expect("an account without email is written");
+        crate::rows::insert::<EUser, _>(&db.connection(), account("carol", ""))
+            .await
+            .expect("a second account without email is written");
+
+        let found = by_email(&db.connection(), "Alice@Example.com")
+            .await
+            .expect("the lookup runs")
+            .map(|user| user.username);
+        let found_by_either = by_username_or_email(&db.connection(), "nobody", "ALICE@example.com")
+            .await
+            .expect("the lookup runs")
+            .map(|user| user.username);
+        let second = crate::rows::insert::<EUser, _>(
+            &db.connection(),
+            account("mallory", "Alice@example.COM"),
+        )
+        .await;
+
+        assert_eq!(found.as_deref(), Some("alice"), "the lookup ignores case");
+        assert_eq!(found_by_either.as_deref(), Some("alice"));
+        assert!(second.is_err(), "the index refuses a case variant");
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn email_index_migration_clears_case_duplicate_emails_of_newer_accounts() {
+        use sea_orm_migration::MigratorTrait;
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let connection = db.connection();
+        let migrations = gradient_migration::Migrator::migrations();
+        let position = migrations
+            .iter()
+            .position(|m| m.name() == "m20261201_000001_case_insensitive_email_unique_index")
+            .expect("register the migration for the index on emails");
+        gradient_migration::Migrator::down(
+            &connection,
+            Some(u32::try_from(migrations.len() - position).expect("the count fits in u32")),
+        )
+        .await
+        .expect("the migrations after the email index revert");
+        let start = chrono::DateTime::UNIX_EPOCH.naive_utc();
+        let account =
+            |username: &str, email: &str, minute: i64, managed: bool, verified: bool| MUser {
+                id: UserId::now_v7(),
+                username: username.into(),
+                name: username.into(),
+                email: email.into(),
+                active: true,
+                managed,
+                email_verified: verified,
+                created_at: start + chrono::Duration::minutes(minute),
+                ..Default::default()
+            };
+        let accounts = [
+            account("alice", "alice@example.com", 0, false, true),
+            account("alice2", "Alice@example.com", 1, false, true),
+            account("bob", "bob@example.com", 0, false, false),
+            account("bob2", "BOB@example.com", 1, false, true),
+            account("carol", "carol@example.com", 0, false, true),
+            account("carol2", "Carol@example.com", 1, true, true),
+            account("dave", "", 0, false, false),
+            account("erin", "", 1, false, false),
+        ];
+        for user in &accounts {
+            crate::rows::insert::<EUser, _>(&connection, user.clone())
+                .await
+                .expect("case variants are allowed before the migration");
+        }
+
+        gradient_migration::Migrator::up(&connection, None)
+            .await
+            .expect("the migration runs on case duplicates");
+
+        let mut emails = Vec::new();
+        for user in &accounts {
+            let row = db
+                .find::<EUser>(user.id)
+                .await
+                .expect("the account remains");
+            emails.push((user.username.clone(), row.email, row.email_verified));
+        }
+        let expected: Vec<(String, String, bool)> = [
+            ("alice", "alice@example.com", true),
+            ("alice2", "", false),
+            ("bob", "", false),
+            ("bob2", "BOB@example.com", true),
+            ("carol", "", false),
+            ("carol2", "Carol@example.com", true),
+            ("dave", "", false),
+            ("erin", "", false),
+        ]
+        .iter()
+        .map(|(name, email, verified)| (name.to_string(), email.to_string(), *verified))
+        .collect();
+        assert_eq!(emails, expected);
+        db.finish().await;
+    }
+
+    #[tokio::test]
     async fn test_delete_user_with_project_fails_and_keeps_project() {
         use gradient_fixtures::ids::{project_id, user_id};
         use gradient_fixtures::rows;
@@ -383,8 +495,16 @@ mod tests {
             .await
             .expect("the project with members deletes");
 
-        assert!(db.find::<gradient_entity::role::Entity>(role.id).await.is_none());
-        assert!(db.rows::<gradient_entity::project_user::Entity>().await.is_empty());
+        assert!(
+            db.find::<gradient_entity::role::Entity>(role.id)
+                .await
+                .is_none()
+        );
+        assert!(
+            db.rows::<gradient_entity::project_user::Entity>()
+                .await
+                .is_empty()
+        );
         db.finish().await;
     }
 }

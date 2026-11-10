@@ -65,6 +65,7 @@ mod m20261128_000001_add_view_permission_bit_to_all_roles;
 mod m20261129_000000_integration_token_expiry_columns;
 mod m20261129_000001_add_restrict_evaluation_fetches_and_extra_allowed_uri_prefixes_to_project;
 mod m20261201_000000_restrict_user_foreign_keys;
+mod m20261201_000001_case_insensitive_email_unique_index;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -155,6 +156,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261129_000000_integration_token_expiry_columns::Migration),
             Box::new(m20261129_000001_add_restrict_evaluation_fetches_and_extra_allowed_uri_prefixes_to_project::Migration),
             Box::new(m20261201_000000_restrict_user_foreign_keys::Migration),
+            Box::new(m20261201_000001_case_insensitive_email_unique_index::Migration),
         ]
     }
 }
