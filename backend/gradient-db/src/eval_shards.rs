@@ -6,6 +6,7 @@
 
 use gradient_entity::StorePath;
 use gradient_entity::derivation::Column as CDerivation;
+use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
 use gradient_entity::entry_point::{Column as CEntryPoint, Entity as EEntryPoint};
 use gradient_entity::eval_shard::{
     ActiveModel as AEvalShard, Column as CEvalShard, Entity as EEvalShard, EvalShardState,
@@ -13,9 +14,9 @@ use gradient_entity::eval_shard::{
 };
 use gradient_entity::eval_split::{Column as CEvalSplit, Entity as EEvalSplit};
 use gradient_entity::ids::{EvalShardId, EvaluationId};
-use sea_orm::sea_query::{Expr, LockType};
+use sea_orm::sea_query::{Expr, LockType, Query};
 use sea_orm::{
-    ColumnTrait, Condition, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait,
+    ColumnTrait, Condition, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, ExprTrait,
     FromQueryResult, IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, RelationTrait,
     TransactionTrait, Value,
 };
@@ -173,11 +174,52 @@ pub async fn requeue_shards_of<C>(
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
+    requeue_or_fail_running_shards_matching_and_collect_failed(
+        db,
+        Condition::all()
+            .add(CEvalShard::TakenJob.eq(job))
+            .add(CEvalShard::Id.is_not_in(held.iter().copied())),
+    )
+    .await
+}
+
+pub async fn requeue_running_shards_whose_job_has_no_open_assignment<C>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<Vec<FailedShard>, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let open_assignment = Query::select()
+        .expr(Expr::val(1))
+        .from(EDispatchedJob)
+        .and_where(
+            Expr::col((EDispatchedJob, CDispatchedJob::JobId))
+                .equals((EEvalShard, CEvalShard::TakenJob)),
+        )
+        .and_where(Expr::col((EDispatchedJob, CDispatchedJob::FinishedAt)).is_null())
+        .to_owned();
+
+    requeue_or_fail_running_shards_matching_and_collect_failed(
+        db,
+        Condition::all()
+            .add(CEvalShard::Evaluation.eq(evaluation))
+            .add(Expr::exists(open_assignment).not()),
+    )
+    .await
+}
+
+async fn requeue_or_fail_running_shards_matching_and_collect_failed<C>(
+    db: &C,
+    matching: Condition,
+) -> Result<Vec<FailedShard>, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let txn = db.begin().await?;
     let running = EEvalShard::find()
-        .filter(CEvalShard::TakenJob.eq(job))
+        .filter(matching)
         .filter(CEvalShard::State.eq(EvalShardState::Running))
-        .filter(CEvalShard::Id.is_not_in(held.iter().copied()))
         .order_by_asc(CEvalShard::Seq)
         .lock(LockType::NoKeyUpdate)
         .all(&txn)
@@ -535,5 +577,54 @@ mod tests {
             "{:?}",
             running.values
         );
+    }
+
+    #[tokio::test]
+    async fn only_a_shard_whose_job_lost_its_assignment_is_queued_again() {
+        let evaluation = EvaluationId::now_v7();
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(evaluation)
+            .derivation("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv")
+            .job()
+            .open_assignment()
+            .assignment_option(|row| row.job_id = Some("eval:alive".into()))
+            .into_database()
+            .await;
+        let conn = db.connection();
+        let taken_by = |seq: i32, job: &str| MEvalShard {
+            taken_job: Some(job.into()),
+            ..shard(evaluation, seq, &["only"])
+        };
+        let (alive, lost) = (taken_by(1, "eval:alive"), taken_by(2, "eval:lost"));
+        EEvalShard::insert_many([
+            alive.clone().into_active_model(),
+            lost.clone().into_active_model(),
+        ])
+        .exec(&conn)
+        .await
+        .expect("the shards insert");
+
+        let failed = requeue_running_shards_whose_job_has_no_open_assignment(&conn, evaluation)
+            .await
+            .expect("requeue");
+
+        assert!(failed.is_empty());
+        let alive_row = db
+            .find::<EEvalShard>(alive.id)
+            .await
+            .expect("the alive shard");
+        let lost_row = db
+            .find::<EEvalShard>(lost.id)
+            .await
+            .expect("the lost shard");
+        assert_eq!(
+            (alive_row.state, alive_row.taken_job.as_deref()),
+            (EvalShardState::Running, Some("eval:alive"))
+        );
+        assert_eq!(
+            (lost_row.state, lost_row.taken_job),
+            (EvalShardState::Queued, None)
+        );
+        db.finish().await;
     }
 }

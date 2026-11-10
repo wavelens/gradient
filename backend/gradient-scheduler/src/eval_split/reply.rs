@@ -250,7 +250,11 @@ impl Scheduler {
         if let Some(finished) = request.finished {
             finish(&txn, job_id, &finished.id, deferred).await?;
         }
-        let stale = eval_shards::requeue_shards_of(&txn, job_id, &held).await?;
+        let mut stale = eval_shards::requeue_shards_of(&txn, job_id, &held).await?;
+        stale.extend(
+            eval_shards::requeue_running_shards_whose_job_has_no_open_assignment(&txn, evaluation)
+                .await?,
+        );
 
         let outcome = match eval_shards::take_shard(&txn, evaluation, job_id).await? {
             Some(shard) => EvalShardOutcome::Shard(given_shard(&txn, shard).await?),
