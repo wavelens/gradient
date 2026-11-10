@@ -82,6 +82,10 @@ impl PartialWriter {
     pub async fn finish(mut self) -> Result<StagedFile> {
         self.hash_prefix().await?;
         self.file.flush().await.context("flush partial")?;
+        self.file
+            .sync_data()
+            .await
+            .context("Sync partial data to disk")?;
         let digest = Sha256::try_from(self.hasher.finish())
             .map_err(|_| anyhow::anyhow!("sha256 finalize produced a non-sha256 digest"))?;
         Ok(StagedFile {

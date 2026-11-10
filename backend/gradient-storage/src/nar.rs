@@ -66,6 +66,19 @@ impl object_store::client::HttpConnector for SharedHttpConnector {
     }
 }
 
+async fn sync_directory_of(file: &std::path::Path) -> Result<()> {
+    let Some(parent) = file.parent() else {
+        return Ok(());
+    };
+    let directory = tokio::fs::File::open(parent)
+        .await
+        .context("Sync the object directory")?;
+    directory
+        .sync_all()
+        .await
+        .context("Sync the object directory")
+}
+
 #[derive(Clone)]
 pub struct NarStore {
     inner: Arc<dyn ObjectStore>,
@@ -457,7 +470,7 @@ impl NarStore {
                     .context("create the object directory")?;
             }
             match tokio::fs::rename(staged, &dest).await {
-                Ok(()) => return Ok(()),
+                Ok(()) => return sync_directory_of(&dest).await,
                 Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {}
                 Err(e) => return Err(e).context("rename the staged file into the store"),
             }
