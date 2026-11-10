@@ -85,7 +85,7 @@ Configure the provider with the SCIM base URL `https://gradient.example.com/scim
 | Add a user | A new passwordless account, claimed on the first OIDC sign-in |
 | Add to a group | Member of the team with that `scim_group` |
 | Remove from a group | Team membership removed |
-| Deactivate or delete | Sign-in blocked, history kept. `scim.hardDelete = true` deletes the account |
+| Deactivate or delete | Sign-in requests fail and history records stay intact. Gradient can delete the account instead with `scim.hardDelete = true`. Deletion attempts fail while projects, caches, tasks, or integrations still list the account as their creator. |
 
 ## Verify Deployment
 
