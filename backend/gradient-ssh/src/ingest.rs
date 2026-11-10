@@ -51,7 +51,7 @@ pub async fn import(
 pub async fn stage(
     session: &Session,
     info: &StoredPathInfo,
-    mut reader: impl AsyncRead + Unpin + Send,
+    reader: impl AsyncRead + Unpin + Send,
 ) -> anyhow::Result<Pending> {
     anyhow::ensure!(
         session.may(Permission::TriggerEvaluation),
@@ -73,7 +73,13 @@ pub async fn stage(
             claim.committed();
         }
 
-        tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
+        let (nar_hash, nar_size) =
+            read_nar_stream_and_return_hash_and_size_without_storing(reader, info.nar_size).await?;
+        anyhow::ensure!(
+            nar_size == info.nar_size && nar_hash == info.nar_hash,
+            "NAR hash of {} does not match",
+            info.original
+        );
         let announced = normalize_nar_hash(&info.nar_hash.as_sri().to_string());
         if known.nar_hash.as_deref().map(normalize_nar_hash) == Some(announced) {
             return Ok(Pending::Known(known));
@@ -231,6 +237,26 @@ async fn compress_into(
     ))
 }
 
+async fn read_nar_stream_and_return_hash_and_size_without_storing(
+    mut reader: impl AsyncRead + Unpin + Send,
+    announced: u64,
+) -> anyhow::Result<(NarHash, u64)> {
+    let mut raw = Context::new(Algorithm::SHA256);
+    let mut nar_size = 0_u64;
+    let mut buf = vec![0_u8; 1 << 16];
+    loop {
+        let n = reader.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+
+        nar_size += n as u64;
+        anyhow::ensure!(nar_size <= announced, "NAR is longer than announced");
+        raw.update(&buf[..n]);
+    }
+    Ok((NarHash::try_from(raw.finish())?, nar_size))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,6 +383,32 @@ mod tests {
             .expect("the stored content stays and the upload is accepted");
 
         assert!(upload.is_empty(), "the NAR bytes are drained");
+        let log = db.into_transaction_log();
+        assert_eq!(log.len(), 1, "only the lookup, nothing signed: {log:?}");
+    }
+
+    #[tokio::test]
+    async fn upload_with_matching_announced_hash_but_different_bytes_is_refused_and_nothing_is_signed()
+     {
+        let existing = MCachedPath {
+            hash: "0123456789abcdfghijklmnpqrsvwxyz".into(),
+            package: "hello".into(),
+            nar_hash: Some(NarHash::digest(NAR).as_sri().to_string()),
+            file_hash: Some("sha256-x".into()),
+            confirmed: true,
+            ..Default::default()
+        };
+        let db = mock_db()
+            .append_query_results([vec![existing]])
+            .into_connection();
+        let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
+        let forged = vec![b'?'; NAR.len()];
+
+        let e = import(&session, &info(NAR), forged.as_slice())
+            .await
+            .expect_err("the upload does not hold the stored content");
+
+        assert!(e.to_string().contains("NAR hash"), "{e}");
         let log = db.into_transaction_log();
         assert_eq!(log.len(), 1, "only the lookup, nothing signed: {log:?}");
     }
