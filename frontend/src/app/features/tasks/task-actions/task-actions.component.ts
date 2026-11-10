@@ -38,7 +38,7 @@ import {
   eventNameToReadableText,
 } from '@core/models';
 import { ActionFormComponent } from './action-form.component';
-import { OutgoingWebhookDeliveryListDialog } from '@shared/outgoing-deliveries';
+import { OutgoingWebhookDeliveryListDialog, getDeliveryResultReason } from '@shared/outgoing-deliveries';
 import { RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 
@@ -74,6 +74,7 @@ interface IntegrationOption {
 })
 export class TaskActionsComponent implements OnInit {
   protected readonly links = links;
+  protected readonly getDeliveryResultReason = getDeliveryResultReason;
   private route = inject(ActivatedRoute);
   private actionsService = inject(ActionsService);
   private integrationsService = inject(IntegrationsService);

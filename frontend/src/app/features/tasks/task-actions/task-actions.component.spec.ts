@@ -294,6 +294,14 @@ describe('TaskActionsComponent - write failures', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Last fired: never');
   });
 
+  it('keeps the reason of a failed last delivery on the action card', () => {
+    const fixture = setup(writer);
+    list.mockReturnValue(of([{ ...action, last_delivery: { id: 'd1', event: 'evaluation.completed', success: false, response_status: 502, duration_ms: 40, delivered_at: '2026-06-08T00:00:00Z' } }]));
+    fixture.componentInstance.testAction('a-1');
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.last-delivery-failed')?.textContent).toContain('Last delivery failed: HTTP 502');
+  });
+
   it('reports a failed test with the server reason', () => {
     const fixture = setup(writer);
     (TestBed.inject(ActionsService) as unknown as Record<string, unknown>)['test'] = () => throwError(() => refused);

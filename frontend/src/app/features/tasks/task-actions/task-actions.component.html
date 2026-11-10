@@ -51,6 +51,14 @@
                       {{ action.active ? 'Active' : 'Inactive' }}
                     </gr-badge>
                     <span>Last fired: {{ action.last_fired_at | relativeTime }}</span>
+                    @if (action.last_delivery; as delivery) {
+                      @if (!delivery.success) {
+                        <span class="fire-fail last-delivery-failed" [title]="delivery.error_message ?? ''">
+                          <gr-icon name="error" size="sm" />
+                          Last delivery failed: {{ getDeliveryResultReason(delivery) }}
+                        </span>
+                      }
+                    }
                     @if (testSuccessId() === action.id) {
                       <span class="fire-success">
                         <gr-icon name="check_circle" size="sm" />
