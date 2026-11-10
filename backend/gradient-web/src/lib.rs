@@ -268,6 +268,10 @@ pub fn create_router_with_scheduler(
     let auth_sensitive =
         auth_sensitive.route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(6), 5)?));
 
+    let (username_availability_api, _) = routes::username_availability_api().split_for_parts();
+    let username_availability_api = username_availability_api
+        .route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(2), 15)?));
+
     let (webhook_routes, _) = routes::webhook_routes().split_for_parts();
     let webhook_routes =
         webhook_routes.route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(1), 30)?));
@@ -280,6 +284,7 @@ pub fn create_router_with_scheduler(
         .merge(account_api)
         .merge(optional_api)
         .merge(auth_sensitive)
+        .merge(username_availability_api)
         .merge(webhook_routes)
         .merge(open_api);
     if state.config.server.public_listing {

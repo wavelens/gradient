@@ -14,29 +14,47 @@ use std::num::NonZeroU32;
 async fn auth_tier_throttles_burst() {
     let server = TestState::new().server();
 
+    let login = || {
+        server
+            .post("/api/v1/auth/basic/login")
+            .json(&serde_json::json!({"loginname": "x", "password": "x"}))
+    };
+
     for i in 1..=5 {
-        let resp = server
-            .post("/api/v1/auth/check-username")
-            .json(&serde_json::json!({"username": "x"}))
-            .await;
-        assert_eq!(
-            resp.status_code(),
-            200,
-            "request {} unexpectedly throttled: {:?}",
-            i,
-            resp.status_code()
-        );
+        let status = login().await.status_code();
+        assert_ne!(status, 429, "request {i} unexpectedly throttled");
     }
 
-    let throttled = server
-        .post("/api/v1/auth/check-username")
-        .json(&serde_json::json!({"username": "x"}))
-        .await;
+    let throttled = login().await.status_code();
     assert_eq!(
-        throttled.status_code(),
+        throttled, 429,
+        "6th burst request should be 429, got {throttled:?}"
+    );
+}
+
+#[tokio::test]
+async fn username_availability_allows_fifteen_rapid_checks_before_rate_limit_response() {
+    let server = TestState::new().server();
+    let check = || {
+        server
+            .post("/api/v1/auth/check-username")
+            .json(&serde_json::json!({"username": "x"}))
+    };
+
+    for i in 1..=15 {
+        let status = check().await.status_code();
+        assert_eq!(status, 200, "check {i} unexpectedly refused: {status:?}");
+    }
+
+    assert_eq!(check().await.status_code(), 429);
+    assert_ne!(
+        server
+            .post("/api/v1/auth/basic/login")
+            .json(&serde_json::json!({"loginname": "x", "password": "x"}))
+            .await
+            .status_code(),
         429,
-        "6th burst request should be 429, got {:?}",
-        throttled.status_code()
+        "username checks must not use up the sign-in budget"
     );
 }
 

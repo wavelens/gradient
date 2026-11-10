@@ -439,7 +439,6 @@ pub(crate) fn auth_sensitive() -> OpenApiRouter<Arc<ServerState>> {
         OpenApiRouter::new()
             .routes(routes!(auth::post_basic_login))
             .routes(routes!(auth::post_basic_register))
-            .routes(routes!(auth::post_check_username))
             .routes(routes!(auth::get_verify_email))
             .routes(routes!(auth::post_resend_verification))
             .routes(routes!(
@@ -452,6 +451,12 @@ pub(crate) fn auth_sensitive() -> OpenApiRouter<Arc<ServerState>> {
             .routes(routes!(login_providers::get_provider_callback))
             .routes(routes!(auth::post_cli_device_start))
             .routes(routes!(auth::post_cli_device_poll)),
+    ))
+}
+
+pub(crate) fn username_availability_api() -> OpenApiRouter<Arc<ServerState>> {
+    unsecured(enveloped(
+        OpenApiRouter::new().routes(routes!(auth::post_check_username)),
     ))
 }
 
