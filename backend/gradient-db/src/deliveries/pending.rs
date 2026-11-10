@@ -40,7 +40,8 @@ crate::sql! {
          RETURNING o.id, o.kind, o.key, o.payload, o.attempts",
         params = [Int(8), Int(CLAIM_LEASE_SECS)];
 
-    PENDING_DELIVERY_MARK_DELIVERED = "UPDATE pending_delivery SET delivered_at = (now() AT TIME ZONE 'UTC') WHERE id = $1",
+    PENDING_DELIVERY_MARK_DELIVERED = "UPDATE pending_delivery SET delivered_at = (now() AT TIME ZONE 'UTC') \
+         WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL",
         params = [NewUuid];
 
     /// The attempt count, the dead-letter decision and the next attempt are moving together.
@@ -48,7 +49,7 @@ crate::sql! {
     PENDING_DELIVERY_MARK_RETRY = "UPDATE pending_delivery SET attempts = attempts + 1, last_error = $2, \
          failed_at = CASE WHEN attempts + 1 >= $3 THEN (now() AT TIME ZONE 'UTC') ELSE NULL END, \
          next_attempt_at = (now() AT TIME ZONE 'UTC') + make_interval(secs => $4::int) \
-         WHERE id = $1",
+         WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL",
         params = [NewUuid, Text("probe"), Int(MAX_ATTEMPTS as i64), Int(30)];
 
     PENDING_DELIVERY_PENDING_COUNTS = "SELECT count(*) FILTER (WHERE delivered_at IS NULL AND failed_at IS NULL) AS pending, \
@@ -313,6 +314,10 @@ mod tests {
         let log = db.into_transaction_log();
         let sql = norm(&log[0].statements()[0].sql);
         assert!(sql.contains("attempts = attempts + 1"), "{sql}");
+        assert!(
+            sql.ends_with("WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL"),
+            "a late retry leaves a settled row alone: {sql}"
+        );
         assert!(
             sql.contains(
                 "failed_at = CASE WHEN attempts + 1 >= $3 THEN (now() AT TIME ZONE 'UTC') ELSE NULL END"
