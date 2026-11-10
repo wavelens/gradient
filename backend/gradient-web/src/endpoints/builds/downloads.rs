@@ -37,23 +37,15 @@ fn relative_in_output(full: &str, output_root: &str) -> String {
 
 async fn collect_build_products(
     db: &WebDb,
-    _build_id: BuildJobId,
     build_outputs: Vec<MDerivationOutput>,
-) -> Vec<BuildProduct> {
+) -> WebResult<Vec<BuildProduct>> {
     let output_ids: Vec<DerivationOutputId> = build_outputs.iter().map(|o| o.id).collect();
     if output_ids.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
-    let rows = match gradient_db::build_products::of_outputs(db, &output_ids).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to query build_product rows");
-            return Vec::new();
-        }
-    };
-
-    rows.into_iter().map(BuildProduct::from).collect()
+    let rows = gradient_db::build_products::of_outputs(db, &output_ids).await?;
+    Ok(rows.into_iter().map(BuildProduct::from).collect())
 }
 
 async fn find_and_serve_file(
@@ -68,13 +60,7 @@ async fn find_and_serve_file(
         return Ok(None);
     }
 
-    let rows = match gradient_db::build_products::of_outputs(db, &output_ids).await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(%build_id, error = %e, "failed to query build_product rows for download");
-            return Ok(None);
-        }
-    };
+    let rows = gradient_db::build_products::of_outputs(db, &output_ids).await?;
 
     for product in rows
         .into_iter()
@@ -209,8 +195,8 @@ pub async fn get_build_downloads(
             .await?;
 
     let mapper = state.project_mapper(ctx.project.id).await?;
-    let products = collect_build_products(&state.web_db, build_id, build_outputs)
-        .await
+    let products = collect_build_products(&state.web_db, build_outputs)
+        .await?
         .into_iter()
         .map(|product| BuildProduct {
             path: original_text(&mapper, product.path),
