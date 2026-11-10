@@ -472,7 +472,7 @@ describe('WebhooksComponent', () => {
     );
     expect(service.list).not.toHaveBeenCalled();
     expect(root.textContent).toContain('No access');
-    expect(root.textContent).toContain('Only the admins of this project can view this.');
+    expect(root.textContent).toContain('Only the members with Write or Admin on this project can view this.');
     expect(root.textContent).not.toContain('New Webhook');
     expect(root.textContent).not.toContain('Try Again');
   });

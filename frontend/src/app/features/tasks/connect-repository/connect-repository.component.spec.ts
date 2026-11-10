@@ -139,13 +139,13 @@ describe('ConnectRepositoryComponent', () => {
     const getSubscribedCaches = vi.fn(() => of([]));
     const el = render({}, {}, { getSubscribedCaches }, ['viewProject']).nativeElement as HTMLElement;
     expect(el.querySelector('#connect-repo')).toBeNull();
-    expect(el.querySelector('gr-load-state')?.textContent).toContain('Only the admins of this project can view this.');
+    expect(el.querySelector('gr-load-state')?.textContent).toContain('Only the members with Write or Admin on this project can view this.');
     expect(getSubscribedCaches).not.toHaveBeenCalled();
   });
 
   it('tells a visitor of a public project who can connect a repository, without permission names', () => {
     const el = render({}, {}, {}, []).nativeElement as HTMLElement;
-    expect(el.querySelector('gr-load-state')?.textContent).toContain('Only the admins of this project can view this.');
+    expect(el.querySelector('gr-load-state')?.textContent).toContain('Only the members of this project can view this.');
     expect(el.querySelector('gr-load-state')?.textContent).not.toContain('permission');
   });
 

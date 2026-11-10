@@ -17,7 +17,7 @@
         [appManagedDisable]="access()"
       ></button>
   }
-  <app-server-configuration-managed-banner [access]="access()" kind="task" showReadOnlyNote />
+  <app-server-configuration-managed-banner [access]="access()" kind="task" permission="manageActions" showReadOnlyNote />
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"

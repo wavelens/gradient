@@ -100,7 +100,7 @@ export class IntegrationsComponent implements OnInit {
   projectName = '';
   breadcrumb = computed(() => this.crumbs.projectSettings(this.projectName, { label: 'Integrations' }));
   missingPermission = computed(() =>
-    createMissingPermissionLoadStateError('project', isViewerProjectMember(this.resolvedProject())),
+    createMissingPermissionLoadStateError('project', isViewerProjectMember(this.resolvedProject()), 'manageIntegrations'),
   );
   integrations = signal<IntegrationResponse[]>([]);
   integrationAccess = computed(

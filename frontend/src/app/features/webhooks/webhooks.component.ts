@@ -200,11 +200,11 @@ export class WebhooksComponent implements OnInit {
   private missingPermission(): MissingPermissionLoadStateError | null {
     if (this.scope.kind === 'project') {
       const project = (this.route.snapshot.data['projectAccess'] as ProjectAccessData | undefined)?.project;
-      return accessTo(project, 'manageWebhooks').canEdit ? null : createMissingPermissionLoadStateError('project', isViewerProjectMember(project));
+      return accessTo(project, 'manageWebhooks').canEdit ? null : createMissingPermissionLoadStateError('project', isViewerProjectMember(project), 'manageWebhooks');
     }
     if (this.scope.kind === 'cache') {
       const cache = (this.route.parent?.snapshot.data['cacheAccess'] as CacheAccessData | undefined)?.cache;
-      return accessTo(cache, 'manageCacheWebhooks').canEdit ? null : createMissingPermissionLoadStateError('cache', isViewerCacheMember(cache));
+      return accessTo(cache, 'manageCacheWebhooks').canEdit ? null : createMissingPermissionLoadStateError('cache', isViewerCacheMember(cache), 'manageCacheWebhooks');
     }
     if (this.scope.kind === 'team') {
       const team = (this.route.snapshot.data['teamAccess'] as TeamAccessData | undefined)?.team;

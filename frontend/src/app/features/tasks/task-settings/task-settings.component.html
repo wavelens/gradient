@@ -8,7 +8,7 @@
 @if (canOpenParentProjectSettings()) {
   <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="links.projectPage(projectName, 'settings')"></a>
 }
-<app-server-configuration-managed-banner [access]="access()" kind="task" showReadOnlyNote />
+<app-server-configuration-managed-banner [access]="access()" kind="task" permission="editTask" showReadOnlyNote />
 <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!task()" loadingMessage="Loading task settings..."
                errorTitle="Failed to load task settings" (retry)="loadTask()">
 @if (task(); as proj) {
