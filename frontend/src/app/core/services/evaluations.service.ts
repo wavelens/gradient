@@ -69,10 +69,6 @@ export class EvaluationsService {
     return this.api.getBlob(`builds/${buildId}/sbom`);
   }
 
-  downloadBuildArtefactFile(buildId: string, artefactName: string): Observable<HttpResponse<Blob>> {
-    return this.api.getBlob(`builds/${buildId}/download/${encodeURIComponent(artefactName)}`);
-  }
-
   prioritizeBuild(buildId: string): Observable<string> {
     return this.api.post<string>(`builds/${buildId}/prioritize`);
   }
