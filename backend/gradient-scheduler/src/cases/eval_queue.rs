@@ -931,6 +931,66 @@ async fn waiting_state(
     )
 }
 
+#[tokio::test]
+async fn q23_failed_drv_recovery_insertion_does_not_abort_stuck_evaluation_and_next_pass_creates_recovery()
+ {
+    use sea_orm::ConnectionTrait;
+
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .evaluation_status(EvaluationStatus::Waiting)
+            .waiting_reason(WaitingReason::graph_stuck(1).to_json())
+            .derivation(A)
+            .walked()
+            .probed()
+            .entry_point(&attr_of(A))
+            .job()
+            .output(A_OUT),
+    )
+    .await;
+    case.backdate_evaluation(e1, ago(121)).await;
+
+    let db = case.db.connection();
+    db.execute_unprepared(
+        "CREATE FUNCTION refuse_evaluation_insert() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN RAISE EXCEPTION 'refused'; END $$; \
+         CREATE TRIGGER refuse_evaluation_insert BEFORE INSERT ON evaluation \
+         FOR EACH ROW EXECUTE FUNCTION refuse_evaluation_insert();",
+    )
+    .await
+    .expect("the trigger installs");
+    case.recover_drv_stuck_evals().await;
+    assert!(
+        recoveries_of(&case, e1).await.is_empty(),
+        "after 1: no recovery evaluation"
+    );
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Waiting,
+        "after 1: evaluation(E1).status"
+    );
+
+    db.execute_unprepared("DROP TRIGGER refuse_evaluation_insert ON evaluation;")
+        .await
+        .expect("the trigger drops");
+    case.recover_drv_stuck_evals().await;
+    assert_eq!(
+        recoveries_of(&case, e1).await.len(),
+        1,
+        "after 2: one recovery evaluation"
+    );
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Aborted,
+        "after 2: evaluation(E1).status"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
 async fn recoveries_of(
     case: &SchedulerCase,
     evaluation: EvaluationId,

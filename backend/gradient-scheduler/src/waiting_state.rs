@@ -20,7 +20,9 @@ use gradient_pool::WorkerInfo;
 use gradient_types::events::worker_demand::WorkerDemand;
 use gradient_types::input::check_repository_url_is_ssh;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, Value};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, TransactionTrait, Value,
+};
 use tracing::{error, info, warn};
 
 const DRV_RECOVERY_GRACE_SECS: i64 = 120;
@@ -705,7 +707,9 @@ pub async fn recover_drv_stuck_evals(scheduler: &crate::Scheduler) -> Result<()>
             }
         };
 
-        match gradient_ci::trigger_drv_recovery(&db.worker_db, &task, &eval).await {
+        match abort_stuck_evaluation_and_insert_recovery_in_transaction(&db.worker_db, &task, &eval)
+            .await
+        {
             Ok(new_eval) => {
                 scheduler.stop_aborted_evaluation(eval.id, false).await;
                 info!(stuck = %eval.id, recovery = %new_eval.id, "auto-triggered .drv-recovery re-evaluation");
@@ -718,6 +722,17 @@ pub async fn recover_drv_stuck_evals(scheduler: &crate::Scheduler) -> Result<()>
     }
 
     Ok(())
+}
+
+async fn abort_stuck_evaluation_and_insert_recovery_in_transaction(
+    db: &WorkerDb,
+    task: &MTask,
+    stuck: &MEvaluation,
+) -> Result<MEvaluation> {
+    let txn = db.begin().await?;
+    let recovery = gradient_ci::trigger_drv_recovery(&txn, task, stuck).await?;
+    txn.commit().await?;
+    Ok(recovery)
 }
 
 async fn eval_blocked_on_unproducible_drv(
