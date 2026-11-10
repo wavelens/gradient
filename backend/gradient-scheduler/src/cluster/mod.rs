@@ -38,6 +38,8 @@ pub struct ClusterAttempts {
     pub(crate) book: AttemptBook,
     pub prepared: PreparedMembers,
     pub(crate) wake: Arc<Notify>,
+    pub(crate) reservation_timeout_skip_until_by_cluster:
+        Arc<gradient_util::sync::Mutex<ReservationTimeoutSkipUntilByCluster>>,
 }
 
 #[derive(Debug, Clone)]

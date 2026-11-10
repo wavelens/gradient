@@ -142,8 +142,27 @@ impl Scheduler {
             ),
             timeout: Duration::from_secs(config.cluster_reserve_timeout_secs.get()),
         };
-        match aging_step(snapshot, gradient_types::now(), Instant::now(), &policy) {
+        let at = Instant::now();
+        let step = {
+            let skipped = self
+                .cluster
+                .reservation_timeout_skip_until_by_cluster
+                .lock();
+            aging_step(snapshot, &skipped, gradient_types::now(), at, &policy)
+        };
+        match step {
             AgingStep::Keep => {}
+            AgingStep::ReservationTimedOut => {
+                if let Some(held) = &snapshot.reservation {
+                    info!(cluster = %held.cluster(), "cluster reservation timeout - reserve again after one aging period");
+                    let until = at + policy.reserve_after.to_std().unwrap_or_default();
+                    self.cluster
+                        .reservation_timeout_skip_until_by_cluster
+                        .lock()
+                        .record_cluster_reservation_timeout_until(held.cluster(), at, until);
+                    self.release_reservation(held.cluster()).await;
+                }
+            }
             AgingStep::Expire => {
                 if let Some(held) = &snapshot.reservation {
                     info!(cluster = %held.cluster(), "cluster reservation released");

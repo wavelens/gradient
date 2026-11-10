@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use chrono::NaiveDateTime;
@@ -47,22 +47,43 @@ pub struct AgingPolicy {
     pub timeout: Duration,
 }
 
+#[derive(Debug, Default)]
+pub struct ReservationTimeoutSkipUntilByCluster(HashMap<ClusterJobId, Instant>);
+
+impl ReservationTimeoutSkipUntilByCluster {
+    pub fn record_cluster_reservation_timeout_until(
+        &mut self,
+        cluster: ClusterJobId,
+        at: Instant,
+        until: Instant,
+    ) {
+        self.0.retain(|_, skipped_until| *skipped_until > at);
+        self.0.insert(cluster, until);
+    }
+
+    pub fn is_cluster_skipped_for_reservations(&self, cluster: ClusterJobId, at: Instant) -> bool {
+        self.0.get(&cluster).is_some_and(|until| at < *until)
+    }
+}
+
 pub enum AgingStep {
     Keep,
     Expire,
+    ReservationTimedOut,
     Reserve(Reservation),
     Commit(Placement),
 }
 
 pub fn aging_step(
     snapshot: &ClusterSnapshot,
+    skipped: &ReservationTimeoutSkipUntilByCluster,
     now: NaiveDateTime,
     at: Instant,
     policy: &AgingPolicy,
 ) -> AgingStep {
     match &snapshot.reservation {
-        Some(held) => held_step(snapshot, held, now, at, policy),
-        None => reserve_step(snapshot, now, at, policy),
+        Some(held) => held_step(snapshot, held, at, policy),
+        None => reserve_step(snapshot, skipped, now, at, policy),
     }
 }
 
@@ -75,7 +96,6 @@ pub fn hide_reserved(snapshot: &mut ClusterSnapshot) {
 fn held_step(
     snapshot: &ClusterSnapshot,
     held: &Reservation,
-    now: NaiveDateTime,
     at: Instant,
     policy: &AgingPolicy,
 ) -> AgingStep {
@@ -86,10 +106,7 @@ fn held_step(
         return AgingStep::Expire;
     }
     if at.duration_since(held.since) >= policy.timeout {
-        return match reserve_step(snapshot, now, at, policy) {
-            AgingStep::Reserve(renewed) => AgingStep::Reserve(renewed),
-            _ => AgingStep::Expire,
-        };
+        return AgingStep::ReservationTimedOut;
     }
     if !held.seats().all(|seat| has_slot(&snapshot.slots, seat)) {
         return AgingStep::Keep;
@@ -109,11 +126,15 @@ fn held_step(
 
 fn reserve_step(
     snapshot: &ClusterSnapshot,
+    skipped: &ReservationTimeoutSkipUntilByCluster,
     now: NaiveDateTime,
     at: Instant,
     policy: &AgingPolicy,
 ) -> AgingStep {
-    for cluster in waiting_clusters_past_reserve_after_delay(snapshot, now, policy) {
+    let candidates = waiting_clusters_past_reserve_after_delay(snapshot, now, policy)
+        .into_iter()
+        .filter(|c| !skipped.is_cluster_skipped_for_reservations(c.id, at));
+    for cluster in candidates {
         if plan(cluster, &snapshot.slots, &snapshot.scores).is_some() {
             return AgingStep::Keep;
         }
@@ -249,7 +270,13 @@ mod tests {
     }
 
     fn step(snapshot: &ClusterSnapshot) -> AgingStep {
-        aging_step(snapshot, gradient_types::now(), Instant::now(), &policy())
+        aging_step(
+            snapshot,
+            &ReservationTimeoutSkipUntilByCluster::default(),
+            gradient_types::now(),
+            Instant::now(),
+            &policy(),
+        )
     }
 
     fn reserved(step: AgingStep) -> Reservation {
@@ -324,17 +351,31 @@ mod tests {
     }
 
     #[test]
-    fn an_old_reservation_is_planned_again() {
-        let c = cluster(2, 700, false);
-        let mut s = snapshot(vec![c], &[], &["w1", "w2"]);
+    fn a_timed_out_cluster_waits_one_aging_period_while_another_reserves() {
+        let stale = cluster(2, 900, false);
+        let other = cluster(2, 700, false);
+        let (stale_id, other_id) = (stale.id, other.id);
+        let mut s = snapshot(vec![stale, other], &[], &["w1", "w2"]);
         let mut r = reserved(step(&s));
+        assert_eq!(r.cluster(), stale_id);
         r.since = Instant::now() - Duration::from_secs(1801);
         s.reservation = Some(r);
+        assert!(matches!(step(&s), AgingStep::ReservationTimedOut));
 
-        let AgingStep::Reserve(renewed) = step(&s) else {
-            panic!("a timed-out reservation is planned again");
-        };
-        assert!(Instant::now().duration_since(renewed.since) < Duration::from_secs(1));
+        let at = Instant::now();
+        let mut skipped = ReservationTimeoutSkipUntilByCluster::default();
+        skipped.record_cluster_reservation_timeout_until(
+            stale_id,
+            at,
+            at + Duration::from_secs(600),
+        );
+        s.reservation = None;
+        let renewed = aging_step(&s, &skipped, gradient_types::now(), at, &policy());
+        assert_eq!(reserved(renewed).cluster(), other_id);
+
+        let later = at + Duration::from_secs(601);
+        let rested = aging_step(&s, &skipped, gradient_types::now(), later, &policy());
+        assert_eq!(reserved(rested).cluster(), stale_id);
     }
 
     #[test]

@@ -36,8 +36,8 @@ pub struct SchedulerArgs {
     #[arg(default_value = "600")]
     pub cluster_reserve_after_secs: NonZeroU64,
 
-    /// Seconds to hold a cluster job reservation before releasing it and planning the cluster
-    /// job again.
+    /// Number of seconds to keep a reservation for a cluster job before release. Cluster jobs wait
+    /// one cluster-reserve-after period before they can reserve workers again.
     #[arg(default_value = "1800")]
     pub cluster_reserve_timeout_secs: NonZeroU64,
 }

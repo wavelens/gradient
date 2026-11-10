@@ -122,7 +122,7 @@ A cluster can be ready to start while no set of workers remain idle long enough 
 - Seats: a reserved worker keeps its current jobs, but the scheduler assign no new job of the reserved kind to it.
 - Commit: once every seat reach an idle state, the reservation commit like a normal placement.
 - One at a time: a single cluster can hold a reservation at any moment. Other clusters plan over the unreserved idle workers.
-- Release: the reservation expire after `scheduler.clusterReserveTimeoutSecs` (1800 s), when a seated worker disconnect, or when the cluster leave the queue. The next planning pass can reserve again.
+- Release: Reservations expire after `scheduler.clusterReserveTimeoutSecs` (1800 seconds), when workers with seat assignments disconnect, or when clusters leave the queue. Clusters get one `scheduler.clusterReserveAfterSecs` period after the timeout before a new reservation. Other clusters can reserve during that period. Other releases allow a new reservation at the next planning pass.
 
 ## Split Evaluations
 
