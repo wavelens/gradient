@@ -139,13 +139,42 @@ pub fn print_server_action_message_or_exit(
     out.human(message);
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildClass {
+    Succeeded,
+    Failed,
+    Building,
+    Queued,
+    AbortedSkippedOrUnknown,
+}
+
+impl BuildClass {
+    pub fn build_class_from_build_status(status: BuildStatus) -> Self {
+        match status {
+            BuildStatus::Completed | BuildStatus::Substituted => Self::Succeeded,
+            BuildStatus::Building => Self::Building,
+            BuildStatus::Created | BuildStatus::Queued | BuildStatus::FailedTransient => {
+                Self::Queued
+            }
+            BuildStatus::FailedPermanent
+            | BuildStatus::FailedTimeout
+            | BuildStatus::DependencyFailed => Self::Failed,
+            BuildStatus::Aborted | BuildStatus::Skipped => Self::AbortedSkippedOrUnknown,
+        }
+    }
+
+    pub fn build_class_from_status_text(status: &str) -> Self {
+        status.parse().map_or(
+            Self::AbortedSkippedOrUnknown,
+            Self::build_class_from_build_status,
+        )
+    }
+}
+
 pub fn build_is_terminal(status: BuildStatus) -> bool {
     !matches!(
-        status,
-        BuildStatus::Created
-            | BuildStatus::Queued
-            | BuildStatus::Building
-            | BuildStatus::FailedTransient
+        BuildClass::build_class_from_build_status(status),
+        BuildClass::Building | BuildClass::Queued
     )
 }
 

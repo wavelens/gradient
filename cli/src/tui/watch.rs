@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::builds::BuildClass;
 use crate::tui::View;
 use connector::api::{BuildItem, EvaluationMessageResponse, EvaluationResponse, EvaluationStatus};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -26,6 +27,7 @@ pub struct BuildSummary {
     pub failed: usize,
     pub building: usize,
     pub queued: usize,
+    pub aborted_or_skipped: usize,
 }
 
 impl BuildSummary {
@@ -35,52 +37,39 @@ impl BuildSummary {
             ..Default::default()
         };
         for b in builds {
-            match build_class(&b.status) {
+            match BuildClass::build_class_from_status_text(&b.status) {
                 BuildClass::Succeeded => s.succeeded += 1,
                 BuildClass::Failed => s.failed += 1,
                 BuildClass::Building => s.building += 1,
                 BuildClass::Queued => s.queued += 1,
+                BuildClass::AbortedSkippedOrUnknown => s.aborted_or_skipped += 1,
             }
         }
         s
     }
 
     pub fn done(&self) -> usize {
-        self.succeeded + self.failed
-    }
-}
-
-enum BuildClass {
-    Succeeded,
-    Failed,
-    Building,
-    Queued,
-}
-
-fn build_class(status: &str) -> BuildClass {
-    match status {
-        "Completed" | "Substituted" => BuildClass::Succeeded,
-        "Building" => BuildClass::Building,
-        "Queued" | "Created" => BuildClass::Queued,
-        _ => BuildClass::Failed,
+        self.succeeded + self.failed + self.aborted_or_skipped
     }
 }
 
 pub fn build_icon(status: &str) -> &'static str {
-    match build_class(status) {
+    match BuildClass::build_class_from_status_text(status) {
         BuildClass::Succeeded => "✔",
         BuildClass::Failed => "✗",
         BuildClass::Building => "▶",
         BuildClass::Queued => "·",
+        BuildClass::AbortedSkippedOrUnknown => "-",
     }
 }
 
 fn build_style(status: &str) -> Style {
-    let color = match build_class(status) {
+    let color = match BuildClass::build_class_from_status_text(status) {
         BuildClass::Succeeded => Color::Green,
         BuildClass::Failed => Color::Red,
         BuildClass::Building => Color::Yellow,
         BuildClass::Queued => Color::DarkGray,
+        BuildClass::AbortedSkippedOrUnknown => Color::Gray,
     };
     Style::default().fg(color)
 }
@@ -332,7 +321,10 @@ impl View for Dashboard {
             )),
             Span::styled(format!("✔{}", summary.succeeded), build_style("Completed")),
             Span::raw(" "),
-            Span::styled(format!("✗{}", summary.failed), build_style("Failed")),
+            Span::styled(
+                format!("✗{}", summary.failed),
+                build_style("FailedPermanent"),
+            ),
             Span::raw(" "),
             Span::styled(format!("▶{}", summary.building), build_style("Building")),
             Span::raw(" "),
@@ -489,19 +481,23 @@ mod tests {
             build("d", "Queued", None),
             build("e", "FailedPermanent", Some(5)),
             build("f", "DependencyFailed", None),
+            build("g", "FailedTransient", None),
+            build("h", "Aborted", None),
+            build("i", "Skipped", None),
         ];
         let s = BuildSummary::of(&builds);
         assert_eq!(
             s,
             BuildSummary {
-                total: 6,
+                total: 9,
                 succeeded: 2,
                 failed: 2,
                 building: 1,
-                queued: 1,
+                queued: 2,
+                aborted_or_skipped: 2,
             }
         );
-        assert_eq!(s.done(), 4);
+        assert_eq!(s.done(), 6);
     }
 
     #[test]
@@ -586,5 +582,8 @@ mod tests {
         assert_eq!(build_icon("FailedTimeout"), "✗");
         assert_eq!(build_icon("Building"), "▶");
         assert_eq!(build_icon("Queued"), "·");
+        assert_eq!(build_icon("FailedTransient"), "·");
+        assert_eq!(build_icon("Aborted"), "-");
+        assert_eq!(build_icon("SomethingNew"), "-");
     }
 }

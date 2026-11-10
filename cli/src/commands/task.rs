@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::builds::BuildClass;
 use crate::commands::{completion, task_subcommands};
 use crate::config::*;
 use crate::input::{
@@ -374,12 +375,12 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             out.human("===== Building =====");
             for build in &builds.builds {
-                let color = match build.status.as_str() {
-                    "Completed" => Color::Green,
-                    "Building" | "Running" => Color::Yellow,
-                    "Queued" | "Pending" => Color::White,
-                    "Failed" | "Error" => Color::Red,
-                    _ => Color::Plain,
+                let color = match BuildClass::build_class_from_status_text(&build.status) {
+                    BuildClass::Succeeded => Color::Green,
+                    BuildClass::Building => Color::Yellow,
+                    BuildClass::Queued => Color::White,
+                    BuildClass::Failed => Color::Red,
+                    BuildClass::AbortedSkippedOrUnknown => Color::Plain,
                 };
                 out.human(out.paint(&build.name, color));
             }
