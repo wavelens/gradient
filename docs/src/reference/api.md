@@ -49,6 +49,8 @@ curl -X POST https://gradient.example.com/api/v1/user/keys \
 
 Create endpoints return the new UUID in `message.id`, its name in `message.name` and its web page in `message.url`. Starting an evaluation returns the evaluation UUID in `message.id`.
 
+The task page, the evaluation menu and the build log menu each have a **Copy** menu. It copies the matching CLI command, API URL or page link.
+
 ```sh
 curl -X POST https://gradient.example.com/api/v1/tasks/acme/web-app/evaluate \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

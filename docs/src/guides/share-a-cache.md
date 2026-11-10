@@ -27,6 +27,8 @@ The one key can cover every path, even paths pulled through from an [upstream ca
 
 Public caches need nothing else. Private caches need a netrc file for the Nix daemon. Store the API key in the netrc file. Create a key in **Settings -> API Keys**. Set the cache scope and select Read store as the permission. Keys with project scope read only the caches that the project subscribes to.
 
+Use **Create key for this cache** on the cache page to open a key dialog with the cache scope and cache prefilled. Create a key. The netrc line, the nix.conf line, and the `install-netrc` command show the key filled in.
+
 === "CLI"
 
     ```sh

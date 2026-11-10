@@ -16,7 +16,7 @@ Open **Settings** from the header.
 | Page | Content | Actions |
 |---|---|---|
 | Profile | Username, full name, email | Edit fields. Choose a theme under **Appearance**. **Delete Account** |
-| API Keys | Keys, each with scope and permissions | **New API Key**, edit, revoke, delete |
+| API Keys | Key, its scope and the names of all permissions. The projects and caches that the key can access, the API base URL and an example for `curl` appear in **Access**. Only the Any project scope can provide **Create projects**. A key pinned to a project cannot grant permissions that the owner does not have in that project. | **New API Key**, **Access**, edit, revoke, delete |
 | Sessions | All devices currently signed in | **Revoke** a single session |
 
 The theme choice (**System**, **Light**, **Dark**) lives in the browser, not in the account.
