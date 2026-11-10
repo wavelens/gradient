@@ -15,7 +15,7 @@ use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::{CachePermission, Permission};
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
-use crate::scope::{CacheScope, ProjectScope, Readable, Requires, RequiresUnmanaged, can};
+use crate::scope::{CacheScope, ProjectScope, Requires, RequiresUnmanaged, can};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -186,7 +186,7 @@ fn project_role_name(roles: &HashMap<RoleId, String>, role: Option<RoleId>) -> O
     responses((status = OK, description = "OK", body = Vec<TeamGrantEntry>), WebError)
 )]
 pub async fn get_project_teams(
-    ProjectScope { project, db, .. }: ProjectScope<Readable>,
+    ProjectScope { project, db, .. }: ProjectScope<Requires<can::ViewProject>>,
 ) -> WebResult<Json<BaseResponse<Vec<TeamGrantEntry>>>> {
     let grants = gradient_db::teams::grants::grants_of_project(&db.web_db, project.id).await?;
     let requests =
@@ -470,10 +470,12 @@ pub async fn delete_project_team(
     Path((project, team)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let db = state.db();
-    let project = get_any_project_by_name(&db, project)
-        .await?
-        .or_not_found(Resource::Project)?;
-    let team = find_team(&state.web_db, &team).await?;
+    let (Some(project), Some(team)) = (
+        get_any_project_by_name(&db, project).await?,
+        gradient_db::teams::by_name(&state.web_db, &team).await?,
+    ) else {
+        return Err(WebError::not_found(Resource::TeamGrant));
+    };
     let grant =
         gradient_db::teams::grants::project_grant(&state.web_db, team.id, project.id).await?;
     let (request, includes_users) = match &grant {
@@ -736,10 +738,12 @@ pub async fn delete_cache_team(
     Path((cache, team)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let db = state.db();
-    let cache = get_any_cache_by_name(&db, cache)
-        .await?
-        .or_not_found(Resource::Cache)?;
-    let team = find_team(&state.web_db, &team).await?;
+    let (Some(cache), Some(team)) = (
+        get_any_cache_by_name(&db, cache).await?,
+        gradient_db::teams::by_name(&state.web_db, &team).await?,
+    ) else {
+        return Err(WebError::not_found(Resource::TeamGrant));
+    };
     let grant = gradient_db::teams::grants::cache_grant(&state.web_db, team.id, cache.id).await?;
     let request = match grant {
         Some(_) => None,

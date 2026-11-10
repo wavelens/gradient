@@ -29,7 +29,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::{InstanceMemory, ServerState};
 use gradient_db::evaluations::TaskEvaluationFilter;
-use gradient_db::lookup::{by_ids, get_any_project_by_name};
+use gradient_db::lookup::{by_ids, get_any_task_by_name};
 use gradient_db::{DbContext, WebDb};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
@@ -839,14 +839,6 @@ pub async fn get_entry_point_download(
     Path((project, task)): Path<(String, String)>,
     Query(params): Query<EntryPointDownloadQuery>,
 ) -> Result<Response, WebError> {
-    let project = get_any_project_by_name(&state.db(), project)
-        .await?
-        .or_not_found(Resource::Project)?;
-
-    let task = gradient_db::tasks::by_name(&state.web_db, project.id, &task)
-        .await?
-        .or_not_found(Resource::Task)?;
-
     let (resolved_user, resolved_key) = if let Some(token_str) = params.token {
         let (user, decoded) =
             crate::authorization::verify_credential_and_return_user_and_decoded_credential(
@@ -862,18 +854,19 @@ pub async fn get_entry_point_download(
         (maybe_user, api_key.as_ref().cloned())
     };
 
-    if !project.public {
-        match resolved_user {
-            Some(ref user) => {
-                if !can_view_project(&state.web_db, user.id, project.id, resolved_key.as_ref())
-                    .await?
-                {
-                    return Err(WebError::not_found(Resource::Task));
-                }
-            }
-            None => return Err(SharedRefusal::AuthorizationRequired.into()),
+    let found = get_any_task_by_name(&state.db(), project, task).await?;
+    let visible = match (&found, &resolved_user) {
+        (Some((project, _)), _) if project.public => true,
+        (Some((project, _)), Some(user)) => {
+            can_view_project(&state.web_db, user.id, project.id, resolved_key.as_ref()).await?
         }
-    }
+        _ => false,
+    };
+    let task = match found {
+        Some((_, task)) if visible => task,
+        _ if resolved_user.is_none() => return Err(SharedRefusal::AuthorizationRequired.into()),
+        _ => return Err(WebError::not_found(Resource::Task)),
+    };
 
     let evaluation_id = task.last_evaluation.or_not_found(Resource::Evaluation)?;
     let evaluation = require::<EEvaluation>(&state.web_db, evaluation_id).await?;

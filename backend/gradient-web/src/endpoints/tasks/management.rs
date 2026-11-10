@@ -21,7 +21,7 @@ use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Readable, RequiresUnmanaged, TaskScope, can};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use gradient_db::lookup::{by_id, by_ids, get_any_project_by_name};
+use gradient_db::lookup::{by_id, by_ids};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
@@ -101,18 +101,14 @@ pub struct TransferOwnershipRequest {
     responses((status = OK, description = "Availability result", body = bool, content_type = "application/json"), WebError)
 )]
 pub async fn get_task_name_available(
-    state: State<Arc<ServerState>>,
-    Path(project): Path<String>,
+    ProjectScope { project, db, .. }: ProjectScope<Member>,
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
     if check_task_name(&name).is_err() {
         return Ok(ok_json(false));
     }
-    let project = get_any_project_by_name(&state.db(), project)
-        .await?
-        .or_not_found(Resource::Project)?;
-    let exists = gradient_db::tasks::by_name(&state.web_db, project.id, &name)
+    let exists = gradient_db::tasks::by_name(&db.web_db, project.id, &name)
         .await?
         .is_some();
     Ok(ok_json(!exists))
