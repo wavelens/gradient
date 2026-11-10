@@ -103,7 +103,9 @@
     </gr-settings-section>
   }
 
-  <app-team-grants kind="project" grants="users" [name]="projectName" [roles]="roleNames()" [canEdit]="access().canEdit && !access().managed" (teamGrantsWithMemberRoles)="teamGrantsReceivedForRoleHolderCount.set($event)" />
+  @if (viewerIsProjectMember()) {
+    <app-team-grants kind="project" grants="users" [name]="projectName" [roles]="roleNames()" [canEdit]="access().canEdit && !access().managed" (teamGrantsWithMemberRoles)="teamGrantsReceivedForRoleHolderCount.set($event)" />
+  }
 
   <!-- Roles -->
   <gr-settings-section title="Roles" [card]="false">

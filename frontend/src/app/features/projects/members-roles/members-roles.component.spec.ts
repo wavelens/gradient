@@ -7,7 +7,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Subject, of, throwError } from 'rxjs';
 import { ApiError } from '@core/services/api.service';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
@@ -125,6 +125,18 @@ describe('MembersRolesComponent - access gating', () => {
     expect(root.textContent).toContain('No access');
     expect(root.textContent).toContain('Only the members of this project can view this.');
     expect(root.textContent).not.toContain('Failed to load roles');
+  });
+
+  it('Does Not Request Team Grants for a Visitor Outside the Project', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [], null);
+    await settled(fixture);
+    TestBed.inject(HttpTestingController).expectNone((request) => request.url.endsWith('projects/acme/teams'));
+  });
+
+  it('requests team grants for a member', async () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false }, [], 'View');
+    await settled(fixture);
+    expect(TestBed.inject(HttpTestingController).match((request) => request.url.endsWith('projects/acme/teams'))).toHaveLength(1);
   });
 
   it('names the role of each member as text instead of a select under read-only access', async () => {

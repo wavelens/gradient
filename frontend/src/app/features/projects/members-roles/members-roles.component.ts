@@ -45,6 +45,7 @@ import {
   getMemberRemovalConsequenceSentence,
   injectSaveMemberRoleChangeWithOwnRoleConfirmation,
   newRoleLacksCurrentRolePermission,
+  isViewerProjectMember,
   requestIfProjectMember,
   formatMemberNameForAutocompleteSuggestion,
 } from '@shared/access';
@@ -115,6 +116,7 @@ export class MembersRolesComponent implements OnInit {
   private saveMemberRoleChange = injectSaveMemberRoleChangeWithOwnRoleConfirmation();
 
   access = computed(() => accessTo(this.project(), 'manageMembers'));
+  viewerIsProjectMember = computed(() => isViewerProjectMember(this.project()));
   roleAccess = computed(() => accessTo(this.project(), 'manageRoles'));
 
   projectName = '';
