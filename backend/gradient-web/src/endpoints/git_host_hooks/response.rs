@@ -52,21 +52,57 @@ impl QueuedEvaluation {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskEvaluationNotStartedReason {
+    SameCommit,
+    Filter,
+    TagNotFound,
+    Concurrency,
+    CommitMessage,
+    Error,
+    InputUpdateRunning,
+    InputUpdateNotConfigured,
+}
+
+impl TaskEvaluationNotStartedReason {
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::SameCommit => "The task already evaluated this commit.",
+            Self::Filter => "Branch not in trigger's branch list",
+            Self::TagNotFound => "Tag not found in repository",
+            Self::Concurrency => {
+                "The concurrency rules of the task skip a new evaluation because an evaluation is already active."
+            }
+            Self::CommitMessage => "Skip request for CI in the commit message",
+            Self::Error => {
+                "Gradient failed to start the evaluation. Details are in the server log."
+            }
+            Self::InputUpdateRunning => {
+                "An update of the flake.lock inputs is already in progress."
+            }
+            Self::InputUpdateNotConfigured => "This task has no setup for updating flake inputs.",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SkippedTask {
     pub task_id: TaskId,
     pub task_name: String,
     pub project: String,
-    pub reason: String,
+    pub reason: TaskEvaluationNotStartedReason,
+    pub reason_text: String,
 }
 
 impl SkippedTask {
-    pub fn new(task: &MTask, project: String, reason: &str) -> Self {
+    pub fn new(task: &MTask, project: String, reason: TaskEvaluationNotStartedReason) -> Self {
         Self {
             task_id: task.id,
             task_name: task.name.clone(),
             project,
-            reason: reason.into(),
+            reason,
+            reason_text: reason.text().into(),
         }
     }
 }

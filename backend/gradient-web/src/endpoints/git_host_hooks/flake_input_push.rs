@@ -9,7 +9,7 @@ use super::fanout::{
     touch_trigger_last_fired,
 };
 use super::installation::{event_repo_matches_task, repo_identity};
-use super::response::{QueuedEvaluation, WebhookTriggerOutcome};
+use super::response::{QueuedEvaluation, TaskEvaluationNotStartedReason, WebhookTriggerOutcome};
 use gradient_ci::CiContext;
 use gradient_ci::trigger::{InputUpdateOutcome, maybe_trigger_input_update};
 use gradient_entity::task_trigger as ept;
@@ -102,7 +102,12 @@ async fn start_input_update(
     outcome.tasks_scanned += 1;
 
     let Some(base_commit) = task_head(ci, trig, task).await else {
-        push_skipped(outcome, task, project_name, "error");
+        push_skipped(
+            outcome,
+            task,
+            project_name,
+            TaskEvaluationNotStartedReason::Error,
+        );
         return;
     };
 
@@ -117,15 +122,26 @@ async fn start_input_update(
                     .map(|id| QueuedEvaluation::new(task, project_name.clone(), id)),
             );
         }
-        Ok(InputUpdateOutcome::AlreadyRunning) => {
-            push_skipped(outcome, task, project_name, "input_update_running")
-        }
-        Ok(InputUpdateOutcome::NotConfigured) => {
-            push_skipped(outcome, task, project_name, "input_update_not_configured")
-        }
+        Ok(InputUpdateOutcome::AlreadyRunning) => push_skipped(
+            outcome,
+            task,
+            project_name,
+            TaskEvaluationNotStartedReason::InputUpdateRunning,
+        ),
+        Ok(InputUpdateOutcome::NotConfigured) => push_skipped(
+            outcome,
+            task,
+            project_name,
+            TaskEvaluationNotStartedReason::InputUpdateNotConfigured,
+        ),
         Err(e) => {
             warn!(error = %e, task_id = %task.id, "Start an update of the flake inputs for a push of flake inputs.");
-            push_skipped(outcome, task, project_name, "error");
+            push_skipped(
+                outcome,
+                task,
+                project_name,
+                TaskEvaluationNotStartedReason::Error,
+            );
         }
     }
 }

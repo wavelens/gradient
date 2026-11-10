@@ -7,7 +7,9 @@
 use super::approval::{PullRequestApprovalContext, sender_is_trusted};
 use super::flake_input_push::trigger_input_updates_for_push;
 use super::installation::event_repo_matches_task;
-use super::response::{QueuedEvaluation, SkippedTask, WebhookTriggerOutcome};
+use super::response::{
+    QueuedEvaluation, SkippedTask, TaskEvaluationNotStartedReason, WebhookTriggerOutcome,
+};
 use gradient_ci::CiContext;
 use gradient_ci::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, parse_owner_repo};
 use gradient_db::lookup::by_id;
@@ -368,7 +370,12 @@ where
 
         let pr_require_approval = match filter_result {
             FilterResult::SkipFilter => {
-                push_skipped(&mut outcome, &task, project_name, "filter");
+                push_skipped(
+                    &mut outcome,
+                    &task,
+                    project_name,
+                    TaskEvaluationNotStartedReason::Filter,
+                );
                 continue;
             }
             FilterResult::Fire => false,
@@ -378,7 +385,12 @@ where
         outcome.tasks_scanned += 1;
 
         let Some(commit_hash) = commit.for_task(&ci.db, &task).await else {
-            push_skipped(&mut outcome, &task, project_name, "tag_not_found");
+            push_skipped(
+                &mut outcome,
+                &task,
+                project_name,
+                TaskEvaluationNotStartedReason::TagNotFound,
+            );
             continue;
         };
 
@@ -475,18 +487,32 @@ async fn apply_and_record(
                 .queued
                 .push(QueuedEvaluation::new(task, project_name, eval.id));
         }
-        Ok(ApplyOutcome::SkippedSameCommit) => {
-            push_skipped(outcome, task, project_name, "same_commit")
-        }
-        Ok(ApplyOutcome::SkippedConcurrency) => {
-            push_skipped(outcome, task, project_name, "concurrency")
-        }
-        Ok(ApplyOutcome::SkippedByCommitMessage) => {
-            push_skipped(outcome, task, project_name, "commit_message")
-        }
+        Ok(ApplyOutcome::SkippedSameCommit) => push_skipped(
+            outcome,
+            task,
+            project_name,
+            TaskEvaluationNotStartedReason::SameCommit,
+        ),
+        Ok(ApplyOutcome::SkippedConcurrency) => push_skipped(
+            outcome,
+            task,
+            project_name,
+            TaskEvaluationNotStartedReason::Concurrency,
+        ),
+        Ok(ApplyOutcome::SkippedByCommitMessage) => push_skipped(
+            outcome,
+            task,
+            project_name,
+            TaskEvaluationNotStartedReason::CommitMessage,
+        ),
         Err(e) => {
             warn!(error = %e, task_id = %task.id, "apply_trigger failed in webhook fan-out");
-            push_skipped(outcome, task, project_name, "error");
+            push_skipped(
+                outcome,
+                task,
+                project_name,
+                TaskEvaluationNotStartedReason::Error,
+            );
         }
     }
 }
@@ -495,7 +521,7 @@ pub(super) fn push_skipped(
     outcome: &mut WebhookTriggerOutcome,
     task: &MTask,
     project_name: String,
-    reason: &str,
+    reason: TaskEvaluationNotStartedReason,
 ) {
     outcome
         .skipped

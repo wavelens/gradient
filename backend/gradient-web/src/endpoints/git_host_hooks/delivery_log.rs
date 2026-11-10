@@ -83,7 +83,7 @@ fn outcome(response: &IncomingWebhookResponse) -> (DeliveryResult, Option<String
         let reasons = response
             .skipped
             .iter()
-            .map(|s| format!("{}: {}", s.task_name, s.reason))
+            .map(|s| format!("{}: {}", s.task_name, s.reason_text))
             .collect::<Vec<_>>()
             .join("; ");
         return (DeliveryResult::Skipped, Some(reasons));
@@ -119,6 +119,29 @@ mod tests {
         );
         assert_eq!(entry.result, DeliveryResult::NoMatchingTask);
         assert_eq!(entry.repository.as_deref(), Some("https://host/acme/other"));
+    }
+
+    #[test]
+    fn a_skipped_task_reads_as_text_not_as_a_code() {
+        let task = gradient_types::MTask {
+            name: "main".into(),
+            ..Default::default()
+        };
+        let outcome = WebhookTriggerOutcome {
+            tasks_scanned: 1,
+            skipped: vec![crate::endpoints::git_host_hooks::SkippedTask::new(
+                &task,
+                "acme".into(),
+                crate::endpoints::git_host_hooks::TaskEvaluationNotStartedReason::SameCommit,
+            )],
+            ..Default::default()
+        };
+        let entry = entry(None, &Ok(response(&["https://host/acme/app"], outcome)));
+        assert_eq!(entry.result, DeliveryResult::Skipped);
+        assert_eq!(
+            entry.detail.as_deref(),
+            Some("main: The task already evaluated this commit.")
+        );
     }
 
     #[test]

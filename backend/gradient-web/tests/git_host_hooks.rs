@@ -689,6 +689,10 @@ async fn git_host_webhook_branch_glob_no_match_skipped() {
     let skipped = msg["skipped"].as_array().unwrap();
     assert_eq!(skipped.len(), 1);
     assert_eq!(skipped[0]["reason"], "filter");
+    assert_eq!(
+        skipped[0]["reason_text"],
+        "Branch not in trigger's branch list"
+    );
 }
 
 #[tokio::test]

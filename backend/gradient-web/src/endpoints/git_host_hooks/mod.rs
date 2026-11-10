@@ -17,7 +17,10 @@ mod payloads;
 mod refusal;
 mod response;
 
-pub use response::{IncomingWebhookResponse, QueuedEvaluation, SkippedTask, WebhookTriggerOutcome};
+pub use response::{
+    IncomingWebhookResponse, QueuedEvaluation, SkippedTask, TaskEvaluationNotStartedReason,
+    WebhookTriggerOutcome,
+};
 
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use anyhow::Context;
