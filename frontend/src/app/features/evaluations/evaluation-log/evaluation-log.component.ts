@@ -19,7 +19,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LogViewerComponent, ServerLog, ansiToHtml, isFindShortcut, removeAnsiEscapeSequences, splitLogLines } from '@shared/log';
 import { matchesBuildSearch } from './build-search';
-import { buildAttemptLogQueryParam, buildLog, fetchBuildLogResponseWithCookiesOrThrow } from './build-log';
+import { BuildLogStreamDecoder, buildAttemptLogQueryParam, buildLog, fetchBuildLogResponseWithCookiesOrThrow } from './build-log';
 import { buildAttemptOutcomeText, formatBuildAttemptDurationText } from './build-attempts';
 import { lastRateLimitNote, rateLimitMarker } from './log-rate-limit';
 import { CommonModule } from '@angular/common';
@@ -955,18 +955,23 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       if (response.ok && response.body && this.streamingBuildId === buildId) {
         if (this.buildIdWithEndedLogStream() === buildId) this.buildIdWithEndedLogStream.set(null);
         this.activeStreamReader = response.body.getReader();
-        const decoder = new TextDecoder();
+        const textDecoder = new TextDecoder();
+        const logDecoder = new BuildLogStreamDecoder();
+        const queueLines = (lines: string[]) => {
+          if (lines.length === 0) return;
+          this.buildLogStreamReconnectAttemptsSinceLastOutput = 0;
+          this.pendingLogLines.push(...lines);
+          this.startLogDrainTimer();
+        };
 
         while (true) {
           const { done, value } = await this.activeStreamReader.read();
-          if (done || this.selectedBuildId() !== buildId) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          if (chunk.trim()) {
-            this.buildLogStreamReconnectAttemptsSinceLastOutput = 0;
-            this.pendingLogLines.push(...this.parseLogContent(chunk));
-            this.startLogDrainTimer();
+          if (this.selectedBuildId() !== buildId) break;
+          if (done) {
+            queueLines(logDecoder.takeLastLogLineWithoutNewline());
+            break;
           }
+          queueLines(logDecoder.appendTextAndReturnCompletedLines(textDecoder.decode(value, { stream: true })));
         }
       }
     } catch {
@@ -1149,37 +1154,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private trackRateLimit(lines: readonly string[]): void {
     const note = lastRateLimitNote(lines);
     if (note) this.logPaused.set(note === 'paused');
-  }
-
-  // ── Log parsing ─────────────────────────────────────────────────────────────
-
-  private parseLogContent(raw: string): string[] {
-    return raw
-      .split('\n')
-      .filter(line => {
-        const t = line.trim();
-        // Keep non-empty transport lines; discard sentinel '""' and bare empty lines
-        return t !== '' && t !== '""' && t !== "''";
-      })
-      .flatMap(line => {
-        // Try JSON.parse first to correctly decode \u001b and other escape sequences
-        if (line.length >= 2 && line.startsWith('"') && line.endsWith('"')) {
-          try {
-            line = JSON.parse(line) as string;
-          } catch {
-            line = line.slice(1, -1);
-          }
-        }
-        // Handle remaining literal escape sequences (non-JSON streams)
-        const decoded = line
-          .replace(/\\u001b/g, '\u001b')
-          .replace(/\\n/g, '\n')
-          .replace(/\\t/g, '\t');
-        // Strip a single trailing newline so split('\n') doesn't produce a
-        // spurious empty element that renders as a blank line between chunks.
-        const trimmed = decoded.endsWith('\n') ? decoded.slice(0, -1) : decoded;
-        return trimmed.split('\n');
-      });
   }
 
   onBuildsViewportScroll(event: Event): void {

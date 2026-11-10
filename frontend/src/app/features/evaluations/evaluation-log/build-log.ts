@@ -84,6 +84,30 @@ async function searchLog(
   return total;
 }
 
+export class BuildLogStreamDecoder {
+  private unfinishedJsonLine = '';
+  private unfinishedLogLine = '';
+
+  appendTextAndReturnCompletedLines(text: string): string[] {
+    const jsonLines = (this.unfinishedJsonLine + text).split('\n');
+    this.unfinishedJsonLine = jsonLines.pop() ?? '';
+    const logText = this.unfinishedLogLine + jsonLines
+      .filter((line) => line.trim() !== '')
+      .map((line) => JSON.parse(line) as string)
+      .join('');
+    const lastLineEnd = logText.lastIndexOf('\n');
+    this.unfinishedLogLine = logText.slice(lastLineEnd + 1);
+    return splitLogLines(logText.slice(0, lastLineEnd + 1));
+  }
+
+  takeLastLogLineWithoutNewline(): string[] {
+    const lines = this.appendTextAndReturnCompletedLines('\n');
+    const last = this.unfinishedLogLine;
+    this.unfinishedLogLine = '';
+    return last ? [...lines, ...splitLogLines(last)] : lines;
+  }
+}
+
 export function buildLog(buildId: string, attemptId: string | null, total: number): ServerLog {
   return {
     total,
