@@ -167,7 +167,8 @@ async fn eval_failure_summary_decodes_from_summary_endpoint() {
             "failures_total": 1,
             "failed_attributes": [{"attr": "checks.broken", "message": "boom", "newly_failing": false}],
             "fixed": ["old"],
-            "fixed_total": 1
+            "fixed_total": 1,
+            "unfinished_attributes": []
         }))))
         .mount(&server)
         .await;
