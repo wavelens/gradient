@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::num::NonZeroU64;
+use std::time::Duration;
+
 use gradient_db::exec_jobs::reads::latest_running_of_task;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_entity::exec_job::{self, ExecJobStatus};
@@ -17,7 +20,7 @@ use gradient_wire::types::GuestChannelKind;
 use gradient_wire::types::{BuildFailureKind, ClusterPeer, ExecJob, Job, JobKind};
 
 use super::exec::{W1, W2, exec_shape, inventory, spec};
-use super::{SchedulerCase, failure, w_exec, without_offers};
+use super::{SchedulerCase, SlotKind, failure, w_exec, without_offers};
 use crate::GuestChannelRefusal;
 use crate::jobs::exec_job_key;
 use crate::test_jobs::allow_all;
@@ -634,5 +637,49 @@ async fn a_two_node_job_never_runs_as_single_jobs() {
             row.node_index
         );
     }
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn a_two_node_job_that_waits_long_reserves_two_exec_workers() {
+    let (evaluation, cluster) = (EvaluationId::now_v7(), ClusterJobId::now_v7());
+    let spec = pair_spec(1, false);
+    let case = SchedulerCase::start_with_then(
+        exec_shape(evaluation),
+        |config| {
+            config.scheduler.cluster_reserve_after_secs =
+                NonZeroU64::new(1).expect("a positive number of seconds");
+        },
+        async |case| seed_queued_cluster(case, &spec, cluster).await,
+    )
+    .await;
+    connect_pair(&case).await;
+
+    case.assign_exec_jobs().await;
+    case.plan_clusters().await;
+    assert!(
+        case.reservation().await.is_none(),
+        "after 1: cluster_snapshot.reservation == none"
+    );
+
+    tokio::time::sleep(Duration::from_secs_f64(1.2)).await;
+    case.plan_clusters().await;
+    let reservation = case.reservation().await.expect("after 2: a reservation");
+    let mut seats: Vec<(String, SlotKind)> = reservation
+        .seats()
+        .map(|(worker, kind)| (worker.to_owned(), kind))
+        .collect();
+    seats.sort();
+    assert_eq!(
+        (reservation.cluster(), seats),
+        (
+            cluster,
+            vec![
+                (W1.to_owned(), SlotKind::Exec),
+                (W2.to_owned(), SlotKind::Exec)
+            ]
+        ),
+        "after 2: cluster_snapshot.reservation == C on W1 and W2"
+    );
     case.finish().await;
 }

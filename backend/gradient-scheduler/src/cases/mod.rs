@@ -123,7 +123,15 @@ impl SchedulerCase {
     }
 
     pub async fn start_then(shape: Shape, seed: impl AsyncFnOnce(&Self)) -> Self {
-        let case = Self::start_seeded(shape, |_| {}).await;
+        Self::start_with_then(shape, |_| {}, seed).await
+    }
+
+    pub async fn start_with_then(
+        shape: Shape,
+        config: impl FnOnce(&mut RuntimeConfig) + 'static,
+        seed: impl AsyncFnOnce(&Self),
+    ) -> Self {
+        let case = Self::start_seeded(shape, config).await;
         seed(&case).await;
         case.assert_drift("the seed").await;
         case

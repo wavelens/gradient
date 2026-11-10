@@ -857,7 +857,7 @@ impl SchedulerCore {
             let (authorized, Some(caps)) = self.auth_and_caps(&worker.id) else {
                 continue;
             };
-            for kind in [SlotKind::Eval, SlotKind::Build] {
+            for kind in [SlotKind::Eval, SlotKind::Build, SlotKind::Exec] {
                 if caps.takes_jobs_of(&kind.job_kind()) {
                     slots.push(Slot {
                         worker: worker.id.clone(),
