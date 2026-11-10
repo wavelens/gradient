@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, afterRenderEffect, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, input, signal, viewChild } from '@angular/core';
 import { RouterLink, RouterLinkActive, type UrlTree } from '@angular/router';
 
 export interface LinkTab {
@@ -18,7 +18,7 @@ export interface LinkTab {
   standalone: true,
   imports: [RouterLink, RouterLinkActive],
   template: `
-    <nav class="link-tabs gr-scroll-fade-row" [attr.aria-label]="ariaLabel()">
+    <nav #tabLinksNav class="link-tabs gr-scroll-fade-row" [attr.aria-label]="ariaLabel()">
       @for (tab of tabs(); track tab.label) {
         <a #link class="link-tab" [routerLink]="tab.link" routerLinkActive="is-active" ariaCurrentWhenActive="page"
           (isActiveChange)="$event && activeLink.set(link)">{{ tab.label }}</a>
@@ -33,6 +33,7 @@ export class LinkTabsComponent {
   ariaLabel = input.required<string>();
 
   protected activeLink = signal<HTMLElement | null>(null);
+  private tabLinksNavElement = viewChild.required<ElementRef<HTMLElement>>('tabLinksNav');
 
   constructor() {
     afterRenderEffect((onCleanup) => {
@@ -43,6 +44,7 @@ export class LinkTabsComponent {
       if (typeof ResizeObserver === 'undefined') return scrollActiveTabLinkToMiddle();
       const resizeObserver = new ResizeObserver(scrollActiveTabLinkToMiddle);
       resizeObserver.observe(link);
+      resizeObserver.observe(this.tabLinksNavElement().nativeElement);
       onCleanup(() => resizeObserver.disconnect());
     });
   }

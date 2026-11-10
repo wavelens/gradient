@@ -67,7 +67,10 @@ describe('gr-link-tabs', () => {
     expect(scrolled.at(-1)?.element).toBe(active);
   });
 
-  it('scrolls the active tab link back to the middle when it changes size', async () => {
+  it.each([
+    { resized: 'active tab link', target: (root: HTMLElement) => root.querySelector('.is-active') },
+    { resized: 'tab row after a window resize', target: (root: HTMLElement) => root.querySelector('nav') },
+  ])('scrolls the active tab link back to the middle when the $resized changes size', async ({ target }) => {
     const observed: { target: Element; notify: () => void }[] = [];
     vi.stubGlobal('ResizeObserver', class {
       constructor(private readonly callback: () => void) {}
@@ -83,8 +86,12 @@ describe('gr-link-tabs', () => {
       { label: 'Profile', link: ['/settings', 'profile'] },
       { label: 'Invites', link: ['/settings', 'invites'] },
     ]);
-    const active = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>('.is-active');
-    const watch = observed.filter((entry) => entry.target === active).at(-1);
+    const root = fixture.nativeElement as HTMLElement;
+    const active = root.querySelector<HTMLElement>('.is-active');
+    const resized = target(root);
+    expect(resized).not.toBeNull();
+    const watch = observed.filter((entry) => entry.target === resized).at(-1);
+    expect(watch).toBeDefined();
     scrolled.length = 0;
 
     watch?.notify();
