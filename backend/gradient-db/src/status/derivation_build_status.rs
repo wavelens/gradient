@@ -50,15 +50,6 @@ pub async fn update_derivation_build_status(
         change = change.col_expr(CDerivationBuild::QueuedAt, Expr::value(Some(now)));
     }
 
-    if status.is_terminal() {
-        crate::scheduling::build_attempt::stamp_attempt_finished(
-            &ctx.worker_db,
-            shared_build.id,
-            now,
-        )
-        .await?;
-    }
-
     let changed = change
         .filter(CDerivationBuild::Id.eq(shared_build.id))
         .exec_with_returning(&ctx.worker_db)
@@ -69,6 +60,15 @@ pub async fn update_derivation_build_status(
             .await?
             .unwrap_or(shared_build));
     };
+
+    if status.is_terminal() {
+        crate::scheduling::build_attempt::stamp_attempt_finished(
+            &ctx.worker_db,
+            shared_build.id,
+            now,
+        )
+        .await?;
+    }
 
     emit_transition_effects(
         ctx,

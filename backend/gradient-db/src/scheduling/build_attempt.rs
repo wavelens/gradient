@@ -9,8 +9,7 @@ use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome, Colum
 use gradient_entity::ids::{
     BuildAttemptId, BuildJobId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId,
 };
-use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, Func, Order, Query, SelectStatement};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     PaginatorTrait, QueryFilter, QueryOrder,
@@ -267,6 +266,16 @@ pub async fn list_build_attempts_with_worker_id_newest_first<C: ConnectionTrait>
         .collect())
 }
 
+fn latest_attempt_id_subquery(derivation_build: DerivationBuildId) -> SelectStatement {
+    Query::select()
+        .column(Column::Id)
+        .from(Entity)
+        .and_where(Column::DerivationBuild.eq(derivation_build))
+        .order_by(Column::CreatedAt, Order::Desc)
+        .limit(1)
+        .to_owned()
+}
+
 pub async fn finish_latest_attempt<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
@@ -274,17 +283,22 @@ pub async fn finish_latest_attempt<C: ConnectionTrait>(
     reason: Option<AttemptFailureReason>,
     failure_message: Option<String>,
 ) -> Result<(), DbErr> {
-    if let Some(att) = latest_attempt(db, derivation_build).await? {
-        let mut a = att.clone().into_active_model();
-        a.outcome = Set(outcome);
-        a.reason = Set(reason);
-        a.failure_message = Set(failure_message);
-        if att.build_finished_at.is_none() {
-            a.build_finished_at = Set(Some(gradient_types::now()));
-        }
-
-        a.update(db).await?;
-    }
+    Entity::update_many()
+        .col_expr(Column::Outcome, Expr::value(outcome))
+        .col_expr(Column::Reason, Expr::value(reason))
+        .col_expr(Column::FailureMessage, Expr::value(failure_message))
+        .col_expr(
+            Column::BuildFinishedAt,
+            Func::coalesce([
+                Expr::col(Column::BuildFinishedAt),
+                Expr::value(gradient_types::now()),
+            ])
+            .into(),
+        )
+        .filter(Column::Id.in_subquery(latest_attempt_id_subquery(derivation_build)))
+        .filter(Column::Outcome.eq(AttemptOutcome::Running))
+        .exec(db)
+        .await?;
 
     Ok(())
 }
@@ -374,13 +388,12 @@ pub async fn stamp_attempt_finished<C: ConnectionTrait>(
     derivation_build: DerivationBuildId,
     now: NaiveDateTime,
 ) -> Result<(), DbErr> {
-    if let Some(att) = latest_attempt(db, derivation_build).await?
-        && att.build_finished_at.is_none()
-    {
-        let mut a = att.into_active_model();
-        a.build_finished_at = Set(Some(now));
-        a.update(db).await?;
-    }
+    Entity::update_many()
+        .col_expr(Column::BuildFinishedAt, Expr::value(Some(now)))
+        .filter(Column::Id.in_subquery(latest_attempt_id_subquery(derivation_build)))
+        .filter(Column::BuildFinishedAt.is_null())
+        .exec(db)
+        .await?;
 
     Ok(())
 }
@@ -394,4 +407,65 @@ pub async fn attempts_oldest_first<C: ConnectionTrait>(
         .order_by_asc(Column::CreatedAt)
         .all(db)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::shape::shape;
+
+    const BUILT: &str = "/nix/store/aaaa-built.drv";
+
+    #[tokio::test]
+    async fn late_failure_does_not_rewrite_build_attempt_closed_as_built() {
+        let db = shape()
+            .derivation(BUILT)
+            .attempt(AttemptOutcome::Built, None)
+            .into_database()
+            .await;
+        let shared_build = db.shared_build(BUILT).await.id;
+
+        finish_latest_attempt(
+            &db.connection(),
+            shared_build,
+            AttemptOutcome::Failed,
+            Some(AttemptFailureReason::WorkerLost),
+            Some("late".into()),
+        )
+        .await
+        .expect("the update runs");
+
+        let [attempt] = db.attempts(BUILT).await.try_into().expect("one attempt");
+        assert_eq!(attempt.outcome, AttemptOutcome::Built);
+        assert_eq!(attempt.reason, None);
+        assert_eq!(attempt.failure_message, None);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn finish_running_latest_attempt_records_outcome_reason_message_and_finish_time() {
+        let db = shape()
+            .derivation(BUILT)
+            .attempt(AttemptOutcome::Running, None)
+            .into_database()
+            .await;
+        let shared_build = db.shared_build(BUILT).await.id;
+
+        finish_latest_attempt(
+            &db.connection(),
+            shared_build,
+            AttemptOutcome::Failed,
+            Some(AttemptFailureReason::WorkerLost),
+            Some("lost".into()),
+        )
+        .await
+        .expect("the update runs");
+
+        let [attempt] = db.attempts(BUILT).await.try_into().expect("one attempt");
+        assert_eq!(attempt.outcome, AttemptOutcome::Failed);
+        assert_eq!(attempt.reason, Some(AttemptFailureReason::WorkerLost));
+        assert_eq!(attempt.failure_message.as_deref(), Some("lost"));
+        assert!(attempt.build_finished_at.is_some());
+        db.finish().await;
+    }
 }
