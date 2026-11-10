@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { catchError, finalize, map, Observable, of, Subject, Subscription, switchMap } from 'rxjs';
-import { auditTime, debounceTime, distinctUntilChanged, filter, share } from 'rxjs/operators';
+import { auditTime, debounceTime, distinctUntilChanged, filter, share, tap } from 'rxjs/operators';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { LiveEvent, LiveService, createResyncOnLiveSocketReconnectCallback } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
@@ -147,6 +147,9 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private lastFetchedEntryPointListEvaluationIdAndStatusKey = '';
   private entryPointsReloadTimer?: ReturnType<typeof setTimeout>;
   private readonly ENTRY_POINTS_LIVE_INTERVAL_MS = 4000;
+  // Live reload, start and abort request the task even with another request open. Only responses newer than the last shown response take effect. A late "Building" response cannot overwrite a newer "Failed" response. A never-ending stream of live events cannot starve the page, unlike switchMap.
+  private sentGetTaskRequestCount = 0;
+  private newestShownTaskRequestNumber = 0;
 
   private readonly OLDER_PAGE = 10;
   private olderEvaluations = signal<EvaluationSummary[]>([]);
@@ -266,10 +269,18 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   loadTaskData(live = false): void {
-    this.tasksService.getTask(this.projectName, this.taskName).subscribe({
+    this.requestTaskDetailsIfNoNewerRequestApplied().subscribe({
       next: (task) => this.applyTask(task, live),
       error: (error) => console.error('Failed to load task:', error),
     });
+  }
+
+  private requestTaskDetailsIfNoNewerRequestApplied(): Observable<TaskDetailsResponse> {
+    const request = ++this.sentGetTaskRequestCount;
+    return this.tasksService.getTask(this.projectName, this.taskName).pipe(
+      filter(() => request > this.newestShownTaskRequestNumber),
+      tap(() => (this.newestShownTaskRequestNumber = request)),
+    );
   }
 
   private applyTask(task: TaskDetailsResponse, live: boolean): void {
@@ -435,7 +446,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.tasksService.startEvaluation(this.projectName, this.taskName, walk).pipe(
       switchMap((evaluation) => {
         this.selectEvaluation(evaluation);
-        return this.tasksService.getTask(this.projectName, this.taskName).pipe(catchError(() => of(null)));
+        return this.requestTaskDetailsIfNoNewerRequestApplied().pipe(catchError(() => of(null)));
       }),
       finalize(() => this.starting.set(false)),
     ).subscribe({

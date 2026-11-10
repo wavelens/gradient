@@ -1874,6 +1874,66 @@ describe('TaskDetailComponent - live package reloads', () => {
     expect(cmp.selected()?.id).toBe('e-new');
   });
 
+  it('keeps a fast failure when the start request answers after the live reload', () => {
+    const access = { managed: false, canEdit: true, canTrigger: true };
+    const responses: Subject<ReturnType<typeof taskFor>>[] = [];
+    const getTask = vi.fn(() => {
+      const response = new Subject<ReturnType<typeof taskFor>>();
+      responses.push(response);
+      return response;
+    });
+    const { fixture, frames } = setup(access, { getTask, primaryStatus: 'Completed', startEvaluation: () => of('e2') });
+    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const cmp = fixture.componentInstance;
+    const withLatest = (status: EvaluationSummary['status'], builds: Partial<BuildStatusCounts>) =>
+      ({ ...taskFor(access), last_evaluations: [evalSummary('e2', status, { builds: { ...zeroCounts(), ...builds } }), evalSummary('e1', 'Completed')] });
+
+    cmp.startEvaluation();
+    frames.next({ event: 'evaluation.building', at: '', content: { evaluation_id: 'e2' } } as LiveEvent);
+    vi.advanceTimersByTime(300);
+    frames.next({ event: 'evaluation.failed', at: '', content: { evaluation_id: 'e2' } } as LiveEvent);
+    vi.advanceTimersByTime(200);
+    expect(responses).toHaveLength(2);
+
+    responses[1].next(withLatest('Failed', { failed: 1 }));
+    responses[1].complete();
+    responses[0].next(withLatest('Building', { building: 1 }));
+    responses[0].complete();
+    fixture.detectChanges();
+
+    expect(cmp.selected()?.status).toBe('Failed');
+    expect(cmp.evaluationInProgress()).toBe(false);
+    expect(cmp.starting()).toBe(false);
+    expect((fixture.nativeElement as HTMLElement).querySelector('.panel-head gr-eval-status-badge')?.textContent?.toLowerCase()).toContain('failed');
+  });
+
+  it('drops an older live reload that answers after a newer one', () => {
+    const access = { managed: false, canEdit: true, canTrigger: true };
+    const responses: Subject<ReturnType<typeof taskFor>>[] = [];
+    const getTask = vi.fn(() => {
+      const response = new Subject<ReturnType<typeof taskFor>>();
+      responses.push(response);
+      return response;
+    });
+    const { fixture, frames } = setup(access, { getTask });
+    const cmp = fixture.componentInstance;
+
+    frames.next({ event: 'evaluation.building', at: '', content: {} } as LiveEvent);
+    vi.advanceTimersByTime(500);
+    frames.next({ event: 'evaluation.failed', at: '', content: {} } as LiveEvent);
+    vi.advanceTimersByTime(500);
+    expect(responses).toHaveLength(2);
+
+    responses[1].next(resolvedTask(access, { primaryStatus: 'Failed' }));
+    responses[0].next(resolvedTask(access, { primaryStatus: 'Building' }));
+    expect(cmp.selected()?.status).toBe('Failed');
+
+    frames.next({ event: 'evaluation.queued', at: '', content: {} } as LiveEvent);
+    vi.advanceTimersByTime(500);
+    responses[2].next(resolvedTask(access, { primaryStatus: 'Queued' }));
+    expect(cmp.selected()?.status).toBe('Queued');
+  });
+
   it('shows a changed waiting reason without waiting for another update', () => {
     const access = { managed: false, canEdit: true, canTrigger: true };
     const waiting = (waiting_reason: EvaluationSummary['waiting_reason']) => resolvedTask(access, { primaryStatus: 'Waiting', primary: { waiting_reason } });
