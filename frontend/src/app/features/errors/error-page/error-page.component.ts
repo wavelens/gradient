@@ -11,7 +11,7 @@ import { ButtonComponent, IconComponent } from '@gradient/ui/ui';
 import { AuthService } from '@core/services/auth.service';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { DeniedKind } from '@core/routing/access-denied';
-import { links } from '@shared/routing';
+import { getInAppReturnPathIfNotErrorPage, links } from '@shared/routing';
 
 interface ErrorMeta {
   title: string;
@@ -100,9 +100,8 @@ export interface DeniedView {
   backLink: string;
 }
 
-function deniedDescription(notFound: string, user: { superuser?: boolean } | null): string {
-  if (!user) return `${notFound} It doesn't exist, or it's private and needs sign-in.`;
-  return user.superuser ? notFound : `${notFound} It doesn't exist, or you don't have access to it.`;
+function deniedDescription(notFound: string, signedIn: boolean): string {
+  return signedIn ? `${notFound} It doesn't exist, or you don't have access to it.` : `${notFound} It doesn't exist, or it's private and needs sign-in.`;
 }
 
 @Component({
@@ -133,7 +132,7 @@ export class ErrorPageComponent {
     const back = this.query.get('back') ?? '/';
     const name = this.query.get('name');
     return {
-      description: deniedDescription(name ? `${kind.label} "${name}" not found.` : `${kind.label} not found.`, this.user()),
+      description: deniedDescription(name ? `${kind.label} "${name}" not found.` : `${kind.label} not found.`, !!this.user()),
       backLabel: PROJECT_PAGE.test(back) ? 'Back to Project' : kind.back,
       backLink: back,
     };
@@ -144,7 +143,7 @@ export class ErrorPageComponent {
       return this.user() ? ERROR_META[403] : { ...ERROR_META[403], description: 'Sign in to open this page.' };
     }
     const base = ERROR_META[this.code()] ?? FALLBACK_META;
-    return this.denied() && !this.user()?.superuser ? { ...base, title: 'Not Found or Access Denied', icon: 'lock' } : base;
+    return this.denied() ? { ...base, title: 'Not Found or Access Denied', icon: 'lock' } : base;
   });
   restricted = computed(() => this.code() === 403 || this.denied() !== null);
   home = computed(() =>
@@ -168,7 +167,6 @@ export class ErrorPageComponent {
   }
 
   private safeFrom(): string | null {
-    const from = this.query.get('from');
-    return from && from.startsWith('/') && !from.startsWith('/error/') ? from : null;
+    return getInAppReturnPathIfNotErrorPage(this.query.get('from'));
   }
 }

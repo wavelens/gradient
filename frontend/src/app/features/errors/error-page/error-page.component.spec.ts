@@ -107,12 +107,11 @@ describe('ErrorPageComponent', () => {
     expect(links).toContainEqual({ text: 'Back to Projects', href: '/projects' });
   });
 
-  it('tells a superuser only that the item is missing and offers no Switch Account', () => {
+  it('gives a superuser the same denied page as any signed-in user', () => {
     const { text, links } = render(404, DENIED, { username: 'root', superuser: true });
-    expect(text).toContain('Cache "researchcache" not found.');
-    expect(text).not.toContain('Access Denied');
-    expect(text).not.toContain("don't have access");
-    expect(links.map((l) => l.text)).not.toContain('Switch Account');
+    expect(text).toContain('Not Found or Access Denied');
+    expect(text).toContain("don't have access");
+    expect(links.map((l) => l.text)).toContain('Switch Account');
   });
 
   it('reloads pending invitations when a signed-in user lands on a denied page', () => {
