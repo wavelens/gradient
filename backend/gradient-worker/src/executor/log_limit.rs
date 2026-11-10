@@ -15,16 +15,18 @@ struct Bucket {
     tokens: f64,
     refill_per_sec: f64,
     last_t: f64,
+    resume_at: f64,
 }
 
 impl Bucket {
-    fn new(capacity_per_window: u64, window_secs: f64) -> Self {
+    fn new(capacity_per_window: u64, window_secs: f64, resume_at: f64) -> Self {
         let capacity = capacity_per_window as f64;
         Self {
             capacity,
             tokens: capacity,
             refill_per_sec: capacity / window_secs,
             last_t: 0.0,
+            resume_at: resume_at.min(capacity),
         }
     }
 
@@ -32,6 +34,11 @@ impl Bucket {
         let dt = (now - self.last_t).max(0.0);
         self.tokens = (self.tokens + dt * self.refill_per_sec).min(self.capacity);
         self.last_t = now;
+    }
+
+    fn holds(&self, n: f64, paused: bool) -> bool {
+        let needed = if paused { n.max(self.resume_at) } else { n };
+        self.tokens >= needed
     }
 }
 
@@ -46,7 +53,6 @@ pub enum Admission {
 pub struct LogRateLimiter {
     minute: Bucket,
     hour: Bucket,
-    resume_at: f64,
     skipped_lines: Option<u64>,
 }
 
@@ -58,24 +64,21 @@ impl From<LogRateLimits> for LogRateLimiter {
 
 impl LogRateLimiter {
     pub fn new(bytes_per_min: u64, bytes_per_hour: u64) -> Self {
+        let resume_at = bytes_per_min as f64 / 4.0;
         Self {
-            minute: Bucket::new(bytes_per_min, 60.0),
-            hour: Bucket::new(bytes_per_hour, 3600.0),
-            resume_at: bytes_per_min as f64 / 4.0,
+            minute: Bucket::new(bytes_per_min, 60.0, resume_at),
+            hour: Bucket::new(bytes_per_hour, 3600.0, resume_at),
             skipped_lines: None,
         }
     }
 
-    /// Paused logs resume when both buckets hold a quarter of the per-minute budget again. Logs continue in bursts instead of a sparse sample of lines.
+    /// A paused log can stay paused until both buckets hold a quarter of the per-minute budget again. A bucket with a smaller capacity than that value can fill instead. The log can then continue as a burst, not as a sparse sample of lines.
     pub fn admit(&mut self, n: u64, now: f64) -> Admission {
         let n = n as f64;
         self.minute.refill(now);
         self.hour.refill(now);
-        let needed = match self.skipped_lines {
-            Some(_) => n.max(self.resume_at),
-            None => n,
-        };
-        if self.minute.tokens < needed || self.hour.tokens < needed {
+        let paused = self.skipped_lines.is_some();
+        if !self.minute.holds(n, paused) || !self.hour.holds(n, paused) {
             let pausing = self.skipped_lines.is_none();
             *self.skipped_lines.get_or_insert(0) += 1;
             return if pausing {
@@ -134,6 +137,14 @@ mod tests {
         assert_eq!(l.admit(10, 10.0), Admission::Skipped);
         assert_eq!(l.admit(10, 15.0), Admission::Resumed { skipped_lines: 2 });
         assert_eq!(l.admit(10, 15.0), Admission::Forward);
+    }
+
+    #[test]
+    fn resumes_when_the_hour_budget_is_below_a_quarter_minute() {
+        let mut l = LogRateLimiter::new(4000, 360);
+        assert_eq!(l.admit(360, 0.0), Admission::Forward);
+        assert_eq!(l.admit(10, 0.0), Admission::Paused);
+        assert_eq!(l.admit(10, 3600.0), Admission::Resumed { skipped_lines: 1 });
     }
 
     #[test]
