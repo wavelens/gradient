@@ -5,6 +5,7 @@
  */
 
 import type { LogSearchHit } from '@core/models';
+import { anyTerminalEscapeSequencePattern } from './ansi';
 
 // Nix strips carriage returns from build logs; exec jobs pass the guest output through untouched.
 function lastRewrite(line: string): string {
@@ -50,11 +51,8 @@ export function windowAround(
   return { start, end };
 }
 
-// eslint-disable-next-line no-control-regex -- ESC is the sequence introducer
-const ANSI_ESCAPE = /\u001b\[[?0-9;]*[A-Za-z~]/g;
-
 export function removeAnsiEscapeSequences(text: string): string {
-  return text.replace(ANSI_ESCAPE, '');
+  return text.replace(anyTerminalEscapeSequencePattern, '');
 }
 
 export function searchLines(lines: readonly string[], query: string): LogSearchHit[] {
