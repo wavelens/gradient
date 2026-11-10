@@ -147,6 +147,38 @@ impl GuestPool {
     }
 
     pub async fn take(self: &Arc<Self>, job_id: String, size: GuestSize) -> Taken {
+        let pool = Arc::clone(self);
+        let claim = async move { pool.claim_or_boot_guest_for_job(job_id, size).await };
+        self.acquire_guest_in_background_and_park_or_stop_guest_if_caller_stops_waiting(true, claim)
+            .await
+    }
+
+    async fn acquire_guest_in_background_and_park_or_stop_guest_if_caller_stops_waiting(
+        self: &Arc<Self>,
+        uses_standard_image: bool,
+        acquire: impl Future<Output = Taken> + Send + 'static,
+    ) -> Taken {
+        let (sender, receiver) = oneshot::channel();
+        let pool = Arc::clone(self);
+        self.tasks.spawn(async move {
+            let Err(Ok((guest, hold))) = sender.send(acquire.await) else {
+                return;
+            };
+            match uses_standard_image {
+                true => pool.keep_or_stop(guest, hold).await,
+                false => pool.teardown_warm(WarmGuest { guest, hold }).await,
+            }
+        });
+        receiver
+            .await
+            .unwrap_or_else(|_| Err(GuestBootError("the guest pool stopped".to_owned())))
+    }
+
+    async fn claim_or_boot_guest_for_job(
+        self: &Arc<Self>,
+        job_id: String,
+        size: GuestSize,
+    ) -> Taken {
         let image = self.worker_image()?;
         let size = job_size(size, &image);
         let warm = lock(&self.slots)
@@ -172,19 +204,10 @@ impl GuestPool {
         }
     }
 
-    async fn cold_boot(self: &Arc<Self>, image: GuestImage, size: GuestSize) -> Taken {
+    async fn cold_boot(&self, image: GuestImage, size: GuestSize) -> Taken {
         let hold = self.make_room(|| self.budget.hold(size)).await?;
-        let (sender, receiver) = oneshot::channel();
-        let pool = Arc::clone(self);
-        self.tasks.spawn(async move {
-            let booted = pool.boot_image(&image).await.map(|guest| (guest, hold));
-            if let Err(Ok((guest, hold))) = sender.send(booted) {
-                pool.keep_or_stop(guest, hold).await;
-            }
-        });
-        receiver
-            .await
-            .unwrap_or_else(|_| Err(GuestBootError("the guest pool stopped".to_owned())))
+        let guest = self.boot_image(&image).await?;
+        Ok((guest, hold))
     }
 
     async fn make_room<T>(
@@ -390,12 +413,18 @@ impl GuestPool {
     ) -> Taken {
         let size = job_size(size, &self.worker_image()?);
         let image = load_image(custom)?.sized(&size);
-        let hold = self.make_room(|| self.budget.hold(size)).await?;
-        let guest = self
-            .boot_image(&image)
+        let custom = custom.to_owned();
+        let pool = Arc::clone(self);
+        let boot = async move {
+            let hold = pool.make_room(|| pool.budget.hold(size)).await?;
+            let guest = pool
+                .boot_image(&image)
+                .await
+                .map_err(|e| custom_boot_error(e, &custom))?;
+            pool.running(guest, hold, size, job_id)
+        };
+        self.acquire_guest_in_background_and_park_or_stop_guest_if_caller_stops_waiting(false, boot)
             .await
-            .map_err(|e| custom_boot_error(e, custom))?;
-        self.running(guest, hold, size, job_id)
     }
 
     async fn boot_warm(
