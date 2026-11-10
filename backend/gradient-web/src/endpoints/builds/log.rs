@@ -44,7 +44,7 @@ pub async fn get_build_log(
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
     let log = match super::effective_log_id(&state.web_db, &ctx.shared_build).await {
-        Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
+        Some(key) => state.log_storage.read(key).await?,
         None => String::new(),
     };
 
@@ -73,12 +73,7 @@ pub async fn post_build_log(
 
     let initial_attempt = latest_attempt_id(&state.web_db, shared_build_id).await?;
     let initial_offset = match initial_attempt {
-        Some(attempt) => state
-            .log_storage
-            .read(attempt)
-            .await
-            .unwrap_or_default()
-            .len() as u64,
+        Some(attempt) => state.log_storage.read(attempt).await?.len() as u64,
         None => 0,
     };
 

@@ -21,7 +21,7 @@ use gradient_types::*;
 use gradient_util::log_lines::PrefixedLines;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, warn};
 
 use super::EvalAccessContext;
 
@@ -77,14 +77,12 @@ async fn read_new_lines(
     shared_build: DerivationBuildId,
     followed: &mut Followed,
     finished: bool,
-) -> Vec<String> {
-    let log = match gradient_db::scheduling::build_attempt::latest_attempt_id(db, shared_build)
-        .await
-        .unwrap_or(None)
-    {
-        Some(key) => log_storage.read(key).await.unwrap_or_default(),
-        None => String::new(),
-    };
+) -> anyhow::Result<Vec<String>> {
+    let log =
+        match gradient_db::scheduling::build_attempt::latest_attempt_id(db, shared_build).await? {
+            Some(key) => log_storage.read(key).await?,
+            None => String::new(),
+        };
 
     let mut lines = log
         .get(followed.offset..)
@@ -96,7 +94,7 @@ async fn read_new_lines(
         followed.done = true;
     }
 
-    lines
+    Ok(lines)
 }
 
 #[utoipa::path(
@@ -134,7 +132,7 @@ pub async fn post_evaluation_builds(
         let mut followed: HashMap<DerivationBuildId, Followed> = HashMap::new();
         let mut first = true;
 
-        loop {
+        'poll_evaluation_builds: loop {
             let current = match eval_shared_build_jobs(&state.web_db, evaluation.id).await {
                 Ok(jobs) => jobs,
                 Err(e) => {
@@ -163,9 +161,13 @@ pub async fn post_evaluation_builds(
                     continue;
                 }
 
-                let lines = read_new_lines(&state.web_db, &state.log_storage, shared_build.id, entry, finished).await;
-                if !lines.is_empty() {
-                    yield lines.join("\n") + "\n";
+                match read_new_lines(&state.web_db, &state.log_storage, shared_build.id, entry, finished).await {
+                    Ok(lines) if lines.is_empty() => {}
+                    Ok(lines) => yield lines.join("\n") + "\n",
+                    Err(e) => {
+                        warn!(shared_build_id = %shared_build.id, error = %e, "log stream for evaluation failed to read the build log");
+                        break 'poll_evaluation_builds;
+                    }
                 }
             }
             first = false;
@@ -190,4 +192,34 @@ pub async fn post_evaluation_builds(
     Ok(StreamBodyAs::json_nl(
         crate::endpoints::log_stream::keepalive_chunks(stream),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_entity::build_attempt;
+    use gradient_fixtures::mock::mock_db;
+    use gradient_test_support::log_storage::ReadErrorLogStorage;
+
+    #[tokio::test]
+    async fn read_new_lines_error_keeps_followed_byte_offset_unchanged() {
+        let shared_build = DerivationBuildId::now_v7();
+        let db = WebDb::new(
+            mock_db()
+                .append_query_results([vec![build_attempt::Model {
+                    derivation_build: shared_build,
+                    ..Default::default()
+                }]])
+                .into_connection(),
+        );
+        let log_storage: Arc<dyn LogStorage> = Arc::new(ReadErrorLogStorage);
+        let mut followed = Followed::new("hello".into());
+        followed.offset = 5;
+
+        let result = read_new_lines(&db, &log_storage, shared_build, &mut followed, true).await;
+
+        assert!(result.is_err());
+        assert_eq!(followed.offset, 5);
+        assert!(!followed.done);
+    }
 }
