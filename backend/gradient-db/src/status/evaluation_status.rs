@@ -20,9 +20,25 @@ pub async fn update_evaluation_status(
     evaluation: MEvaluation,
     status: EvaluationStatus,
 ) -> Result<MEvaluation, DbErr> {
+    let id = evaluation.id;
+    let fallback = evaluation.clone();
+    match update_evaluation_status_only_if_changed(ctx, evaluation, status).await? {
+        Some(updated) => Ok(updated),
+        None => Ok(EEvaluation::find_by_id(id)
+            .one(&ctx.worker_db)
+            .await?
+            .unwrap_or(fallback)),
+    }
+}
+
+async fn update_evaluation_status_only_if_changed(
+    ctx: &DbContext,
+    evaluation: MEvaluation,
+    status: EvaluationStatus,
+) -> Result<Option<MEvaluation>, DbErr> {
     if evaluation.status != status && !status.sources().contains(&evaluation.status) {
         warn!(evaluation_id = %evaluation.id, from = ?evaluation.status, to = ?status, "Skipping invalid evaluation status transition");
-        return Ok(evaluation);
+        return Ok(None);
     }
 
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
@@ -52,7 +68,15 @@ pub async fn update_evaluation_status(
         _ => None,
     };
     if let Some(col) = phase_col {
-        update = update.col_expr(col, sea_orm::sea_query::Expr::value(now));
+        update = update.col_expr(
+            col,
+            sea_orm::sea_query::Expr::case(
+                CEvaluation::Status.eq(status),
+                sea_orm::sea_query::Expr::col(col),
+            )
+            .finally(now)
+            .into(),
+        );
     }
 
     let updated = update
@@ -62,11 +86,7 @@ pub async fn update_evaluation_status(
         .await?;
 
     if updated.rows_affected == 0 {
-        // A concurrent writer moved the row to a terminal state; keep its value.
-        return Ok(EEvaluation::find_by_id(evaluation.id)
-            .one(&ctx.worker_db)
-            .await?
-            .unwrap_or(evaluation));
+        return Ok(None);
     }
 
     let updated_eval = EEvaluation::find_by_id(evaluation.id)
@@ -80,7 +100,7 @@ pub async fn update_evaluation_status(
         });
 
     report_evaluation_status(ctx, &updated_eval, event_status, now).await?;
-    Ok(updated_eval)
+    Ok(Some(updated_eval))
 }
 
 pub fn evaluation_change(transition: Transition<EvaluationStatus>) -> UpdateMany<EEvaluation> {
@@ -227,14 +247,93 @@ pub async fn update_evaluation_status_with_error(
     let source = failure.source();
     debug!(evaluation_id = %evaluation.id, status = ?status, error = %failure, source, "Updating evaluation status with error");
 
+    let id = evaluation.id;
+    let fallback = evaluation.clone();
+    let Some(updated) = update_evaluation_status_only_if_changed(ctx, evaluation, status).await?
+    else {
+        return Ok(EEvaluation::find_by_id(id)
+            .one(&ctx.worker_db)
+            .await?
+            .unwrap_or(fallback));
+    };
+
     insert_evaluation_message(
         &ctx.worker_db,
-        evaluation.id,
+        id,
         MessageLevel::Error,
         failure.to_string(),
         Some(source.to_owned()),
     )
     .await?;
 
-    update_evaluation_status(ctx, evaluation, status).await
+    Ok(updated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::shape::shape;
+
+    #[tokio::test]
+    async fn outdated_error_report_after_completion_keeps_completed_status_without_error_message() {
+        let evaluation = EvaluationId::now_v7();
+        let db = shape()
+            .evaluation(evaluation)
+            .evaluation_status(EvaluationStatus::Completed)
+            .into_database()
+            .await;
+        let outdated = MEvaluation {
+            status: EvaluationStatus::Building,
+            ..db.find::<EEvaluation>(evaluation)
+                .await
+                .expect("the evaluation exists")
+        };
+        let (ctx, _pool) = crate::test_ctx::ctx(db.connection()).await;
+
+        let returned = update_evaluation_status_with_error(
+            &ctx,
+            outdated,
+            EvaluationStatus::Failed,
+            &EvaluationFailure::ReportedByWorker("late"),
+        )
+        .await
+        .expect("the update runs");
+
+        assert_eq!(returned.status, EvaluationStatus::Completed);
+        assert!(db.error_messages(evaluation).await.is_empty());
+        drop(ctx);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn reporting_same_evaluation_status_keeps_building_started_at() {
+        let evaluation = EvaluationId::now_v7();
+        let db = shape()
+            .evaluation(evaluation)
+            .evaluation_status(EvaluationStatus::Building)
+            .into_database()
+            .await;
+        let started = chrono::DateTime::UNIX_EPOCH.naive_utc();
+        db.execute(&format!(
+            "UPDATE evaluation SET building_started_at = '{started}' WHERE id = '{evaluation}'"
+        ))
+        .await;
+        let current = db
+            .find::<EEvaluation>(evaluation)
+            .await
+            .expect("the evaluation exists");
+        let (ctx, _pool) = crate::test_ctx::ctx(db.connection()).await;
+
+        update_evaluation_status(&ctx, current, EvaluationStatus::Building)
+            .await
+            .expect("the update runs");
+
+        let row = db
+            .find::<EEvaluation>(evaluation)
+            .await
+            .expect("the evaluation exists");
+        assert_eq!(row.building_started_at, Some(started));
+        drop(ctx);
+        db.finish().await;
+    }
 }
