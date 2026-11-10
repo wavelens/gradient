@@ -67,6 +67,22 @@ async fn a_job_token_is_refused_on_account_routes() {
 }
 
 #[tokio::test]
+async fn a_job_token_is_refused_on_exec_job_terminals() {
+    for terminal in ["shell", "console", "forward?port=22"] {
+        let server = make_test_server(with_job_token(mock_db()).into_connection());
+
+        let res = server
+            .get(&format!(
+                "/api/v1/exec/00000000-0000-0000-0000-000000000000/{terminal}"
+            ))
+            .add_header("Authorization", TOKEN)
+            .await;
+
+        assert_refused_by_scope(res.status_code(), &res.json::<Json>());
+    }
+}
+
+#[tokio::test]
 async fn a_job_token_on_an_optional_route_outside_its_scope_is_refused() {
     let db = with_job_token(mock_db()).append_query_results([vec![user()]]);
     let server = make_test_server(db.into_connection());

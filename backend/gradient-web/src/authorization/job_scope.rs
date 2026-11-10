@@ -11,12 +11,52 @@ use axum::http::Method;
 use axum::http::request::Parts;
 use gradient_db::exec_jobs::tokens::ResolvedJobToken;
 
-const JOB_READ_PREFIXES: &[&str] = &[
+const JOB_READ_ROUTES: &[&str] = &[
     "/projects/{project}",
     "/tasks/{project}",
+    "/tasks/{project}/available",
+    "/tasks/{project}/{task}",
+    "/tasks/{project}/{task}/badge",
+    "/tasks/{project}/{task}/details",
+    "/tasks/{project}/{task}/entry-point-downloads",
+    "/tasks/{project}/{task}/entry-point-metrics",
+    "/tasks/{project}/{task}/entry-points",
+    "/tasks/{project}/{task}/evaluations",
+    "/tasks/{project}/{task}/flake-inputs",
+    "/tasks/{project}/{task}/flake-inputs/{id}",
+    "/tasks/{project}/{task}/live",
+    "/tasks/{project}/{task}/metrics",
     "/evals/{evaluation}",
+    "/evals/{evaluation}/artefacts",
+    "/evals/{evaluation}/builds",
+    "/evals/{evaluation}/closure",
+    "/evals/{evaluation}/exec",
+    "/evals/{evaluation}/flake-graph",
+    "/evals/{evaluation}/live",
+    "/evals/{evaluation}/messages",
+    "/evals/{evaluation}/report",
+    "/evals/{evaluation}/runtime-closure",
+    "/evals/{evaluation}/summary",
     "/builds/{build}",
+    "/builds/{build}/attempts",
+    "/builds/{build}/closure",
+    "/builds/{build}/download-token",
+    "/builds/{build}/download/{filename}",
+    "/builds/{build}/downloads",
+    "/builds/{build}/graph",
+    "/builds/{build}/live",
+    "/builds/{build}/log",
+    "/builds/{build}/log/chunk/{index}",
+    "/builds/{build}/log/chunks",
+    "/builds/{build}/log/lines",
+    "/builds/{build}/log/search",
+    "/builds/{build}/runtime-closure",
+    "/builds/{build}/sbom",
     "/exec/{job}",
+    "/exec/{job}/log",
+    "/exec/{job}/outputs",
+    "/exec/{job}/outputs/{path}",
+    "/exec/{job}/pull-requests",
 ];
 
 const JOB_WRITE_ROUTES: &[&str] = &[
@@ -80,17 +120,8 @@ pub(crate) async fn job_scope_of_request(
 }
 
 fn route_reachable(method: &Method, route: &str) -> bool {
-    let read = matches!(*method, Method::GET | Method::HEAD)
-        && JOB_READ_PREFIXES
-            .iter()
-            .any(|prefix| route_is_under(route, prefix));
+    let read = matches!(*method, Method::GET | Method::HEAD) && JOB_READ_ROUTES.contains(&route);
     read || JOB_WRITE_ROUTES.contains(&route)
-}
-
-fn route_is_under(route: &str, prefix: &str) -> bool {
-    route
-        .strip_prefix(prefix)
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 fn params_name_the_job(params: &[(&str, &str)], job: &ResolvedJobToken) -> bool {
@@ -188,6 +219,22 @@ mod tests {
                 vec![("evaluation", "e")],
             ),
             (Method::POST, "/api/v1/exec/{job}/run", vec![("job", "j")]),
+            (Method::GET, "/api/v1/exec/{job}/shell", vec![("job", "j")]),
+            (
+                Method::GET,
+                "/api/v1/exec/{job}/console",
+                vec![("job", "j")],
+            ),
+            (
+                Method::GET,
+                "/api/v1/exec/{job}/forward",
+                vec![("job", "j")],
+            ),
+            (
+                Method::GET,
+                "/api/v1/projects/{project}/secrets",
+                vec![("project", "infra")],
+            ),
         ] {
             assert!(
                 matches!(
