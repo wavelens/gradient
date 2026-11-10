@@ -83,11 +83,16 @@ impl NixPathInfo {
                 .join(" ");
             out.push_str(&format!("References: {}\n", refs));
         }
-        if let Some(deriver) = &self.deriver {
-            out.push_str(&format!("Deriver: {}\n", store_path_name(deriver)));
+        if let Some(deriver) = self
+            .deriver
+            .as_deref()
+            .map(store_path_name)
+            .filter(|d| !d.is_empty())
+        {
+            out.push_str(&format!("Deriver: {}\n", deriver));
         }
         out.push_str(&format!("Sig: {}\n", self.sig));
-        if let Some(ca) = &self.ca {
+        if let Some(ca) = self.ca.as_deref().filter(|ca| !ca.is_empty()) {
             out.push_str(&format!("CA: {}\n", ca));
         }
         out
@@ -312,6 +317,31 @@ mod tests {
         let sig_idx = s.find("Sig:").unwrap();
         let ca_idx = s.find("CA:").unwrap();
         assert!(sig_idx < ca_idx, "CA must appear after Sig");
+    }
+
+    #[test]
+    fn rendered_narinfo_with_empty_deriver_and_ca_omits_deriver_and_ca_lines_has_nonempty_key_value_lines_and_one_trailing_newline()
+     {
+        let mut pi = path_info();
+        pi.deriver = Some(String::new());
+        pi.ca = Some(String::new());
+        let s = pi.to_nix_string();
+        assert!(
+            !s.contains("Deriver:"),
+            "Always omit the Deriver line for an empty deriver.\n{s}"
+        );
+        assert!(!s.contains("CA:"), "Omit the CA line for an empty CA.\n{s}");
+        for line in s.lines() {
+            assert!(
+                line.split_once(": ")
+                    .is_some_and(|(key, value)| !key.is_empty() && !value.trim().is_empty()),
+                "All lines need a `Key: value` with a non-empty value, but got {line:?} in:\n{s}"
+            );
+        }
+        assert!(
+            s.ends_with('\n') && !s.ends_with("\n\n"),
+            "End the body with exactly one newline. The body is {s:?}"
+        );
     }
 
     #[test]
