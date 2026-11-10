@@ -5,6 +5,7 @@
  */
 
 mod batch;
+mod drv_file_and_input_source_retention;
 mod exec;
 mod failure;
 mod gc;

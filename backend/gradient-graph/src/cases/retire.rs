@@ -13,7 +13,7 @@ use gradient_fixtures::shape::shape;
 
 use super::{
     A, A_OUT, B, B_OUT, C, C_OUT, Case, D, D_OUT, F_OUT, F1, F2, P, P_OUT, UNKNOWN_OUT, X, X_OUT,
-    as_set, chain, chain_done, commit_of, drv_nar, pass,
+    as_set, chain, chain_done, commit_of, drv, drv_nar, pass, with_output,
 };
 use crate::messages::{Demotion, NarCommit};
 
@@ -186,7 +186,8 @@ async fn r02_a_build_that_only_referenced_the_path_stays_terminal_and_loses_its_
 }
 
 #[tokio::test]
-async fn r03_retiring_a_drv_unqueues_its_queued_owner_and_the_recommit_queues_it_again() {
+async fn r03_removing_cached_drv_file_marks_derivation_not_walked_moves_queued_build_to_created_reupload_alone_keeps_it_created_and_new_walk_queues_it_again()
+ {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(
         chain(e1)
@@ -208,6 +209,8 @@ async fn r03_retiring_a_drv_unqueues_its_queued_owner_and_the_recommit_queues_it
     let b = case.sb(B).await;
     let b = (b.status, b.wanted);
     assert_eq!(b, (Created, true), "after 1: sb(B)");
+    let walked = case.derivation(B).await.walked;
+    assert!(!walked, "after 1: derivation(B).walked");
     let c = case.sb(C).await.status;
     assert_eq!(c, Building, "after 1: sb(C).status");
     let counters = case.counters(e1).await;
@@ -217,8 +220,17 @@ async fn r03_retiring_a_drv_unqueues_its_queued_owner_and_the_recommit_queues_it
     case.commit_nar(drv_nar(B)).await;
 
     let b = case.sb(B).await.status;
-    assert_eq!(b, Queued, "after 2: sb(B).status");
+    assert_eq!(b, Created, "after 2: sb(B).status");
+    let walked = case.derivation(B).await.walked;
+    assert!(!walked, "after 2: derivation(B).walked");
     case.zero_drift("step 2").await;
+
+    let leaf = with_output(drv(B, &[]), B_OUT);
+    case.walk(case.tasked(e1, vec![leaf]).await).await;
+
+    let b = case.sb(B).await.status;
+    assert_eq!(b, Queued, "after 3: sb(B).status");
+    case.zero_drift("step 3").await;
     case.finish().await;
 }
 

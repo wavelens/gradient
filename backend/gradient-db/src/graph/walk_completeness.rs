@@ -76,6 +76,10 @@ RETURNING d.id, x.was_complete, (d.walked AND d.unwalked_inputs = 0) AS complete
     UNWALK = "UPDATE derivation SET walked = false WHERE id = ANY($1)",
         params = [DerivationIds(64)];
 
+    SELECT_DERIVATION_IDS_WITH_DRV_OR_INPUT_SOURCE_HASH_AMONG = "SELECT id FROM derivation WHERE hash = ANY($1::text[]) \
+             UNION SELECT derivation FROM derivation_input_source WHERE hash = ANY($1::text[])",
+        params = [CachedPathHashes(64)];
+
     UNWALKED_INPUTS_DRIFTED = UNWALKED_INPUTS_DRIFTED_SQL,
         params = [],
         tier = Sweep,
@@ -140,6 +144,27 @@ pub async fn unwalk(txn: &DatabaseTransaction, derivations: &[DerivationId]) -> 
     ripple(txn, complete, false).await?;
 
     Ok(())
+}
+
+pub async fn mark_derivations_not_walked_for_store_path_hashes(
+    txn: &DatabaseTransaction,
+    hashes: &[String],
+) -> Result<Vec<DerivationId>, DbErr> {
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut owners = derivation_ids(
+        &txn.query_all_raw(
+            SELECT_DERIVATION_IDS_WITH_DRV_OR_INPUT_SOURCE_HASH_AMONG
+                .bind([hashes.to_vec().into()]),
+        )
+        .await?,
+    );
+    owners.sort_unstable();
+    unwalk(txn, &owners).await?;
+
+    Ok(owners)
 }
 
 async fn ripple(

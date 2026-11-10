@@ -27,9 +27,7 @@ pub use need::{
     update_and_settle_need,
 };
 pub(crate) use need::{settle_need, update_need, wanted_by_its_evaluation};
-pub use queue::{
-    promote, promote_closure, unpromote_drv_owners, unpromote_ungated, unwalk_derivations,
-};
+pub use queue::{promote, promote_closure, unpromote_ungated, unwalk_derivations};
 pub use repair::{
     Repaired, RepairedFetchable, can_start_scope, repair_can_start, repair_fetchable,
 };

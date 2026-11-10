@@ -320,6 +320,11 @@ pub async fn retire_outputs(
 
     txn.execute_raw(LOCK_CACHED_PATHS.bind([hashes.to_vec().into()]))
         .await?;
+    let owners =
+        crate::graph::walk_completeness::mark_derivations_not_walked_for_store_path_hashes(
+            txn, hashes,
+        )
+        .await?;
 
     let gone = crate::graph::reachability::producers_of_hashes(txn, hashes).await?;
     let was_complete = complete_among(txn, &gone).await?;
@@ -333,7 +338,7 @@ pub async fn retire_outputs(
 
     let mut incomplete = was_complete.clone();
     incomplete.extend(ripple_shared_builds_incomplete(txn, was_complete).await?);
-    let transitions = retire_shared_builds(txn, &gone, &incomplete, hashes).await?;
+    let transitions = retire_shared_builds(txn, &gone, &incomplete, &owners).await?;
 
     Ok(Retired {
         deleted,
@@ -346,10 +351,11 @@ async fn retire_shared_builds(
     txn: &DatabaseTransaction,
     gone: &[DerivationId],
     incomplete: &[DerivationId],
-    hashes: &[String],
+    owners: &[DerivationId],
 ) -> Result<Vec<crate::status::TransitionChange>, DbErr> {
     let mut scope = gone.to_vec();
     scope.extend_from_slice(incomplete);
+    scope.extend_from_slice(owners);
     scope.sort_unstable();
     scope.dedup();
 
@@ -357,7 +363,7 @@ async fn retire_shared_builds(
     let mut transitions = crate::graph::can_start::lost_fetchability(&lock).await?;
 
     transitions.extend(reset_uncached_producers(txn, gone).await?);
-    transitions.extend(crate::graph::can_start::unpromote_drv_owners(txn, hashes).await?);
+    transitions.extend(crate::graph::can_start::unpromote_ungated(txn, owners).await?);
 
     Ok(transitions)
 }

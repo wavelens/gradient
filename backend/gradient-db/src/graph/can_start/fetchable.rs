@@ -262,7 +262,7 @@ pub async fn lost_fetchability(lock: &SharedBuildLock<'_>) -> Result<Vec<Transit
 mod tests {
     use super::*;
     use crate::graph::can_start::lock::lock_seed_shared_builds;
-    use crate::graph::can_start::queue::{unpromote_drv_owners, unpromote_ungated};
+    use crate::graph::can_start::queue::unpromote_ungated;
     use crate::graph::can_start::repair::RECOUNT_BLOCKING_DEPS;
     use crate::graph::can_start::test_rows::{drv, exec, norm, transition_row};
     use gradient_fixtures::mock::{empty_db, mock_db, statements};
@@ -360,7 +360,6 @@ mod tests {
         txn.commit().await.unwrap();
 
         assert!(promote(&db, &[]).await.unwrap().is_empty());
-        assert!(unpromote_drv_owners(&db, &[]).await.unwrap().is_empty());
         assert!(unpromote_ungated(&db, &[]).await.unwrap().is_empty());
         assert!(statements(db.into_transaction_log()).is_empty());
     }

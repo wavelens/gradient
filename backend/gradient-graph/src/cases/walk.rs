@@ -157,7 +157,8 @@ async fn w03_both_unknown_inputs_of_a_diamond_top_drop_with_its_leaf() {
 }
 
 #[tokio::test]
-async fn w04_a_missing_producerless_drv_leaves_its_derivation_walked_and_the_batch_is_skipped() {
+async fn w04_missing_producerless_drv_in_cache_fails_build_marks_derivation_not_walked_raises_dependent_unwalked_inputs_and_skips_building_evaluation_walk_batch()
+ {
     let e1 = EvaluationId::now_v7();
     let case = Case::start(
         shape()
@@ -191,9 +192,9 @@ async fn w04_a_missing_producerless_drv_leaves_its_derivation_walked_and_the_bat
     let stored = case.find_cached_path(drv_hash).await;
     assert_eq!(stored, None, "after 1: cached_path(A.drv)");
     let derivation = case.derivation(A).await;
-    assert!(derivation.walked, "after 1: derivation(A).walked");
+    assert!(!derivation.walked, "after 1: derivation(A).walked");
     let inputs = unwalked_inputs(&case, &[X]).await;
-    assert_eq!(inputs, [0], "after 1: unwalked_inputs of X");
+    assert_eq!(inputs, [1], "after 1: unwalked_inputs of X");
     let a = case.sb(A).await;
     let columns = (a.status, a.attempt, a.wanted);
     assert_eq!(columns, (FailedTransient, 1, true), "after 1: sb(A)");

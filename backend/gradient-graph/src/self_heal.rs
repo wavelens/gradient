@@ -114,7 +114,7 @@ pub(crate) async fn repair_missing_inputs(
         parents_unwalked,
         requeued,
         paths = missing_paths.len(),
-        "repaired missing inputs: gone objects purged, present and producerless paths kept"
+        "Repaired missing inputs. Purged gone outputs. Marked derivations that list gone paths as unwalked. Kept present objects."
     );
     Ok(())
 }

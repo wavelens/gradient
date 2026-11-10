@@ -89,19 +89,6 @@ fn unpromote_ungated_sql(scope: &str) -> String {
     ))
 }
 
-static UNPROMOTE_DRV_OWNERS: LazyLock<String> = LazyLock::new(|| {
-    unpromote_ungated_sql(
-        "EXISTS (SELECT 1 FROM derivation d \
-                 WHERE d.id = db.derivation AND d.hash = ANY($1::text[])) AND ",
-    )
-});
-
-crate::sql_lazy! {
-    UNPROMOTE_DRV_OWNERS_QUERY = || UNPROMOTE_DRV_OWNERS.as_str(),
-        params = [DerivationHashes(64)],
-        status_write = StatusWrite::build(BuildStatus::UNQUEUE);
-}
-
 static UNPROMOTE_UNGATED: LazyLock<String> = LazyLock::new(|| unpromote_ungated_sql(""));
 
 crate::sql_lazy! {
@@ -158,20 +145,6 @@ where
         returned_derivations(rows),
         BuildStatus::Created,
         BuildStatus::Queued,
-    ))
-}
-
-pub async fn unpromote_drv_owners<C: ConnectionTrait>(
-    db: &C,
-    drv_hashes: &[String],
-) -> Result<Vec<TransitionChange>, DbErr> {
-    if drv_hashes.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    Ok(returned_transitions(
-        db.query_all_raw(UNPROMOTE_DRV_OWNERS_QUERY.bind([drv_hashes.to_vec().into()]))
-            .await?,
     ))
 }
 
@@ -253,21 +226,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn unpromoting_a_drv_owner_rechecks_the_complete_gate() {
-        let sql = norm(&UNPROMOTE_DRV_OWNERS);
-        assert!(sql.contains("d.hash = ANY($1::text[])"), "{sql}");
-        assert!(
-            sql.contains(&format!("AND NOT {}", norm(&gates_predicate("db")))),
-            "{sql}"
-        );
-        assert!(sql.contains("db.status = 1"), "queued rows only: {sql}");
-        assert!(
-            sql.contains("RETURNING db.derivation, old.status AS from_status"),
-            "{sql}"
-        );
-    }
-
     #[tokio::test]
     async fn unpromote_ungated_moves_queued_rows_back_to_created() {
         let d = DerivationId::now_v7();
@@ -305,11 +263,7 @@ mod tests {
                 &crate::scheduling::assignment_record::build_job_key_sql("db.id"),
             ),
         );
-        for sql in [
-            &*UNPROMOTE_UNGATED,
-            &*UNPROMOTE_UNGATED_IN,
-            &*UNPROMOTE_DRV_OWNERS,
-        ] {
+        for sql in [&*UNPROMOTE_UNGATED, &*UNPROMOTE_UNGATED_IN] {
             assert!(norm(sql).contains(&gate), "{sql}");
         }
     }

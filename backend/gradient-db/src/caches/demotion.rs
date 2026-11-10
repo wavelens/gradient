@@ -84,10 +84,7 @@ crate::sql! {
         params = [DerivationIds(64)];
 }
 
-/// Clear `cache_available` before the retire reads it, under
-/// [`crate::graph::runtime_can_start::lock_cached_paths`] taken first. All writers follow the
-/// class order `cached_path`, then `derivation_build`, or a concurrent retire deadlocks against
-/// this path.
+/// Acquire the [`crate::graph::runtime_can_start::lock_cached_paths`] first. Clear `cache_available` under that lock before a concurrent retire can read that value. All writers follow the class order `cached_path`, then `derivation`, then `derivation_build`. A concurrent retire can deadlock with this path on any other order.
 pub async fn demote_cached_output(
     ctx: &crate::DbContext,
     hash: &str,
@@ -115,6 +112,11 @@ pub async fn demote_cached_output(
 
     let txn = db.begin().await?;
     crate::graph::runtime_can_start::lock_cached_paths(&txn, &[hash.to_owned()]).await?;
+    crate::graph::walk_completeness::mark_derivations_not_walked_for_store_path_hashes(
+        &txn,
+        &[hash.to_owned()],
+    )
+    .await?;
     let _shared_builds = crate::graph::can_start::lock_shared_builds(&txn, &producers).await?;
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
@@ -261,6 +263,8 @@ mod tests {
         let db = mock_db()
             .append_query_results([vec![output.clone()], vec![output]])
             .append_query_results([
+                none.clone(),
+                none.clone(),
                 vec![producer_row],
                 none.clone(),
                 vec![deleted],
@@ -296,17 +300,17 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            20,
-            "outputs, demote, path lock, shared build lock, trust clear, retire lock, \
-             producers of the hash, the complete closure they had, delete, \
-             shared build lock, mark, reset, owners, the unneeded outputs forgotten under \
-             their lock and closure read, un-promote and the raised, locked update of what \
-             the producers now need: {log:?}"
+            21,
+            "output, demote, path lock, derivations that list path, shared build lock, trust clear, retire lock, derivations that list path, producers of that hash, full closures that they held, delete, shared build lock, mark, reset, forget unneeded outputs under that lock and read closure, un-promote and update producer needs under raised lock: {log:?}"
         );
         let paths = log
             .iter()
             .position(|s| s.contains("FROM cached_path WHERE hash = ANY($1)"))
             .expect("the path lock is taken first");
+        let listing_derivations = log
+            .iter()
+            .position(|s| s.contains("FROM derivation_input_source WHERE hash = ANY"))
+            .expect("demote can read which derivations list that path.");
         let shared_builds = log
             .iter()
             .position(|s| s.contains("FROM derivation_build WHERE derivation = ANY($1::uuid[])"))
@@ -334,6 +338,10 @@ mod tests {
         assert!(
             paths < trust,
             "this is the one path that writes derivation_build before a retire, so it takes the cached_path lock first or it deadlocks against a concurrent eviction: {log:?}"
+        );
+        assert!(
+            paths < listing_derivations && listing_derivations < shared_builds,
+            "Writers mark derivations that list the path as not walked after the cached_path lock and before the shared build lock. All writers follow this order of lock classes. Otherwise concurrent retire can deadlock: {log:?}"
         );
         assert!(
             paths < shared_builds && shared_builds < trust,
@@ -418,6 +426,8 @@ mod tests {
         let db = mock_db()
             .append_query_results([vec![output.clone()], vec![output]])
             .append_query_results([
+                none.clone(),
+                none.clone(),
                 vec![drv_row.clone()],
                 none.clone(),
                 none.clone(),
@@ -449,13 +459,8 @@ mod tests {
         let log = statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            24,
-            "outputs, demote, path lock, shared build lock, trust clear, retire lock, \
-             producers of the hash, the complete closure they had, the delete that finds \
-             nothing, shared build lock, mark, ripple, the raised, locked update below \
-             what the mark flipped, reset, owners, the unneeded outputs forgotten under \
-             their lock and closure read, un-promote and the raised, locked update of \
-             what the producers now need: {log:?}"
+            25,
+            "Outputs, demotion, path lock, derivations that list the path, shared build lock, clearing of trust, lock retirement, derivations that list the path, producers of the hash, their full closure, delete with no match, shared build lock, mark, ripple, locked update below what the mark toggled, reset, read of unneeded outputs and closures that are forgotten under those locks, locked update of un-promote and what producers now need: {log:?}"
         );
         assert!(
             log.iter()

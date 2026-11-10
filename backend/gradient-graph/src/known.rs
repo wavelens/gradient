@@ -12,6 +12,8 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 /// The second flag is keeping pruning safe against a walk abandoned between batches.
 /// Build and cache state are not telling whether the graph is recorded.
 /// Keying on them re-walked complete records until their shared build succeeded.
+/// `walked` can also mean that the cache can provide the `.drv` file and its input sources.
+/// Retiring either one can clear `walked`. Later evaluations parse the derivation again and push them.
 pub(crate) async fn prunable(
     db: &WorkerDb,
     drv_hashes: Vec<String>,
