@@ -10,10 +10,10 @@ import { AdminService } from '@core/services/admin.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { AdminWorkerListEntry } from '@core/models';
-import { confirmAndDrainWorker, WorkerDrainingBadgeComponent } from '@shared/ui';
+import { confirmAndDrainWorker, formatEntityLabel, WorkerDrainingBadgeComponent } from '@shared/ui';
 
 export function getWorkerOwnerDisplayName(worker: AdminWorkerListEntry): string {
-  return worker.team?.display_name ?? worker.registrations.map((r) => r.project.display_name).join(', ');
+  return worker.team ? formatEntityLabel(worker.team) : worker.registrations.map((r) => formatEntityLabel(r.project)).join(', ');
 }
 
 @Component({
@@ -34,7 +34,7 @@ export function getWorkerOwnerDisplayName(worker: AdminWorkerListEntry): string 
               <td>{{ ownerName(worker) }}</td>
               <td>
                 @for (project of worker.projects; track project.id; let last = $last) {
-                  {{ project.display_name }}{{ last ? '' : ', ' }}
+                  {{ formatEntityLabel(project) }}{{ last ? '' : ', ' }}
                 } @empty {
                   <span class="muted">-</span>
                 }
@@ -74,6 +74,7 @@ export class AdminWorkersTabComponent implements OnInit {
   private notify = inject(NotifyService);
 
   protected readonly ownerName = getWorkerOwnerDisplayName;
+  protected readonly formatEntityLabel = formatEntityLabel;
 
   workers = signal<AdminWorkerListEntry[]>([]);
   loading = signal(true);

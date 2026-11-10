@@ -60,8 +60,8 @@ describe('AdminWorkersTabComponent', () => {
   afterEach(() => TestBed.resetTestingModule());
 
   it('names the owning team, or the projects that registered the worker', () => {
-    expect(getWorkerOwnerDisplayName(IDLE)).toBe('Ops');
-    expect(getWorkerOwnerDisplayName(OFFLINE)).toBe('Web');
+    expect(getWorkerOwnerDisplayName(IDLE)).toBe('Ops (ops)');
+    expect(getWorkerOwnerDisplayName(OFFLINE)).toBe('Web (web)');
   });
 
   it('shows status, live jobs and the worker id when no name is set', () => {

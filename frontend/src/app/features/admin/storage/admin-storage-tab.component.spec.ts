@@ -68,6 +68,14 @@ describe('AdminStorageTabComponent', () => {
     expect(root.querySelector('gr-table.tasks a')?.getAttribute('href')).toBe('/project/web/task/build/settings');
   });
 
+  it('shows the display name of each cache, project and task with the slug beside it', () => {
+    const root = setup().nativeElement as HTMLElement;
+    const labels = (table: string) => Array.from(root.querySelectorAll(`gr-table.${table} gr-entity-name`)).map((name) => name.getAttribute('title'));
+    expect(labels('caches')).toEqual(['Main (main)']);
+    expect(labels('projects')).toEqual(['Web (web)']);
+    expect(labels('tasks')).toEqual(['Build (build)', 'Web (web)']);
+  });
+
   it('says when no deep GC finished yet', () => {
     expect(setup().nativeElement.querySelector('.last-deep-gc').textContent).toContain('Deep GC is not complete.');
   });

@@ -13,6 +13,7 @@ import { ConfirmService } from '@shared/confirm';
 import { links } from '@shared/routing';
 import { formatBytes, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { AdminStorageResponse } from '@core/models';
+import { EntityNameComponent } from '@shared/ui';
 import { confirmAndStartDeepGcForAllStorageBackends } from '../confirm-and-start-deep-gc';
 
 export function getCacheStorageLimitLabel(maxStorageGb: number): string {
@@ -22,7 +23,7 @@ export function getCacheStorageLimitLabel(maxStorageGb: number): string {
 @Component({
   selector: 'app-admin-storage-tab',
   standalone: true,
-  imports: [RouterLink, ServerTimestampToLocalDateTimePipe, ButtonComponent, LoadStateComponent, TableComponent],
+  imports: [RouterLink, ServerTimestampToLocalDateTimePipe, ButtonComponent, EntityNameComponent, LoadStateComponent, TableComponent],
   template: `
     <gr-load-state [loading]="loading()" [error]="loadError()" [empty]="!storage()"
                    loadingMessage="Loading storage..." errorTitle="Failed to load storage" (retry)="load()">
@@ -50,7 +51,7 @@ export function getCacheStorageLimitLabel(maxStorageGb: number): string {
         <tbody>
           @for (cache of s.caches; track cache.id) {
             <tr>
-              <td><a [routerLink]="links.cachePage(cache.name, 'settings')">{{ cache.display_name }}</a></td>
+              <td><a [routerLink]="links.cachePage(cache.name, 'settings')"><gr-entity-name [displayName]="cache.display_name" [name]="cache.name" /></a></td>
               <td class="number">{{ cache.packages }}</td>
               <td class="number">{{ bytes(cache.bytes) }}</td>
               <td class="number">{{ cacheLimit(cache.max_storage_gb) }}</td>
@@ -65,7 +66,7 @@ export function getCacheStorageLimitLabel(maxStorageGb: number): string {
         <tbody>
           @for (row of s.projects; track row.project.id) {
             <tr>
-              <td><a [routerLink]="links.project(row.project.name)">{{ row.project.display_name }}</a></td>
+              <td><a [routerLink]="links.project(row.project.name)"><gr-entity-name [displayName]="row.project.display_name" [name]="row.project.name" /></a></td>
               <td class="number">{{ row.packages }}</td>
               <td class="number">{{ bytes(row.bytes) }}</td>
             </tr>
@@ -80,8 +81,8 @@ export function getCacheStorageLimitLabel(maxStorageGb: number): string {
         <tbody>
           @for (task of s.tasks; track task.id) {
             <tr>
-              <td><a [routerLink]="links.taskPage(task.project.name, task.name, 'settings')">{{ task.display_name }}</a></td>
-              <td>{{ task.project.display_name }}</td>
+              <td><a [routerLink]="links.taskPage(task.project.name, task.name, 'settings')"><gr-entity-name [displayName]="task.display_name" [name]="task.name" /></a></td>
+              <td><gr-entity-name [displayName]="task.project.display_name" [name]="task.project.name" /></td>
               <td class="number">{{ task.evaluations }}</td>
               <td class="number">{{ task.keep_evaluations }}</td>
               <td>{{ task.oldest_evaluation_at ? (task.oldest_evaluation_at | serverDate) : '-' }}</td>
