@@ -35,6 +35,7 @@ function path(tree: UrlTree): string[] {
 const every: UrlTree[] = [
   links.dashboard(),
   links.login('/projects'),
+  links.loginPageAfterSingleSignOnError('failed'),
   links.register(),
   links.projects(),
   links.project('p'),

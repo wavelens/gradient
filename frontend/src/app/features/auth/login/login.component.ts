@@ -32,6 +32,7 @@ const LOGIN_ERRORS: Record<string, string> = {
   username_taken: 'The username is taken. Sign in and connect the account from your profile instead.',
   no_verified_email: 'The account has no verified primary email.',
   unusable_username: 'The username of the account cannot be used here.',
+  session_cookie_missing: "Sign-in succeeded, but the browser didn't save the session cookie. Allow cookies for this site, then sign in again.",
   failed: 'Sign-in failed. Please try again.',
 };
 

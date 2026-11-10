@@ -38,19 +38,24 @@ function origin(from: BuildOrigin): Query {
   return { task: from.task, eval: from.evaluation };
 }
 
+export function safeInAppPathOrNull(path: string | null | undefined): string | null {
+  return path?.startsWith('/') && !path.startsWith('//') && !path.includes('\\') ? path : null;
+}
+
 export function readInAppNextPathFromRouteSnapshot(route: ActivatedRouteSnapshot): string | null {
-  const next = route.queryParamMap.get('next');
-  return next?.startsWith('/') && !next.startsWith('//') && !next.includes('\\') ? next : null;
+  return safeInAppPathOrNull(route.queryParamMap.get('next'));
 }
 
 export function getInAppReturnPathIfNotErrorPage(from: string | null | undefined): string | null {
-  return from?.startsWith('/') && !from.startsWith('//') && !from.startsWith('/error/') ? from : null;
+  const path = safeInAppPathOrNull(from);
+  return path && !path.startsWith('/error/') ? path : null;
 }
 
 // All navigation targets in the app originate in this file. The tests in links.spec.ts check each one against app.routes.ts.
 export const links = {
   dashboard: () => url([]),
   login: (next?: string | null, reason?: LoginReason) => url(['account', 'login'], { next, reason }),
+  loginPageAfterSingleSignOnError: (code: string) => url(['account', 'login'], { login_error: code }),
   loginAfterRegister: (username: string, next?: string | null) => url(['account', 'login'], { registered: username, next }),
   register: (next?: string | null) => url(['account', 'register'], { next }),
 
