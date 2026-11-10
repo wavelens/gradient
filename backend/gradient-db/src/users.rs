@@ -314,4 +314,77 @@ mod tests {
         );
         db.finish().await;
     }
+
+    #[tokio::test]
+    async fn test_delete_user_with_project_fails_and_keeps_project() {
+        use gradient_fixtures::ids::{project_id, user_id};
+        use gradient_fixtures::rows;
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let connection = db.connection();
+        crate::rows::insert::<EUser, _>(&connection, rows::user())
+            .await
+            .expect("the creator is written");
+        crate::rows::insert::<EProject, _>(&connection, rows::project())
+            .await
+            .expect("the project is written");
+
+        let deleted = delete_by_id(&connection, user_id()).await;
+
+        assert!(deleted.is_err(), "the creator of a project stays");
+        assert!(db.find::<EProject>(project_id()).await.is_some());
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn deleting_project_removes_custom_roles_and_member_rows_using_them() {
+        use gradient_fixtures::ids::project_id;
+        use gradient_fixtures::rows;
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let connection = db.connection();
+        let member = MUser {
+            id: UserId::now_v7(),
+            username: "member".into(),
+            email: "member@example.com".into(),
+            ..rows::user()
+        };
+        let role = gradient_entity::role::Model {
+            id: RoleId::now_v7(),
+            name: "Reviewer".into(),
+            project: Some(project_id()),
+            permission: 1,
+            managed: false,
+        };
+        crate::rows::insert::<EUser, _>(&connection, rows::user())
+            .await
+            .expect("the creator is written");
+        crate::rows::insert::<EUser, _>(&connection, member.clone())
+            .await
+            .expect("the member is written");
+        crate::rows::insert::<EProject, _>(&connection, rows::project())
+            .await
+            .expect("the project is written");
+        crate::rows::insert::<gradient_entity::role::Entity, _>(&connection, role.clone())
+            .await
+            .expect("the role is written");
+        crate::rows::insert::<gradient_entity::project_user::Entity, _>(
+            &connection,
+            gradient_entity::project_user::Model {
+                user: member.id,
+                ..rows::project_member(role.id)
+            },
+        )
+        .await
+        .expect("the membership is written");
+
+        EProject::delete_by_id(project_id())
+            .exec(&connection)
+            .await
+            .expect("the project with members deletes");
+
+        assert!(db.find::<gradient_entity::role::Entity>(role.id).await.is_none());
+        assert!(db.rows::<gradient_entity::project_user::Entity>().await.is_empty());
+        db.finish().await;
+    }
 }
