@@ -1303,6 +1303,63 @@ async fn k33_a_resolve_retried_after_its_write_committed_still_requeues_the_clus
     case.finish().await;
 }
 
+#[tokio::test]
+async fn k34_a_split_cluster_retried_after_its_place_deadline_is_not_dissolved() {
+    let (c, e1, _) = cluster_ids();
+    let case = SchedulerCase::start(split_of_three(c, e1)).await;
+    case.connect(W1, w_network_eval(), &[]).await;
+    case.connect(W2, w_eval(), &[]).await;
+    case.assign_queued_evals().await;
+    case.idle(W1, JobKind::Flake).await;
+    case.idle(W2, JobKind::Flake).await;
+    case.plan_clusters().await;
+    let mut seated = Vec::new();
+    for worker in [W1, W2] {
+        let key = without_offers(case.signals(worker))
+            .into_iter()
+            .find_map(|signal| match signal {
+                SessionSignal::ClusterAssign { job_id } => Some(job_id),
+                _ => None,
+            })
+            .expect("each worker got a split member");
+        let assignment = case.take_cluster_assignment(worker, &key).await;
+        case.accept(worker, &key).await;
+        seated.push((worker, key, assignment.assignment_id));
+    }
+    case.signals(W1);
+    case.signals(W2);
+    case.db
+        .execute("UPDATE cluster_job SET dissolve_after = now() AT TIME ZONE 'UTC' - interval '1 second'")
+        .await;
+    case.check("step 1").await;
+
+    let (worker, key, assignment) = &seated[1];
+    case.fail(
+        worker,
+        key,
+        *assignment,
+        failure(BuildFailureKind::Transient).elapsed_ms(2),
+    )
+    .await;
+    assert_eq!(
+        cluster_state(&case, c).await,
+        (ClusterJobStatus::Queued, 1),
+        "after 2: cluster_job(C)"
+    );
+    case.check("step 2").await;
+
+    case.plan_clusters().await;
+    let row = case.cluster(c).await;
+    assert!(
+        row.dissolve_after
+            .is_some_and(|deadline| deadline > gradient_types::now()),
+        "after 3: cluster_job(C) kept with a fresh dissolve_after, got {row:?}"
+    );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
 fn split_of_three(
     cluster: ClusterJobId,
     evaluation: EvaluationId,

@@ -6,10 +6,10 @@
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
 use gradient_db::eval_costs::TaskEvalCosts;
+use gradient_db::scheduling::cluster::SPLIT_PLACE_TIMEOUT;
 use gradient_entity::cluster_job::{ClusterJobStatus, Entity as EClusterJob, Model as MClusterJob};
 use gradient_entity::cluster_member::{
     ActiveModel as AClusterMember, Entity as EClusterMember, Model as MClusterMember,
@@ -34,7 +34,6 @@ use crate::Scheduler;
 use crate::cluster::{Slot, SlotKind};
 
 pub const MAX_SPLIT_MEMBERS: usize = 4;
-pub const SPLIT_PLACE_TIMEOUT: Duration = Duration::from_secs(30);
 pub const SPLIT_RETRY_BUDGET: i32 = 2;
 
 #[derive(Clone, Debug, Default)]

@@ -18,6 +18,8 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, DeleteMany, EntityTrait, ExprTrait, QueryFilter,
 };
 
+pub const SPLIT_PLACE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Requeue {
     No,
@@ -40,12 +42,24 @@ pub async fn requeue_cluster_job<C: ConnectionTrait>(
     cluster: ClusterJobId,
     requeue: Requeue,
 ) -> Result<bool, DbErr> {
+    let now = gradient_types::now();
+    let place_deadline = chrono::TimeDelta::from_std(SPLIT_PLACE_TIMEOUT)
+        .map_err(|e| DbErr::Custom(e.to_string()))?;
     let update = EClusterJob::update_many()
         .col_expr(
             CClusterJob::Status,
             Expr::value(i16::from(ClusterJobStatus::Queued)),
         )
-        .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
+        .col_expr(CClusterJob::UpdatedAt, Expr::value(now))
+        .col_expr(
+            CClusterJob::DissolveAfter,
+            Expr::case(
+                Expr::col(CClusterJob::DissolveAfter).is_not_null(),
+                Expr::value(now + place_deadline),
+            )
+            .finally(Expr::col(CClusterJob::DissolveAfter))
+            .into(),
+        )
         .filter(CClusterJob::Id.eq(cluster))
         .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
         .filter(Expr::exists(dead_member_of_cluster()).not());
@@ -371,6 +385,47 @@ mod tests {
         let skipped = requeue_cluster_job(&conn, cluster, Requeue::No).await;
         assert!(!skipped.expect("requeue"));
         assert_eq!(row().await.attempts_outside_budget, 1);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_requeued_split_cluster_gets_a_fresh_place_deadline() {
+        let (split, plain, evaluation) = (
+            ClusterJobId::now_v7(),
+            ClusterJobId::now_v7(),
+            EvaluationId::now_v7(),
+        );
+        let long_ago = gradient_types::now() - chrono::Duration::minutes(10);
+        let db = shape()
+            .evaluation(evaluation)
+            .cluster(split, false, 2, ClusterJobStatus::Running, 1, long_ago)
+            .cluster_option(split, |cluster| {
+                cluster.dissolve_after = Some(long_ago + chrono::Duration::seconds(30));
+            })
+            .split_member_of(split, "primary", 0)
+            .cluster(plain, false, 2, ClusterJobStatus::Running, 1, long_ago)
+            .evaluation_member_of(plain, "server", true, None)
+            .into_database()
+            .await;
+        let conn = db.connection();
+
+        for cluster in [split, plain] {
+            let requeued = requeue_cluster_job(&conn, cluster, Requeue::WithinBudget).await;
+            assert!(requeued.expect("requeue"));
+        }
+
+        assert_eq!(
+            dissolve_unplaced_clusters(&conn).await.expect("dissolve"),
+            []
+        );
+        let deadline = db
+            .find::<EClusterJob>(split)
+            .await
+            .and_then(|row| row.dissolve_after)
+            .expect("the split keeps a deadline");
+        assert!(deadline > gradient_types::now());
+        let plain_row = db.find::<EClusterJob>(plain).await.expect("the cluster");
+        assert_eq!(plain_row.dissolve_after, None);
         db.finish().await;
     }
 }
