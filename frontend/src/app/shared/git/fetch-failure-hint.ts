@@ -14,7 +14,7 @@ const HINTS: { pattern: RegExp; hint: string }[] = [
     hint: "Can't resolve the host name. Check the repository URL.",
   },
   {
-    pattern: /failed to fill whole buffer|handshake/i,
+    pattern: /failed to fill whole buffer|early eof|(kex|banner).*handshake|handshake failed/i,
     hint: 'The host closed the connection before Git started. Check the hostname and port in the repository URL.',
   },
   {

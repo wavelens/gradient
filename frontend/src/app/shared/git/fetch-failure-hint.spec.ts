@@ -21,4 +21,9 @@ describe('fetchFailureHint', () => {
     expect(fetchFailureHint('something else broke')).toBeNull();
     expect(fetchFailureHint(null)).toBeNull();
   });
+
+  it('adds no hint to reasons the server already explains', () => {
+    expect(fetchFailureHint('The server closed the connection before it listed the repository branches. Check that the repository is at this URL.')).toBeNull();
+    expect(fetchFailureHint('The secure connection to the server failed during the handshake. Check the URL, the port and server support for this protocol.')).toBeNull();
+  });
 });
