@@ -189,7 +189,7 @@ pub(crate) async fn apply<C: ConnectionTrait>(
             task: task.id,
             name: "Report status to Git host".into(),
             action_type: cfg.action_type(),
-            config: serde_json::to_value(&cfg).unwrap_or_default(),
+            config: cfg.to_db_json(),
             events: serde_json::json!([]),
             active: true,
             created_by: task.created_by,

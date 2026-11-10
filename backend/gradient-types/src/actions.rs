@@ -91,6 +91,11 @@ fn default_true() -> bool {
 }
 
 impl ActionConfig {
+    pub fn to_db_json(&self) -> serde_json::Value {
+        serde_json::to_value(self)
+            .expect("ActionConfig is a derived enum of strings, IDs and flags.")
+    }
+
     pub fn action_type(&self) -> ActionType {
         match self {
             ActionConfig::SendMail { .. } => ActionType::SendMail,
@@ -176,6 +181,16 @@ mod tests {
             let field = cfg.action_type().secret_field().unwrap();
             assert_eq!(json[field], "S");
         }
+    }
+
+    #[test]
+    fn the_stored_config_reads_back_as_the_same_action() {
+        let cfg = ActionConfig::GitHostStatusReport {
+            integration_id: crate::IntegrationId::now_v7(),
+        };
+        let stored = cfg.to_db_json();
+        assert_eq!(stored["type"], "git_host_status_report");
+        assert_eq!(serde_json::from_value::<ActionConfig>(stored).unwrap(), cfg);
     }
 
     #[test]

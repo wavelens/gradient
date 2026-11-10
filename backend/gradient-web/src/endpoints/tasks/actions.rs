@@ -718,7 +718,7 @@ pub async fn regenerate_token(
 
     let read_at = existing.updated_at;
     let mut am: ATaskAction = existing.into();
-    am.config = Set(serde_json::to_value(&cfg).context("serialize the action config")?);
+    am.config = Set(cfg.to_db_json());
     am.updated_at = Set(Utc::now().naive_utc());
     gradient_db::actions::update(&state.web_db, am, read_at)
         .await

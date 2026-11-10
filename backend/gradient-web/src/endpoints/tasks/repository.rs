@@ -497,7 +497,7 @@ async fn sync_status_action(
             let read_at = row.updated_at;
             let mut active: ATaskAction = row.into();
             if let Some(cfg) = &desired {
-                active.config = Set(serde_json::to_value(cfg).unwrap_or_default());
+                active.config = Set(cfg.to_db_json());
             }
             active.active = Set(desired.is_some());
             active.updated_at = Set(now);
@@ -511,7 +511,7 @@ async fn sync_status_action(
                     task: task.id,
                     name: STATUS_ACTION_NAME.into(),
                     action_type: cfg.action_type(),
-                    config: serde_json::to_value(&cfg).unwrap_or_default(),
+                    config: cfg.to_db_json(),
                     events: serde_json::json!([]),
                     active: true,
                     created_by: task.created_by,
