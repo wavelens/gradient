@@ -125,4 +125,69 @@ mod tests {
         assert!(!free);
         db.finish().await;
     }
+
+    #[tokio::test]
+    async fn roles_stored_without_the_view_bit_gain_it_on_upgrade() {
+        use gradient_migration::{Migrator, MigratorTrait};
+        use gradient_types::permissions::{
+            CachePermission, Permission, cache_mask_from, cache_mask_grants, mask_from, mask_grants,
+        };
+        use sea_orm_migration::SchemaManager;
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let deployer = crate::rows::insert::<ERole, _>(
+            &db.connection(),
+            MRole {
+                id: RoleId::now_v7(),
+                name: "deployer".into(),
+                permission: mask_from(&[Permission::TriggerEvaluation]),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the custom role is written");
+        let uploader = crate::rows::insert::<ECacheRole, _>(
+            &db.connection(),
+            MCacheRole {
+                id: RoleId::now_v7(),
+                name: "uploader".into(),
+                permission: cache_mask_from(&[CachePermission::WriteStore]),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the custom cache role is written");
+
+        let migration = Migrator::migrations()
+            .into_iter()
+            .find(|m| m.name() == "m20261128_000001_add_view_permission_bit_to_all_roles")
+            .expect("the migration is registered");
+        migration
+            .up(&SchemaManager::new(&db.connection()))
+            .await
+            .expect("the migration runs");
+
+        let deployer = db
+            .find::<ERole>(deployer.id)
+            .await
+            .expect("the role exists");
+        assert!(mask_grants(deployer.permission, Permission::ViewProject));
+        assert!(mask_grants(
+            deployer.permission,
+            Permission::TriggerEvaluation
+        ));
+        let uploader = db
+            .find::<ECacheRole>(uploader.id)
+            .await
+            .expect("the cache role exists");
+        assert!(cache_mask_grants(
+            uploader.permission,
+            CachePermission::ViewCache
+        ));
+        assert!(cache_mask_grants(
+            uploader.permission,
+            CachePermission::WriteStore
+        ));
+        db.finish().await;
+    }
 }

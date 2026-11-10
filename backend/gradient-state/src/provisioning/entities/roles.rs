@@ -43,7 +43,9 @@ impl<'a> StateApplicator<'a> {
                 )
                 .into());
             }
-            let mask = gradient_types::permissions::mask_from(&perms);
+            let mask = gradient_types::permissions::mask_with_view_project_permission(
+                gradient_types::permissions::mask_from(&perms),
+            );
 
             let existing = role::Entity::find()
                 .filter(role::Column::Name.eq(&state_role.name))
@@ -73,5 +75,57 @@ impl<'a> StateApplicator<'a> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::rows;
+    use gradient_types::permissions::{Permission, mask_grants};
+    use std::path::Path;
+
+    #[tokio::test]
+    async fn a_declared_role_always_views_its_project() {
+        let db = TestDatabase::create().await;
+        let connection = db.connection();
+        rows::user()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let project = rows::project()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let app = StateApplicator {
+            db: &connection,
+            crypt_secret_file: "",
+            credentials_dir: Path::new(""),
+            email_enabled: false,
+        };
+
+        app.apply_roles(&HashMap::from([(
+            "deployer".to_string(),
+            StateRole {
+                name: "deployer".into(),
+                project: project.name.clone(),
+                permissions: vec!["triggerEvaluation".into()],
+            },
+        )]))
+        .await
+        .unwrap();
+
+        let role = db
+            .rows::<role::Entity>()
+            .await
+            .into_iter()
+            .find(|role| role.name == "deployer")
+            .expect("the declared role is written");
+        assert!(mask_grants(role.permission, Permission::ViewProject));
+        assert!(mask_grants(role.permission, Permission::TriggerEvaluation));
+        db.finish().await;
     }
 }

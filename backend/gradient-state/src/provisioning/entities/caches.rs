@@ -317,7 +317,9 @@ impl<'a> StateApplicator<'a> {
                     })?;
                 perms.push(p);
             }
-            let mask = gradient_types::permissions::cache_mask_from(&perms);
+            let mask = gradient_types::permissions::cache_mask_with_view_permission_set(
+                gradient_types::permissions::cache_mask_from(&perms),
+            );
 
             let existing = ECacheRole::find()
                 .filter(CCacheRole::Cache.eq(cache_id))
@@ -444,5 +446,64 @@ impl<'a> StateApplicator<'a> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::rows;
+    use gradient_types::permissions::{CachePermission, cache_mask_grants};
+    use std::path::Path;
+
+    #[tokio::test]
+    async fn a_declared_cache_role_always_views_its_cache() {
+        let db = TestDatabase::create().await;
+        let connection = db.connection();
+        rows::user()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let cache = rows::cache()
+            .into_active_model()
+            .insert(&connection)
+            .await
+            .unwrap();
+        let app = StateApplicator {
+            db: &connection,
+            crypt_secret_file: "",
+            credentials_dir: Path::new(""),
+            email_enabled: false,
+        };
+
+        app.apply_cache_roles_and_members(
+            cache.id,
+            &cache.name,
+            &[StateCacheRoleEntry {
+                name: "uploader".into(),
+                permissions: vec!["writeStore".into()],
+            }],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let role = db
+            .rows::<ECacheRole>()
+            .await
+            .into_iter()
+            .find(|role| role.name == "uploader")
+            .expect("the declared cache role is written");
+        assert!(cache_mask_grants(
+            role.permission,
+            CachePermission::ViewCache
+        ));
+        assert!(cache_mask_grants(
+            role.permission,
+            CachePermission::WriteStore
+        ));
+        db.finish().await;
     }
 }

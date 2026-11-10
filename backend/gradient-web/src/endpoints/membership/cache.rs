@@ -10,8 +10,8 @@ use super::{
 };
 use crate::error::WebResult;
 use crate::permissions::{
-    CachePermission, PermissionEntry, PermissionMask, available_cache_permissions,
-    cache_mask_to_wire, is_builtin_cache_role, parse_cache_permission_list,
+    PermissionEntry, PermissionMask, available_cache_permissions, cache_mask_to_wire,
+    cache_mask_with_view_permission_set, is_builtin_cache_role, parse_cache_permission_list,
 };
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
@@ -223,10 +223,9 @@ impl Owner for CacheOwner {
     }
 
     fn parse_permissions(wire: &[String]) -> WebResult<PermissionMask> {
-        Ok(
-            parse_cache_permission_list(wire, "GET /caches/{cache}/roles")?
-                | CachePermission::ViewCache.bit(),
-        )
+        Ok(cache_mask_with_view_permission_set(
+            parse_cache_permission_list(wire, "GET /caches/{cache}/roles")?,
+        ))
     }
 
     async fn role_granted_to_a_team(db: &impl ConnectionTrait, role: RoleId) -> WebResult<bool> {
@@ -259,6 +258,7 @@ impl Owner for CacheOwner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::permissions::CachePermission;
 
     #[test]
     fn custom_roles_always_view_the_cache() {

@@ -147,6 +147,10 @@ pub fn view_mask() -> PermissionMask {
     Permission::ViewProject.bit()
 }
 
+pub const fn mask_with_view_project_permission(mask: PermissionMask) -> PermissionMask {
+    mask | Permission::ViewProject.bit()
+}
+
 pub fn is_builtin_role(role_id: RoleId) -> bool {
     role_id == BASE_ROLE_ADMIN_ID || role_id == BASE_ROLE_WRITE_ID || role_id == BASE_ROLE_VIEW_ID
 }
@@ -277,6 +281,10 @@ pub fn cache_write_mask() -> PermissionMask {
 pub fn cache_view_mask() -> PermissionMask {
     use CachePermission::*;
     cache_mask_from(&[ViewCache, ReadStore])
+}
+
+pub const fn cache_mask_with_view_permission_set(mask: PermissionMask) -> PermissionMask {
+    mask | CachePermission::ViewCache.bit()
 }
 
 pub fn is_builtin_cache_role(role_id: RoleId) -> bool {
