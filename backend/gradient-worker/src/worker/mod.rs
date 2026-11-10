@@ -48,19 +48,13 @@ pub struct Worker<S> {
     _marker: PhantomData<S>,
 }
 
-impl<S> Worker<S> {
-    pub fn executor_handle(&self) -> JobExecutor {
-        self.executor.clone()
-    }
-}
-
 impl Worker<Connected> {
     pub async fn from_accepted(
         ws: tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
         config: WorkerConfig,
-        exec: Option<Arc<ExecHost>>,
+        executor: JobExecutor,
     ) -> Result<Self> {
         let mut conn = ProtoConnection::from_accepted(ws);
         perform_setup(
@@ -68,49 +62,34 @@ impl Worker<Connected> {
             &config,
             Side::Inbound,
             Vec::new(),
-            exec.as_deref(),
+            executor.exec.as_deref(),
         )
         .await?;
-        let (executor, scorer) = build_executor(&config, exec).await?;
-        Ok(Self::new_connected(config, conn, executor, scorer))
-    }
-
-    fn new_connected(
-        config: WorkerConfig,
-        conn: ProtoConnection,
-        executor: JobExecutor,
-        scorer: JobScorer,
-    ) -> Self {
-        Self {
+        Ok(Self {
             jobs: Arc::new(WorkerJobs::new(&config)),
             config,
             executor,
-            scorer,
+            scorer: JobScorer::new(),
             conn_state: Connected { conn },
             _marker: PhantomData,
-        }
+        })
     }
 }
 
 impl Worker<Disconnected> {
-    pub async fn start(
-        config: WorkerConfig,
-        exec: Option<Arc<ExecHost>>,
-        resumed: Vec<ResumedJob>,
-    ) -> Result<Self> {
-        let (executor, scorer) = build_executor(&config, exec).await?;
+    pub fn start(config: WorkerConfig, executor: JobExecutor, resumed: Vec<ResumedJob>) -> Self {
         let jobs = Arc::new(WorkerJobs::new(&config));
         for job in resumed {
             resume_exec_job(&jobs, &executor, job);
         }
-        Ok(Self {
+        Self {
             config,
             executor,
-            scorer,
+            scorer: JobScorer::new(),
             jobs,
             conn_state: Disconnected,
             _marker: PhantomData,
-        })
+        }
     }
 
     pub async fn connect(&self, server_url: &str) -> Result<ProtoConnection> {
@@ -205,10 +184,10 @@ impl Worker<Connected> {
     }
 }
 
-async fn build_executor(
+pub(crate) async fn build_executor(
     config: &WorkerConfig,
     exec: Option<Arc<ExecHost>>,
-) -> Result<(JobExecutor, JobScorer)> {
+) -> Result<JobExecutor> {
     let store = LocalNixStore::connect(config.nix_daemon.max_connections.get())?;
     let evaluator = WorkerEvaluator::new(
         config.fork_workers(),
@@ -241,7 +220,7 @@ async fn build_executor(
         },
     )
     .with_exec(exec);
-    Ok((executor, JobScorer::new()))
+    Ok(executor)
 }
 
 fn resume_exec_job(jobs: &WorkerJobs, executor: &JobExecutor, resumed: ResumedJob) {
@@ -272,9 +251,6 @@ async fn perform_setup(
 ) -> Result<()> {
     let peer_id = load_or_generate_id(&config.base_dir, config.id.as_deref())
         .context("load or generate persistent worker ID")?;
-    if let Some(exec) = exec {
-        exec.start_session();
-    }
     let handshake = match side {
         Side::Inbound => {
             perform_dialed_handshake(
@@ -295,6 +271,9 @@ async fn perform_setup(
         version = handshake.version,
         "capabilities negotiated"
     );
+    if let Some(exec) = exec {
+        exec.start_session();
+    }
     if handshake.version >= RUNNING_JOBS_SINCE {
         conn.send(ClientMessage::RunningJobs {
             assignments: running,

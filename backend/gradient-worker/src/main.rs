@@ -113,6 +113,7 @@ fn main() -> Result<()> {
         }
 
         let sessions = TaskTracker::new();
+        let executor = worker::build_executor(&config, exec.clone()).await?;
 
         if config.nar.partial_ttl_secs > 0 {
             let gc_config = config.clone();
@@ -153,14 +154,14 @@ fn main() -> Result<()> {
             let listener_config = config.clone();
             let listener_stop = stop.clone();
             let listener_sessions = sessions.clone();
-            let listener_exec = exec.clone();
+            let listener_executor = executor.clone();
             #[expect(clippy::disallowed_methods, reason = "returns once the worker stops")]
             tokio::spawn(async move {
                 if let Err(e) = listener::start_listener(
                     listener_config,
                     listener_stop,
                     listener_sessions,
-                    listener_exec,
+                    listener_executor,
                 )
                 .await
                 {
@@ -172,7 +173,7 @@ fn main() -> Result<()> {
         sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
         let served = match server_url {
             Some(server_url) => {
-                let worker = Worker::start(config.clone(), exec.clone(), resumed).await?;
+                let worker = Worker::start(config.clone(), executor.clone(), resumed);
                 run_outbound(worker, &server_url, stop, &sessions, config.exit_limits()).await
             }
             None => {
@@ -183,6 +184,7 @@ fn main() -> Result<()> {
                 Ok(())
             }
         };
+        executor.shutdown().await;
         if let Some(exec) = &exec {
             exec.stop_with_worker().await;
         }
@@ -254,8 +256,6 @@ async fn run_outbound(
     let mut worker = worker.into_connected(conn);
     backoff = INITIAL_BACKOFF;
 
-    let executor_handle = worker.executor_handle();
-
     loop {
         let (disconnected, outcome) = worker.run(stop.clone()).await;
 
@@ -263,7 +263,6 @@ async fn run_outbound(
             info!("worker stopped or reached an exit limit; tearing down");
             drop(disconnected);
             wait_for_inbound_sessions(sessions).await;
-            executor_handle.shutdown().await;
             return Ok(());
         }
 
@@ -313,7 +312,6 @@ async fn run_outbound(
                 info!("shutdown requested or exit limit reached during reconnect");
                 stop.cancel();
                 wait_for_inbound_sessions(sessions).await;
-                executor_handle.shutdown().await;
                 return Ok(());
             }
         }
