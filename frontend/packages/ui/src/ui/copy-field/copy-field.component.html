@@ -38,7 +38,7 @@ SPDX-License-Identifier: AGPL-3.0-only
     [text]="true"
     [icon]="copied() ? 'check' : 'content_copy'"
     [severity]="copied() ? 'primary' : 'secondary'"
-    [attr.aria-label]="copied() ? copiedLabel() : copyLabel()"
+    [attr.aria-label]="copied() ? copiedLabel() : copyButtonAccessibleName()"
     (click)="copy()"
   ></button>
   <span class="copy-field__status" aria-live="polite">

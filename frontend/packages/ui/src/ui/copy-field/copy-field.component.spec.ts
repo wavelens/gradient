@@ -86,6 +86,27 @@ describe('CopyFieldComponent', () => {
     expect(input?.getAttribute('aria-label')).toBe('Store address');
   });
 
+  it.each([
+    { source: 'its own label', inputs: { value, label: 'Public key' }, name: 'Copy Public key' },
+    { source: 'no label', inputs: { value }, name: 'Copy to clipboard' },
+  ])('names the copy button after $source', async ({ inputs, name }) => {
+    const { root } = await render(inputs);
+    expect(root.querySelector('.copy-field__button')?.getAttribute('aria-label')).toBe(name);
+  });
+
+  it('names the copy button after the surrounding form field, also when a label names the input', async () => {
+    @Component({
+      imports: [CopyFieldComponent, FormFieldComponent],
+      template: `<gr-form-field label="nix.conf snippet" for="conf"><gr-copy-field inputId="conf" value="substituters" /></gr-form-field>`,
+    })
+    class InFieldWithId {}
+    const fixture = TestBed.createComponent(InFieldWithId);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const button = (fixture.nativeElement as HTMLElement).querySelector('.copy-field__button');
+    expect(button?.getAttribute('aria-label')).toBe('Copy nix.conf snippet');
+  });
+
   it('copies the value and flags copied state', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });

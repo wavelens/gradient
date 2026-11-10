@@ -25,13 +25,17 @@ export class CopyFieldComponent {
   mono = input(true, { transform: booleanAttribute });
   inline = input(false, { transform: booleanAttribute });
   multiline = input(false, { transform: booleanAttribute });
-  copyLabel = input('Copy to clipboard');
+  copyLabel = input<string>();
   copiedLabel = input('Copied');
 
   copied = signal(false);
 
   private field = inject(FormFieldComponent, { optional: true });
   protected name = computed(() => this.label() ?? (this.inputId() ? undefined : this.field?.label()));
+  protected copyButtonAccessibleName = computed(() => {
+    const label = this.label() ?? this.field?.label();
+    return this.copyLabel() ?? (label ? `Copy ${label}` : 'Copy to clipboard');
+  });
 
   async copy(): Promise<void> {
     try {
