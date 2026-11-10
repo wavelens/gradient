@@ -578,14 +578,11 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     expect(section.textContent).toContain('substituted');
   });
 
-  it('each row links to the assigned job', () => {
-    const fixture = setup({ getJob: () => of(WITH_ATTEMPTS) });
-    const links = fixture.debugElement
-      .query(By.css('section.attempts'))
-      .queryAll(By.directive(RouterLink));
-    const urls = links.map((l) => l.injector.get(RouterLink).urlTree?.toString());
-    expect(urls).toContain('/board/jobs/dj-a1');
-    expect(urls).toContain('/board/jobs/dj-a2');
+  it('opens each attempt through a keyboard-reachable link in its first cell', () => {
+    const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
+    const links = Array.from(el.querySelectorAll<HTMLAnchorElement>('section.attempts tbody tr td:first-child a[href]'));
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/board/jobs/dj-a1', '/board/jobs/dj-a2']);
+    expect(links.map((link) => link.getAttribute('aria-label'))).toEqual(['Open build attempt 1', 'Open build attempt 2']);
   });
 
   it('leaves an attempt without a dispatched job unlinked', () => {

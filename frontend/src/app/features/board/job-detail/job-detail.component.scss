@@ -41,7 +41,9 @@ gr-table.kv.counts { display: block; margin-top: 1rem; }
 .drv-row.clickable:hover { background: var(--gr-surface-hover); border-color: var(--gr-border-subtle); }
 .drv-row .pname { color: var(--gr-text-primary); }
 .drv-row .path { color: var(--gr-text-muted); font-size: $font-size-xs; word-break: break-all; }
-tbody tr.clickable { cursor: pointer; transition: background 0.1s; }
+tbody tr.clickable { position: relative; cursor: pointer; transition: background 0.1s; }
+.attempt-link { color: inherit; text-decoration: none; }
+.attempt-link::after { content: ""; position: absolute; inset: 0; }
 tbody tr.clickable:hover { background: var(--gr-surface-hover); }
 tbody tr.current td { color: var(--gr-text-primary); font-weight: 600; }
 // gr-table lights every row on hover; the attempt on screen goes nowhere.

@@ -277,9 +277,14 @@ interface RuleRow {
               @for (a of j.previous_attempts; track a.created_at; let i = $index) {
                 @let current = a.dispatched_job_id === j.id;
                 @let opens = !current && a.dispatched_job_id !== null;
-                <tr [class.clickable]="opens" [class.current]="current"
-                    [routerLink]="opens && a.dispatched_job_id ? links.boardJob(a.dispatched_job_id) : null">
-                  <td>{{ i + 1 }}</td>
+                <tr [class.clickable]="opens" [class.current]="current">
+                  <td>
+                    @if (opens && a.dispatched_job_id) {
+                      <a class="attempt-link" [routerLink]="links.boardJob(a.dispatched_job_id)" [attr.aria-label]="'Open build attempt ' + (i + 1)">{{ i + 1 }}</a>
+                    } @else {
+                      {{ i + 1 }}
+                    }
+                  </td>
                   <td>{{ a.substitute ? 'substitute' : 'build' }}</td>
                   <td class="mono">{{ attemptOutcome(a.outcome) }}</td>
                   @let reason = a.failure_message ? removeAnsiEscapeSequences(a.failure_message) : '';

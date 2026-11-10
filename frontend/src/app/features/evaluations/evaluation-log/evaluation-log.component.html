@@ -40,12 +40,10 @@
         class="sidebar-item evaluation-messages-item"
         [class.selected]="selectedSection() === 'messages'"
         [class.has-errors]="errorMessages().length > 0"
-        (click)="selectEvaluationSection()"
-        (keydown.enter)="selectEvaluationSection()"
-        tabindex="0"
-        role="button"
-        [attr.aria-pressed]="selectedSection() === 'messages'"
       >
+        <button type="button" class="sidebar-row-link" aria-label="Messages"
+                [attr.aria-pressed]="selectedSection() === 'messages'"
+                (click)="selectEvaluationSection()"></button>
         <span class="sidebar-item-label">Messages</span>
         @if (errorMessages().length > 0) {
           <gr-badge severity="danger">{{ errorMessages().length }}</gr-badge>

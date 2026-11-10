@@ -1070,6 +1070,18 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
+    it('opens the evaluation messages from a real button in the sidebar', () => {
+      const fixture = setupEvaluationLogPageFixture([], undefined, { status: 'Completed' });
+      fixture.detectChanges();
+      const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.evaluation-messages-item button.sidebar-row-link');
+      expect(fixture.componentInstance.selectedSection()).toBeNull();
+      button?.click();
+      fixture.detectChanges();
+      expect(fixture.componentInstance.selectedSection()).toBe('messages');
+      expect(button?.getAttribute('aria-pressed')).toBe('true');
+      fixture.destroy();
+    });
+
     it('marks the selected evaluation entry red only when the evaluation has errors', () => {
       const fixture = setupEvaluationLogPageFixture([], undefined, { status: 'Completed' });
       fixture.componentInstance.selectEvaluationSection();
