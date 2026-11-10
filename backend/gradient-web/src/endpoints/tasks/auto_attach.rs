@@ -20,9 +20,9 @@ use gradient_types::{
 use sea_orm::ConnectionTrait;
 
 #[derive(Debug, Default, PartialEq)]
-pub(crate) struct AutoAttach {
-    pub inbound: Option<MIntegration>,
-    pub outbound: Option<MIntegration>,
+struct AutoAttach {
+    inbound: Option<MIntegration>,
+    outbound: Option<MIntegration>,
 }
 
 pub(crate) fn url_host(url: &str) -> Option<String> {
@@ -94,7 +94,7 @@ fn pick_one(
     matched.next().is_none().then(|| first.clone())
 }
 
-pub(crate) fn match_integrations_for_repo(repo: &str, integrations: &[MIntegration]) -> AutoAttach {
+fn match_integrations_for_repo(repo: &str, integrations: &[MIntegration]) -> AutoAttach {
     let Some(host) = url_host(repo) else {
         return AutoAttach::default();
     };
