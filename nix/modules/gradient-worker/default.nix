@@ -50,6 +50,16 @@
             ExecStart = "${lib.getExe' cfg.packages.usbip "usbipd"} -4";
             IPAddressAllow = "localhost";
             IPAddressDeny = "any";
+            LockPersonality = true;
+            MemoryDenyWriteExecute = true;
+            NoNewPrivileges = true;
+            PrivateTmp = true;
+            ProtectHome = true;
+            ProtectSystem = "full";
+            RestrictAddressFamilies = [ "AF_INET" "AF_UNIX" "AF_NETLINK" ];
+            RestrictNamespaces = true;
+            RestrictRealtime = true;
+            SystemCallArchitectures = "native";
           };
         };
 
@@ -125,6 +135,27 @@
               "--except-interface=lo"
             ];
             Restart = "on-failure";
+            DynamicUser = true;
+            AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
+            CapabilityBoundingSet = [ "CAP_NET_BIND_SERVICE" ];
+            LockPersonality = true;
+            MemoryDenyWriteExecute = true;
+            NoNewPrivileges = true;
+            PrivateDevices = true;
+            ProtectClock = true;
+            ProtectControlGroups = true;
+            ProtectHome = true;
+            ProtectHostname = true;
+            ProtectKernelLogs = true;
+            ProtectKernelModules = true;
+            ProtectKernelTunables = true;
+            ProtectProc = "invisible";
+            ProtectSystem = "strict";
+            RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" "AF_NETLINK" ];
+            RestrictNamespaces = true;
+            RestrictRealtime = true;
+            SystemCallArchitectures = "native";
+            SystemCallFilter = [ "@system-service" ];
           };
         };
       };
@@ -488,7 +519,11 @@ in {
             User = "gradient-worker";
             Group = "gradient-worker";
             UMask = "0027";
+            CapabilityBoundingSet = "";
+            LockPersonality = true;
+            NoNewPrivileges = true;
             PrivateTmp = true;
+            ProtectControlGroups = true;
             ProtectHome = true;
             ProtectHostname = true;
             ProtectKernelLogs = true;
@@ -509,6 +544,8 @@ in {
             RestrictNamespaces = true;
             RestrictRealtime = true;
             RestrictSUIDSGID = true;
+            SystemCallArchitectures = "native";
+            SystemCallFilter = [ "@system-service" ];
             WorkingDirectory = cfg.baseDir;
             LoadCredential = lib.optionals (cfg.peersFile != null) [
               "gradient_worker_peers:${cfg.peersFile}"

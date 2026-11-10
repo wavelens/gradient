@@ -76,7 +76,12 @@ in {
         StandardOutput = "journal+console";
       };
       script = ''
-        echo "Gradient is running at ${url} - log in with admin / $(cat ${stateDir}/admin-password)"
+        if [ -e ${stateDir}/admin-password-shown ]; then
+          echo "Gradient is running at ${url} - the admin password is at ${stateDir}/admin-password"
+        else
+          echo "Gradient is running at ${url} - log in with admin / $(cat ${stateDir}/admin-password)"
+          touch ${stateDir}/admin-password-shown
+        fi
       '';
     };
   };

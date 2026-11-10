@@ -639,7 +639,12 @@ in {
             UMask = "0027";
             User = "gradient";
             Group = "gradient";
+            CapabilityBoundingSet = "";
+            LockPersonality = true;
+            NoNewPrivileges = true;
             PrivateTmp = true;
+            ProtectClock = true;
+            ProtectControlGroups = true;
             ProtectHome = true;
             ProtectHostname = true;
             ProtectKernelLogs = true;
@@ -655,6 +660,8 @@ in {
             RestrictNamespaces = true;
             RestrictRealtime = true;
             RestrictSUIDSGID = true;
+            SystemCallArchitectures = "native";
+            SystemCallFilter = [ "@system-service" "~@privileged" ];
             WorkingDirectory = cfg.baseDir;
             LoadCredential = [
               "gradient_database_url:${cfg.database.urlFile}"

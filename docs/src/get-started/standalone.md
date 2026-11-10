@@ -45,13 +45,13 @@ The first boot can take a minute. PostgreSQL has to initialize, and Gradient gen
 
 ## 2. Log In
 
-On first boot, Gradient creates a random password for the `admin` account. Each boot prints that password in this line:
+The boot steps in Gradient create a random password for the `admin` account at first boot. They write that password once on the next line.
 
 ```text
 Gradient is running at http://localhost:8080 - log in with admin / <password>
 ```
 
-To read the current password directly from disk, run one of these commands.
+Later starts show a file name instead of the password. Run one of the commands below to read the current password directly from disk.
 
 === "Docker"
 
