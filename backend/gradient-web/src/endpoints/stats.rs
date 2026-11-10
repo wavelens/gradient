@@ -77,12 +77,7 @@ pub struct CacheStatsResponse {
 /// `gradient_db::metrics::cache_traffic` is writing the accumulator.
 pub fn record_nar_traffic(cache_traffic: &CacheTraffic, cache_id: CacheId, bytes: i64) {
     let bucket = cache_traffic::minute_bucket(gradient_types::now());
-    cache_traffic.record(
-        cache_id,
-        bucket,
-        bytes,
-        cache_traffic::TrafficSource::External,
-    );
+    cache_traffic.record(cache_id, bucket, bytes);
 }
 
 async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
