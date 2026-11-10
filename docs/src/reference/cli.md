@@ -54,6 +54,7 @@ gradient login https://gradient.example.com
 - `gradient config <key> [value]` reads or writes one of `server`, `authtoken`, `selectedproject`, `selectedtask` for the current account.
 - `GRADIENT_SERVER` and `GRADIENT_TOKEN` replace the saved server and token. Use them in a CI job with no config file, for example. A saved token can go only to the server that stored it. Pass `GRADIENT_TOKEN` too with another `GRADIENT_SERVER`. `gradient config server <url>` with another server can also clear the saved token.
 - Add `--json` to any command for machine-readable output with all prompts disabled.
+- Tokens in the output of `gradient config authtoken` show only the first and last characters (example: `GRAD…1234`).
 - Without a terminal on stdin, or with `--json`, commands never open `$EDITOR`: pass every required field as a flag, otherwise the command fails and names the missing flag.
 - Delete commands ask for confirmation in the terminal. Pass `--yes` (`-y`) to skip the prompt. The delete command fails without `--yes` when there's no terminal or `--json` is present.
 - The `edit` commands open the current values in `$EDITOR` without a field flag. Use any flag to change only those fields and keep the rest untouched. The description can stay empty.
@@ -181,14 +182,16 @@ gradient account switch work
 | `gradient task trigger test <TRIGGER>` | - | Fire the trigger now against the current head commit of the task. |
 | `gradient task trigger default <TRIGGER>` | - | Set the trigger to default. Manual evaluations use that branch. |
 
+- `project create`, `task create`, `cache create`, `team create` and `task evaluate` print the UUID of the new item. Pass `--json` to print `{"id", "name", "url"}` instead. `url` is the web page of the new item.
+
 ## Builds and Evaluations
 
 | Command | Options | Description |
 |---|---|---|
 | `gradient build [TARGET]` | `--system <SYSTEM>`, `--background`, `--quiet`, `--no-link`, `--override-input <INPUT> <FLAKE>` | Submit a build request from the current git repository |
 | `gradient run [TARGET]` | `--no-shell`, `--cpus <CPUS>`, `--memory <MB>`, `--network`, `--labels <LABELS>`, `--timeout <TIMEOUT>`, `--system <SYSTEM>`, `--attach <JOB_ID>`, `-L, --forward <[LOCAL:]PORT>` | Run the flake program on an exec worker and stream the program output to this terminal, see [Run a Program from the CLI](../exec/run.md) |
-| `gradient watch <EVALUATION>` | - | Watch a running evaluation's live build logs and status |
-| `gradient logs <EVALUATION>` | - | Print the full logs of every build in an evaluation |
+| `gradient watch <EVALUATION>` | - | Show live build logs and status of an evaluation in a full-screen view. Print a status line like `gradient evaluation wait` and exit if there's no terminal or `--json`. |
+| `gradient logs <EVALUATION>` | `--exit-code` | Print complete logs for every build in an evaluation. `--exit-code` can exit with the evaluation result, like `gradient evaluation wait`. |
 | `gradient download [FLAKE_REF]` | `--evaluation <EVALUATION>`, `--products <PRODUCTS>`, `--out <OUT>` | Download evaluation artefacts |
 | `gradient builds graph <ID>` | `--interactive` | Show a build's dependency graph |
 | `gradient builds log <ID>` | `--interactive`, `--lines <LINES>`, `--search <SEARCH>`, `--case` | View a build's log |
@@ -205,10 +208,13 @@ gradient account switch work
 | `gradient evaluation report <EVALUATION>` | `--output-file <PATH>`, `--keep-real-identities`, `--anonymize-package-names`, `--exclude-failed-build-logs`, `--include-worker-fleet`, `--include-exec-jobs` | Save an SQLite diagnostic report for a bug report. Default settings anonymize identifying information and include failed build logs. Only a user with permission to manage workers can use the `--include-worker-fleet` flag. |
 | `gradient evaluation closure <EVALUATION>` | `--runtime-closure` | Display the dependency closure for all entry points, with the size of each store path. `--runtime-closure` can show the runtime closure instead. |
 | `gradient evaluation show-flake-graph <EVALUATION>` | - | List the flake outputs that the evaluation reached, with their type and derivation path. |
-| `gradient evaluation follow <EVALUATION>` | - | Print live events from an evaluation until completion. Pass ``--json`` to get one JSON line per event. Use ``gradient watch`` for the full-screen display. |
+| `gradient evaluation follow <EVALUATION>` | `--exit-code` | Emit live events from an evaluation until completion. Pass `--json` to get one line of JSON per event. Pass `--exit-code` to exit with the evaluation result, as in `gradient evaluation wait`. Use `gradient watch` for full-screen display. |
+| `gradient evaluation wait <EVALUATION>` | `--timeout <SECONDS>` | Wait for evaluation completion. Print one line on each status change. Exit with 0 on completion, 1 on failure, 4 on cancellation, or 5 for a timeout from `--timeout` before evaluation completion. |
 | `gradient eval <PATTERN>...` | `--workers <N>`, `--max-rss <MiB>`, `--max-memory <MiB>` | Evaluate a flake to derivations locally, a JSON line per attribute. Only in `gradient-cli-full`, see [below](#local-evaluation) |
 
 - `build` and `run` no longer accept the `-p` short flag. Use the global `--project <NAME>` instead.
+- `<EVALUATION>` can receive an evaluation UUID, `project/task` (the latest evaluation of the task), `project/task@<commit>` (a full or short commit hash), or a link from the Web UI. Build `<ID>` can receive a build UUID, or a link to a log page with `?build=<id>` appended. `--task` can also receive a link to a task page.
+- Exit codes 0, 1, 2, 3, 4 and 5 map to success, server error or evaluation failure, incorrect usage, not logged in, evaluation abort and timeout. A script designed to accept an aborted evaluation can check for 4, for example ``gradient evaluation wait acme/web || [ $? -eq 4 ]``.
 
 ## Pull Requests
 
