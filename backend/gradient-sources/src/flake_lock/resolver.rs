@@ -11,12 +11,11 @@ use gradient_wire::traits::InputProgressSink;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use super::lock::LockedRef;
+use super::lock::{GITHUB_HOST, GITLAB_HOST, LockedRef};
 use super::narhash::{nar_hash_of_dir, tarball_source_nar_hash};
 
 const USER_AGENT: &str = "gradient-flake-lock";
 const GITHUB_API: &str = "https://api.github.com";
-const GITLAB_API: &str = "https://gitlab.com";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedRev {
@@ -112,14 +111,15 @@ impl HttpRevisionResolver {
 
     async fn resolve_gitlab(
         &self,
+        host: &str,
         owner: &str,
         repo: &str,
         ref_: &Option<String>,
         progress: &dyn InputProgressSink,
     ) -> Result<ResolvedRev> {
-        let task = format!("{owner}/{repo}").replace('/', "%2F");
+        let project_api = gitlab_project_api(host, owner, repo);
         let r = ref_.clone().unwrap_or_else(|| "HEAD".to_owned());
-        let url = format!("{GITLAB_API}/api/v4/tasks/{task}/repository/commits/{r}");
+        let url = format!("{project_api}/repository/commits/{r}");
         let commit: GitlabCommit = self
             .gitlab_get(&url)
             .send()
@@ -133,7 +133,7 @@ impl HttpRevisionResolver {
 
         let last_modified = parse_rfc3339(&commit.committed_date)?;
         let tarball = format!(
-            "{GITLAB_API}/api/v4/tasks/{task}/repository/archive.tar.gz?sha={}",
+            "{project_api}/repository/archive.tar.gz?sha={}",
             commit.id
         );
         let nar_hash = tarball_source_nar_hash(self.gitlab_get(&tarball), progress).await?;
@@ -201,11 +201,25 @@ impl RevisionResolver for HttpRevisionResolver {
         progress: Arc<dyn InputProgressSink>,
     ) -> Result<ResolvedRev> {
         match reference {
-            LockedRef::Github { owner, repo, ref_ } => {
+            LockedRef::Github {
+                owner,
+                repo,
+                host,
+                ref_,
+            } => {
+                if let Some(host) = host.as_deref().filter(|host| *host != GITHUB_HOST) {
+                    bail!("the updater doesn't support GitHub inputs on {host} yet");
+                }
                 self.resolve_github(owner, repo, ref_, &*progress).await
             }
-            LockedRef::Gitlab { owner, repo, ref_ } => {
-                self.resolve_gitlab(owner, repo, ref_, &*progress).await
+            LockedRef::Gitlab {
+                owner,
+                repo,
+                host,
+                ref_,
+            } => {
+                let host = host.as_deref().unwrap_or(GITLAB_HOST);
+                self.resolve_gitlab(host, owner, repo, ref_, &*progress).await
             }
             LockedRef::Git { url, ref_ } => self.resolve_git(url, ref_).await,
             LockedRef::Tarball { .. } => {
@@ -217,6 +231,11 @@ impl RevisionResolver for HttpRevisionResolver {
             LockedRef::Other(ty) => bail!("unsupported flake input type `{ty}`"),
         }
     }
+}
+
+fn gitlab_project_api(host: &str, owner: &str, repo: &str) -> String {
+    let project = format!("{}/{repo}", owner.replace("%2F", "/")).replace('/', "%2F");
+    format!("https://{host}/api/v4/projects/{project}")
 }
 
 fn git_checkout(
@@ -308,6 +327,14 @@ mod tests {
 
     // `git_checkout` is called directly because a reqwest client cannot be built in the sandboxed
     // CI without system CA certificates.
+    #[test]
+    fn a_gitlab_input_is_resolved_through_the_projects_api_of_its_host() {
+        assert_eq!(
+            gitlab_project_api("gitlab.example.com", "group%2Fsub", "tool"),
+            "https://gitlab.example.com/api/v4/projects/group%2Fsub%2Ftool"
+        );
+    }
+
     #[test]
     fn git_checkout_fetches_file_url() {
         let (_tmp, repo) = make_git_repo();

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::lock::{FlakeLock, LockedRef};
+use super::lock::{FlakeLock, GITHUB_HOST, GITLAB_HOST, LockedRef, SOURCEHUT_HOST};
 use gradient_util::glob::{glob_match, is_pattern};
 use serde_json::{Map, Value};
 
@@ -38,28 +38,42 @@ fn is_tracked(name: &str, tracked: &[String]) -> bool {
 }
 
 fn repository_of(original: &Map<String, Value>) -> Option<(String, Option<String>)> {
-    let host = |default: &str| {
-        original
-            .get("host")
-            .and_then(Value::as_str)
-            .unwrap_or(default)
-            .to_owned()
-    };
     let (url, branch) = match LockedRef::from_map(original).ok()? {
-        LockedRef::Github { owner, repo, ref_ } => (
-            format!("https://{}/{owner}/{repo}", host("github.com")),
+        LockedRef::Github {
+            owner,
+            repo,
+            host,
+            ref_,
+        } => (
+            format!(
+                "https://{}/{owner}/{repo}",
+                host.as_deref().unwrap_or(GITHUB_HOST)
+            ),
             ref_,
         ),
-        LockedRef::Gitlab { owner, repo, ref_ } => (
+        LockedRef::Gitlab {
+            owner,
+            repo,
+            host,
+            ref_,
+        } => (
             format!(
                 "https://{}/{}/{repo}",
-                host("gitlab.com"),
+                host.as_deref().unwrap_or(GITLAB_HOST),
                 owner.replace("%2F", "/")
             ),
             ref_,
         ),
-        LockedRef::Sourcehut { owner, repo, ref_ } => (
-            format!("https://{}/{owner}/{repo}", host("git.sr.ht")),
+        LockedRef::Sourcehut {
+            owner,
+            repo,
+            host,
+            ref_,
+        } => (
+            format!(
+                "https://{}/{owner}/{repo}",
+                host.as_deref().unwrap_or(SOURCEHUT_HOST)
+            ),
             ref_,
         ),
         LockedRef::Git { url, ref_ } => (url, ref_),

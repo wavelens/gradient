@@ -37,21 +37,28 @@ pub enum InputRef {
     Follows(Vec<String>),
 }
 
+pub const GITHUB_HOST: &str = "github.com";
+pub const GITLAB_HOST: &str = "gitlab.com";
+pub const SOURCEHUT_HOST: &str = "git.sr.ht";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LockedRef {
     Github {
         owner: String,
         repo: String,
+        host: Option<String>,
         ref_: Option<String>,
     },
     Gitlab {
         owner: String,
         repo: String,
+        host: Option<String>,
         ref_: Option<String>,
     },
     Sourcehut {
         owner: String,
         repo: String,
+        host: Option<String>,
         ref_: Option<String>,
     },
     Git {
@@ -138,16 +145,19 @@ impl LockedRef {
             "github" => Self::Github {
                 owner: req("owner")?,
                 repo: req("repo")?,
+                host: s("host"),
                 ref_: s("ref"),
             },
             "gitlab" => Self::Gitlab {
                 owner: req("owner")?,
                 repo: req("repo")?,
+                host: s("host"),
                 ref_: s("ref"),
             },
             "sourcehut" => Self::Sourcehut {
                 owner: req("owner")?,
                 repo: req("repo")?,
+                host: s("host"),
                 ref_: s("ref"),
             },
             "git" => Self::Git {
@@ -224,6 +234,7 @@ mod tests {
             LockedRef::Github {
                 owner: "NixOS".into(),
                 repo: "nixpkgs".into(),
+                host: None,
                 ref_: Some("nixos-unstable".into()),
             }
         );
