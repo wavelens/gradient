@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ChangeDetectionStrategy, Component, effect, inject, input, model, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, model, output, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
   ButtonComponent,
@@ -20,6 +20,7 @@ import type { MakeCacheRequest } from '@core/models';
 import { nameAvailability } from './name-availability';
 import { NameFieldsComponent } from './name-fields.component';
 import { dialogFormChangesSinceOpen } from './unsaved-changes';
+import { injectRevealFirstInvalid } from './reveal-invalid';
 
 const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description: '', priority: 50, local_priority: null, public: false };
 
@@ -31,8 +32,10 @@ const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description:
   template: `
     <gr-dialog #cacheDialog [header]="header()" [(visible)]="visible" width="500px" [busy]="creating()" [error]="error()" [confirmDiscard]="formChanges.changed()">
       <app-name-fields
+        #nameFields
         noun="cache"
         [names]="names"
+        [submitAttempted]="submitAttempted()"
         [(displayName)]="cache.display_name"
         [(name)]="cache.name"
         (submitted)="create()"
@@ -56,7 +59,7 @@ const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description:
           grButton
           [label]="submitLabel()"
           (click)="create()"
-          [disabled]="!canSubmit()"
+          [disabled]="names.blocksSubmit() || creating()"
           [loading]="creating()"
         ></button>
       </div>
@@ -80,6 +83,9 @@ export class CreateCacheDialogComponent {
   protected cache: MakeCacheRequest = { ...EMPTY_CACHE };
   protected creating = signal(false);
   protected error = signal<string | null>(null);
+  protected submitAttempted = signal(false);
+  private nameFields = viewChild('nameFields', { read: ElementRef<HTMLElement> });
+  private revealFirstInvalid = injectRevealFirstInvalid();
   protected formChanges = dialogFormChangesSinceOpen(() => this.cache);
 
   constructor() {
@@ -88,18 +94,20 @@ export class CreateCacheDialogComponent {
       untracked(() => {
         this.cache = { ...EMPTY_CACHE };
         this.names.reset();
+        this.submitAttempted.set(false);
         this.error.set(null);
         this.formChanges.mark();
       });
     });
   }
 
-  protected canSubmit(): boolean {
-    return !!this.cache.name && !!this.cache.display_name && !this.names.blocksSubmit() && !this.creating();
-  }
-
   protected create(): void {
-    if (!this.canSubmit()) return;
+    if (this.creating() || this.names.blocksSubmit()) return;
+    this.submitAttempted.set(true);
+    if (!this.cache.name || !this.cache.display_name) {
+      this.revealFirstInvalid(() => this.nameFields()?.nativeElement);
+      return;
+    }
     this.creating.set(true);
     this.error.set(null);
     this.caches.createCache(this.cache).subscribe({

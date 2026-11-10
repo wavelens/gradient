@@ -85,6 +85,18 @@ describe('CreateCacheDialogComponent', () => {
     expect(host.visible).toBe(false);
   });
 
+  it('keeps Create enabled on an empty form and names the missing fields on submit, like Create Project', async () => {
+    const createCache = vi.fn(() => of('id'));
+    const { host, submit } = await setup(createCache);
+    const create = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.includes('Create'))!;
+    expect(create.disabled).toBe(false);
+    expect(document.body.textContent).not.toContain('Enter a display name.');
+    await submit();
+    expect(createCache).not.toHaveBeenCalled();
+    expect(host.visible).toBe(true);
+    expect(document.body.textContent).toContain('Enter a display name.');
+  });
+
   it('confirms a created cache with a toast', async () => {
     const { type, submit } = await setup(() => of('id'));
     const success = vi.spyOn(TestBed.inject(NotifyService), 'success');
