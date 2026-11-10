@@ -1210,6 +1210,49 @@ async fn k31_a_split_cluster_with_one_free_seat_dissolves_at_once() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn k32_an_oldest_cluster_pinned_to_an_offline_worker_lets_a_younger_one_reserve() {
+    let (c1, e1, e2) = cluster_ids();
+    let (c2, e3, e4) = cluster_ids();
+    let given = shape()
+        .evalq(e1)
+        .evaluation_member_of(c1, "head", true, Some("offline"))
+        .one(e2, A, A_OUT)
+        .build_member_of(c1, "node", false, None)
+        .cluster(c1, false, 2, ClusterJobStatus::Queued, 0, ago(900))
+        .cl2(c2, e3, e4, B, B_OUT)
+        .cluster_option(c2, |cluster| {
+            cluster.created_at = ago(700);
+            cluster.updated_at = ago(700);
+        });
+    let case = SchedulerCase::start_with(given, |config| {
+        config.scheduler.cluster_reserve_after_secs = seconds(1);
+    })
+    .await;
+    case.connect(W1, w_all(), &[]).await;
+    case.connect(W2, w_all(), &[]).await;
+
+    case.assign_queued_evals().await;
+    case.admit_startable_moves().await;
+    case.plan_clusters().await;
+    assert!(
+        case.reservation().await.is_none(),
+        "after 1: cluster_snapshot.reservation == none"
+    );
+    case.check("step 1").await;
+
+    tokio::time::sleep(Duration::from_secs_f64(1.2)).await;
+    case.plan_clusters().await;
+    assert_eq!(
+        case.reservation().await.map(|r| r.cluster()),
+        Some(c2),
+        "after 2: cluster_snapshot.reservation == C2"
+    );
+    case.check("step 2").await;
+
+    case.finish().await;
+}
+
 fn split_of_three(
     cluster: ClusterJobId,
     evaluation: EvaluationId,

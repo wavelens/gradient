@@ -113,33 +113,33 @@ fn reserve_step(
     at: Instant,
     policy: &AgingPolicy,
 ) -> AgingStep {
-    let Some(cluster) = oldest_aged(snapshot, now, policy) else {
-        return AgingStep::Keep;
-    };
-    if plan(cluster, &snapshot.slots, &snapshot.scores).is_some() {
-        return AgingStep::Keep;
+    for cluster in waiting_clusters_past_reserve_after_delay(snapshot, now, policy) {
+        if plan(cluster, &snapshot.slots, &snapshot.scores).is_some() {
+            return AgingStep::Keep;
+        }
+        if let Some(placement) = plan(cluster, &snapshot.connected, &idle_first(snapshot, cluster))
+        {
+            return AgingStep::Reserve(Reservation {
+                kinds: placement
+                    .seats
+                    .iter()
+                    .map(|seat| SlotKind::from(&cluster.members[seat.member]))
+                    .collect(),
+                placement,
+                since: at,
+            });
+        }
     }
 
-    match plan(cluster, &snapshot.connected, &idle_first(snapshot, cluster)) {
-        Some(placement) => AgingStep::Reserve(Reservation {
-            kinds: placement
-                .seats
-                .iter()
-                .map(|seat| SlotKind::from(&cluster.members[seat.member]))
-                .collect(),
-            placement,
-            since: at,
-        }),
-        None => AgingStep::Keep,
-    }
+    AgingStep::Keep
 }
 
-fn oldest_aged<'a>(
+fn waiting_clusters_past_reserve_after_delay<'a>(
     snapshot: &'a ClusterSnapshot,
     now: NaiveDateTime,
     policy: &AgingPolicy,
-) -> Option<&'a PendingCluster> {
-    snapshot
+) -> Vec<&'a PendingCluster> {
+    let mut aged: Vec<&PendingCluster> = snapshot
         .clusters
         .iter()
         .filter(|c| {
@@ -147,7 +147,10 @@ fn oldest_aged<'a>(
                 && c.startable_since
                     .is_some_and(|since| now - since >= policy.reserve_after)
         })
-        .min_by_key(|c| (!c.prioritized(), c.queued_at))
+        .collect();
+    aged.sort_by_key(|c| (!c.prioritized(), c.queued_at));
+
+    aged
 }
 
 /// An idle worker is keeping its score and a busy one is counting as unscored. The planner is then
@@ -332,6 +335,17 @@ mod tests {
             panic!("a timed-out reservation is planned again");
         };
         assert!(Instant::now().duration_since(renewed.since) < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn an_unplaceable_oldest_cluster_lets_a_younger_one_reserve() {
+        let mut pinned = cluster(2, 900, false);
+        pinned.members[0].pin = Some("offline".into());
+        let younger = cluster(2, 700, false);
+        let younger_id = younger.id;
+        let s = snapshot(vec![pinned, younger], &[], &["w1", "w2"]);
+
+        assert_eq!(reserved(step(&s)).cluster(), younger_id);
     }
 
     fn aged_reservation() -> ClusterSnapshot {
