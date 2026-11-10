@@ -18,13 +18,15 @@ describe('cronExpressionToPlainEnglish', () => {
     ['0 5 * * * *', 'Every hour at minute 5'],
     ['0 */15 * * * *', 'Every 15 minutes'],
     ['0 0 */6 * * *', 'Every 6 hours'],
+    ['0 2 * * *', 'Every day at 02:00 UTC'],
+    ['*/15 * * * *', 'Every 15 minutes'],
   ])('describes %s', (expression, description) => {
     expect(cronExpressionToPlainEnglish(expression)).toBe(description);
   });
 
   it.each([
     '',
-    '0 2 * * *',
+    '0 2 * *',
     '30 0 2 * * *',
     '0 0 2 * 1 *',
     '0 0 2 * * 0',

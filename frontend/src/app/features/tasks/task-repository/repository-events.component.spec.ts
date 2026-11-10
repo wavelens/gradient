@@ -36,8 +36,6 @@ function repo(overrides: Partial<TaskRepositoryResponse> = {}): TaskRepositoryRe
     uses_ssh: true,
     deploy_key: 'ssh-ed25519 AAAA',
     fetch: null,
-    build_on_push: null,
-    build_on_pull_request: null,
     last_event: null,
     report_status: null,
     integrations: [],
@@ -109,38 +107,22 @@ describe('RepositoryEventsComponent', () => {
     expect(el.textContent).not.toContain('Save');
   });
 
-  it('turns on push and pull request builds when a connection is picked and saves them', () => {
-    const updateRepository = vi.fn(() => of(repo()));
-    const fixture = render(repo({ integrations: [inbound, outbound] }), {
-      tasks: { updateRepository },
-      integrations: { listIntegrationDeliveries: () => of([]) },
-    });
-    const comp = fixture.componentInstance;
-    comp.patch({ inbound: null });
-    comp.patch({ inbound: 'in1' });
-    expect(comp.form().push).toBe(true);
-    expect(comp.form().pullRequest).toBe(true);
-    comp.patch({ outbound: null, reportStatus: false });
-    comp.patch({ outbound: 'out1' });
-    comp.save();
-    expect(updateRepository).toHaveBeenCalledWith('acme', 'app', expect.objectContaining({
-      inbound_integration: 'in1',
-      build_on_push: true,
-      build_on_pull_request: true,
-      outbound_integration: 'out1',
-      report_status: true,
-    }));
+  it('leaves push and pull request settings to the Triggers page and status reports to the Actions page', () => {
+    const el = render(repo({ integrations: [inbound, outbound] })).nativeElement as HTMLElement;
+    expect(el.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(el.querySelector('[data-testid="triggers-link"]')?.getAttribute('href')).toBe('/project/acme/task/app/triggers');
+    expect(el.querySelector('[data-testid="actions-link"]')?.getAttribute('href')).toBe('/project/acme/task/app/actions');
+    expect(el.querySelector('gr-copy-field')).not.toBeNull();
   });
 
-  it('connects a Git host, shows the secret when the webhook install fails and wires push, pull requests and status', () => {
+  it('connects a Git host and shows the secret when the webhook install fails, without adding triggers', () => {
     const connectGitHost = vi.fn(() => of({
       inbound: { ...inbound, generated_secret: 's3cret' },
       outbound: { ...outbound },
     }));
-    const updateRepository = vi.fn(() => of(repo()));
     const installWebhook = vi.fn(() => throwError(() => new ApiError('403 token lacks admin rights', 502)));
     const fixture = render(repo(), {
-      tasks: { updateRepository, installWebhook, installDeployKey: () => of('acme/app') },
+      tasks: { installWebhook, installDeployKey: () => of('acme/app') },
       integrations: { connectGitHost, listIntegrationDeliveries: () => of([]) },
     });
     const comp = fixture.componentInstance;
@@ -156,12 +138,7 @@ describe('RepositoryEventsComponent', () => {
     expect(installWebhook).toHaveBeenCalledWith('acme', 'app', { inbound_integration: 'in1', outbound_integration: 'out1' });
     expect(comp.createdSecret()?.secret).toBe('s3cret');
     expect(comp.showSecret()).toBe(true);
-    expect(updateRepository).toHaveBeenCalledWith('acme', 'app', expect.objectContaining({
-      inbound_integration: 'in1',
-      build_on_push: true,
-      outbound_integration: 'out1',
-      report_status: true,
-    }));
+    expect(Object.keys(TestBed.inject(TasksService))).toEqual(['installWebhook', 'installDeployKey']);
   });
 
   it('installs the webhook and deploy key through the Git host and skips the manual secret', () => {
@@ -169,7 +146,7 @@ describe('RepositoryEventsComponent', () => {
     const installWebhook = vi.fn(() => of('acme/app'));
     const installDeployKey = vi.fn(() => of('acme/app'));
     const fixture = render(repo(), {
-      tasks: { updateRepository: () => of(repo()), installWebhook, installDeployKey },
+      tasks: { installWebhook, installDeployKey },
       integrations: { connectGitHost, listIntegrationDeliveries: () => of([]) },
     });
     const comp = fixture.componentInstance;

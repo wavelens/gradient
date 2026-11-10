@@ -26,49 +26,85 @@
               <button grButton label="Check again" icon="refresh" severity="secondary" (click)="loadCaches()"></button>
             </div>
           }
-          @if (createError(); as error) {
-            <gr-message-banner type="error">{{ error }}</gr-message-banner>
-          }
           <gr-form-field label="Repository URL" for="connect-repo" required hint="URL of the Git repository to evaluate"
             [invalid]="!!repositoryError" [error]="repositoryError ?? ''">
             <gr-label-help slot="label" doc="concepts/projects-and-tasks/#repository-url" title="Accepted forms: ssh://git@host/path, git@host:path, https://host/path, git://host/path" />
             <input grInput id="connect-repo" [ngModel]="form.repository" (ngModelChange)="repositoryChanged($event)"
-              placeholder="ssh://git@forgejo.example.com/acme/app.git" (keyup.enter)="createTask()" />
+              placeholder="ssh://git@forgejo.example.com/acme/app.git" (keyup.enter)="continueFromRepository()" />
           </gr-form-field>
-          <app-name-fields noun="task" [names]="names" [submitAttempted]="attempted()" [(displayName)]="form.display_name" [(name)]="form.name" (submitted)="createTask()" />
+          <app-name-fields noun="task" [names]="names" [submitAttempted]="attempted()" [(displayName)]="form.display_name" [(name)]="form.name" (submitted)="continueFromRepository()" />
+          <gr-form-field label="Branch" for="connect-branch" hint="Leave empty to build the default branch (HEAD) of the repository.">
+            <input grInput id="connect-branch" [(ngModel)]="form.branch" placeholder="HEAD (default branch)" (keyup.enter)="continueFromRepository()" />
+          </gr-form-field>
           <gr-form-field label="Evaluation Wildcard" for="connect-wildcard" hint="Output pattern to evaluate"
             [invalid]="!!wildcardError" [error]="wildcardError ?? ''">
             <gr-label-help slot="label" doc="reference/wildcards/" title="Learn about evaluation wildcards" />
-            <input grInput id="connect-wildcard" [(ngModel)]="form.wildcard" (keyup.enter)="createTask()" />
+            <input grInput id="connect-wildcard" [(ngModel)]="form.wildcard" (keyup.enter)="continueFromRepository()" />
           </gr-form-field>
           <div class="gr-form-actions gr-form-actions--end">
             <a grButton label="Back" severity="secondary" [routerLink]="links.project(projectName)"></a>
-            <button grButton label="Create task" icon="add" (grSubmit)="createTask()" [loading]="creating()"
-              [disabled]="creating() || names.blocksSubmit()"></button>
+            <button grButton label="Continue" icon="arrow_forward" (grSubmit)="continueFromRepository()"
+              [disabled]="names.blocksSubmit()"></button>
           </div>
         </gr-settings-section>
       }
       @case ('access') {
-        @if (state(); as repo) {
-          <app-repository-access [project]="projectName" [task]="taskName()!" [state]="repo" (changed)="loadState()" />
-        }
+        <gr-settings-section title="Repository access">
+          <gr-form-field label="Repository URL">
+            <gr-copy-field [value]="form.repository.trim()" />
+          </gr-form-field>
+          @if (usesSsh()) {
+            @if (deployKey(); as key) {
+              <gr-form-field label="Deploy key" hint="Add this key to the repository as a read-only deploy key. Gradient can clone SSH repositories with the SSH key of the project.">
+                <gr-copy-field multiline [value]="key" />
+              </gr-form-field>
+            }
+          } @else {
+            <p class="text-secondary">Repositories over HTTPS or git:// need no key.</p>
+          }
+          @if (repositoryAccessTestPassedForCurrentUrl()) {
+            <p class="text-secondary" role="status" data-testid="access-ok">Gradient can access this repository.</p>
+          }
+          @if (testError(); as error) {
+            <p class="text-secondary" role="alert">{{ error }}</p>
+          }
+          <div class="gr-form-actions gr-form-actions--end">
+            <button grButton label="Back" severity="secondary" (click)="back()"></button>
+            <button grButton severity="secondary" label="Test access" icon="lan" (click)="testAccess()" [loading]="testing()" [disabled]="testing()"></button>
+            <button grButton label="Continue" icon="arrow_forward" (click)="continueToTriggers()"></button>
+          </div>
+        </gr-settings-section>
       }
-      @case ('events') {
-        @if (state(); as repo) {
-          <app-repository-events [project]="projectName" [task]="taskName()!" [state]="repo" (saved)="state.set($event)" />
-        }
+      @case ('triggers') {
+        <gr-settings-section title="Triggers and Settings" description="The task and its triggers exist only after `Create task`. No evaluation can run before that.">
+          @if (createError(); as error) {
+            <gr-message-banner type="error">{{ error }}</gr-message-banner>
+          }
+          <gr-form-field>
+            <gr-checkbox inputId="connect-polling" [binary]="true" label="Check for new commits on branches every 5 minutes" [(ngModel)]="form.polling" />
+          </gr-form-field>
+          @for (choice of suggestions(); track $index; let i = $index) {
+            <gr-form-field>
+              <gr-checkbox [inputId]="'connect-suggestion-' + i" [binary]="true" [label]="suggestionLabel(choice.config)"
+                [ngModel]="choice.selected" (ngModelChange)="toggleSuggestion(i, $event)" />
+            </gr-form-field>
+          }
+          <gr-form-field label="Cron Expression" for="connect-cron" hint="Optional cron schedule in UTC (for example, `0 2 * * *` for a daily run at 02:00). Leave blank for no schedule."
+            [invalid]="!!cronError" [error]="cronError ?? ''">
+            <input grInput id="connect-cron" [(ngModel)]="form.cron" placeholder="0 2 * * *" />
+          </gr-form-field>
+          @if (config.execEnabled) {
+            <gr-form-field>
+              <gr-checkbox inputId="connect-exec-enabled" [binary]="true" label="Run exec jobs" [(ngModel)]="form.exec_enabled" />
+            </gr-form-field>
+          }
+          <div class="gr-form-actions gr-form-actions--end">
+            <button grButton label="Back" severity="secondary" (click)="back()" [disabled]="creating()"></button>
+            <button grButton label="Create task" icon="add" (click)="createTaskWithTriggersAndOpenTask()" [loading]="creating()"
+              [disabled]="creating() || !!cronError"></button>
+          </div>
+        </gr-settings-section>
       }
-    }
-
-    @if (step() === 'access') {
-      <div class="gr-form-actions gr-form-actions--end">
-        <button grButton label="Continue" icon="arrow_forward" (click)="next()"></button>
-      </div>
-    } @else if (step() === 'events') {
-      <div class="gr-form-actions gr-form-actions--end">
-        <button grButton label="Back" severity="secondary" (click)="back()"></button>
-        <a grButton label="Open task" icon="arrow_forward" [routerLink]="links.task(projectName, taskName()!)"></a>
-      </div>
     }
   }
 </gr-page-layout>

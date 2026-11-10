@@ -24,7 +24,8 @@ import {
   MakeTaskRequest,
   PatchTaskRequest,
   TaskRepositoryResponse,
-  UpdateTaskRepositoryRequest,
+  RepositoryAccessCheckRequest,
+  DuplicateTaskRequest,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -110,8 +111,13 @@ export class TasksService {
     return this.api.get<TaskRepositoryResponse>(`tasks/${project}/${task}/repository`);
   }
 
-  updateRepository(project: string, task: string, body: UpdateTaskRepositoryRequest): Observable<TaskRepositoryResponse> {
-    return this.api.put<TaskRepositoryResponse>(`tasks/${project}/${task}/repository`, body);
+  testRepositoryCloneAccess(project: string, repository: string): Observable<string> {
+    const body: RepositoryAccessCheckRequest = { repository };
+    return this.api.post<string>(`projects/${project}/repository-check`, body);
+  }
+
+  duplicateTask(project: string, task: string, body: DuplicateTaskRequest): Observable<string> {
+    return this.api.post<string>(`tasks/${project}/${task}/duplicate`, body);
   }
 
   installWebhook(project: string, task: string, body: InstallWebhookRequest): Observable<string> {

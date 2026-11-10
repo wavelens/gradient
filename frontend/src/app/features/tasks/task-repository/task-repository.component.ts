@@ -23,12 +23,12 @@ import { injectTaskAccessData } from '@core/resolvers/inject-access';
   imports: [LoadStateComponent, PageLayoutComponent, RepositoryAccessComponent, RepositoryEventsComponent, ServerConfigurationManagedBannerComponent],
   template: `
     <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Repository"
-      subtitle="Connect this task to the Git host for access, push-triggered builds and commit status.">
+      subtitle="Repository URL, access, and connection to the Git host.">
       @if (state(); as repo) {
         <app-server-configuration-managed-banner [access]="taskAccess()?.access" kind="task" showReadOnlyNote />
         <app-repository-access [project]="projectName" [task]="taskName" [state]="repo"
           [gitHost]="gitHost()" (changed)="load()" />
-        <app-repository-events [project]="projectName" [task]="taskName" [state]="repo" (saved)="state.set($event)" />
+        <app-repository-events [project]="projectName" [task]="taskName" [state]="repo" (changed)="load()" />
       } @else {
         <gr-load-state [loading]="loading()" [error]="loadError()" loadingMessage="Loading repository..."
           errorTitle="Failed to load repository" (retry)="load()" />
@@ -44,7 +44,6 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
   protected taskAccess = injectTaskAccessData();
 
   private access = viewChild(RepositoryAccessComponent);
-  private events = viewChild(RepositoryEventsComponent);
 
   projectName = '';
   taskName = '';
@@ -83,7 +82,7 @@ export class TaskRepositoryComponent implements OnInit, CanComponentDeactivate {
   }
 
   canDeactivate() {
-    const pending = [this.access()?.unsaved, this.events()?.unsaved].find((unsaved) => unsaved?.changed());
-    return pending?.canLeave() ?? true;
+    const unsaved = this.access()?.unsaved;
+    return unsaved?.changed() ? unsaved.canLeave() : true;
   }
 }

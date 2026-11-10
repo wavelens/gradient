@@ -34,7 +34,6 @@ const baseIntegration: IntegrationResponse = {
   created_by: 'u',
   created_at: '2026-01-01T00:00:00Z',
   managed: false,
-  connected_tasks: [],
 };
 
 const githubOutbound: IntegrationResponse = {
@@ -54,7 +53,6 @@ const githubOutbound: IntegrationResponse = {
   installation_id: 99999,
   account_login: 'acme-project',
   managed: false,
-  connected_tasks: [],
 };
 
 const githubInbound: IntegrationResponse = {
@@ -359,20 +357,6 @@ describe('IntegrationsComponent - write failures', () => {
     name.dispatchEvent(new Event('input'));
     fixture.detectChanges();
     expect(document.querySelector('[data-testid="rename-breaks-webhook"]')?.textContent).toContain('Webhook URL');
-  });
-
-  it('names the tasks a new integration connected to', async () => {
-    const fixture = setup(writable, []);
-    const create = vi.fn(() => of({ ...baseIntegration, connected_tasks: ['app', 'lib'] }));
-    (TestBed.inject(IntegrationsService) as unknown as { createProjectIntegration: typeof create }).createProjectIntegration = create;
-    await settled(fixture);
-    const comp = fixture.componentInstance;
-    comp.openCreateDialog();
-    comp.formData.name = 'gitea-prod';
-    comp.createIntegration();
-    expect(TestBed.inject(MessageService).messages()).toContainEqual(
-      expect.objectContaining({ severity: 'success', summary: 'Created integration. Connected to app, lib.' }),
-    );
   });
 
   it('shows the generated webhook secret once after creating an inbound integration', async () => {

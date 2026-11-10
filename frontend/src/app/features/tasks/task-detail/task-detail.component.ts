@@ -60,7 +60,7 @@ import {
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, buildStatusLabel, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, removeNixErrorInternalsFromEvaluationMessage, buildTally, getBuildCountTextPieces, repositoryWebUrl, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, buildStatusLabel, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, removeNixErrorInternalsFromEvaluationMessage, buildTally, getBuildCountTextPieces, repositoryWebUrl, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase, nextPollText } from '@shared/evaluation';
 
 const NO_EVALUATION_SELECTED = 'No evaluation selected.';
 
@@ -219,6 +219,14 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const e = this.latestEvaluation();
     return !!e && isEvaluationNotStartedStatus(e.status);
   });
+
+  nextPollingTriggerCheckText = computed(() => {
+    const task = this.task();
+    if (!task || this.evaluationInProgress() || this.latestEvaluationNotStarted()) return null;
+    return nextPollText(task.next_polling_trigger_check_at, this.tick());
+  });
+
+  activeTriggerBranchLabels = computed(() => (this.task()?.branches ?? []).map((branch) => branch ?? 'Default branch'));
 
   startDisabledReason = computed(() => {
     const latest = this.latestEvaluation();

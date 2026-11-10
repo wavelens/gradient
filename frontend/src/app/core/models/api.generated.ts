@@ -922,6 +922,12 @@ export interface DrainingResponse {
   draining: boolean;
 }
 
+export interface DuplicateTaskRequest {
+  name: IndexName;
+  display_name: DisplayName;
+  branch: string;
+}
+
 export interface DurationsHeatmap {
   times: string[];
   bands: HeatmapBand[];
@@ -1519,7 +1525,6 @@ export interface IntegrationResponse {
   managed: boolean;
   generated_secret?: string | null;
   webhook_url?: string | null;
-  connected_tasks: string[];
 }
 
 export interface IntegrationSummaryResponse {
@@ -1714,6 +1719,8 @@ export interface MakeTaskRequest {
   wait_for_workers?: boolean | null;
   retry_failed_builds?: boolean | null;
   multi_node_evaluation?: boolean | null;
+  exec_enabled?: boolean | null;
+  triggers?: TriggerConfig[] | null;
 }
 
 export interface MakeTeamRequest {
@@ -2218,28 +2225,10 @@ export interface PublicProjectSummary {
   created_at: string;
 }
 
-export interface PullRequestBuild {
-  trigger_id: TaskTriggerId;
-  integration_id: IntegrationId;
-  active: boolean;
-  branches: string[];
-  require_approval: boolean;
-  last_fired_at?: string | null;
-}
-
 export interface PullRequestResponse {
   url: string;
   number: number;
   branch: string;
-}
-
-export interface PushBuild {
-  trigger_id: TaskTriggerId;
-  integration_id: IntegrationId;
-  active: boolean;
-  branches: string[];
-  tags: string[];
-  last_fired_at?: string | null;
 }
 
 export interface PutProjectSecretRequest {
@@ -2320,6 +2309,10 @@ export interface ReportGap {
   worker_elapsed_ms?: number | null;
   worker_tail_ms?: number | null;
   transit_ms?: number | null;
+}
+
+export interface RepositoryAccessCheckRequest {
+  repository: string;
 }
 
 export interface RepositoryFetchStatus {
@@ -2492,7 +2485,8 @@ export interface SkippedTask {
   task_id: TaskId;
   task_name: string;
   project: string;
-  reason: string;
+  reason: TaskEvaluationNotStartedReason;
+  reason_text: string;
 }
 
 export interface SopsRecipientResponse {
@@ -2608,6 +2602,8 @@ export interface TaskDetailsResponse {
   keep_evaluations: number;
   last_check_at?: string | null;
   repository_fetch?: RepositoryFetchStatus | null;
+  branches: (string | null)[];
+  next_polling_trigger_check_at?: string | null;
   queue: QueueSummary;
   last_evaluations: EvaluationSummary[];
   can_edit: boolean;
@@ -2615,6 +2611,8 @@ export interface TaskDetailsResponse {
   permissions: Permission[];
   managed: boolean;
 }
+
+export type TaskEvaluationNotStartedReason = "same_commit" | "filter" | "tag_not_found" | "concurrency" | "commit_message" | "error" | "input_update_running" | "input_update_not_configured";
 
 export type TaskId = string;
 
@@ -2639,8 +2637,6 @@ export interface TaskRepositoryResponse {
   uses_ssh: boolean;
   deploy_key?: string | null;
   fetch?: RepositoryFetchStatus | null;
-  build_on_push?: PushBuild | null;
-  build_on_pull_request?: PullRequestBuild | null;
   last_event?: IncomingWebhookDeliveryResponse | null;
   report_status?: StatusReport | null;
   integrations: RepositoryIntegration[];
@@ -2673,6 +2669,8 @@ export interface TaskResponse {
   exec_enabled: boolean;
   only_evaluate: boolean;
   repository_fetch?: RepositoryFetchStatus | null;
+  branches: (string | null)[];
+  next_polling_trigger_check_at?: string | null;
   can_edit: boolean;
   can_trigger: boolean;
   permissions: Permission[];
@@ -2837,6 +2835,7 @@ export type TriggerConfig = {
   type: "reporter_pull_request";
 } | {
   cron: string;
+  branch?: string | null;
   type: "time";
 };
 
@@ -2878,18 +2877,6 @@ export interface UpdateActionRequest {
 export interface UpdateFlakeInputOverrideRequest {
   input_name?: string | null;
   url?: string | null;
-}
-
-export interface UpdateTaskRepositoryRequest {
-  inbound_integration?: IntegrationId | null;
-  build_on_push?: boolean;
-  push_branches?: string[];
-  push_tags?: string[];
-  build_on_pull_request?: boolean;
-  pull_request_branches?: string[];
-  require_approval?: boolean;
-  outbound_integration?: IntegrationId | null;
-  report_status?: boolean;
 }
 
 export interface UpdateTriggerRequest {

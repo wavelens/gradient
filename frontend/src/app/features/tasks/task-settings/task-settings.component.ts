@@ -33,8 +33,9 @@ import {
 } from '@gradient/ui/ui';
 import { EntityNameComponent, LabelHelpComponent, entityToPickerOption, formatEntityLabel } from '@shared/ui';
 import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canOpenProjectSettings } from '@shared/access';
-import { fieldChecks, injectRevealFirstInvalid, maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
+import { NameFieldsComponent, fieldChecks, injectRevealFirstInvalid, maxDisplayNameCharacterCount, nameAvailability, unsavedChanges } from '@shared/forms';
 import { wildcardError } from '../wildcard-error';
+import { RESERVED_TASK_NAMES } from '../connect-repository/connect-repository.component';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { TaskResponse, ConcurrencyPolicy, PatchTaskRequest } from '@core/models';
 import { injectTaskAccess, injectTaskAccessData } from '@core/resolvers/inject-access';
@@ -79,6 +80,7 @@ interface TaskForm {
     RowComponent,
     RowListComponent,
     SubmitDirective,
+    NameFieldsComponent,
   ],
   templateUrl: './task-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -117,6 +119,17 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   transferProjectName = '';
   transferError = signal<string | null>(null);
   transferTargetProjectOptions = signal<{ label: string; value: string }[]>([]);
+
+  showCopyTaskToBranchDialog = signal(false);
+  copyRequestInFlight = signal(false);
+  duplicateTaskDialogErrorMessage = signal<string | null>(null);
+  duplicateDialogSubmitTried = signal(false);
+  copiedTaskForm = { display_name: '', name: '', branch: '' };
+  protected copiedTaskNameAvailability = nameAvailability(
+    (name) => this.tasksService.checkTaskNameAvailable(this.projectName, name),
+    RESERVED_TASK_NAMES,
+  );
+  hasCreateTaskPermission = computed(() => this.task()?.permissions.includes('createTask') ?? false);
 
   projectName = '';
   taskName = '';
@@ -295,6 +308,41 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
       error: (error) => {
         this.transferError.set(apiErrorMessage(error, 'Failed to transfer ownership.'));
         this.transferring.set(false);
+      },
+    });
+  }
+
+  openDuplicateTaskDialogWithPrefilledFields(): void {
+    const task = this.task();
+    this.copiedTaskForm = { display_name: task?.display_name ?? '', name: '', branch: task?.branches.find((branch) => branch !== null) ?? '' };
+    this.copiedTaskNameAvailability.reset();
+    this.duplicateDialogSubmitTried.set(false);
+    this.duplicateTaskDialogErrorMessage.set(null);
+    this.showCopyTaskToBranchDialog.set(true);
+  }
+
+  get branchError(): string | null {
+    return this.duplicateDialogSubmitTried() && !this.copiedTaskForm.branch.trim() ? 'Enter a branch for the new task.' : null;
+  }
+
+  sendDuplicateRequestAndNavigateToNewTask(): void {
+    if (this.copyRequestInFlight() || this.copiedTaskNameAvailability.blocksSubmit()) return;
+    this.duplicateDialogSubmitTried.set(true);
+    const { name, display_name } = this.copiedTaskForm;
+    const branch = this.copiedTaskForm.branch.trim();
+    if (!name || !display_name.trim() || !branch) return;
+    this.copyRequestInFlight.set(true);
+    this.duplicateTaskDialogErrorMessage.set(null);
+    this.tasksService.duplicateTask(this.projectName, this.taskName, { name, display_name: display_name.trim(), branch }).subscribe({
+      next: () => {
+        this.copyRequestInFlight.set(false);
+        this.showCopyTaskToBranchDialog.set(false);
+        this.notify.success('Task duplicated');
+        this.router.navigateByUrl(links.task(this.projectName, name));
+      },
+      error: (error: unknown) => {
+        this.duplicateTaskDialogErrorMessage.set(apiErrorMessage(error, "Couldn't duplicate the task."));
+        this.copyRequestInFlight.set(false);
       },
     });
   }

@@ -352,7 +352,7 @@ export class IntegrationsComponent implements OnInit {
       next: (created) => {
         this.saving.set(false);
         this.showCreateDialog.set(false);
-        this.notifyCreated(created);
+        this.notify.success('Integration created');
         const returnTo = this.triggerToReturnTo;
         if (returnTo && created.kind === 'inbound') {
           this.createdForTrigger.set(links.editTrigger(this.projectName, returnTo.task, returnTo.trigger, created.id));
@@ -368,11 +368,6 @@ export class IntegrationsComponent implements OnInit {
         this.saving.set(false);
       },
     });
-  }
-
-  private notifyCreated(created: IntegrationResponse): void {
-    const tasks = created.connected_tasks ?? [];
-    this.notify.success(tasks.length > 0 ? `Created integration. Connected to ${tasks.join(', ')}.` : 'Integration created');
   }
 
   openEditDialog(integration: IntegrationResponse): void {

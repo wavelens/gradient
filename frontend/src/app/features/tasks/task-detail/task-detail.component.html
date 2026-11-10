@@ -64,8 +64,14 @@
         <span class="chip mono" title="Flake directory"><gr-icon name="folder" size="sm" />dir {{ flakeDir }}</span>
       }
       <span class="chip chip--wildcard mono">{{ proj.wildcard }}</span>
+      @for (branch of activeTriggerBranchLabels(); track branch) {
+        <span class="chip mono" grTooltip="Branches that active triggers for this task evaluate"><gr-icon name="call_split" size="sm" />{{ branch }}</span>
+      }
       @if (proj.last_check_at) {
         <span class="chip">checked {{ proj.last_check_at | serverDate }}</span>
+      }
+      @if (nextPollingTriggerCheckText(); as nextPoll) {
+        <span class="chip" grTooltip="Time until the polling trigger can check the repository for new commits"><gr-icon name="schedule" size="sm" />{{ nextPoll }}</span>
       }
     </div>
   </div>

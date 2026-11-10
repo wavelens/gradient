@@ -22,7 +22,7 @@ import { LiveEvent, LiveService } from '@core/services/live.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
 import { AccessState } from '@core/models/access.model';
-import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models';
+import { BuildStatusCounts, EntryPointSummary, EvaluationSummary, TaskDetailsResponse } from '@core/models';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { monthDayClockTime } from '@shared/text';
 import { CopyMenuService } from '@shared/routing';
@@ -109,6 +109,7 @@ function taskFor(
     keep_evaluations: 5,
     last_check_at: '2026-01-01T00:00:00',
     queue: { building: 0, queued: 0 },
+    branches: [null] as (string | null)[],
     last_evaluations: [evalSummary('e1', primaryStatus, primary), ...extraEvals],
     can_edit: access.canEdit,
     can_trigger: access.canTrigger,
@@ -137,10 +138,11 @@ type SetupOverrides = Partial<{
   primaryStatus: EvaluationSummary['status'];
   primary: Partial<EvaluationSummary>;
   repository: string;
+  task: Partial<TaskDetailsResponse>;
 }>;
 
 function resolvedTask(access: AccessState, overrides: SetupOverrides) {
-  return taskFor(access, overrides.extraEvals ?? [], overrides.primaryStatus, overrides.primary, overrides.repository);
+  return { ...taskFor(access, overrides.extraEvals ?? [], overrides.primaryStatus, overrides.primary, overrides.repository), ...overrides.task } as ReturnType<typeof taskFor>;
 }
 
 function makeTasksService(access: AccessState, overrides: SetupOverrides = {}): TasksService {
@@ -359,6 +361,22 @@ describe('TaskDetailComponent - loading', () => {
     expect(badge?.textContent).toContain('Inactive');
     expect(badge?.getAttribute('href')).toBe('/project/acme/task/demo/settings');
     expect(findByText(root, 'Start Evaluation')?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('names the branches of the task so two tasks on one repository can be told apart', () => {
+    const { fixture } = setup(access, { task: { branches: [null, 'release'] } });
+    const chips = (fixture.nativeElement as HTMLElement).querySelector('.task-info')?.textContent ?? '';
+    expect(chips).toContain('Default branch');
+    expect(chips).toContain('release');
+  });
+
+  it('shows the next poll only while no evaluation runs', () => {
+    const task = { next_polling_trigger_check_at: new Date(Date.now() + 270_000).toISOString().slice(0, 19) };
+    const idle = setup(access, { primaryStatus: 'Completed', task }).fixture.nativeElement as HTMLElement;
+    expect(idle.querySelector('.task-info')?.textContent).toContain('Next poll in 5m');
+    TestBed.resetTestingModule();
+    const running = setup(access, { primaryStatus: 'Building', task }).fixture.nativeElement as HTMLElement;
+    expect(running.querySelector('.task-info')?.textContent).not.toContain('Next poll');
   });
 
   it('leaves the build queue to the evaluation tabs instead of repeating it in the header', () => {

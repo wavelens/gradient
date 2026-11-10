@@ -13,6 +13,8 @@ import { accessTo } from '@core/models/access.model';
 import { injectProject } from '@core/resolvers/project-access.resolver';
 import {
   ButtonComponent,
+  CheckboxComponent,
+  CopyFieldComponent,
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
@@ -21,34 +23,59 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { CacheSubscriptionItem, TaskRepositoryResponse } from '@core/models';
+import { CacheSubscriptionItem, IntegrationSummaryResponse, TriggerConfig } from '@core/models';
 import { ProjectNoActiveWritableCacheSubscriptionWarningComponent, hasActiveCacheSubscriptionWithWriteAccess } from '@features/projects/project-no-active-writable-cache-subscription-warning.component';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { TriggersService } from '@core/services/triggers.service';
+import { IntegrationsService } from '@core/services/integrations.service';
+import { ConfigService } from '@core/services/config.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { NotifyService } from '@core/services/notify.service';
-import { ApiError, apiErrorMessage } from '@core/services/api.service';
+import { apiErrorMessage } from '@core/services/api.service';
 import { NameFieldsComponent, fieldChecks, firstFieldError, injectRevealFirstInvalid, nameAvailability } from '@shared/forms';
 import { wildcardError } from '../wildcard-error';
 import { LabelHelpComponent } from '@shared/ui';
 import { repositoryUrlError } from '@shared/text/repository-url';
 import { slugify } from '@shared/text';
-import { RepositoryAccessComponent } from '../task-repository/repository-access.component';
-import { RepositoryEventsComponent } from '../task-repository/repository-events.component';
 
-const RESERVED_TASK_NAMES = ['build-request'];
+export const RESERVED_TASK_NAMES = ['build-request'];
 const DEFAULT_WILDCARD = 'packages.x86_64-linux.**';
+const DEFAULT_POLLING_INTERVAL_SECS = 300;
 
-export type ConnectStep = 'repository' | 'access' | 'events';
+export type ConnectStep = 'repository' | 'access' | 'triggers';
 const STEPS: { id: ConnectStep; label: string }[] = [
   { id: 'repository', label: 'Repository' },
   { id: 'access', label: 'Access' },
-  { id: 'events', label: 'Events and Status' },
+  { id: 'triggers', label: 'Triggers and Settings' },
 ];
+
+interface SuggestedTriggerChoice {
+  config: TriggerConfig;
+  selected: boolean;
+}
 
 function repositoryName(url: string): string {
   const path = url.trim().replace(/\?.*$/, '').replace(/\/+$/, '').replace(/\.git$/, '');
   return path.split(/[/:]/).pop() ?? '';
+}
+
+export function buildTaskCreationTriggersFromWizardChoices(choices: {
+  branch: string;
+  polling: boolean;
+  cron: string;
+  suggestions: SuggestedTriggerChoice[];
+}): TriggerConfig[] {
+  const branch = choices.branch.trim() || null;
+  const triggers: TriggerConfig[] = [];
+  if (choices.polling) triggers.push({ type: 'polling', interval_secs: DEFAULT_POLLING_INTERVAL_SECS, branch });
+  for (const { config, selected } of choices.suggestions) {
+    if (!selected || config.type === 'polling' || config.type === 'time') continue;
+    triggers.push(branch ? { ...config, branches: [branch] } : config);
+  }
+  const cron = choices.cron.trim();
+  if (cron) triggers.push({ type: 'time', cron, branch });
+  return triggers;
 }
 
 @Component({
@@ -59,6 +86,8 @@ function repositoryName(url: string): string {
     ProjectNoActiveWritableCacheSubscriptionWarningComponent,
     RouterLink,
     ButtonComponent,
+    CheckboxComponent,
+    CopyFieldComponent,
     FormFieldComponent,
     InputDirective,
     LoadStateComponent,
@@ -68,8 +97,6 @@ function repositoryName(url: string): string {
     SubmitDirective,
     NameFieldsComponent,
     LabelHelpComponent,
-    RepositoryAccessComponent,
-    RepositoryEventsComponent,
   ],
   templateUrl: './connect-repository.component.html',
   styleUrl: './connect-repository.component.scss',
@@ -81,11 +108,14 @@ export class ConnectRepositoryComponent implements OnInit {
   private router = inject(Router);
   private tasks = inject(TasksService);
   private projects = inject(ProjectsService);
+  private triggers = inject(TriggersService);
+  private integrations = inject(IntegrationsService);
   private crumbs = inject(BreadcrumbsService);
   private notify = inject(NotifyService);
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
   private revealFirstInvalid = injectRevealFirstInvalid();
   private project = injectProject();
+  protected readonly config = inject(ConfigService);
 
   readonly steps = STEPS;
   access = computed(() => accessTo(this.project(), 'createTask'));
@@ -99,15 +129,19 @@ export class ConnectRepositoryComponent implements OnInit {
     (name) => this.tasks.checkTaskNameAvailable(this.projectName, name),
     RESERVED_TASK_NAMES,
   );
-  form = { repository: '', display_name: '', name: '', wildcard: DEFAULT_WILDCARD };
+  form = { repository: '', display_name: '', name: '', wildcard: DEFAULT_WILDCARD, branch: '', polling: true, cron: '', exec_enabled: false };
   private autofilledDisplayName = '';
   attempted = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
-
-  taskName = signal<string | null>(null);
-  state = signal<TaskRepositoryResponse | null>(null);
   caches = signal<CacheSubscriptionItem[] | null>(null);
+
+  deployKey = signal<string | null>(null);
+  testing = signal(false);
+  repositoryAccessTestPassedForCurrentUrl = signal(false);
+  testError = signal<string | null>(null);
+  suggestions = signal<SuggestedTriggerChoice[]>([]);
+  private inboundIntegrations = signal<IntegrationSummaryResponse[]>([]);
 
   get repositoryError(): string | null {
     const url = this.form.repository.trim();
@@ -115,26 +149,32 @@ export class ConnectRepositoryComponent implements OnInit {
     return firstFieldError(url, fieldChecks.remoteRepository, (value) => repositoryUrlError(String(value)));
   }
 
-  ngOnInit(): void {
-    this.projectName = this.route.snapshot.paramMap.get('project') ?? '';
-    if (!this.access().canEdit) return;
-    const query = this.route.snapshot.queryParamMap;
-    const task = query.get('task');
-    if (task) {
-      this.taskName.set(task);
-      this.go(query.get('step') === 'events' ? 'events' : 'access');
-    } else {
-      this.loadCaches();
-    }
-  }
-
   get wildcardError(): string | null {
     const wildcard = this.form.wildcard.trim();
     return wildcard ? wildcardError(wildcard) : null;
   }
 
+  get cronError(): string | null {
+    const cron = this.form.cron.trim();
+    if (!cron) return null;
+    const fields = cron.split(/\s+/).length;
+    return fields >= 5 && fields <= 7 ? null : 'Enter 5, 6, or 7 cron fields separated by spaces.';
+  }
+
+  usesSsh(): boolean {
+    return !/^(https?|git):\/\//.test(this.form.repository.trim());
+  }
+
+  ngOnInit(): void {
+    this.projectName = this.route.snapshot.paramMap.get('project') ?? '';
+    if (!this.access().canEdit) return;
+    this.loadCaches();
+  }
+
   repositoryChanged(url: string): void {
     this.form.repository = url;
+    this.repositoryAccessTestPassedForCurrentUrl.set(false);
+    this.testError.set(null);
     const previous = this.autofilledDisplayName;
     if (this.form.display_name !== previous || this.form.name !== slugify(previous)) return;
     const name = this.repositoryError ? '' : repositoryName(url);
@@ -143,13 +183,69 @@ export class ConnectRepositoryComponent implements OnInit {
     this.form.name = slugify(name);
   }
 
-  createTask(): void {
-    if (this.creating() || this.names.blocksSubmit()) return;
+  continueFromRepository(): void {
+    if (this.names.blocksSubmit()) return;
     this.attempted.set(true);
     if (!this.form.name || !this.form.display_name || this.repositoryError || this.wildcardError) {
       this.revealFirstInvalid(() => this.host.nativeElement);
       return;
     }
+    this.step.set('access');
+    if (this.usesSsh() && this.deployKey() === null) {
+      this.projects.getSSHKey(this.projectName).subscribe({
+        next: (key) => this.deployKey.set(key),
+        error: () => this.deployKey.set(null),
+      });
+    }
+  }
+
+  testAccess(): void {
+    if (this.testing()) return;
+    this.testing.set(true);
+    this.testError.set(null);
+    this.repositoryAccessTestPassedForCurrentUrl.set(false);
+    this.tasks.testRepositoryCloneAccess(this.projectName, this.form.repository.trim()).subscribe({
+      next: () => {
+        this.testing.set(false);
+        this.repositoryAccessTestPassedForCurrentUrl.set(true);
+      },
+      error: (error: unknown) => {
+        this.testing.set(false);
+        this.testError.set(apiErrorMessage(error, "Couldn't test access"));
+      },
+    });
+  }
+
+  continueToTriggers(): void {
+    this.step.set('triggers');
+    this.integrations.listProjectIntegrationSummaries(this.projectName).subscribe({
+      next: (list) => this.inboundIntegrations.set(list.filter((i) => i.kind === 'inbound')),
+      error: () => {},
+    });
+    this.triggers.getSuggestedPushAndPullRequestTriggerConfigs(this.projectName, this.form.repository.trim()).subscribe({
+      next: (configs) => this.suggestions.set(configs.map((config) => ({ config, selected: false }))),
+      error: () => this.suggestions.set([]),
+    });
+  }
+
+  suggestionLabel(config: TriggerConfig): string {
+    const id = 'integration_id' in config ? config.integration_id : null;
+    const integration = this.inboundIntegrations().find((i) => i.id === id);
+    const from = integration ? integration.display_name || integration.name : this.form.repository.trim();
+    return config.type === 'reporter_pull_request' ? `Build pull requests from ${from}` : `Build pushes from ${from}`;
+  }
+
+  toggleSuggestion(index: number, selected: boolean): void {
+    this.suggestions.update((list) => list.map((choice, i) => (i === index ? { ...choice, selected } : choice)));
+  }
+
+  back(): void {
+    const previous = STEPS[this.stepIndex() - 1];
+    if (previous) this.step.set(previous.id);
+  }
+
+  createTaskWithTriggersAndOpenTask(): void {
+    if (this.creating() || this.cronError) return;
     this.creating.set(true);
     this.createError.set(null);
     this.tasks
@@ -159,53 +255,20 @@ export class ConnectRepositoryComponent implements OnInit {
         description: '',
         repository: this.form.repository.trim(),
         wildcard: this.form.wildcard.trim() || DEFAULT_WILDCARD,
+        exec_enabled: this.form.exec_enabled,
+        triggers: buildTaskCreationTriggersFromWizardChoices({ ...this.form, suggestions: this.suggestions() }),
       })
       .subscribe({
         next: (task) => {
           this.creating.set(false);
-          this.taskName.set(task.name);
-          this.go('access');
+          this.notify.success('Task created');
+          this.router.navigateByUrl(links.task(this.projectName, task.name));
         },
         error: (error: unknown) => {
           this.creating.set(false);
-          this.createError.set(apiErrorMessage(error, 'Task creation failed'));
+          this.createError.set(apiErrorMessage(error, "Couldn't create task"));
         },
       });
-  }
-
-  go(step: ConnectStep): void {
-    this.step.set(step);
-    const task = this.taskName();
-    if (task) {
-      this.router.navigate([], { relativeTo: this.route, queryParams: { task, step }, replaceUrl: true });
-      this.loadState();
-    }
-  }
-
-  next(): void {
-    const following = STEPS[this.stepIndex() + 1];
-    if (following) this.go(following.id);
-  }
-
-  back(): void {
-    const previous = STEPS[this.stepIndex() - 1];
-    if (previous && previous.id !== 'repository') this.go(previous.id);
-  }
-
-  loadState(): void {
-    const task = this.taskName();
-    if (!task) return;
-    this.tasks.getRepository(this.projectName, task).subscribe({
-      next: (state) => this.state.set(state),
-      error: (error: unknown) => {
-        if (!(error instanceof ApiError && error.status === 404)) return this.notify.failure('Failed to load repository', error);
-        this.notify.failure(`Task ${task} not found`, null);
-        this.taskName.set(null);
-        this.step.set('repository');
-        this.router.navigate([], { relativeTo: this.route, queryParams: {}, replaceUrl: true });
-        this.loadCaches();
-      },
-    });
   }
 
   loadCaches(): void {

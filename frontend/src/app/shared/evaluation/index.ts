@@ -18,3 +18,4 @@ export * from './progress';
 export * from './repository';
 export * from './status-phase';
 export * from './waiting-reason';
+export * from './next-poll';

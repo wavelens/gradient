@@ -23,8 +23,10 @@ import {
   IconComponent,
   InputDirective,
   LoadStateComponent,
+  MessageBannerComponent,
   PageLayoutComponent,
   SelectComponent,
+  SettingsSectionComponent,
   TooltipDirective,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
@@ -38,11 +40,11 @@ import {
   CreateTriggerRequest,
   UpdateTriggerRequest,
 } from '@core/models';
-import { RelativeTimePipe } from '@shared/text';
+import { CurrentTimeSignal, RelativeTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
 import { splitList } from '@shared/forms';
 import { gitHostLabel } from '@shared/git';
-import { getCiTriggerTypeLabel } from '@shared/evaluation';
+import { getCiTriggerTypeLabel, getNextPollTime, nextPollText } from '@shared/evaluation';
 import { cronExpressionToPlainEnglish } from './cron-expression-description';
 
 interface Option<T> {
@@ -104,6 +106,8 @@ const DEFAULT_FORM: TriggerFormState = {
     FormFieldComponent,
     BadgeComponent,
     TooltipDirective,
+    MessageBannerComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './task-triggers.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -118,6 +122,7 @@ export class TaskTriggersComponent implements OnInit {
   private accessSvc = inject(AccessService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private clock = inject(CurrentTimeSignal);
 
   private taskAccess = injectTaskAccess();
   private taskAccessData = injectTaskAccessData();
@@ -153,6 +158,16 @@ export class TaskTriggersComponent implements OnInit {
   error = signal<string | null>(null);
 
   inboundIntegrations = signal<IntegrationSummaryResponse[]>([]);
+  private suggestions = signal<TriggerConfig[]>([]);
+  missingTriggerConfigSuggestions = computed(() =>
+    this.suggestions().filter((suggestion) =>
+      !this.triggers().some((t) => t.type === suggestion.type && (t.config as { integration_id?: string }).integration_id === (suggestion as { integration_id?: string }).integration_id),
+    ),
+  );
+  fallbackPollingTrigger = computed(() => {
+    const active = this.triggers().filter((t) => t.active);
+    return active.some((t) => t.type === 'reporter_push') ? (active.find((t) => t.type === 'polling') ?? null) : null;
+  });
 
   form: TriggerFormState = { ...DEFAULT_FORM };
   submitAttempted = signal(false);
@@ -169,7 +184,6 @@ export class TaskTriggersComponent implements OnInit {
   readonly typeLabel = getCiTriggerTypeLabel;
   typeOptions: Option<TriggerType>[] = (['polling', 'reporter_push', 'reporter_pull_request', 'time'] as const)
     .map((value) => ({ label: getCiTriggerTypeLabel(value), value }));
-  readonly createTypeOptions = this.typeOptions.filter((o) => o.value === 'polling' || o.value === 'time');
 
   integrationOptions = computed<Option<string>[]>(() => {
     const opts: Option<string>[] = [{ label: '- select integration -', value: '' }];
@@ -184,6 +198,7 @@ export class TaskTriggersComponent implements OnInit {
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     this.loadTriggers();
     this.loadIntegrations();
+    this.loadSuggestions();
   }
 
   loadTriggers(): void {
@@ -220,6 +235,15 @@ export class TaskTriggersComponent implements OnInit {
     });
   }
 
+  private loadSuggestions(): void {
+    const repository = this.taskAccessData()?.task.repository;
+    if (!this.viewerIsProjectMember() || !repository) return;
+    this.triggersService.getSuggestedPushAndPullRequestTriggerConfigs(this.projectName, repository).subscribe({
+      next: (list) => this.suggestions.set(list),
+      error: () => {},
+    });
+  }
+
   get intervalError(): string | null {
     const interval = this.form.interval_secs;
     return interval !== null && /^\d+$/.test(String(interval)) && interval >= 10
@@ -235,9 +259,9 @@ export class TaskTriggersComponent implements OnInit {
     const cron = this.form.cron.trim();
     if (!cron) return 'Enter a cron expression.';
     const fields = cron.split(/\s+/).length;
-    return fields === 6 || fields === 7
+    return fields >= 5 && fields <= 7
       ? null
-      : 'Enter 6 or 7 fields separated by spaces. The fields are sec, min, hour, dom, mon and dow, plus an optional year.';
+      : 'Enter 5, 6, or 7 fields, each separated by a space. The 5 fields are minute, hour, day of month, month, and day of week. Use a 6th field at the start to set seconds. Use a 7th field at the end to set year.';
   }
 
   get cronScheduleDescription(): string | null {
@@ -300,15 +324,10 @@ export class TaskTriggersComponent implements OnInit {
   }
 
   private buildConfig(): object {
+    const branch = this.form.branch?.trim() || null;
     switch (this.form.type) {
-      case 'polling': {
-        const trimmed = this.form.branch?.trim() ?? '';
-        return {
-          type: 'polling',
-          interval_secs: Number(this.form.interval_secs),
-          branch: trimmed === '' ? null : trimmed,
-        } as TriggerConfig;
-      }
+      case 'polling':
+        return { type: 'polling', interval_secs: Number(this.form.interval_secs), branch } as TriggerConfig;
       case 'reporter_push': {
         const cfg: any = { type: 'reporter_push', integration_id: this.form.integration_id };
         const branches = splitList(this.form.branches);
@@ -329,7 +348,7 @@ export class TaskTriggersComponent implements OnInit {
         return cfg;
       }
       case 'time':
-        return { type: 'time', cron: this.form.cron.trim() };
+        return { type: 'time', cron: this.form.cron.trim(), branch } as TriggerConfig;
     }
   }
 
@@ -401,6 +420,30 @@ export class TaskTriggersComponent implements OnInit {
     });
   }
 
+  deactivateTrigger(trigger: TriggerOut): void {
+    this.triggersService.update(this.projectName, this.taskName, trigger.id, { active: false }).subscribe({
+      next: () => {
+        this.notify.success('Trigger saved');
+        this.loadTriggers();
+      },
+      error: (error: unknown) => this.notify.failure("Couldn't save trigger", error),
+    });
+  }
+
+  createTriggerFromSuggestedConfig(config: TriggerConfig): void {
+    this.triggersService.create(this.projectName, this.taskName, { config, active: true }).subscribe({
+      next: () => {
+        this.notify.success('Trigger created');
+        this.loadTriggers();
+      },
+      error: (error: unknown) => this.notify.failure("Couldn't create trigger", error),
+    });
+  }
+
+  nextPoll(trigger: TriggerOut): string | null {
+    return nextPollText(getNextPollTime(trigger), this.clock.currentTimeMilliseconds());
+  }
+
   makeDefault(id: string): void {
     this.makingDefaultId.set(id);
     this.triggersService.setDefault(this.projectName, this.taskName, id).subscribe({
@@ -460,9 +503,16 @@ export class TaskTriggersComponent implements OnInit {
       case 'time': {
         const cron = cfg.cron ?? '';
         const description = cronExpressionToPlainEnglish(cron);
-        return description ? `${description} (${cron})` : cron;
+        const schedule = description ? `${description} (${cron})` : cron;
+        return cfg.branch ? `${schedule}, branch ${cfg.branch}` : schedule;
       }
     }
+  }
+
+  suggestionSummary(config: TriggerConfig): string {
+    const id = 'integration_id' in config ? config.integration_id : null;
+    const integration = this.inboundIntegrations().find((i) => i.id === id);
+    return integration ? `from ${integration.display_name || integration.name}` : '';
   }
 
   private integrationLabel(trigger: TriggerOut): string {

@@ -5,11 +5,29 @@
 -->
 
 <gr-settings-section title="Builds from events on the Git host" description="Gradient can check the repository for new commits on a schedule when no events exist.">
-  <gr-form-field label="Events from" for="repo-inbound">
-    <gr-select inputId="repo-inbound" [options]="inboundOptions()" optionLabel="label" optionValue="value"
-      [ngModel]="form().inbound" (ngModelChange)="patch({ inbound: $event })" [disabled]="!state().can_edit" />
-  </gr-form-field>
-  @if (!hasServingInbound()) {
+  @if (selectedInbound(); as inbound) {
+    @if (inbound.webhook_url; as url) {
+      <gr-form-field label="Webhook URL" [hint]="'Events to enable: ' + events()">
+        <gr-copy-field [value]="url" />
+      </gr-form-field>
+    }
+    @if (hostLinks() || provisioner()) {
+      <div class="gr-form-actions">
+        @if (hostLinks(); as link) {
+          <a grButton label="Open settings for webhooks" icon="open_in_new" severity="secondary" [href]="link.webhooks" target="_blank" rel="noopener noreferrer"></a>
+        }
+        @if (provisioner()) {
+          <button grButton severity="secondary" label="Install webhook" icon="add_link" (click)="installWebhook()"
+            [loading]="installingWebhook()" [disabled]="installingWebhook()" data-testid="install-webhook"></button>
+        }
+      </div>
+    }
+    <p class="text-secondary" role="status" data-testid="last-event">
+      <strong>Last event</strong>
+      {{ lastEvent() ?? 'No events yet. Send a test delivery from the webhook settings on the Git host.' }}
+    </p>
+    <app-incoming-deliveries [project]="project()" [integrationId]="inbound.id" [limit]="5" />
+  } @else {
     <p class="gr-form-aside">
       @if (isGitHub()) {
         <span data-testid="github-hint">
@@ -32,93 +50,25 @@
       }
     </p>
   }
-
-  @if (selectedInbound(); as inbound) {
-    @if (inbound.webhook_url; as url) {
-      <gr-form-field label="Webhook URL" [hint]="'Events to enable: ' + events()">
-        <gr-copy-field [value]="url" />
-      </gr-form-field>
+  <p class="text-secondary">The push and pull request triggers on the Triggers page start evaluations from these events.</p>
+  <div class="gr-form-actions">
+    <a grButton label="Open Triggers page" icon="schedule_send" severity="secondary" [routerLink]="links.taskPage(project(), task(), 'triggers')" data-testid="triggers-link"></a>
+    @if (state().can_manage_integrations) {
+      <a grButton label="Manage connections" icon="hub" severity="secondary" [routerLink]="links.projectPage(project(), 'integrations')"></a>
     }
-    @if (hostLinks() || (provisioner() && inbound.serves_repository)) {
-      <div class="gr-form-actions">
-        @if (hostLinks(); as link) {
-          <a grButton label="Open settings for webhooks" icon="open_in_new" severity="secondary" [href]="link.webhooks" target="_blank" rel="noopener noreferrer"></a>
-        }
-        @if (provisioner() && inbound.serves_repository) {
-          <button grButton severity="secondary" label="Install webhook" icon="add_link" (click)="installWebhook()"
-            [loading]="installingWebhook()" [disabled]="installingWebhook()" data-testid="install-webhook"></button>
-        }
-      </div>
-    }
-    <p class="text-secondary" role="status" data-testid="last-event">
-      <strong>Last event</strong>
-      {{ lastEvent() ?? 'No events yet. Send a test delivery from the webhook settings on the Git host.' }}
-    </p>
-
-    <gr-form-field>
-      <gr-checkbox inputId="repo-push" [binary]="true" label="Build all pushes" [disabled]="!state().can_edit"
-        [ngModel]="form().push" (ngModelChange)="patch({ push: $event })" />
-    </gr-form-field>
-    @if (form().push) {
-      <div class="gr-grid-form">
-        <gr-form-field label="Branches" for="repo-push-branches" hint="Leave empty to build all branches.">
-          <input grInput id="repo-push-branches" [ngModel]="form().pushBranches" (ngModelChange)="patch({ pushBranches: $event })"
-            placeholder="main, release/*" [disabled]="!state().can_edit" />
-        </gr-form-field>
-        <gr-form-field label="Tags" for="repo-push-tags">
-          <input grInput id="repo-push-tags" [ngModel]="form().pushTags" (ngModelChange)="patch({ pushTags: $event })"
-            placeholder="v*" [disabled]="!state().can_edit" />
-        </gr-form-field>
-      </div>
-    }
-    <gr-form-field>
-      <gr-checkbox inputId="repo-pr" [binary]="true" label="Build pull requests" [disabled]="!state().can_edit"
-        [ngModel]="form().pullRequest" (ngModelChange)="patch({ pullRequest: $event })" />
-    </gr-form-field>
-    @if (form().pullRequest) {
-      <div class="gr-grid-form">
-        <gr-form-field label="Branches" for="repo-pr-branches" hint="Leave empty to build all branches.">
-          <input grInput id="repo-pr-branches" [ngModel]="form().pullRequestBranches" (ngModelChange)="patch({ pullRequestBranches: $event })"
-            placeholder="main" [disabled]="!state().can_edit" />
-        </gr-form-field>
-        <gr-form-field>
-          <gr-checkbox inputId="repo-pr-approval" [binary]="true" [disabled]="!state().can_edit"
-            label="Pull requests from users without write access wait for approval."
-            [ngModel]="form().requireApproval" (ngModelChange)="patch({ requireApproval: $event })" />
-        </gr-form-field>
-      </div>
-    }
-    <app-incoming-deliveries [project]="project()" [integrationId]="inbound.id" [limit]="5" />
-  }
+  </div>
 </gr-settings-section>
 
 <gr-settings-section title="Commit status">
-  <gr-form-field>
-    <gr-checkbox inputId="repo-status" [binary]="true" label="Report build results to the Git host" [disabled]="!state().can_edit"
-      [ngModel]="form().reportStatus" (ngModelChange)="patch({ reportStatus: $event })" />
-  </gr-form-field>
-  <gr-form-field label="Report through" for="repo-outbound">
-    <gr-select inputId="repo-outbound" [options]="outboundOptions()" optionLabel="label" optionValue="value"
-      [ngModel]="form().outbound" (ngModelChange)="patch({ outbound: $event })" [disabled]="!state().can_edit" />
-  </gr-form-field>
   <p class="text-secondary" role="status" data-testid="last-report">
     <strong>Last status report</strong>
     {{ lastReport() ?? 'No status reports yet.' }}
   </p>
-</gr-settings-section>
-
-@if (state().can_edit) {
-  <div class="gr-form-actions gr-form-actions--end">
-    @if (state().can_manage_integrations) {
-      <a grButton label="Manage connections" icon="hub" severity="secondary" [routerLink]="links.projectPage(project(), 'integrations')"></a>
-    }
-    <button grButton label="Save" icon="check" (click)="save()" [loading]="saving()"
-      [disabled]="saving() || !dirty() || !!formError()"></button>
+  <p class="text-secondary">The status report action on the Actions page can report build results to the Git host.</p>
+  <div class="gr-form-actions">
+    <a grButton label="Open the Actions page" icon="bolt" severity="secondary" [routerLink]="links.taskPage(project(), task(), 'actions')" data-testid="actions-link"></a>
   </div>
-  @if (formError() ?? saveError(); as message) {
-    <p class="text-secondary" role="alert">{{ message }}</p>
-  }
-}
+</gr-settings-section>
 
 <gr-dialog [header]="'Connect ' + (host() ?? 'Git host')" [(visible)]="showConnect" [busy]="connecting()" [error]="connectError()" width="520px">
   <p>Gradient can create a webhook receiver for this Git host. Gradient can also create a status reporter when an access token exists.</p>

@@ -13,6 +13,7 @@ import {
   TriggerOut,
   CreateTriggerRequest,
   UpdateTriggerRequest,
+  TriggerConfig,
 } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -45,6 +46,10 @@ export class TriggersService {
 
   fireNow(project: string, proj: string, id: string): Observable<FireOutcome> {
     return this.api.post<FireOutcome>(`${this.base(project, proj)}/${id}/test`);
+  }
+
+  getSuggestedPushAndPullRequestTriggerConfigs(project: string, repository: string): Observable<TriggerConfig[]> {
+    return this.api.get<TriggerConfig[]>(`projects/${project}/trigger-suggestions?repository=${encodeURIComponent(repository)}`);
   }
 
   setDefault(project: string, proj: string, id: string): Observable<TriggerOut> {

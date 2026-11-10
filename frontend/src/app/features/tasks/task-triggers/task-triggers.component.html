@@ -5,8 +5,6 @@
 -->
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Triggers" subtitle="Conditions that start an evaluation. Start Evaluation uses the default trigger.">
-  <a slot="actions" *appWritable="access()" grButton label="Open the Repository page" icon="hub" severity="secondary"
-     [routerLink]="links.taskPage(projectName, taskName, 'repository')"></a>
   @if (triggers().length) {
     <button slot="actions"
         *appWritable="access()"
@@ -18,6 +16,13 @@
       ></button>
   }
   <app-server-configuration-managed-banner [access]="access()" kind="task" permission="manageTriggers" showReadOnlyNote />
+  @if (fallbackPollingTrigger(); as polling) {
+    <gr-message-banner type="info" data-testid="polling-fallback">
+      Polling acts as a fallback while a push trigger is active. Pause polling to stop the scheduled checks of the repository.
+      <button *appWritable="access()" grButton label="Pause polling" icon="pause" severity="secondary" size="small"
+        [disabled]="rowBusy()" [appManagedDisable]="access()" (click)="deactivateTrigger(polling)"></button>
+    </gr-message-banner>
+  }
   <gr-load-state
     [loading]="loading()"
     [error]="loadError()"
@@ -53,6 +58,9 @@
                     <gr-badge severity="neutral">Inactive</gr-badge>
                   }
                   <span>Last fired: {{ trigger.last_fired_at | relativeTime }}</span>
+                  @if (nextPoll(trigger); as next) {
+                    <span>{{ next }}</span>
+                  }
                   @if (fireSuccessId() === trigger.id) {
                     <span class="fire-success">
                       <gr-icon name="check_circle" size="sm" />
@@ -66,7 +74,7 @@
               <button
                 *appWritable="triggerAccess()"
                 grButton
-                label="Fire Now"
+                [label]="trigger.type === 'polling' ? 'Poll now' : 'Fire Now'"
                 icon="play_arrow"
                 severity="secondary"
                 size="small"
@@ -118,6 +126,26 @@
       }
     </div>
   </gr-load-state>
+  @if (missingTriggerConfigSuggestions().length && access().canEdit) {
+    <gr-settings-section title="Recommended Triggers" description="Use the project's webhook receiver for this Git host. Add a trigger to start an evaluation on push or pull request.">
+      <div class="triggers-list" data-testid="trigger-suggestions">
+        @for (suggestion of missingTriggerConfigSuggestions(); track suggestion.type) {
+          <div class="trigger-row">
+            <div class="trigger-header">
+              <div class="trigger-info">
+                <gr-badge>{{ typeLabel(suggestion.type) }}</gr-badge>
+                <div class="trigger-summary">{{ suggestionSummary(suggestion) }}</div>
+              </div>
+              <div class="trigger-actions">
+                <button grButton label="Add" icon="add" severity="secondary" size="small" [appManagedDisable]="access()"
+                  (click)="createTriggerFromSuggestedConfig(suggestion)"></button>
+              </div>
+            </div>
+          </div>
+        }
+      </div>
+    </gr-settings-section>
+  }
 </gr-page-layout>
 
 <!-- Create Dialog -->
@@ -159,7 +187,7 @@
     <gr-select
       inputId="trig-type"
       [(ngModel)]="form.type"
-      [options]="isEdit ? typeOptions : createTypeOptions"
+      [options]="typeOptions"
       optionLabel="label"
       optionValue="value"
       [disabled]="isEdit"
@@ -168,6 +196,18 @@
       <small class="text-secondary">Trigger type cannot be changed after creation.</small>
   }
   </gr-form-field>
+
+  @if (form.type === 'polling' || form.type === 'time') {
+    <gr-form-field label="Branch" for="trig-branch" hint="Leave empty to track the repo's default branch (HEAD).">
+      <input
+        grInput
+        id="trig-branch"
+        [(ngModel)]="form.branch"
+        placeholder="HEAD (default branch)"
+        (keyup.enter)="submitForm()"
+      />
+    </gr-form-field>
+  }
 
   @if (form.type === 'polling') {
     <gr-form-field label="Interval (seconds)" for="trig-interval" required hint="Minimum 10 seconds. Example: 300 = every 5 minutes."
@@ -180,15 +220,6 @@
         step="1"
         [(ngModel)]="form.interval_secs"
         #intervalModel="ngModel"
-        (keyup.enter)="submitForm()"
-      />
-    </gr-form-field>
-    <gr-form-field label="Branch" for="trig-branch" hint="Leave empty to track the repo's default branch (HEAD).">
-      <input
-        grInput
-        id="trig-branch"
-        [(ngModel)]="form.branch"
-        placeholder="HEAD (default branch)"
         (keyup.enter)="submitForm()"
       />
     </gr-form-field>
@@ -275,7 +306,7 @@
         @if (cronScheduleDescription; as schedule) {
           {{ schedule }}
         } @else {
-          6 or 7 fields (year optional): sec min hour dom mon dow year (UTC). Example: <code>0 0 2 * * *</code> = 02:00 UTC daily.
+          5 fields are minute, hour, day of month, month, and day of week (UTC). <code>0 2 * * *</code> means every day at 02:00 UTC. 6 or 7 fields need a seconds field at the start or a year field at the end.
         }
       </span>
       <input
@@ -283,7 +314,7 @@
         id="trig-cron"
         [(ngModel)]="form.cron"
         #cronModel="ngModel"
-        placeholder="0 0 2 * * *"
+        placeholder="0 2 * * *"
         (keyup.enter)="submitForm()"
       />
     </gr-form-field>

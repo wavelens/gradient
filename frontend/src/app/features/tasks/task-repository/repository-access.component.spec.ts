@@ -18,8 +18,6 @@ const state: TaskRepositoryResponse = {
   uses_ssh: true,
   deploy_key: 'ssh-ed25519 AAAAkey',
   fetch: null,
-  build_on_push: null,
-  build_on_pull_request: null,
   last_event: null,
   report_status: null,
   integrations: [],

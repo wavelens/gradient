@@ -141,7 +141,7 @@
       </gr-row>
       <gr-row icon="schedule" linkLabel="Triggers" [link]="links.taskPage(projectName, taskName, 'triggers')">
         Triggers
-        <span slot="meta">Polling intervals and cron schedules. Integrations provide the triggers for push and pull request events.</span>
+        <span slot="meta">Polling interval, cron schedule, push trigger, pull request trigger.</span>
       </gr-row>
       <gr-row icon="bolt" linkLabel="Actions" [link]="links.taskPage(projectName, taskName, 'actions')">
         Actions
@@ -180,6 +180,25 @@
       ></button>
     </gr-row>
   </gr-settings-section>
+
+  @if (hasCreateTaskPermission()) {
+    <gr-settings-section title="Duplicate task">
+      <gr-row>
+        Duplicate task
+        <span slot="meta">Create a new task for another branch with the same settings, triggers and actions.</span>
+        <button
+            slot="actions"
+            *appWritable="access()"
+            grButton
+            label="Duplicate task"
+            icon="content_copy"
+            severity="secondary"
+            (click)="openDuplicateTaskDialogWithPrefilledFields()"
+            [appManagedDisable]="access()"
+        ></button>
+      </gr-row>
+    </gr-settings-section>
+  }
 
   @if (accessService.isWritable(access())) {
     <gr-settings-section title="Danger Zone" danger>
@@ -236,5 +255,26 @@ width="420px"
 <div grDialogFooter>
   <button grButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
   <button grButton label="Transfer" icon="send" severity="danger" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName"></button>
+</div>
+</gr-dialog>
+
+<gr-dialog
+header="Duplicate task"
+[(visible)]="showCopyTaskToBranchDialog"
+[busy]="copyRequestInFlight()"
+[error]="duplicateTaskDialogErrorMessage()"
+width="460px"
+>
+<div>
+  <p>Copy the settings, triggers, and actions of <strong>{{ task()?.display_name }}</strong> to a new task. All triggers in the new task use the single branch entered below.</p>
+  <app-name-fields noun="task" [names]="copiedTaskNameAvailability" [submitAttempted]="duplicateDialogSubmitTried()"
+    [(displayName)]="copiedTaskForm.display_name" [(name)]="copiedTaskForm.name" (submitted)="sendDuplicateRequestAndNavigateToNewTask()" />
+  <gr-form-field label="Branch" for="duplicate-branch" required [invalid]="!!branchError" [error]="branchError ?? ''">
+    <input grInput id="duplicate-branch" [(ngModel)]="copiedTaskForm.branch" placeholder="release" (keyup.enter)="sendDuplicateRequestAndNavigateToNewTask()" />
+  </gr-form-field>
+</div>
+<div grDialogFooter>
+  <button grButton label="Cancel" severity="secondary" (click)="showCopyTaskToBranchDialog.set(false)" [disabled]="copyRequestInFlight()"></button>
+  <button grButton label="Duplicate" icon="content_copy" (click)="sendDuplicateRequestAndNavigateToNewTask()" [loading]="copyRequestInFlight()"></button>
 </div>
 </gr-dialog>

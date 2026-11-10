@@ -15,6 +15,7 @@ import { TaskSettingsComponent } from './task-settings.component';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { AccessState } from '@core/models/access.model';
+import type { Permission } from '@core/models';
 import { ConfigService } from '@core/services/config.service';
 import { NotifyService } from '@core/services/notify.service';
 import { ApiError } from '@core/services/api.service';
@@ -48,6 +49,8 @@ function taskFor(c: AccessCase) {
     managed: c.managed,
     can_edit: c.canEdit,
     can_trigger: c.canTrigger ?? c.canEdit,
+    permissions: (c.canEdit ? ['editTask', 'createTask'] : []) as Permission[],
+    branches: [null, 'main'],
   };
 }
 
@@ -380,5 +383,47 @@ describe('TaskSettingsComponent - write failures', () => {
     expect(component.showTransferDialog()).toBe(true);
     expect(document.body.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Project not found');
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Project not found');
+  });
+});
+
+describe('TaskSettingsComponent - duplicate task', () => {
+  const admin = { managed: false, canEdit: true, canTrigger: true };
+
+  it('offers Duplicate task only to members who can create tasks', () => {
+    expect(findByText(setup(admin).nativeElement, 'duplicate task')).not.toBeNull();
+    TestBed.resetTestingModule();
+    expect(findByText(setup({ managed: false, canEdit: false }).nativeElement, 'duplicate task')).toBeNull();
+  });
+
+  it('copies the task onto the chosen branch and opens the copy', () => {
+    const fixture = setup(admin);
+    const duplicateTask = vi.fn(() => of('new-id'));
+    (TestBed.inject(TasksService) as unknown as Record<string, unknown>)['duplicateTask'] = duplicateTask;
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const component = fixture.componentInstance;
+    component.openDuplicateTaskDialogWithPrefilledFields();
+    expect(component.copiedTaskForm.branch).toBe('main');
+
+    component.copiedTaskForm = { display_name: 'Demo release ', name: 'demo-release', branch: '' };
+    component.sendDuplicateRequestAndNavigateToNewTask();
+    expect(duplicateTask).not.toHaveBeenCalled();
+    expect(component.branchError).toBe('Enter a branch for the new task.');
+
+    component.copiedTaskForm.branch = ' release ';
+    component.sendDuplicateRequestAndNavigateToNewTask();
+    expect(duplicateTask).toHaveBeenCalledWith('acme', 'demo', { name: 'demo-release', display_name: 'Demo release', branch: 'release' });
+    expect(component.showCopyTaskToBranchDialog()).toBe(false);
+    expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/project/acme/task/demo-release');
+  });
+
+  it('keeps the dialog open with the server reason when the copy is refused', () => {
+    const fixture = setup(admin);
+    (TestBed.inject(TasksService) as unknown as Record<string, unknown>)['duplicateTask'] = () => throwError(() => new ApiError('Task name already exists', 409));
+    const component = fixture.componentInstance;
+    component.openDuplicateTaskDialogWithPrefilledFields();
+    component.copiedTaskForm = { display_name: 'Copy', name: 'copy', branch: 'release' };
+    component.sendDuplicateRequestAndNavigateToNewTask();
+    expect(component.showCopyTaskToBranchDialog()).toBe(true);
+    expect(component.duplicateTaskDialogErrorMessage()).toBe('Task name already exists');
   });
 });

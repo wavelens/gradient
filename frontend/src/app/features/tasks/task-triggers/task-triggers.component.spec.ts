@@ -49,6 +49,8 @@ const trigger = {
 
 const list = vi.fn();
 const listProjectIntegrationSummaries = vi.fn();
+const getSuggestedPushAndPullRequestTriggerConfigs = vi.fn();
+let suggested: unknown[] = [];
 
 function setup(
   access: AccessState,
@@ -60,6 +62,7 @@ function setup(
 ): ComponentFixture<TaskTriggersComponent> {
   list.mockReset().mockReturnValue(of(triggers));
   listProjectIntegrationSummaries.mockReset().mockReturnValue(of(integrations));
+  getSuggestedPushAndPullRequestTriggerConfigs.mockReset().mockReturnValue(of(suggested));
   TestBed.configureTestingModule({
     imports: [TaskTriggersComponent],
     providers: [
@@ -67,7 +70,7 @@ function setup(
       provideHttpClient(),
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access, query, task) },
-      { provide: TriggersService, useValue: { list, update } },
+      { provide: TriggersService, useValue: { list, update, getSuggestedPushAndPullRequestTriggerConfigs } },
       { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries } },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: TasksService, useValue: { getTaskInfo: () => of({ display_name: 'Demo Task' }) } },
@@ -79,20 +82,12 @@ function setup(
 }
 
 describe('TaskTriggersComponent - access gating', () => {
-  it('hides New Trigger / Edit / Delete / Fire Now buttons under read-only', () => {
+  it('hides New Trigger / Edit / Delete / Poll now buttons under read-only', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'new trigger')).toBeNull();
     expect(findByText(fixture.nativeElement, 'edit')).toBeNull();
     expect(findByText(fixture.nativeElement, 'delete')).toBeNull();
-    expect(findByText(fixture.nativeElement, 'fire now')).toBeNull();
-  });
-
-  it('links editors to the Repository page for push and pull request builds, not read-only users', () => {
-    const repositoryLink = (fixture: ReturnType<typeof setup>) =>
-      Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a')).find((a) => a.textContent?.includes('Repository'));
-    expect(repositoryLink(setup({ managed: false, canEdit: true, canTrigger: true }))?.getAttribute('href')).toMatch(/\/project\/acme\/task\/[^/]+\/repository$/);
-    TestBed.resetTestingModule();
-    expect(repositoryLink(setup({ managed: false, canEdit: false, canTrigger: false }))).toBeUndefined();
+    expect(findByText(fixture.nativeElement, 'poll now')).toBeNull();
   });
 
   it('shows a visitor outside the project no access, asks the server nothing and offers no Repository page', () => {
@@ -105,9 +100,12 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(Array.from(el.querySelectorAll('a')).some((a) => a.textContent?.includes('Repository'))).toBe(false);
   });
 
-  it('offers only polling and cron when creating a trigger', () => {
+  it('offers all four trigger kinds when creating a trigger', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    expect(fixture.componentInstance.createTypeOptions.map((o) => o.value)).toEqual(['polling', 'time']);
+    fixture.componentInstance.startCreate();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.typeOptions.map((o) => o.value)).toEqual(['polling', 'reporter_push', 'reporter_pull_request', 'time']);
+    expect(document.querySelector('#trig-type')).not.toBeNull();
   });
 
   it('renders reporter trigger using inlined integration display_name (not raw UUID)', () => {
@@ -167,7 +165,7 @@ describe('TaskTriggersComponent - access gating', () => {
     const newBtn = findByText(fixture.nativeElement, 'new trigger') as HTMLButtonElement | null;
     const editBtn = findByText(fixture.nativeElement, 'edit') as HTMLButtonElement | null;
     const deleteBtn = findByText(fixture.nativeElement, 'delete') as HTMLButtonElement | null;
-    const fireBtn = findByText(fixture.nativeElement, 'fire now') as HTMLButtonElement | null;
+    const fireBtn = findByText(fixture.nativeElement, 'poll now') as HTMLButtonElement | null;
     expect(newBtn).not.toBeNull();
     expect(newBtn!.getAttribute('aria-disabled')).toBe('true');
     expect(editBtn).not.toBeNull();
@@ -175,7 +173,7 @@ describe('TaskTriggersComponent - access gating', () => {
     expect(deleteBtn).not.toBeNull();
     expect(deleteBtn!.getAttribute('aria-disabled')).toBe('true');
     expect(fireBtn).not.toBeNull();
-    // Fire Now is a trigger action, not a config edit - exempt from the managed flag (AccessService.triggerAccess).
+    // Poll now can start an evaluation. The button doesn't edit config, so the managed flag can't disable it (AccessService.triggerAccess).
     expect(fireBtn!.disabled).toBe(false);
   });
 });
@@ -388,15 +386,16 @@ describe('TaskTriggersComponent - validation', () => {
     const { fixture, component, create } = withCreate();
     component.startCreate();
     component.form.type = 'time';
-    component.form.cron = '0 2 * * *';
+    component.form.cron = '0 2 * *';
     component.saveCreate();
     fixture.detectChanges();
-    expect(fieldError()).toContain('6 or 7 fields');
+    expect(fieldError()).toContain('Enter 5, 6, or 7 fields');
     expect(create).not.toHaveBeenCalled();
 
-    component.form.cron = '0 0 2 * * *';
+    component.form.cron = '0 2 * * *';
+    component.form.branch = ' release ';
     component.saveCreate();
-    expect(create).toHaveBeenCalledWith('acme', 'demo', { config: { type: 'time', cron: '0 0 2 * * *' }, active: true });
+    expect(create).toHaveBeenCalledWith('acme', 'demo', { config: { type: 'time', cron: '0 2 * * *', branch: 'release' }, active: true });
   });
 
   it('describes the schedule in plain words under the cron field and in the list', () => {
@@ -465,5 +464,62 @@ describe('TaskTriggersComponent - setting up an integration from a trigger', () 
   ])('opens no edit dialog on the way back under %s access', (_label, access) => {
     const fixture = setup(access, [orphan], undefined, { edit: 't3', integration: 'new-id' }, [inbound]);
     expect(fixture.componentInstance.showEditDialog()).toBe(false);
+  });
+});
+
+describe('TaskTriggersComponent - push triggers next to polling', () => {
+  const writer = { managed: false, canEdit: true, canTrigger: true };
+  const inbound = { id: 'in-1', name: 'forgejo', display_name: 'Forgejo', kind: 'inbound', git_host_type: 'forgejo' };
+  const push = {
+    ...trigger,
+    id: 't-push',
+    type: 'reporter_push' as const,
+    config: { type: 'reporter_push', integration_id: 'in-1', branches: [] },
+    integration: { id: 'in-1', name: 'forgejo', display_name: 'Forgejo', git_host_type: 'forgejo' },
+  };
+  const repository = { repository: 'ssh://git@forgejo.example.com/acme/app.git' };
+  afterEach(() => (suggested = []));
+
+  it('offers suggested push and pull request triggers unticked and creates one on Add', () => {
+    const pr = { type: 'reporter_pull_request', integration_id: 'in-1' };
+    suggested = [push.config, pr];
+    const fixture = setup(writer, [trigger], undefined, {}, [inbound], repository);
+    const create = vi.fn(() => of({}));
+    Object.assign(TestBed.inject(TriggersService), { create });
+
+    const section = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="trigger-suggestions"]')!;
+    expect(getSuggestedPushAndPullRequestTriggerConfigs).toHaveBeenCalledWith('acme', repository.repository);
+    expect(section.textContent).toContain('from Forgejo');
+    expect(create).not.toHaveBeenCalled();
+    findByText(section as HTMLElement, 'add')!.click();
+    expect(create).toHaveBeenCalledWith('acme', 'demo', { config: push.config, active: true });
+  });
+
+  it('hides suggestions the task already has', () => {
+    suggested = [push.config];
+    const fixture = setup(writer, [trigger, push], undefined, {}, [inbound], repository);
+    expect(getSuggestedPushAndPullRequestTriggerConfigs).toHaveBeenCalled();
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="trigger-suggestions"]')).toBeNull();
+  });
+
+  it('pauses the polling fallback in one click while a push trigger is active', () => {
+    const update = vi.fn((..._args: any[]) => of({}));
+    const fixture = setup(writer, [trigger, push], update);
+    const banner = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="polling-fallback"]') as HTMLElement;
+    expect(banner.textContent).toContain('Polling acts as a fallback');
+    findByText(banner, 'pause polling')!.click();
+    expect(update).toHaveBeenCalledWith('acme', 'demo', 't1', { active: false });
+  });
+
+  it('shows no polling fallback hint without an active push trigger', () => {
+    const fixture = setup(writer, [trigger, { ...push, active: false }]);
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="polling-fallback"]')).toBeNull();
+  });
+
+  it('labels polling rows with Poll now and the next poll', () => {
+    const fixture = setup(writer, [{ ...trigger, last_fired_at: new Date(Date.now() - 60_000).toISOString() }]);
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(findByText(fixture.nativeElement, 'poll now')).not.toBeNull();
+    expect(text).toContain('Next poll in 4m');
   });
 });

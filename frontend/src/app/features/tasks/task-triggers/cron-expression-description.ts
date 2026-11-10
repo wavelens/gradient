@@ -35,6 +35,7 @@ function weekdayList(field: string): string | null {
 // Handle common formats only. Other expressions return null, so the UI can show only the original expression as text.
 export function cronExpressionToPlainEnglish(expression: string): string | null {
   const fields = expression.trim().split(/\s+/).map((field) => (field === '?' ? '*' : field));
+  if (fields.length === 5) fields.unshift('0');
   if (fields.length === 7 && fields[6] === '*') fields.pop();
   if (fields.length !== 6 || fields[0] !== '0' || fields[4] !== '*') return null;
   const [, minuteField, hourField, dayOfMonthField, , dayOfWeekField] = fields;
