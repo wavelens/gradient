@@ -509,6 +509,12 @@ export const routes: Routes = [
             (m) => m.InvitesComponent
           ),
       },
+      {
+        path: 'settings/access',
+        title: 'Access',
+        loadComponent: () =>
+          import('./features/settings/access/settings-access.component').then((m) => m.SettingsAccessComponent),
+      },
     ],
   },
 

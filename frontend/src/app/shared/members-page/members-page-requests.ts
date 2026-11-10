@@ -39,7 +39,7 @@ export interface ProjectOrCacheRoleRequests {
   deleteRole(role: string): Observable<unknown>;
 }
 
-const teamMemberSourceLabels: Record<TeamMemberItem['source'], string> = {
+export const teamMemberSourceLabels: Record<TeamMemberItem['source'], string> = {
   api: 'Direct',
   state: 'Direct · server configuration',
   group: 'From a group in the identity provider',

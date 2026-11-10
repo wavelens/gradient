@@ -10,7 +10,7 @@ export type ProjectPage = 'settings' | 'connect' | 'workers' | 'integrations' | 
 export type TaskPage = 'settings' | 'repository' | 'triggers' | 'actions' | 'flake-inputs' | 'metrics';
 export type CachePage = 'settings' | 'upstream-caches' | 'nars' | 'subscriptions' | 'webhooks';
 export type TeamPage = 'settings' | 'webhooks';
-export type SettingsPage = 'profile' | 'keys' | 'ssh-keys' | 'sessions' | 'invites';
+export type SettingsPage = 'profile' | 'keys' | 'ssh-keys' | 'sessions' | 'invites' | 'access';
 export type BoardTab =
   | 'overview' | 'live' | 'scheduler' | 'throughput' | 'durations' | 'workers' | 'cache'
   | 'network' | 'health' | 'storage' | 'expensive';

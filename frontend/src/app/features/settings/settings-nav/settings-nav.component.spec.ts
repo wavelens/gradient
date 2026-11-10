@@ -32,6 +32,7 @@ describe('SettingsNavComponent', () => {
       ['SSH Keys', '/settings/ssh-keys'],
       ['Sessions', '/settings/sessions'],
       ['Invitations (2)', '/settings/invites'],
+      ['Access', '/settings/access'],
     ]);
   });
 

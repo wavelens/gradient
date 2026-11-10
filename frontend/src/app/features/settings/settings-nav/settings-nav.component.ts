@@ -29,6 +29,7 @@ export class SettingsNavComponent {
       ...(this.config.sshEnabled ? [{ label: 'SSH Keys', link: links.settings('ssh-keys') }] : []),
       { label: 'Sessions', link: links.settings('sessions') },
       { label: pending ? `Invitations (${pending})` : 'Invitations', link: links.settings('invites') },
+      { label: 'Access', link: links.settings('access') },
     ];
   });
 }

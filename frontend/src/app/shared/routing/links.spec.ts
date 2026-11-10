@@ -71,8 +71,8 @@ const every: UrlTree[] = [
   links.boardCluster('c'),
   links.boardPendingJob({ evaluation_id: 'e', build_id: 'b' }),
   links.boardExecJob({ project: 'p', task: 't', id: 'x', node_index: 0 }),
-  ...(['profile', 'keys', 'ssh-keys', 'sessions', 'invites'] as const).map((page) => links.settings(page)),
   links.createApiKeyPageForCache('c'),
+  ...(['profile', 'keys', 'ssh-keys', 'sessions', 'invites', 'access'] as const).map((page) => links.settings(page)),
   links.admin('webhooks'),
   links.admin('github-app'),
 ];
