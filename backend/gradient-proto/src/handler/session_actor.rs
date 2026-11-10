@@ -410,11 +410,12 @@ impl Actor for SessionActor {
             }
             SessionMsg::Signal(SessionSignal::GuestChannel(signal)) => {
                 match outbound_guest_channel(signal, st.writer.version()) {
-                    Ok(msg) => {
+                    Ok(Some(msg)) => {
                         if send_server_msg(&st.writer, &msg).await.is_err() {
                             myself.stop(Some("write failed".into()));
                         }
                     }
+                    Ok(None) => {}
                     Err(channel_id) => st.scheduler.guest_channels.closed_by_worker(
                         &st.peer_id,
                         channel_id,

@@ -17,7 +17,7 @@ use nix::unistd::Pid;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::process::Child;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::output::{OutputChunk, OutputReader};
@@ -42,6 +42,47 @@ struct OpenChannel {
     input: mpsc::Sender<Vec<u8>>,
     terminal: Option<Arc<PtyMaster>>,
     ended: CancellationToken,
+    client_read_output_byte_count_sender: Option<watch::Sender<u64>>,
+}
+
+struct ClientReadWindowSendWait {
+    window: u64,
+    sent: u64,
+    read: watch::Receiver<u64>,
+}
+
+impl ClientReadWindowSendWait {
+    async fn wait_for_byte_allowance(&mut self, len: u64) -> bool {
+        let (window, sent) = (self.window, self.sent);
+        if self
+            .read
+            .wait_for(|&read| sent.saturating_add(len) <= read.saturating_add(window))
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        self.sent = sent.saturating_add(len);
+        true
+    }
+}
+
+fn build_client_read_window_send_wait_from_max_unread_bytes(
+    max_unread_output_bytes: Option<u64>,
+) -> (Option<watch::Sender<u64>>, Option<ClientReadWindowSendWait>) {
+    let Some(max_unread_output_bytes) = max_unread_output_bytes else {
+        return (None, None);
+    };
+    let (client_read_output_byte_count_sender, read) = watch::channel(0);
+    let client_read_window_send_wait = ClientReadWindowSendWait {
+        window: max_unread_output_bytes.max(u64::try_from(GUEST_CHANNEL_CHUNK).unwrap_or(u64::MAX)),
+        sent: 0,
+        read,
+    };
+    (
+        Some(client_read_output_byte_count_sender),
+        Some(client_read_window_send_wait),
+    )
 }
 
 impl AgentChannels {
@@ -57,11 +98,21 @@ impl AgentChannels {
         &mut self,
         channel_id: u64,
         kind: GuestChannelKind,
+        max_unread_output_bytes: Option<u64>,
         context: Option<&ShellContext>,
     ) {
         self.open.retain(|_, channel| !channel.ended.is_cancelled());
-        match self.start(channel_id, kind, context).await {
+        let (client_read_output_byte_count_sender, client_read_window_send_wait) =
+            build_client_read_window_send_wait_from_max_unread_bytes(max_unread_output_bytes);
+        match self
+            .start(channel_id, kind, context, client_read_window_send_wait)
+            .await
+        {
             Ok(channel) => {
+                let channel = OpenChannel {
+                    client_read_output_byte_count_sender,
+                    ..channel
+                };
                 self.open.insert(channel_id, channel);
             }
             Err(message) => self.refuse(channel_id, message).await,
@@ -98,6 +149,22 @@ impl AgentChannels {
         }
     }
 
+    pub fn update_client_read_bytes(&self, channel_id: u64, total: u64) {
+        let client_read_output_byte_count_sender = self
+            .open
+            .get(&channel_id)
+            .and_then(|channel| channel.client_read_output_byte_count_sender.as_ref());
+        if let Some(client_read_output_byte_count_sender) = client_read_output_byte_count_sender {
+            client_read_output_byte_count_sender.send_if_modified(|read| {
+                if *read >= total {
+                    return false;
+                }
+                *read = total;
+                true
+            });
+        }
+    }
+
     pub fn close(&mut self, channel_id: u64) {
         if let Some(channel) = self.open.remove(&channel_id) {
             channel.ended.cancel();
@@ -122,21 +189,27 @@ impl AgentChannels {
         channel_id: u64,
         kind: GuestChannelKind,
         context: Option<&ShellContext>,
+        client_read_window_send_wait: Option<ClientReadWindowSendWait>,
     ) -> Result<OpenChannel, String> {
         match (kind, context) {
-            (GuestChannelKind::Forward { port }, _) => self.start_forward(channel_id, port).await,
+            (GuestChannelKind::Forward { port }, _) => {
+                self.start_forward(channel_id, port, client_read_window_send_wait)
+                    .await
+            }
             (GuestChannelKind::Console, _) => {
                 Err("the console is served by the worker, not the guest agent".to_owned())
             }
             (GuestChannelKind::Shell { .. }, None) => Err("the job has not started yet".to_owned()),
             (GuestChannelKind::Shell { attach: true, .. }, Some(context)) => {
                 match &context.program {
-                    Some(program) => self.start_attached(channel_id, program),
+                    Some(program) => {
+                        self.start_attached(channel_id, program, client_read_window_send_wait)
+                    }
                     None => Err(NO_PROGRAM_TERMINAL.to_owned()),
                 }
             }
             (GuestChannelKind::Shell { pty, attach: false }, Some(context)) => {
-                self.start_shell(channel_id, context, pty)
+                self.start_shell(channel_id, context, pty, client_read_window_send_wait)
             }
         }
     }
@@ -146,6 +219,7 @@ impl AgentChannels {
         channel_id: u64,
         context: &ShellContext,
         pty: bool,
+        client_read_window_send_wait: Option<ClientReadWindowSendWait>,
     ) -> Result<OpenChannel, String> {
         let Shell {
             child,
@@ -161,6 +235,7 @@ impl AgentChannels {
             context.redactor.stream(),
             self.outbound.clone(),
             channel.ended.clone(),
+            client_read_window_send_wait,
         ));
         Ok(channel)
     }
@@ -169,6 +244,7 @@ impl AgentChannels {
         &self,
         channel_id: u64,
         program: &ProgramTerminal,
+        client_read_window_send_wait: Option<ClientReadWindowSendWait>,
     ) -> Result<OpenChannel, String> {
         let master = program.master();
         let input = master
@@ -181,12 +257,18 @@ impl AgentChannels {
             program.clone(),
             self.outbound.clone(),
             channel.ended.clone(),
+            client_read_window_send_wait,
         ));
         program.mark_attached();
         Ok(channel)
     }
 
-    async fn start_forward(&self, channel_id: u64, port: u16) -> Result<OpenChannel, String> {
+    async fn start_forward(
+        &self,
+        channel_id: u64,
+        port: u16,
+        client_read_window_send_wait: Option<ClientReadWindowSendWait>,
+    ) -> Result<OpenChannel, String> {
         let stream = TcpStream::connect(("127.0.0.1", port))
             .await
             .map_err(|_| format!("nothing listens on port {port} in the guest"))?;
@@ -197,6 +279,7 @@ impl AgentChannels {
             reader,
             self.outbound.clone(),
             channel.ended.clone(),
+            client_read_window_send_wait,
         ));
         Ok(channel)
     }
@@ -209,6 +292,7 @@ impl AgentChannels {
             input: sender,
             terminal,
             ended,
+            client_read_output_byte_count_sender: None,
         }
     }
 }
@@ -261,6 +345,7 @@ async fn send_output(
     mut output: impl AsyncRead + Unpin,
     mut redactor: Option<StreamRedactor>,
     outbound: &mpsc::Sender<AgentToWorker>,
+    mut client_read_window_send_wait: Option<ClientReadWindowSendWait>,
 ) {
     let mut buf = vec![0; GUEST_CHANNEL_CHUNK];
     while let Ok(n) = output.read(&mut buf).await
@@ -270,17 +355,42 @@ async fn send_output(
             Some(redactor) => redactor.push(&buf[..n]),
             None => buf[..n].to_vec(),
         };
-        if !send_data(channel_id, &data, outbound).await {
+        if !send_data(
+            channel_id,
+            &data,
+            outbound,
+            &mut client_read_window_send_wait,
+        )
+        .await
+        {
             return;
         }
     }
     if let Some(mut redactor) = redactor {
-        send_data(channel_id, &redactor.finish(), outbound).await;
+        send_data(
+            channel_id,
+            &redactor.finish(),
+            outbound,
+            &mut client_read_window_send_wait,
+        )
+        .await;
     }
 }
 
-async fn send_data(channel_id: u64, data: &[u8], outbound: &mpsc::Sender<AgentToWorker>) -> bool {
+async fn send_data(
+    channel_id: u64,
+    data: &[u8],
+    outbound: &mpsc::Sender<AgentToWorker>,
+    client_read_window_send_wait: &mut Option<ClientReadWindowSendWait>,
+) -> bool {
     for piece in data.chunks(GUEST_CHANNEL_CHUNK) {
+        if let Some(client_read_window_send_wait) = client_read_window_send_wait.as_mut()
+            && !client_read_window_send_wait
+                .wait_for_byte_allowance(u64::try_from(piece.len()).unwrap_or(u64::MAX))
+                .await
+        {
+            return false;
+        }
         let data = piece.to_vec();
         if outbound
             .send(AgentToWorker::ChannelData { channel_id, data })
@@ -300,6 +410,7 @@ async fn shell_output(
     redactor: StreamRedactor,
     outbound: mpsc::Sender<AgentToWorker>,
     ended: CancellationToken,
+    client_read_window_send_wait: Option<ClientReadWindowSendWait>,
 ) {
     let group = child
         .id()
@@ -307,7 +418,13 @@ async fn shell_output(
         .map(Pid::from_raw);
     let status = {
         let finished = async {
-            let pump = send_output(channel_id, output, Some(redactor), &outbound);
+            let pump = send_output(
+                channel_id,
+                output,
+                Some(redactor),
+                &outbound,
+                client_read_window_send_wait,
+            );
             let exit = child.wait();
             tokio::pin!(pump, exit);
             tokio::select! {
@@ -350,9 +467,10 @@ async fn forward_output(
     reader: tokio::net::tcp::OwnedReadHalf,
     outbound: mpsc::Sender<AgentToWorker>,
     ended: CancellationToken,
+    client_read_window_send_wait: Option<ClientReadWindowSendWait>,
 ) {
     tokio::select! {
-        () = send_output(channel_id, reader, None, &outbound) => {
+        () = send_output(channel_id, reader, None, &outbound, client_read_window_send_wait) => {
             let _ = outbound.send(closed(channel_id, None, None)).await;
             ended.cancel();
         }
@@ -366,9 +484,10 @@ async fn attached_output(
     program: ProgramTerminal,
     outbound: mpsc::Sender<AgentToWorker>,
     ended: CancellationToken,
+    client_read_window_send_wait: Option<ClientReadWindowSendWait>,
 ) {
     tokio::select! {
-        () = send_followed(channel_id, reader, &outbound) => {
+        () = send_followed(channel_id, reader, &outbound, client_read_window_send_wait) => {
             let _ = outbound.send(closed(channel_id, program.exit_code(), None)).await;
             ended.cancel();
         }
@@ -380,12 +499,20 @@ async fn send_followed(
     channel_id: u64,
     mut reader: OutputReader,
     outbound: &mpsc::Sender<AgentToWorker>,
+    mut client_read_window_send_wait: Option<ClientReadWindowSendWait>,
 ) {
     while let Some(chunk) = reader.next().await {
         let OutputChunk::Data(data) = chunk else {
             continue;
         };
-        if !send_data(channel_id, &data, outbound).await {
+        if !send_data(
+            channel_id,
+            &data,
+            outbound,
+            &mut client_read_window_send_wait,
+        )
+        .await
+        {
             return;
         }
     }
@@ -448,6 +575,7 @@ mod tests {
                     pty: true,
                     attach: true,
                 },
+                None,
                 Some(&ShellContext::default()),
             )
             .await;
@@ -467,7 +595,9 @@ mod tests {
         let mut program = program_fixture().await;
         let (mut channels, mut sent) = channels();
 
-        channels.open(9, attach(), Some(&program.context)).await;
+        channels
+            .open(9, attach(), None, Some(&program.context))
+            .await;
         program.log.append(b"$ ").await.unwrap();
         assert_eq!(
             sent.recv().await,
@@ -500,7 +630,9 @@ mod tests {
         let program = program_fixture().await;
         let (mut channels, mut sent) = channels();
 
-        channels.open(9, attach(), Some(&program.context)).await;
+        channels
+            .open(9, attach(), None, Some(&program.context))
+            .await;
         program.exit.send_replace(Some(0));
         program.log.close();
 
@@ -526,7 +658,7 @@ mod tests {
         let (mut channels, mut sent) = channels();
 
         channels
-            .open(5, GuestChannelKind::Forward { port }, None)
+            .open(5, GuestChannelKind::Forward { port }, None, None)
             .await;
         channels.data(5, b"ping".to_vec()).await;
         assert_eq!(
@@ -542,6 +674,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_port_forward_channel_output_stops_at_allowance_until_client_read_total_then_continues()
+     {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let bytes_written_by_local_tcp_server = vec![b'x'; 3 * GUEST_CHANNEL_CHUNK];
+        let _server = Shutdown::new().spawn({
+            let bytes_written_by_local_tcp_server = bytes_written_by_local_tcp_server.clone();
+            async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                stream
+                    .write_all(&bytes_written_by_local_tcp_server)
+                    .await
+                    .unwrap();
+                stream
+            }
+        });
+        let (mut channels, mut sent) = channels();
+
+        channels
+            .open(5, GuestChannelKind::Forward { port }, Some(1), None)
+            .await;
+        let mut guest_agent_output_bytes_received = 0;
+        while let Ok(Some(AgentToWorker::ChannelData { data, .. })) = tokio::time::timeout(
+            Duration::from_millis(match guest_agent_output_bytes_received {
+                0 => 5000,
+                _ => 300,
+            }),
+            sent.recv(),
+        )
+        .await
+        {
+            guest_agent_output_bytes_received += data.len();
+        }
+        assert!(guest_agent_output_bytes_received > 0);
+        assert!(guest_agent_output_bytes_received <= GUEST_CHANNEL_CHUNK);
+
+        while guest_agent_output_bytes_received < bytes_written_by_local_tcp_server.len() {
+            channels.update_client_read_bytes(
+                5,
+                u64::try_from(guest_agent_output_bytes_received).unwrap(),
+            );
+            match sent.recv().await {
+                Some(AgentToWorker::ChannelData { data, .. }) => {
+                    guest_agent_output_bytes_received += data.len();
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(
+            guest_agent_output_bytes_received,
+            bytes_written_by_local_tcp_server.len()
+        );
+    }
+
+    #[tokio::test]
     async fn a_forward_to_a_closed_port_closes_with_a_message() {
         let port = TcpListener::bind("127.0.0.1:0")
             .await
@@ -552,7 +739,7 @@ mod tests {
         let (mut channels, mut sent) = channels();
 
         channels
-            .open(6, GuestChannelKind::Forward { port }, None)
+            .open(6, GuestChannelKind::Forward { port }, None, None)
             .await;
 
         assert_eq!(
@@ -576,6 +763,7 @@ mod tests {
                     pty: true,
                     attach: false,
                 },
+                None,
                 None,
             )
             .await;

@@ -9,11 +9,13 @@ use std::path::PathBuf;
 
 use gradient_redact::SecretRedactor;
 use gradient_vm::ConsoleLink;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tracing::debug;
 
 use super::agent_client::AgentClient;
-use super::channels::{GuestChannelCommand, GuestChannelMux, MuxAction};
+use super::channels::{
+    GuestChannelCommand, GuestChannelMux, GuestChannelReadBytesByChannelId, MuxAction,
+};
 use super::job::ExecReport;
 
 pub type GuestChannelInbox = mpsc::Receiver<GuestChannelCommand>;
@@ -25,19 +27,27 @@ pub enum ChannelEvent {
     Command(GuestChannelCommand),
     ConsoleOutput(Vec<u8>),
     ConsoleLost,
+    ReadTotalsChanged(GuestChannelReadBytesByChannelId),
 }
 
 pub struct JobChannels {
     inbox: Option<GuestChannelInbox>,
+    channel_read_totals_watch: Option<watch::Receiver<GuestChannelReadBytesByChannelId>>,
     mux: GuestChannelMux,
     guest_dir: PathBuf,
     console: Option<ConsoleLink>,
 }
 
 impl JobChannels {
-    pub fn new(inbox: GuestChannelInbox, mux: GuestChannelMux, guest_dir: PathBuf) -> Self {
+    pub fn new(
+        inbox: GuestChannelInbox,
+        channel_read_totals_watch: watch::Receiver<GuestChannelReadBytesByChannelId>,
+        mux: GuestChannelMux,
+        guest_dir: PathBuf,
+    ) -> Self {
         Self {
             inbox: Some(inbox),
+            channel_read_totals_watch: Some(channel_read_totals_watch),
             mux,
             guest_dir,
             console: None,
@@ -54,6 +64,14 @@ impl JobChannels {
                 command = next_command(self.inbox.as_mut()) => match command {
                     Some(command) => return ChannelEvent::Command(command),
                     None => self.inbox = None,
+                },
+                client_read_bytes_by_guest_channel_id = wait_for_client_read_byte_counts_change(
+                    self.channel_read_totals_watch.as_mut(),
+                ) => match client_read_bytes_by_guest_channel_id {
+                    Some(client_read_bytes_by_guest_channel_id) => {
+                        return ChannelEvent::ReadTotalsChanged(client_read_bytes_by_guest_channel_id);
+                    }
+                    None => self.channel_read_totals_watch = None,
                 },
                 output = read_console(self.console.as_mut()) => {
                     return output.map_or(ChannelEvent::ConsoleLost, ChannelEvent::ConsoleOutput);
@@ -72,6 +90,11 @@ impl JobChannels {
             ChannelEvent::Command(command) => self.mux.on_command(command),
             ChannelEvent::ConsoleOutput(data) => self.mux.on_console_output(&data),
             ChannelEvent::ConsoleLost => self.lose_console(CONSOLE_CLOSED),
+            ChannelEvent::ReadTotalsChanged(client_read_bytes_by_guest_channel_id) => self
+                .mux
+                .forward_increased_client_read_totals_to_guest_agent(
+                    &client_read_bytes_by_guest_channel_id,
+                ),
         };
         self.apply(actions, agent, reporter).await;
     }
@@ -108,6 +131,7 @@ impl JobChannels {
         let actions = self.mux.on_job_end(exit_code);
         self.apply(actions, agent, reporter).await;
         self.inbox = None;
+        self.channel_read_totals_watch = None;
     }
 
     fn lose_console(&mut self, message: &str) -> Vec<MuxAction> {
@@ -169,6 +193,18 @@ impl JobChannels {
 async fn next_command(inbox: Option<&mut GuestChannelInbox>) -> Option<GuestChannelCommand> {
     match inbox {
         Some(inbox) => inbox.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn wait_for_client_read_byte_counts_change(
+    channel_read_totals_watch: Option<&mut watch::Receiver<GuestChannelReadBytesByChannelId>>,
+) -> Option<GuestChannelReadBytesByChannelId> {
+    match channel_read_totals_watch {
+        Some(channel_read_totals_watch) => {
+            channel_read_totals_watch.changed().await.ok()?;
+            Some(channel_read_totals_watch.borrow_and_update().clone())
+        }
         None => std::future::pending().await,
     }
 }

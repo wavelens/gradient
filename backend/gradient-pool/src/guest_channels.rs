@@ -17,6 +17,7 @@ use tokio::sync::Notify;
 use crate::session_port::{SessionPort, SessionSignal};
 
 pub const GUEST_CHANNEL_OUTPUT_BUFFER_BYTE_LIMIT: usize = 8 * 1024 * 1024;
+pub const GUEST_CHANNEL_OUTPUT_BYTES_AHEAD_OF_READER_LIMIT: u64 = 1024 * 1024;
 
 const OVERFLOW_MESSAGE: &str = "the terminal could not keep up";
 const DISCONNECT_MESSAGE: &str = "the worker disconnected";
@@ -27,6 +28,7 @@ pub enum GuestChannelSignal {
         job_id: String,
         channel_id: u64,
         kind: GuestChannelKind,
+        max_unread_output_bytes: Option<u64>,
     },
     Data {
         channel_id: u64,
@@ -39,6 +41,10 @@ pub enum GuestChannelSignal {
     },
     Close {
         channel_id: u64,
+    },
+    OutputBytesRead {
+        channel_id: u64,
+        total: u64,
     },
 }
 
@@ -70,7 +76,10 @@ struct GuestChannelPendingOutput {
     wake: Notify,
 }
 
-fn guest_channel_output() -> (GuestChannelOutputWriter, GuestChannelEventReceiver) {
+fn guest_channel_output(
+    channel_id: u64,
+    channels: Arc<GuestChannels>,
+) -> (GuestChannelOutputWriter, GuestChannelEventReceiver) {
     let pending = Arc::new(GuestChannelPendingOutput {
         status: Mutex::new(GuestChannelUnreadOutputAndEndStatus {
             output: Vec::new(),
@@ -80,7 +89,12 @@ fn guest_channel_output() -> (GuestChannelOutputWriter, GuestChannelEventReceive
     });
     (
         GuestChannelOutputWriter(Arc::clone(&pending)),
-        GuestChannelEventReceiver(pending),
+        GuestChannelEventReceiver {
+            pending_output: pending,
+            channel_id,
+            channels,
+            total_output_bytes_read: 0,
+        },
     )
 }
 
@@ -114,11 +128,17 @@ impl Drop for GuestChannelOutputWriter {
     }
 }
 
-pub struct GuestChannelEventReceiver(Arc<GuestChannelPendingOutput>);
+pub struct GuestChannelEventReceiver {
+    pending_output: Arc<GuestChannelPendingOutput>,
+    channel_id: u64,
+    channels: Arc<GuestChannels>,
+    total_output_bytes_read: u64,
+}
 
 impl std::fmt::Debug for GuestChannelEventReceiver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GuestChannelEventReceiver")
+            .field("channel_id", &self.channel_id)
             .finish_non_exhaustive()
     }
 }
@@ -129,14 +149,25 @@ impl GuestChannelEventReceiver {
             if let Poll::Ready(event) = self.poll_buffered_guest_channel_event() {
                 return event;
             }
-            self.0.wake.notified().await;
+            self.pending_output.wake.notified().await;
         }
     }
 
     fn poll_buffered_guest_channel_event(&mut self) -> Poll<Option<GuestChannelEvent>> {
-        let mut status = self.0.status.lock();
+        let mut status = self.pending_output.status.lock();
         if !status.output.is_empty() {
             let output = std::mem::take(&mut status.output);
+            drop(status);
+            self.total_output_bytes_read = self
+                .total_output_bytes_read
+                .saturating_add(u64::try_from(output.len()).unwrap_or(u64::MAX));
+            self.channels.signal_if_open(
+                self.channel_id,
+                GuestChannelSignal::OutputBytesRead {
+                    channel_id: self.channel_id,
+                    total: self.total_output_bytes_read,
+                },
+            );
             return Poll::Ready(Some(GuestChannelEvent::Data(output)));
         }
         match std::mem::replace(&mut status.state, GuestChannelReaderState::Finished) {
@@ -198,7 +229,7 @@ impl GuestChannels {
         kind: GuestChannelKind,
     ) -> (GuestChannelHandle, GuestChannelEventReceiver) {
         let channel_id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let (output, receiver) = guest_channel_output();
+        let (output, receiver) = guest_channel_output(channel_id, Arc::clone(self));
         let route = Route {
             worker: worker.to_owned(),
             port,
@@ -209,6 +240,7 @@ impl GuestChannels {
             job_id,
             channel_id,
             kind,
+            max_unread_output_bytes: Some(GUEST_CHANNEL_OUTPUT_BYTES_AHEAD_OF_READER_LIMIT),
         });
         open.insert(channel_id, route);
         drop(open);
@@ -504,6 +536,43 @@ mod tests {
             events.poll_buffered_guest_channel_event(),
             Poll::Ready(Some(GuestChannelEvent::Data(vec![b'x'; 1000])))
         );
+    }
+
+    #[test]
+    fn test_output_bytes_read_signal_reports_cumulative_bytes_until_channel_closed() {
+        let channels = GuestChannels::new();
+        let port = Arc::new(RecordingPort::default());
+        let (handle, mut events) = open_on(&channels, "w1", &port);
+        let id = handle.id();
+        let read_totals = || -> Vec<u64> {
+            port.guest_signals()
+                .into_iter()
+                .filter_map(|s| match s {
+                    GuestChannelSignal::OutputBytesRead { channel_id, total }
+                        if channel_id == id =>
+                    {
+                        Some(total)
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(port.guest_signals().contains(&GuestChannelSignal::Open {
+            job_id: "exec:j".into(),
+            channel_id: id,
+            kind: GuestChannelKind::Console,
+            max_unread_output_bytes: Some(GUEST_CHANNEL_OUTPUT_BYTES_AHEAD_OF_READER_LIMIT),
+        }));
+        channels.deliver("w1", id, b"abc".to_vec());
+        channels.deliver("w1", id, b"de".to_vec());
+        assert!(events.poll_buffered_guest_channel_event().is_ready());
+        channels.deliver("w1", id, b"f".to_vec());
+        assert!(events.poll_buffered_guest_channel_event().is_ready());
+        assert_eq!(read_totals(), vec![5, 6]);
+        channels.deliver("w1", id, b"late".to_vec());
+        channels.closed_by_worker("w1", id, Some(0), None);
+        assert!(events.poll_buffered_guest_channel_event().is_ready());
+        assert_eq!(read_totals(), vec![5, 6]);
     }
 
     #[test]

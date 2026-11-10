@@ -50,6 +50,8 @@ pub const HELD_EVAL_SHARDS_SINCE: u16 = 55;
 
 pub const FLAKE_INPUT_SOURCES_SINCE: u16 = 56;
 
+pub const GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_SINCE: u16 = 60;
+
 pub const GUEST_CHANNEL_CHUNK: usize = 32 * 1024;
 
 pub const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);

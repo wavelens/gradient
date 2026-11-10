@@ -42,10 +42,11 @@ The message definitions live in `backend/gradient-wire/src/messages` and cover e
 | `InputProgress` | Download bytes of the input fetch an `InputRequest` waits for | `job_id`, `request_id`, `bytes_done`, `bytes_total` |
 | `FetchInput` | Download one input for a project and push the result to the cache. Carries the project SSH key only for a worker with `secrets` | `fetch_id`, `project`, `request`, `ssh_key` |
 | `EvalShardReply` | Reply to `EvalShardRequest`, see [Split Evaluation Messages](#split-evaluation-messages) (since 40) | `job_id`, `outcome` |
-| `OpenGuestChannel` | Open a terminal or a port forward into the guest of a running exec job, see [Guest Channels](../exec/index.md#guest-channels) (since 44) | `job_id`, `channel_id`, `kind` (`Shell { pty, attach }`, `Forward { port }`, `Console`) |
+| `OpenGuestChannel` | Open a terminal or a port forward into the guest of a running exec job, see [Guest Channels](../exec/index.md#guest-channels) (since 44) | `job_id`, `channel_id`, `kind` (`Shell { pty, attach }`, `Forward { port }`, `Console`), `max_unread_output_bytes` (since 60) |
 | `GuestChannelData` | Input bytes for a guest channel, at most 32 KiB (since 44) | `channel_id`, `data` |
 | `GuestChannelResize` | New terminal size of a guest channel (since 44) | `channel_id`, `cols`, `rows` |
 | `CloseGuestChannel` | Close a guest channel (since 44) | `channel_id` |
+| `GuestChannelTotalOutputBytesRead` | Total output bytes a client has read from a guest channel. The guest can send up to `max_unread_output_bytes` beyond that (since 60). | `channel_id`, `total` |
 
 ## Worker -> Server
 

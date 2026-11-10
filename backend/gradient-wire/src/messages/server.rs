@@ -211,6 +211,8 @@ pub enum ServerMessage {
         job_id: String,
         channel_id: u64,
         kind: GuestChannelKind,
+        #[proto(60, default)]
+        max_unread_output_bytes: Option<u64>,
     },
 
     #[proto(44)]
@@ -235,6 +237,12 @@ pub enum ServerMessage {
     ExecKeepVmRunning {
         job_id: String,
         keep_vm_running: bool,
+    },
+
+    #[proto(60)]
+    GuestChannelTotalOutputBytesRead {
+        channel_id: u64,
+        total: u64,
     },
 }
 
@@ -298,6 +306,9 @@ impl ServerMessage {
             ServerMessage::CloseGuestChannel { .. } => "CloseGuestChannel",
             ServerMessage::GuestChannelResize { .. } => "GuestChannelResize",
             ServerMessage::ExecKeepVmRunning { .. } => "ExecKeepVmRunning",
+            ServerMessage::GuestChannelTotalOutputBytesRead { .. } => {
+                "GuestChannelTotalOutputBytesRead"
+            }
         }
     }
 

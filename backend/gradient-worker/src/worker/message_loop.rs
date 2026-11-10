@@ -474,8 +474,16 @@ impl MessageLoopState {
                 job_id,
                 channel_id,
                 kind,
+                max_unread_output_bytes,
             } => {
-                self.on_open_guest_channel(&job_id, channel_id, kind).await;
+                self.on_open_guest_channel(&job_id, channel_id, kind, max_unread_output_bytes)
+                    .await;
+            }
+            ServerMessage::GuestChannelTotalOutputBytesRead { channel_id, total } => {
+                self.jobs
+                    .registry
+                    .lock()
+                    .record_guest_channel_total_output_bytes_read(channel_id, total);
             }
             ServerMessage::GuestChannelData { channel_id, data } => {
                 self.route_guest_channel(GuestChannelCommand::Data { channel_id, data });
@@ -507,12 +515,19 @@ impl MessageLoopState {
         Ok(())
     }
 
-    async fn on_open_guest_channel(&self, job_id: &str, channel_id: u64, kind: GuestChannelKind) {
-        let opened = self
-            .jobs
-            .registry
-            .lock()
-            .open_guest_channel(job_id, channel_id, kind);
+    async fn on_open_guest_channel(
+        &self,
+        job_id: &str,
+        channel_id: u64,
+        kind: GuestChannelKind,
+        max_unread_output_bytes: Option<u64>,
+    ) {
+        let opened = self.jobs.registry.lock().open_guest_channel(
+            job_id,
+            channel_id,
+            kind,
+            max_unread_output_bytes,
+        );
         if opened {
             return;
         }

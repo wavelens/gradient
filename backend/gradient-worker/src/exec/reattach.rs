@@ -105,7 +105,12 @@ async fn follow_again(
         watchdog: resumed_watchdog(stored),
         abort,
         leave_running: host.worker_stop_keeping_guests(),
-        channels: JobChannels::new(inbox.channels, mux, guest.dir().to_owned()),
+        channels: JobChannels::new(
+            inbox.channels,
+            inbox.channel_read_totals_watch,
+            mux,
+            guest.dir().to_owned(),
+        ),
         uploads: GuestUploads::new(guest.dir().join("outputs")),
         keep_vm_running: KeepVmRunning::resumed(inbox.keep_vm_running, guest.dir()),
     };

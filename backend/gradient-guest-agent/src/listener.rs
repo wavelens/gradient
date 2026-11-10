@@ -189,9 +189,18 @@ async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> 
                 }
             }
             WorkerToAgent::Kill => agent.kill.cancel(),
-            WorkerToAgent::OpenChannel { channel_id, kind } => {
+            WorkerToAgent::OpenChannel {
+                channel_id,
+                kind,
+                max_unread_output_bytes,
+            } => {
                 let context = agent.shell_context();
-                channels.open(channel_id, kind, context.as_ref()).await;
+                channels
+                    .open(channel_id, kind, max_unread_output_bytes, context.as_ref())
+                    .await;
+            }
+            WorkerToAgent::ChannelTotalOutputBytesRead { channel_id, total } => {
+                channels.update_client_read_bytes(channel_id, total);
             }
             WorkerToAgent::ChannelData { channel_id, data } => {
                 channels.data(channel_id, data).await;

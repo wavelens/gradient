@@ -9,12 +9,14 @@ use std::path::{Path, PathBuf};
 use tokio::sync::watch;
 use tracing::warn;
 
+use super::channels::GuestChannelReadBytesByChannelId;
 use super::job_channels::GuestChannelInbox;
 
 const MARKER_FILE: &str = "keep-vm-running";
 
 pub struct ExecInbox {
     pub channels: GuestChannelInbox,
+    pub channel_read_totals_watch: watch::Receiver<GuestChannelReadBytesByChannelId>,
     pub keep_vm_running: watch::Receiver<bool>,
 }
 

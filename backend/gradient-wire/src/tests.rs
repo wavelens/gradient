@@ -316,6 +316,7 @@ fn guest_channel_messages_round_trip_and_stay_off_older_sessions() {
         job_id: "exec:x".into(),
         channel_id: 7,
         kind: GuestChannelKind::Forward { port: 6006 },
+        max_unread_output_bytes: None,
     };
     assert_eq!(
         from_bytes::<ServerMessage>(
@@ -672,6 +673,77 @@ fn a_guest_shutdown_needs_the_sixth_guest_version() {
         AgentToWorker::GuestShutdown
     );
     assert!(to_bytes(&AgentToWorker::GuestShutdown, since - 1).is_err());
+}
+
+#[test]
+fn guest_output_flow_control_needs_protocol_60_older_peers_skip_allowance() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::messages::{
+        GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_SINCE, GuestChannelKind, ServerMessage,
+    };
+
+    let since = GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_SINCE;
+    let open = |max_unread_output_bytes| ServerMessage::OpenGuestChannel {
+        job_id: "exec:x".into(),
+        channel_id: 7,
+        kind: GuestChannelKind::Console,
+        max_unread_output_bytes,
+    };
+    let read = ServerMessage::GuestChannelTotalOutputBytesRead {
+        channel_id: 7,
+        total: 4096,
+    };
+    for message in [open(Some(1 << 20)), read.clone()] {
+        assert_eq!(
+            from_bytes::<ServerMessage>(to_bytes(&message, since).unwrap(), since).unwrap(),
+            message
+        );
+    }
+    assert_eq!(
+        from_bytes::<ServerMessage>(
+            to_bytes(&open(Some(1 << 20)), since - 1).unwrap(),
+            since - 1
+        )
+        .unwrap(),
+        open(None)
+    );
+    assert!(to_bytes(&read, since - 1).is_err());
+}
+
+#[test]
+fn open_channel_allowance_and_channel_total_output_bytes_read_need_the_ninth_guest_version() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::guest::{
+        GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_AGENT_SINCE, GUEST_PROTO_VERSIONS, WorkerToAgent,
+    };
+    use crate::messages::GuestChannelKind;
+
+    let since = GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_AGENT_SINCE;
+    let open = |max_unread_output_bytes| WorkerToAgent::OpenChannel {
+        channel_id: 7,
+        kind: GuestChannelKind::Forward { port: 6006 },
+        max_unread_output_bytes,
+    };
+    let read = WorkerToAgent::ChannelTotalOutputBytesRead {
+        channel_id: 7,
+        total: 4096,
+    };
+    assert!(GUEST_PROTO_VERSIONS.contains(&since));
+    for message in [open(Some(1 << 20)), read.clone()] {
+        assert_eq!(
+            from_bytes::<WorkerToAgent>(to_bytes(&message, since).unwrap(), since).unwrap(),
+            message
+        );
+    }
+    assert_eq!(
+        from_bytes::<WorkerToAgent>(
+            to_bytes(&open(Some(1 << 20)), since - 1).unwrap(),
+            since - 1
+        )
+        .unwrap(),
+        open(None)
+    );
+    assert!(to_bytes(&read, since - 1).is_err());
 }
 
 #[test]

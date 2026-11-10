@@ -423,6 +423,7 @@ flowchart LR
 
 - The agent frames `OpenChannel`, `ChannelData`, `Resize` and `CloseChannel` require guest protocol version 2. Server messages live in [Messages](../proto/messages.md).
 - Data frames top out at 32 KiB. Agents queue 256 input chunks per channel. Agents close a full channel with `the guest stopped reading the channel input`.
+- Output follows a window like SSH. The server opens each channel with `max_unread_output_bytes` (1 MiB) and reports the bytes the client has read with `GuestChannelTotalOutputBytesRead`. The worker passes both to the agent as `OpenChannel.max_unread_output_bytes` and `ChannelTotalOutputBytesRead`, guest protocol version 9. The agent stops reading the PTY, the TCP connection or the output log while it is a full window ahead of the client.
 - Shells and forwards of a job without `ssh` fail the worker checks. Ports outside `ports` and agents below version 2 fail too.
 - Channel traffic can never move the `maxSilent` deadline.
 
@@ -452,5 +453,5 @@ flowchart LR
 |---|---|
 | Either side | `CloseGuestChannel` ends the route on both sides. Later frames for the id go nowhere |
 | Session end | The worker closes every channel of its exec jobs. The server closes them with `the worker disconnected` |
-| Slow client | A full server buffer of 256 events closes the channel with `the terminal could not keep up` |
+| Slow client | Agent channels pause output when a client is 1 MiB behind. The console, old workers and old agents close the channel with `the terminal could not keep up` at a server buffer of 8 MiB. |
 | Forward refused | `nothing listens on port <port> in the guest` |

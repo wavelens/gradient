@@ -19,13 +19,14 @@ use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{Proto, from_bytes, to_bytes};
 use crate::types::GuestChannelKind;
 
-pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=8;
+pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=9;
 pub const GUEST_CHANNELS_AGENT_SINCE: u16 = 2;
 pub const GUEST_JOB_SECRETS_SINCE: u16 = 2;
 pub const GUEST_UPLOADS_SINCE: u16 = 3;
 pub const GUEST_WORK_DISK_SINCE: u16 = 5;
 pub const GUEST_SHUTDOWN_SINCE: u16 = 6;
 pub const GUEST_CONSOLE_RESIZE_SINCE: u16 = 8;
+pub const GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_AGENT_SINCE: u16 = 9;
 pub const AGENT_VSOCK_PORT: u32 = 7000;
 pub const GUEST_STORE_VSOCK_PORT: u32 = 7001;
 pub const AGENT_RELAY_PORT_BASE: u32 = 7100;
@@ -43,6 +44,8 @@ pub enum WorkerToAgent {
     OpenChannel {
         channel_id: u64,
         kind: GuestChannelKind,
+        #[proto(9, default)]
+        max_unread_output_bytes: Option<u64>,
     },
     #[proto(2)]
     ChannelData {
@@ -68,6 +71,11 @@ pub enum WorkerToAgent {
     ResizeConsole {
         cols: u16,
         rows: u16,
+    },
+    #[proto(9)]
+    ChannelTotalOutputBytesRead {
+        channel_id: u64,
+        total: u64,
     },
 }
 
@@ -424,6 +432,7 @@ mod tests {
                 pty: true,
                 attach: true,
             },
+            max_unread_output_bytes: None,
         };
 
         let (mut old_worker, mut old_agent) = connected(1..=1).await;

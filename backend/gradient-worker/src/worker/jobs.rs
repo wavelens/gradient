@@ -27,7 +27,7 @@ use tracing::{debug, warn};
 
 use crate::config::WorkerConfig;
 use crate::count::clamp_to_u32;
-use crate::exec::channels::GuestChannelCommand;
+use crate::exec::channels::{GuestChannelCommand, GuestChannelReadBytesByChannelId};
 use crate::exec::keep_vm::ExecInbox;
 use crate::executor::AbortSignal;
 use crate::executor::timeline::JobTimeline;
@@ -50,6 +50,7 @@ pub(super) struct ActiveJob {
     pub(super) cluster: Option<String>,
     pub(super) log: JobLog,
     guest_channels: Option<mpsc::Sender<GuestChannelCommand>>,
+    read_bytes_by_guest_channel_sender: watch::Sender<GuestChannelReadBytesByChannelId>,
     keep_vm_running: watch::Sender<bool>,
 }
 
@@ -101,10 +102,13 @@ impl JobRegistry {
         let timeline = JobTimeline::new();
         let (commands, inbox) = mpsc::channel(GUEST_CHANNEL_INBOX);
         let (keep_vm_running, keep_vm_running_updates) = watch::channel(false);
+        let (read_bytes_by_guest_channel_sender, channel_read_totals_watch) =
+            watch::channel(GuestChannelReadBytesByChannelId::new());
         self.running.insert(
             job_id,
             ActiveJob {
                 guest_channels: (kind == JobKind::Exec).then_some(commands),
+                read_bytes_by_guest_channel_sender,
                 keep_vm_running,
                 kind,
                 assignment_id: assignment_id.clone(),
@@ -122,6 +126,7 @@ impl JobRegistry {
             done_tx: self.done_tx.clone(),
             exec_inbox: ExecInbox {
                 channels: inbox,
+                channel_read_totals_watch,
                 keep_vm_running: keep_vm_running_updates,
             },
         }
@@ -142,6 +147,7 @@ impl JobRegistry {
         job_id: &str,
         channel_id: u64,
         kind: GuestChannelKind,
+        max_unread_output_bytes: Option<u64>,
     ) -> bool {
         let Some(commands) = self
             .running
@@ -151,7 +157,11 @@ impl JobRegistry {
             return false;
         };
         if commands
-            .try_send(GuestChannelCommand::Open { channel_id, kind })
+            .try_send(GuestChannelCommand::Open {
+                channel_id,
+                kind,
+                max_unread_output_bytes,
+            })
             .is_err()
         {
             return false;
@@ -167,6 +177,7 @@ impl JobRegistry {
             GuestChannelCommand::Close { channel_id } => {
                 let channel_id = *channel_id;
                 let routed = self.send_to_channel_job(channel_id, command);
+                self.remove_guest_channel_client_read_byte_count(channel_id);
                 self.channel_jobs.remove(&channel_id);
                 return routed;
             }
@@ -175,16 +186,56 @@ impl JobRegistry {
         self.send_to_channel_job(channel_id, command)
     }
 
-    fn send_to_channel_job(&self, channel_id: u64, command: GuestChannelCommand) -> bool {
+    pub(super) fn record_guest_channel_total_output_bytes_read(&self, channel_id: u64, total: u64) {
+        if let Some(job) = self.find_active_job_by_guest_channel_id(channel_id) {
+            job.read_bytes_by_guest_channel_sender.send_if_modified(
+                |client_read_bytes_by_guest_channel_id| {
+                    if client_read_bytes_by_guest_channel_id
+                        .get(&channel_id)
+                        .is_some_and(|&known| known >= total)
+                    {
+                        return false;
+                    }
+                    client_read_bytes_by_guest_channel_id.insert(channel_id, total);
+                    true
+                },
+            );
+        }
+    }
+
+    fn remove_guest_channel_client_read_byte_count(&self, channel_id: u64) {
+        if let Some(job) = self.find_active_job_by_guest_channel_id(channel_id) {
+            job.read_bytes_by_guest_channel_sender.send_if_modified(
+                |client_read_bytes_by_guest_channel_id| {
+                    client_read_bytes_by_guest_channel_id.remove(&channel_id);
+                    false
+                },
+            );
+        }
+    }
+
+    fn find_active_job_by_guest_channel_id(&self, channel_id: u64) -> Option<&ActiveJob> {
         self.channel_jobs
             .get(&channel_id)
             .and_then(|job_id| self.running.get(job_id))
+    }
+
+    fn send_to_channel_job(&self, channel_id: u64, command: GuestChannelCommand) -> bool {
+        self.find_active_job_by_guest_channel_id(channel_id)
             .and_then(|job| job.guest_channels.as_ref())
             .is_some_and(|commands| commands.try_send(command).is_ok())
     }
 
     pub(super) fn close_guest_channels(&mut self) {
         self.channel_jobs.clear();
+        for job in self.running.values() {
+            job.read_bytes_by_guest_channel_sender.send_if_modified(
+                |client_read_bytes_by_guest_channel_id| {
+                    client_read_bytes_by_guest_channel_id.clear();
+                    false
+                },
+            );
+        }
         for commands in self
             .running
             .values()
@@ -926,19 +977,48 @@ mod tests {
             .to_vec(),
         };
 
-        assert!(jobs.open_guest_channel("exec:b", 9, GuestChannelKind::Console));
+        assert!(jobs.open_guest_channel("exec:b", 9, GuestChannelKind::Console, Some(1024)));
         assert_eq!(
             b.exec_inbox.channels.try_recv().ok(),
             Some(GuestChannelCommand::Open {
                 channel_id: 9,
-                kind: GuestChannelKind::Console
+                kind: GuestChannelKind::Console,
+                max_unread_output_bytes: Some(1024)
             })
         );
         assert!(a.exec_inbox.channels.try_recv().is_err());
         assert!(jobs.route_guest_channel(data(9)));
         assert_eq!(b.exec_inbox.channels.try_recv().ok(), Some(data(9)));
-        assert!(!jobs.open_guest_channel("exec:x", 10, GuestChannelKind::Console));
+        assert!(!jobs.open_guest_channel("exec:x", 10, GuestChannelKind::Console, None));
         assert!(!jobs.route_guest_channel(data(10)));
+    }
+
+    #[test]
+    fn exec_job_read_byte_count_watch_channel_grows_then_removed_on_guest_channel_close() {
+        let (mut jobs, _done_rx) = registry();
+        let mut job = jobs.register(
+            "exec:a".to_owned(),
+            JobKind::Exec,
+            "d-a".to_owned(),
+            None,
+            log(),
+        );
+        let mut channel_read_totals_watch = job.exec_inbox.channel_read_totals_watch.clone();
+        assert!(jobs.open_guest_channel("exec:a", 9, GuestChannelKind::Console, Some(1024)));
+
+        jobs.record_guest_channel_total_output_bytes_read(9, 500);
+        jobs.record_guest_channel_total_output_bytes_read(10, 700);
+        assert!(channel_read_totals_watch.has_changed().unwrap());
+        assert_eq!(
+            *channel_read_totals_watch.borrow_and_update(),
+            GuestChannelReadBytesByChannelId::from([(9, 500)])
+        );
+        jobs.record_guest_channel_total_output_bytes_read(9, 300);
+        assert!(!channel_read_totals_watch.has_changed().unwrap());
+
+        assert!(jobs.route_guest_channel(GuestChannelCommand::Close { channel_id: 9 }));
+        assert!(channel_read_totals_watch.borrow().is_empty());
+        assert!(job.exec_inbox.channels.try_recv().is_ok());
     }
 
     #[tokio::test]

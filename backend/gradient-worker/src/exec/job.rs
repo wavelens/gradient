@@ -734,7 +734,12 @@ impl ExecRun<'_> {
             ),
             abort,
             leave_running: self.host.worker_stop_keeping_guests(),
-            channels: JobChannels::new(inbox.channels, mux, guest.dir().to_owned()),
+            channels: JobChannels::new(
+                inbox.channels,
+                inbox.channel_read_totals_watch,
+                mux,
+                guest.dir().to_owned(),
+            ),
             uploads: GuestUploads::new(guest.dir().join("outputs")),
             keep_vm_running: KeepVmRunning::new(
                 inbox.keep_vm_running,
@@ -974,7 +979,7 @@ mod tests {
     use tokio::net::UnixStream;
     use tokio::sync::{mpsc, watch};
 
-    use crate::exec::channels::GuestChannelCommand;
+    use crate::exec::channels::{GuestChannelCommand, GuestChannelReadBytesByChannelId};
 
     use super::*;
 
@@ -1063,7 +1068,11 @@ mod tests {
     fn job_channels(ssh: bool) -> (mpsc::Sender<GuestChannelCommand>, JobChannels) {
         let (commands, inbox) = mpsc::channel(8);
         let mux = GuestChannelMux::new(ssh, Vec::new(), GUEST_CHANNELS_AGENT_SINCE);
-        (commands, JobChannels::new(inbox, mux, PathBuf::new()))
+        let channel_read_totals_watch = watch::channel(GuestChannelReadBytesByChannelId::new()).1;
+        (
+            commands,
+            JobChannels::new(inbox, channel_read_totals_watch, mux, PathBuf::new()),
+        )
     }
 
     fn guest_job(watchdog: Watchdog) -> GuestJob {
@@ -1267,6 +1276,7 @@ mod tests {
             .send(GuestChannelCommand::Open {
                 channel_id: 4,
                 kind: shell,
+                max_unread_output_bytes: None,
             })
             .await
             .unwrap();

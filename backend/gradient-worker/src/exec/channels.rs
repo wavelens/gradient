@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use gradient_redact::{SecretRedactor, StreamRedactor};
-use gradient_wire::guest::{GUEST_CHANNELS_AGENT_SINCE, GUEST_CONSOLE_RESIZE_SINCE, WorkerToAgent};
+use gradient_wire::guest::{
+    GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_AGENT_SINCE, GUEST_CHANNELS_AGENT_SINCE,
+    GUEST_CONSOLE_RESIZE_SINCE, WorkerToAgent,
+};
 use gradient_wire::messages::{GUEST_CHANNEL_CHUNK, GuestChannelKind};
 
 pub const CONSOLE_SCROLLBACK: usize = 64 * 1024;
@@ -18,11 +21,14 @@ const NO_PROGRAM_TERMINAL: &str = "program has no terminal, set ssh = true";
 const AGENT_TOO_OLD: &str =
     "the guest agent is too old for shells, the next attempt gets a new guest";
 
+pub type GuestChannelReadBytesByChannelId = HashMap<u64, u64>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GuestChannelCommand {
     Open {
         channel_id: u64,
         kind: GuestChannelKind,
+        max_unread_output_bytes: Option<u64>,
     },
     Data {
         channel_id: u64,
@@ -58,8 +64,13 @@ pub enum MuxAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Route {
-    Agent { attached: bool },
-    Console { size: Option<(u16, u16)> },
+    Agent {
+        attached: bool,
+        last_client_read_total_forwarded_to_agent: Option<u64>,
+    },
+    Console {
+        size: Option<(u16, u16)>,
+    },
 }
 
 pub struct GuestChannelMux {
@@ -91,7 +102,11 @@ impl GuestChannelMux {
 
     pub fn on_command(&mut self, command: GuestChannelCommand) -> Vec<MuxAction> {
         match command {
-            GuestChannelCommand::Open { channel_id, kind } => self.open(channel_id, kind),
+            GuestChannelCommand::Open {
+                channel_id,
+                kind,
+                max_unread_output_bytes,
+            } => self.open(channel_id, kind, max_unread_output_bytes),
             GuestChannelCommand::Data { channel_id, data } => self.data(channel_id, data),
             GuestChannelCommand::Resize {
                 channel_id,
@@ -138,6 +153,34 @@ impl GuestChannelMux {
         }]
     }
 
+    pub fn forward_increased_client_read_totals_to_guest_agent(
+        &mut self,
+        client_read_bytes_by_guest_channel_id: &GuestChannelReadBytesByChannelId,
+    ) -> Vec<MuxAction> {
+        let mut actions = Vec::new();
+        for (&channel_id, route) in &mut self.routes {
+            let Route::Agent {
+                last_client_read_total_forwarded_to_agent:
+                    Some(last_client_read_total_forwarded_to_agent),
+                ..
+            } = route
+            else {
+                continue;
+            };
+            let Some(&total) = client_read_bytes_by_guest_channel_id
+                .get(&channel_id)
+                .filter(|&&total| total > *last_client_read_total_forwarded_to_agent)
+            else {
+                continue;
+            };
+            *last_client_read_total_forwarded_to_agent = total;
+            actions.push(MuxAction::ToAgent(
+                WorkerToAgent::ChannelTotalOutputBytesRead { channel_id, total },
+            ));
+        }
+        actions
+    }
+
     pub fn on_console_output(&mut self, data: &[u8]) -> Vec<MuxAction> {
         let masked = self.console_redactor.push(data);
         self.scrollback.push(&masked);
@@ -163,7 +206,12 @@ impl GuestChannelMux {
             .collect()
     }
 
-    fn open(&mut self, channel_id: u64, kind: GuestChannelKind) -> Vec<MuxAction> {
+    fn open(
+        &mut self,
+        channel_id: u64,
+        kind: GuestChannelKind,
+        max_unread_output_bytes: Option<u64>,
+    ) -> Vec<MuxAction> {
         if kind == GuestChannelKind::Console {
             return self.open_console(channel_id);
         }
@@ -171,10 +219,19 @@ impl GuestChannelMux {
             return vec![server_close(channel_id, Some(refusal))];
         }
         let attached = matches!(kind, GuestChannelKind::Shell { attach: true, .. });
-        self.routes.insert(channel_id, Route::Agent { attached });
+        let max_unread_output_bytes = max_unread_output_bytes
+            .filter(|_| self.agent_version >= GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_AGENT_SINCE);
+        self.routes.insert(
+            channel_id,
+            Route::Agent {
+                attached,
+                last_client_read_total_forwarded_to_agent: max_unread_output_bytes.map(|_| 0),
+            },
+        );
         vec![MuxAction::ToAgent(WorkerToAgent::OpenChannel {
             channel_id,
             kind,
+            max_unread_output_bytes,
         })]
     }
 
@@ -284,7 +341,8 @@ impl GuestChannelMux {
             .into_iter()
             .map(|(channel_id, route)| MuxAction::ToServerClose {
                 channel_id,
-                exit_code: exit_code.filter(|_| route == Route::Agent { attached: true }),
+                exit_code: exit_code
+                    .filter(|_| matches!(route, Route::Agent { attached: true, .. })),
                 message: None,
             })
             .collect();
@@ -353,7 +411,11 @@ mod tests {
     }
 
     fn open(channel_id: u64, kind: GuestChannelKind) -> GuestChannelCommand {
-        GuestChannelCommand::Open { channel_id, kind }
+        GuestChannelCommand::Open {
+            channel_id,
+            kind,
+            max_unread_output_bytes: None,
+        }
     }
 
     fn data(channel_id: u64, data: &[u8]) -> GuestChannelCommand {
@@ -389,11 +451,91 @@ mod tests {
             mux.on_command(open(4, new_shell())),
             [MuxAction::ToAgent(WorkerToAgent::OpenChannel {
                 channel_id: 4,
-                kind: new_shell()
+                kind: new_shell(),
+                max_unread_output_bytes: None
             })]
         );
         assert_eq!(mux.on_agent_data(4, b"$ ".to_vec()), [to_server(4, b"$ ")]);
         assert!(mux.on_command(data(9, b"x")).is_empty());
+    }
+
+    fn open_with_max_unread_output_bytes(
+        channel_id: u64,
+        kind: GuestChannelKind,
+    ) -> GuestChannelCommand {
+        GuestChannelCommand::Open {
+            channel_id,
+            kind,
+            max_unread_output_bytes: Some(1024),
+        }
+    }
+
+    fn to_agent_channel_total_output_bytes_read(channel_id: u64, total: u64) -> MuxAction {
+        MuxAction::ToAgent(WorkerToAgent::ChannelTotalOutputBytesRead { channel_id, total })
+    }
+
+    #[test]
+    fn agent_channel_sends_output_allowance_and_forwards_only_increased_read_totals() {
+        let mut mux = GuestChannelMux::new(
+            true,
+            Vec::new(),
+            GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_AGENT_SINCE,
+        );
+
+        assert_eq!(
+            mux.on_command(open_with_max_unread_output_bytes(4, new_shell())),
+            [MuxAction::ToAgent(WorkerToAgent::OpenChannel {
+                channel_id: 4,
+                kind: new_shell(),
+                max_unread_output_bytes: Some(1024)
+            })]
+        );
+        mux.on_command(open(5, new_shell()));
+        assert_eq!(
+            mux.forward_increased_client_read_totals_to_guest_agent(&HashMap::from([
+                (4, 100),
+                (5, 100),
+                (9, 100)
+            ])),
+            [to_agent_channel_total_output_bytes_read(4, 100)]
+        );
+        assert!(
+            mux.forward_increased_client_read_totals_to_guest_agent(&HashMap::from([(4, 100)]))
+                .is_empty()
+        );
+        assert_eq!(
+            mux.forward_increased_client_read_totals_to_guest_agent(&HashMap::from([(4, 250)])),
+            [to_agent_channel_total_output_bytes_read(4, 250)]
+        );
+    }
+
+    #[test]
+    fn old_guest_protocol_channel_opens_without_allowance_and_forwards_no_read_totals() {
+        let mut mux = GuestChannelMux::new(
+            true,
+            Vec::new(),
+            GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_AGENT_SINCE - 1,
+        );
+
+        assert_eq!(
+            mux.on_command(open_with_max_unread_output_bytes(4, new_shell())),
+            [MuxAction::ToAgent(WorkerToAgent::OpenChannel {
+                channel_id: 4,
+                kind: new_shell(),
+                max_unread_output_bytes: None
+            })]
+        );
+        mux.on_command(open_with_max_unread_output_bytes(
+            5,
+            GuestChannelKind::Console,
+        ));
+        assert!(
+            mux.forward_increased_client_read_totals_to_guest_agent(&HashMap::from([
+                (4, 100),
+                (5, 100)
+            ]))
+            .is_empty()
+        );
     }
 
     fn resize(channel_id: u64, cols: u16) -> GuestChannelCommand {
