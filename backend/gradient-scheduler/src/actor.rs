@@ -36,6 +36,7 @@ pub struct Registration {
     pub session: Arc<dyn SessionPort>,
     pub active: Vec<crate::jobs::Reattached>,
     pub reclaims_jobs: bool,
+    pub held_jobs_wait_deadline: Instant,
 }
 
 pub struct Registered {
@@ -924,6 +925,10 @@ impl Actor for CoreActor {
                 core.restore(&reg.worker, reg.active);
                 core.pool.set_reclaims_jobs(&reg.worker, reg.reclaims_jobs);
                 let unreclaimed = if reg.reclaims_jobs {
+                    core.tracker.extend_reclaim_deadlines_for_worker(
+                        &reg.worker,
+                        reg.held_jobs_wait_deadline,
+                    );
                     Vec::new()
                 } else {
                     core.tracker.take_unlisted(&reg.worker, &HashSet::new())

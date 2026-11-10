@@ -1880,6 +1880,33 @@ async fn w38_a_restarted_core_still_requeues_a_held_build_after_the_grace() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn w39_a_reconnected_worker_that_never_lists_running_jobs_has_its_build_requeued_after_the_grace_period()
+ {
+    let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    case.connect_reclaiming(W1, w_all(), &[]).await;
+    let (a, a1) = building_on_w1(&case).await;
+    case.disconnect(W1).await;
+    case.connect_reclaiming(W1, w_all(), &[]).await;
+
+    case.requeue_unreclaimed_after(Duration::from_secs(599))
+        .await;
+    assert!(!case.pending(&a).await, "after 2: pending(build:A)");
+    case.check("step 2").await;
+
+    case.requeue_unreclaimed_after(Duration::from_secs(601))
+        .await;
+    assert_eq!(
+        closes(&case.assignments(&a).await),
+        vec![(a1, Some(DispatchedJobOutcome::Abandoned))],
+        "after 3: dj(build:A)"
+    );
+    assert!(case.pending(&a).await, "after 3: pending(build:A)");
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
 fn reattached_keys(reclaimed: &Reclaimed) -> Vec<(String, DispatchedJobId)> {
     reclaimed
         .reattached

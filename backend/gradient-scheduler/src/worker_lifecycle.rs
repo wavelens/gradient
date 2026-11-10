@@ -171,6 +171,8 @@ impl Scheduler {
             session,
             active,
             reclaims_jobs,
+            held_jobs_wait_deadline: Instant::now()
+                + Duration::from_secs(self.db.config.proto.assignment_reclaim_grace_secs),
         };
         let registered = self
             .call(|reply| SchedulerMsg::Register(registration, reply))
@@ -372,7 +374,9 @@ impl Scheduler {
             return;
         }
         let connected = self
-            .connected_workers(unreclaimed.iter().map(|(_, held)| held.worker.clone()))
+            .worker_ids_connected_to_other_instances(
+                unreclaimed.iter().map(|(_, held)| held.worker.clone()),
+            )
             .await;
         let (elsewhere, unreclaimed): (Vec<_>, Vec<_>) = unreclaimed
             .into_iter()
@@ -390,12 +394,20 @@ impl Scheduler {
         self.requeue_held(unreclaimed).await;
     }
 
-    async fn connected_workers(&self, workers: impl Iterator<Item = String>) -> HashSet<String> {
-        let workers: Vec<String> = workers.collect::<HashSet<_>>().into_iter().collect();
+    async fn worker_ids_connected_to_other_instances(
+        &self,
+        workers: impl Iterator<Item = String>,
+    ) -> HashSet<String> {
+        let mut remote = Vec::new();
+        for worker in workers.collect::<HashSet<_>>() {
+            if !self.is_worker_connected(&worker).await {
+                remote.push(worker);
+            }
+        }
         gradient_entity::worker_connection::Entity::find()
             .select_only()
             .column(gradient_entity::worker_connection::Column::WorkerId)
-            .filter(gradient_entity::worker_connection::Column::WorkerId.is_in(workers))
+            .filter(gradient_entity::worker_connection::Column::WorkerId.is_in(remote))
             .filter(gradient_entity::worker_connection::Column::DisconnectedAt.is_null())
             .into_tuple::<String>()
             .all(&self.db.worker_db)

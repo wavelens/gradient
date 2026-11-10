@@ -1705,6 +1705,13 @@ impl JobTracker {
         }
     }
 
+    pub fn extend_reclaim_deadlines_for_worker(&mut self, worker_id: &str, deadline: Instant) {
+        self.awaiting_reclaim
+            .values_mut()
+            .filter(|held| held.worker == worker_id)
+            .for_each(|held| held.deadline = held.deadline.max(deadline));
+    }
+
     pub fn take_unreclaimed(&mut self, now: Instant) -> Vec<(String, AwaitingReclaim)> {
         self.awaiting_reclaim
             .extract_if(|_, held| held.deadline <= now)
