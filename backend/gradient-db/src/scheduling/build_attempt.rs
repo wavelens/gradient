@@ -12,7 +12,7 @@ use gradient_entity::ids::{
 use sea_orm::sea_query::{Expr, Func, Order, Query, SelectStatement};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    PaginatorTrait, QueryFilter, QueryOrder,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
 };
 use uuid::Uuid;
 
@@ -235,18 +235,17 @@ pub async fn latest_attempt_worker<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
 ) -> Result<Option<String>, DbErr> {
-    let Some(dispatched_job) = latest_attempt(db, derivation_build)
-        .await?
-        .and_then(|attempt| attempt.dispatched_job)
-    else {
-        return Ok(None);
-    };
-
-    let job = gradient_entity::dispatched_job::Entity::find_by_id(dispatched_job)
+    let worker = Entity::find()
+        .select_only()
+        .column(gradient_entity::dispatched_job::Column::WorkerId)
+        .left_join(gradient_entity::dispatched_job::Entity)
+        .filter(Column::DerivationBuild.eq(derivation_build))
+        .order_by_desc(Column::CreatedAt)
+        .into_tuple::<Option<String>>()
         .one(db)
         .await?;
 
-    Ok(job.map(|j| j.worker_id))
+    Ok(worker.flatten())
 }
 
 pub async fn list_build_attempts_with_worker_id_newest_first<C: ConnectionTrait>(

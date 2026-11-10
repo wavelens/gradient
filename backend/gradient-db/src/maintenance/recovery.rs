@@ -13,7 +13,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::AttemptOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::sea_query::{Expr, ExprTrait};
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
 
 use gradient_types::*;
 
@@ -130,17 +130,17 @@ async fn kept_assignments<C: ConnectionTrait>(conn: &C) -> Result<Vec<KeptAssign
 
 async fn requeue_interrupted_evals<C: ConnectionTrait>(conn: &C) -> Result<u64, DbErr> {
     let ids: Vec<EvaluationId> = EEvaluation::find()
+        .select_only()
+        .column(CEvaluation::Id)
         .filter(
             CEvaluation::Status.is_in(EvaluationStatus::REQUEUE_INTERRUPTED.from.iter().copied()),
         )
         .filter(Expr::cust(no_open_assignment_predicate(&eval_job_key_sql(
             "\"evaluation\".\"id\"",
         ))))
+        .into_tuple()
         .all(conn)
-        .await?
-        .into_iter()
-        .map(|e| e.id)
-        .collect();
+        .await?;
     if ids.is_empty() {
         return Ok(0);
     }
@@ -178,8 +178,7 @@ mod tests {
     use super::*;
     use gradient_fixtures::mock::mock_db;
 
-    use gradient_entity::evaluation::Model as MEval;
-    use gradient_entity::ids::{CommitId, EvaluationId, TaskId};
+    use gradient_entity::ids::EvaluationId;
     use sea_orm::{DatabaseConnection, MockExecResult, Value};
     use std::collections::BTreeMap;
 
@@ -220,18 +219,11 @@ mod tests {
         ])
     }
 
-    fn eval_row(status: EvaluationStatus, task: Option<TaskId>) -> MEval {
-        MEval {
-            id: EvaluationId::now_v7(),
-            task,
-            status,
-            repository: "git+https://example.com/repo".into(),
-            commit: CommitId::now_v7(),
-            wildcard: "**".into(),
-            created_at: now(),
-            updated_at: now(),
-            ..Default::default()
-        }
+    fn eval_row() -> Row {
+        BTreeMap::from([(
+            "id".to_owned(),
+            Value::from(EvaluationId::now_v7().into_inner()),
+        )])
     }
 
     fn affected(rows_affected: u64) -> MockExecResult {
@@ -246,7 +238,7 @@ mod tests {
             .append_exec_results([affected(0), affected(0)])
             .append_query_results([kept])
             .append_query_results([Vec::<Row>::new()])
-            .append_query_results([Vec::<MEval>::new()])
+            .append_query_results([Vec::<Row>::new()])
             .append_exec_results([0, 0, 0, 0].map(affected))
             .append_query_results([Vec::<Row>::new()])
             .append_exec_results([affected(0)])
@@ -265,7 +257,6 @@ mod tests {
 
     #[tokio::test]
     async fn all_operations_populate_report() {
-        let task_id = TaskId::now_v7();
         let mid_flight = DerivationId::now_v7();
         let db = mock_db()
             .append_exec_results([affected(1), affected(3)])
@@ -276,7 +267,7 @@ mod tests {
             ]])
             .append_query_results([vec![unpromoted_row(mid_flight)]])
             .append_exec_results([affected(1)])
-            .append_query_results([vec![eval_row(EvaluationStatus::Fetching, Some(task_id))]])
+            .append_query_results([vec![eval_row()]])
             .append_exec_results([affected(1)])
             .append_query_results([crate::test_ctx::inserted_phase_event()])
             .append_exec_results([1, 0, 0, 1].map(affected))

@@ -68,6 +68,7 @@ mod m20261201_000000_restrict_user_foreign_keys;
 mod m20261201_000001_case_insensitive_email_unique_index;
 mod m20261201_000002_add_job_id_dispatched_at_desc_index_to_dispatched_job_concurrently;
 mod m20261201_000003_evaluation_previous_next_set_null_on_delete;
+mod m20261201_000004_add_retention_delete_indexes;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -161,6 +162,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261201_000001_case_insensitive_email_unique_index::Migration),
             Box::new(m20261201_000002_add_job_id_dispatched_at_desc_index_to_dispatched_job_concurrently::Migration),
             Box::new(m20261201_000003_evaluation_previous_next_set_null_on_delete::Migration),
+            Box::new(m20261201_000004_add_retention_delete_indexes::Migration),
         ]
     }
 }

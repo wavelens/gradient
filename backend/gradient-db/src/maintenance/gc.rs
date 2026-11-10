@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use chrono::{Duration as ChronoDuration, NaiveDateTime};
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -109,12 +109,15 @@ pub async fn after_evaluation_delete(ctx: &DbContext, deleted: &[MEvaluation]) -
 
     let commit_ids: Vec<CommitId> = deleted.iter().map(|e| e.commit).collect();
     let still_referenced: std::collections::HashSet<CommitId> = EEvaluation::find()
+        .select_only()
+        .column(CEvaluation::Commit)
+        .distinct()
         .filter(CEvaluation::Commit.is_in(commit_ids.clone()))
+        .into_tuple::<CommitId>()
         .all(&ctx.worker_db)
         .await
         .context("GC: check commit references")?
         .into_iter()
-        .map(|e| e.commit)
         .collect();
 
     let orphaned: Vec<CommitId> = commit_ids

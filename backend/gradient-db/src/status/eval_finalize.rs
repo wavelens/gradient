@@ -9,7 +9,7 @@ use crate::DbContext;
 use crate::evaluations::EvaluationItemFailureAndAbortFlags;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DbErr, EntityTrait, PaginatorTrait, QueryFilter};
 use tracing::info;
 
 /// The counters are only answering "not yet".
@@ -93,15 +93,14 @@ pub async fn settle_without_builds(ctx: &DbContext, eval: MEvaluation) -> Result
     Ok(())
 }
 
-async fn eval_error_count(ctx: &DbContext, evaluation_id: EvaluationId) -> Result<usize, DbErr> {
-    Ok(EEvaluationMessage::find()
+async fn eval_error_count(ctx: &DbContext, evaluation_id: EvaluationId) -> Result<u64, DbErr> {
+    EEvaluationMessage::find()
         .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
         .filter(
             CEvaluationMessage::Level.eq(gradient_entity::evaluation_message::MessageLevel::Error),
         )
-        .all(&ctx.worker_db)
-        .await?
-        .len())
+        .count(&ctx.worker_db)
+        .await
 }
 
 fn in_build_phase(eval: &MEvaluation) -> bool {
