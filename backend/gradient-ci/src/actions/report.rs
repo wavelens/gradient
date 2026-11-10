@@ -121,9 +121,10 @@ pub(super) async fn build_ci_reports_from_payload(
         repo,
         sha: vec_to_hex(&commit.hash),
         details_url: load_project_name(ctx, task.project).await.map(|project| {
-            format!(
-                "{}/project/{}/log/{}",
-                ctx.db.config.server.frontend_url, project, evaluation.id
+            gradient_types::frontend_page_urls::evaluation(
+                &ctx.db.config.server.frontend_url,
+                &project,
+                evaluation.id,
             )
         }),
     };

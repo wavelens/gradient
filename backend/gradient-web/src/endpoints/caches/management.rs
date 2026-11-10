@@ -10,7 +10,7 @@ use crate::api_spec::CachePath;
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
 use crate::error::{WebError, WebResult, require_create_permission};
-use crate::helpers::ok_json;
+use crate::helpers::{CreatedEntityResponse, ok_json};
 use crate::json_body::JsonBody;
 use crate::names::{CacheDisplayName, CacheName};
 use crate::permissions::{
@@ -199,7 +199,7 @@ pub async fn get(
     summary = "Create cache",
     description = "Create a new binary cache with an auto-generated signing key. Only signed-in sessions can call this endpoint. API keys cannot create caches.",
     request_body = MakeCacheRequest,
-    responses((status = OK, description = "Cache UUID", body = String, content_type = "application/json"), WebError)
+    responses((status = OK, description = "Cache created", body = CreatedEntityResponse), WebError)
 )]
 pub async fn put(
     state: State<Arc<ServerState>>,
@@ -207,7 +207,7 @@ pub async fn put(
     Extension(user): Extension<MUser>,
     Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     JsonBody(body): JsonBody<MakeCacheRequest>,
-) -> WebResult<Json<BaseResponse<String>>> {
+) -> WebResult<Json<BaseResponse<CreatedEntityResponse>>> {
     reject_api_key_authentication(api_key.as_ref())?;
     require_create_permission(state.config.permissions.create_cache, &user)?;
     if !state
@@ -291,7 +291,10 @@ pub async fn put(
         )
         .await;
 
-    Ok(ok_json(cache.id.to_string()))
+    let url = frontend_page_urls::cache(&state.config.server.frontend_url, &cache.name);
+    Ok(ok_json(CreatedEntityResponse::new(
+        cache.id, cache.name, url,
+    )))
 }
 
 #[utoipa::path(

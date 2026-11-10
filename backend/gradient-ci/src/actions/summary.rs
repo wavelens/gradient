@@ -87,9 +87,10 @@ impl EventSummary {
         self.task = Some(rows.task.name);
         self.commit = Some(short_sha(&vec_to_hex(&rows.commit.hash)));
         self.link = project_name.as_ref().map(|project| {
-            format!(
-                "{}/project/{}/log/{}",
-                ctx.db.config.server.frontend_url, project, evaluation.id
+            gradient_types::frontend_page_urls::evaluation(
+                &ctx.db.config.server.frontend_url,
+                project,
+                evaluation.id,
             )
         });
         self.project = project_name;

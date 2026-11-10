@@ -13,7 +13,7 @@ use crate::audit::{Audit, changed_fields};
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::evals::task_run_history::get_last_n_evaluation_runs_by_latest_evaluation_id;
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json, paginate};
+use crate::helpers::{CreatedEntityResponse, OptionExt, ok_json, paginate};
 use crate::json_body::JsonBody;
 use crate::names::{TaskDisplayName, TaskName};
 use crate::permissions::Permission;
@@ -200,7 +200,7 @@ pub async fn get(
     description = "Creates a new task in the project. `wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.",
     params(("project" = String, Path)),
     request_body = MakeTaskRequest,
-    responses((status = OK, description = "Task UUID", body = String, content_type = "application/json"), WebError)
+    responses((status = OK, description = "Created a task.", body = CreatedEntityResponse), WebError)
 )]
 pub async fn put(
     state: State<Arc<ServerState>>,
@@ -209,7 +209,7 @@ pub async fn put(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(project): Path<String>,
     JsonBody(body): JsonBody<MakeTaskRequest>,
-) -> WebResult<Json<BaseResponse<String>>> {
+) -> WebResult<Json<BaseResponse<CreatedEntityResponse>>> {
     let repository = validated_repository(body.repository.clone())?;
 
     let project = load_project(
@@ -301,12 +301,11 @@ pub async fn put(
         )
         .await;
 
-    let res = BaseResponse {
-        error: false,
-        message: task.id.to_string(),
-    };
-
-    Ok(Json(res))
+    Ok(ok_json(CreatedEntityResponse::new(
+        task.id,
+        task.name.clone(),
+        frontend_page_urls::task(&state.config.server.frontend_url, &project.name, &task.name),
+    )))
 }
 
 #[utoipa::path(

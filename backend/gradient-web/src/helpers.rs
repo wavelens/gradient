@@ -11,6 +11,7 @@ use gradient_db::lookup::by_ids;
 use gradient_types::ids::RoleId;
 use gradient_types::{BaseResponse, ERole, Paginated, PaginationParams};
 use sea_orm::{ConnectionTrait, PaginatorTrait, SelectorTrait};
+use serde::Serialize;
 use std::collections::HashMap;
 
 #[inline]
@@ -19,6 +20,23 @@ pub fn ok_json<T>(message: T) -> Json<BaseResponse<T>> {
         error: false,
         message,
     })
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct CreatedEntityResponse {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+}
+
+impl CreatedEntityResponse {
+    pub fn new(id: impl ToString, name: impl Into<String>, url: String) -> Self {
+        Self {
+            id: id.to_string(),
+            name: name.into(),
+            url,
+        }
+    }
 }
 
 pub trait OptionExt<T> {

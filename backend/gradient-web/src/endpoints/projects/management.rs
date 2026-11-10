@@ -9,7 +9,7 @@ use crate::api_spec::ProjectPath;
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::{MaybeApiKey, reject_api_key_authentication};
 use crate::error::{WebError, WebResult, require_create_permission};
-use crate::helpers::{ok_json, paginate};
+use crate::helpers::{CreatedEntityResponse, ok_json, paginate};
 use crate::json_body::JsonBody;
 use crate::names::{ProjectDisplayName, ProjectName};
 use crate::permissions::{Permission, PermissionMask, mask_to_vec};
@@ -260,9 +260,9 @@ pub async fn get(
     operation_id = "createProject",
     tag = "projects",
     summary = "Create project",
-    description = "Create a new project for the current user. Only signed-in sessions can call this endpoint. API keys cannot create projects.",
+    description = "Create a new project for the current user. Return the UUID, the name and the URL of the web page. Only signed-in sessions can call this endpoint. API keys cannot create projects.",
     request_body = MakeProjectRequest,
-    responses((status = OK, description = "Project UUID", body = String, content_type = "application/json"), WebError)
+    responses((status = OK, description = "Project created", body = CreatedEntityResponse), WebError)
 )]
 pub async fn put(
     state: State<Arc<ServerState>>,
@@ -271,7 +271,7 @@ pub async fn put(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     JsonBody(body): JsonBody<MakeProjectRequest>,
-) -> WebResult<Json<BaseResponse<String>>> {
+) -> WebResult<Json<BaseResponse<CreatedEntityResponse>>> {
     reject_api_key_authentication(api_key.as_ref())?;
     require_create_permission(state.config.permissions.create_project, &user)?;
 
@@ -345,10 +345,12 @@ pub async fn put(
         }
     }
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: project.id.to_string(),
-    }))
+    let url = frontend_page_urls::project(&state.config.server.frontend_url, &project.name);
+    Ok(ok_json(CreatedEntityResponse::new(
+        project.id,
+        project.name,
+        url,
+    )))
 }
 
 type PaginatedPublicProjectSummary = Paginated<PublicProjectSummary>;

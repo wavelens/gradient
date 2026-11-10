@@ -43,7 +43,7 @@ curl -X POST https://gradient.example.com/api/v1/user/keys \
 
 ## Examples
 
-An evaluation start request return the evaluation ID in the response message.
+Create endpoints return the new UUID in `message.id`, its name in `message.name` and its web page in `message.url`. Starting an evaluation returns the evaluation UUID in `message.id`.
 
 ```sh
 curl -X POST https://gradient.example.com/api/v1/tasks/acme/web-app/evaluate \

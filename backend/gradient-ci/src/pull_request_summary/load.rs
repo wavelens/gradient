@@ -23,9 +23,10 @@ pub(super) async fn load_summary(
     let evaluation_link = load_project_name(ctx, rows.task.project)
         .await
         .map(|project| {
-            format!(
-                "{}/project/{}/log/{}",
-                ctx.db.config.server.frontend_url, project, evaluation.id
+            gradient_types::frontend_page_urls::evaluation(
+                &ctx.db.config.server.frontend_url,
+                &project,
+                evaluation.id,
             )
         });
 

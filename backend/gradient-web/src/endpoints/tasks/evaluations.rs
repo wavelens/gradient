@@ -16,7 +16,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::{live_progress, live_progress_status};
 use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::{CreatedEntityResponse, OptionExt, ok_json};
 use crate::lookup::require;
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
@@ -202,16 +202,22 @@ fn first_line_truncated(s: &str, max: usize) -> Option<String> {
     operation_id = "triggerEvaluation",
     tag = "tasks",
     summary = "Trigger evaluation",
-    description = "Start an evaluation on the branch of the default trigger for the task. Return the evaluation UUID in `message`. The caller can track the run through `GET /evals/{id}` or the `GET /evals/{id}/live` stream. This run counts as manual. It does not record the default trigger and does not change the `last_fired_at` of that trigger. Outcomes for running evaluations follow the concurrency policy of the task.\nA `commit` instead evaluates that commit alongside the task's own runs.\n`POST /evals/{evaluation}/retry` re-runs the failed builds of a finished\nevaluation.\n\nThe endpoint can return `400` with `code: \"repository_unreachable\"` if it cannot fetch the repository. The causes can be DNS failure, authentication failure, an unreachable host or an invalid URL. The message can give a fixed hint. The server logs record the underlying git error.",
+    description = "Start an evaluation on the branch for the default trigger of the task. The fields in the response give the evaluation UUID in `message.id`, the task as `project/task` in `message.name`, and the evaluation page in `message.url`. The caller can track the run through `GET /evals/{id}` or the `GET /evals/{id}/live` stream. This run counts as manual. It does not record the default trigger and does not change the `last_fired_at` of that trigger. Outcomes for running evaluations follow the concurrency policy of the task.\nA `commit` instead evaluates that commit alongside the task's own runs.\n`POST /evals/{evaluation}/retry` re-runs the failed builds of a finished\nevaluation.\n\nThe endpoint can return `400` with `code: \"repository_unreachable\"` if it cannot fetch the repository. The causes can be DNS failure, authentication failure, an unreachable host or an invalid URL. The message can give a fixed hint. The server logs record the underlying git error.",
     params(TaskPath),
     request_body = Option<EvaluateRequest>,
-    responses((status = OK, description = "Evaluation UUID", body = String, content_type = "application/json"), WebError)
+    responses((status = OK, description = "Evaluation started", body = CreatedEntityResponse), WebError)
 )]
 pub async fn post_task_evaluate(
-    TaskScope { task, user, db, .. }: TaskScope<Requires<can::TriggerEvaluation>>,
+    TaskScope {
+        project,
+        task,
+        user,
+        db,
+        ..
+    }: TaskScope<Requires<can::TriggerEvaluation>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     body: Option<Json<Option<EvaluateRequest>>>,
-) -> WebResult<Json<BaseResponse<String>>> {
+) -> WebResult<Json<BaseResponse<CreatedEntityResponse>>> {
     let body = body.and_then(|Json(b)| b).unwrap_or_default();
     let attr = parse_evaluate_attr(body.attr.as_deref())?;
     let walk_mode = body.walk.unwrap_or_default();
@@ -229,7 +235,25 @@ pub async fn post_task_evaluate(
         }
     };
 
-    Ok(ok_json(evaluation.to_string()))
+    Ok(ok_json(build_created_evaluation_response(
+        &db.config.server.frontend_url,
+        &project.name,
+        &task.name,
+        evaluation,
+    )))
+}
+
+fn build_created_evaluation_response(
+    frontend_url: &str,
+    project: &str,
+    task: &str,
+    evaluation: EvaluationId,
+) -> CreatedEntityResponse {
+    CreatedEntityResponse::new(
+        evaluation,
+        format!("{project}/{task}"),
+        frontend_page_urls::evaluation(frontend_url, project, evaluation),
+    )
 }
 
 fn parse_evaluate_attr(attr: Option<&str>) -> WebResult<Option<String>> {
@@ -908,6 +932,23 @@ pub async fn get_entry_point_download(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn started_evaluation_response_names_the_task_and_links_the_evaluation_page() {
+        let evaluation = gradient_types::EvaluationId::now_v7();
+        let created = super::build_created_evaluation_response(
+            "https://ci.example/",
+            "infra",
+            "master",
+            evaluation,
+        );
+        assert_eq!(created.id, evaluation.to_string());
+        assert_eq!(created.name, "infra/master");
+        assert_eq!(
+            created.url,
+            format!("https://ci.example/project/infra/log/{evaluation}")
+        );
+    }
+
     #[test]
     fn first_line_truncated_takes_first_line_and_caps_length() {
         assert_eq!(super::first_line_truncated("", 100), None);

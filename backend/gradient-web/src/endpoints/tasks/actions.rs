@@ -645,8 +645,8 @@ async fn test_fire_link(
     let frontend_url = &ci.db.config.server.frontend_url;
     let latest = gradient_db::evaluations::latest_of_task(&ci.db.web_db, task_id, 1).await?;
     Ok(match latest.first() {
-        Some(evaluation) => format!("{frontend_url}/project/{project}/log/{}", evaluation.id),
-        None => format!("{frontend_url}/project/{project}/task/{task}"),
+        Some(evaluation) => frontend_page_urls::evaluation(frontend_url, project, evaluation.id),
+        None => frontend_page_urls::task(frontend_url, project, task),
     })
 }
 

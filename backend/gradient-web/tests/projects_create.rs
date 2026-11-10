@@ -57,6 +57,7 @@ async fn put_project_returns_already_exists_via_pre_check() {
 async fn put_project_creates_project_and_admin_membership() {
     let (db, auth) = signed_in();
     let inserted = project_named("fresh");
+    let project_id = inserted.id;
     let membership = project_user_row(inserted.id);
 
     let db = db
@@ -78,6 +79,7 @@ async fn put_project_creates_project_and_admin_membership() {
     let server = TestState::new()
         .web_db(db.into_connection())
         .cli(|cli| cli.secrets.crypt_file = temp_crypt_secret_file())
+        .config(|c| c.server.frontend_url = "https://ci.example/".into())
         .server();
     let res = server
         .put("/api/v1/projects")
@@ -93,4 +95,12 @@ async fn put_project_creates_project_and_admin_membership() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["error"], false);
+    assert_eq!(
+        body["message"],
+        json!({
+            "id": project_id.to_string(),
+            "name": "fresh",
+            "url": "https://ci.example/project/fresh",
+        })
+    );
 }

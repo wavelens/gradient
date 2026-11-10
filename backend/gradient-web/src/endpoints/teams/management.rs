@@ -10,7 +10,7 @@ use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::authorization::{MaybeApiKey, reject_api_key_authentication};
 use crate::error::{WebError, WebResult, require_create_permission, require_superuser};
-use crate::helpers::ok_json;
+use crate::helpers::{CreatedEntityResponse, ok_json};
 use crate::json_body::JsonBody;
 use crate::names::{TeamDisplayName, TeamName};
 use crate::resource::Resource;
@@ -173,7 +173,7 @@ pub async fn get_team_name_available(
     summary = "Create team",
     description = "Create a team and make the caller its admin. Use `--permissions-create-team` to control which users can create teams. Requests need a signed-in session. API keys cannot use team endpoints.",
     request_body = MakeTeamRequest,
-    responses((status = OK, description = "Team created", body = String, content_type = "application/json"), WebError)
+    responses((status = OK, description = "Team created", body = CreatedEntityResponse), WebError)
 )]
 pub async fn put_team(
     state: State<Arc<ServerState>>,
@@ -181,7 +181,7 @@ pub async fn put_team(
     Extension(user): Extension<MUser>,
     Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     JsonBody(body): JsonBody<MakeTeamRequest>,
-) -> WebResult<Json<BaseResponse<String>>> {
+) -> WebResult<Json<BaseResponse<CreatedEntityResponse>>> {
     reject_api_key_authentication(api_key.as_ref())?;
     require_create_permission(state.config.permissions.create_team, &user)?;
 
@@ -228,7 +228,8 @@ pub async fn put_team(
         )
         .await;
 
-    Ok(ok_json(team.id.to_string()))
+    let url = frontend_page_urls::team(&state.config.server.frontend_url, &team.name);
+    Ok(ok_json(CreatedEntityResponse::new(team.id, team.name, url)))
 }
 
 #[utoipa::path(

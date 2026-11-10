@@ -459,7 +459,7 @@ async fn create_task_seeds_default_polling_trigger() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["error"], false);
-    assert_eq!(body["message"], task_id().to_string());
+    assert_eq!(body["message"]["id"], task_id().to_string());
     drop(server);
     let task_and_trigger_in_one_transaction = conn.into_transaction_log().iter().any(|t| {
         let sql: Vec<&str> = t.statements().iter().map(|s| s.sql.as_str()).collect();

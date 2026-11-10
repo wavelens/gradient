@@ -81,6 +81,7 @@ async fn put_cache_returns_already_exists_via_pre_check() {
 async fn put_cache_creates_cache_and_default_upstream() {
     let (db, auth) = signed_in();
     let inserted = cache_row("fresh");
+    let cache_id = inserted.id;
     let upstream = cache_upstream_row(inserted.id);
     let creator_admin = cache_member_in(inserted.id, BASE_CACHE_ROLE_ADMIN_ID);
 
@@ -123,4 +124,12 @@ async fn put_cache_creates_cache_and_default_upstream() {
     res.assert_status_ok();
     let body: Value = res.json();
     assert_eq!(body["error"], false);
+    assert_eq!(body["message"]["id"], cache_id.to_string());
+    assert_eq!(body["message"]["name"], "fresh");
+    assert!(
+        body["message"]["url"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("/caches/fresh")
+    );
 }

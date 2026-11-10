@@ -16,6 +16,7 @@ pub mod consts;
 pub mod events;
 pub mod exec;
 pub mod flake_url;
+pub mod frontend_page_urls;
 pub mod git_host;
 pub mod ids;
 pub mod input;

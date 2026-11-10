@@ -53,6 +53,18 @@ async fn creating_a_team_makes_the_creator_its_admin() {
         .await;
 
     res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(
+        body["message"]["id"],
+        gradient_fixtures::ids::team_id().to_string()
+    );
+    assert_eq!(body["message"]["name"], "platform");
+    assert!(
+        body["message"]["url"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("/team/platform")
+    );
     drop(server);
     assert!(ran(conn, "INSERT INTO \"team_user\""));
 }
