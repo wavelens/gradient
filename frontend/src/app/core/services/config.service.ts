@@ -8,7 +8,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '@environments/environment';
-import { CreatePermission, LoginProviderInfo, ServerConfig } from '@core/models';
+import { CreatePermission, GiteaOAuthAppConfig, LoginProviderInfo, ServerConfig } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class ConfigService {
@@ -27,6 +27,7 @@ export class ConfigService {
   createCache: CreatePermission = 'everyone';
   createTeam: CreatePermission = 'everyone';
   githubAppEnabled = false;
+  giteaOauthAppConfig: GiteaOAuthAppConfig | null = null;
   sshEnabled = false;
   sshPort: number | null = null;
   gradientCiEnabled = false;
@@ -68,6 +69,7 @@ export class ConfigService {
           this.createCache = res.message.create_cache ?? 'everyone';
           this.createTeam = res.message.create_team ?? 'everyone';
           this.githubAppEnabled = res.message.github_app_enabled ?? false;
+          this.giteaOauthAppConfig = res.message.gitea_oauth_app ?? null;
           this.sshEnabled = res.message.ssh_enabled ?? false;
           this.sshPort = res.message.ssh_port ?? null;
           this.gradientCiEnabled = res.message.gradient_ci_enabled ?? false;

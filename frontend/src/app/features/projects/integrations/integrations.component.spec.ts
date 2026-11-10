@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, Subject, of, throwError } from 'rxjs';
@@ -13,6 +13,7 @@ import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { IntegrationsComponent } from './integrations.component';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { TasksService } from '@core/services/tasks.service';
+import { ConfigService } from '@core/services/config.service';
 import { projectRouteStub } from '@core/resolvers/access-route.testing';
 import { AccessState, IntegrationResponse } from '@core/models';
 import { ApiError } from '@core/services/api.service';
@@ -28,6 +29,7 @@ const baseIntegration: IntegrationResponse = {
   endpoint_url: null,
   has_secret: true,
   has_access_token: false,
+  access_token_refreshes_automatically: false,
   allowed_ips: [],
   created_by: 'u',
   created_at: '2026-01-01T00:00:00Z',
@@ -45,6 +47,7 @@ const githubOutbound: IntegrationResponse = {
   endpoint_url: null,
   has_secret: false,
   has_access_token: false,
+  access_token_refreshes_automatically: false,
   allowed_ips: [],
   created_by: 'u',
   created_at: '2026-01-01T00:00:00Z',
@@ -548,5 +551,80 @@ describe('IntegrationsComponent - validation', () => {
     comp.formData.display_name = '  ';
     comp.saveEdit();
     expect(writes.patchProjectIntegration).toHaveBeenCalledWith('acme', baseIntegration.id, { display_name: 'gitea-prod' });
+  });
+});
+
+describe('IntegrationsComponent - OAuth2 connection', () => {
+  const writable: AccessState = { managed: false, canEdit: true, canTrigger: true };
+  const codeberg = { git_host_type: 'forgejo', instance_base_url: 'https://codeberg.org' };
+
+  function setupWithOAuth2App(integrations: IntegrationResponse[], query: Record<string, string> = {}) {
+    TestBed.overrideProvider(ConfigService, { useValue: { giteaOauthAppConfig: codeberg } });
+    const fixture = setup(writable, integrations, false, null, query);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    return { fixture, navigate };
+  }
+
+  const banner = (fixture: ComponentFixture<IntegrationsComponent>) =>
+    (fixture.nativeElement as HTMLElement).querySelector('[data-testid="oauth-outcome-banner"]')?.textContent?.trim();
+
+  it('no OAuth2 connection without an OAuth2 app on the server', async () => {
+    const fixture = setup(writable, []);
+    await settled(fixture);
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="oauth-connect-section"]')).toBeNull();
+  });
+
+  it('prefill name from host, set name and display name, send browser to connect endpoint', async () => {
+    const { fixture } = setupWithOAuth2App([]);
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    (findByText(fixture.nativeElement, 'connect with forgejo (codeberg.org)') as HTMLButtonElement).click();
+    expect(comp.showIntegrationNameDialog()).toBe(true);
+    expect(comp.formData.name).toBe('codeberg');
+    comp.formData.display_name = 'Codeberg CI';
+    expect(comp.oauth2ConnectUrlWithNameAndDisplayName).toBe(
+      '/api/v1/projects/acme/integrations/oauth/connect?name=codeberg&display_name=Codeberg+CI',
+    );
+  });
+
+  it('reject a name already used by either kind of integration', async () => {
+    const { fixture } = setupWithOAuth2App([baseIntegration]);
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    comp.openOAuth2ConnectDialogWithDefaultNameFromHostname();
+    comp.formData.name = baseIntegration.name;
+    comp.connectOAuthIntegration();
+    fixture.detectChanges();
+    expect(document.querySelector('.gr-dialog .field-error')?.textContent?.trim()).toBe(
+      'An integration with this name is already present in this project.',
+    );
+  });
+
+  it('report connected integrations and installed webhooks and remove the results from the URL', async () => {
+    const { fixture, navigate } = setupWithOAuth2App([], { oauth_connected: 'codeberg', webhooks_installed: '2' });
+    await settled(fixture);
+    expect(banner(fixture)).toContain('Connected codeberg. Installed webhooks in 2 repositories.');
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({
+      queryParams: { oauth_connected: null, webhooks_installed: null, oauth_error: null },
+      replaceUrl: true,
+    }));
+  });
+
+  it('explain connection failure and fall back to generic message for unknown code', async () => {
+    const denied = setupWithOAuth2App([], { oauth_error: 'denied' });
+    await settled(denied.fixture);
+    expect(banner(denied.fixture)).toContain('Access denied by the Git host.');
+
+    TestBed.resetTestingModule();
+    const unknown = setupWithOAuth2App([], { oauth_error: 'teapot' });
+    await settled(unknown.fixture);
+    expect(banner(unknown.fixture)).toContain('Connection to the Git host failed. Try again.');
+  });
+
+  it('mark a status reporter for automatic access token refresh', async () => {
+    const reporter = { ...baseIntegration, kind: 'outbound', has_access_token: true, access_token_refreshes_automatically: true };
+    const fixture = setup(writable, [reporter]);
+    await settled(fixture);
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="token-refreshes-badge"]')).not.toBeNull();
   });
 });

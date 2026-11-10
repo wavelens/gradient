@@ -22,6 +22,9 @@
       <a grButton label="Back to trigger" icon="arrow_back" size="small" [routerLink]="triggerLink"></a>
     </gr-message-banner>
   }
+  @if (gitHostOauthApprovalReturnBannerSignal(); as outcome) {
+    <gr-message-banner slot="banner" [type]="outcome.severity" data-testid="oauth-outcome-banner">{{ outcome.text }}</gr-message-banner>
+  }
   @if (!access().canEdit) {
     <gr-load-state [error]="missingPermission()" />
   } @else if (loading() || loadError()) {
@@ -49,6 +52,20 @@
             }
           </div>
         </div>
+      </gr-settings-section>
+    }
+
+    @if (giteaForgejoOAuth2AppConfig) {
+      <gr-settings-section [title]="oauth2AppGitHostTypeAndInstanceHostnameLabel" data-testid="oauth-connect-section">
+        <p class="text-secondary">Connect this project to a Git host with OAuth2. Gradient can create a webhook receiver and a status reporter after approval on the Git host. Gradient can refresh the access token automatically and install webhooks in the repositories of connected tasks.</p>
+        <button
+          *appWritable="access()"
+          grButton
+          [label]="'Connect with ' + oauth2AppGitHostTypeAndInstanceHostnameLabel"
+          icon="link"
+          (click)="openOAuth2ConnectDialogWithDefaultNameFromHostname()"
+          [appManagedDisable]="access()"
+        ></button>
       </gr-settings-section>
     }
 
@@ -141,6 +158,9 @@
                   <gr-form-field label="Access Token">
                     @if (integration.has_access_token) {
                       <gr-badge severity="success">Configured</gr-badge>
+                      @if (integration.access_token_refreshes_automatically) {
+                        <gr-badge data-testid="token-refreshes-badge">Automatic refresh of the token</gr-badge>
+                      }
                     } @else {
                       <gr-badge severity="warning">Not set</gr-badge>
                     }
@@ -279,6 +299,31 @@
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
     <button grButton label="Save" icon="check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
+  </div>
+</gr-dialog>
+
+<gr-dialog
+  [header]="'Connect with ' + oauth2AppGitHostTypeAndInstanceHostnameLabel"
+  [(visible)]="showIntegrationNameDialog"
+  width="520px"
+>
+  <gr-message-banner type="warning">Gradient can redirect to the Git host for approval. Access tokens for the approving account have full access, so approve with a bot account.</gr-message-banner>
+  <gr-form-field
+    label="Name"
+    for="oauth-name"
+    required
+    [invalid]="(submitAttempted() || oauthNameModel.touched) && !!oauth2IntegrationNameValidationError"
+    [error]="oauth2IntegrationNameValidationError ?? ''"
+    hint="Name of the webhook receiver and the status reporter. Lowercase letters, numbers, dashes."
+  >
+    <input grInput id="oauth-name" [(ngModel)]="formData.name" #oauthNameModel="ngModel" (keyup.enter)="connectOAuthIntegration()" />
+  </gr-form-field>
+  <gr-form-field label="Display Name" for="oauth-display-name" hint="Human-readable label shown in the integrations list.">
+    <input grInput id="oauth-display-name" [(ngModel)]="formData.display_name" placeholder="Defaults to the name" (keyup.enter)="connectOAuthIntegration()" />
+  </gr-form-field>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showIntegrationNameDialog.set(false)"></button>
+    <button grButton label="Continue" icon="open_in_new" (click)="connectOAuthIntegration()"></button>
   </div>
 </gr-dialog>
 

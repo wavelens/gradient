@@ -6,8 +6,10 @@
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule, UrlTree } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule, UrlTree } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { environment } from '@environments/environment';
+import { ConfigService } from '@core/services/config.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -51,6 +53,19 @@ interface Option<T> {
   value: T;
 }
 
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  denied: 'Access denied by the Git host.',
+  signed_out: 'Sign-out happened before the Git host responded. Sign in again and retry.',
+  forbidden: 'No permission to manage integrations for this project.',
+  exists: 'This project already has an integration with this name. Choose another name and retry.',
+  failed: 'Connection to the Git host failed. Try again.',
+};
+
+function deriveDefaultIntegrationNameFromUrl(url: string): string {
+  const labels = new URL(url).hostname.split('.');
+  return slugify((labels.length > 1 ? labels.slice(0, -1) : labels).join('-'));
+}
+
 @Component({
   selector: 'app-integrations',
   standalone: true,
@@ -84,6 +99,8 @@ interface Option<T> {
 })
 export class IntegrationsComponent implements OnInit {
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
+  private config = inject(ConfigService);
   private integrationsService = inject(IntegrationsService);
   private resolvedProject = injectProject();
   private tasksService = inject(TasksService);
@@ -120,6 +137,20 @@ export class IntegrationsComponent implements OnInit {
     return taken ? 'An integration of this kind with this name is already in this project.' : null;
   }
 
+  get oauth2IntegrationNameValidationError(): string | null {
+    const name = this.formData.name.trim();
+    if (!name) return 'Enter a name.';
+    if (!this.namePattern.test(name)) return 'Lowercase letters, digits and dashes only. Cannot start or end with a dash.';
+    return this.integrations().some((i) => i.name === name) ? 'An integration with this name is already present in this project.' : null;
+  }
+
+  get oauth2ConnectUrlWithNameAndDisplayName(): string {
+    const query = new URLSearchParams({ name: this.formData.name.trim() });
+    const displayName = this.formData.display_name.trim();
+    if (displayName) query.set('display_name', displayName);
+    return `${environment.apiUrl}/projects/${encodeURIComponent(this.projectName)}/integrations/oauth/connect?${query}`;
+  }
+
   get endpointUrlError(): string | null {
     return this.formData.endpoint_url.trim() ? fieldChecks.httpUrl(this.formData.endpoint_url) : 'Enter the base URL of the Git host.';
   }
@@ -140,6 +171,8 @@ export class IntegrationsComponent implements OnInit {
   showCreateDialog = signal(false);
   showEditDialog = signal(false);
   showSecretDialog = signal(false);
+  showIntegrationNameDialog = signal(false);
+  gitHostOauthApprovalReturnBannerSignal = signal<{ severity: 'success' | 'error'; text: string } | null>(null);
   createdInbound = signal<{ integration: IntegrationResponse; secret: string } | null>(null);
   private readonly triggerToReturnTo = this.readTriggerToReturnTo();
   private createdForTrigger = signal<UrlTree | null>(null);
@@ -180,6 +213,10 @@ export class IntegrationsComponent implements OnInit {
   githubAppInstalled = computed(() => this.githubInstallations().length > 0);
   githubAppInstallUrl = computed(() => this.resolvedProject()?.github_app_install_url ?? null);
 
+  readonly giteaForgejoOAuth2AppConfig = this.config.giteaOauthAppConfig;
+  readonly oauth2AppGitHostTypeAndInstanceHostnameLabel = this.giteaForgejoOAuth2AppConfig
+    ? `${gitHostLabel(this.giteaForgejoOAuth2AppConfig.git_host_type)} (${new URL(this.giteaForgejoOAuth2AppConfig.instance_base_url).host})`
+    : '';
 
   readonly selfHostedGitHostOptions = SELF_HOSTED_GIT_HOSTS;
 
@@ -187,6 +224,7 @@ export class IntegrationsComponent implements OnInit {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
+    this.readConnectOutcomeFromQueryParams();
     this.loadIntegrations();
     this.tasksService.getTasks(this.projectName).subscribe({
       next: (page) => {
@@ -202,6 +240,40 @@ export class IntegrationsComponent implements OnInit {
     const task = query.get('task');
     const trigger = query.get('trigger');
     return task && trigger ? { task, trigger } : null;
+  }
+
+  private readConnectOutcomeFromQueryParams(): void {
+    const query = this.route.snapshot.queryParamMap;
+    const connected = query.get('oauth_connected');
+    const error = query.get('oauth_error');
+    if (!connected && !error) return;
+    if (error) {
+      this.gitHostOauthApprovalReturnBannerSignal.set({ severity: 'error', text: OAUTH_ERROR_MESSAGES[error] ?? OAUTH_ERROR_MESSAGES['failed'] });
+    } else {
+      const installed = Number(query.get('webhooks_installed') ?? 0);
+      const webhooks = installed > 0 ? ` Installed webhooks in ${installed} repositories.` : '';
+      this.gitHostOauthApprovalReturnBannerSignal.set({ severity: 'success', text: `Connected ${connected}.${webhooks}` });
+    }
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { oauth_connected: null, webhooks_installed: null, oauth_error: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
+  openOAuth2ConnectDialogWithDefaultNameFromHostname(): void {
+    const app = this.giteaForgejoOAuth2AppConfig;
+    if (!app) return;
+    this.formData = { ...this.formData, name: deriveDefaultIntegrationNameFromUrl(app.instance_base_url), display_name: '' };
+    this.submitAttempted.set(false);
+    this.showIntegrationNameDialog.set(true);
+  }
+
+  connectOAuthIntegration(): void {
+    this.submitAttempted.set(true);
+    if (this.oauth2IntegrationNameValidationError) return;
+    window.location.href = this.oauth2ConnectUrlWithNameAndDisplayName;
   }
 
   private openCreateDialogForTrigger(): void {
