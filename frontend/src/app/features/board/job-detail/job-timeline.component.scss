@@ -5,6 +5,9 @@
  */
 
 @use '@gradient/ui/styles/variables' as *;
+@use '../phone-width-hide-cells' as phone;
+
+@include phone.hide-cell-below-small-breakpoint;
 
 // The chart and its phase breakdown are one panel, so the timeline paints the
 // same card every other section of the page sits on.
@@ -18,6 +21,12 @@
 }
 
 .chart { width: 100%; }
+
+.unfinished-note {
+  margin: 0 0 $spacing-sm;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+}
 
 .phases-scroll { overflow-x: auto; }
 

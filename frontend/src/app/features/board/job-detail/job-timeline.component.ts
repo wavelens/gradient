@@ -104,21 +104,31 @@ export function phaseLabelColumnWidth(hostWidth: number): number {
   template: `
     @if (rows().length) {
       <div class="chart" #chart [style.height.px]="chartHeight()"></div>
+      @if (!jobFinished()) {
+        <p class="unfinished-note">More phases appear after job completion.</p>
+      }
 
       <div class="phases-scroll" grScrollRegion>
       <table class="phases">
         <thead>
-          <tr><th>Phase</th><th class="num">Start</th><th class="num">Duration</th><th>Share</th><th class="num">Paths</th><th class="num">Size</th></tr>
+          <tr>
+            <th>Phase</th>
+            <th class="num job-board-table-cell-hidden-on-phone">Start</th>
+            <th class="num">Duration</th>
+            <th>Share</th>
+            <th class="num job-board-table-cell-hidden-on-phone">Paths</th>
+            <th class="num job-board-table-cell-hidden-on-phone">Size</th>
+          </tr>
         </thead>
         <tbody>
           @for (r of rows(); track r.seq) {
             <tr>
               <td class="name" [style.padding-left.px]="8 + r.depth * 16">{{ label(r.phase) }}</td>
-              <td class="num mono">+{{ duration(r.startMs) }}</td>
+              <td class="num mono job-board-table-cell-hidden-on-phone">+{{ duration(r.startMs) }}</td>
               <td class="num mono">{{ duration(r.durationMs) }}</td>
               <td class="bar-cell"><div class="bar" [style.width.%]="r.share * 100"></div></td>
-              <td class="num mono">{{ r.paths ? count(r.paths) : '-' }}</td>
-              <td class="num mono">{{ r.bytes ? bytes(r.bytes) : '-' }}</td>
+              <td class="num mono job-board-table-cell-hidden-on-phone">{{ r.paths ? count(r.paths) : '-' }}</td>
+              <td class="num mono job-board-table-cell-hidden-on-phone">{{ r.bytes ? bytes(r.bytes) : '-' }}</td>
             </tr>
           }
         </tbody>
@@ -132,6 +142,7 @@ export function phaseLabelColumnWidth(hostWidth: number): number {
 })
 export class JobTimelineComponent implements OnDestroy {
   readonly phases = input.required<JobPhaseView[]>();
+  readonly jobFinished = input(true);
 
   private readonly chartRef = viewChild<ElementRef<HTMLElement>>('chart');
   private readonly theme = inject(ThemeService);

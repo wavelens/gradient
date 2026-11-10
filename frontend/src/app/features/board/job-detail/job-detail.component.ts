@@ -246,7 +246,7 @@ interface RuleRow {
 
       @if (j.phases.length) {
         <h2>Worker timeline <gr-label-help doc="ui/job-board/#job-inspection" title="About the worker timeline" /></h2>
-        <gr-job-timeline [phases]="j.phases" />
+        <gr-job-timeline [phases]="j.phases" [jobFinished]="!!j.finished_at" />
       }
 
       @if (j.derivations.length) {

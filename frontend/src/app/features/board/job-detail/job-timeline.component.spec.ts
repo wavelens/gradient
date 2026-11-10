@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { depths, phaseLabel, phaseLabelColumnWidth, phaseRows } from './job-timeline.component';
+import { TestBed } from '@angular/core/testing';
+import { JobTimelineComponent, depths, phaseLabel, phaseLabelColumnWidth, phaseRows } from './job-timeline.component';
 import { JobPhaseView } from '@core/models';
 
 function span(seq: number, parent_seq: number | null, phase: string, start_ms: number, end_ms: number): JobPhaseView {
@@ -64,5 +65,25 @@ describe('job timeline', () => {
     expect(phaseLabel('nar_fetch')).toBe('NAR fetch');
     expect(phaseLabel('nar_import')).toBe('NAR import');
     expect(phaseLabel('unknown_99')).toBe('unknown_99');
+  });
+});
+
+describe('JobTimelineComponent', () => {
+  function render(jobFinished: boolean): HTMLElement {
+    const fixture = TestBed.createComponent(JobTimelineComponent);
+    fixture.componentRef.setInput('phases', [span(0, null, 'program', 0, 4000)]);
+    fixture.componentRef.setInput('jobFinished', jobFinished);
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  it('says more phases follow while the job runs and drops the note once it finished', () => {
+    expect(render(false).querySelector('.unfinished-note')?.textContent).toContain('after job completion');
+    expect(render(true).querySelector('.unfinished-note')).toBeNull();
+  });
+
+  it('marks start, paths and size as the columns a phone hides', () => {
+    const hidden = Array.from(render(true).querySelectorAll('thead .job-board-table-cell-hidden-on-phone')).map((cell) => cell.textContent?.trim());
+    expect(hidden).toEqual(['Start', 'Paths', 'Size']);
   });
 });
