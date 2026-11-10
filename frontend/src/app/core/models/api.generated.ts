@@ -331,6 +331,7 @@ export interface BuildItem {
   prioritized: boolean;
   ifd: boolean;
   continued_in_evaluation?: EvaluationId | null;
+  entry_points: string[];
 }
 
 export type BuildJobId = string;
@@ -381,6 +382,7 @@ export interface BuildWithOutputs {
   created_at: string;
   updated_at: string;
   progress?: BuildProgress | null;
+  entry_points: string[];
 }
 
 export interface Cache {
@@ -1408,6 +1410,8 @@ export interface HistoryBar {
   status: EvaluationStatus;
   duration_ms?: number | null;
   created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
 }
 
 export type HitKind = "project" | "task" | "cache" | "nar" | "commit";
@@ -2636,6 +2640,7 @@ export interface TaskResponse {
   wildcard: string;
   last_evaluation?: EvaluationId | null;
   last_evaluation_status?: EvaluationStatus | null;
+  recent_evaluations: HistoryBar[];
   force_evaluation: boolean;
   created_by: UserId;
   created_at: string;

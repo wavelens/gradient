@@ -449,6 +449,7 @@ mod tests {
             build_started_at: None,
             build_time_ms: ms,
             continued_in_evaluation: None,
+            entry_points: Vec::new(),
             depth: 0,
             dispatched_job: None,
             has_artefacts: false,

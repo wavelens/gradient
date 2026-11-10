@@ -22,7 +22,7 @@ async fn get_build_returns_response() {
             "id": "00000000-0000-0000-0000-000000000001", "evaluation": "00000000-0000-0000-0000-000000000002", "status": "Completed",
             "derivation_path": "/nix/store/abc.drv", "architecture": "x86_64-linux",
             "output": {}, "created_at": "2024-01-01T00:00:00", "updated_at": "2024-01-01T00:00:00",
-            "dispatched_job": null, "ifd": false, "prioritized": false, "progress": null,
+            "dispatched_job": null, "entry_points": [], "ifd": false, "prioritized": false, "progress": null,
             "worker": null
         }))))
         .mount(&server)

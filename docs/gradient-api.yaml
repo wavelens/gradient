@@ -15238,6 +15238,7 @@ components:
       - depth
       - prioritized
       - ifd
+      - entry_points
       properties:
         id:
           $ref: '#/components/schemas/BuildJobId'
@@ -15276,6 +15277,10 @@ components:
           oneOf:
           - $ref: '#/components/schemas/EvaluationId'
           - type: 'null'
+        entry_points:
+          type: array
+          items:
+            type: string
     BuildJobId:
       type: string
       format: uuid
@@ -15398,6 +15403,7 @@ components:
       - ifd
       - created_at
       - updated_at
+      - entry_points
       properties:
         id:
           $ref: '#/components/schemas/BuildJobId'
@@ -15437,6 +15443,10 @@ components:
           oneOf:
           - $ref: '#/components/schemas/BuildProgress'
           - type: 'null'
+        entry_points:
+          type: array
+          items:
+            type: string
     Cache:
       type: object
       required:
@@ -18455,6 +18465,16 @@ components:
           format: int64
         created_at:
           type: string
+          format: date-time
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
           format: date-time
     HitKind:
       type: string
@@ -21921,6 +21941,7 @@ components:
       - description
       - repository
       - wildcard
+      - recent_evaluations
       - force_evaluation
       - created_by
       - created_at
@@ -21961,6 +21982,10 @@ components:
           oneOf:
           - $ref: '#/components/schemas/EvaluationStatus'
           - type: 'null'
+        recent_evaluations:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryBar'
         force_evaluation:
           type: boolean
         created_by:
