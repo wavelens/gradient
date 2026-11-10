@@ -47,7 +47,7 @@ describe('DashboardStatsComponent', () => {
     expect(cards(render(() => of(STATS)).root)).toEqual({
       'CPU time': '18.4 y',
       'Completed builds - projects you can see': '1.28M',
-      'Size of your caches': '2.4 TiB',
+      'Size of caches created or caches used by projects': '2.4 TiB',
       'Worker load': '72%',
       'Median queue wait (24 h)': '38.0 s',
     });
@@ -61,7 +61,7 @@ describe('DashboardStatsComponent', () => {
 
   it('lays out every labelled card with a placeholder value until the stats arrive', () => {
     const root = render(() => NEVER).root;
-    expect(Object.keys(cards(root))).toEqual(['Completed builds - projects you can see', 'Size of your caches', 'Worker load', 'Median queue wait (24 h)']);
+    expect(Object.keys(cards(root))).toEqual(['Completed builds - projects you can see', 'Size of caches created or caches used by projects', 'Worker load', 'Median queue wait (24 h)']);
     expect(root.querySelectorAll('.stat-value gr-skeleton').length).toBe(4);
   });
 
@@ -85,6 +85,6 @@ describe('DashboardStatsComponent', () => {
   });
 
   it('shows a dash for worker load when no worker is online', () => {
-    expect(cards(render(() => of({ ...STATS, workers: { online: 0, busy_pct: 0 } })).root)['Worker load']).toBe('-');
+    expect(cards(render(() => of({ ...STATS, workers: { online: 0, busy_pct: 0 } })).root)['Worker load']).toBe('0 online');
   });
 });

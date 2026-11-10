@@ -131,7 +131,7 @@ describe('DashboardTaskTableComponent', () => {
     const deactivated = { ...row('hosts'), active: false, latest: null, entry_points: null };
     const { f, root } = render(null, () => of({ ...PAGE, tasks: [deactivated] }));
     await settle(f);
-    expect(root.querySelector('gr-row .meta')?.textContent?.trim()).toBe('Disabled');
+    expect(root.querySelector('gr-row .meta')?.textContent?.trim()).toBe('Inactive');
   });
 
   it('puts a neutral icon in the status slot of a task that never ran', async () => {

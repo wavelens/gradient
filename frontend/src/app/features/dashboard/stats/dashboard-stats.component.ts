@@ -45,7 +45,7 @@ export class DashboardStatsComponent implements OnInit {
       ...(s?.cpu_time_ms == null ? [] : [{ label: 'CPU time', value: formatCpuTime(s.cpu_time_ms) }]),
       { label: `Completed builds - ${scope.projects}`, value: s && formatCount(s.builds_completed) },
       { label: `Size of ${scope.caches}`, value: s && formatBytes(s.cache_size_bytes) },
-      { label: 'Worker load', value: s && (s.workers.online ? `${s.workers.busy_pct}%` : '-') },
+      { label: 'Worker load', value: s && (s.workers.online ? `${s.workers.busy_pct}%` : '0 online') },
       { label: 'Median queue wait (24 h)', value: s && formatDuration(s.queue_wait_p50_ms) },
     ];
   });

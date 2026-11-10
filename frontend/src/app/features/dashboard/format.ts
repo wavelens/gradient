@@ -20,7 +20,7 @@ export function formatCpuTime(ms: number | null | undefined): string {
 export function getDashboardScopePhrases(superuser: boolean): { projects: string; caches: string } {
   return superuser
     ? { projects: 'all projects', caches: 'all caches' }
-    : { projects: 'projects you can see', caches: 'your caches' };
+    : { projects: 'projects you can see', caches: 'caches created or caches used by projects' };
 }
 
 export function barsThatFit(width: number): number {
