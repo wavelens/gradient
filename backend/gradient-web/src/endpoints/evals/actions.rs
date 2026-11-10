@@ -22,7 +22,7 @@ use gradient_types::*;
 use std::sync::Arc;
 
 use super::EvalAccessContext;
-use super::types::MakeEvaluationRequest;
+use super::types::{EvaluationAction, MakeEvaluationRequest};
 
 async fn load_abortable_evaluation(
     db: &gradient_db::WebDb,
@@ -78,8 +78,8 @@ pub async fn post_evaluation(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let ctx = load_abortable_evaluation(&state.web_db, &user, &api_key, evaluation_id).await?;
 
-    if body.method == "abort" {
-        scheduler.abort_evaluation(ctx.evaluation).await;
+    match body.method {
+        EvaluationAction::Abort => scheduler.abort_evaluation(ctx.evaluation).await,
     }
 
     Ok(ok_json("Success".to_string()))
@@ -89,7 +89,7 @@ pub async fn post_evaluation(
     post,
     path = "/evals/{evaluation}/retry",
     operation_id = "retryEvaluation",
-    tag = "evaluations",
+    tag = "evals",
     summary = "Retry evaluation",
     description = "Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Callers need the `triggerEvaluation` permission on the project. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.",
     params(("evaluation" = EvaluationId, Path)),

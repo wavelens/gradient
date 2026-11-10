@@ -9,9 +9,15 @@ use gradient_types::ids::*;
 use gradient_types::{EvaluationProgress, MEntryPoint, MEvaluationMessage, WaitingReason};
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum EvaluationAction {
+    Abort,
+}
+
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct MakeEvaluationRequest {
-    pub method: String,
+    pub method: EvaluationAction,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -166,5 +172,17 @@ mod tests {
         let idle = response(None);
         assert!(idle.get("progress").is_none());
         assert!(idle.get("expected_thunks").is_none());
+    }
+
+    #[test]
+    fn an_unknown_evaluation_action_is_rejected() {
+        let parse = |value| serde_json::from_value::<MakeEvaluationRequest>(value);
+        assert_eq!(
+            parse(serde_json::json!({ "method": "abort" }))
+                .unwrap()
+                .method,
+            EvaluationAction::Abort
+        );
+        assert!(parse(serde_json::json!({ "method": "abrot" })).is_err());
     }
 }
