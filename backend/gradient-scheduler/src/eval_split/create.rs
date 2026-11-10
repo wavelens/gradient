@@ -40,8 +40,12 @@ pub const SPLIT_RETRY_BUDGET: i32 = 2;
 pub struct SplitDecisions(Arc<Mutex<HashSet<EvaluationId>>>);
 
 impl SplitDecisions {
-    pub fn first_time(&self, evaluation: EvaluationId) -> bool {
-        self.0.lock().insert(evaluation)
+    pub fn has_final_split_decision(&self, evaluation: EvaluationId) -> bool {
+        self.0.lock().contains(&evaluation)
+    }
+
+    pub fn record_final_split_decision(&self, evaluation: EvaluationId) {
+        self.0.lock().insert(evaluation);
     }
 
     pub fn keep_only(&self, queued: &HashSet<EvaluationId>) {
@@ -71,14 +75,18 @@ pub fn split_members(costs: &TaskEvalCosts, seats: usize) -> usize {
 
 impl Scheduler {
     pub async fn decide_split(&self, evaluation: &MEvaluation) -> Result<Option<ClusterJobId>> {
-        if !self.split_decisions.first_time(evaluation.id) {
+        if self.split_decisions.has_final_split_decision(evaluation.id) {
             return Ok(None);
         }
 
         let Some(task) = evaluation.task else {
+            self.split_decisions
+                .record_final_split_decision(evaluation.id);
             return Ok(None);
         };
         if !opted_in(&self.db.worker_db, task).await? {
+            self.split_decisions
+                .record_final_split_decision(evaluation.id);
             return Ok(None);
         }
 
@@ -92,6 +100,8 @@ impl Scheduler {
         let forecast = forecast_wall_ms(&costs, &split_params(seats));
         let members = split_members(&costs, seats);
         if members < 2 {
+            self.split_decisions
+                .record_final_split_decision(evaluation.id);
             info!(
                 evaluation_id = %evaluation.id,
                 seats,
@@ -110,6 +120,8 @@ impl Scheduler {
             min_free_ram_mb(&costs),
         )
         .await?;
+        self.split_decisions
+            .record_final_split_decision(evaluation.id);
         if let Some(cluster) = created {
             info!(
                 evaluation_id = %evaluation.id,

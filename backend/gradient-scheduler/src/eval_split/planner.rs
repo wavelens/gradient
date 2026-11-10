@@ -70,25 +70,25 @@ pub fn forecast_wall_ms(costs: &TaskEvalCosts, params: &SplitParams) -> Vec<f64>
     }
 
     let listed = listed_from_history(costs);
+    let index = CostIndex::new(costs);
     (1..=params.max_members)
         .map(|members| {
-            let shards = plan_shards(costs, &listed, members, params);
+            let shards = plan_shards(&index, &listed, members, params);
             predict_wall_ms(costs, &shards, members, params)
         })
         .collect()
 }
 
 pub fn plan_shards(
-    costs: &TaskEvalCosts,
+    index: &CostIndex,
     listed: &[ListedSet],
     members: usize,
     params: &SplitParams,
 ) -> Vec<PlannedShard> {
-    let index = CostIndex::new(costs);
     let mut sets: Vec<(f64, Vec<PlannedShard>)> = listed
         .iter()
         .map(|set| {
-            let children = costed_children(&index, set);
+            let children = costed_children(index, set);
             let total_ms = children.iter().map(|(_, ms)| ms).sum();
             let target_ms = shard_target_ms(total_ms, members, params);
             (total_ms, pack_set(&set.path, children, target_ms))
@@ -155,13 +155,13 @@ struct Below {
     subtrees: usize,
 }
 
-struct CostIndex {
+pub struct CostIndex {
     below: HashMap<Vec<String>, Below>,
     median_ms: f64,
 }
 
 impl CostIndex {
-    fn new(costs: &TaskEvalCosts) -> Self {
+    pub fn new(costs: &TaskEvalCosts) -> Self {
         let mut below: HashMap<Vec<String>, Below> = HashMap::new();
         for subtree in &costs.subtrees {
             for len in 1..=subtree.path.len() {
@@ -396,7 +396,7 @@ mod tests {
         };
         let listed = listed_from_history(&costs);
 
-        let shards = plan_shards(&costs, &listed, 2, &params(2));
+        let shards = plan_shards(&CostIndex::new(&costs), &listed, 2, &params(2));
 
         assert_eq!(shards[0].set, segs(&["b"]));
     }
@@ -416,7 +416,7 @@ mod tests {
             children: segs(&["new"]),
         }];
 
-        let shards = plan_shards(&costs, &listed, 1, &params(1));
+        let shards = plan_shards(&CostIndex::new(&costs), &listed, 1, &params(1));
 
         assert_eq!(shards.len(), 1);
         assert_eq!(shards[0].predicted_ms, 200.0);
@@ -436,7 +436,7 @@ mod tests {
         };
 
         let listed = listed_from_history(&costs);
-        let shards = plan_shards(&costs, &listed, 1, &params(1));
+        let shards = plan_shards(&CostIndex::new(&costs), &listed, 1, &params(1));
 
         assert_eq!(
             listed,
@@ -474,7 +474,12 @@ mod tests {
             children: segs(&["a", "b", "c"]),
         }];
 
-        let shards = plan_shards(&TaskEvalCosts::default(), &listed, 1, &params(1));
+        let shards = plan_shards(
+            &CostIndex::new(&TaskEvalCosts::default()),
+            &listed,
+            1,
+            &params(1),
+        );
 
         assert_eq!(shards[0].predicted_ms, 3.0 * UNKNOWN_CHILD_MS);
     }

@@ -25,7 +25,7 @@ use sea_orm::{
 };
 use tracing::{info, warn};
 
-use super::planner::{ListedSet, plan_shards};
+use super::planner::{CostIndex, ListedSet, plan_shards};
 use super::split_params;
 use crate::Scheduler;
 use crate::jobs::parse_eval_job_key;
@@ -378,11 +378,12 @@ impl From<Vec<EvalShardSpec>> for PlanInput {
 impl PlanInput {
     fn shards(self, costs: &TaskEvalCosts, members: usize) -> Vec<NewShard> {
         let params = split_params(members);
+        let index = CostIndex::new(costs);
         let mut groups: Vec<(f64, Vec<NewShard>)> = self
             .listed
             .into_iter()
             .map(|(pattern, set)| {
-                let planned = plan_shards(costs, std::slice::from_ref(&set), members, &params);
+                let planned = plan_shards(&index, std::slice::from_ref(&set), members, &params);
                 let total_ms = planned.iter().map(|shard| shard.predicted_ms).sum();
                 let shards = planned
                     .into_iter()
