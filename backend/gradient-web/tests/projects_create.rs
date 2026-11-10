@@ -7,7 +7,7 @@
 //! `MockDatabase` cannot model unique-violation rollbacks. The race between the pre-check SELECT
 //! and the INSERT is not provable with mocks.
 
-use gradient_entity::{ids::*, project, project_user};
+use gradient_entity::{ids::*, project, project_user, team_project};
 use gradient_fixtures::rows::{project_member, project_named};
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, signed_in};
@@ -64,6 +64,8 @@ async fn put_project_creates_project_and_admin_membership() {
         .append_query_results::<project::Model, _, _>([Vec::<project::Model>::new()])
         .append_query_results([vec![inserted]])
         .append_query_results([vec![membership]])
+        .append_query_results([Vec::<team_project::Model>::new()])
+        .append_query_results([Vec::<team_project::Model>::new()])
         .append_query_results([Vec::<gradient_entity::team::Model>::new()])
         .append_exec_results([
             MockExecResult {
