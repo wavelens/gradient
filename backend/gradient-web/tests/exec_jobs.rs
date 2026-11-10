@@ -187,6 +187,21 @@ async fn an_outsider_cannot_read_a_private_exec_job() {
 }
 
 #[tokio::test]
+async fn a_signed_in_non_member_gets_403_not_404_when_aborting_an_exec_job_of_a_public_project() {
+    let (db, auth) = signed_in_as(user());
+    let db = with_job(db, ExecJobStatus::Running)
+        .append_query_results([vec![public_project()]])
+        .append_query_results([Vec::<project_access::Model>::new()]);
+
+    let res = make_test_server(db.into_connection())
+        .post(&format!("/api/v1/exec/{}/abort", job_id()))
+        .add_header("authorization", auth)
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn a_finished_exec_job_cannot_be_aborted() {
     let (db, auth) = signed_in_as(superuser());
     let db = with_job(db, ExecJobStatus::Completed).append_query_results([vec![project()]]);

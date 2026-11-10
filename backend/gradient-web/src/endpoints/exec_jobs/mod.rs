@@ -24,15 +24,15 @@ pub use self::query::{
     ExecJobTokenView, StartedEvaluationView, get_exec_job, list_evaluation_exec_jobs,
 };
 
-use crate::access::{can_view_project, require_project_permission};
+use crate::access::{can_view_project, load_membership_with_permissions};
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
-use crate::refusal::{Refusal, RefusalStatus};
+use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
 use gradient_db::WebDb;
 use gradient_db::exec_jobs::reads::{self, ExecJobDetail, ExecNodeDetail};
 use gradient_db::lookup::by_id;
-use gradient_types::permissions::Permission;
+use gradient_types::permissions::{Permission, mask_grants};
 use gradient_types::*;
 
 #[derive(Debug, thiserror::Error)]
@@ -94,16 +94,17 @@ impl ExecJobAccessContext {
         api_key: Option<&ApiKeyContext>,
     ) -> WebResult<Self> {
         let ctx = Self::load_unguarded(db, job).await?;
-        if !user.superuser {
-            require_project_permission(
-                db,
-                user.id,
-                ctx.project.id,
-                Permission::TriggerEvaluation,
-                Resource::ExecJob,
-                api_key,
-            )
-            .await?;
+        if user.superuser {
+            return Ok(ctx);
+        }
+        let mask = load_membership_with_permissions(db, user.id, ctx.project.id, api_key)
+            .await?
+            .unwrap_or(0);
+        if !ctx.project.public && !mask_grants(mask, Permission::ViewProject) {
+            return Err(WebError::not_found(Resource::ExecJob));
+        }
+        if !mask_grants(mask, Permission::TriggerEvaluation) {
+            return Err(SharedRefusal::MissingPermission.into());
         }
         Ok(ctx)
     }
