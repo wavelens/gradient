@@ -10,8 +10,9 @@ use crate::output::Output;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::{
-    AddMemberRequest, CreateRoleRequest, GrantCacheRequest, IndexName, PatchCacheGrantRequest,
-    PatchRoleRequest, RemoveMemberRequest, RevokeInvitationRequest, RoleResponseCacheRoleOwner,
+    AddMemberRequest, ChangeMemberRoleRequest, CreateRoleRequest, GrantCacheRequest, IndexName,
+    PatchCacheGrantRequest, PatchRoleRequest, RemoveMemberRequest, RevokeInvitationRequest,
+    RoleResponseCacheRoleOwner,
 };
 
 #[derive(Subcommand, Debug)]
@@ -31,6 +32,9 @@ pub enum CacheUserCommands {
         user: String,
         /// Role name, such as `Admin`, `Write`, `View`, or a custom role.
         role: String,
+        /// Add the user immediately without sending an invite. Valid for instance admins, members of the owner team and users who already have access from a team grant.
+        #[arg(long)]
+        add_as_member_immediately: bool,
     },
     /// Change the role of a cache member
     Edit {
@@ -206,21 +210,36 @@ pub async fn handle_cache_user_commands(cmd: CacheUserCommands, out: Output) {
             }
             Err(e) => out.fail(e),
         },
-        CacheUserCommands::Add { cache, user, role } => {
+        CacheUserCommands::Add {
+            cache,
+            user,
+            role,
+            add_as_member_immediately,
+        } => {
             match caches
-                .invite_cache_member(&cache, AddMemberRequest { user, role })
+                .invite_cache_member(
+                    &cache,
+                    AddMemberRequest {
+                        user,
+                        role,
+                        add_as_member_immediately: add_as_member_immediately.then_some(true),
+                    },
+                )
                 .await
             {
                 Ok(message) => {
-                    out.ok(&serde_json::json!({"invited": true, "message": message}));
-                    out.human("Invitation sent.");
+                    out.ok(&serde_json::json!({
+                        "invited": !add_as_member_immediately,
+                        "message": message,
+                    }));
+                    out.human(format!("{message}."));
                 }
                 Err(e) => out.fail(e),
             }
         }
         CacheUserCommands::Edit { cache, user, role } => {
             match caches
-                .update_cache_member_role(&cache, AddMemberRequest { user, role })
+                .update_cache_member_role(&cache, ChangeMemberRoleRequest { user, role })
                 .await
             {
                 Ok(_) => {

@@ -216,6 +216,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     local_priority: None,
                     public: None,
                     pull_through: None,
+                    owner_team: None,
                 })
                 .await
             {

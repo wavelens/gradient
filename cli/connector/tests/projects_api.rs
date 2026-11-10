@@ -101,6 +101,7 @@ async fn create_project_sends_body() {
             description: "x".into(),
             hide_build_requests: None,
             public: None,
+            owner_team: None,
         })
         .await
         .unwrap();

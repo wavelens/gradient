@@ -5,6 +5,7 @@
  */
 
 use crate::commands::completion;
+use crate::commands::user_access::access_reasons_to_comma_separated_text;
 use crate::commands::webhook::{
     NoWebhookOwnerArguments, WebhookSubcommands, run_webhook_subcommand,
 };
@@ -44,9 +45,14 @@ pub enum Commands {
         /// Description
         #[arg(short = 'c', long)]
         description: Option<String>,
+        /// The team for the project (default: the only team when there is exactly one team membership)
+        #[arg(long)]
+        team: Option<String>,
     },
     /// Show the selected project
     Show,
+    /// Display everyone with access to the selected project, along with role and source of access.
+    Access,
     /// List the projects of the current user
     List,
     /// Edit the selected project
@@ -120,6 +126,9 @@ pub enum UserCommands {
         user: String,
         /// Role: View, Write or Admin (default: Write)
         role: Option<String>,
+        /// Add the user immediately without sending an invite. Valid for instance admins, members of the owner team and users who already have access from a team grant.
+        #[arg(long)]
+        add_as_member_immediately: bool,
     },
     /// Remove a member
     Remove {
@@ -256,6 +265,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             name,
             display_name,
             description,
+            team,
         } => {
             let input_fields = vec![
                 CommandLineFormField::new_non_empty("Name", name),
@@ -267,6 +277,10 @@ pub async fn handle(cmd: Commands, out: Output) {
             let name = input.get("Name");
 
             let client = client_from_config(out);
+            let owner_team = match team {
+                Some(team) => Some(team),
+                None => get_team_name_if_member_of_exactly_one_team(&client).await,
+            };
             match client
                 .projects()
                 .create(MakeProjectRequest {
@@ -275,6 +289,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     description: input.get("Description"),
                     hide_build_requests: None,
                     public: None,
+                    owner_team: owner_team.clone(),
                 })
                 .await
             {
@@ -283,8 +298,34 @@ pub async fn handle(cmd: Commands, out: Output) {
                         set_value(ConfigKey::SelectedProject, name, true);
                     }
                     out.ok(&created);
-                    out.progress("Project created.");
+                    match owner_team {
+                        Some(team) => out.progress(format!("Created project in team {team}.")),
+                        None => out.progress("Project created."),
+                    }
                     out.human(created.id);
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::Access => {
+            let project = selected_project(out);
+
+            let client = client_from_config(out);
+            match client.projects().list_project_access(&project).await {
+                Ok(people) => {
+                    out.ok(&people);
+                    if people.is_empty() {
+                        out.human("No people have access.");
+                    }
+                    for person in people {
+                        out.human(format!(
+                            "{}: {} ({})",
+                            person.user,
+                            person.role.as_deref().unwrap_or("-"),
+                            access_reasons_to_comma_separated_text(&person.reasons)
+                        ));
+                    }
                 }
                 Err(e) => out.fail(e),
             }
@@ -356,6 +397,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         allow_exec_in_build_requests: None,
                         restrict_evaluation_fetches: None,
                         extra_allowed_uri_prefixes: None,
+                        owner_team: None,
                     },
                 )
                 .await
@@ -420,7 +462,11 @@ pub async fn handle(cmd: Commands, out: Output) {
                     Err(e) => out.fail(e),
                 },
 
-                UserCommands::Add { user, role } => {
+                UserCommands::Add {
+                    user,
+                    role,
+                    add_as_member_immediately,
+                } => {
                     if role
                         .as_deref()
                         .map(|r| r != "View" && r != "Write" && r != "Admin")
@@ -439,6 +485,8 @@ pub async fn handle(cmd: Commands, out: Output) {
                             AddMemberRequest {
                                 user,
                                 role: role.unwrap_or_else(|| "Write".to_string()),
+                                add_as_member_immediately: add_as_member_immediately
+                                    .then_some(true),
                             },
                         )
                         .await
@@ -788,6 +836,14 @@ fn read_project_secret_value_from_flag_stdin_or_hidden_prompt(
         out.fail(CliError::EmptyField(name.to_owned()));
     }
     value.to_owned()
+}
+
+async fn get_team_name_if_member_of_exactly_one_team(client: &Client) -> Option<String> {
+    let mut teams = client.teams().list().await.ok()?;
+    match teams.len() {
+        1 => teams.pop().map(|team| team.name),
+        _ => None,
+    }
 }
 
 async fn membership_names(out: Output) -> Vec<String> {

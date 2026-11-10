@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    AddMemberRequest, CacheSubscriptionItem, CreateRoleRequest, CreatedEntityResponse,
+    AddMemberRequest, CacheSubscriptionItem, ChangeMemberRoleRequest, CreateRoleRequest,
+    CreatedEntityResponse,
     GrantProjectRequest, MakeProjectRequest, MemberItem, PaginatedProjectSummary,
     PatchProjectGrantRequest, PatchProjectRequest, PatchRoleRequest, PendingInvitationItem,
-    ProjectResponse, ProjectSecretSummary, PutProjectSecretRequest, RemoveMemberRequest,
-    RevokeInvitationRequest, RoleResponseProjectRoleOwner, SopsRecipientResponse, TeamGrantEntry,
+    PersonWithAccessToProjectOrCache, ProjectResponse, ProjectSecretSummary,
+    PutProjectSecretRequest, RemoveMemberRequest, RevokeInvitationRequest,
+    RoleResponseProjectRoleOwner, SopsRecipientResponse, TeamGrantEntry,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -107,6 +109,21 @@ impl ProjectsApi<'_> {
         http::decode(req.send().await?).await
     }
 
+    pub async fn list_project_access(
+        &self,
+        project: &str,
+    ) -> Result<Vec<PersonWithAccessToProjectOrCache>, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("projects/{project}/access"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
     pub async fn add_user(
         &self,
         project: &str,
@@ -127,7 +144,7 @@ impl ProjectsApi<'_> {
     pub async fn update_user(
         &self,
         project: &str,
-        body: AddMemberRequest,
+        body: ChangeMemberRoleRequest,
     ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),

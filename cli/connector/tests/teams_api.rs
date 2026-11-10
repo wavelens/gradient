@@ -8,8 +8,9 @@
 
 use connector::Client;
 use connector::api::{
-    MakeTeamRequest, PatchTeamRequest, PatchWorkerRequest, RegisterWorkerRequest,
-    RemoveTeamMemberRequest, RevokeInvitationRequest, TeamMemberRequest, TeamRole,
+    AddTeamMemberRequest, MakeTeamRequest, PatchTeamRequest, PatchWorkerRequest,
+    RegisterWorkerRequest, RemoveTeamMemberRequest, RevokeInvitationRequest, TeamMemberRequest,
+    TeamRole,
 };
 use serde_json::{Value, json};
 use wiremock::matchers::{body_json, method, path, query_param};
@@ -182,9 +183,10 @@ async fn add_user_posts_member_request() {
         .teams()
         .add_user(
             "ops",
-            TeamMemberRequest {
+            AddTeamMemberRequest {
                 user: "bob".into(),
                 role: TeamRole::Member,
+                add_as_member_immediately: None,
             },
         )
         .await

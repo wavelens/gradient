@@ -44,6 +44,7 @@ pub mod search_command;
 pub mod task;
 pub mod task_subcommands;
 pub mod team;
+pub mod user_access;
 pub mod watch;
 pub mod webhook;
 pub mod worker;

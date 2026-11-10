@@ -5,7 +5,7 @@ use crate::api::{
     ApiKeyInfo, ApiKeyPermissionsResponse, ApiKeyRequest, AuditLogEntry, CreateApiKeyRequest,
     CreateSshKeyRequest, DeleteUserRequest, GetUserSettingsResponse, InviteItem,
     InviteTokenRequest, PaginatedSessionInfo, PatchApiKeyRequest, PatchUserSettingsRequest,
-    SshKeyInfo, UserInfoResponse,
+    SshKeyInfo, UserAccessSummary, UserInfoResponse,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -26,6 +26,33 @@ impl UserApi<'_> {
         http::decode::<Option<UserInfoResponse>>(req.send().await?)
             .await?
             .ok_or(ConnectorError::Unauthorized)
+    }
+
+    pub async fn get_own_access_summary(&self) -> Result<UserAccessSummary, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            "user/access",
+            true,
+        )?;
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn get_user_access_summary(
+        &self,
+        username: &str,
+    ) -> Result<UserAccessSummary, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::GET,
+            &format!("users/{username}/access"),
+            true,
+        )?;
+        http::decode(req.send().await?).await
     }
 
     pub async fn delete_own_account(

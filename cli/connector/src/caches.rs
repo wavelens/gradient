@@ -3,8 +3,9 @@
 
 use crate::api::{
     AddMemberRequest, AddUpstreamRequest, CacheResponse, CacheStatsResponse,
-    CacheSubscribersResponse, CacheUpstreamId, ChunkReceived, CreateRoleRequest,
-    CreatedEntityResponse, GrantCacheRequest, MakeCacheRequest, MemberItem, NarDetail, NarStats,
+    CacheSubscribersResponse, CacheUpstreamId, ChangeMemberRoleRequest, ChunkReceived,
+    CreateRoleRequest, CreatedEntityResponse, GrantCacheRequest, MakeCacheRequest, MemberItem,
+    NarDetail, NarStats,
     NarinfoPart, PaginatedCache, PaginatedNarSummary, PatchCacheGrantRequest, PatchCacheRequest,
     PatchRoleRequest, PatchUpstreamRequest, PendingInvitationItem, RemoveMemberRequest,
     RevokeInvitationRequest, RoleListResponseCacheRoleOwner, RoleResponseCacheRoleOwner,
@@ -303,7 +304,7 @@ impl CachesApi<'_> {
     pub async fn update_cache_member_role(
         &self,
         cache: &str,
-        body: AddMemberRequest,
+        body: ChangeMemberRoleRequest,
     ) -> Result<String, ConnectorError> {
         self.0
             .send_authenticated_request(

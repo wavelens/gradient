@@ -9,8 +9,9 @@ use crate::input::{CommandLineFormField, client_from_config, confirm_delete, han
 use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
 use connector::api::{
-    MakeTeamRequest, PatchTeamRequest, PatchWorkerRequest, RegisterWorkerRequest,
-    RemoveTeamMemberRequest, RevokeInvitationRequest, TeamMemberRequest, TeamRole,
+    AddTeamMemberRequest, MakeTeamRequest, PatchTeamRequest, PatchWorkerRequest,
+    RegisterWorkerRequest, RemoveTeamMemberRequest, RevokeInvitationRequest, TeamMemberRequest,
+    TeamRole,
 };
 use connector::webhooks::WebhookResource;
 
@@ -435,7 +436,14 @@ async fn handle_members(cmd: TeamMembersCommands, client: &connector::Client, ou
             Err(e) => out.fail(e),
         },
         TeamMembersCommands::Add { team, user, role } => teams
-            .add_user(&team, TeamMemberRequest { user, role })
+            .add_user(
+                &team,
+                AddTeamMemberRequest {
+                    user,
+                    role,
+                    add_as_member_immediately: None,
+                },
+            )
             .await
             .map(|message| (serde_json::json!({"message": message}), message)),
         TeamMembersCommands::Edit { team, user, role } => teams

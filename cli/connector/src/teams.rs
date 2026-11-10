@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    CreatedEntityResponse, MakeTeamRequest, PatchTeamRequest, PatchWorkerRequest,
+    AddTeamMemberRequest, CreatedEntityResponse, MakeTeamRequest, PatchTeamRequest,
+    PatchWorkerRequest,
     PendingInvitationItem, RegisterWorkerRequest, RegisteredTeamWorker, RemoveTeamMemberRequest,
     RevokeInvitationRequest, TeamDemand, TeamGrants, TeamMemberItem, TeamMemberRequest,
     TeamRequestItem, TeamResponse, TeamSummary, TeamWorkerEntry,
@@ -83,7 +84,7 @@ impl TeamsApi<'_> {
     pub async fn add_user(
         &self,
         team: &str,
-        body: TeamMemberRequest,
+        body: AddTeamMemberRequest,
     ) -> Result<String, ConnectorError> {
         Self::send(
             self.request(

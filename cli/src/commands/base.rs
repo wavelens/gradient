@@ -122,6 +122,11 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: team::Commands,
     },
+    /// Show users and their access rights.
+    User {
+        #[command(subcommand)]
+        cmd: user_access::UserAccessCommands,
+    },
     /// Submit a build request from the current git repository
     Build {
         /// Eval target attribute path (default: task's wildcard)
@@ -529,6 +534,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             search_command::run_gradient_search_command(query, limit, out).await
         }
         MainCommands::Team { cmd } => team::handle(cmd, out).await,
+        MainCommands::User { cmd } => user_access::handle(cmd, out).await,
         MainCommands::Builds { cmd } => builds::handle(cmd, out).await,
         MainCommands::Evaluation { cmd } => evaluation::handle(cmd, out).await,
         MainCommands::Generate { cmd } => generate::handle(cmd, out).await,

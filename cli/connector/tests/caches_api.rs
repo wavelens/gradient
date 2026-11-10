@@ -191,6 +191,7 @@ async fn invite_cache_member_posts_user_and_role_as_json() {
             connector::api::AddMemberRequest {
                 user: "bob".into(),
                 role: "View".into(),
+                add_as_member_immediately: None,
             },
         )
         .await
