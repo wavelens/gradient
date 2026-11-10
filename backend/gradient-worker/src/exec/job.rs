@@ -50,7 +50,7 @@ use crate::proto::credentials::JobCredentials;
 use crate::proto::job::{JobUpdater, push_exec_output};
 use crate::worker::cluster::ClusterStart;
 
-const STORE_DIR: &str = "/nix/store/";
+pub(super) const STORE_DIR: &str = "/nix/store/";
 const EXEC_KEY_PREFIX: &str = "exec:";
 const KILL_GRACE: Duration = Duration::from_secs(15);
 const NO_FREE_ADDRESS: &str = "no free guest address in exec.subnet";

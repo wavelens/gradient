@@ -1225,7 +1225,7 @@ async fn run_job(
             until_aborted(run, abort).await
         }
         Job::Build(build_job) => {
-            let run = executor.execute_build_job(build_job, updater, credentials, job_abort);
+            let run = executor.execute_build_job(build_job, updater, job_abort);
             until_aborted(run, abort).await
         }
         Job::Exec(exec_job) => {

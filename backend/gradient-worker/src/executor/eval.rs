@@ -207,12 +207,6 @@ impl Clone for WorkerEvaluator {
     }
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
-pub async fn evaluate_flake(_job: &FlakeJob, updater: &mut JobUpdater) -> Result<()> {
-    let updater: &JobUpdater = updater;
-    updater.report_evaluating_flake().await
-}
-
 pub fn required_local_source(source: &FlakeSource) -> Option<&str> {
     match source {
         FlakeSource::Cached { store_path, .. } => Some(store_path.as_str()),

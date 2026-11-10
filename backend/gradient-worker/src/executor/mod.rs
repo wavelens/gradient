@@ -408,7 +408,7 @@ impl JobExecutor {
             .await?;
         {
             let _g = updater.phase(JobPhase::EvalFlake);
-            eval::evaluate_flake(job, updater).await?;
+            updater.report_evaluating_flake().await?;
         }
 
         let push = push_inputs(
@@ -432,7 +432,7 @@ impl JobExecutor {
                 FlakeStep::FetchFlake => {}
                 FlakeStep::EvaluateFlake => {
                     let _g = updater.phase(JobPhase::EvalFlake);
-                    eval::evaluate_flake(job, updater).await?
+                    updater.report_evaluating_flake().await?
                 }
                 FlakeStep::EvaluateDerivations => {
                     if local_flake_path.is_none()
@@ -692,7 +692,6 @@ impl JobExecutor {
         &self,
         job: BuildJob,
         updater: &mut JobUpdater,
-        _credentials: &JobCredentials,
         mut abort: AbortSignal,
     ) -> Result<()> {
         let mut gc_handles: Vec<GcRootHandle> = Vec::new();

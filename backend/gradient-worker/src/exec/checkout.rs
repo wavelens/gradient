@@ -14,13 +14,11 @@ use gradient_types::secret::SecretString;
 use gradient_wire::types::JobContext;
 use tokio_util::sync::CancellationToken;
 
-use super::job::StoreAccess;
+use super::job::{STORE_DIR, StoreAccess};
 use crate::executor::failure::BuildError;
 use crate::proto::credentials::JobCredentials;
 use crate::proto::job::JobUpdater;
 use crate::proto::prefetch::{MissingInputs, SubstituteNotOnUpstream, ensure_path};
-
-const STORE_DIR: &str = "/nix/store/";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum WorkSource<'a> {
