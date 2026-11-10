@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -61,6 +61,7 @@ pub struct Guest {
     api: HypervisorApi,
     control: Option<GuestConnection<UnixStream>>,
     bridge: String,
+    mounts: Vec<MountConfig>,
 }
 
 impl Guest {
@@ -72,6 +73,7 @@ impl Guest {
             dir,
             control: None,
             bridge: config.bridge.clone(),
+            mounts: config.mounts.clone(),
         }
     }
 
@@ -209,7 +211,7 @@ impl Guest {
                 false
             }
         };
-        remove_guest_dirs(&self.dir, &self.state.per_job_dirs, stopped);
+        remove_guest_dirs(&self.mounts, &self.dir, &self.state.per_job_dirs, stopped);
         stopped
     }
 
@@ -417,18 +419,35 @@ pub fn device_groups(units: &[(String, DeviceUnit)]) -> Vec<String> {
     groups.into_iter().map(str::to_owned).collect()
 }
 
-pub fn remove_guest_dirs(dir: &Path, per_job_dirs: &[PathBuf], unit_stopped: bool) {
+pub fn remove_guest_dirs(
+    mounts: &[MountConfig],
+    dir: &Path,
+    per_job_dirs: &[PathBuf],
+    unit_stopped: bool,
+) {
     if !unit_stopped {
         warn!(dir = %dir.display(), "keeping the guest directory of a unit that did not stop");
         return;
     }
-    for dir in per_job_dirs.iter().map(PathBuf::as_path).chain([dir]) {
+    let per_job_dirs = per_job_dirs
+        .iter()
+        .map(PathBuf::as_path)
+        .filter(|path| is_direct_child_of_per_job_mount_path(mounts, path));
+    for dir in per_job_dirs.chain([dir]) {
         if let Err(e) = std::fs::remove_dir_all(dir)
             && e.kind() != std::io::ErrorKind::NotFound
         {
             warn!(dir = %dir.display(), error = %e, "could not remove a guest directory");
         }
     }
+}
+
+fn is_direct_child_of_per_job_mount_path(mounts: &[MountConfig], path: &Path) -> bool {
+    let named = matches!(path.components().next_back(), Some(Component::Normal(_)));
+    named
+        && mounts
+            .iter()
+            .any(|mount| mount.per_job && path.parent() == Some(mount.path.as_path()))
 }
 
 fn relay_name(class: &str, relays: &[GuestRelay]) -> String {
@@ -477,22 +496,58 @@ fn quiet(result: Result<()>, what: &str) {
 mod tests {
     use super::*;
 
+    fn scratch_mount(root: &Path) -> MountConfig {
+        MountConfig {
+            name: "scratch".to_owned(),
+            path: root.join("scratch"),
+            read_only: false,
+            per_job: true,
+        }
+    }
+
     #[test]
     fn the_state_file_stays_while_the_unit_is_still_running() {
         let root = tempfile::tempdir().unwrap();
+        let mounts = [scratch_mount(root.path())];
         let dir = root.path().join("guest");
-        let per_job = root.path().join("job");
+        let per_job = root.path().join("scratch").join("job");
         std::fs::create_dir(&dir).unwrap();
-        std::fs::create_dir(&per_job).unwrap();
+        std::fs::create_dir_all(&per_job).unwrap();
         std::fs::write(dir.join("state.json"), "{}").unwrap();
 
-        remove_guest_dirs(&dir, std::slice::from_ref(&per_job), false);
+        remove_guest_dirs(&mounts, &dir, std::slice::from_ref(&per_job), false);
         assert!(dir.join("state.json").exists());
         assert!(per_job.exists());
 
-        remove_guest_dirs(&dir, std::slice::from_ref(&per_job), true);
+        remove_guest_dirs(&mounts, &dir, std::slice::from_ref(&per_job), true);
         assert!(!dir.exists());
         assert!(!per_job.exists());
+    }
+
+    #[test]
+    fn test_guest_cleanup_deletes_only_direct_per_job_directories_below_configured_mount_and_keeps_other_recorded_paths()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let mounts = [scratch_mount(root.path())];
+        let dir = root.path().join("guest");
+        let elsewhere = root.path().join("etc");
+        let nested = root.path().join("scratch").join("a").join("b");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::create_dir_all(&nested).unwrap();
+        let recorded = [
+            elsewhere.clone(),
+            nested.clone(),
+            root.path().join("scratch"),
+            root.path().join("scratch").join(".."),
+        ];
+
+        remove_guest_dirs(&mounts, &dir, &recorded, true);
+
+        assert!(!dir.exists());
+        assert!(elsewhere.exists());
+        assert!(nested.exists());
+        assert!(root.path().join("scratch").exists());
     }
 
     #[test]

@@ -86,12 +86,17 @@ pub async fn apply(
                 false
             }
         };
-        remove_guest_dirs(&config.guests_dir.join(id.to_string()), &[], stopped);
+        remove_guest_dirs(
+            &config.mounts,
+            &config.guests_dir.join(id.to_string()),
+            &[],
+            stopped,
+        );
     }
     for state in plan.lost {
         info!(guest = %state.guest_id, "guest unit ended while the worker was down");
         let dir = config.guests_dir.join(state.guest_id.to_string());
-        remove_guest_dirs(&dir, &state.per_job_dirs, true);
+        remove_guest_dirs(&config.mounts, &dir, &state.per_job_dirs, true);
     }
     for state in plan.warm {
         let guest = Guest::from_state(config, state);

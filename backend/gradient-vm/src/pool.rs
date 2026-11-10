@@ -390,7 +390,12 @@ impl GuestPool {
         for (id, state) in read_states(&self.config.guests_dir) {
             let per_job_dirs = state.map(|state| state.per_job_dirs).unwrap_or_default();
             let dir = self.config.guests_dir.join(id.to_string());
-            remove_guest_dirs(&dir, &per_job_dirs, !still_running.contains(&id));
+            remove_guest_dirs(
+                &self.config.mounts,
+                &dir,
+                &per_job_dirs,
+                !still_running.contains(&id),
+            );
         }
     }
 
@@ -572,7 +577,7 @@ impl GuestPool {
             }
             stopped = self.units.stop(&id).await.is_ok();
         }
-        remove_guest_dirs(&dir, &per_job_dirs, true);
+        remove_guest_dirs(&self.config.mounts, &dir, &per_job_dirs, true);
     }
 
     pub async fn stop_boots(&self) {
