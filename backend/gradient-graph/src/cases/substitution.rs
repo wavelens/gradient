@@ -564,9 +564,9 @@ async fn s13_a_producer_whose_unneeded_missing_output_becomes_needed_is_asked_ab
 
     let b = case.sb(B).await;
     assert_eq!(
-        (b.cache_available, b.unneeded_outputs, b.probed),
-        (true, Vec::<String>::new(), true),
-        "after 2: sb(B) cache_available, unneeded_outputs, probed"
+        (b.status, b.cache_available, b.unneeded_outputs, b.probed),
+        (BuildStatus::Queued, true, Vec::<String>::new(), true),
+        "after 2: sb(B) status, cache_available, unneeded_outputs, probed"
     );
     let c = case.sb(C).await;
     assert_eq!(
@@ -575,5 +575,15 @@ async fn s13_a_producer_whose_unneeded_missing_output_becomes_needed_is_asked_ab
         "after 2: sb(C) status, wanted"
     );
     case.zero_drift("step 2").await;
+
+    substitute_b(&case, e1, &[(B_OUT, "b"), (B_OUT2, "b-dev")]).await;
+
+    let d = case.sb(D).await;
+    assert_eq!(
+        (d.status, d.blocking_deps),
+        (BuildStatus::Queued, 0),
+        "after 3: sb(D) status, blocking_deps"
+    );
+    case.zero_drift("step 3").await;
     case.finish().await;
 }
