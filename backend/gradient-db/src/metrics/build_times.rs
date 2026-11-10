@@ -103,7 +103,7 @@ fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String 
            JOIN evaluation ev ON ev.id = bj.evaluation \
            JOIN task pr ON pr.id = ev.task \
            WHERE {clauses} \
-           ORDER BY b.id, bj.created_at DESC \
+           ORDER BY b.id, bj.created_at ASC \
          ), ranked AS ( \
            SELECT a.id, a.evaluation, a.project, a.task_name, a.task_display_name, a.name, \
            {BUILD_TIME_MS} AS build_time_ms, \
@@ -325,6 +325,44 @@ mod tests {
             ),
             "sql = {sql}"
         );
+    }
+
+    #[tokio::test]
+    async fn expensive_jobs_credit_the_evaluation_that_dispatched_the_build() {
+        use gradient_entity::build::BuildStatus;
+        use gradient_fixtures::shape::shape;
+        use gradient_types::EvaluationId;
+
+        const HEAVY: &str = "/nix/store/aaaa-heavy.drv";
+        let now = chrono::Utc::now().naive_utc();
+        let (first, reuser) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = shape()
+            .evaluation(first)
+            .derivation(HEAVY)
+            .job()
+            .job_option(|j| j.created_at = now - chrono::Duration::hours(2))
+            .shared_build_option(|b| {
+                b.status = BuildStatus::Completed;
+                b.created_at = now;
+            })
+            .derivation_metric(|m| {
+                m.build_time_ms = Some(90_000);
+                m.created_at = now;
+            })
+            .evaluation(reuser)
+            .derivation(HEAVY)
+            .job()
+            .job_option(|j| j.created_at = now - chrono::Duration::hours(1))
+            .into_database()
+            .await;
+
+        let builds = expensive_builds(&db.connection(), 30, None)
+            .await
+            .expect("the expensive builds read");
+
+        let evaluations: Vec<_> = builds.iter().map(|b| b.evaluation).collect();
+        assert_eq!(evaluations, vec![first.into_inner()]);
+        db.finish().await;
     }
 
     #[test]
