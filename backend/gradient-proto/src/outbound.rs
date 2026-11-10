@@ -192,18 +192,17 @@ impl OutboundConnect {
     }
 }
 
-pub fn start_outbound_loop(
-    state: Arc<ServerState>,
+pub fn outbound_websocket_worker_loop_child_spec(
+    state: &ServerState,
     scheduler: Arc<Scheduler>,
     sessions: Arc<SessionsHandle>,
-) {
-    let shutdown = state.shutdown.clone();
-    shutdown.supervise(ChildSpec::pass(OutboundConnect {
-        handles: SessionHandles::from_state(&state),
+) -> ChildSpec {
+    ChildSpec::pass(OutboundConnect {
+        handles: SessionHandles::from_state(state),
         scheduler,
         sessions,
         connecting: Arc::default(),
-    }));
+    })
 }
 
 pub(crate) async fn dialable(

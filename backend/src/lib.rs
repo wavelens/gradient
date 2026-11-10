@@ -74,6 +74,7 @@ pub async fn run(cli: Cli, extensions: ServerExtensions) -> std::io::Result<()> 
         None
     };
 
+    let listener = gradient_web::bind_http_server_tcp_listener(&state).await?;
     state
         .shutdown
         .supervise_now(state.graph.child_spec(state.db()))
@@ -98,7 +99,7 @@ pub async fn run(cli: Cli, extensions: ServerExtensions) -> std::io::Result<()> 
     }
 
     info!("Starting web service");
-    gradient_web::serve_web(Arc::clone(&state), scheduler).await?;
+    gradient_web::serve_web(Arc::clone(&state), scheduler, listener).await?;
 
     Ok(())
 }

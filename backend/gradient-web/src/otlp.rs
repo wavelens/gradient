@@ -15,7 +15,7 @@ use gradient_storage::admission::UploadAdmission;
 use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
-use tracing::{error, info};
+use tracing::info;
 
 #[derive(Default, Clone, Copy)]
 struct Snapshot {
@@ -66,23 +66,19 @@ impl Pass for OtlpSnapshot {
     }
 }
 
-pub fn start_otlp(state: Arc<ServerState>, scheduler: Arc<Scheduler>) {
+pub fn build_otlp_exporter_child_spec(
+    state: &ServerState,
+    scheduler: Arc<Scheduler>,
+) -> Result<Option<ChildSpec>, opentelemetry_otlp::ExporterBuildError> {
     let Some(endpoint) = state.config.metrics_args.otlp_endpoint.clone() else {
-        return;
+        return Ok(None);
     };
     let interval = Duration::from_secs(state.config.metrics_args.otlp_push_interval_secs.get());
 
-    let exporter = match opentelemetry_otlp::MetricExporter::builder()
+    let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_http()
         .with_endpoint(endpoint)
-        .build()
-    {
-        Ok(e) => e,
-        Err(e) => {
-            error!(error = %e, "OTLP metric exporter build failed; OTLP disabled");
-            return;
-        }
-    };
+        .build()?;
 
     let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
         .with_interval(interval)
@@ -118,17 +114,15 @@ pub fn start_otlp(state: Arc<ServerState>, scheduler: Arc<Scheduler>) {
     gauge!("gradient_cache_nar_bytes", cache_nar_bytes);
     gauge!("gradient_cache_packages", cache_packages);
 
-    let shutdown = state.shutdown.clone();
-    shutdown.supervise(ChildSpec::pass(OtlpSnapshot {
+    // The provider must outlive the process for the periodic reader to keep exporting.
+    Box::leak(Box::new(provider));
+    info!("OTLP metric push enabled");
+    Ok(Some(ChildSpec::pass(OtlpSnapshot {
         web_db: state.web_db.clone(),
         started_at: state.started_at,
         upload_admission: Arc::clone(&state.memory.upload_admission),
         scheduler,
         snapshot: snap,
         period: interval,
-    }));
-
-    // The provider must outlive the process for the periodic reader to keep exporting.
-    Box::leak(Box::new(provider));
-    info!("OTLP metric push enabled");
+    })))
 }

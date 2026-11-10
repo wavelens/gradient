@@ -169,12 +169,13 @@ impl FromRef<Arc<ServerState>> for WebSocketCredentialRecheckDependencies {
 
 pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
-    create_router_with_scheduler(state, scheduler)
+    create_router_with_scheduler(state, scheduler, gradient_proto::SessionsHandle::new())
 }
 
 pub fn create_router_with_scheduler(
     state: Arc<ServerState>,
     scheduler: Arc<Scheduler>,
+    sessions: Arc<gradient_proto::SessionsHandle>,
 ) -> Result<Router, InitError> {
     let serve_url: http::HeaderValue =
         state
@@ -322,40 +323,6 @@ pub fn create_router_with_scheduler(
             .merge(public_listing_api.route_layer(GovernorLayer::new(Arc::clone(&caller_limit))));
     }
 
-    scheduler.start();
-    state.shutdown.supervise(ChildSpec::pass(
-        gradient_db::maintenance::retention::Retention::new(state.db()),
-    ));
-    state
-        .shutdown
-        .supervise(ChildSpec::pass(gradient_db::metrics::rollup::Rollup::new(
-            state.db(),
-        )));
-    state.shutdown.supervise(ChildSpec::pass(
-        gradient_db::metrics::cache_traffic::CacheMetricFlush::new(
-            state.db(),
-            Arc::clone(&state.memory.cache_traffic),
-        ),
-    ));
-    gradient_db::metrics::cache_traffic::flush_on_shutdown(
-        state.db(),
-        Arc::clone(&state.memory.cache_traffic),
-    );
-    state.shutdown.supervise(ChildSpec::pass(
-        gradient_db::metrics::infra::InfraMetricFlush::new(state.db()),
-    ));
-    gradient_db::metrics::infra::flush_on_shutdown(state.db());
-    otlp::start_otlp(Arc::clone(&state), Arc::clone(&scheduler));
-    let sessions = gradient_proto::SessionsHandle::new();
-    state
-        .shutdown
-        .supervise(sessions.child_spec(Arc::clone(&scheduler)));
-    gradient_proto::outbound::start_outbound_loop(
-        Arc::clone(&state),
-        Arc::clone(&scheduler),
-        Arc::clone(&sessions),
-    );
-
     let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_connections.get()));
 
     let (cache_upload_api, _) = routes::cache_upload_api(&limits).split_for_parts();
@@ -493,12 +460,75 @@ fn tuned_listener(
     listener.tap_io(tap as fn(&mut tokio::net::TcpStream))
 }
 
-pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> std::io::Result<()> {
+pub async fn bind_http_server_tcp_listener(
+    state: &ServerState,
+) -> std::io::Result<tokio::net::TcpListener> {
     let server_url = format!(
         "{}:{}",
-        state.config.server.listen_addr.clone(),
-        state.config.server.port.clone()
+        state.config.server.listen_addr, state.config.server.port
     );
+    tokio::net::TcpListener::bind(&server_url)
+        .await
+        .inspect_err(|e| tracing::error!(addr = %server_url, error = %e, "Failed to bind listener"))
+}
+
+async fn start_background_services(
+    state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
+    sessions: &Arc<gradient_proto::SessionsHandle>,
+) -> std::io::Result<()> {
+    scheduler.start();
+    let mut services = vec![
+        ChildSpec::pass(gradient_db::maintenance::retention::Retention::new(
+            state.db(),
+        )),
+        ChildSpec::pass(gradient_db::metrics::rollup::Rollup::new(state.db())),
+        ChildSpec::pass(gradient_db::metrics::cache_traffic::CacheMetricFlush::new(
+            state.db(),
+            Arc::clone(&state.memory.cache_traffic),
+        )),
+        ChildSpec::pass(gradient_db::metrics::infra::InfraMetricFlush::new(
+            state.db(),
+        )),
+        sessions.child_spec(Arc::clone(scheduler)),
+        gradient_proto::outbound::outbound_websocket_worker_loop_child_spec(
+            state,
+            Arc::clone(scheduler),
+            Arc::clone(sessions),
+        ),
+    ];
+    services.extend(
+        otlp::build_otlp_exporter_child_spec(state, Arc::clone(scheduler))
+            .map_err(std::io::Error::other)?,
+    );
+    for service in services {
+        state
+            .shutdown
+            .supervise_now(service)
+            .await
+            .map_err(std::io::Error::other)?;
+    }
+
+    gradient_db::metrics::cache_traffic::flush_on_shutdown(
+        state.db(),
+        Arc::clone(&state.memory.cache_traffic),
+    );
+    gradient_db::metrics::infra::flush_on_shutdown(state.db());
+    Ok(())
+}
+
+pub async fn serve_web(
+    state: Arc<ServerState>,
+    scheduler: Arc<Scheduler>,
+    listener: tokio::net::TcpListener,
+) -> std::io::Result<()> {
+    let sessions = gradient_proto::SessionsHandle::new();
+    let app = create_router_with_scheduler(
+        Arc::clone(&state),
+        Arc::clone(&scheduler),
+        Arc::clone(&sessions),
+    )
+    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
 
     match gradient_db::maintenance::recovery::recover_interrupted_work(&state.worker_db).await {
         Ok(r) => {
@@ -536,15 +566,8 @@ pub async fn serve_web(state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> st
         Err(e) => tracing::error!(error = ?e, "failed to recover draining-parked evaluations"),
     }
 
-    let app = create_router_with_scheduler(Arc::clone(&state), scheduler)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    start_background_services(&state, &scheduler, &sessions).await?;
 
-    let listener = tokio::net::TcpListener::bind(&server_url)
-        .await
-        .map_err(|e| {
-            tracing::error!(addr = %server_url, error = %e, "Failed to bind listener");
-            e
-        })?;
     let listener = tuned_listener(listener);
     sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
 
