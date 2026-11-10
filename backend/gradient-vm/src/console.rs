@@ -19,6 +19,7 @@ pub const CONSOLE_LOG: &str = "console.log";
 pub const CONSOLE_SOCKET: &str = "console.sock";
 pub const SERIAL_SOCKET: &str = "serial.sock";
 pub const CONSOLE_TAIL: u64 = 64 * 1024;
+const GUEST_CONSOLE_LOG_MAX_SIZE_BYTES_BEFORE_TAIL_TRUNCATION: u64 = 1024 * 1024;
 const SERIAL_RETRY: Duration = Duration::from_millis(100);
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_CHUNK: usize = 32 * 1024;
@@ -31,9 +32,11 @@ pub async fn serve_console(dir: &Path, clients: UnixListener) -> Result<()> {
         .open(&log_path)
         .await
         .with_context(|| format!("open {}", log_path.display()))?;
+    let console_log_file_size_bytes = log.metadata().await?.len();
     let mut relay = ConsoleRelay {
         log,
         log_path,
+        console_log_file_size_bytes,
         client: None,
     };
     loop {
@@ -68,6 +71,7 @@ struct ConsoleClient {
 struct ConsoleRelay {
     log: File,
     log_path: std::path::PathBuf,
+    console_log_file_size_bytes: u64,
     client: Option<ConsoleClient>,
 }
 
@@ -101,7 +105,24 @@ impl ConsoleRelay {
     async fn on_serial_output(&mut self, data: &[u8]) -> Result<()> {
         self.log.write_all(data).await?;
         self.log.flush().await?;
+        self.console_log_file_size_bytes = self
+            .console_log_file_size_bytes
+            .saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
+        if self.console_log_file_size_bytes
+            > GUEST_CONSOLE_LOG_MAX_SIZE_BYTES_BEFORE_TAIL_TRUNCATION
+        {
+            self.truncate_console_log_to_tail().await?;
+        }
         self.send_to_client(data).await;
+        Ok(())
+    }
+
+    async fn truncate_console_log_to_tail(&mut self) -> Result<()> {
+        let tail = console_tail(&self.log_path, CONSOLE_TAIL)?;
+        self.log.set_len(0).await?;
+        self.log.write_all(&tail).await?;
+        self.log.flush().await?;
+        self.console_log_file_size_bytes = u64::try_from(tail.len()).unwrap_or(u64::MAX);
         Ok(())
     }
 
@@ -205,6 +226,39 @@ mod tests {
 
         tokio::select! {
             served = serve_console(dir.path(), clients) => panic!("the relay ended: {served:?}"),
+            () = scenario => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn test_guest_console_log_stays_below_size_limit_and_keeps_newest_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let serial = UnixListener::bind(dir.path().join(SERIAL_SOCKET)).unwrap();
+        let clients = UnixListener::bind(dir.path().join(CONSOLE_SOCKET)).unwrap();
+        let log = dir.path().join(CONSOLE_LOG);
+
+        let scenario = async {
+            let (mut guest, _) = serial.accept().await.unwrap();
+            let chunk = vec![b'x'; 64 * 1024];
+            for _ in 0..40 {
+                guest.write_all(&chunk).await.unwrap();
+            }
+            guest.write_all(b"end").await.unwrap();
+            loop {
+                let content = std::fs::read(&log).unwrap_or_default();
+                let size = u64::try_from(content.len()).unwrap();
+                if content.ends_with(b"end")
+                    && size <= GUEST_CONSOLE_LOG_MAX_SIZE_BYTES_BEFORE_TAIL_TRUNCATION
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+
+        tokio::select! {
+            served = serve_console(dir.path(), clients) => panic!("the relay ended: {served:?}"),
+            () = tokio::time::sleep(Duration::from_secs(30)) => panic!("the console log was not cut down"),
             () = scenario => {}
         }
     }
