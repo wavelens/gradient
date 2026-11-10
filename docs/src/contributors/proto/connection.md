@@ -78,8 +78,8 @@ A side that refuses the handshake can reply with these codes.
 | `403` | `the link is disabled`, `the upstream is not allowed to run` |
 | `503` | `the upstream is unreadable right now`, `the allowance is not checked yet` |
 
-- Over `wss://` URLs, the server can send its tokens.
-- Use a `ws://` URL only for local and operator setups. The server can still send the tokens there and log a warning.
+- Server connections use only `wss://` URLs. Connections to `ws://` URLs work only for loopback hosts, so tokens never travel over the network unencrypted.
+- Worker URLs on private, loopback, or link-local addresses fail at registration and before every connection unless administrators set `proto.allowWorkerUrlsOnPrivateNetworks`. Server connections go only to addresses that the server inspected.
 - Workers verify server tokens against the hashes in `services.gradient.worker.acceptedServerTokensFile` on the worker. Workers without this file accept every server.
 - A server-connected session that reauths receives `AuthUpdate`, never `AuthChallenge`.
 - A reauth that discovers a new registration ends the session. The next connection can carry the new project's token.

@@ -6,4 +6,4 @@
 
 pub mod dial;
 
-pub use dial::{dial, dial_with_auth};
+pub use dial::{dial, dial_with_auth, dial_with_prechecked_socket_addrs};

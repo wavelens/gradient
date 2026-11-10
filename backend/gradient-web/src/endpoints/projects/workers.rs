@@ -264,7 +264,14 @@ pub async fn post_project_worker(
     if gradient_db::teams::workers::is_team_worker(&state.web_db, &worker_id_str).await? {
         return Err(ProjectRefusal::WorkerIdBelongsToTeamWorker.into());
     }
-    if body.url.as_deref().is_some_and(|u| !u.trim().is_empty()) {
+    if let Some(url) = body.url.as_deref().filter(|u| !u.trim().is_empty()) {
+        gradient_util::http_validation::validate_worker_websocket_url(
+            url,
+            state.config.proto.allow_worker_urls_on_private_networks,
+        )
+        .map_err(|e| ProjectRefusal::InvalidWorkerUrl {
+            reason: e.to_string(),
+        })?;
         ensure_dialable_worker_id(&state.web_db, &worker_id_str).await?;
     }
 

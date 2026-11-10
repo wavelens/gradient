@@ -56,6 +56,90 @@ pub fn validate_webhook_url(url: &str) -> Result<reqwest::Url, WebhookUrlError> 
 }
 
 #[derive(Debug, thiserror::Error)]
+pub enum WorkerConnectionUrlError {
+    #[error("Invalid URL: {0}")]
+    Parse(#[from] url::ParseError),
+    #[error("Use wss as the scheme of the worker URL. Use ws only for a loopback host. Got '{0}'")]
+    Scheme(String),
+    #[error(
+        "Connection tokens travel over ws:// without encryption. Use wss:// for all hosts other than loopback."
+    )]
+    Unencrypted,
+    #[error("Include a host in the URL")]
+    MissingHost,
+    #[error("The URL has an internal address ({0}). Allow worker URLs on private networks.")]
+    InternalAddress(IpAddr),
+    #[error(
+        "The URL host \"localhost\" is internal. Allow worker URLs on private networks in the admin settings."
+    )]
+    Localhost,
+    #[error("Failed to resolve worker host: {0}")]
+    Resolve(#[source] std::io::Error),
+    #[error(transparent)]
+    InternalOnly(#[from] InternalOnly),
+}
+
+pub fn validate_worker_websocket_url(
+    url: &str,
+    private_networks_allowed: bool,
+) -> Result<reqwest::Url, WorkerConnectionUrlError> {
+    let parsed = reqwest::Url::parse(url)?;
+    let host = parsed.host().ok_or(WorkerConnectionUrlError::MissingHost)?;
+    let loopback = match &host {
+        url::Host::Ipv4(ip) => ip.is_loopback(),
+        url::Host::Ipv6(ip) => ip.is_loopback(),
+        url::Host::Domain(d) => d.eq_ignore_ascii_case("localhost"),
+    };
+    match parsed.scheme() {
+        "wss" => {}
+        "ws" if loopback => {}
+        "ws" => return Err(WorkerConnectionUrlError::Unencrypted),
+        s => return Err(WorkerConnectionUrlError::Scheme(s.to_owned())),
+    }
+    if private_networks_allowed {
+        return Ok(parsed);
+    }
+    match host {
+        url::Host::Ipv4(ip) if is_unsafe_ipv4(&ip) => {
+            Err(WorkerConnectionUrlError::InternalAddress(ip.into()))
+        }
+        url::Host::Ipv6(ip) if is_unsafe_ipv6(&ip) => {
+            Err(WorkerConnectionUrlError::InternalAddress(ip.into()))
+        }
+        url::Host::Domain(_) if loopback => Err(WorkerConnectionUrlError::Localhost),
+        _ => Ok(parsed),
+    }
+}
+
+/// The server can connect only to the returned addresses, so a DNS response can't redirect the
+/// destination to an internal host after the check.
+pub async fn check_worker_url_and_resolve_allowed_socket_addresses(
+    url: &str,
+    private_networks_allowed: bool,
+) -> Result<Vec<SocketAddr>, WorkerConnectionUrlError> {
+    let parsed = validate_worker_websocket_url(url, private_networks_allowed)?;
+    let port = parsed
+        .port_or_known_default()
+        .ok_or(WorkerConnectionUrlError::MissingHost)?;
+    let resolved: Vec<SocketAddr> = match parsed.host() {
+        Some(url::Host::Ipv4(ip)) => vec![SocketAddr::new(ip.into(), port)],
+        Some(url::Host::Ipv6(ip)) => vec![SocketAddr::new(ip.into(), port)],
+        Some(url::Host::Domain(domain)) => tokio::net::lookup_host((domain, port))
+            .await
+            .map_err(WorkerConnectionUrlError::Resolve)?
+            .collect(),
+        None => return Err(WorkerConnectionUrlError::MissingHost),
+    };
+    if private_networks_allowed {
+        return Ok(resolved);
+    }
+    Ok(public_addrs(
+        parsed.host_str().unwrap_or_default(),
+        resolved.into_iter(),
+    )?)
+}
+
+#[derive(Debug, thiserror::Error)]
 #[error("{0} resolves only to private/loopback/link-local/cloud-metadata addresses")]
 pub struct InternalOnly(String);
 
@@ -208,6 +292,56 @@ mod tests {
         ] {
             assert!(validate_webhook_url(url).is_err(), "{url}");
         }
+    }
+
+    #[test]
+    fn a_worker_url_needs_encryption_and_a_public_host() {
+        for url in [
+            "wss://worker.example.com/proto",
+            "wss://8.8.8.8:9000/proto",
+            "wss://[2001:4860:4860::8888]/proto",
+        ] {
+            assert!(validate_worker_websocket_url(url, false).is_ok(), "{url}");
+        }
+        for url in [
+            "ws://worker.example.com/proto",
+            "ws://10.0.0.5:6379/",
+            "wss://10.0.0.5:6379/",
+            "wss://169.254.169.254/",
+            "wss://[::1]/proto",
+            "wss://localhost/proto",
+            "ws://127.0.0.1:3000/proto",
+            "https://worker.example.com/proto",
+            "not a url",
+        ] {
+            assert!(validate_worker_websocket_url(url, false).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn an_admin_can_allow_worker_urls_on_private_networks() {
+        for url in [
+            "wss://10.0.0.5/proto",
+            "ws://127.0.0.1:3000/proto",
+            "ws://localhost/proto",
+        ] {
+            assert!(validate_worker_websocket_url(url, true).is_ok(), "{url}");
+        }
+        assert!(validate_worker_websocket_url("ws://10.0.0.5/proto", true).is_err());
+    }
+
+    #[tokio::test]
+    async fn the_dial_addresses_of_a_literal_host_keep_its_port() {
+        let addrs =
+            check_worker_url_and_resolve_allowed_socket_addresses("wss://8.8.8.8/proto", false)
+                .await
+                .expect("public address");
+        let local = check_worker_url_and_resolve_allowed_socket_addresses("ws://[::1]:3000/", true)
+            .await
+            .expect("allowed loopback");
+
+        assert_eq!(addrs, vec!["8.8.8.8:443".parse().unwrap()]);
+        assert_eq!(local, vec!["[::1]:3000".parse().unwrap()]);
     }
 
     #[test]

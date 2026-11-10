@@ -14,6 +14,7 @@ use gradient_entity::{team_worker, worker_registration};
 use gradient_types::ids::ProjectId;
 use gradient_types::{ETeamWorker, EWorkerRegistration, SecretString};
 use gradient_util::error_cause_chain_formatting::error_chain;
+use gradient_util::http_validation::check_worker_url_and_resolve_allowed_socket_addresses;
 use gradient_util::supervision::{ChildSpec, Pass, PassError, RunsOn};
 use gradient_wire::Rejection;
 use gradient_wire::session::handshake::DialerCredentials;
@@ -335,19 +336,12 @@ fn plan_worker(group: WorkerDial, decrypt: &impl Fn(&str) -> Option<SecretString
     PlannedDial::Dial(DialTarget {
         credentials: DialerCredentials {
             worker_id: group.worker_id,
-            tokens: tokens_for_scheme(&group.url, tokens),
+            tokens,
         },
         url: group.url,
         token_projects,
         team_worker,
     })
-}
-
-fn tokens_for_scheme(url: &str, tokens: Vec<(String, String)>) -> Vec<(String, String)> {
-    if !url.starts_with("wss://") && !tokens.is_empty() {
-        warn!(%url, "sending connection tokens over an unencrypted ws:// connection");
-    }
-    tokens
 }
 
 async fn dial(
@@ -360,7 +354,18 @@ async fn dial(
     let url = target.url.clone();
     debug!(%worker_id, %url, "connecting outbound to worker");
 
-    match tokio::time::timeout(DIAL_TIMEOUT, gradient_wire::client::dial(&url)).await {
+    let private_networks_allowed = handles
+        .db
+        .config
+        .proto
+        .allow_worker_urls_on_private_networks;
+    let connect = async {
+        let addrs =
+            check_worker_url_and_resolve_allowed_socket_addresses(&url, private_networks_allowed)
+                .await?;
+        gradient_wire::client::dial_with_prechecked_socket_addrs(&url, &addrs).await
+    };
+    match tokio::time::timeout(DIAL_TIMEOUT, connect).await {
         Ok(Ok(socket)) => {
             debug!(%worker_id, %url, "outbound connection established");
             handle_socket(

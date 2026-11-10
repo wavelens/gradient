@@ -23,6 +23,13 @@ pub struct ProtoArgs {
     #[arg(default_value = "false")]
     pub federate: bool,
 
+    /// Whether the server can connect to worker URLs on private, loopback, or link-local
+    /// addresses. Leave this option off unless a worker is reachable only on an internal network.
+    /// Otherwise, a project member with permission to manage workers can make the server open a
+    /// connection to that network.
+    #[arg(default_value = "false")]
+    pub allow_worker_urls_on_private_networks: bool,
+
     /// Maximum simultaneous `/proto` WebSocket connections.
     #[arg(id = "proto-max-connections", default_value = "256")]
     pub max_connections: NonZeroUsize,
