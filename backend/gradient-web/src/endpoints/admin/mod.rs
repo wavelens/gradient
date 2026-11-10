@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod config;
 pub mod draining;
 pub mod github_app;
 pub mod maintenance;
@@ -38,6 +39,7 @@ async fn superuser_only(
 pub fn admin_router() -> OpenApiRouter<Arc<ServerState>> {
     OpenApiRouter::new()
         .routes(routes!(state::export_state))
+        .routes(routes!(config::get_server_options_for_instance_admins))
         .routes(routes!(github_app::request_manifest))
         .routes(routes!(github_app::credentials))
         .routes(routes!(maintenance::start_deep_gc))

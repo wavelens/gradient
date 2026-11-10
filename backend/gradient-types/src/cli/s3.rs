@@ -21,6 +21,7 @@ pub struct S3Args {
     /// use AWS.
     pub endpoint: Option<String>,
     /// AWS access key ID. Set it to `null` to use instance credentials or the environment.
+    #[hide_in_admin_config_view]
     pub access_key_id: Option<String>,
     /// File containing the AWS secret access key.
     pub secret_access_key_file: Option<String>,

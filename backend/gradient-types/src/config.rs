@@ -220,6 +220,7 @@ pub struct RuntimeConfig {
     /// scrape token.
     pub metrics_args: MetricsArgs,
     pub network: NetworkConfig,
+    pub effective_options: Vec<super::cli::EffectiveConfigOption>,
 }
 
 impl RuntimeConfig {
@@ -255,6 +256,7 @@ impl RuntimeConfig {
             metrics: cli.metrics_config(),
             metrics_args: cli.metrics.clone(),
             network: cli.network_config()?,
+            effective_options: Vec::new(),
         })
     }
 }

@@ -192,6 +192,9 @@ pub struct ServerConfig {
     pub exec_enabled: bool,
     pub public_listing: bool,
     pub max_keep_evaluations_per_task: Option<i32>,
+    /// Limit for cached NAR storage across the instance, in GB (`cache.maxStorageGb`). This field does not exist when the limit is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_cached_nar_storage_gb: Option<u32>,
 }
 
 #[utoipa::path(
@@ -253,6 +256,7 @@ pub async fn get_config(
             exec_enabled: state.config.exec.enable,
             public_listing: state.config.server.public_listing,
             max_keep_evaluations_per_task: state.config.eval.keep_evaluations_max(),
+            max_cached_nar_storage_gb: Some(state.config.cache.max_storage_gb).filter(|gb| *gb > 0),
         },
     };
 

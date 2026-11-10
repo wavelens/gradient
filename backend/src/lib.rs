@@ -6,7 +6,7 @@
 
 use gradient_core::{ServerExtensions, init_state};
 use gradient_types::Cli;
-use gradient_types::cli::LogArgs;
+use gradient_types::cli::{EffectiveConfigOption, LogArgs};
 use gradient_util::logging::{LogSetup, LogWriter, NOISY_DEPS, TraceSetup};
 use std::sync::Arc;
 use tracing::info;
@@ -38,7 +38,11 @@ fn init_logging(log: &LogArgs) {
     });
 }
 
-pub async fn run(cli: Cli, extensions: ServerExtensions) -> std::io::Result<()> {
+pub async fn run(
+    cli: Cli,
+    effective_options: Vec<EffectiveConfigOption>,
+    extensions: ServerExtensions,
+) -> std::io::Result<()> {
     init_logging(&cli.log);
 
     if cli.state.validate {
@@ -54,7 +58,7 @@ pub async fn run(cli: Cli, extensions: ServerExtensions) -> std::io::Result<()> 
         None
     };
 
-    let state = match init_state(cli, extensions).await {
+    let state = match init_state(cli, effective_options, extensions).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = %e, "server bootstrap failed");

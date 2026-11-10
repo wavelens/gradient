@@ -21,6 +21,7 @@ use gradient_graph::Graph;
 use gradient_storage::NarStore;
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::bearer;
+use gradient_types::cli::{EffectiveConfigOption, ServerOptionValueSource};
 use sea_orm::{EntityTrait, PaginatorTrait};
 use serde_json::Value;
 use tempfile::TempDir;
@@ -28,6 +29,18 @@ use tokio::sync::Notify;
 
 const LIB: &str = "cccccccccccccccccccccccccccccccc-lib.drv";
 const LIB_OUT: &str = "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f";
+
+fn database_url_option() -> Vec<EffectiveConfigOption> {
+    vec![EffectiveConfigOption {
+        group: "database".into(),
+        field: "url".into(),
+        flag: "database-url".into(),
+        env: Some("GRADIENT_DATABASE_URL".into()),
+        value: None,
+        secret: true,
+        source: ServerOptionValueSource::Env,
+    }]
+}
 
 struct StorageArea {
     db: TestDatabase,
@@ -98,6 +111,7 @@ async fn storage_area(superuser: bool) -> StorageArea {
         .cache_db(conn)
         .nar_storage(NarStore::local(nar_dir.path()).expect("a local NAR store"))
         .graph(Arc::clone(&graph))
+        .config(|config| config.effective_options = database_url_option())
         .build();
     graph
         .spawn(state.db(), None, None)
@@ -218,5 +232,31 @@ async fn deleting_evaluations_needs_permission_to_edit_the_task() {
     let res = area.delete_before("2030-01-01T00:00:00Z").await;
     assert!(res.status_code().is_client_error(), "{}", res.status_code());
     assert_eq!(area.remaining_evaluations().await, 2);
+    area.db.finish().await;
+}
+
+#[tokio::test]
+async fn the_settings_page_shows_option_sources_to_superusers_only() {
+    let area = storage_area(true).await;
+
+    let res = area
+        .server
+        .get("/api/v1/admin/config")
+        .add_header("authorization", &area.auth)
+        .await;
+    res.assert_status_ok();
+    let option = &res.json::<Value>()["message"][0];
+    assert_eq!(option["source"], "env");
+    assert_eq!(option["secret"], true);
+    assert!(option.get("value").is_none());
+
+    area.db
+        .execute("UPDATE \"user\" SET superuser = false")
+        .await;
+    area.server
+        .get("/api/v1/admin/config")
+        .add_header("authorization", &area.auth)
+        .await
+        .assert_status(StatusCode::FORBIDDEN);
     area.db.finish().await;
 }

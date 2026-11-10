@@ -174,6 +174,7 @@ async fn load_and_check_secret_files_and_external_endpoints_before_database(
 
 pub async fn init_state(
     cli: Cli,
+    effective_options: Vec<gradient_types::cli::EffectiveConfigOption>,
     extensions: ServerExtensions,
 ) -> Result<Arc<ServerState>, InitError> {
     if cli.secrets.crypt_file.is_empty() || cli.secrets.jwt_file.is_empty() {
@@ -187,9 +188,10 @@ pub async fn init_state(
         "Starting Gradient server bootstrap",
     );
 
-    let config = Arc::new(
-        RuntimeConfig::from_cli(&cli).map_err(|e| InitError::NetworkConfig(e.to_string()))?,
-    );
+    let config = Arc::new(RuntimeConfig {
+        effective_options,
+        ..RuntimeConfig::from_cli(&cli).map_err(|e| InitError::NetworkConfig(e.to_string()))?
+    });
     let ValidatedStartupSettings {
         http,
         jwt_secret,
@@ -284,7 +286,7 @@ mod tests {
         let mut cli = gradient_test_support::cli::test_cli();
         cli.secrets.crypt_file = "/nonexistent/gradient-crypt".into();
         cli.database.url = Some("postgres://127.0.0.1:1/unreachable".into());
-        let error = init_state(cli, ServerExtensions::default())
+        let error = init_state(cli, Vec::new(), ServerExtensions::default())
             .await
             .expect_err("bootstrap fails");
         assert!(matches!(error, InitError::EncryptionKeyFile(_)), "{error}");

@@ -137,6 +137,23 @@ pub struct Cli {
     pub exec: ExecArgs,
 }
 
+impl Cli {
+    pub fn parse_args_and_env_with_option_value_sources() -> (Self, Vec<cli::EffectiveConfigOption>)
+    {
+        use clap::{CommandFactory, FromArgMatches};
+
+        let command = Self::command();
+        let matches = command.clone().get_matches();
+        let cli = Self::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
+        let options = cli::collect_active_options_with_secret_values_hidden(
+            &command,
+            &matches,
+            &Self::options(),
+        );
+        (cli, options)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BaseResponse<T> {
     pub error: bool,

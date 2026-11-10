@@ -52,7 +52,10 @@ pub use log::LogArgs;
 pub use metrics::MetricsArgs;
 pub use nar::NarArgs;
 pub use oidc::OidcArgs;
-pub use options::{OptionSpec, options_json};
+pub use options::{
+    EffectiveConfigOption, OptionSpec, ServerOptionValueSource,
+    collect_active_options_with_secret_values_hidden, options_json,
+};
 pub use permissions::{CreatePermission, PermissionsArgs};
 pub use proto::ProtoArgs;
 pub use pull_requests::PullRequestsArgs;

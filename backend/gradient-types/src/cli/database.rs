@@ -12,6 +12,7 @@ use gradient_derive::config_group;
 #[config_group("database")]
 #[derive(Args, Debug, Clone)]
 pub struct DatabaseArgs {
+    #[hide_in_admin_config_view]
     pub url: Option<String>,
     pub url_file: Option<String>,
 

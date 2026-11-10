@@ -135,13 +135,13 @@ fn name_option(field: &mut Field, group: &Group) -> syn::Result<TokenStream> {
         reject_hand_written_names(attr)?;
     }
 
-    let flag_only = field
-        .attrs
-        .iter()
-        .any(|attr| attr.path().is_ident("flag_only"));
-    field
-        .attrs
-        .retain(|attr| !attr.path().is_ident("flag_only"));
+    let marked =
+        |field: &Field, name: &str| field.attrs.iter().any(|attr| attr.path().is_ident(name));
+    let flag_only = marked(field, "flag_only");
+    let secret = marked(field, "hide_in_admin_config_view");
+    field.attrs.retain(|attr| {
+        !attr.path().is_ident("flag_only") && !attr.path().is_ident("hide_in_admin_config_view")
+    });
 
     let flag = format!(
         "{}{}",
@@ -175,6 +175,7 @@ fn name_option(field: &mut Field, group: &Group) -> syn::Result<TokenStream> {
             env: #env,
             rust_type: #rust_type,
             description: #description,
+            secret: #secret,
         }
     })
 }
