@@ -238,9 +238,23 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     })
     .await;
 
-    match written {
+    let (outcomes, committed) = match written {
         Ok((outcomes, committed)) => {
             st.record(&Ok(()));
+            (outcomes, Ok(committed))
+        }
+        Err(e) => {
+            warn!(error = %e, groups = groups.len(), nars = commits.len(), "Record transaction failed. Writing evaluations and NARs in separate transactions.");
+            st.record(&Err(anyhow!("{e}")));
+            write_record_groups_then_nar_commits_separately_after_failed_flush(
+                &st.ctx, &groups, &commits,
+            )
+            .await
+        }
+    };
+
+    match committed {
+        Ok(committed) => {
             let mut landed: Vec<_> = commits.into_iter().zip(commit_replies).collect();
             let deferred = landed.split_off(committed.len());
             for ((commit, reply), outcome) in landed.into_iter().zip(committed) {
@@ -256,42 +270,60 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
                     let _ = myself.send_message(GraphMsg::Flush);
                 }
             }
-            for ((group, group_replies), outcome) in groups.into_iter().zip(replies).zip(outcomes) {
-                match outcome {
-                    Ok(report) => {
-                        record::after_commit(&st.ctx, myself, &group, &report).await;
-                        for reply in group_replies {
-                            let _ = reply.send(Ok(report.clone()));
-                        }
-                    }
-                    Err(e) => {
-                        record::fail_evaluation(&st.ctx, group.evaluation, &e.to_string()).await;
-                        let mut group_replies = group_replies.into_iter();
-                        let first = group_replies.next();
-                        for reply in group_replies {
-                            let _ = reply.send(Err(anyhow!("{e:#}")));
-                        }
-                        if let Some(reply) = first {
-                            let _ = reply.send(Err(e));
-                        }
-                    }
-                }
-            }
         }
         Err(e) => {
-            warn!(error = %e, groups = replies.len(), nars = commit_replies.len(), "record transaction failed; its evaluations are failed");
-            st.record(&Err(anyhow!("{e}")));
             for reply in commit_replies {
-                let _ = reply.send(Err(anyhow!("{e}")));
+                let _ = reply.send(Err(anyhow!("{e:#}")));
             }
-            for (group, group_replies) in groups.into_iter().zip(replies) {
-                record::fail_evaluation(&st.ctx, group.evaluation, &e.to_string()).await;
+        }
+    }
+
+    for ((group, group_replies), outcome) in groups.into_iter().zip(replies).zip(outcomes) {
+        match outcome {
+            Ok(report) => {
+                record::after_commit(&st.ctx, myself, &group, &report).await;
                 for reply in group_replies {
-                    let _ = reply.send(Err(anyhow!("{e}")));
+                    let _ = reply.send(Ok(report.clone()));
+                }
+            }
+            Err(e) => {
+                record::fail_evaluation(&st.ctx, group.evaluation, &e.to_string()).await;
+                let mut group_replies = group_replies.into_iter();
+                let first = group_replies.next();
+                for reply in group_replies {
+                    let _ = reply.send(Err(anyhow!("{e:#}")));
+                }
+                if let Some(reply) = first {
+                    let _ = reply.send(Err(e));
                 }
             }
         }
     }
+}
+
+type NarCommitOutcomes = anyhow::Result<Vec<anyhow::Result<NarCommitted>>>;
+
+async fn write_record_groups_then_nar_commits_separately_after_failed_flush(
+    ctx: &DbContext,
+    groups: &[RecordBatch],
+    commits: &[NarCommit],
+) -> (Vec<anyhow::Result<RecordReport>>, NarCommitOutcomes) {
+    let mut outcomes = Vec::with_capacity(groups.len());
+    for group in groups {
+        let outcome = transact(ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+            record_one(&scoped, group).await
+        })
+        .await;
+        outcomes.push(outcome);
+    }
+
+    let committed = transact(ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+        let committed = commit_nars(&scoped, commits).await?;
+        claim_landed_paths(&scoped, commits, &committed).await?;
+        Ok(committed)
+    })
+    .await;
+    (outcomes, committed)
 }
 
 fn merge_queued(
