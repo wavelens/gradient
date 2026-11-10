@@ -30,7 +30,7 @@ use gradient_types::events::audit::Action;
 use chrono::Duration;
 use email_address::EmailAddress;
 use gradient_core::ServerState;
-use gradient_notify::{EmailSender, generate_verification_token};
+use gradient_notify::{EmailSender, generate_token};
 use gradient_types::consts::*;
 use gradient_types::input::{validate_password, validate_username};
 use gradient_types::*;
@@ -196,7 +196,7 @@ pub async fn post_basic_register(
     }
 
     let (email_verified, verification_token, verification_expires) = if requires_verification {
-        let token = generate_verification_token();
+        let token = generate_token();
         let expires = gradient_types::now() + chrono::Duration::hours(24);
         (false, Some(token), Some(expires))
     } else {
@@ -809,7 +809,7 @@ pub async fn post_resend_verification(
         return Err(AuthRefusal::EmailAlreadyVerified.into());
     }
 
-    let verification_token = generate_verification_token();
+    let verification_token = generate_token();
     let verification_expires = gradient_types::now() + chrono::Duration::hours(24);
 
     gradient_db::users::set_email_verification_token(

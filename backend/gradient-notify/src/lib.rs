@@ -9,7 +9,8 @@ use async_trait::async_trait;
 use gradient_types::EmailConfig;
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
-use lettre::{Message, SmtpTransport, Transport};
+use lettre::transport::smtp::client::{Tls, TlsParameters};
+use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use thiserror::Error;
 use tokio::fs;
 use tracing::info;
@@ -112,7 +113,7 @@ pub enum EmailError {
 
 #[derive(Debug)]
 pub struct EmailService {
-    transport: Option<SmtpTransport>,
+    transport: Option<AsyncSmtpTransport<Tokio1Executor>>,
     from_address: String,
     from_name: String,
 }
@@ -136,12 +137,15 @@ impl EmailService {
         let credentials = Credentials::new(config.smtp_username.clone(), smtp_password);
 
         let transport = if !config.enable_tls {
-            SmtpTransport::builder_dangerous(&config.smtp_host)
+            let tls =
+                TlsParameters::new(config.smtp_host.clone()).context("create SMTP transport")?;
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.smtp_host)
+                .tls(Tls::Opportunistic(tls))
                 .credentials(credentials)
                 .port(config.smtp_port)
                 .build()
         } else {
-            SmtpTransport::relay(&config.smtp_host)
+            AsyncSmtpTransport::<Tokio1Executor>::relay(&config.smtp_host)
                 .context("create SMTP transport")?
                 .credentials(credentials)
                 .port(config.smtp_port)
@@ -155,7 +159,7 @@ impl EmailService {
         })
     }
 
-    fn transport(&self) -> Result<&SmtpTransport, EmailError> {
+    fn transport(&self) -> Result<&AsyncSmtpTransport<Tokio1Executor>, EmailError> {
         self.transport.as_ref().ok_or(EmailError::SmtpNotConfigured)
     }
 }
@@ -196,7 +200,7 @@ impl EmailSender for EmailService {
             .body(email_body)
             .context("build email")?;
 
-        transport.send(&email).context("send email")?;
+        transport.send(email).await.context("send email")?;
 
         info!(to = to_email, "Verification email sent");
         Ok(())
@@ -229,7 +233,7 @@ impl EmailSender for EmailService {
             .body(email_body)
             .context("build email")?;
 
-        transport.send(&email).context("send email")?;
+        transport.send(email).await.context("send email")?;
 
         info!(to = to_email, "Password reset email sent");
         Ok(())
@@ -251,13 +255,13 @@ impl EmailSender for EmailService {
             .from(from.parse().context("invalid from address")?)
             .subject(subject);
         for addr in to {
-            builder = builder.to(addr.parse().context("invalid recipient")?);
+            builder = builder.bcc(addr.parse().context("invalid recipient")?);
         }
         let msg = builder
             .header(ContentType::TEXT_PLAIN)
             .body(body.to_string())
             .context("build email message")?;
-        let response = transport.send(&msg).context("smtp send")?;
+        let response = transport.send(msg).await.context("smtp send")?;
         Ok(MailDeliveryResult {
             status_code: u16::from(response.code()) as i32,
             server_response: response.message().collect::<Vec<_>>().join(" "),
@@ -291,7 +295,7 @@ impl EmailSender for EmailService {
             .body(invitation_email_html(to_name, invite))
             .context("build email")?;
 
-        transport.send(&email).context("send email")?;
+        transport.send(email).await.context("send email")?;
 
         info!(to = to_email, "Invitation email sent");
         Ok(())
@@ -330,7 +334,7 @@ impl EmailSender for EmailService {
             )
             .subject(subject);
         for addr in to {
-            builder = builder.to(addr.parse().context("invalid recipient")?);
+            builder = builder.bcc(addr.parse().context("invalid recipient")?);
         }
 
         let msg = builder
@@ -338,13 +342,15 @@ impl EmailSender for EmailService {
             .body(subscription_email_html(mail))
             .context("build email")?;
 
-        transport.send(&msg).context("send email")?;
+        transport.send(msg).await.context("send email")?;
 
         Ok(())
     }
 }
 
 fn verification_email_html(name: &str, verification_url: &str) -> String {
+    let name = escape_html_special_characters(name);
+    let verification_url = escape_html_special_characters(verification_url);
     format!(
         r#"
 <!DOCTYPE html>
@@ -390,6 +396,8 @@ fn verification_email_html(name: &str, verification_url: &str) -> String {
 }
 
 fn password_reset_email_html(name: &str, reset_url: &str) -> String {
+    let name = escape_html_special_characters(name);
+    let reset_url = escape_html_special_characters(reset_url);
     format!(
         r#"
 <!DOCTYPE html>
@@ -435,11 +443,12 @@ fn password_reset_email_html(name: &str, reset_url: &str) -> String {
 }
 
 fn invitation_email_html(name: &str, invite: &InvitationMail<'_>) -> String {
+    let name = escape_html_special_characters(name);
     let scope = invite.scope.label();
-    let scope_name = invite.scope_display_name;
-    let role = invite.role;
-    let inviter = invite.inviter;
-    let accept_url = &invite.accept_url;
+    let scope_name = escape_html_special_characters(invite.scope_display_name);
+    let role = escape_html_special_characters(invite.role);
+    let inviter = escape_html_special_characters(invite.inviter);
+    let accept_url = escape_html_special_characters(&invite.accept_url);
     format!(
         r#"
 <!DOCTYPE html>
@@ -485,11 +494,11 @@ fn invitation_email_html(name: &str, invite: &InvitationMail<'_>) -> String {
 }
 
 fn subscription_email_html(mail: &SubscriptionMail<'_>) -> String {
-    let project = mail.project_display_name;
-    let cache = mail.cache_display_name;
-    let mode = mail.mode;
-    let actor = mail.actor;
-    let link = &mail.link;
+    let project = escape_html_special_characters(mail.project_display_name);
+    let cache = escape_html_special_characters(mail.cache_display_name);
+    let mode = escape_html_special_characters(mail.mode);
+    let actor = escape_html_special_characters(mail.actor);
+    let link = escape_html_special_characters(&mail.link);
     let (heading, body) = match mail.event {
         SubscriptionEvent::Requested => (
             "Cache subscription requested",
@@ -544,11 +553,67 @@ fn subscription_email_html(mail: &SubscriptionMail<'_>) -> String {
     )
 }
 
+fn escape_html_special_characters(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
 pub fn generate_token() -> String {
     let token: [u8; 32] = rand::random();
     hex::encode(token)
 }
 
-pub fn generate_verification_token() -> String {
-    generate_token()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_and_links_are_escaped_in_html_mails() {
+        let html = verification_email_html("<b>Eve</b>", "https://ci.example/v?a=1&b=\"x\"");
+        assert!(html.contains("Hello &lt;b&gt;Eve&lt;/b&gt;,"));
+        assert!(html.contains("href=\"https://ci.example/v?a=1&amp;b=&quot;x&quot;\""));
+        assert!(!html.contains("<b>Eve</b>"));
+
+        let html = invitation_email_html(
+            "Bob",
+            &InvitationMail {
+                scope: InviteScope::Team,
+                scope_display_name: "<script>x</script>",
+                role: "Admin",
+                inviter: "Mallory & Co",
+                accept_url: "https://ci.example/invite".into(),
+            },
+        );
+        assert!(html.contains("<strong>&lt;script&gt;x&lt;/script&gt;</strong> team"));
+        assert!(html.contains("Mallory &amp; Co invited you"));
+
+        let html = subscription_email_html(&SubscriptionMail {
+            event: SubscriptionEvent::Requested,
+            project_display_name: "web\"app",
+            cache_display_name: "main",
+            mode: "read",
+            actor: "<i>Al</i>",
+            link: "https://ci.example/cache".into(),
+        });
+        assert!(html.contains("&lt;i&gt;Al&lt;/i&gt; asked"));
+        assert!(html.contains("<strong>web&quot;app</strong>"));
+    }
+
+    #[test]
+    fn a_token_is_64_hex_characters() {
+        let token = generate_token();
+        assert_eq!(token.len(), 64);
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(token, generate_token());
+    }
 }

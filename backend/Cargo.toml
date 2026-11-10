@@ -158,7 +158,7 @@ http-body-util       = { version = "0.1", default-features = false }
 hyper                = { version = "1", default-features = false, features = ["client", "http1"] }
 hyper-util           = { version = "0.1", default-features = false, features = ["tokio"] }
 jsonwebtoken         = { version = "11.0", default-features = false, features = ["aws_lc_rs"] }
-lettre               = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "rustls-native-certs", "aws-lc-rs"] }
+lettre               = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "rustls-native-certs", "aws-lc-rs", "tokio1-rustls"] }
 reqwest              = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart", "brotli", "gzip", "deflate", "zstd"] }
 tower                = { version = "0.5", default-features = false }
 tower-http           = { version = "0.7", default-features = false, features = ["cors", "request-id", "trace"] }
