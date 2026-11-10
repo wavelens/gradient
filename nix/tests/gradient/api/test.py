@@ -216,7 +216,7 @@ api("GET", "projects/cliproject", token=token)  # CLI-created project visible vi
 cli("project list")
 cli("project select cliproject")
 cli("project show")
-cli("project delete")
+cli("project delete --yes")
 api("GET", "projects/cliproject", token=token, expect_error=True)  # gone
 machine.succeed(f"{CLI} project select myproject")
 
@@ -275,7 +275,7 @@ api("GET", "tasks/myproject/clitask", token=token)
 cli("task list")
 machine.succeed(f"{CLI} task select clitask")
 cli("task show")
-cli("task delete")
+cli("task delete --yes")
 api("GET", "tasks/myproject/clitask", token=token, expect_error=True)
 machine.succeed(f"{CLI} task select mytask")
 
@@ -307,7 +307,7 @@ cli(f"worker register {cli_worker} --display-name cli-worker")
 assert any(w["worker_id"] == cli_worker
            for w in api("GET", "projects/myproject/workers", token=token))
 cli("worker list")
-cli(f"worker delete {cli_worker}")
+cli(f"worker delete {cli_worker} --yes")
 assert not any(w["worker_id"] == cli_worker
                for w in api("GET", "projects/myproject/workers", token=token))
 
@@ -336,7 +336,7 @@ cli("cache create --name clicache --display-name 'CLI Cache' --description d --p
 api("GET", "caches/clicache", token=token)
 cli("cache list")
 cli("cache show clicache")
-cli("cache delete clicache")
+cli("cache delete clicache --yes")
 api("GET", "caches/clicache", token=token, expect_error=True)
 
 # ── Phase 6b: cache sub-resources (members, roles, upstream caches, subscription) ───
