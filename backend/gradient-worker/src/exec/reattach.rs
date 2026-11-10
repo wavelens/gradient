@@ -18,7 +18,7 @@ use super::job::{GuestJob, finish, unix_now, unless_aborted};
 use super::job_channels::JobChannels;
 use super::keep_vm::{ExecInbox, KeepVmRunning};
 use super::state::StoredJob;
-use super::uploads::GuestUploads;
+use super::uploads::{GuestUploads, guest_upload_staging_bytes_from_requested_disk_mb};
 use super::watchdog::Watchdog;
 use crate::executor::AbortSignal;
 use crate::executor::failure::BuildError;
@@ -111,7 +111,10 @@ async fn follow_again(
             mux,
             guest.dir().to_owned(),
         ),
-        uploads: GuestUploads::new(guest.dir().join("outputs")),
+        uploads: GuestUploads::new(
+            guest.dir().join("outputs"),
+            guest_upload_staging_bytes_from_requested_disk_mb(stored.disk_mb),
+        ),
         keep_vm_running: KeepVmRunning::resumed(inbox.keep_vm_running, guest.dir()),
     };
     finish(&mut agent, updater, &mut job).await
@@ -169,6 +172,7 @@ mod tests {
             sent_to_agent,
             ssh: false,
             ports: Vec::new(),
+            disk_mb: 0,
         }
     }
 

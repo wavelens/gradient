@@ -20,6 +20,8 @@ pub struct StoredJob {
     pub ssh: bool,
     #[serde(default)]
     pub ports: Vec<u16>,
+    #[serde(default)]
+    pub disk_mb: u64,
 }
 
 #[cfg(test)]
@@ -42,6 +44,7 @@ mod tests {
             sent_to_agent: true,
             ssh: true,
             ports: vec![6006],
+            disk_mb: 2048,
         };
         let guest_id = GuestId::new();
         let state = GuestState {

@@ -15,6 +15,16 @@ use tracing::debug;
 
 pub type OutputUpload = BoxFuture<'static, Result<()>>;
 
+const MAX_OPEN_UPLOADS_PER_JOB: usize = 64;
+
+pub fn guest_upload_staging_bytes_from_requested_disk_mb(disk_mb: u64) -> u64 {
+    let disk_mb = match disk_mb {
+        0 => gradient_wire::types::GuestSize::default_request().disk_mb,
+        requested => requested,
+    };
+    disk_mb.saturating_mul(1024 * 1024)
+}
+
 enum StagedUpload {
     Writing {
         path: String,
@@ -29,22 +39,41 @@ enum StagedUpload {
 pub struct GuestUploads {
     dir: PathBuf,
     open: HashMap<u64, StagedUpload>,
-    settling: JoinSet<(u64, Option<String>)>,
+    settling: JoinSet<(u64, u64, Option<String>)>,
+    guest_upload_bytes_limit: u64,
+    claimed_staged_upload_bytes: u64,
 }
 
 impl GuestUploads {
-    pub fn new(dir: PathBuf) -> Self {
+    pub fn new(dir: PathBuf, guest_upload_bytes_limit: u64) -> Self {
         Self {
             dir,
             open: HashMap::new(),
             settling: JoinSet::new(),
+            guest_upload_bytes_limit,
+            claimed_staged_upload_bytes: 0,
         }
     }
 
     pub async fn start(&mut self, upload_id: u64, path: String, size: u64) -> Result<()> {
+        if self.open.len() >= MAX_OPEN_UPLOADS_PER_JOB {
+            bail!("Upload {upload_id} rejected: {MAX_OPEN_UPLOADS_PER_JOB} uploads already open");
+        }
+        let free = self
+            .guest_upload_bytes_limit
+            .saturating_sub(self.claimed_staged_upload_bytes);
+        if size > free {
+            let reason = format!(
+                "Upload {upload_id} rejected: {size} bytes exceed the {free} bytes left for uploads in this job"
+            );
+            self.open
+                .insert(upload_id, StagedUpload::Failed(reason.clone()));
+            bail!(reason);
+        }
         let staged = self.dir.join(upload_id.to_string());
         let (upload, created) = match self.create(&staged).await {
             Ok(file) => {
+                self.claimed_staged_upload_bytes += size;
                 let writing = StagedUpload::Writing {
                     path,
                     file,
@@ -81,10 +110,11 @@ impl GuestUploads {
     }
 
     async fn fail(&mut self, upload_id: u64, reason: String) {
-        if let Some(StagedUpload::Writing { staged, .. }) =
+        if let Some(StagedUpload::Writing { staged, size, .. }) =
             self.open.insert(upload_id, StagedUpload::Failed(reason))
         {
             remove_staged(&staged).await;
+            self.claimed_staged_upload_bytes -= size;
         }
     }
 
@@ -93,6 +123,7 @@ impl GuestUploads {
         upload_id: u64,
         upload: impl FnOnce(String, PathBuf, u64) -> OutputUpload,
     ) {
+        let mut claimed = 0;
         let settling: BoxFuture<'static, Option<String>> = match self.open.remove(&upload_id) {
             Some(StagedUpload::Writing {
                 path,
@@ -101,6 +132,7 @@ impl GuestUploads {
                 size,
                 written,
             }) => {
+                claimed = size;
                 let upload = upload(path, staged.clone(), size);
                 Box::pin(async move {
                     let settled = settle(file, upload, size, written).await;
@@ -112,13 +144,16 @@ impl GuestUploads {
             None => ready_answer(Some(format!("upload {upload_id} is not open"))),
         };
         self.settling
-            .spawn(async move { (upload_id, settling.await) });
+            .spawn(async move { (upload_id, claimed, settling.await) });
     }
 
     pub async fn next_settled(&mut self) -> Option<(u64, Option<String>)> {
         loop {
             match self.settling.join_next().await? {
-                Ok(settled) => return Some(settled),
+                Ok((upload_id, claimed, error)) => {
+                    self.claimed_staged_upload_bytes -= claimed;
+                    return Some((upload_id, error));
+                }
                 Err(e) => debug!(error = %e, "guest upload task ended without an answer"),
             }
         }
@@ -198,7 +233,7 @@ mod tests {
     #[tokio::test]
     async fn chunks_beyond_the_announced_size_fail_the_upload() {
         let dir = tempfile::tempdir().unwrap();
-        let mut uploads = GuestUploads::new(dir.path().to_owned());
+        let mut uploads = GuestUploads::new(dir.path().to_owned(), 1024);
         uploads.start(1, "w.bin".into(), 3).await.unwrap();
 
         let error = uploads.chunk(1, b"abcd").await.unwrap_err();
@@ -208,6 +243,45 @@ mod tests {
         assert_eq!(
             uploads.next_settled().await,
             Some((1, Some("upload 1 exceeds its 3 bytes".into())))
+        );
+    }
+
+    #[tokio::test]
+    async fn an_upload_beyond_the_job_byte_limit_is_refused_until_space_frees() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut uploads = GuestUploads::new(dir.path().to_owned(), 5);
+        uploads.start(1, "a.bin".into(), 3).await.unwrap();
+
+        let error = uploads.start(2, "b.bin".into(), 3).await.unwrap_err();
+        uploads.end(2, |_, _, _| Box::pin(async { Ok(()) }));
+        assert_eq!(
+            error.to_string(),
+            "Upload 2 rejected: 3 bytes exceed the 2 bytes left for uploads in this job"
+        );
+        assert_eq!(
+            uploads.next_settled().await,
+            Some((2, Some(error.to_string())))
+        );
+
+        uploads.chunk(1, b"abc").await.unwrap();
+        uploads.end(1, |_, _, _| Box::pin(async { Ok(()) }));
+        assert_eq!(uploads.next_settled().await, Some((1, None)));
+        uploads.start(3, "c.bin".into(), 5).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn opening_more_uploads_than_the_limit_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut uploads = GuestUploads::new(dir.path().to_owned(), 1024);
+        for upload_id in 0..MAX_OPEN_UPLOADS_PER_JOB as u64 {
+            uploads.start(upload_id, "f".into(), 1).await.unwrap();
+        }
+
+        let error = uploads.start(999, "f".into(), 1).await.unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!("Upload 999 rejected: {MAX_OPEN_UPLOADS_PER_JOB} uploads already open")
         );
     }
 
@@ -264,7 +338,7 @@ mod tests {
             }
         });
         let dir = tempfile::tempdir().unwrap();
-        let mut uploads = GuestUploads::new(dir.path().join("outputs"));
+        let mut uploads = GuestUploads::new(dir.path().join("outputs"), 1024);
 
         uploads.start(1, "model/w.bin".into(), 3).await.unwrap();
         uploads.chunk(1, b"abc").await.unwrap();

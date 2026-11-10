@@ -37,7 +37,9 @@ use super::job_channels::JobChannels;
 use super::keep_vm::{ExecInbox, KeepVmRunning, marker_file};
 use super::sops::WorkerSecrets;
 use super::state::StoredJob;
-use super::uploads::{GuestUploads, OutputUpload};
+use super::uploads::{
+    GuestUploads, OutputUpload, guest_upload_staging_bytes_from_requested_disk_mb,
+};
 use super::watchdog::{Watchdog, Watched};
 use super::work_disk::{WorkDiskError, build_work_disk};
 use crate::executor::AbortSignal;
@@ -733,7 +735,10 @@ impl ExecRun<'_> {
                 mux,
                 guest.dir().to_owned(),
             ),
-            uploads: GuestUploads::new(guest.dir().join("outputs")),
+            uploads: GuestUploads::new(
+                guest.dir().join("outputs"),
+                guest_upload_staging_bytes_from_requested_disk_mb(requirement.guest.disk_mb),
+            ),
             keep_vm_running: KeepVmRunning::new(
                 inbox.keep_vm_running,
                 self.job.keep_vm_running,
@@ -883,6 +888,7 @@ impl ExecRun<'_> {
             sent_to_agent,
             ssh: self.job.requirement.ssh,
             ports: self.job.requirement.ports.clone(),
+            disk_mb: self.job.requirement.guest.disk_mb,
         }
     }
 }
@@ -1074,7 +1080,7 @@ mod tests {
             abort: AbortSignal::never(),
             leave_running: CancellationToken::new(),
             channels: job_channels(false).1,
-            uploads: GuestUploads::new(PathBuf::new()),
+            uploads: GuestUploads::new(PathBuf::new(), 1024),
             keep_vm_running: KeepVmRunning::new(watch::channel(false).1, false, None),
         }
     }
@@ -1125,7 +1131,7 @@ mod tests {
         let uploaded = recorder.1.clone();
         let dir = tempfile::tempdir().unwrap();
         let mut job = GuestJob {
-            uploads: GuestUploads::new(dir.path().join("outputs")),
+            uploads: GuestUploads::new(dir.path().join("outputs"), 1024),
             ..unwatched_job()
         };
 
