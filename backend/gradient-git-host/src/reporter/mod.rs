@@ -270,11 +270,19 @@ pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
         &url[colon_pos + 1..]
     };
 
-    let path = path.trim_end_matches(".git");
-    let mut parts = path.splitn(2, '/');
-    let owner = parts.next()?.to_string();
-    let repo = parts.next()?.to_string();
-    Some((owner, repo))
+    let path = path.trim_end_matches('/').trim_end_matches(".git");
+    if !path.split('/').all(is_valid_repository_path_component) {
+        return None;
+    }
+    let (owner, repo) = path.split_once('/')?;
+    Some((owner.to_string(), repo.to_string()))
+}
+
+fn is_valid_repository_path_component(segment: &str) -> bool {
+    !matches!(segment, "" | "." | "..")
+        && segment
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 #[cfg(test)]
@@ -390,6 +398,18 @@ mod tests {
             "https://github.com",
             "https://github.com/acme",
             "ftp-no-colon-owner-repo",
+        ] {
+            assert_eq!(parse_owner_repo(url), None, "{url}");
+        }
+    }
+
+    #[test]
+    fn parse_owner_repo_rejects_dot_segments_and_odd_characters() {
+        for url in [
+            "https://github.com/a/b/../../../orgs/x/y",
+            "https://github.com/a/./b",
+            "https://github.com/a//b",
+            "https://github.com/a/b%2F..",
         ] {
             assert_eq!(parse_owner_repo(url), None, "{url}");
         }

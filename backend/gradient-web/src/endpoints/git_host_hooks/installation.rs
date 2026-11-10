@@ -5,6 +5,7 @@
  */
 
 use super::payloads::GitHubInstallationPayload;
+use crate::endpoints::tasks::auto_attach::url_host;
 use gradient_ci::parse_owner_repo;
 use gradient_db::WebDb;
 use gradient_types::*;
@@ -106,15 +107,16 @@ async fn store_installation_id(db: &WebDb, payload: &GitHubInstallationPayload) 
 }
 
 pub(crate) fn github_full_name(repo_url: &str) -> Option<String> {
-    let lower = repo_url.to_ascii_lowercase();
-    let is_github = lower.contains("github.com")
-        || lower.starts_with("github:")
-        || lower.starts_with("git+github:");
+    let lower = repo_url.trim().to_ascii_lowercase();
+    let is_github = lower.starts_with("github:")
+        || lower.starts_with("git+github:")
+        || url_host(&lower).as_deref() == Some("github.com");
     if !is_github {
         return None;
     }
 
-    parse_owner_repo(repo_url).map(|(owner, repo)| format!("{owner}/{repo}").to_ascii_lowercase())
+    let (owner, repo) = parse_owner_repo(repo_url.trim())?;
+    (!repo.contains('/')).then(|| format!("{owner}/{repo}").to_ascii_lowercase())
 }
 
 pub(super) fn normalize_repo_url(url: &str) -> String {
@@ -307,6 +309,22 @@ mod tests {
     #[test]
     fn github_full_name_rejects_non_github_hosts() {
         assert_eq!(github_full_name("https://gitlab.com/NuschtOS/search"), None);
+        assert_eq!(
+            github_full_name("https://notgithub.com.evil.example/acme/widgets"),
+            None
+        );
+        assert_eq!(
+            github_full_name("https://evil.example/github.com/acme/widgets"),
+            None
+        );
+        assert_eq!(
+            github_full_name("https://github.com/a/b/../../../orgs/x/y"),
+            None
+        );
+        assert_eq!(
+            github_full_name("https://github.com/acme/widgets/extra"),
+            None
+        );
         assert_eq!(
             github_full_name("https://gitea.example.com/acme/widgets"),
             None
