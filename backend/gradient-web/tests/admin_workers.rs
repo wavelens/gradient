@@ -78,7 +78,7 @@ async fn admin_area(superuser: bool) -> AdminArea {
             role: None,
             includes_users: false,
             includes_workers: true,
-            managed: false,
+            grant_source: gradient_types::TeamGrantSource::Manual,
             created_at: test_date(),
         },
     )
