@@ -312,6 +312,16 @@ impl InboundContext<'_> {
                 )
             }
             StorageTarget::Put { url } => (GrantTarget::Put { url }, Transfer::Put, lease),
+            StorageTarget::PresignedPutToTemporaryUploadObject {
+                url,
+                temporary_nar_storage_key,
+            } => (
+                GrantTarget::Put { url },
+                Transfer::PutToTemporaryUploadObject {
+                    temporary_nar_storage_key,
+                },
+                lease,
+            ),
             StorageTarget::Multipart(grant) => {
                 let upload_id = grant.upload_id.clone();
                 (
@@ -454,11 +464,23 @@ impl InboundContext<'_> {
 }
 
 pub(super) async fn abandon_transfer(nar_storage: &NarStore, granted: Granted) {
-    if let (Transfer::Multipart { upload_id }, UploadObject::Nar { store_path }) =
-        (&granted.transfer, &granted.object)
-        && let Some(hash) = nar_key(store_path)
-    {
-        nar_storage.abort_multipart(&hash, upload_id).await;
+    match (&granted.transfer, &granted.object) {
+        (Transfer::Multipart { upload_id }, UploadObject::Nar { store_path }) => {
+            if let Some(hash) = nar_key(store_path) {
+                nar_storage.abort_multipart(&hash, upload_id).await;
+            }
+        }
+        (
+            Transfer::PutToTemporaryUploadObject {
+                temporary_nar_storage_key,
+            },
+            _,
+        ) => {
+            let _ = nar_storage
+                .delete_temporary_nar_upload(temporary_nar_storage_key)
+                .await;
+        }
+        _ => {}
     }
 }
 

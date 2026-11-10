@@ -95,7 +95,7 @@ pub(super) async fn run(
             .await
         }
         Pass::Nars => pass_nars(db, graph, shard, report).await,
-        Pass::Partials => pass_partials(&db.config, report).await,
+        Pass::Partials => pass_partials(&db.config, &db.storage.nar_storage, report).await,
     }
     .with_context(|| format!("deep GC unit {unit}"))
 }
@@ -287,7 +287,15 @@ async fn referenced_exec_attempts(
 
 /// This is the only sweep of upload partials. A walk per session, request or maintenance tick would
 /// stall every waiter behind the filesystem.
-async fn pass_partials(config: &RuntimeConfig, report: &mut DeepGcReport) -> Result<()> {
+async fn pass_partials(
+    config: &RuntimeConfig,
+    nar_storage: &NarStore,
+    report: &mut DeepGcReport,
+) -> Result<()> {
+    report.stale_partials_removed += nar_storage
+        .delete_expired_temporary_nar_uploads()
+        .await
+        .context("clean up temporary NAR uploads")?;
     let ttl = std::time::Duration::from_secs(config.nar.partial_ttl_secs);
     let server = &config.server;
     for root in [

@@ -28,7 +28,7 @@ sequenceDiagram
 |---|---|---|
 | `Skip` | The path is already stored, or the project has no writable cache for an evaluation cache segment | Nothing |
 | `Passthrough { resume_offset }` | Local NAR storage | `UploadChunk` frames of `worker.nar.chunkBytes` into `<baseDir>/nar-partial`, resuming after a break |
-| `Put { url }` | S3, NAR up to 1 GiB | One presigned PUT, valid 1 h |
+| `Put { url }` | S3, NAR up to 1 GiB | One signed PUT to a temporary object under `nar-uploads/` with a 1-hour lifetime. |
 | `Multipart` | S3, NAR over 1 GiB | Presigned parts of at least 64 MiB |
 
 - **Admission** applies server-wide and treats all sessions fairly.
@@ -47,7 +47,8 @@ sequenceDiagram
     - Both rules also hold for an answer arriving before the grant.
     - A failed transfer or an abandoned request led to an `UploadCancel` message.
 - **Commit:** For a passthrough upload, the server checked length and SHA-256, then moved the upload into the NAR store.
-    - For a presigned upload, the commit completed the multipart transfer and checked the object size.
+    - The commit for a presigned PUT checked the size of the temporary object. It only copied the object to the NAR store, if no other content existed at that path. The commit then deleted the temporary object. Deep garbage collection can remove leftovers older than 2 hours.
+    - A commit for a multipart upload only completed the transfer, if there was no other content at that path. The commit then checked the object size.
     - A full digest check happened only with `nar.verifyDigest` set.
 - **Leases:** A passthrough upload expired after `upload.leaseIdleSecs` (300 s) without progress. A failed job or closed session released its uploads.
 - **Evaluation cache segments** reuse the same handshake, with `UploadObject::EvalCacheSegment` and `UploadMetadata::EvalCache` as the payload types.

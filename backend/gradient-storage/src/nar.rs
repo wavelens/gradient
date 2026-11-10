@@ -39,6 +39,7 @@ impl Default for S3Timeouts {
     }
 }
 
+const TEMPORARY_NAR_UPLOADS: &str = "nar-uploads";
 const WRITE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 #[derive(Debug)]
@@ -350,7 +351,23 @@ impl NarStore {
         expected_size: u64,
         rehash: bool,
     ) -> std::result::Result<(), crate::digest::VerifyError> {
-        match self.head_size(hash).await? {
+        self.verify_object(
+            &self.object_path(hash),
+            expected_file_hash,
+            expected_size,
+            rehash,
+        )
+        .await
+    }
+
+    async fn verify_object(
+        &self,
+        path: &Path,
+        expected_file_hash: &str,
+        expected_size: u64,
+        rehash: bool,
+    ) -> std::result::Result<(), crate::digest::VerifyError> {
+        match self.head_object(path).await?.map(|meta| meta.size) {
             Some(size) if size == expected_size => {}
             Some(size) => {
                 return Err(crate::digest::VerifyError::Size {
@@ -362,7 +379,7 @@ impl NarStore {
         }
         if rehash {
             let bytes = self
-                .get(hash)
+                .get_object(path)
                 .await?
                 .ok_or(crate::digest::VerifyError::Missing)?;
             crate::digest::verify_nar_bytes(&bytes, expected_file_hash, expected_size)?;
@@ -498,13 +515,73 @@ impl NarStore {
             .await
     }
 
-    pub async fn presigned_put_url(
+    async fn presigned_temporary_nar_upload(&self, hash: &str) -> Result<Option<StorageTarget>> {
+        let upload = Path::from(format!(
+            "{}{TEMPORARY_NAR_UPLOADS}/{hash}-{}.nar.zst",
+            self.prefix,
+            uuid::Uuid::now_v7()
+        ));
+        Ok(self
+            .presign_object(reqwest::Method::PUT, &upload, PRESIGN_TTL)
+            .await?
+            .map(|url| StorageTarget::PresignedPutToTemporaryUploadObject {
+                url,
+                temporary_nar_storage_key: upload.to_string(),
+            }))
+    }
+
+    pub async fn check_temporary_nar_upload_size_and_sha256(
+        &self,
+        temporary_nar_storage_key: &str,
+        expected_file_hash: &str,
+        expected_size: u64,
+        rehash: bool,
+    ) -> std::result::Result<(), crate::digest::VerifyError> {
+        self.verify_object(
+            &Path::from(temporary_nar_storage_key),
+            expected_file_hash,
+            expected_size,
+            rehash,
+        )
+        .await
+    }
+
+    pub async fn copy_staged_upload_to_nar_for_hash_and_delete_staged(
         &self,
         hash: &str,
-        expires_in: std::time::Duration,
-    ) -> Result<Option<String>> {
-        self.presign_object(reqwest::Method::PUT, &self.object_path(hash), expires_in)
+        temporary_nar_storage_key: &str,
+    ) -> Result<()> {
+        let staged = Path::from(temporary_nar_storage_key);
+        self.inner
+            .copy(&staged, &self.object_path(hash))
             .await
+            .context("Copy of Uploaded NAR to Final Location")?;
+        self.hot.invalidate(hash);
+        self.delete_object(&staged).await
+    }
+
+    pub async fn delete_temporary_nar_upload(&self, temporary_nar_storage_key: &str) -> Result<()> {
+        self.delete_object(&Path::from(temporary_nar_storage_key))
+            .await
+    }
+
+    pub async fn delete_expired_temporary_nar_uploads(&self) -> Result<u64> {
+        let cutoff = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .saturating_sub(2 * PRESIGN_TTL)
+            .as_secs();
+        let prefix = Path::from(format!("{}{TEMPORARY_NAR_UPLOADS}", self.prefix));
+        let mut listing = self.inner.list(Some(&prefix));
+        let mut removed = 0;
+        while let Some(item) = listing.next().await {
+            let meta = item.context("list temporary NAR uploads")?;
+            if u64::try_from(meta.last_modified.timestamp()).unwrap_or(0) < cutoff {
+                self.delete_object(&meta.location).await?;
+                removed += 1;
+            }
+        }
+        Ok(removed)
     }
 
     pub async fn presigned_multipart(
@@ -886,14 +963,22 @@ impl NarStore {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StorageTarget {
     Passthrough,
-    Put { url: String },
+    Put {
+        url: String,
+    },
+    PresignedPutToTemporaryUploadObject {
+        url: String,
+        temporary_nar_storage_key: String,
+    },
     Multipart(gradient_wire::types::PresignedMultipart),
 }
 
 pub fn upload_lease(target: &StorageTarget, size: u64) -> Option<std::time::Duration> {
     match target {
         StorageTarget::Passthrough => None,
-        StorageTarget::Put { .. } => Some(PRESIGN_TTL),
+        StorageTarget::Put { .. } | StorageTarget::PresignedPutToTemporaryUploadObject { .. } => {
+            Some(PRESIGN_TTL)
+        }
         StorageTarget::Multipart(_) => Some(crate::multipart::part_ttl(size)),
     }
 }
@@ -912,9 +997,8 @@ impl NarStore {
                 .map(StorageTarget::Multipart)
                 .ok_or_else(missing),
             ObjectKey::Nar(hash) => self
-                .presigned_put_url(hash, PRESIGN_TTL)
+                .presigned_temporary_nar_upload(hash)
                 .await?
-                .map(|url| StorageTarget::Put { url })
                 .ok_or_else(missing),
             ObjectKey::EvalCache(key) => self
                 .presigned_eval_cache_put_url(key, PRESIGN_TTL)
@@ -1000,7 +1084,18 @@ mod tests {
             .upload_target(&ObjectKey::Nar("a".repeat(32)), 1024)
             .await
             .unwrap();
-        assert!(matches!(nar, StorageTarget::Put { .. }), "{nar:?}");
+        let StorageTarget::PresignedPutToTemporaryUploadObject {
+            url,
+            temporary_nar_storage_key,
+        } = nar
+        else {
+            panic!("{nar:?}")
+        };
+        assert!(
+            temporary_nar_storage_key.starts_with(&format!("nar-uploads/{}-", "a".repeat(32))),
+            "{temporary_nar_storage_key}"
+        );
+        assert!(!url.contains("/nars/"), "{url}");
         let blob = store
             .upload_target(&ObjectKey::EvalCache("eval-cache/c/fp".into()), 1024)
             .await

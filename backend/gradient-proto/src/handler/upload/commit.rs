@@ -10,9 +10,9 @@ use gradient_db::exec_jobs::{continuations, outputs};
 use gradient_db::{DbContext, WorkerDb};
 use gradient_storage::admission::{ObjectKey, UploadPermit};
 use gradient_storage::{NarStore, StagedFile};
+use gradient_types::EExecJob;
 use gradient_types::exec::ContinueFile;
 use gradient_types::ids::{CacheId, ExecJobId, ProjectId};
-use gradient_types::{EExecJob, RuntimeConfig};
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{
     CONTINUE_OUTPUT, NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome,
@@ -126,9 +126,26 @@ async fn place(
                     )
                     .await
                 }
-                Transfer::Put | Transfer::Multipart { .. } => {
-                    place_presigned(&db.storage.nar_storage, &db.config, &hash, meta).await
+                Transfer::PutToTemporaryUploadObject {
+                    temporary_nar_storage_key,
+                } => {
+                    verify_nar_put_and_place_if_path_has_no_content(
+                        db,
+                        &hash,
+                        &temporary_nar_storage_key,
+                        meta,
+                    )
+                    .await
                 }
+                Transfer::Multipart { upload_id } => {
+                    complete_and_verify_multipart_nar_upload_if_no_other_content_for_path(
+                        db, &hash, &upload_id, meta,
+                    )
+                    .await
+                }
+                Transfer::Put => Err(rejected(
+                    "NAR uploads need a temporary upload object.".into(),
+                )),
             }
             .map(|()| None)
         }
@@ -271,28 +288,88 @@ async fn place_passed_through(
     Ok(())
 }
 
-async fn place_presigned(
-    nar_storage: &NarStore,
-    config: &RuntimeConfig,
+async fn verify_nar_put_and_place_if_path_has_no_content(
+    db: &DbContext,
     hash: &str,
+    temporary_nar_storage_key: &str,
     meta: &NarUploadMetadata,
 ) -> Result<(), UploadOutcome> {
-    if let Some(receipt) = &meta.multipart
-        && let Err(e) = nar_storage.complete_multipart(hash, receipt).await
+    let nar_storage = &db.storage.nar_storage;
+    let needed = match nar_storage
+        .check_temporary_nar_upload_size_and_sha256(
+            temporary_nar_storage_key,
+            &meta.file_hash,
+            meta.file_size,
+            db.config.nar.verify_digest,
+        )
+        .await
     {
-        nar_storage.abort_multipart(hash, &receipt.upload_id).await;
+        Ok(()) => nar_write_needed(&db.worker_db, nar_storage, hash, &meta.file_hash)
+            .await
+            .map_err(retry),
+        Err(e) => Err(retry(e)),
+    };
+    if matches!(needed, Ok(WriteNeeded::Write)) {
+        return nar_storage
+            .copy_staged_upload_to_nar_for_hash_and_delete_staged(hash, temporary_nar_storage_key)
+            .await
+            .map_err(retry);
+    }
+
+    if let Err(e) = nar_storage
+        .delete_temporary_nar_upload(temporary_nar_storage_key)
+        .await
+    {
+        warn!(%hash, error = %e, "Failed to delete temporary NAR upload");
+    }
+    needed.map(|_| ())
+}
+
+async fn complete_and_verify_multipart_nar_upload_if_no_other_content_for_path(
+    db: &DbContext,
+    hash: &str,
+    upload_id: &str,
+    meta: &NarUploadMetadata,
+) -> Result<(), UploadOutcome> {
+    let nar_storage = &db.storage.nar_storage;
+    let receipt = match &meta.multipart {
+        Some(receipt) if receipt.upload_id == upload_id => receipt,
+        Some(_) => {
+            nar_storage.abort_multipart(hash, upload_id).await;
+            return Err(rejected(
+                "A multipart receipt for a different upload.".into(),
+            ));
+        }
+        None => {
+            nar_storage.abort_multipart(hash, upload_id).await;
+            return Err(rejected(
+                "The multipart upload reported no completed parts.".into(),
+            ));
+        }
+    };
+    let needed = nar_write_needed(&db.worker_db, nar_storage, hash, &meta.file_hash).await;
+    if !matches!(needed, Ok(WriteNeeded::Write)) {
+        nar_storage.abort_multipart(hash, upload_id).await;
+        return needed.map(|_| ()).map_err(retry);
+    }
+
+    if let Err(e) = nar_storage.complete_multipart(hash, receipt).await {
+        nar_storage.abort_multipart(hash, upload_id).await;
         return Err(retry(format!("completing the multipart upload: {e:#}")));
     }
-    nar_storage
+    let verified = nar_storage
         .verify(
             hash,
             &meta.file_hash,
             meta.file_size,
-            config.nar.verify_digest,
+            db.config.nar.verify_digest,
         )
-        .await
-        .map_err(retry)?;
+        .await;
     nar_storage.hot().invalidate(hash);
+    if let Err(e) = verified {
+        let _ = nar_storage.delete(hash).await;
+        return Err(retry(e));
+    }
     Ok(())
 }
 
@@ -315,7 +392,9 @@ async fn place_eval_cache(
             let _ = tokio::fs::remove_file(&staged.path).await;
             nar_storage.put_eval_cache(key, bytes).await.map_err(retry)
         }
-        Transfer::Put | Transfer::Multipart { .. } => nar_storage
+        Transfer::Put
+        | Transfer::PutToTemporaryUploadObject { .. }
+        | Transfer::Multipart { .. } => nar_storage
             .verify_eval_cache(key, size_bytes)
             .await
             .map_err(retry),
@@ -491,7 +570,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_presigned_nar_that_is_not_in_storage_is_retried() {
+    async fn a_presigned_nar_that_was_never_uploaded_is_retried() {
         let state = test_state(empty_db());
         let (_session, permit) = granted_permit(&state).await;
         let (writer_out, mut sent) = ProtoWriter::spy(std::time::Duration::from_secs(5));
@@ -507,7 +586,9 @@ mod tests {
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
-            transfer: Transfer::Put,
+            transfer: Transfer::PutToTemporaryUploadObject {
+                temporary_nar_storage_key: "nar-uploads/missing.nar.zst".into(),
+            },
             metadata: UploadMetadata::Nar(Box::new(NarUploadMetadata {
                 file_hash: "sha256:0000".into(),
                 file_size: 3,
@@ -534,6 +615,97 @@ mod tests {
                 outcome: UploadOutcome::Retry { .. }
             }
         ));
+    }
+
+    fn presigned_nar(file_hash: String) -> UploadMetadata {
+        UploadMetadata::Nar(Box::new(NarUploadMetadata {
+            file_hash,
+            file_size: 3,
+            nar_size: 3,
+            nar_hash: "sha256:1111".into(),
+            references: Vec::new(),
+            deriver: None,
+            ca: None,
+            multipart: None,
+        }))
+    }
+
+    async fn put_temporary_upload(
+        state: &ServerState,
+        key: &str,
+        bytes: &[u8],
+    ) -> std::path::PathBuf {
+        let file = state.nar_storage.local_base().unwrap().join(key);
+        tokio::fs::create_dir_all(file.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&file, bytes).await.unwrap();
+        file
+    }
+
+    #[tokio::test]
+    async fn a_presigned_nar_for_a_stored_path_leaves_the_stored_object() {
+        let hash = "s".repeat(32);
+        let stored = gradient_types::MCachedPath {
+            hash: hash.clone(),
+            file_hash: Some("sha256:stored".into()),
+            confirmed: true,
+            ..Default::default()
+        };
+        let state = test_state(
+            mock_db()
+                .append_query_results([vec![stored]])
+                .into_connection(),
+        );
+        state.nar_storage.put(&hash, b"OLD".to_vec()).await.unwrap();
+        let key = format!("nar-uploads/{hash}-1.nar.zst");
+        let file = put_temporary_upload(&state, &key, b"abc").await;
+
+        place(
+            &state.db(),
+            &ObjectKey::Nar(hash.clone()),
+            &UploadObject::Nar {
+                store_path: format!("/nix/store/{hash}-p"),
+            },
+            Transfer::PutToTemporaryUploadObject {
+                temporary_nar_storage_key: key.clone(),
+            },
+            &presigned_nar(gradient_storage::file_hash_sri(b"abc")),
+        )
+        .await
+        .unwrap_or_else(|outcome| panic!("{outcome:?}"));
+
+        assert_eq!(state.nar_storage.get(&hash).await.unwrap().unwrap(), b"OLD");
+        assert!(!file.exists(), "the temporary upload is deleted");
+    }
+
+    #[tokio::test]
+    async fn a_presigned_nar_for_a_new_path_is_copied_into_place() {
+        let hash = "n".repeat(32);
+        let state = test_state(
+            mock_db()
+                .append_query_results([Vec::<gradient_types::MCachedPath>::new()])
+                .into_connection(),
+        );
+        let key = format!("nar-uploads/{hash}-1.nar.zst");
+        let file = put_temporary_upload(&state, &key, b"abc").await;
+
+        place(
+            &state.db(),
+            &ObjectKey::Nar(hash.clone()),
+            &UploadObject::Nar {
+                store_path: format!("/nix/store/{hash}-p"),
+            },
+            Transfer::PutToTemporaryUploadObject {
+                temporary_nar_storage_key: key.clone(),
+            },
+            &presigned_nar(gradient_storage::file_hash_sri(b"abc")),
+        )
+        .await
+        .unwrap_or_else(|outcome| panic!("{outcome:?}"));
+
+        assert_eq!(state.nar_storage.get(&hash).await.unwrap().unwrap(), b"abc");
+        assert!(!file.exists());
     }
 
     #[tokio::test]

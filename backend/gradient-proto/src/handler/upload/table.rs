@@ -15,6 +15,7 @@ use gradient_wire::types::{UploadMetadata, UploadObject};
 pub(in crate::handler) enum Transfer {
     Passthrough(Box<PartialWriter>),
     Put,
+    PutToTemporaryUploadObject { temporary_nar_storage_key: String },
     Multipart { upload_id: String },
 }
 
