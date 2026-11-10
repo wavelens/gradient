@@ -80,7 +80,7 @@ sops encrypt --in-place secrets/train.yaml
 | Variable | `GRADIENT_SECRET_WANDB_TOKEN` |
 | Placeholder | `@gradient.secret.wandb-token@` in `args` and `env` |
 
-- Logs, terminals and the console show `[secret:<name>]` in place of a value. Base64 and URL-encoded values also receive masks.
+- Logs, terminals and the console show `[secret:<name>]` in place of a value. Masks also cover Base64 values (standard and URL-safe, including inside longer Base64 text such as HTTP Basic headers), hex values and URL-encoded values.
 - Values shorter than 8 bytes stay unmasked. Binary outputs and port forwards stay unmasked too.
 
 !!! warning "Swap on the Worker Host"

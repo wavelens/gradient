@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use base64::Engine as _;
-use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
+use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
 use gradient_secret::SecretBytes;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_encode};
 
@@ -68,12 +68,54 @@ fn lines_of(value: &[u8]) -> Vec<SecretBytes> {
         .collect()
 }
 
-fn encoded_forms(value: &[u8]) -> [SecretBytes; 3] {
-    [
+fn encoded_forms(value: &[u8]) -> Vec<SecretBytes> {
+    let mut forms = vec![
         SecretBytes::new(STANDARD.encode(value).into_bytes()),
         SecretBytes::new(STANDARD_NO_PAD.encode(value).into_bytes()),
+        SecretBytes::new(URL_SAFE.encode(value).into_bytes()),
+        SecretBytes::new(URL_SAFE_NO_PAD.encode(value).into_bytes()),
         percent_encoded(value),
+        percent_encode_secret_with_lowercase_hex(value),
+    ];
+    forms.extend(hex_encoded_forms(value));
+    forms.extend(base64_secret_at_each_start_offset(value));
+    forms
+}
+
+fn hex_encoded_forms(value: &[u8]) -> [SecretBytes; 2] {
+    let lower: String = value.iter().map(|b| format!("{b:02x}")).collect();
+    let upper = lower.to_ascii_uppercase();
+    [
+        SecretBytes::new(lower.into_bytes()),
+        SecretBytes::new(upper.into_bytes()),
     ]
+}
+
+fn base64_secret_at_each_start_offset(value: &[u8]) -> Vec<SecretBytes> {
+    (0..3)
+        .map(|offset| {
+            let mut shifted = vec![0u8; offset];
+            shifted.extend_from_slice(value);
+            let encoded = STANDARD_NO_PAD.encode(&shifted);
+            let first = (offset * 8).div_ceil(6);
+            let end = (shifted.len() * 8) / 6;
+            SecretBytes::from(&encoded.as_bytes()[first..end.max(first)])
+        })
+        .collect()
+}
+
+fn percent_encode_secret_with_lowercase_hex(value: &[u8]) -> SecretBytes {
+    let mut out = percent_encoded(value).expose().to_vec();
+    let mut escape_left = 0;
+    for byte in &mut out {
+        if *byte == b'%' {
+            escape_left = 2;
+        } else if escape_left > 0 {
+            byte.make_ascii_lowercase();
+            escape_left -= 1;
+        }
+    }
+    SecretBytes::new(out)
 }
 
 fn percent_encoded(value: &[u8]) -> SecretBytes {
@@ -159,6 +201,40 @@ mod tests {
             b"x [secret:hf-token] y"
         );
         assert_eq!(r.redact(b"q=a%20b%2Fc%2Bd%3De%3Ff"), b"q=[secret:hf-token]");
+    }
+
+    #[test]
+    fn url_safe_base64_hex_and_lowercase_escapes_are_masked() {
+        let value = b"a b/c+d=e?f\xfb\xff";
+        let r = SecretRedactor::new([("hf-token", value.as_slice())]);
+        let url_safe = URL_SAFE_NO_PAD.encode(value);
+        assert_eq!(
+            r.redact(format!("x {url_safe} y").as_bytes()),
+            b"x [secret:hf-token] y"
+        );
+        let hex: String = value.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            r.redact(format!("x {hex} y").as_bytes()),
+            b"x [secret:hf-token] y"
+        );
+        assert_eq!(
+            r.redact(b"q=a%20b%2fc%2bd%3de%3ff%fb%ff"),
+            b"q=[secret:hf-token]"
+        );
+    }
+
+    #[test]
+    fn a_token_inside_a_basic_auth_header_is_masked() {
+        let r = SecretRedactor::new([("registry-token", b"s3cr3t-value-123".as_slice())]);
+        for user in ["u", "us", "usr"] {
+            let header = STANDARD.encode(format!("{user}:s3cr3t-value-123"));
+            let masked = r.redact(format!("Authorization: Basic {header}").as_bytes());
+            assert!(
+                String::from_utf8_lossy(&masked).contains("[secret:registry-token]"),
+                "{user}: {}",
+                String::from_utf8_lossy(&masked)
+            );
+        }
     }
 
     #[test]

@@ -133,7 +133,7 @@ The project SSH key doubles as the sops key. `GET /projects/{project}/sops-recip
 |---|---|
 | Replacement | `[secret:<name>]`, the job token as `[secret:job-token]` |
 | Floor | `MIN_SECRET_BYTES = 8`. Shorter values stay unmasked in every form |
-| Forms | The value and the value without trailing newlines, each in plain text, standard base64 with and without padding, and URL encoding with upper-case hex |
+| Forms | The value and the value without the trailing newline each use these forms. Plaintext, standard base64 and URL-safe base64, both with and without padding, base64 at each of three start offsets in a longer text, lowercase and uppercase hex, and URL encoding with lowercase and uppercase hex. |
 | Lines | Each line of a multi-line value with at least 8 bytes |
 | Matcher | Aho-Corasick, leftmost-longest |
 
