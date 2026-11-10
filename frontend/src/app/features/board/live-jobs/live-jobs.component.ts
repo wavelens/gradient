@@ -5,7 +5,9 @@
  */
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
+import { Subject, switchMap } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule, UrlTree } from '@angular/router';
 import { BoardService } from '@core/services/board.service';
@@ -346,6 +348,28 @@ export class BoardLiveJobsComponent implements OnInit {
   visibleDecisionRowCount = signal(boardTableLoadMoreRowCount);
   visibleDecisionRows = computed(() => this.decisionRows().slice(0, this.visibleDecisionRowCount()));
 
+  private runningJobsFetchRequest$ = new Subject<void>();
+  private assignmentDecisionFetchTrigger = new Subject<void>();
+  private pendingJobsFetchSubject = new Subject<void>();
+
+  constructor() {
+    this.runningJobsFetchRequest$
+      .pipe(switchMap(() => this.board.getAssignedJobs().pipe(this.assignedJobsPanelFirstLoad.track())), takeUntilDestroyed())
+      .subscribe((r) => {
+        this.jobs.set(r.jobs);
+        this.otherRunning.set(r.other_running);
+      });
+    this.assignmentDecisionFetchTrigger
+      .pipe(switchMap(() => this.board.getAssignmentDecisions().pipe(this.assignedJobsPanelFirstLoad.track())), takeUntilDestroyed())
+      .subscribe((d) => this.decisions.set(d));
+    this.pendingJobsFetchSubject
+      .pipe(switchMap(() => this.board.getPendingJobs().pipe(this.pendingJobsFirstLoad.track())), takeUntilDestroyed())
+      .subscribe((r) => {
+        this.pendingJobs.set(r.jobs);
+        this.otherPending.set(r.other_pending);
+      });
+  }
+
   ngOnInit(): void {
     this.load();
   }
@@ -380,22 +404,16 @@ export class BoardLiveJobsComponent implements OnInit {
   }
 
   private loadAssignedPanel(): void {
-    this.board.getAssignedJobs().pipe(this.assignedJobsPanelFirstLoad.track()).subscribe((r) => {
-      this.jobs.set(r.jobs);
-      this.otherRunning.set(r.other_running);
-    });
+    this.runningJobsFetchRequest$.next();
     if (this.showDecisions()) this.loadDecisions();
   }
 
   private loadDecisions(): void {
-    this.board.getAssignmentDecisions().pipe(this.assignedJobsPanelFirstLoad.track()).subscribe((d) => this.decisions.set(d));
+    this.assignmentDecisionFetchTrigger.next();
   }
 
   private loadPending(): void {
-    this.board.getPendingJobs().pipe(this.pendingJobsFirstLoad.track()).subscribe((r) => {
-      this.pendingJobs.set(r.jobs);
-      this.otherPending.set(r.other_pending);
-    });
+    this.pendingJobsFetchSubject.next();
   }
 
   assignedJobDetailPageUrl(j: DispatchedJobSummary): UrlTree {

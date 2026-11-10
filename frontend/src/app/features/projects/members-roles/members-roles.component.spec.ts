@@ -36,8 +36,10 @@ const addMember = vi.fn();
 const deleteRole = vi.fn();
 const notify = { success: vi.fn(), failure: vi.fn() };
 const confirm = vi.fn();
+const searchUsers = vi.fn();
 
 function setup(access: AccessState, permissions?: Permission[], role?: string | null): ComponentFixture<MembersRolesComponent> {
+  searchUsers.mockReset();
   confirm.mockReset().mockImplementation((request: ConfirmRequest) => request.action());
   deleteRole.mockReset().mockReturnValue(of(true));
   revokeInvitation.mockReset().mockReturnValue(of('Invitation revoked'));
@@ -83,7 +85,7 @@ function setup(access: AccessState, permissions?: Permission[], role?: string | 
         },
       },
       { provide: ConfirmService, useValue: { confirm } },
-      { provide: UserService, useValue: { listUsers: () => of([]) } },
+      { provide: UserService, useValue: { listUsers: () => of([]), searchUsers } },
       { provide: NotifyService, useValue: notify },
     ],
   });
@@ -396,5 +398,27 @@ describe('MembersRolesComponent - load errors', () => {
     await settled(fixture);
     expect(getMembers).toHaveBeenCalledTimes(2);
     expect(element.textContent).toContain('alice');
+  });
+});
+
+describe('MembersRolesComponent - username search', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('searches once for the last typed text and ignores the answer to an earlier search', () => {
+    vi.useFakeTimers();
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const earlierAnswer = new Subject<{ id: string; username: string; name: string }[]>();
+    searchUsers.mockReturnValueOnce(earlierAnswer).mockReturnValueOnce(of([{ id: 'u2', username: 'alice', name: 'Alice' }]));
+    const component = fixture.componentInstance;
+
+    component.onUserSearch({ query: 'a' });
+    component.onUserSearch({ query: 'al' });
+    vi.advanceTimersByTime(1000);
+    component.onUserSearch({ query: 'ali' });
+    vi.advanceTimersByTime(1000);
+    earlierAnswer.next([{ id: 'u1', username: 'al', name: 'Al' }]);
+
+    expect(searchUsers.mock.calls.map(([query]) => query)).toEqual(['al', 'ali']);
+    expect(component.userSuggestions().map((suggestion) => suggestion.value)).toEqual(['alice']);
   });
 });

@@ -5,6 +5,7 @@
  */
 
 import { Component, OnInit, computed, inject, linkedSignal, signal, ChangeDetectionStrategy } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -60,8 +61,9 @@ import {
 } from '@core/models';
 import { permissionLabel, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { links } from '@shared/routing';
-import { Observable, finalize } from 'rxjs';
+import { Observable, Subject, catchError, debounceTime, finalize, map, of, switchMap } from 'rxjs';
 
+const usernameSearchWaitAfterLastKeystrokeMilliseconds = 250;
 const ROLE_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 interface RoleFormState {
@@ -160,6 +162,25 @@ export class MembersRolesComponent implements OnInit {
     ),
   );
 
+  private usernameAutocompleteText$ = new Subject<string>();
+
+  constructor() {
+    this.usernameAutocompleteText$
+      .pipe(
+        debounceTime(usernameSearchWaitAfterLastKeystrokeMilliseconds),
+        switchMap((query) =>
+          query.trim()
+            ? this.userService.searchUsers(query).pipe(
+                map((users) => users.map(formatMemberNameForAutocompleteSuggestion)),
+                catchError(() => of([])),
+              )
+            : of([]),
+        ),
+        takeUntilDestroyed(),
+      )
+      .subscribe((suggestions) => this.userSuggestions.set(suggestions));
+  }
+
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.loadRoles();
@@ -226,14 +247,7 @@ export class MembersRolesComponent implements OnInit {
   // ── Members ──────────────────────────────────────────────────────────────
 
   onUserSearch(event: { query: string }): void {
-    if (!event.query.trim()) {
-      this.userSuggestions.set([]);
-      return;
-    }
-    this.userService.searchUsers(event.query).subscribe({
-      next: (users) => this.userSuggestions.set(users.map(formatMemberNameForAutocompleteSuggestion)),
-      error: () => this.userSuggestions.set([]),
-    });
+    this.usernameAutocompleteText$.next(event.query);
   }
 
   openAddMemberDialog(): void {

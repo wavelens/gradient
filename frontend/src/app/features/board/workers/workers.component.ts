@@ -5,7 +5,9 @@
  */
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
+import { EMPTY, Subject, catchError, switchMap } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { BoardService } from '@core/services/board.service';
@@ -188,6 +190,26 @@ export class BoardWorkersComponent implements OnInit {
   archLoad = computed(() => this.radar(this.rangedLoad()?.by_architecture ?? []));
   featLoad = computed(() => this.radar(this.load()?.by_feature ?? []));
 
+  private workerLoadTimeRangeSelection$ = new Subject<LoadRange>();
+
+  constructor() {
+    this.workerLoadTimeRangeSelection$
+      .pipe(
+        switchMap((range) =>
+          range === 'now'
+            ? EMPTY
+            : this.board.getWorkerLoadAverage(LOAD_RANGE_HOURS[range]).pipe(
+                catchError((error: unknown) => {
+                  this.averageError.set(error);
+                  return EMPTY;
+                }),
+              ),
+        ),
+        takeUntilDestroyed(),
+      )
+      .subscribe((l) => this.averageLoad.set(l));
+  }
+
   ngOnInit(): void {
     this.loadAll();
   }
@@ -212,11 +234,7 @@ export class BoardWorkersComponent implements OnInit {
   loadAverage(): void {
     const range = this.loadRange();
     this.averageError.set(null);
-    if (range === 'now') return;
-    this.averageLoad.set(null);
-    this.board.getWorkerLoadAverage(LOAD_RANGE_HOURS[range]).subscribe({
-      next: (l) => this.averageLoad.set(l),
-      error: (error: unknown) => this.averageError.set(error),
-    });
+    if (range !== 'now') this.averageLoad.set(null);
+    this.workerLoadTimeRangeSelection$.next(range);
   }
 }
