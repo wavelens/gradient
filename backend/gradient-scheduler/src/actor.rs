@@ -169,6 +169,10 @@ pub enum SchedulerMsg {
         metrics: WorkerMetrics,
         reply: RpcReplyPort<()>,
     },
+    CancelDraining {
+        worker: String,
+        reply: RpcReplyPort<bool>,
+    },
     MarkDraining {
         worker: String,
         reply: RpcReplyPort<()>,
@@ -1074,6 +1078,10 @@ impl Actor for CoreActor {
                     core.pool.update_exec_inventory(&worker, metrics.exec);
                 }
                 let _ = reply.send(());
+            }
+            SchedulerMsg::CancelDraining { worker, reply } => {
+                core.pool.cancel_draining(&worker);
+                let _ = reply.send(core.pool.signal(&worker, SessionSignal::DrainCancelled));
             }
             SchedulerMsg::MarkDraining { worker, reply } => {
                 core.pool.mark_draining(&worker);

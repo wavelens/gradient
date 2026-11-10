@@ -225,6 +225,15 @@ impl<S: WorkerMarker> std::ops::DerefMut for TypedWorker<S> {
     }
 }
 
+impl TypedWorker<Draining> {
+    pub fn into_active(self) -> TypedWorker<Active> {
+        TypedWorker {
+            shared: self.shared,
+            _state: PhantomData,
+        }
+    }
+}
+
 impl TypedWorker<Active> {
     pub fn new(
         capabilities: GradientCapabilities,

@@ -2044,6 +2044,36 @@ async fn only_a_network_worker_gets(seed: Shape) {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn an_admin_drain_reaches_the_worker_outlives_a_reconnect_and_can_be_cancelled() {
+    let case = SchedulerCase::start(shape().two(EvaluationId::now_v7())).await;
+    case.connect(W1, w_all().slots(2), &[]).await;
+    case.admit_startable_moves().await;
+    case.offers_full(W1).await;
+    case.score_all(W1).await;
+    drain_signals(&case, &[W1]);
+
+    assert!(case.scheduler.mark_worker_draining_by_admin(W1).await);
+    assert_eq!(case.signals(W1), vec![SessionSignal::Draining]);
+    assert!(case.request_job(W1, JobKind::Build).await.is_none());
+
+    case.disconnect(W1).await;
+    case.connect(W1, w_all().slots(2), &[]).await;
+    assert!(case.signals(W1).contains(&SessionSignal::Draining));
+    assert!(case.request_job(W1, JobKind::Build).await.is_none());
+
+    assert!(case.scheduler.cancel_worker_admin_drain(W1).await);
+    assert!(case.signals(W1).contains(&SessionSignal::DrainCancelled));
+    case.offers_full(W1).await;
+    case.score_all(W1).await;
+    assert!(case.request_job(W1, JobKind::Build).await.is_some());
+
+    case.disconnect(W1).await;
+    case.connect(W1, w_all().slots(2), &[]).await;
+    assert!(!case.signals(W1).contains(&SessionSignal::Draining));
+    case.finish().await;
+}
+
 fn drain_signals(case: &SchedulerCase, workers: &[&str]) {
     for worker in workers {
         case.signals(worker);

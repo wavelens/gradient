@@ -239,6 +239,9 @@ pub enum ServerMessage {
         channel_id: u64,
         total: u64,
     },
+
+    #[proto(62)]
+    DrainCancelled,
 }
 
 impl ServerMessage {
@@ -304,6 +307,7 @@ impl ServerMessage {
             ServerMessage::GuestChannelTotalOutputBytesRead { .. } => {
                 "GuestChannelTotalOutputBytesRead"
             }
+            ServerMessage::DrainCancelled => "DrainCancelled",
         }
     }
 

@@ -12,6 +12,8 @@ use crate::guest_channels::GuestChannelSignal;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionSignal {
     Offers(u64),
+    Draining,
+    DrainCancelled,
     Reauth,
     Abort {
         job_id: String,

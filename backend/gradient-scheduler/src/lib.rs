@@ -11,6 +11,7 @@ pub mod build_history;
 pub mod buildability;
 pub mod cluster;
 pub mod connection_failures;
+pub mod drained_workers;
 pub mod draining;
 pub mod eval;
 pub mod eval_split;
@@ -85,6 +86,7 @@ pub struct Scheduler {
     pub(crate) build_kick: BuildKick,
     pub draining: draining::Draining,
     pub connection_failures: Arc<connection_failures::ConnectionFailures>,
+    pub drained_workers: Arc<drained_workers::DrainedWorkerSet>,
     pub(crate) import_waits: import_waits::ImportWaits,
     pub(crate) input_waits: input_waits::InputWaits,
     pub(crate) workers: worker_memory::WorkerMemory,
@@ -117,6 +119,7 @@ impl Scheduler {
             build_kick: BuildKick::default(),
             draining: draining::Draining::default(),
             connection_failures: Arc::default(),
+            drained_workers: Arc::default(),
             import_waits: import_waits::ImportWaits::default(),
             input_waits: input_waits::InputWaits::default(),
             workers: worker_memory::WorkerMemory::default(),

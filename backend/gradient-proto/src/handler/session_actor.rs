@@ -38,8 +38,8 @@ use super::store_paths::{outbound_message, outbound_offer, project_mapper};
 use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::Rejection;
 use gradient_wire::messages::{
-    ClientMessage, EXEC_KEEP_VM_RUNNING_SINCE, GradientCapabilities, RUNNING_JOBS_SINCE,
-    ServerMessage,
+    ClientMessage, DRAIN_CANCELLED_SINCE, EXEC_KEEP_VM_RUNNING_SINCE, GradientCapabilities,
+    RUNNING_JOBS_SINCE, ServerMessage,
 };
 use gradient_wire::session::frame::ProtoReader;
 
@@ -422,6 +422,28 @@ impl Actor for SessionActor {
                         None,
                         Some(WORKER_TOO_OLD.into()),
                     ),
+                }
+            }
+            SessionMsg::Signal(SessionSignal::Draining) => {
+                info!(peer_id = %st.peer_id, "sending Draining to worker");
+                if send_server_msg(&st.writer, &ServerMessage::Draining)
+                    .await
+                    .is_err()
+                {
+                    myself.stop(Some("write failed".into()));
+                }
+            }
+            SessionMsg::Signal(SessionSignal::DrainCancelled) => {
+                if st.writer.version() < DRAIN_CANCELLED_SINCE {
+                    st.scheduler.mark_worker_draining(&st.peer_id).await;
+                    return Ok(());
+                }
+                info!(peer_id = %st.peer_id, "sending DrainCancelled to worker");
+                if send_server_msg(&st.writer, &ServerMessage::DrainCancelled)
+                    .await
+                    .is_err()
+                {
+                    myself.stop(Some("write failed".into()));
                 }
             }
             SessionMsg::Signal(SessionSignal::ExecKeepVmRunning {

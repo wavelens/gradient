@@ -30,7 +30,7 @@ use gradient_db::scheduling::assignment_record::{
     abandon_open_assignments, keys_with_open_assignment,
 };
 use gradient_entity::ids::DispatchedJobId;
-use gradient_pool::session_port::SessionPort;
+use gradient_pool::session_port::{SessionPort, SessionSignal};
 
 pub(crate) async fn record_worker_sample(
     db: &impl sea_orm::ConnectionTrait,
@@ -109,6 +109,7 @@ impl Scheduler {
     ) -> Result<Registered> {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
         let projects = authorized_peers.iter().copied().collect();
+        let port = Arc::clone(&session);
         let registration = Registration {
             worker: worker_id.to_owned(),
             capabilities,
@@ -127,6 +128,10 @@ impl Scheduler {
             .await?;
         self.workers.forget(worker_id);
         self.pre_warm.forget(worker_id);
+        if self.drained_workers.contains(worker_id) {
+            self.mark_worker_draining(worker_id).await;
+            port.signal(SessionSignal::Draining);
+        }
         if !reclaims_jobs {
             self.close_unclaimed_assignments(worker_id).await;
         }
@@ -171,6 +176,7 @@ impl Scheduler {
         reclaims_jobs: bool,
     ) -> Result<Registered> {
         let reports = self.workers.reports(worker_id);
+        let port = Arc::clone(&session);
         let registration = Registration {
             worker: worker_id.to_owned(),
             capabilities,
@@ -539,5 +545,29 @@ impl Scheduler {
             .call(|reply| SchedulerMsg::MarkDraining { worker, reply })
             .await;
         info!(%worker_id, "worker marked draining");
+    }
+
+    pub async fn mark_worker_draining_by_admin(&self, worker_id: &str) -> bool {
+        self.drained_workers.insert(worker_id);
+        let Some(port) = self.worker_port(worker_id).await else {
+            return false;
+        };
+        self.mark_worker_draining(worker_id).await;
+        port.signal(SessionSignal::Draining);
+        true
+    }
+
+    pub async fn cancel_worker_admin_drain(&self, worker_id: &str) -> bool {
+        self.drained_workers.remove(worker_id);
+        let worker = worker_id.to_owned();
+        let connected = self
+            .call(|reply| SchedulerMsg::CancelDraining { worker, reply })
+            .await
+            .unwrap_or(false);
+        if connected {
+            info!(%worker_id, "admin drain cancelled");
+            self.build_kick.kick();
+        }
+        connected
     }
 }

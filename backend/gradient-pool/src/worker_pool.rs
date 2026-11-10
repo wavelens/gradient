@@ -307,6 +307,16 @@ impl WorkerPool {
         }
     }
 
+    pub fn cancel_draining(&mut self, id: &str) {
+        if let Some(slot) = self.workers.remove(id) {
+            let new_slot = match slot {
+                WorkerSlot::Draining(w) => WorkerSlot::Active(w.into_active()),
+                active => active,
+            };
+            self.workers.insert(id.to_owned(), new_slot);
+        }
+    }
+
     pub fn set_sent_candidates(&mut self, worker_id: &str, job_ids: HashSet<String>) {
         if let Some(slot) = self.workers.get_mut(worker_id) {
             slot.shared_mut().sent_candidates = job_ids;
@@ -842,6 +852,10 @@ mod tests {
         pool.mark_draining("w1");
         assert!(!pool.has_capacity("w1", &JobKind::Build));
         assert!(!pool.has_capacity("w1", &JobKind::Flake));
+
+        pool.cancel_draining("w1");
+        assert!(pool.has_capacity("w1", &JobKind::Build));
+        assert!(pool.has_capacity("w1", &JobKind::Flake));
     }
 
     #[test]
