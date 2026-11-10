@@ -117,14 +117,14 @@ fn require_approval_default() -> bool {
 }
 
 struct Wiring {
-    push: Option<(MTaskTrigger, TriggerConfig)>,
-    pull_request: Option<(MTaskTrigger, TriggerConfig)>,
+    push: Vec<(MTaskTrigger, TriggerConfig)>,
+    pull_request: Vec<(MTaskTrigger, TriggerConfig)>,
     status: Option<(MTaskAction, IntegrationId)>,
 }
 
 async fn load_wiring(db: &impl sea_orm::ConnectionTrait, task: TaskId) -> WebResult<Wiring> {
     let triggers = gradient_db::triggers::of_task(db, task).await?;
-    let first_of = |wanted: fn(&TriggerConfig) -> bool| {
+    let matching_of = |wanted: fn(&TriggerConfig) -> bool| {
         let mut matching: Vec<_> = triggers
             .iter()
             .filter_map(|t| {
@@ -135,10 +135,10 @@ async fn load_wiring(db: &impl sea_orm::ConnectionTrait, task: TaskId) -> WebRes
             })
             .collect();
         matching.sort_by_key(|(t, _)| (!t.active, t.created_at));
-        matching.into_iter().next()
+        matching
     };
-    let push = first_of(|c| matches!(c, TriggerConfig::ReporterPush { .. }));
-    let pull_request = first_of(|c| matches!(c, TriggerConfig::ReporterPullRequest { .. }));
+    let push = matching_of(|c| matches!(c, TriggerConfig::ReporterPush { .. }));
+    let pull_request = matching_of(|c| matches!(c, TriggerConfig::ReporterPullRequest { .. }));
 
     let mut status: Vec<_> = gradient_db::actions::of_task(db, task)
         .await?
@@ -187,7 +187,7 @@ async fn repository_response(
         project: &project.name,
     };
 
-    let build_on_push = wiring.push.as_ref().and_then(|(t, cfg)| match cfg {
+    let build_on_push = wiring.push.first().and_then(|(t, cfg)| match cfg {
         TriggerConfig::ReporterPush {
             integration_id,
             branches,
@@ -203,7 +203,7 @@ async fn repository_response(
         }),
         _ => None,
     });
-    let build_on_pull_request = wiring.pull_request.as_ref().and_then(|(t, cfg)| match cfg {
+    let build_on_pull_request = wiring.pull_request.first().and_then(|(t, cfg)| match cfg {
         TriggerConfig::ReporterPullRequest {
             integration_id,
             branches,
@@ -376,13 +376,16 @@ pub async fn put_task_repository(
     }
 
     let txn = db.web_db.inner().begin().await?;
+    gradient_db::lookup::by_id_for_delete::<ETask, _>(&txn, task.id)
+        .await?
+        .ok_or_else(|| WebError::not_found(crate::resource::Resource::Task))?;
     let wiring = load_wiring(&txn, task.id).await?;
     let now = gradient_types::now();
 
     let push = inbound
         .filter(|_| body.build_on_push)
         .map(|integration_id| {
-            let (releases_only, include_flake_inputs) = match &wiring.push {
+            let (releases_only, include_flake_inputs) = match wiring.push.first() {
                 Some((
                     _,
                     TriggerConfig::ReporterPush {
@@ -401,12 +404,19 @@ pub async fn put_task_repository(
                 include_flake_inputs,
             }
         });
-    sync_trigger(&txn, task.id, wiring.push.map(|(t, _)| t), push, now).await?;
+    sync_trigger(
+        &txn,
+        task.id,
+        wiring.push.into_iter().map(|(t, _)| t).collect(),
+        push,
+        now,
+    )
+    .await?;
 
     let pull_request = inbound
         .filter(|_| body.build_on_pull_request)
         .map(|integration_id| {
-            let actions = match &wiring.pull_request {
+            let actions = match wiring.pull_request.first() {
                 Some((_, TriggerConfig::ReporterPullRequest { actions, .. })) => actions.clone(),
                 _ => ["opened", "synchronize", "reopened"]
                     .map(String::from)
@@ -422,7 +432,7 @@ pub async fn put_task_repository(
     sync_trigger(
         &txn,
         task.id,
-        wiring.pull_request.map(|(t, _)| t),
+        wiring.pull_request.into_iter().map(|(t, _)| t).collect(),
         pull_request,
         now,
     )
@@ -449,11 +459,12 @@ fn clean(patterns: &[String]) -> Vec<String> {
 async fn sync_trigger(
     db: &impl sea_orm::ConnectionTrait,
     task: TaskId,
-    existing: Option<MTaskTrigger>,
+    existing: Vec<MTaskTrigger>,
     desired: Option<TriggerConfig>,
     now: chrono::NaiveDateTime,
 ) -> WebResult<()> {
-    match (existing, desired) {
+    let mut existing = existing.into_iter();
+    match (existing.next(), desired) {
         (Some(row), Some(cfg)) => {
             let mut active: ATaskTrigger = row.into();
             active.config = Set(cfg.to_db_json());
@@ -461,11 +472,13 @@ async fn sync_trigger(
             active.updated_at = Set(now);
             gradient_db::triggers::update(db, active).await?;
         }
-        (Some(row), None) if row.active => {
-            let mut active: ATaskTrigger = row.into();
-            active.active = Set(false);
-            active.updated_at = Set(now);
-            gradient_db::triggers::update(db, active).await?;
+        (Some(row), None) => {
+            for row in std::iter::once(row).chain(existing).filter(|t| t.active) {
+                let mut active: ATaskTrigger = row.into();
+                active.active = Set(false);
+                active.updated_at = Set(now);
+                gradient_db::triggers::update(db, active).await?;
+            }
         }
         (None, Some(cfg)) => {
             gradient_db::triggers::insert(

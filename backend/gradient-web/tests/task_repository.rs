@@ -229,6 +229,7 @@ async fn turning_on_push_builds_creates_the_push_trigger() {
     let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_ADMIN_ID);
     let db = with_mask(db, BASE_ROLE_ADMIN_ID)
         .append_query_results([vec![inbound()]])
+        .append_query_results([vec![ssh_task()]])
         .append_query_results([Vec::<task_trigger::Model>::new()])
         .append_query_results([Vec::<task_action::Model>::new()])
         .append_query_results([vec![push_trigger()]]);
@@ -259,6 +260,47 @@ async fn turning_on_push_builds_creates_the_push_trigger() {
     let statements = format!("{:?}", log.into_transaction_log());
     assert!(statements.contains("INSERT INTO"), "{statements}");
     assert!(statements.contains("task_trigger"), "{statements}");
+}
+
+#[tokio::test]
+async fn turning_off_push_builds_deactivates_every_push_trigger() {
+    let session_id = SessionId::now_v7();
+    let duplicate = task_trigger::Model {
+        id: TaskTriggerId::now_v7(),
+        ..push_trigger()
+    };
+    let inactive = |t: task_trigger::Model| task_trigger::Model { active: false, ..t };
+    let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_ADMIN_ID);
+    let db = with_mask(db, BASE_ROLE_ADMIN_ID)
+        .append_query_results([vec![inbound()]])
+        .append_query_results([vec![ssh_task()]])
+        .append_query_results([vec![push_trigger(), duplicate.clone()]])
+        .append_query_results([Vec::<task_action::Model>::new()])
+        .append_query_results([vec![inactive(push_trigger())]])
+        .append_query_results([vec![inactive(duplicate.clone())]]);
+    let db = with_mask(db, BASE_ROLE_ADMIN_ID)
+        .append_query_results([vec![inactive(push_trigger()), inactive(duplicate)]])
+        .append_query_results([Vec::<task_action::Model>::new()])
+        .append_query_results([vec![inbound()]])
+        .append_query_results([Vec::<incoming_webhook_delivery::Model>::new()]);
+    let conn = db.into_connection();
+    let log = conn.clone();
+
+    let res = make_test_server(conn)
+        .put(URL)
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&json!({ "inbound_integration": inbound().id, "build_on_push": false }))
+        .await;
+
+    res.assert_status_ok();
+    let trigger_updates = gradient_fixtures::mock::raw_statements(log.into_transaction_log())
+        .iter()
+        .filter(|s| s.sql.starts_with(r#"UPDATE "task_trigger""#))
+        .count();
+    assert_eq!(trigger_updates, 2);
 }
 
 fn outbound_without_token() -> integration::Model {
