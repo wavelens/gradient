@@ -5,7 +5,7 @@
  */
 
 use axum::http::StatusCode;
-use gradient_entity::{project, task_trigger};
+use gradient_entity::{project, task, task_trigger};
 use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{
@@ -19,6 +19,10 @@ use sea_orm::MockDatabase;
 use serde_json::{Value, json};
 
 fn authorized_db(session_id: SessionId) -> MockDatabase {
+    authorized_db_with_task(session_id, task_without_cache_signing())
+}
+
+fn authorized_db_with_task(session_id: SessionId, task: task::Model) -> MockDatabase {
     let session = live_session(session_id);
     mock_db()
         .append_query_results([vec![session.clone()]])
@@ -34,7 +38,7 @@ fn authorized_db(session_id: SessionId) -> MockDatabase {
             created_at: test_date(),
             ..Default::default()
         }]])
-        .append_query_results([vec![task_without_cache_signing()]])
+        .append_query_results([vec![task]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
 }
@@ -67,6 +71,31 @@ async fn rejects_a_commit_that_is_not_a_full_hash() {
         "unexpected message: {}",
         body["message"]
     );
+}
+
+#[tokio::test]
+async fn answers_400_without_raw_git_error_when_commit_cannot_be_fetched() {
+    let session_id = SessionId::now_v7();
+    let missing_repository = "/nonexistent/gradient-missing-repository";
+    let task = task::Model {
+        repository: missing_repository.into(),
+        ..task_without_cache_signing()
+    };
+    let res = evaluate(
+        authorized_db_with_task(session_id, task),
+        session_id,
+        json!({ "commit": "a".repeat(40) }),
+    )
+    .await;
+
+    res.assert_status_bad_request();
+    let body: Value = res.json();
+    assert_eq!(body["code"], "repository_unreachable");
+    assert_eq!(
+        body["message"],
+        "The repository has no such commit. Check the commit hash and confirm that Gradient can read the repository."
+    );
+    assert!(!res.text().contains(missing_repository));
 }
 
 #[tokio::test]

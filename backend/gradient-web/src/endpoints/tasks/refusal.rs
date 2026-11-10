@@ -70,8 +70,10 @@ pub(crate) enum TaskRefusal {
     InvalidCommitHash,
     #[error("Invalid `attr`: {reason}")]
     InvalidAttr { reason: String },
-    #[error("Commit not found in repository: {reason}")]
-    CommitLookupFailed { reason: String },
+    #[error(
+        "The repository has no such commit. Check the commit hash and confirm that Gradient can read the repository."
+    )]
+    CommitLookupFailed,
     #[error("Evaluation already in progress")]
     EvaluationInProgress,
     #[error("`attr` must be a concrete attribute path, without wildcard syntax")]
@@ -119,7 +121,7 @@ impl Refusal for TaskRefusal {
             | Self::InvalidCommitHash
             | Self::StartTaskInOtherProject
             | Self::InvalidAttr { .. }
-            | Self::CommitLookupFailed { .. }
+            | Self::CommitLookupFailed
             | Self::EvaluationInProgress
             | Self::AttrNotConcrete
             | Self::UnknownEvaluationStatus { .. }
@@ -150,7 +152,7 @@ impl Refusal for TaskRefusal {
 
     fn code(&self) -> ErrorCode {
         match self {
-            Self::RepositoryCheckFailed { .. } | Self::CommitLookupFailed { .. } => {
+            Self::RepositoryCheckFailed { .. } | Self::CommitLookupFailed => {
                 ErrorCode::REPOSITORY_UNREACHABLE
             }
             Self::ActionNameTaken => ErrorCode::ALREADY_EXISTS,

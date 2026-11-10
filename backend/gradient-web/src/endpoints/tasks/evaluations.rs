@@ -279,9 +279,8 @@ async fn evaluate_commit(
         .ok_or(TaskRefusal::InvalidCommitHash)?;
 
     let commit = get_commit_info(db, task, &commit_hash).await.map_err(|e| {
-        TaskRefusal::CommitLookupFailed {
-            reason: e.to_string(),
-        }
+        tracing::warn!(task_id = %task.id, error = %e, "rejecting evaluation because fetching the requested commit failed");
+        TaskRefusal::CommitLookupFailed
     })?;
 
     let eval = gradient_ci::trigger_evaluation(
