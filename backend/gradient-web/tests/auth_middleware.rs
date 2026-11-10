@@ -43,6 +43,13 @@ async fn missing_auth_header_returns_403_envelope() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn get_project_teams_without_credentials_returns_403_envelope() {
+    let res = server().get("/api/v1/projects/test-project/teams").await;
+    res.assert_status_forbidden();
+    assert_envelope(&res.json::<Value>(), "Authorization header not found");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn get_user_without_credentials_returns_200_envelope() {
     let res = server().get("/api/v1/user").await;
     res.assert_status_ok();

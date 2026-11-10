@@ -111,7 +111,10 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     teams::workers::patch_team_worker,
                     teams::workers::delete_team_worker
                 ))
-                .routes(routes!(teams::grants::post_project_team))
+                .routes(routes!(
+                    teams::grants::get_project_teams,
+                    teams::grants::post_project_team
+                ))
                 .routes(routes!(
                     teams::grants::patch_project_team,
                     teams::grants::delete_project_team
@@ -357,7 +360,6 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(user::get))
                 .routes(routes!(projects::management::get_project))
                 .routes(routes!(membership::endpoints::project::list_members))
-                .routes(routes!(teams::grants::get_project_teams))
                 .routes(routes!(tasks::management::get))
                 .routes(routes!(tasks::management::get_task))
                 .routes(routes!(tasks::evaluations::get_task_evaluations))

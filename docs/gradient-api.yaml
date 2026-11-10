@@ -8364,7 +8364,6 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security:
-      - {}
       - bearerAuth: []
     post:
       tags:
