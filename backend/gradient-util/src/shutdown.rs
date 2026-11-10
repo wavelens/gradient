@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 use tokio_util::task::TaskTracker;
 use tracing::{Instrument, error, info, warn};
 
-use crate::supervision::{ChildSpec, Supervisor, SupervisorHealth};
+use crate::supervision::{ChildSpec, SharedServerShutdownDeadline, Supervisor, SupervisorHealth};
 
 pub use tokio_util::sync::CancellationToken;
 
@@ -26,6 +26,7 @@ pub struct Shutdown {
     token: CancellationToken,
     tracker: TaskTracker,
     tree: Arc<OnceCell<Supervisor>>,
+    deadline: SharedServerShutdownDeadline,
 }
 
 impl Default for Shutdown {
@@ -40,6 +41,7 @@ impl Shutdown {
             token: CancellationToken::new(),
             tracker: TaskTracker::new(),
             tree: Arc::new(OnceCell::new()),
+            deadline: SharedServerShutdownDeadline::default(),
         }
     }
 
@@ -70,9 +72,13 @@ impl Shutdown {
     pub async fn supervisor(&self) -> Result<&Supervisor, String> {
         self.tree
             .get_or_try_init(|| async {
-                Supervisor::start(self.token.clone(), self.tracker.clone())
-                    .await
-                    .map_err(|e| e.to_string())
+                Supervisor::start(
+                    self.token.clone(),
+                    self.tracker.clone(),
+                    self.deadline.clone(),
+                )
+                .await
+                .map_err(|e| e.to_string())
             })
             .await
     }
@@ -100,13 +106,27 @@ impl Shutdown {
     }
 
     pub fn cancel(&self) {
+        self.deadline
+            .deadline_or_start_with_default_shutdown_budget();
         self.token.cancel();
     }
 
-    pub async fn cancel_and_drain(&self, timeout: Duration) -> bool {
-        self.cancel();
+    pub async fn wait_until_shutdown_deadline_passed(&self) {
+        self.cancelled().await;
+        tokio::time::sleep_until(
+            self.deadline
+                .deadline_or_start_with_default_shutdown_budget(),
+        )
+        .await;
+    }
+
+    pub async fn cancel_and_drain(&self, budget: Duration) -> bool {
+        let deadline = self
+            .deadline
+            .set_deadline_to_now_plus_budget_if_unset_and_return_deadline(budget);
+        self.token.cancel();
         self.tracker.close();
-        match tokio::time::timeout(timeout, self.tracker.wait()).await {
+        match tokio::time::timeout_at(deadline, self.tracker.wait()).await {
             Ok(()) => {
                 info!("background tasks drained cleanly");
                 true

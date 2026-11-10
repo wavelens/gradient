@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use ractor::{
@@ -30,7 +30,25 @@ pub type SpawnFn = Arc<dyn Fn(ChildCtx) -> SpawnFuture + Send + Sync>;
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 const HEALTHY_RESET: Duration = Duration::from_secs(300);
-const STOP_TIMEOUT: Duration = Duration::from_secs(25);
+pub const GRACEFUL_SERVER_SHUTDOWN_TIME_BUDGET: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Debug, Default)]
+pub struct SharedServerShutdownDeadline(Arc<OnceLock<tokio::time::Instant>>);
+
+impl SharedServerShutdownDeadline {
+    pub fn set_deadline_to_now_plus_budget_if_unset_and_return_deadline(
+        &self,
+        budget: Duration,
+    ) -> tokio::time::Instant {
+        *self.0.get_or_init(|| tokio::time::Instant::now() + budget)
+    }
+
+    pub fn deadline_or_start_with_default_shutdown_budget(&self) -> tokio::time::Instant {
+        self.set_deadline_to_now_plus_budget_if_unset_and_return_deadline(
+            GRACEFUL_SERVER_SHUTDOWN_TIME_BUDGET,
+        )
+    }
+}
 
 /// A `wake` is starting the next pass at once instead of at the end of the period. A wake arriving
 /// during a pass is starting another one right after it.
@@ -259,6 +277,7 @@ pub struct RootArgs {
     pub children: Vec<ChildSpec>,
     pub health: Arc<SupervisorHealth>,
     pub cancel: CancellationToken,
+    pub deadline: SharedServerShutdownDeadline,
 }
 
 pub struct RootState {
@@ -316,6 +335,7 @@ async fn spawn_child(
                 children: children.clone(),
                 health: Arc::clone(&ctx.health),
                 cancel: ctx.cancel.clone(),
+                deadline: state.args.deadline.clone(),
             };
             let (child, _) = Actor::spawn_linked(None, Root, args, ctx.parent).await?;
             child.get_cell()
@@ -428,16 +448,23 @@ impl Actor for Root {
             .get_children()
             .into_iter()
             .partition(|c| state.stop_last.contains(&c.get_id()));
-        stop_wave(first).await;
-        stop_wave(last).await;
+        let deadline = state
+            .args
+            .deadline
+            .deadline_or_start_with_default_shutdown_budget();
+        let first_wave_end =
+            deadline - deadline.saturating_duration_since(tokio::time::Instant::now()) / 3;
+        stop_wave(first, first_wave_end).await;
+        stop_wave(last, deadline).await;
         Ok(())
     }
 }
 
-async fn stop_wave(cells: Vec<ActorCell>) {
+async fn stop_wave(cells: Vec<ActorCell>, until: tokio::time::Instant) {
+    let timeout = until.saturating_duration_since(tokio::time::Instant::now());
     futures::future::join_all(cells.into_iter().map(|cell| async move {
         let _ = cell
-            .stop_and_wait(Some("shutdown".into()), Some(STOP_TIMEOUT))
+            .stop_and_wait(Some("shutdown".into()), Some(timeout))
             .await;
     }))
     .await;
@@ -456,22 +483,27 @@ impl std::fmt::Debug for Supervisor {
 }
 
 impl Supervisor {
-    pub async fn start(token: CancellationToken, tracker: TaskTracker) -> Result<Self, SpawnErr> {
+    pub async fn start(
+        token: CancellationToken,
+        tracker: TaskTracker,
+        deadline: SharedServerShutdownDeadline,
+    ) -> Result<Self, SpawnErr> {
         let health = Arc::new(SupervisorHealth::default());
         let args = RootArgs {
             children: Vec::new(),
             health: Arc::clone(&health),
             cancel: token.clone(),
+            deadline: deadline.clone(),
         };
         let (root, _) = Actor::spawn(None, Root, args).await?;
         let stop = root.clone();
         tracker.spawn(async move {
             token.cancelled().await;
+            let remaining = deadline
+                .deadline_or_start_with_default_shutdown_budget()
+                .saturating_duration_since(tokio::time::Instant::now());
             if let Err(e) = stop
-                .stop_and_wait(
-                    Some("shutdown".into()),
-                    Some(STOP_TIMEOUT + Duration::from_secs(5)),
-                )
+                .stop_and_wait(Some("shutdown".into()), Some(remaining))
                 .await
             {
                 warn!(error = %e, "supervision tree did not stop cleanly");
@@ -831,6 +863,52 @@ mod tests {
         assert_eq!(*log.lock().unwrap(), vec!["first", "last"]);
     }
 
+    struct SlowToStop;
+
+    impl Actor for SlowToStop {
+        type Msg = ();
+        type State = ();
+        type Arguments = ();
+
+        async fn pre_start(&self, _: ActorRef<()>, _: ()) -> Result<(), ActorProcessingErr> {
+            Ok(())
+        }
+
+        async fn post_stop(&self, _: ActorRef<()>, _: &mut ()) -> Result<(), ActorProcessingErr> {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn slow_first_wave_child_does_not_take_time_from_last_stopped_children() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let shutdown = Shutdown::new();
+        shutdown
+            .supervise_now(recorder_spec("last", true, &log))
+            .await
+            .unwrap();
+        shutdown
+            .supervise_now(ChildSpec::Custom {
+                name: "slow",
+                stop_last: false,
+                spawn: Arc::new(|ctx: ChildCtx| {
+                    Box::pin(async move {
+                        let (actor, _) =
+                            Actor::spawn_linked(None, SlowToStop, (), ctx.parent).await?;
+                        Ok(actor.get_cell())
+                    })
+                }),
+            })
+            .await
+            .unwrap();
+
+        let started = Instant::now();
+        shutdown.cancel_and_drain(Duration::from_millis(900)).await;
+        assert_eq!(*log.lock().unwrap(), vec!["last"]);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
     #[tokio::test]
     async fn backoff_grows_and_caps() {
         let cancel = CancellationToken::new();
@@ -839,6 +917,7 @@ mod tests {
                 children: vec![],
                 health: Arc::default(),
                 cancel,
+                deadline: SharedServerShutdownDeadline::default(),
             },
             live: HashMap::new(),
             stop_last: HashSet::new(),

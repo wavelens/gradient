@@ -575,15 +575,21 @@ pub async fn serve_web(
     install_signal_handler(shutdown.clone());
 
     let drain_token = shutdown.token();
-    let serve_result = axum::serve(
+    let serve = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(async move { drain_token.cancelled().await })
-    .await;
+    .with_graceful_shutdown(async move { drain_token.cancelled().await });
+    let serve_result = tokio::select! {
+        result = std::future::IntoFuture::into_future(serve) => result,
+        () = shutdown.wait_until_shutdown_deadline_passed() => {
+            tracing::warn!("The shutdown deadline discarded HTTP connections that were still open.");
+            Ok(())
+        }
+    };
 
     shutdown
-        .cancel_and_drain(std::time::Duration::from_secs(30))
+        .cancel_and_drain(gradient_util::supervision::GRACEFUL_SERVER_SHUTDOWN_TIME_BUDGET)
         .await;
 
     serve_result
