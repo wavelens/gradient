@@ -35,6 +35,7 @@ use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -64,10 +65,11 @@ pub struct CheckRepositoryRequest {
 }
 
 fn validated_repository(repository: String) -> WebResult<String> {
+    let repository = repository.trim();
     repository
         .parse::<RepositoryUrl>()
         .map_err(|e| TaskRefusal::InvalidRepositoryUrl(e.to_string()))?;
-    Ok(repository)
+    Ok(repository.to_owned())
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -195,9 +197,7 @@ pub async fn put(
     Path(project): Path<String>,
     JsonBody(body): JsonBody<MakeTaskRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    body.repository
-        .parse::<RepositoryUrl>()
-        .map_err(|e| TaskRefusal::InvalidRepositoryUrl(e.to_string()))?;
+    let repository = validated_repository(body.repository.clone())?;
 
     let project = load_project(
         &state.0.db(),
@@ -232,7 +232,7 @@ pub async fn put(
         active: true,
         display_name: body.display_name.trim().to_string(),
         description: body.description.trim().to_string(),
-        repository: body.repository.clone(),
+        repository,
         wildcard,
         last_check_at: *NULL_TIME,
         created_by: user.id,
@@ -246,7 +246,8 @@ pub async fn put(
         ..Default::default()
     };
 
-    let task = gradient_db::tasks::insert(&state.web_db, task)
+    let txn = state.web_db.inner().begin().await?;
+    let task = gradient_db::tasks::insert(&txn, task)
         .await
         .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
 
@@ -266,7 +267,8 @@ pub async fn put(
         updated_at: now,
         ..Default::default()
     };
-    gradient_db::triggers::insert(&state.web_db, default_trigger).await?;
+    gradient_db::triggers::insert(&txn, default_trigger).await?;
+    txn.commit().await?;
 
     let github_app = auto_attach::configured_github_app_if_caller_can_manage_integrations(
         &state.web_db,
@@ -342,7 +344,7 @@ pub async fn get_task(
     operation_id = "patchTask",
     tag = "tasks",
     summary = "Update task",
-    description = "Updates one or more task fields.",
+    description = "Update one or more fields of a task. Changes to `repository`, `wildcard`, `only_evaluate`, `exec_enabled` or `multi_node_evaluation` trigger a re-evaluation of the latest commit. Other fields take effect at the next evaluation.",
     params(TaskPath),
     request_body = PatchTaskRequest,
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
@@ -383,6 +385,11 @@ pub async fn patch_task(
         .repository
         .as_deref()
         .is_some_and(|url| url.trim() != task.repository);
+    let evaluation_inputs_changed = repository_changed
+        || body.wildcard.is_some()
+        || body.only_evaluate.is_some()
+        || body.exec_enabled.is_some()
+        || body.multi_node_evaluation.is_some();
     let mut atask: ATask = task.into();
     let mut patcher = TaskPatcher::new(&state, &mut atask);
 
@@ -426,7 +433,9 @@ pub async fn patch_task(
         patcher.atask.only_evaluate = Set(only_evaluate);
     }
 
-    atask.force_evaluation = Set(true);
+    if evaluation_inputs_changed {
+        atask.force_evaluation = Set(true);
+    }
     if repository_changed {
         atask.last_fetch_at = Set(None);
         atask.last_fetch_ok_at = Set(None);

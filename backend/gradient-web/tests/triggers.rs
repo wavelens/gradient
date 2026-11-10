@@ -442,7 +442,8 @@ async fn create_task_seeds_default_polling_trigger() {
         .append_query_results([vec![created_task]])
         .append_query_results([vec![seeded_trigger]]);
 
-    let server = make_test_server(db.into_connection());
+    let conn = db.into_connection();
+    let server = make_test_server(conn.clone());
     let res = server
         .put("/api/v1/tasks/test-project")
         .add_header("authorization", auth)
@@ -459,6 +460,15 @@ async fn create_task_seeds_default_polling_trigger() {
     let body: Value = res.json();
     assert_eq!(body["error"], false);
     assert_eq!(body["message"], task_id().to_string());
+    drop(server);
+    let task_and_trigger_in_one_transaction = conn.into_transaction_log().iter().any(|t| {
+        let sql: Vec<&str> = t.statements().iter().map(|s| s.sql.as_str()).collect();
+        sql.iter().any(|s| s.starts_with(r#"INSERT INTO "task" "#))
+            && sql
+                .iter()
+                .any(|s| s.starts_with(r#"INSERT INTO "task_trigger""#))
+    });
+    assert!(task_and_trigger_in_one_transaction);
 }
 
 #[tokio::test]
@@ -506,9 +516,38 @@ async fn changing_the_repository_clears_the_fetch_status() {
         .into_iter()
         .find(|s| s.sql.starts_with(r#"UPDATE "task""#))
         .expect("the task row is updated");
-    for column in ["last_fetch_at", "last_fetch_ok_at", "last_fetch_error"] {
+    for column in [
+        "last_fetch_at",
+        "last_fetch_ok_at",
+        "last_fetch_error",
+        "force_evaluation",
+    ] {
         assert!(update.sql.contains(column), "{column} in {}", update.sql);
     }
+}
+
+#[tokio::test]
+async fn a_description_only_task_patch_does_not_force_an_evaluation() {
+    let session_id = SessionId::now_v7();
+    let db = with_task_edit(with_auth(mock_db(), session_id))
+        .append_query_results([vec![task()]])
+        .into_connection();
+
+    let res = make_test_server(db.clone())
+        .patch("/api/v1/tasks/test-project/test-task")
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&serde_json::json!({"description": "Only the text can change."}))
+        .await;
+
+    res.assert_status_ok();
+    let update = all_statements(db.into_transaction_log())
+        .into_iter()
+        .find(|s| s.sql.starts_with(r#"UPDATE "task""#))
+        .expect("the task row is updated");
+    assert!(!update.sql.contains("force_evaluation"), "{}", update.sql);
 }
 
 #[tokio::test]
