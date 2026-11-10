@@ -18,6 +18,7 @@ pub mod metrics;
 pub mod nar;
 pub mod net;
 pub mod nix_hash;
+pub mod outbound_http_status_error;
 pub mod shutdown;
 pub mod ssh;
 pub mod store_path;

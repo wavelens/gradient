@@ -15,6 +15,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+const MEMBERS_PER_PAGE: usize = 100;
+const MEMBER_PAGES: usize = 20;
+
 #[derive(Debug)]
 pub struct GitlabReporter {
     client: HostClient,
@@ -139,18 +142,26 @@ impl CiReporter for GitlabReporter {
     async fn is_repo_writer(&self, owner: &str, repo: &str, username: &str) -> Result<bool> {
         let encoded_username: String =
             url::form_urlencoded::byte_serialize(username.as_bytes()).collect();
-        let members: Vec<Member> = self
-            .client
-            .get_json(&format!(
-                "{}/members/all?query={}",
-                project_path(owner, repo),
-                encoded_username
-            ))
-            .await?;
+        for page in 1..=MEMBER_PAGES {
+            let members: Vec<Member> = self
+                .client
+                .get_json(&format!(
+                    "{}/members/all?query={encoded_username}&per_page={MEMBERS_PER_PAGE}&page={page}",
+                    project_path(owner, repo),
+                ))
+                .await?;
+            if members
+                .iter()
+                .any(|m| m.username.eq_ignore_ascii_case(username) && m.access_level >= 30)
+            {
+                return Ok(true);
+            }
+            if members.len() < MEMBERS_PER_PAGE {
+                break;
+            }
+        }
 
-        Ok(members
-            .iter()
-            .any(|m| m.username.eq_ignore_ascii_case(username) && m.access_level >= 30))
+        Ok(false)
     }
 
     async fn post_pr_comment(

@@ -70,7 +70,7 @@ root
 | `graph` | Every request-path write to `derivation*`, `build_job`, `build_attempt`, `cached_path`, and the retires of maintenance | [Shared Builds](scheduler/shared-builds.md) |
 | `scheduler-core` | `WorkerPool` and the candidate cache (`JobTracker`). `Scheduler` is a facade, one message per method | [Capabilities and Assignment](proto/capabilities-and-dispatch.md) |
 | `SessionActor` | One worker connection. Frames come from the reader in order, up to 32 MiB unanswered. TCP backpressure can hold any frame past that limit. `CacheQuery` and `QueryKnownDerivations` get their answer from the reader directly. | [Connection](proto/connection.md) |
-| `effects` | Pending deliveries (`pending_delivery`): 8 workers, 6 attempts with backoff doubling from 30 s (capped at 15 min), then dead letter | [Events and Webhooks](../reference/events.md) |
+| `effects` | Pending deliveries (`pending_delivery`): 8 workers, 6 attempts with backoff doubling from 30 s (capped at 15 min), then dead letter. A 4xx answer other than 408, 425, 429 or an exhausted rate limit is dead-lettered at once. `Retry-After` and the rate limit reset time extend the wait, up to 1 h. | [Events and Webhooks](../reference/events.md) |
 
 - **Pull-based assignment:** A claim means a `dispatched_job` insert in Postgres (`gradient_db::scheduling::assignment_record::claim_assignment`). The scheduler actor can only cache candidates.
 - **Session signals:** The scheduler can reach a session only through `SessionPort` (`Offers`, `Reauth`, `Abort`, `Close`). A burst of enqueues will collapse into one offer per generation.

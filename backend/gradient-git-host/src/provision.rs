@@ -30,7 +30,10 @@ pub enum ProvisionError {
 
 impl From<HostError> for ProvisionError {
     fn from(e: HostError) -> Self {
-        warn!(error = %e, "The Git host rejected the provisioning request.");
+        warn!(
+            error = %gradient_util::error_cause_chain_formatting::error_chain(&e),
+            "The Git host rejected the provisioning request."
+        );
         Self::Host(match e.status() {
             Some(status) => status.to_string(),
             None => "No response from the Git host".to_owned(),

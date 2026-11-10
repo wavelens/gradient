@@ -18,6 +18,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::events::{Envelope, Event, evaluation};
 use gradient_types::ids::{BuildAttemptId, CacheId, TaskActionId, WebhookId};
 use gradient_types::*;
+use gradient_util::outbound_http_status_error::OutboundHttpNonSuccessStatusError;
 use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
 use serde_json::Value as JsonValue;
 use tracing::warn;
@@ -36,7 +37,22 @@ pub async fn consume(ctx: &EffectsCtx, row: &PendingDelivery) -> Outcome {
 
     match result {
         Ok(()) => Outcome::Delivered,
-        Err(e) => Outcome::Retry(format!("{e:#}")),
+        Err(e) => failed_delivery_error_to_outcome(&e),
+    }
+}
+
+fn failed_delivery_error_to_outcome(e: &anyhow::Error) -> Outcome {
+    let error = format!("{e:#}");
+    let rejection = e
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<OutboundHttpNonSuccessStatusError>());
+    match rejection {
+        Some(rejection) if rejection.is_not_retryable() => Outcome::PermanentFailure(error),
+        Some(OutboundHttpNonSuccessStatusError {
+            retry_after_duration: Some(delay),
+            ..
+        }) => Outcome::RetryAfterDelay(error, *delay),
+        _ => Outcome::Retry(error),
     }
 }
 
@@ -265,6 +281,44 @@ mod tests {
             payload,
             attempts: 0,
         }
+    }
+
+    fn rejection(status: u16, headers: &[(&'static str, &str)]) -> anyhow::Error {
+        let mut map = reqwest::header::HeaderMap::new();
+        for (name, value) in headers {
+            map.insert(*name, value.parse().unwrap());
+        }
+        anyhow::Error::new(
+            OutboundHttpNonSuccessStatusError::create_error_from_response_status_and_headers(
+                reqwest::StatusCode::from_u16(status).unwrap(),
+                &map,
+                "rejected".into(),
+            ),
+        )
+        .context("send Git host status report")
+    }
+
+    #[test]
+    fn a_rejected_request_is_given_up_and_a_rate_limit_waits() {
+        assert!(matches!(
+            failed_delivery_error_to_outcome(&rejection(422, &[])),
+            Outcome::PermanentFailure(_)
+        ));
+        assert!(matches!(
+            failed_delivery_error_to_outcome(&rejection(502, &[])),
+            Outcome::Retry(_)
+        ));
+        assert_eq!(
+            failed_delivery_error_to_outcome(&rejection(429, &[("retry-after", "1200")])),
+            Outcome::RetryAfterDelay(
+                "send Git host status report: rejected".into(),
+                std::time::Duration::from_secs(1200)
+            )
+        );
+        assert!(matches!(
+            failed_delivery_error_to_outcome(&anyhow!("connection reset")),
+            Outcome::Retry(_)
+        ));
     }
 
     #[test]

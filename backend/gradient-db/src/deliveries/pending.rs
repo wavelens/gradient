@@ -76,6 +76,8 @@ pub struct PendingDelivery {
 pub enum Outcome {
     Delivered,
     Retry(String),
+    RetryAfterDelay(String, Duration),
+    PermanentFailure(String),
 }
 
 pub async fn enqueue<C: ConnectionTrait>(
@@ -185,16 +187,29 @@ pub async fn mark<C: ConnectionTrait>(
         Outcome::Delivered => {
             PENDING_DELIVERY_MARK_DELIVERED.bind([Value::Uuid(Some(row.id.into_inner()))])
         }
-        Outcome::Retry(error) => PENDING_DELIVERY_MARK_RETRY.bind([
-            Value::Uuid(Some(row.id.into_inner())),
-            Value::String(Some(error.chars().take(4000).collect())),
-            Value::Int(Some(MAX_ATTEMPTS)),
-            Value::BigInt(Some(backoff(row.attempts).as_secs() as i64)),
-        ]),
+        Outcome::Retry(error) => retry(row, error, MAX_ATTEMPTS, backoff(row.attempts)),
+        Outcome::RetryAfterDelay(error, delay) => {
+            retry(row, error, MAX_ATTEMPTS, backoff(row.attempts).max(*delay))
+        }
+        Outcome::PermanentFailure(error) => retry(row, error, 0, Duration::ZERO),
     };
     db.execute_raw(stmt).await?;
 
     Ok(())
+}
+
+fn retry(
+    row: &PendingDelivery,
+    error: &str,
+    max_attempts: i32,
+    delay: Duration,
+) -> sea_orm::Statement {
+    PENDING_DELIVERY_MARK_RETRY.bind([
+        Value::Uuid(Some(row.id.into_inner())),
+        Value::String(Some(error.chars().take(4000).collect())),
+        Value::Int(Some(max_attempts)),
+        Value::BigInt(Some(delay.as_secs() as i64)),
+    ])
 }
 
 pub async fn pending_counts<C: ConnectionTrait>(db: &C) -> Result<(i64, i64), DbErr> {

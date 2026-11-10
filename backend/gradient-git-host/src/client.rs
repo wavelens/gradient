@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_util::outbound_http_status_error::OutboundHttpNonSuccessStatusError;
 use reqwest::{Method, Response, StatusCode};
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt;
@@ -308,11 +309,16 @@ impl Reply {
             return Ok(self);
         }
 
+        let headers = self.response.headers().clone();
         let body = self.response.text().await.unwrap_or_default();
         Err(HostError {
             method: self.method,
             url: self.url,
-            failure: Failure::Status { status, body },
+            failure: Failure::Status(
+                OutboundHttpNonSuccessStatusError::create_error_from_response_status_and_headers(
+                    status, &headers, body,
+                ),
+            ),
         })
     }
 
@@ -331,7 +337,7 @@ impl Reply {
 #[derive(Debug)]
 enum Failure {
     Transport(reqwest::Error),
-    Status { status: StatusCode, body: String },
+    Status(OutboundHttpNonSuccessStatusError),
     Decode(reqwest::Error),
 }
 
@@ -345,7 +351,7 @@ pub(crate) struct HostError {
 impl HostError {
     pub(crate) fn status(&self) -> Option<StatusCode> {
         match self.failure {
-            Failure::Status { status, .. } => Some(status),
+            Failure::Status(ref rejection) => Some(rejection.status),
             Failure::Transport(_) | Failure::Decode(_) => None,
         }
     }
@@ -360,15 +366,22 @@ impl fmt::Display for HostError {
         } = self;
         match failure {
             Failure::Transport(source) => write!(f, "{method} {url}: {source}"),
-            Failure::Status { status, body } => {
-                write!(f, "{method} {url} returned {status}: {body}")
+            Failure::Status(rejection) => {
+                write!(f, "{method} {url} returned {}", rejection.status)
             }
             Failure::Decode(source) => write!(f, "{method} {url}: decoding response: {source}"),
         }
     }
 }
 
-impl std::error::Error for HostError {}
+impl std::error::Error for HostError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.failure {
+            Failure::Status(rejection) => Some(rejection),
+            Failure::Transport(_) | Failure::Decode(_) => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -408,7 +421,7 @@ mod tests {
 
         assert_eq!(err.status(), Some(StatusCode::FORBIDDEN));
         assert_eq!(
-            err.to_string(),
+            format!("{:#}", anyhow::Error::new(err)),
             format!(
                 "POST http://{addr}/api/v1/repos/acme/widgets/statuses/abc returned 403 Forbidden: no access"
             )
