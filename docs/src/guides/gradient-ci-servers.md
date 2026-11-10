@@ -43,7 +43,7 @@ Run builds for more than one project? Pick a team connection. One key then handl
     2. Pick **Open servers.gradient.ci** in the dialog.
     3. Sign in, name the key and select **Create key**. The connection token appear once on the page.
     4. Copy the token into the **Connection token** field and select **Connect**.
-    5. On the **Members & Roles** page of each project, grant the team **Workers** so builds can use the connection.
+    5. Grant **Workers** to a team on the **Teams** tab of the **Members** page for each project, so that builds can use the connection.
 
     A project start building on the connection only after this grant.
 

@@ -13,9 +13,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 ![Closure View](src/assets/screenshots/closure_view.png)
 
-## Members & Roles
+## Members
 
-![Members & Roles](src/assets/screenshots/members_and_roles.png)
+![Members](src/assets/screenshots/members_and_roles.png)
 
 ## Project Settings
 

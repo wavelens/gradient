@@ -43,8 +43,8 @@ A grant requires consent from two parties: the project or cache, and the team.
 
 | Caller | Outcome |
 |---|---|
-| Members & Roles rights on the project or cache, plus Admin in the team | Grant becomes active immediately |
-| Members & Roles rights only | A pending request appears on the team page and stays there until a team Admin approves it |
+| Member management rights on the project or cache, plus Admin in the team | Grant becomes active immediately |
+| Member management rights only | A pending request appears on the team page and stays there until a team Admin approves it |
 | Either party | Can revoke the grant |
 
 Activation of the team's workers within an existing grant requires a team Admin.
@@ -59,9 +59,9 @@ Register a team worker once in the **Workers** section of the team page. The wor
 
 ## Owner Team
 
-Every project and cache can have an owner team. Choose an owner team at project or cache creation, or pass `--team` to `gradient project create`. Only team members can select that team as owner.
+Every project and cache can have an owner team. Select an owner team in the **Owner team** field of the create dialog, or pass `--team` to `gradient project create`. Members with exactly one team get that team preselected in this field. The **Create Project** and **Create Cache** buttons on a team page open the dialog with that team preselected. Team members and instance administrators alone can select a team as owner. The project and cache lists show the owner team after each name.
 
-The team setting **Default role of members on team projects** can grant every team user their role on projects that the team owns. Access has one source. One grant with the mark of the owner grant is that source. Project admins don't need an invitation to add members of the owner team. They can also add users who already have project access through team grants.
+The **Default role for members on team projects** setting can assign the selected role to every user on the team for projects of the team. Access has one source. One grant with the mark of the owner grant is that source. Project admins don't need an invitation to add members of the owner team. They can also add users who already have project access through team grants.
 
 **Add team workers to all new projects**: this setting can grant the team workers to all new projects regardless of the owner team. Only superusers can edit these settings. Team `server` is in system state. [local worker](workers.md#access) is the worker for that team. All new projects receive this worker through this setting.
 

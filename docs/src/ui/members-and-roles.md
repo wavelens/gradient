@@ -5,25 +5,48 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Members and Roles
 
-Members and roles define who can access a project or cache and what they can do there. Each project and each cache keeps its own member list. Open the page through **Settings -> Members & Roles** on a project or **Members & Roles** on a cache.
+Members and roles define who can access a project, cache, or team and what each person can do there. Projects, caches, and teams each have a separate member list. Use the **Members** button in the header of a project, cache, or team page to open the page. The URL is `/project/<name>/members/people`, `/caches/<name>/members/people`, or `/team/<name>/members/people`.
 
-![Members & Roles](../assets/screenshots/members_and_roles.png)
+- The project page and the cache page show the **Members** button to members and instance admins. Anonymous visitors and signed-in users without access don't see the button.
+- Members with the `View` role see the page in read-only mode. They get no **Invite Member**, no role changes, and no **Remove**.
 
-The page has three areas:
+![Members](../assets/screenshots/members_and_roles.png)
 
-| Area | Content | Actions |
+This page can show up to four tabs.
+
+| Tab | Content | Actions |
 |---|---|---|
-| Members | All members and their assigned role | Invite a user with **Add Member**, change a role, or remove a member |
-| Pending Invitations | Invitations not yet accepted | **Revoke** |
-| Roles | Built-in roles and custom roles | **New Role**: pick a name and single permissions |
+| People | Every person with access, their role and the source of that access: direct role, team grant, owner team or instance administrator | Change a direct role, **Remove** |
+| Teams | Projects and caches only. Teams with a grant and the role their members get | **Grant Team**, change or revoke a grant |
+| Pending | Only for people who can manage members. Open invitations and team grant requests | **Revoke** |
+| Roles | Projects and caches only, members only. Built-in and custom roles | **New Role**: pick a name and single permissions |
 
-## Invitations
+Direct roles give a person their role. Team grants apply only to people without a direct role.
 
-- Use **Add Member** to send an invitation. The invitee got no access until the invitation got accepted on the **My Invites** page in the user menu of the header.
-- Each invitation expired after 7 days. One user could hold at most one open invitation per project or cache.
-- With [email](../reference/configuration.md#email) configured, the invitee also got the invitation link by mail.
-- A superuser with the permission could add members directly.
-- Projects and caches [declared in Nix](../guides/manage-with-nix.md) took their members from the configuration alone.
+## Invite Member
+
+Use **Invite Member** to open a dialog with a username, a role, and a way to add the member.
+
+- **Add now** can apply the role right away. Instance admins always have this option. On projects and caches, everyone who can manage members can use this option for people who already have access through team grants or owner teams.
+- **Send invitation** can grant access only after acceptance of the invitation on the **My Invites** page in the header user menu. Invitations expire after 7 days. A person can hold only one pending invitation per project, cache or team.
+- The invited person can also receive the invitation link by email with [email](../reference/configuration.md#email) set.
+- Projects and caches [declared in Nix](../guides/manage-with-nix.md) get their members from the configuration only.
+
+## Remove a Member
+
+The first step is a confirmation from **Remove** on the row in the People tab. Access rights that remain after removal appear in the dialog. People with team grants keep their team roles. Links to those team pages appear in the dialog as well. People who remove their own access return to the list of projects or caches.
+
+## Grant a Team
+
+All teams on the server appear in the Teams tab **Grant Team**. Select a team and a role for team members. The grant form can also allow team workers to build. People who are not Admin in the chosen team create a request instead of an active grant. A team Admin must approve that request first. See [Teams](../concepts/teams.md#requests).
+
+## Your Access
+
+Use **Settings -> Access** (`/settings/access`) to list every project, cache and team the account can access, with the reason for each.
+
+## Revoke All Access
+
+Instance administrators open **User access** in the user menu of `/admin/users`. Enter a username and select **View access**. This shows every project, cache, and team of that user, with the reason for each. **Revoke All Access** removes all direct roles in projects and caches of that user, all team memberships, and all pending invitations. Memberships from server settings and groups from the identity provider stay.
 
 ## Project Roles
 
