@@ -73,15 +73,17 @@ The token needs these scopes.
 
 ## 2. Connect the Repository
 
-1. Click **Connect repository** in the project. Enter the repository URL and click **Create task**.
-2. Click **Connect gitea.example.com** in the **Events and Status** step. Select Gitea or Forgejo. Keep the base URL as is and paste the bot token. Click **Connect**.
-3. Click **Open task**. The first evaluation has already begun at task creation.
+1. Click **Connect repository** in the project. Enter the repository URL and follow the steps. Click **Create task**.
 
-**Connect** can run all of these steps at once.
+2. Open the task's **Settings -> Repository**. Click **Connect gitea.example.com** and select Gitea or Forgejo. Leave the base URL unchanged and paste the bot token. Click **Connect**.
 
-- Gradient can create a webhook receiver and a status reporter for the Git host.
-- Tasks build pushes and pull requests and report commit statuses.
-- With admin rights on the token, Gradient can install a webhook and a deploy key in the repository.
+3. Click **Add** for the recommended push and pull request triggers on the **Triggers** page. Add the **Git Status** action on the **Actions** page to report commit statuses.
+
+These steps apply to **Connect**.
+
+- Create a webhook receiver and status reporter for the Git host.
+- Use admin rights on the token to install a webhook and deploy key in the repository.
+- Add no trigger or action to the task. Later tasks show a push trigger and a pull request trigger as options in the last step of **Connect repository**.
 
 Gradient shows the webhook URL and secret once if the token lacks admin rights. Add them under **Settings -> Webhooks -> Add Webhook** on the Git host.
 

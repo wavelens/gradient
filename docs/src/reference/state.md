@@ -215,7 +215,7 @@ Each worker registration has the following options.
 | `polling` | - | `interval_secs` (minimum 10, default 300) and `branch` (default: the remote HEAD) |
 | `reporter_push` | Inbound integration | `branches`, `tags` (glob, an empty value can match all), `releases_only`, `include_flake_inputs` (default `false`: a push to the repository of a tracked flake input can start an input update, see [Pushes to Flake Inputs](../concepts/triggers.md#pushes-to-flake-inputs)) |
 | `reporter_pull_request` | Inbound integration | `branches`, `actions` (default `opened`, `synchronize`, `reopened`), `require_approval` (default `true`: pull requests from non-writers wait for a maintainer's approval) |
-| `time` | - | `cron` with six UTC fields, `sec min hour dom mon dow`, for example `"0 0 2 * * *"` |
+| `time` | - | `cron` is in UTC. Two forms exist. One form is 5 fields for `min hour dom mon dow` (seconds are `0`). The other form is 6 fields for `sec min hour dom mon dow`. An example is `"0 2 * * *"`. `branch` (default: remote HEAD). |
 
 Trigger rules, cron syntax and pull request commands are in [Triggers](../concepts/triggers.md).
 

@@ -57,7 +57,7 @@ A project acts as the access boundary. All members, workers and caches live insi
 
 A task combines one repository with the flake outputs to build from it.
 
-Open the project page and select **Create Task**. Then fill in the two fields in the form.
+Open the project page and select **Connect repository**. Fill in the two fields below. Click **Continue** to move through the steps, then click **Create task**.
 
 | Field | Value |
 |---|---|

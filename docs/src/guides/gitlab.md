@@ -52,15 +52,15 @@ A personal access token from a dedicated account works as an alternative. That a
 
 ## 2. Connect the Repository
 
-1. Click **Connect repository** in the project. Enter the repository URL and click **Create task**.
-2. Click **Connect gitlab.example.com** in the **Events and Status** step. Select GitLab. Keep the base URL as is and paste the token. Click **Connect**.
-3. Click **Open task**. The first evaluation has already begun at task creation.
+1. Click **Connect repository** in the project. Enter the repository URL. Follow the steps and click **Create task**.
+2. Open **Settings -> Repository** for the task. Click **Connect gitlab.example.com**. Select GitLab, keep the base URL and paste the token. Click **Connect**.
+3. Click **Add** for the recommended push trigger and merge request trigger on the **Triggers** page. Add the **Git Status** action on the **Actions** page to report commit status.
 
-**Connect** can run all of these steps at once.
+The **Connect** dialog can perform three actions.
 
-- Gradient can create a webhook receiver and a status reporter for GitLab.
-- A task can build on pushes and merge requests and report commit status.
-- Give the token the **Maintainer** role. Gradient can install a webhook and a deploy key in the project.
+- Create a webhook receiver and a status reporter for GitLab.
+- Install a webhook and a deploy key in the project for a token with the **Maintainer** role.
+- Add no triggers or actions to tasks. Tasks created later show push triggers and merge request triggers as options in the last step of **Connect repository**.
 
 Gradient shows the webhook URL and secret a single time for the **Developer** role. Add both in the GitLab project or group under **Settings -> Webhooks -> Add new webhook**.
 

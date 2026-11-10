@@ -629,8 +629,9 @@
             for an input with no branch.
           - `reporter_pull_request` takes
             `{ branches = [ ]; actions = [ "opened" "synchronize" "reopened" ]; require_approval = true; }`.
-          - `time` takes `{ cron = "0 0 2 * * *"; }`, six fields in UTC
-            (`sec min hour dom mon dow`).
+          - `time` can receive `{ cron = "0 2 * * *"; branch = "main"; }` in UTC. There are 5
+            fields in `cron` (`min hour dom mon dow`, seconds are `0`) or 6 fields
+            (`sec min hour dom mon dow`). The default for `branch` is remote HEAD.
 
           Empty `branches`, `tags` and `actions` lists match everything.
 

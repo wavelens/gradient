@@ -23,6 +23,8 @@ flowchart LR
 
 A task can have triggers in any combination. Use [declarative state reference](../reference/state.md#trigger-types) to list the options for each type. Use [concurrency table](projects-and-tasks.md#concurrency) to get the branch name of each evaluation.
 
+Integrations don't add triggers to a task. The task's **Triggers** page and the last step of **Connect repository** suggest push and pull request triggers. These suggestions appear for projects with a webhook receiver for the repository host. The suggested triggers start unchecked. `GET /projects/{project}/trigger-suggestions?repository=<URL>` returns the same suggestions.
+
 ## Polling
 
 - **Interval**: `interval_secs`, at least 10, default 300. Each round can include a random delay of up to 10% of the interval to spread load across many tasks.
@@ -30,13 +32,15 @@ A task can have triggers in any combination. Use [declarative state reference](.
 - **Branch**: `branch`, or the remote default branch if that branch is absent.
 - **New Commit**: An evaluation can start only for a remote head that is different from the branch's latest evaluation.
 - **Skip Markers**: A head commit with a [skip marker](projects-and-tasks.md#skip-a-commit) starts no evaluation.
+- **Fallback**: Polling triggers next to active push triggers catch only missed webhooks. A **Pause polling** button on the **Triggers** page can pause the polling trigger.
 
 ## Time (cron)
 
 - **Schedule**: `cron` expression. Always UTC. Schedule checks happen on the server every 5 seconds.
 - **First Fire**: The first scheduled time after trigger creation. A new trigger doesn't run right away.
-- **Commit**: The HEAD of the default branch. A fire can evaluate that HEAD even with no new commit.
+- **Commit**: the HEAD of `branch`, or the HEAD of the remote default branch if `branch` is absent. A trigger can evaluate that HEAD even with no new commits.
 - **Downtime**: A restart can combine all schedule times missed while the server was down into one evaluation.
+- **Fields**: 5 fields as in crontab, or 6 or 7 fields with a seconds field added at the start. Gradient stores a 5-field expression with the seconds field `0`.
 
 | Position | Field | Values |
 |---|---|---|
@@ -54,14 +58,14 @@ A task can have triggers in any combination. Use [declarative state reference](.
 - **Both Day Fields**: Always require both a restricted day of month and a restricted day of week to match. `0 0 0 13 * Fri` can fire only on Friday the 13th.
 
 !!! warning
-    Unlike the five-field crontab format, the expression needs a leading seconds field. Day of week and month reject `0`. Day names avoid the off-by-one trap.
+    Day of week values count ``1`` as Sunday. Classic crontab rules define ``1`` as Monday. The day of week and month fields reject ``0`` in the 5-field format too. Day names avoid the off-by-one trap.
 
 | Expression | Fires |
 |---|---|
-| `0 0 2 * * *` | Daily at 02:00 UTC |
-| `0 30 6 * * Mon-Fri` | Monday to Friday at 06:30 UTC |
+| `0 2 * * *` | Daily at 02:00 UTC |
+| `30 6 * * Mon-Fri` | Monday to Friday at 06:30 UTC |
 | `0 0 */6 * * *` | Every 6 hours, at 00:00, 06:00, 12:00 and 18:00 UTC |
-| `0 0 3 1 * *` | On the first day of each month at 03:00 UTC |
+| `0 3 1 * *` | On the first day of each month at 03:00 UTC |
 
 ## Flake Input Updates
 
@@ -71,7 +75,7 @@ A push trigger with `include_flake_inputs` set can also start an input update on
 
 ## Push
 
-Triggers need inbound integration from the [GitHub](../guides/github.md), [Gitea or Forgejo](../guides/gitea.md), or [GitLab](../guides/gitlab.md) guide.
+Triggers need inbound integration from the [GitHub](../guides/github.md), [Gitea or Forgejo](../guides/gitea.md), or [GitLab](../guides/gitlab.md) guide. A connection to a Git host can't add triggers. Add a push trigger on the **Triggers** page.
 
 | Event | Fires when | Filter |
 |---|---|---|
@@ -94,7 +98,7 @@ Triggers need inbound integration from the [GitHub](../guides/github.md), [Gitea
 - **Branch**: Use the ref or branch of an input in `flake.lock`. Inputs without that ref or branch follow the default branch from the webhook.
 - **Ignored Events**: Pushes of tags and releases.
 - **Filters**: The `branches`, `tags`, and `releases_only` settings do not apply to these pushes.
-- **First Update**: Gradient can discover the input repositories during an update round. A push cannot start anything before the first update round of the task from polling, a cron schedule, or **Fire Now**.
+- **First Update**: Gradient can discover the input repositories during an update round. A push cannot start anything before the first update round of the task from polling, a cron schedule, or **Poll now**.
 - **Webhooks**: Deliver webhooks for input repositories to the same integration. Use a GitHub App installed on the fork, or a webhook on the fork.
 - **Skipped Pushes**: Tasks skip the push with reason `input_update_not_configured` when they have no active **PR** action and no tracked input. Gradient can skip a push during an active update with reason `input_update_running`.
 

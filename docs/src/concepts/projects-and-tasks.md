@@ -58,10 +58,10 @@ flowchart LR
 
 Exactly one trigger per task is the default trigger. The "Start Evaluation" button and the API start fire the default trigger.
 
-- **Branch**: The configured branch of a polling trigger, or the first push or pull request branch without glob characters. Otherwise the default branch of the remote.
+- **Branch**: The branch that a polling trigger or cron trigger can set, or the first push branch or pull request branch without glob characters. Otherwise, the remote default branch.
 - **Inactive**: An inactive default trigger can still fire on a manual start, but never on its own.
 - **Deletion**: Locked until "Make Default" on another trigger.
-- **New Tasks**: New tasks start with a polling trigger as the default.
+- **New Tasks**: New tasks use the triggers selected at creation. The first trigger is the default. Tasks with no trigger list get one polling trigger on the chosen branch. That trigger is the default.
 
 ## Skip a Commit
 
@@ -86,7 +86,7 @@ Each task allows one active evaluation per branch. A trigger that fires while th
 | Push | Pushed branch or tag |
 | Pull request | Pull request number, shared by every push to the pull request |
 | Polling | Polled branch, or the default branch of the remote without a configured branch |
-| Cron schedule | Default branch of the remote |
+| Cron schedule | Configured branch or remote default branch |
 | Manual start, API | Branch of the [default trigger](#default-trigger) |
 
 Polls, cron schedules, manual starts and API starts resolve the default branch name on the remote. A push to `main` and a poll of the default branch `main` therefore share one branch.

@@ -151,16 +151,16 @@ gradient account switch work
 | `gradient task select <TASK>` | - | Choose the task that later commands target, within the selected project |
 | `gradient task show` | - | Display the selected task, its last evaluation and its builds |
 | `gradient task log` | - | Stream logs from the last evaluation of the selected task |
-| `gradient task create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--repository <REPOSITORY>`, `--wildcard <WILDCARD>` | Create a task in the selected project. Fields left empty open in `$EDITOR` |
+| `gradient task create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--repository <REPOSITORY>`, `--wildcard <WILDCARD>`, `--branch <BRANCH>`, `--trigger <TRIGGER>`, `--no-default-trigger` | Create a task in the selected project. Fields left empty open in `$EDITOR`. `--trigger` can take `polling`, `cron=<EXPRESSION>`, `push`, or `pr`. The flag can occur multiple times. Omit `--trigger` to give the task one polling trigger for `--branch`. Add `--no-default-trigger` to create the task with no triggers. |
+| `gradient task duplicate` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--branch <BRANCH>` | Copy the selected task to a new task with its settings, triggers and actions. All triggers of the copy use `--branch`. |
 | `gradient task list` | - | List all tasks in the selected project |
 | `gradient task edit` | `--new-name <NEW_NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--repository <REPOSITORY>`, `--wildcard <WILDCARD>` | Change details of the selected task |
 | `gradient task delete` | `--yes` | Remove the selected task |
 | `gradient task evaluate` | - | Trigger a new evaluation of the selected task |
 | `gradient task transfer <PROJECT>` | - | Move the selected task to another project. |
-| `gradient task repository show` | - | Show push and pull request builds, commit status reports and the Git host integrations of the project |
-| `gradient task repository edit` | `--inbound-integration <INTEGRATION>`, `--build-on-push <BOOL>`, `--push-branches <PATTERNS>`, `--push-tags <PATTERNS>`, `--build-on-pull-request <BOOL>`, `--pull-request-branches <PATTERNS>`, `--require-approval <BOOL>`, `--outbound-integration <INTEGRATION>`, `--report-status <BOOL>` | Change the repository connection. Pass the integration as a name or UUID. Omitted flags keep their current values. |
+| `gradient task repository show` | - | Show the last event from the project's Git host, reports of commit status and integrations with the Git host. |
 | `gradient task repository install-deploy-key` | `--outbound-integration <INTEGRATION>` | Add the project SSH key as a read-only deploy key on the Git host. Defaults to the status reporter of the task |
-| `gradient task repository install-webhook` | `--inbound-integration <INTEGRATION>`, `--outbound-integration <INTEGRATION>` | Create a webhook on the Git host to send repository events to Gradient. The default is the task integration. |
+| `gradient task repository install-webhook` | `--inbound-integration <INTEGRATION>`, `--outbound-integration <INTEGRATION>` | Create a webhook on the Git host to send repository events to Gradient. Default: the project's webhook receiver for the host of the task repository. |
 | `gradient task action list` | - | List actions of the selected task. |
 | `gradient task action show <ACTION>` | - | Print one action by name or UUID |
 | `gradient task action create --name <NAME> --config <JSON>` | `--events <EVENTS>`, `--inactive` | Create an action from JSON settings. Command output: the token for the new send_web_request action, one time only. |
