@@ -7,15 +7,20 @@
 use axum::http::StatusCode;
 use gradient_entity::ids::*;
 use gradient_entity::team_user::TeamRole;
-use gradient_entity::{role, team_project, team_project_request, team_user, team_worker};
+use gradient_entity::{
+    api, project_user, role, team_project, team_project_request, team_user, team_worker,
+};
 use gradient_fixtures::ids::{project_id, team_id, user_id};
 use gradient_fixtures::mock::{all_statements, exec_ok, mock_db, ran};
-use gradient_fixtures::rows::{admin_role, project, project_member, team, team_member, write_role};
+use gradient_fixtures::rows::{
+    admin_role, project, project_member, team, team_member, user, write_role,
+};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{bearer, make_test_server, signed_in, with_auth};
 use gradient_types::SessionId;
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_WRITE_ID};
 use gradient_types::permissions::{Permission, mask_from};
+use gradient_web::authorization::hash_api_key;
 use serde_json::{Value, json};
 
 fn workers_manager_role() -> role::Model {
@@ -229,6 +234,40 @@ async fn managing_workers_is_not_enough_to_remove_a_grant_with_users() {
     let res = server
         .delete("/api/v1/projects/test-project/teams/platform")
         .add_header("authorization", auth)
+        .await;
+
+    res.assert_status(StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_team_admin_cannot_remove_a_grant_with_an_api_key() {
+    let raw = "t".repeat(64);
+    let now = chrono::Utc::now().naive_utc();
+    let key = api::Model {
+        id: ApiId::now_v7(),
+        owned_by: user_id(),
+        name: "unpinned".into(),
+        key: hash_api_key(&raw),
+        last_used_at: now,
+        created_at: now,
+        permission: i64::MAX,
+        ..Default::default()
+    };
+    let db = mock_db()
+        .append_query_results([vec![key.clone()]])
+        .append_exec_results([exec_ok()])
+        .append_query_results([vec![key]])
+        .append_query_results([vec![user()]])
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![team()]])
+        .append_query_results([vec![grant(false, true)]])
+        .append_query_results([Vec::<project_user::Model>::new()])
+        .append_query_results([vec![team_member(TeamRole::Admin)]]);
+    let server = make_test_server(db.into_connection());
+
+    let res = server
+        .delete("/api/v1/projects/test-project/teams/platform")
+        .add_header("authorization", format!("Bearer GRAD{raw}"))
         .await;
 
     res.assert_status(StatusCode::NOT_FOUND);

@@ -8,7 +8,7 @@ use super::refusal::TeamRefusal;
 use crate::access::{Caller, ProjectAccess, has_cache_permission, has_permission, load_project};
 use crate::api_spec::{CachePath, ProjectPath};
 use crate::audit::Audit;
-use crate::authorization::MaybeApiKey;
+use crate::authorization::{MaybeApiKey, reject_api_key_authentication};
 use crate::endpoints::teams::workers::{reauth_team_workers, withdraw_team_workers};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -102,10 +102,8 @@ async fn removes_as_team_admin(
     api_key: &MaybeApiKey,
     team: TeamId,
 ) -> WebResult<bool> {
-    let pinned = api_key
-        .as_ref()
-        .is_some_and(|k| k.project.is_some() || k.cache_pin.is_some());
-    Ok(!pinned && is_team_admin(db, user, team).await?)
+    Ok(reject_api_key_authentication(api_key.as_ref()).is_ok()
+        && is_team_admin(db, user, team).await?)
 }
 
 async fn is_team_admin(db: &WebDb, user: &MUser, team: TeamId) -> WebResult<bool> {
