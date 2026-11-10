@@ -32,6 +32,7 @@ use crate::endpoints::evals::task_run_history::HistoryBar;
 use crate::permissions::{Permission, PermissionMask, mask_grants, mask_to_vec};
 use gradient_types::ids::*;
 
+use gradient_db::evaluations::LatestEvaluation;
 use gradient_db::evaluations::failed_attributes::FailedAttribute;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -142,7 +143,7 @@ pub(crate) fn error_message_if_caller_can_edit_task(
 impl TaskResponse {
     pub fn new(
         task: MTask,
-        last_evaluation_status: Option<EvaluationStatus>,
+        latest_evaluation: Option<LatestEvaluation>,
         recent_evaluations: Vec<HistoryBar>,
         triggers: &[MTaskTrigger],
         permissions: PermissionMask,
@@ -162,8 +163,8 @@ impl TaskResponse {
             description: task.description,
             repository: task.repository,
             wildcard: task.wildcard,
-            last_evaluation: task.last_evaluation,
-            last_evaluation_status,
+            last_evaluation: latest_evaluation.map(|e| e.id),
+            last_evaluation_status: latest_evaluation.map(|e| e.status),
             recent_evaluations,
             force_evaluation: task.force_evaluation,
             created_by: task.created_by,

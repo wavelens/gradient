@@ -8,6 +8,7 @@ pub mod caches;
 pub mod derivations;
 pub mod workers;
 
+use crate::evaluations::LatestEvaluation;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -77,31 +78,17 @@ pub async fn get_running_and_waiting_evaluation_counts_by_project_id<C: Connecti
         .await?;
 
     let task_ids: Vec<TaskId> = tasks.iter().map(|p| p.id).collect();
-    let task_to_project: HashMap<TaskId, ProjectId> =
-        tasks.into_iter().map(|p| (p.id, p.project)).collect();
+    let latest = crate::evaluations::latest_evaluation_status_of_tasks(db, &task_ids).await?;
 
     let mut per_project: HashMap<ProjectId, ProjectEvaluationProgressCounts> = HashMap::new();
-    if !task_ids.is_empty() {
-        let latest: Vec<(Option<TaskId>, EvaluationStatus)> = EEvaluation::find()
-            .select_only()
-            .columns([CEvaluation::Task, CEvaluation::Status])
-            .distinct_on([CEvaluation::Task])
-            .filter(CEvaluation::Task.is_in(task_ids))
-            .order_by_asc(CEvaluation::Task)
-            .order_by_desc(CEvaluation::CreatedAt)
-            .order_by_desc(CEvaluation::Id)
-            .into_tuple()
-            .all(db)
-            .await?;
-        for (task_id, status) in latest {
-            let Some(&project_id) = task_id.and_then(|task| task_to_project.get(&task)) else {
-                continue;
-            };
-            if status == EvaluationStatus::Waiting {
-                per_project.entry(project_id).or_default().waiting += 1;
-            } else if EvaluationStatus::DOING_WORK_STATUSES.contains(&status) {
-                per_project.entry(project_id).or_default().running += 1;
-            }
+    for task in tasks {
+        let Some(&LatestEvaluation { status, .. }) = latest.get(&task.id) else {
+            continue;
+        };
+        if status == EvaluationStatus::Waiting {
+            per_project.entry(task.project).or_default().waiting += 1;
+        } else if EvaluationStatus::DOING_WORK_STATUSES.contains(&status) {
+            per_project.entry(task.project).or_default().running += 1;
         }
     }
 

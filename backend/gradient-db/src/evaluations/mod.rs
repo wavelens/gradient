@@ -20,6 +20,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, FromQueryResult,
     IntoActiveModel, JoinType, QueryFilter, QueryOrder, QuerySelect, RelationTrait,
 };
+use std::collections::HashMap;
 
 pub async fn by_id_in_task<C: ConnectionTrait>(
     db: &C,
@@ -132,9 +133,41 @@ pub async fn latest_of_task<C: ConnectionTrait>(
     EEvaluation::find()
         .filter(CEvaluation::Task.eq(task))
         .order_by_desc(CEvaluation::CreatedAt)
+        .order_by_desc(CEvaluation::Id)
         .limit(limit)
         .all(db)
         .await
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LatestEvaluation {
+    pub id: EvaluationId,
+    pub status: EvaluationStatus,
+}
+
+pub async fn latest_evaluation_status_of_tasks<C: ConnectionTrait>(
+    db: &C,
+    tasks: &[TaskId],
+) -> Result<HashMap<TaskId, LatestEvaluation>, DbErr> {
+    let rows: Vec<(Option<TaskId>, EvaluationId, EvaluationStatus)> =
+        crate::fetch_in_chunks(tasks, |chunk| async move {
+            EEvaluation::find()
+                .select_only()
+                .columns([CEvaluation::Task, CEvaluation::Id, CEvaluation::Status])
+                .distinct_on([CEvaluation::Task])
+                .filter(CEvaluation::Task.is_in(chunk))
+                .order_by_asc(CEvaluation::Task)
+                .order_by_desc(CEvaluation::CreatedAt)
+                .order_by_desc(CEvaluation::Id)
+                .into_tuple()
+                .all(db)
+                .await
+        })
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(task, id, status)| Some((task?, LatestEvaluation { id, status })))
+        .collect())
 }
 
 pub async fn latest_completed_of_task<C: ConnectionTrait>(

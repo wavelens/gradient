@@ -27,7 +27,6 @@ use crate::scope::{Member, ProjectScope, Readable, Requires, RequiresUnmanaged, 
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_db::WebDb;
-use gradient_db::lookup::{by_id, by_ids};
 use gradient_types::actions::ActionConfig;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -192,39 +191,26 @@ pub async fn get(
     )
     .await?;
 
-    let eval_ids: Vec<EvaluationId> = listing
-        .items
-        .iter()
-        .filter_map(|p| p.last_evaluation)
-        .collect();
     let db = &db.web_db;
-    let eval_status_map: HashMap<EvaluationId, gradient_entity::evaluation::EvaluationStatus> =
-        by_ids::<EEvaluation, _>(db, &eval_ids)
-            .await?
-            .into_iter()
-            .map(|(id, e)| (id, e.status))
-            .collect();
+    let task_ids: Vec<TaskId> = listing.items.iter().map(|p| p.id).collect();
+    let latest = gradient_db::evaluations::latest_evaluation_status_of_tasks(db, &task_ids).await?;
+    let latest_ids: Vec<EvaluationId> = latest.values().map(|e| e.id).collect();
     let mut recent_evaluations = get_last_n_evaluation_runs_by_latest_evaluation_id(
         db,
-        &eval_ids,
+        &latest_ids,
         TASK_RECENT_EVALUATION_RUN_COUNT,
     )
     .await?;
-
-    let task_ids: Vec<TaskId> = listing.items.iter().map(|t| t.id).collect();
     let triggers = gradient_db::triggers::of_tasks(db, &task_ids).await?;
 
     let listing = listing.map(|p| {
-        let last_evaluation_status = p
-            .last_evaluation
-            .and_then(|id| eval_status_map.get(&id).cloned());
-        let recent_evaluations = p
-            .last_evaluation
-            .and_then(|id| recent_evaluations.remove(&id))
+        let latest_evaluation = latest.get(&p.id).copied();
+        let recent_evaluations = latest_evaluation
+            .and_then(|e| recent_evaluations.remove(&e.id))
             .unwrap_or_default();
         TaskResponse::new(
             p,
-            last_evaluation_status,
+            latest_evaluation,
             recent_evaluations,
             &triggers,
             permissions,
@@ -395,27 +381,26 @@ pub async fn get_task(
     )
     .await?;
 
-    let (last_evaluation_status, recent_evaluations) = match task.last_evaluation {
-        Some(eval_id) => (
-            by_id::<EEvaluation, _>(&db.web_db, eval_id)
-                .await?
-                .map(|e| e.status),
-            get_last_n_evaluation_runs_by_latest_evaluation_id(
-                &db.web_db,
-                &[eval_id],
-                TASK_RECENT_EVALUATION_RUN_COUNT,
-            )
+    let latest_evaluation =
+        gradient_db::evaluations::latest_evaluation_status_of_tasks(&db.web_db, &[task.id])
             .await?
-            .remove(&eval_id)
-            .unwrap_or_default(),
-        ),
-        None => (None, Vec::new()),
+            .remove(&task.id);
+    let recent_evaluations = match latest_evaluation {
+        Some(latest) => get_last_n_evaluation_runs_by_latest_evaluation_id(
+            &db.web_db,
+            &[latest.id],
+            TASK_RECENT_EVALUATION_RUN_COUNT,
+        )
+        .await?
+        .remove(&latest.id)
+        .unwrap_or_default(),
+        None => Vec::new(),
     };
     let triggers = gradient_db::triggers::of_task(&db.web_db, task.id).await?;
 
     Ok(ok_json(TaskResponse::new(
         task,
-        last_evaluation_status,
+        latest_evaluation,
         recent_evaluations,
         &triggers,
         permissions,

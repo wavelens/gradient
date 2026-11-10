@@ -31,6 +31,7 @@ async fn get_task_includes_sign_cache() {
         .append_query_results([vec![admin_role()]])
         .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
         .append_query_results([vec![admin_role()]])
+        .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([Vec::<task_trigger::Model>::new()]);
 
     let server = make_test_server(db.into_connection());
