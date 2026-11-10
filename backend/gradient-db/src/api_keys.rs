@@ -80,14 +80,16 @@ pub async fn revoke<C: ConnectionTrait>(
     active.update(db).await
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use gradient_fixtures::database::TestDatabase;
-    use gradient_fixtures::rows;
+    use gradient_fixtures::{rows, test_date};
     use gradient_migration::{Migrator, MigratorTrait};
     use gradient_types::permissions::{
-        CachePermission, Permission, PermissionMask, cache_mask_from, mask_from,
+        CachePermission, Permission, PermissionMask, cache_mask_from, cache_mask_to_vec, mask_from,
+        mask_to_vec,
     };
     use sea_orm_migration::SchemaManager;
 
@@ -99,8 +101,8 @@ mod tests {
             key: name.into(),
             permission,
             cache,
-            last_used_at: gradient_fixtures::test_date(),
-            created_at: gradient_fixtures::test_date(),
+            last_used_at: test_date(),
+            created_at: test_date(),
             ..Default::default()
         }
     }
@@ -150,6 +152,87 @@ mod tests {
             deploy | Permission::ViewProject.bit()
         );
         assert_eq!(cache_key.permission, upload);
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn migration_adds_missing_api_key_permission_bits_to_existing_api_keys() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        let owner = crate::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the owner is written");
+        let cache = crate::rows::insert::<ECache, _>(&conn, rows::cache())
+            .await
+            .expect("the cache is written");
+        let key = |name: &str, permission: i64, cache: Option<CacheId>, managed: bool| MApi {
+            id: ApiId::now_v7(),
+            owned_by: owner.id,
+            name: name.into(),
+            key: name.into(),
+            last_used_at: test_date(),
+            created_at: test_date(),
+            managed,
+            permission,
+            cache,
+            ..Default::default()
+        };
+        let push = key(
+            "push",
+            cache_mask_from(&[CachePermission::WriteStore]),
+            Some(cache.id),
+            false,
+        );
+        let deploy = key(
+            "deploy",
+            mask_from(&[Permission::TriggerEvaluation]),
+            None,
+            false,
+        );
+        let declared = key(
+            "declared",
+            mask_from(&[Permission::TriggerEvaluation]),
+            None,
+            true,
+        );
+        for row in [&push, &deploy, &declared] {
+            crate::rows::insert::<EApi, _>(&conn, row.clone())
+                .await
+                .expect("the key is written");
+        }
+
+        let migration = Migrator::migrations()
+            .into_iter()
+            .find(|m| {
+                m.name() == "m20261130_000000_add_view_and_read_store_bits_to_existing_api_keys"
+            })
+            .expect("the migration is registered");
+        for _ in 0..2 {
+            migration
+                .up(&SchemaManager::new(&conn))
+                .await
+                .expect("the migration runs");
+        }
+
+        let permission_of = async |row: &MApi| {
+            db.find::<EApi>(row.id)
+                .await
+                .expect("the key exists")
+                .permission
+        };
+        assert_eq!(
+            cache_mask_to_vec(permission_of(&push).await),
+            [
+                CachePermission::ViewCache,
+                CachePermission::ReadStore,
+                CachePermission::WriteStore
+            ]
+        );
+        assert_eq!(
+            mask_to_vec(permission_of(&deploy).await),
+            [Permission::ViewProject, Permission::TriggerEvaluation]
+        );
+        assert_eq!(permission_of(&declared).await, declared.permission);
         db.finish().await;
     }
 }

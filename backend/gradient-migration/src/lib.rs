@@ -64,6 +64,7 @@ mod m20261128_000000_add_dispatched_at_desc_index_to_dispatched_job;
 mod m20261128_000001_add_view_permission_bit_to_all_roles;
 mod m20261129_000000_integration_token_expiry_columns;
 mod m20261129_000001_add_restrict_evaluation_fetches_and_extra_allowed_uri_prefixes_to_project;
+mod m20261130_000000_add_view_and_read_store_bits_to_existing_api_keys;
 mod m20261201_000000_restrict_user_foreign_keys;
 mod m20261201_000001_case_insensitive_email_unique_index;
 mod m20261201_000002_add_job_id_dispatched_at_desc_index_to_dispatched_job_concurrently;
@@ -161,6 +162,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261128_000001_add_view_permission_bit_to_all_roles::Migration),
             Box::new(m20261129_000000_integration_token_expiry_columns::Migration),
             Box::new(m20261129_000001_add_restrict_evaluation_fetches_and_extra_allowed_uri_prefixes_to_project::Migration),
+            Box::new(m20261130_000000_add_view_and_read_store_bits_to_existing_api_keys::Migration),
             Box::new(m20261201_000000_restrict_user_foreign_keys::Migration),
             Box::new(m20261201_000001_case_insensitive_email_unique_index::Migration),
             Box::new(m20261201_000002_add_job_id_dispatched_at_desc_index_to_dispatched_job_concurrently::Migration),
