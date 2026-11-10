@@ -17,12 +17,15 @@ use gradient_entity::{
 use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{eval_at, project, public_project, superuser, task, user, view_role};
 use gradient_fixtures::test_date;
+use gradient_test_support::log_storage::ReadErrorLogStorage;
+use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, signed_in_as};
 use gradient_types::exec::{DeviceRequest, ExecSpec};
 use gradient_types::waiting_reason::{ExecUnmet, WaitingReason};
 use sea_orm::MockDatabase;
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use uuid::Uuid;
 
 fn job_id() -> ExecJobId {
@@ -397,6 +400,18 @@ async fn the_log_of_an_unknown_node_is_404() {
     assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
     let body: Value = res.json();
     assert_eq!(body["message"], "no node 2 in this job");
+}
+
+#[tokio::test]
+async fn a_log_storage_failure_is_a_server_error_not_an_empty_log() {
+    let res = TestState::new()
+        .web_db(with_two_nodes(mock_db()).into_connection())
+        .log_storage(Arc::new(ReadErrorLogStorage))
+        .server()
+        .get(&format!("/api/v1/exec/{}/log?offset=12", node_id(0)))
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]

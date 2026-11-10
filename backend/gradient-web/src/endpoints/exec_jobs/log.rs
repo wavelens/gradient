@@ -77,11 +77,7 @@ pub async fn get_exec_job_log(
         None => attempts.last(),
     };
     let log = match attempt {
-        Some(attempt) => state
-            .log_storage
-            .read(log_key(attempt.id))
-            .await
-            .unwrap_or_default(),
+        Some(attempt) => state.log_storage.read(log_key(attempt.id)).await?,
         None => String::new(),
     };
     Ok(ok_json(ExecJobLog::after(log, query.offset)))

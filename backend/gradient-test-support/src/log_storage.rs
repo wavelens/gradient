@@ -52,6 +52,42 @@ impl LogStorage for NoopLogStorage {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ReadErrorLogStorage;
+
+impl LogStorage for ReadErrorLogStorage {
+    fn append<'a>(&'a self, build_id: BuildAttemptId, text: &'a str) -> BoxFuture<'a, Result<()>> {
+        NoopLogStorage.append(build_id, text)
+    }
+    fn read<'a>(&'a self, _build_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async { anyhow::bail!("log storage unavailable") })
+    }
+    fn delete<'a>(&'a self, build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
+        NoopLogStorage.delete(build_id)
+    }
+    fn list_shard<'a>(&'a self, shard: &'a str) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
+        NoopLogStorage.list_shard(shard)
+    }
+    fn write_chunk<'a>(
+        &'a self,
+        build_id: BuildAttemptId,
+        index: u32,
+        bytes: &'a [u8],
+    ) -> BoxFuture<'a, Result<()>> {
+        NoopLogStorage.write_chunk(build_id, index, bytes)
+    }
+    fn read_chunk<'a>(
+        &'a self,
+        build_id: BuildAttemptId,
+        index: u32,
+    ) -> BoxFuture<'a, Result<Vec<u8>>> {
+        NoopLogStorage.read_chunk(build_id, index)
+    }
+    fn delete_chunks<'a>(&'a self, build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
+        NoopLogStorage.delete_chunks(build_id)
+    }
+}
+
 /// `read` is returning every append for a build concatenated, matching `FileLogStorage` on disk.
 #[derive(Debug, Default)]
 pub struct RecordingLogStorage {
