@@ -13,7 +13,7 @@ use gradient_core::ServerState;
 use gradient_core::{ExternalIdentity, MatchRule};
 use gradient_types::input::load_secret;
 use gradient_types::*;
-use jsonwebtoken::{DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use rand::RngExt as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -43,11 +43,40 @@ struct IdTokenClaims {
     #[serde(default)]
     email: Option<String>,
     #[serde(default)]
+    email_verified: Option<serde_json::Value>,
+    #[serde(default)]
     name: Option<String>,
     #[serde(default)]
     preferred_username: Option<String>,
     #[serde(default)]
     groups: Vec<String>,
+}
+
+impl IdTokenClaims {
+    fn is_email_verified(&self) -> bool {
+        match &self.email_verified {
+            Some(serde_json::Value::Bool(verified)) => *verified,
+            Some(serde_json::Value::String(verified)) => verified == "true",
+            _ => false,
+        }
+    }
+}
+
+fn allowed_id_token_signing_algorithms_from_discovery(
+    metadata: &serde_json::Value,
+) -> Vec<Algorithm> {
+    let listed: Vec<Algorithm> = metadata["id_token_signing_alg_values_supported"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|alg| alg.as_str()?.parse().ok())
+        .filter(|alg| !matches!(alg, Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512))
+        .collect();
+    if listed.is_empty() {
+        vec![Algorithm::RS256]
+    } else {
+        listed
+    }
 }
 
 pub(crate) fn random_url_safe(bytes: usize) -> String {
@@ -227,7 +256,16 @@ pub async fn oidc_login_verify(
         .as_str()
         .context("no id_token in token response")?;
 
-    let claims = verify_id_token(&state.http, id_token, jwks_uri, &issuer, &oidc.client_id).await?;
+    let algorithms = allowed_id_token_signing_algorithms_from_discovery(&metadata);
+    let claims = verify_id_token(
+        &state.http,
+        id_token,
+        jwks_uri,
+        &algorithms,
+        &issuer,
+        &oidc.client_id,
+    )
+    .await?;
 
     match claims.nonce.as_deref() {
         Some(n) if n.as_bytes().ct_eq(expected_nonce.as_bytes()).unwrap_u8() == 1 => {}
@@ -247,10 +285,14 @@ async fn verify_id_token(
     http: &reqwest::Client,
     id_token: &str,
     jwks_uri: &str,
+    algorithms: &[Algorithm],
     expected_iss: &str,
     expected_aud: &str,
 ) -> Result<IdTokenClaims> {
     let header = decode_header(id_token).context("decode id_token header")?;
+    if !algorithms.contains(&header.alg) {
+        bail!("id_token algorithm {:?} not allowed", header.alg);
+    }
     let kid = header.kid.clone().context("id_token header has no kid")?;
 
     let jwks = fetch_jwks(http, jwks_uri).await?;
@@ -259,6 +301,7 @@ async fn verify_id_token(
     let decoding_key = DecodingKey::from_jwk(jwk).context("construct decoding key from JWK")?;
 
     let mut validation = Validation::new(header.alg);
+    validation.algorithms = algorithms.to_vec();
     validation.set_issuer(&[expected_iss]);
     validation.set_audience(&[expected_aud]);
     validation.validate_exp = true;
@@ -270,6 +313,7 @@ async fn verify_id_token(
 }
 
 fn external_identity(claims: IdTokenClaims) -> ExternalIdentity {
+    let email = claims.email.clone().filter(|_| claims.is_email_verified());
     let username = claims
         .preferred_username
         .unwrap_or_else(|| claims.sub.clone());
@@ -277,10 +321,54 @@ fn external_identity(claims: IdTokenClaims) -> ExternalIdentity {
         issuer: claims.iss,
         subject: claims.sub,
         username,
-        email: claims.email,
+        email,
         name: claims.name,
         groups: Some(claims.groups),
         match_rule: MatchRule::UsernameOrEmail,
         refresh_profile: true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn claims(email_verified: serde_json::Value) -> IdTokenClaims {
+        serde_json::from_value(json!({
+            "iss": "https://provider.example.com",
+            "sub": "42",
+            "email": "alice@example.com",
+            "email_verified": email_verified,
+        }))
+        .expect("claims parse")
+    }
+
+    #[test]
+    fn only_a_verified_email_reaches_the_login_match() {
+        for (verified, expected) in [
+            (json!(true), Some("alice@example.com")),
+            (json!("true"), Some("alice@example.com")),
+            (json!(false), None),
+            (serde_json::Value::Null, None),
+        ] {
+            let identity = external_identity(claims(verified.clone()));
+            assert_eq!(identity.email.as_deref(), expected, "{verified}");
+        }
+    }
+
+    #[test]
+    fn id_tokens_accept_only_advertised_asymmetric_algorithms() {
+        let advertised =
+            json!({"id_token_signing_alg_values_supported": ["ES256", "HS256", "none"]});
+
+        assert_eq!(
+            allowed_id_token_signing_algorithms_from_discovery(&advertised),
+            vec![Algorithm::ES256]
+        );
+        assert_eq!(
+            allowed_id_token_signing_algorithms_from_discovery(&json!({})),
+            vec![Algorithm::RS256]
+        );
     }
 }

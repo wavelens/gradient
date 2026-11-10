@@ -36,7 +36,7 @@ The export stores secrets in hashed or encrypted form. Every `*_file` field come
 | `tasks.<name>.actions.*.config.token_file` | Web request token | `openssl rand -hex 32` |
 
 !!! tip "Superuser Through OIDC"
-    On the first OIDC sign-in with a matching username or email, a user with `superuser = true` and no `password_file` becomes the superuser.
+    Users with `superuser = true` and without `password_file` become superusers at the first OIDC sign-in. The sign-in can match a username or a verified email address (the `email_verified` claim).
 
 ## 3. Apply
 
