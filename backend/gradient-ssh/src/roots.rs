@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+const MAX_TEMPORARY_ROOTS_PER_USER: usize = 256;
+
 struct Dir {
     user: UserId,
     created: Instant,
@@ -49,6 +51,16 @@ impl Roots {
 
         let dir = Path::new("/tmp").join(name);
         self.with_dirs(|dirs| {
+            let owned = dirs.values().filter(|dir| dir.user == user).count();
+            if owned >= MAX_TEMPORARY_ROOTS_PER_USER
+                && let Some(oldest) = dirs
+                    .iter()
+                    .filter(|(_, dir)| dir.user == user)
+                    .min_by_key(|(_, dir)| dir.created)
+                    .map(|(path, _)| path.clone())
+            {
+                dirs.remove(&oldest);
+            }
             dirs.insert(
                 dir.clone(),
                 Dir {
@@ -103,6 +115,23 @@ impl Roots {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn making_more_temp_directories_than_user_limit_evicts_oldest_temp_directory() {
+        let roots = Roots::new(Duration::from_secs(3600));
+        let user = UserId::now_v7();
+        let other = UserId::now_v7();
+        let others = roots.make_dir(other, "tmp.XXXXXXXX");
+        let oldest = roots.make_dir(user, "tmp.XXXXXXXX");
+        for _ in 0..MAX_TEMPORARY_ROOTS_PER_USER {
+            roots.make_dir(user, "tmp.XXXXXXXX");
+        }
+
+        assert!(!roots.add(user, &oldest.join("result"), "/nix/store/x".to_owned()));
+        assert!(roots.add(other, &others.join("result"), "/nix/store/x".to_owned()));
+        let held = roots.with_dirs(|dirs| dirs.values().filter(|dir| dir.user == user).count());
+        assert_eq!(held, MAX_TEMPORARY_ROOTS_PER_USER);
+    }
 
     #[test]
     fn a_root_in_a_made_dir_resolves() {

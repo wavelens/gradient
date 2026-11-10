@@ -190,10 +190,12 @@ async fn realise(
             return 1;
         }
     };
-    let (tx, mut rx) = mpsc::unbounded_channel::<LogMessage>();
+    let (tx, mut rx) = mpsc::channel::<LogMessage>(
+        crate::build_request::BUILD_LOG_MESSAGE_BUFFER_SIZE_PER_SSH_CLIENT,
+    );
     let build = async move {
         crate::build_request::run(session, &derivations, move |message| {
-            let _ = tx.send(message);
+            let _ = tx.try_send(message);
         })
         .await
     };

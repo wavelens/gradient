@@ -27,6 +27,8 @@ use std::future::Future;
 use tokio::io::AsyncReadExt as _;
 
 const CONCURRENT_READS: usize = 32;
+const MAX_DRV_FILE_BYTES_READ_INTO_MEMORY: u64 = 64 * 1024 * 1024;
+pub const BUILD_LOG_MESSAGE_BUFFER_SIZE_PER_SSH_CLIENT: usize = 4096;
 const RECORD_BATCH_SIZE: usize = 50;
 
 static EVALUATION_LOOKUP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -78,9 +80,17 @@ impl DrvSource for CacheDrvSource<'_> {
 
         let mut events = std::pin::pin!(harmonia_file_nar::parse_nar(reader));
         while let Some(event) = events.next().await {
-            if let harmonia_file_nar::NarEvent::File { mut reader, .. } = event? {
+            if let harmonia_file_nar::NarEvent::File { reader, .. } = event? {
                 let mut contents = Vec::new();
-                reader.read_to_end(&mut contents).await?;
+                reader
+                    .take(MAX_DRV_FILE_BYTES_READ_INTO_MEMORY + 1)
+                    .read_to_end(&mut contents)
+                    .await?;
+                anyhow::ensure!(
+                    contents.len() as u64 <= MAX_DRV_FILE_BYTES_READ_INTO_MEMORY,
+                    "{drv_path} is larger than {limit} bytes",
+                    limit = MAX_DRV_FILE_BYTES_READ_INTO_MEMORY
+                );
                 let drv = parse_drv(&contents)?;
                 return stored_derivation(&self.session.mapper, drv).map(Some);
             }

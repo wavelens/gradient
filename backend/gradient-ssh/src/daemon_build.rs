@@ -33,10 +33,12 @@ where
     W: FnOnce(Arc<Session>, Box<dyn Fn(LogMessage) + Send + Sync>) -> F + Send + 'static,
     F: Future<Output = DaemonResult<T>> + Send + 'static,
 {
-    let (tx, mut rx) = mpsc::unbounded_channel::<LogMessage>();
+    let (tx, mut rx) = mpsc::channel::<LogMessage>(
+        crate::build_request::BUILD_LOG_MESSAGE_BUFFER_SIZE_PER_SSH_CLIENT,
+    );
     let shutdown = session.handles.db.shutdown.clone();
     let log = Box::new(move |message: LogMessage| {
-        let _ = tx.send(message);
+        let _ = tx.try_send(message);
     });
     let task = shutdown.spawn(work(session, log));
 

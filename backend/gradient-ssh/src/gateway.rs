@@ -27,6 +27,7 @@ const VM_STARTUP_LIMIT: Duration = Duration::from_secs(30 * 60);
 const WAITING_FOR_VM: &str = "waiting for vm startup";
 const VM_STARTUP_TIMED_OUT: &str = "the vm did not start within 30 minutes";
 const NO_EXIT_CODE: u32 = 255;
+const MAX_KEYBOARD_INPUT_BYTES_WHILE_WAITING_FOR_EXEC_GUEST_START: usize = 64 * 1024;
 const OPEN_FAILED: &str = "the terminal could not be opened";
 const NOT_ALLOWED: &str = "this login needs the TriggerEvaluation permission on the project";
 
@@ -120,7 +121,9 @@ impl EarlyClient<'_> {
     async fn still_there(&mut self) -> bool {
         match self.channel.wait().await {
             Some(ChannelMsg::Data { data }) => {
-                self.input.extend_from_slice(&data);
+                let room = MAX_KEYBOARD_INPUT_BYTES_WHILE_WAITING_FOR_EXEC_GUEST_START
+                    .saturating_sub(self.input.len());
+                self.input.extend_from_slice(&data[..data.len().min(room)]);
                 true
             }
             Some(ChannelMsg::Close) | None => false,
