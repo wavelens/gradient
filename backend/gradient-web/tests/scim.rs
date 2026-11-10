@@ -301,6 +301,52 @@ async fn scim_patch_group_add_member_joins_the_team() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn scim_patch_group_replace_members_removes_absent_group_members() {
+    let team = scim_team();
+    let kept = UserId::now_v7();
+    let dropped = UserId::now_v7();
+    let added_by_hand = team_user::Model {
+        source: TeamMemberSource::Api,
+        ..team_member(team.id, UserId::now_v7())
+    };
+    let db = mock_db()
+        .append_query_results([vec![team.clone()]])
+        .append_query_results([vec![team_member(team.id, kept)]])
+        .append_query_results([vec![
+            team_member(team.id, kept),
+            team_member(team.id, dropped),
+            added_by_hand.clone(),
+        ]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![team_member(team.id, kept), added_by_hand]])
+        .into_connection();
+    let server = scim_server(db.clone());
+    let res = server
+        .patch("/scim/v2/Groups/acme-eng")
+        .add_header("Authorization", auth_header())
+        .json(&json!({
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            "Operations": [{"op": "replace", "path": "members", "value": [{"value": kept.to_string()}]}]
+        }))
+        .await;
+    res.assert_status_ok();
+    drop(server);
+    let deletes: Vec<_> = all_statements(db.into_transaction_log())
+        .into_iter()
+        .filter(|s| s.sql.starts_with("DELETE FROM \"team_user\""))
+        .collect();
+    assert_eq!(deletes.len(), 1, "only the dropped group member leaves");
+    assert!(
+        format!("{:?}", deletes[0].values).contains(&dropped.to_string()),
+        "{:?}",
+        deletes[0]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn scim_patch_group_remove_member_leaves_the_team() {
     let team = scim_team();
     let member = UserId::now_v7();

@@ -117,7 +117,7 @@ pub async fn get(
     operation_id = "scimPatchGroup",
     tag = "scim",
     summary = "Patch SCIM group membership",
-    description = "Adds or removes members of the team whose `scim_group` matches. Added users\njoin as Members. Unknown group names return 404.",
+    description = "Use this endpoint to add, remove, or replace members of the team with a matching `scim_group`. Added users join as members. Use a `replace` for `members` to remove SCIM-added members that aren't in the new list. Members added manually or by the state remain. Unknown group names return 404.",
     params(("id" = String, Path)),
     request_body(content = PatchRequest, content_type = "application/scim+json"),
     responses((status = OK, description = "Group patched", body = GroupResource, content_type = "application/scim+json"), ScimError)
@@ -136,9 +136,14 @@ pub async fn patch(
 
         let member_ids = extract_member_ids(op);
         match op.op.to_ascii_lowercase().as_str() {
-            "add" | "replace" => {
+            "add" => {
                 for uid in &member_ids {
                     add_member(&state.web_db, team.id, uid).await?;
+                }
+            }
+            "replace" => {
+                if let Some(members) = replacement_member_ids(op, &path) {
+                    replace_members(&state.web_db, team.id, &members).await?;
                 }
             }
             "remove" => {
@@ -203,6 +208,36 @@ async fn add_member(web_db: &WebDb, team: TeamId, uid: &str) -> ScimResult<()> {
         && !is_unique_violation(&e)
     {
         return Err(e.into());
+    }
+    Ok(())
+}
+
+fn replacement_member_ids(op: &PatchOperation, path: &str) -> Option<Vec<String>> {
+    if !path.is_empty() {
+        return Some(extract_member_ids(op));
+    }
+    let members = op.value.as_ref()?.get("members")?.as_array()?;
+    Some(
+        members
+            .iter()
+            .filter_map(|m| m.get("value").and_then(|v| v.as_str()).map(String::from))
+            .collect(),
+    )
+}
+
+async fn replace_members(web_db: &WebDb, team: TeamId, uids: &[String]) -> ScimResult<()> {
+    let wanted = uids
+        .iter()
+        .map(|uid| parse_uid(uid))
+        .collect::<ScimResult<Vec<UserId>>>()?;
+    for uid in uids {
+        add_member(web_db, team, uid).await?;
+    }
+    let db = web_db.inner();
+    for membership in gradient_db::teams::members::memberships_of(db, team).await? {
+        if membership.source == TeamMemberSource::Group && !wanted.contains(&membership.user) {
+            gradient_db::teams::members::remove_group_member(db, team, membership.user).await?;
+        }
     }
     Ok(())
 }
