@@ -107,5 +107,5 @@ nix eval --json --file docs/tools/options.nix | python3 docs/tools/options.py > 
 
 ## Nix
 
-- Packages and modules live in `nix/`: server options in `nix/modules/gradient.nix`, worker options in `nix/modules/gradient-worker.nix`, declarative state in `nix/modules/gradient-state.nix`.
+- Packages and modules live in `nix/`: server options in `nix/modules/gradient.nix`, worker options in `nix/modules/gradient-worker/`, declarative state in `nix/modules/gradient-state.nix`.
 - New modules need a NixOS VM test under `nix/tests/gradient/`.

@@ -44,7 +44,7 @@
   };
 
   workerModule = { lib, ... }: {
-    imports = [ ../../../modules/gradient-worker.nix shapedLink ];
+    imports = [ ../../../modules/gradient-worker shapedLink ];
 
     virtualisation = {
       cores = WORKER_CORES;

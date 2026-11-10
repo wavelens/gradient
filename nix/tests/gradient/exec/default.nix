@@ -101,7 +101,7 @@
   };
 
   execWorker = { name, peer, label, maxPreWarm, stopGuestsWithWorker, memorySize ? 4096, sops ? { }, customImages ? false }: { nodes, pkgs, lib, ... }: {
-    imports = [ ../../../modules/gradient-worker.nix ];
+    imports = [ ../../../modules/gradient-worker ];
 
     virtualisation = {
       cores = 4;

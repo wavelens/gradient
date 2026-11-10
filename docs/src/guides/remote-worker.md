@@ -9,16 +9,24 @@ A remote worker is an extra machine that can evaluate and build for a project. I
 
 **Requirements:**
 
-- A NixOS machine with network access to the Gradient server
+- A Mac with [nix-darwin](https://github.com/nix-darwin/nix-darwin) installed, or a NixOS machine with network access to the Gradient server
 - A project with a cache subscription, see [First Project](../get-started/first-project.md)
 
 ## 1. Pick a Worker ID
 
-A worker ID is a UUID. Generate one with this command:
+A worker ID is a UUID. Generate one on the worker machine.
 
-```sh
-cat /proc/sys/kernel/random/uuid
-```
+=== "NixOS"
+
+    ```sh
+    cat /proc/sys/kernel/random/uuid
+    ```
+
+=== "macOS"
+
+    ```sh
+    uuidgen | tr A-F a-f
+    ```
 
 ## 2. Register the Worker
 
@@ -61,31 +69,63 @@ Without this setting, the local worker can still connect on the loopback address
 
 ## 4. Configure the Machine
 
-```nix
-# configuration.nix on the worker machine
-{
-  imports = [ inputs.gradient.nixosModules.default ];
+=== "NixOS"
 
-  services.gradient.worker = {
-    enable = true;
-    id = "<worker id from step 1>";
-    serverUrl = "wss://gradient.example.com/proto";
-    peersFile = "/run/secrets/gradient-worker-peers"; # (1)!
-    build.metrics = true; # (2)!
-  };
-}
-```
+    ```nix
+    # configuration.nix on the worker machine
+    {
+      imports = [ inputs.gradient.nixosModules.default ];
 
-1.  This file holds one line per project on this worker. See [Peers File](#peers-file).
-2.  Optional. With this enabled, the worker records memory and CPU usage for each build. The scheduler can use those numbers to place heavy builds on machines with matching capacity.
+      services.gradient.worker = {
+        enable = true;
+        id = "<worker id from step 1>";
+        serverUrl = "wss://gradient.example.com/proto";
+        peersFile = "/run/secrets/gradient-worker-peers"; # (1)!
+        build.metrics = true; # (2)!
+      };
+    }
+    ```
+
+    1.  This file holds one line per project on this worker. See [Peers File](#peers-file).
+    2.  Optional. With this enabled, the worker records memory and CPU usage for each build. The scheduler can use those numbers to place heavy builds on machines with matching capacity.
+
+=== "macOS"
+
+    ```nix
+    # darwin-configuration.nix on the worker machine
+    {
+      imports = [ inputs.gradient.darwinModules.default ];
+
+      services.gradient.worker = {
+        enable = true;
+        id = "<worker id from step 1>";
+        serverUrl = "wss://gradient.example.com/proto";
+        peersFile = "/var/lib/gradient-worker/peers"; # (1)!
+      };
+    }
+    ```
+
+    1.  Give the `_gradient-worker` user read access to the file. The `owner = "_gradient-worker"` setting in sops-nix or agenix can assign the owner. The worker can open the file directly. No systemd credentials exist on macOS.
 
 ## Verify Deployment
 
 - Check **Settings -> Workers**. The worker appears as connected, together with the detected systems and features.
 - The next project evaluation places builds on the new worker.
+- The connection to the server is visible in `/var/log/gradient-worker.log` on macOS.
 
 !!! tip "One Machine, Many Projects"
     Register the same worker ID in each project. Give each project its own line in the peers file. To share a worker across a whole team, use a [team worker](../concepts/teams.md#team-workers) instead.
+
+## macOS Workers
+
+The ``darwinModules.default`` module can run the worker as a launchd daemon ``org.nixos.gradient-worker``. The macOS module and the NixOS module differ.
+
+- User: ``_gradient-worker``, with UID and GID 536. Set ``users.users._gradient-worker.uid`` and ``users.groups._gradient-worker.gid`` to different values if another account can use 536.
+- Logs: ``/var/log/gradient-worker.log``.
+- Restart: ``sudo launchctl kickstart -k system/org.nixos.gradient-worker``.
+- System: ``aarch64-darwin`` only. Support for Intel Mac (``x86_64-darwin``) is absent. nixpkgs deprecated this platform.
+- Linux only: exec jobs (``capabilities.exec``), ``build.metrics`` and the reverse proxy options.
+- Nix settings: the module can add ``_gradient-worker`` to ``trusted-users`` and enable the ``nix-command``, ``flakes`` and ``ca-derivations`` features. Add both to the Nix settings manually for ``nix.enable = false``, for example Determinate Nix.
 
 ## Peers File
 

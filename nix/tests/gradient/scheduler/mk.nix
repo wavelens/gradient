@@ -45,7 +45,7 @@ let
 
   workerNode = name: { ... }: {
     imports = [
-      ../../../modules/gradient-worker.nix
+      ../../../modules/gradient-worker
       ./gradient-daemon.nix
     ];
 

@@ -8,15 +8,6 @@
   cfg = config.services.gradient.worker;
   exec = cfg.exec;
 
-  execByHand = [
-    [ "exec" "image" ]
-    [ "exec" "devices" ]
-    [ "exec" "mounts" ]
-    [ "exec" "allow" "ports" ]
-    [ "exec" "cloudHypervisorBin" ]
-    [ "exec" "virtiofsdBin" ]
-  ];
-
   subnetParts = lib.splitString "/" exec.subnet;
   prefixLength = lib.toInt (lib.last subnetParts);
   addressToInt = address: lib.foldl (sum: octet: sum * 256 + lib.toInt octet) 0 (lib.splitString "." address);
@@ -105,67 +96,16 @@
     };
   };
 
-  workerOptions = import ./options.nix {
-    inherit lib;
-    specs = builtins.fromJSON (builtins.readFile ../../backend/gradient-worker/options.json);
-    subGroups = { eval = [ "cache" ]; log = [ "level" ]; exec = [ "allow" "defaults" "sops" ]; };
-    groupSwitches.exec = [ "capabilities" "exec" ];
-    emptyListIsUnset = true;
-
-    examples = {
-      endpoint = "10.0.0.7:7000";
-      id = "550e8400-e29b-41d4-a716-446655440001";
-      serverUrl = "wss://gradient.example.com/proto";
-      zone = "fra1";
-      log.traceDir = "/var/lib/gradient-worker/trace";
-      exec.sops.files = [ "/etc/gradient/worker-secrets.yaml" ];
-    };
-
-    withoutEnvironment = [ [ "peers" ] [ "sshBin" ] [ "evalSubprocess" ] [ "evalDriver" ] [ "guestSupervisor" ] ] ++ execByHand;
-
-    writtenByHand = execByHand ++ [
-      [ "peers" ]
-      [ "sshBin" ]
-      [ "evalSubprocess" ]
-      [ "evalDriver" ]
-      [ "guestSupervisor" ]
-      [ "system" "architectures" ]
-      [ "system" "features" ]
-      [ "nixDaemon" "maxConnections" ]
-      [ "build" "cgroup" ]
-      [ "nar" "chunkBytes" ]
-      [ "log" "level" "default" ]
-      [ "log" "level" "eval" ]
-      [ "log" "level" "build" ]
-      [ "log" "level" "proto" ]
-    ];
-  };
-
-  logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
-  environmentValue = value: if lib.isBool value then lib.boolToString value else lib.mapNullable toString value;
+  sharedWorkerOptionsModule = import ./options-assertions-environment.nix { inherit lib pkgs cfg; };
 in {
   disabledModules = [ "services/continuous-integration/gradient/worker.nix" ];
 
   imports = [
-    { options.services.gradient.worker = workerOptions.options; }
+    { options.services.gradient.worker = sharedWorkerOptionsModule.options; }
   ];
 
   options.services.gradient.worker = {
-    enable = lib.mkEnableOption "the Gradient worker";
-
-    environmentVariables = lib.mkOption {
-      type = with lib.types; lazyAttrsOf (nullOr (oneOf [ bool int str path ]));
-      default = { };
-      example = { GRADIENT_WORKER_BUILD_MAX_CONCURRENT = 8; };
-      description = ''
-        Environment variables of the Gradient worker.
-        The [configuration reference](https://wavelens.github.io/gradient/reference/configuration) lists every variable and its default.
-        Set a variable to `null` to unset it.
-      '';
-    };
-
     packages = {
-      gradient = lib.mkPackageOption pkgs "gradient" { };
       git = lib.mkOption {
         type = lib.types.package;
         default = config.programs.git.package;
@@ -200,7 +140,7 @@ in {
       image = lib.mkOption {
         type = lib.types.package;
         default = (pkgs.nixos {
-          imports = [ ./guest.nix ];
+          imports = [ ../guest.nix ];
           gradient.guest.enable = true;
         }).config.system.build.gradientGuest;
         defaultText = lib.literalExpression "(pkgs.nixos { imports = [ ./guest.nix ]; gradient.guest.enable = true; }).config.system.build.gradientGuest";
@@ -370,73 +310,6 @@ in {
       '';
     };
 
-    peersFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = ''
-        File of peer tokens for challenge-response authentication with the server,
-        with `peer_id:token` per line and `#` starting a comment.
-
-        ```
-        <uuid>:<token>
-        *:<token>
-        ```
-
-        Use peer ID `*` to match any UUID in the server's challenge.
-        Tokens are 48 byte random secrets, for example from {command}`openssl rand -base64 48`.
-        Register them via the API through `POST /api/v1/projects/{project}/workers`.
-        Set it to `null` for open mode without authentication; avoid that in a production setup.
-      '';
-    };
-
-    acceptedServerTokensFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = ''
-        File of token hashes required from connecting servers,
-        with `peer_id:hash` per line and `#` starting a comment.
-        A hash is an argon2 PHC string or the lowercase SHA-256 hex digest of the token itself,
-        for example from {command}`printf %s "$TOKEN" | sha256sum`.
-        Peer ID `*` matches any peer.
-        The worker reads this file only with {env}`GRADIENT_WORKER_DISCOVERABLE`.
-        Set it to `null` to accept every server; avoid that in a production setup.
-      '';
-    };
-
-    system = {
-      architectures = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ pkgs.stdenv.hostPlatform.system ] ++ lib.optional (pkgs.stdenv.hostPlatform.system == "x86_64-linux") "i686-linux";
-        defaultText = lib.literalExpression ''[ pkgs.stdenv.hostPlatform.system ] ++ lib.optional (pkgs.stdenv.hostPlatform.system == "x86_64-linux") "i686-linux"'';
-        example = [ "x86_64-linux" "aarch64-linux" ];
-        description = "Nix system types this worker builds for.";
-      };
-
-      features = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
-        example = [ "nixos-test" "benchmark" "big-parallel" ];
-        description = ''
-          Nix system features this worker advertises. An empty list uses the system features of
-          the Nix store, including those that enabled experimental features imply, such as
-          `recursive-nix`.
-        '';
-      };
-
-    };
-
-    nixDaemon = {
-      maxConnections = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = cfg.build.maxConcurrent * 9 + 16;
-        defaultText = lib.literalExpression "config.services.gradient.worker.build.maxConcurrent * 9 + 16";
-        description = ''
-          Maximum connections to the local Nix daemon. Each build holds one for its whole run
-          plus up to 8 for parallel NAR imports. The rest is headroom for path checks.
-        '';
-      };
-    };
-
     build = {
       metrics = lib.mkOption {
         type = lib.types.bool;
@@ -479,80 +352,17 @@ in {
         '';
       };
     };
-
-    nar = {
-      chunkBytes = lib.mkOption {
-        type = lib.types.ints.between 4096 4194304;
-        default = 524288;
-        description = ''
-          Size in bytes of each outbound NAR upload chunk, from 4 KiB to 4 MiB.
-          Smaller chunks can help slow or high-latency links like Tailscale over DERP.
-        '';
-      };
-    };
-
-    log = {
-      level = lib.mkOption {
-        type = lib.types.submodule {
-          options = {
-            default = lib.mkOption {
-              type = logLevelType;
-              default = "info";
-              description = "Default log level.";
-            };
-
-            eval = lib.mkOption {
-              type = lib.types.nullOr logLevelType;
-              default = null;
-              description = ''
-                Log level of the evaluator. `null` uses
-                {option}`services.gradient.worker.log.level.default`.
-              '';
-            };
-
-            build = lib.mkOption {
-              type = lib.types.nullOr logLevelType;
-              default = null;
-              description = ''
-                Log level of the builder. `null` uses
-                {option}`services.gradient.worker.log.level.default`.
-              '';
-            };
-
-            proto = lib.mkOption {
-              type = lib.types.nullOr logLevelType;
-              default = null;
-              description = ''
-                Log level of the protocol layer. `null` uses
-                {option}`services.gradient.worker.log.level.default`.
-              '';
-            };
-          };
-        };
-        default = { };
-        description = "Log levels per component.";
-      };
-
-    };
   };
 
   config = lib.mkIf cfg.enable (lib.mkMerge [ {
-    assertions = [
+    assertions = sharedWorkerOptionsModule.assertions ++ [
       {
         assertion = config.systemd.services.gradient-worker.enable -> cfg.serverUrl != null || cfg.discoverable;
         message = "services.gradient.worker: serverUrl unset without discoverable, set either to connect to a server";
       }
       {
-        assertion = cfg.capabilities.federate -> cfg.discoverable;
-        message = "services.gradient.worker: capabilities.federate and discoverable together, enable both";
-      }
-      {
         assertion = !(cfg.reverseProxy.nginx.enable && cfg.reverseProxy.caddy.enable);
         message = "services.gradient.worker: a reverse proxy at a time, nginx or caddy, not both";
-      }
-      {
-        assertion = !(cfg.system.minFreeRamMb != 0 && cfg.eval.maxMemory != null);
-        message = "services.gradient.worker.system.minFreeRamMb and services.gradient.worker.eval.maxMemory are alternatives, unset either";
       }
       {
         assertion = execOptionsSet -> cfg.capabilities.exec;
@@ -641,12 +451,7 @@ in {
             ];
           };
 
-          environment = {
-            NIX_REMOTE = "daemon";
-            XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
-            RUST_LOG = cfg.log.level.default;
-            GRADIENT_WORKER_SSH_BIN = lib.getExe' cfg.packages.ssh "ssh";
-          } // lib.optionalAttrs (cfg.peersFile != null) {
+          environment = lib.optionalAttrs (cfg.peersFile != null) {
             GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
           } // lib.optionalAttrs (cfg.acceptedServerTokensFile != null) {
             GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE = "%d/gradient_worker_accepted_server_tokens";
@@ -660,7 +465,9 @@ in {
             GRADIENT_WORKER_EXEC_SOPS_KEY_FILE = "%d/gradient_worker_exec_sops_key";
           } // lib.optionalAttrs (cfg.capabilities.exec && exec.allow.ports != null) {
             GRADIENT_WORKER_EXEC_ALLOW_PORTS = lib.concatMapStringsSep "," (entry: if lib.isList entry then "${toString (lib.head entry)}-${toString (lib.last entry)}" else toString entry) exec.allow.ports;
-          } // workerOptions.environment cfg // lib.mapAttrs (_: environmentValue) cfg.environmentVariables;
+          } // lib.optionalAttrs (cfg.build.cgroup != null) {
+            GRADIENT_WORKER_BUILD_CGROUP = cfg.build.cgroup;
+          } // sharedWorkerOptionsModule.environment;
         };
       };
     };

@@ -19,7 +19,7 @@
       overlays = map (v: self.overlays.${v}) (builtins.attrNames self.overlays);
       config = { allowUnfree = true; };
     };
-  in flake-utils.lib.eachDefaultSystem (system: let
+  in flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] (system: let
     pkgs = pkgsFor system;
 
     craneLib = crane.mkLib pkgs;
@@ -201,6 +201,15 @@
         nixpkgs.overlays = lib.mkIf (config.services.gradient.enable || config.services.gradient.worker.enable) [
           self.overlays.default
         ];
+      };
+
+      default = gradient;
+    };
+
+    darwinModules = rec {
+      gradient = { config, lib, ... }: {
+        imports = [ ./nix/modules/gradient-worker/darwin-launchd.nix ];
+        nixpkgs.overlays = lib.mkIf config.services.gradient.worker.enable [ self.overlays.default ];
       };
 
       default = gradient;

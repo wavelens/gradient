@@ -9,7 +9,6 @@
 , craneLib
 , e2fsprogs
 , git
-, glibc
 , installShellFiles
 , llvmPackages
 , gradient-nix
@@ -21,6 +20,7 @@
 , postgresql_18
 , postgresqlTestHook
 , sqlite
+, stdenv
 , xz
 , zlib
 , zstd
@@ -74,10 +74,11 @@ let
     env = {
       CARGO_INCREMENTAL = "0";
       LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
-      BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
       LIBGIT2_NO_VENDOR = "1";
       LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";
       ZSTD_SYS_USE_PKG_CONFIG = "1";
+    } // lib.optionalAttrs stdenv.hostPlatform.isLinux {
+      BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${stdenv.cc.libc.dev}";
     };
 
     cargoExtraArgs = "--locked --features gradient-daemon/mock";

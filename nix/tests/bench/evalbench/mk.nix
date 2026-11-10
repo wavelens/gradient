@@ -16,7 +16,7 @@
   workerIds.builder = "ab68d6ce-8331-44dc-9433-f22ccfd0a44b";
 
   builderModule = { lib, ... }: {
-    imports = [ ../../../modules/gradient-worker.nix ../capture-module.nix ];
+    imports = [ ../../../modules/gradient-worker ../capture-module.nix ];
 
     virtualisation.additionalPaths = [ testStore ];
 

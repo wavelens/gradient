@@ -32,7 +32,7 @@ let
 
   workerNode = name: { ... }: {
     imports = [
-      ../../../modules/gradient-worker.nix
+      ../../../modules/gradient-worker
       ../scheduler/gradient-daemon.nix
     ];
 

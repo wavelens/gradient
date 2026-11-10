@@ -77,7 +77,7 @@ in {
   nodes.machine = { config, pkgs, lib, ... }: {
     imports = [
       ../../modules/gradient.nix
-      ../../modules/gradient-worker.nix
+      ../../modules/gradient-worker
     ];
 
     networking = {

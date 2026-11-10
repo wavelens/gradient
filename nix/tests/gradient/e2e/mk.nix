@@ -19,7 +19,7 @@
   };
 
   builderModule = { config, pkgs, lib, ... }: {
-    imports = [ ../../../modules/gradient-worker.nix ];
+    imports = [ ../../../modules/gradient-worker ];
 
     virtualisation.additionalPaths = [ testStore ];
 
