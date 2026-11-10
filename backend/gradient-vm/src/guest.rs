@@ -100,7 +100,7 @@ impl Guest {
             size: image.size(),
         };
         let mut guest = Guest::from_state(config, state);
-        let started = match guest.start_unit(units, config).await {
+        let started = match guest.start_unit(units).await {
             Ok(()) => tokio::select! {
                 started = guest.start_vm(image, config.guest_store_mb) => started,
                 () = stop.cancelled() => Err(anyhow!("the guest pool stopped during the boot")),
@@ -212,19 +212,13 @@ impl Guest {
         remove_guest_dirs(&self.dir, &self.state.per_job_dirs, stopped);
     }
 
-    async fn start_unit(&self, units: &GuestUnits, config: &VmConfig) -> Result<()> {
+    async fn start_unit(&self, units: &GuestUnits) -> Result<()> {
         std::fs::create_dir_all(&self.dir)
             .with_context(|| format!("create {}", self.dir.display()))?;
         std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o770))
             .with_context(|| format!("open {} to the guest unit", self.dir.display()))?;
-        let group = std::fs::metadata(&self.dir)
-            .with_context(|| format!("read the group of {}", self.dir.display()))?
-            .gid();
         self.save()?;
-
-        let mut argv = config.supervisor_command.clone();
-        argv.push(self.dir.display().to_string());
-        units.start(&self.state.guest_id, argv, group).await
+        units.start(&self.state.guest_id).await
     }
 
     async fn start_vm(&mut self, image: &GuestImage, store_mb: u64) -> Result<()> {

@@ -52,7 +52,7 @@ services.gradient.worker = {
 6.  Workers send `allow` and `defaults` to the server. The server can apply both at placement.
 
 !!! warning
-    Polkit rules from the module let the worker user start and stop `gradient-guest-*` units. Those units run as root. The worker user is root-equivalent on the host.
+Polkit rules come with the module file. The worker user can start and stop `gradient-guest@<id>` units, but nothing else. The fixed commands and settings of those units come from the module. Those units run as root. The units expose cloud-hypervisor to the worker through the API socket. The worker user can still get access equivalent to root on the host.
 
 ## 2. Connect the Network
 

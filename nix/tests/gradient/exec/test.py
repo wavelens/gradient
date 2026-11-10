@@ -28,7 +28,7 @@ import time
 
 API = "http://gradient.local/api/v1"
 GUESTS = "/var/lib/gradient-worker/guests"
-GUEST_UNIT = re.compile(r"gradient-guest-[0-9a-f]{32}\.service")
+GUEST_UNIT = re.compile(r"gradient-guest@[0-9a-f]{32}\.service")
 WORKERS = [stopper, keeper]
 NAMES = [
     "fetch", "silent", "abort", "long-stop", "fail", "long-keep", "lost", "interactive", "terminal",
@@ -76,7 +76,7 @@ def fleet_tail():
         parts.append(f"--- {node.name} guest units ---\n" + node.execute(
             f"ls -ln {GUESTS}/*/; for s in {GUESTS}/*/api.sock; do "
             "curl -s --max-time 5 --unix-socket $s http://localhost/api/v1/vm.info | jq -c .state; done; "
-            "journalctl -u 'gradient-guest-*' --no-pager -n 60")[1])
+            "journalctl -u 'gradient-guest@*' --no-pager -n 60")[1])
         parts.append(f"--- {node.name} guest journals at failed store imports ---\n" + node.execute(
             "journalctl -u gradient-worker --no-pager | grep -A 120 'guest store import failed' | tail -n 400")[1])
     return "\n".join(parts)
@@ -295,13 +295,13 @@ def wait_started(name):
 
 def active_guests(node):
     listing = node.succeed(
-        "systemctl list-units --plain --no-legend --state=active 'gradient-guest-*.service'")
+        "systemctl list-units --plain --no-legend --state=active 'gradient-guest@*.service'")
     units = [line.split()[0] for line in listing.splitlines() if line.strip()]
     return [unit for unit in units if GUEST_UNIT.fullmatch(unit)]
 
 
 def guest_id(unit):
-    return unit.removeprefix("gradient-guest-").removesuffix(".service")
+    return unit.removeprefix("gradient-guest@").removesuffix(".service")
 
 
 def vm_state(node, unit):

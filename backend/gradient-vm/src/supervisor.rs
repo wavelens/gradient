@@ -40,6 +40,7 @@ pub fn run_supervisor(dir: &Path, config: SupervisorConfig) -> Result<()> {
 }
 
 async fn supervise(dir: &Path, config: SupervisorConfig) -> Result<()> {
+    reject_guest_directory_path_with_symlink_or_not_directory(dir)?;
     let group = std::fs::metadata(dir)
         .with_context(|| format!("read the group of {}", dir.display()))?
         .gid();
@@ -366,6 +367,17 @@ fn check_mount(
     Ok(())
 }
 
+fn reject_guest_directory_path_with_symlink_or_not_directory(dir: &Path) -> Result<()> {
+    let canonical =
+        std::fs::canonicalize(dir).with_context(|| format!("resolve {}", dir.display()))?;
+    ensure!(
+        canonical == dir && canonical.is_dir(),
+        "{} is not a directory without symlinks",
+        dir.display()
+    );
+    Ok(())
+}
+
 fn is_tap_name(name: &str) -> bool {
     let cid = name.strip_prefix(TAP_PREFIX).unwrap_or_default();
     name.len() <= MAX_INTERFACE_NAME && !cid.is_empty() && cid.bytes().all(|b| b.is_ascii_digit())
@@ -494,6 +506,29 @@ mod tests {
 
         assert_eq!(usb_bus_id(root.path(), "1d6b:0002"), Some("1-2".to_owned()));
         assert_eq!(usb_bus_id(root.path(), "ffff:0001"), None);
+    }
+
+    #[test]
+    fn symlinked_guest_directory_is_rejected_while_real_directory_is_accepted() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let real = root.join("guest");
+        let link = root.join("link");
+        std::fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        assert!(reject_guest_directory_path_with_symlink_or_not_directory(&real).is_ok());
+        assert!(reject_guest_directory_path_with_symlink_or_not_directory(&link).is_err());
+        assert!(
+            reject_guest_directory_path_with_symlink_or_not_directory(
+                &link.join("..").join("guest")
+            )
+            .is_err()
+        );
+        assert!(
+            reject_guest_directory_path_with_symlink_or_not_directory(&root.join("missing"))
+                .is_err()
+        );
     }
 
     fn worker_config() -> SupervisorConfig {

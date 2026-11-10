@@ -7,13 +7,12 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use zbus::zvariant::{OwnedObjectPath, Value};
+use zbus::zvariant::OwnedObjectPath;
 
 use crate::state::GuestId;
 
-const UNIT_PREFIX: &str = "gradient-guest-";
+const UNIT_PREFIX: &str = "gradient-guest@";
 const UNIT_SUFFIX: &str = ".service";
-const SLICE: &str = "gradient-guests.slice";
 const STOP_WAIT: Duration = Duration::from_secs(60);
 
 type UnitStatus = (
@@ -35,13 +34,7 @@ type UnitStatus = (
     default_path = "/org/freedesktop/systemd1"
 )]
 trait SystemdManager {
-    fn start_transient_unit(
-        &self,
-        name: &str,
-        mode: &str,
-        properties: &[(&str, Value<'_>)],
-        aux: &[(&str, &[(&str, Value<'_>)])],
-    ) -> zbus::Result<OwnedObjectPath>;
+    fn start_unit(&self, name: &str, mode: &str) -> zbus::Result<OwnedObjectPath>;
 
     fn stop_unit(&self, name: &str, mode: &str) -> zbus::Result<OwnedObjectPath>;
 
@@ -77,31 +70,10 @@ impl GuestUnits {
         Ok(Self { manager })
     }
 
-    pub async fn start(&self, id: &GuestId, argv: Vec<String>, group: u32) -> Result<()> {
-        let Some(program) = argv.first().cloned() else {
-            bail!("guest unit without a command");
-        };
+    pub async fn start(&self, id: &GuestId) -> Result<()> {
         let name = unit_name(id);
-        let exec_start = vec![(program, argv, false)];
-        let mut properties = vec![
-            ("Description", Value::from(format!("Gradient guest {id}"))),
-            ("ExecStart", Value::from(exec_start)),
-            ("Group", Value::from(group.to_string())),
-            ("UMask", Value::from(0o007_u32)),
-            ("LimitMEMLOCK", Value::from(u64::MAX)),
-            ("KillMode", Value::from("control-group")),
-            ("CollectMode", Value::from("inactive-or-failed")),
-            ("Slice", Value::from(SLICE)),
-        ];
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "the guest unit finds ip, usbip and virtiofsd through the worker's PATH"
-        )]
-        if let Ok(path) = std::env::var("PATH") {
-            properties.push(("Environment", Value::from(vec![format!("PATH={path}")])));
-        }
         self.manager
-            .start_transient_unit(&name, "fail", &properties, &[])
+            .start_unit(&name, "fail")
             .await
             .with_context(|| format!("start {name}"))?;
         Ok(())
@@ -170,10 +142,11 @@ mod tests {
     fn foreign_units_are_not_guests() {
         let id = GuestId::new();
         for unit in [
-            "gradient-guest-.service".to_owned(),
-            "gradient-guest-xyz.service".to_owned(),
+            "gradient-guest@.service".to_owned(),
+            "gradient-guest@xyz.service".to_owned(),
             "gradient-worker.service".to_owned(),
-            format!("gradient-guest-{id}.socket"),
+            format!("gradient-guest-{id}.service"),
+            format!("gradient-guest@{id}.socket"),
         ] {
             assert_eq!(guest_id_of(&unit), None, "{unit}");
         }

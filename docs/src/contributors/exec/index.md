@@ -217,7 +217,7 @@ Exec jobs start in their own cloud-hypervisor guests. Guest units, pools and dev
 
 ```mermaid
 flowchart LR
-    worker["gradient-worker"] -- "systemd D-Bus" --> unit["gradient-guest-ID.service"]
+    worker["gradient-worker"] -- "systemd D-Bus" --> unit["gradient-guest@ID.service"]
     unit --> ch["cloud-hypervisor"]
     unit --> fs["virtiofsd"]
     worker -- "api.sock" --> ch
@@ -226,14 +226,14 @@ flowchart LR
 
 | Part | Location |
 |---|---|
-| Guest unit | Transient `gradient-guest-<id>.service` in `gradient-guests.slice`, started over D-Bus |
+| Guest unit | Instance `gradient-guest@<id>.service` of the template in the NixOS module at `gradient-guests.slice` (start through D-Bus) |
 | Supervisor | Main process of the unit, `gradient-worker --guest-supervisor <dir>` as root with the worker's group |
 | Guest directory | `/var/lib/gradient-worker/guests/<id>/`, mode `0770` |
 | Files | `state.json`, `console.log`, `serial.sock`, `console.sock`, `api.sock`, `vsock.sock`, `control.sock`, `guest-store.sock`, `writable-store.img`, `work.img`, `mounts/<name>.sock` |
 
 - Supervisors own cloud-hypervisor, every virtiofsd, the taps and the USB/IP bindings. Guests never belong to the worker process.
 - Workers drive the cloud-hypervisor API, the supervisor control socket and the agent over hybrid vsock.
-- Supervisors check every request against the configured devices, mounts and bridge.
+- The supervisor can check every request against the devices, mounts and bridges in the unit environment. These values come from the NixOS module, not from the worker.
 - State files hold the unit, the vsock CID, held devices, mounts and a job record without the token.
 
 ### Guest Store

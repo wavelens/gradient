@@ -27,7 +27,8 @@
         polkit.addRule(function(action, subject) {
           if (action.id == "org.freedesktop.systemd1.manage-units" &&
               subject.user == "gradient-worker" &&
-              /^gradient-guest-[0-9a-f]{32}\.service$/.test(action.lookup("unit") || "")) {
+              ["start", "stop"].indexOf(action.lookup("verb")) >= 0 &&
+              /^gradient-guest@[0-9a-f]{32}\.service$/.test(action.lookup("unit") || "")) {
             return polkit.Result.YES;
           }
         });
@@ -49,6 +50,29 @@
             ExecStart = "${lib.getExe' cfg.packages.usbip "usbipd"} -4";
             IPAddressAllow = "localhost";
             IPAddressDeny = "any";
+          };
+        };
+
+        "gradient-guest@" = {
+          description = "Root supervisor for Gradient guest %i";
+          path = [ pkgs.iproute2 ] ++ lib.optional (hasDevice "usb") cfg.packages.usbip;
+          environment = lib.filterAttrs (name: _: lib.hasPrefix "GRADIENT_WORKER_EXEC_" name)
+            config.systemd.services.gradient-worker.environment;
+          unitConfig.CollectMode = "inactive-or-failed";
+          serviceConfig = {
+            ExecStart = "${lib.getExe' cfg.packages.gradient "gradient-worker"} --guest-supervisor ${cfg.baseDir}/guests/%i";
+            Group = "gradient-worker";
+            UMask = "0007";
+            LimitMEMLOCK = "infinity";
+            KillMode = "control-group";
+            Slice = "gradient-guests.slice";
+            NoNewPrivileges = true;
+            LockPersonality = true;
+            ProtectClock = true;
+            ProtectHostname = true;
+            ProtectKernelLogs = true;
+            RestrictRealtime = true;
+            RestrictSUIDSGID = true;
           };
         };
 
