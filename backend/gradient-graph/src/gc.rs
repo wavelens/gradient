@@ -13,10 +13,7 @@ use gradient_db::{DbContext, graph::runtime_can_start::retire_outputs};
 use gradient_types::ids::{BuildAttemptId, DerivationId, EvaluationId};
 use gradient_types::*;
 use ractor::ActorRef;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait, IntoActiveModel,
-    TransactionTrait, Value,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait, Value};
 use tracing::info;
 use uuid::Uuid;
 
@@ -318,16 +315,11 @@ async fn delete_evaluations(ctx: &DbContext, chosen: &[EvaluationId]) -> Result<
         .await
         .context("GC: collect the exec jobs of the evaluations to delete")?;
 
-    unlink(db, evaluations)
+    EEvaluation::delete_many()
+        .filter(CEvaluation::Id.is_in(evaluations.to_vec()))
+        .exec(db)
         .await
-        .context("GC: set evaluation linked-list pointers to NULL")?;
-
-    for id in evaluations {
-        EEvaluation::delete_by_id(*id)
-            .exec(db)
-            .await
-            .context("GC: delete an evaluation")?;
-    }
+        .context("GC: delete the evaluations")?;
 
     let (adopted, changes) = gradient_db::maintenance::gc::settle_after_delete(ctx, &lost)
         .await
@@ -351,7 +343,7 @@ async fn still_finished<C: ConnectionTrait>(
     chosen: &[EvaluationId],
 ) -> Result<Vec<EvaluationId>, sea_orm::DbErr> {
     use gradient_entity::evaluation::EvaluationStatus;
-    use sea_orm::{ColumnTrait, QueryFilter, QuerySelect};
+    use sea_orm::QuerySelect;
 
     let terminal: Vec<i32> = EvaluationStatus::TERMINAL.map(i32::from).to_vec();
     EEvaluation::find()
@@ -362,39 +354,6 @@ async fn still_finished<C: ConnectionTrait>(
         .into_tuple()
         .all(db)
         .await
-}
-
-async fn unlink<C: ConnectionTrait>(
-    db: &C,
-    deleted: &[EvaluationId],
-) -> Result<(), sea_orm::DbErr> {
-    use sea_orm::{ColumnTrait, Condition, QueryFilter};
-
-    let gone: HashSet<EvaluationId> = deleted.iter().copied().collect();
-    let touching = EEvaluation::find()
-        .filter(
-            Condition::any()
-                .add(CEvaluation::Id.is_in(deleted.to_vec()))
-                .add(CEvaluation::Previous.is_in(deleted.to_vec()))
-                .add(CEvaluation::Next.is_in(deleted.to_vec())),
-        )
-        .all(db)
-        .await?;
-
-    for eval in touching {
-        let drop_prev = eval.previous.is_some_and(|p| gone.contains(&p));
-        let drop_next = eval.next.is_some_and(|n| gone.contains(&n));
-        let mut a: AEvaluation = eval.clone().into_active_model();
-        if gone.contains(&eval.id) || drop_prev {
-            a.previous = Set(None);
-        }
-        if gone.contains(&eval.id) || drop_next {
-            a.next = Set(None);
-        }
-        a.update(db).await?;
-    }
-
-    Ok(())
 }
 
 async fn pairs<C: ConnectionTrait>(

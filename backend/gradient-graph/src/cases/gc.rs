@@ -466,6 +466,41 @@ async fn c11_evaluation_gc_skips_a_chosen_evaluation_that_runs_again() {
 }
 
 #[tokio::test]
+async fn c40_gc_middle_evaluation_keeps_both_neighbours_and_clears_their_pointers_to_it() {
+    let (first, middle, last) = (
+        EvaluationId::now_v7(),
+        EvaluationId::now_v7(),
+        EvaluationId::now_v7(),
+    );
+    let case = Case::start(
+        shape()
+            .evaluation(first)
+            .evaluation_status(EvaluationStatus::Completed)
+            .evaluation(middle)
+            .evaluation_status(EvaluationStatus::Completed)
+            .evaluation(last)
+            .evaluation_status(EvaluationStatus::Completed),
+    )
+    .await;
+    case.db
+        .execute(&format!(
+            "UPDATE evaluation SET next = '{middle}' WHERE id = '{first}'; \
+             UPDATE evaluation SET previous = '{first}', next = '{last}' WHERE id = '{middle}'; \
+             UPDATE evaluation SET previous = '{middle}' WHERE id = '{last}';"
+        ))
+        .await;
+
+    let report = gc_evaluations(&case, &[middle]).await;
+
+    assert_eq!(report.deleted_evaluations, vec![middle]);
+    let first_row = case.evaluation(first).await;
+    let last_row = case.evaluation(last).await;
+    assert_eq!((first_row.previous, first_row.next), (None, None));
+    assert_eq!((last_row.previous, last_row.next), (None, None));
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn c10_evaluation_gc_leaves_the_other_sharing_evaluation_complete() {
     let (e1, e2) = (EvaluationId::now_v7(), EvaluationId::now_v7());
     let case = Case::start(
