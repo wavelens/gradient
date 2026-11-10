@@ -147,7 +147,7 @@ describe('ProjectListComponent', () => {
   it('names the owner team next to the project name', () => {
     const page = { items: [{ id: 'p1', name: 'acme', display_name: 'Acme', role: 'Admin', owner_team: { name: 'infra', display_name: 'Infra' } }], total: 1, page: 1 };
     const { root } = render(() => of(page));
-    expect(root.querySelector('gr-nav-card')?.textContent).toContain('Acme · Infra');
+    expect(root.querySelector('gr-nav-card gr-entity-name')?.getAttribute('title')).toBe('Acme (acme) · Infra');
   });
 
   it('opens the created project', () => {

@@ -121,7 +121,7 @@ describe('CacheListComponent', () => {
       teams: [],
     };
     const { element } = setup({ authenticated: true, getPublicCaches: () => of([]), accessSummary });
-    expect(element.querySelector('gr-nav-card')?.textContent).toContain('Main · Infra');
+    expect(element.querySelector('gr-nav-card gr-entity-name')?.getAttribute('title')).toBe('Main (main) · Infra');
     expect(Array.from(element.querySelectorAll('gr-badge')).map((badge) => badge.textContent?.trim())).toEqual(['Read']);
   });
 });
