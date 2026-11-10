@@ -15,6 +15,7 @@ import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
 import { ConfigService } from '@core/services/config.service';
+import { formatBytes } from '@shared/text';
 
 const OWN_KEY = 'public.gradient.ci-main:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M=';
 const UPSTREAM_KEY = 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=';
@@ -191,6 +192,50 @@ describe('CacheDetailComponent empty and inactive caches', () => {
     const link = root.querySelector<HTMLAnchorElement>('[data-testid="create-cache-key"]');
     expect(link?.textContent).toContain('Create key for this cache');
     expect(link?.getAttribute('href')).toBe('/settings/keys?cache=main');
+  });
+});
+
+describe('CacheDetailComponent traffic cards', () => {
+  it('sums the per-minute traffic of the last 60 minutes instead of the current clock hour', () => {
+    const point = (time: string, bytes: number, requests: number) => ({ time, bytes, requests });
+    const stats = {
+      total_packages: 1,
+      total_bytes: 1,
+      total_nar_bytes: 1,
+      storage_minutes: [],
+      storage_hours: [],
+      storage_days: [],
+      storage_weeks: [],
+      minutes: [point('2026-11-10T09:58:00', 1024, 2), point('2026-11-10T10:01:00', 2048, 3)],
+      hours: [point('2026-11-10T09:00:00', 1024, 2), point('2026-11-10T10:00:00', 2048, 3)],
+      days: [],
+      weeks: [],
+    };
+    TestBed.configureTestingModule({
+      imports: [CacheDetailComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: CachesService, useValue: { getCache: () => NEVER, getCacheStats: () => of(stats), getSubscribers: () => NEVER } },
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            snapshot: { paramMap: convertToParamMap({ cache: 'main' }), queryParamMap: convertToParamMap({}) },
+            parent: { data: of({ cacheAccess: { cache: { name: 'main', display_name: 'Main', active: true, public: true }, access: { managed: false, canEdit: false, canTrigger: false } } }) },
+          },
+        },
+        { provide: StarsService, useValue: { starred: () => of(false), set: () => of(true) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(CacheDetailComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const cards = Object.fromEntries(
+      Array.from(root.querySelectorAll('gr-stat-card')).map((c) => [c.querySelector('.stat-label')?.textContent?.trim(), c.querySelector('.stat-value')?.textContent?.trim()]),
+    );
+    expect(cards['Requests last 60 minutes']).toBe('5');
+    expect(cards['Traffic last 60 minutes']).toBe(formatBytes(3072));
   });
 });
 

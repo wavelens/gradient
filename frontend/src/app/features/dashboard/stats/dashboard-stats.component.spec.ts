@@ -7,8 +7,6 @@
 import { TestBed } from '@angular/core/testing';
 import { NEVER, Observable, of, throwError } from 'rxjs';
 import { DashboardStatsComponent } from './dashboard-stats.component';
-import { signal } from '@angular/core';
-import { AuthService } from '@core/services/auth.service';
 import { DashboardService } from '@core/services/dashboard.service';
 import { DashboardStats } from '@core/models';
 
@@ -29,13 +27,10 @@ const cards = (root: HTMLElement) =>
     ]),
   );
 
-function render(stats: () => Observable<DashboardStats>, superuser = false) {
+function render(stats: () => Observable<DashboardStats>) {
   TestBed.configureTestingModule({
     imports: [DashboardStatsComponent],
-    providers: [
-      { provide: DashboardService, useValue: { stats: vi.fn(stats) } },
-      { provide: AuthService, useValue: { user: signal({ superuser }) } },
-    ],
+    providers: [{ provide: DashboardService, useValue: { stats: vi.fn(stats) } }],
   });
   const f = TestBed.createComponent(DashboardStatsComponent);
   f.detectChanges();
@@ -46,22 +41,16 @@ describe('DashboardStatsComponent', () => {
   it('reads the stats in human units, one card each', () => {
     expect(cards(render(() => of(STATS)).root)).toEqual({
       'CPU time': '18.4 y',
-      'Completed builds - projects you can see': '1.28M',
-      'Size of caches created or caches used by projects': '2.4 TiB',
+      'Completed builds': '1.28M',
+      'Total cached': '2.4 TiB',
       'Worker load': '72%',
-      'Median queue wait (24 h)': '38.0 s',
+      'Queue wait': '38.0 s',
     });
-  });
-
-  it('names the instance-wide scope for a superuser', () => {
-    expect(Object.keys(cards(render(() => of(STATS), true).root))).toEqual(
-      expect.arrayContaining(['Completed builds - all projects', 'Size of all caches']),
-    );
   });
 
   it('lays out every labelled card with a placeholder value until the stats arrive', () => {
     const root = render(() => NEVER).root;
-    expect(Object.keys(cards(root))).toEqual(['Completed builds - projects you can see', 'Size of caches created or caches used by projects', 'Worker load', 'Median queue wait (24 h)']);
+    expect(Object.keys(cards(root))).toEqual(['Completed builds', 'Total cached', 'Worker load', 'Queue wait']);
     expect(root.querySelectorAll('.stat-value gr-skeleton').length).toBe(4);
   });
 

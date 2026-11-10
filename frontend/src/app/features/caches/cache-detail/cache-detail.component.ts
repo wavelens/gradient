@@ -170,6 +170,13 @@ export class CacheDetailComponent implements OnInit {
     return s[this.activeWindow()];
   });
 
+  last60MinutesTrafficTotals = computed(() =>
+    (this.stats()?.minutes ?? []).reduce(
+      (total, p) => ({ bytes: total.bytes + p.bytes, requests: total.requests + p.requests }),
+      { bytes: 0, requests: 0 },
+    )
+  );
+
   activeStoragePoints = computed<StorageMetricPoint[]>(() => {
     const s = this.stats();
     if (!s) return [];
