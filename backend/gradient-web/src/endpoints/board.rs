@@ -714,7 +714,7 @@ pub async fn get_dispatched_job(
         outbound_drv_paths(&mut c.job_context, &state.project_mapper(c.project).await?);
 
         let (project, worker_name) =
-            job_names(&state.web_db, &scope, c.project.into(), &c.worker_id).await?;
+            job_names(&state.web_db, &scope, c.project, &c.worker_id).await?;
 
         let derivations = job_derivations(&state.web_db, c.evaluation_id, &c.job_context).await;
         let build_id = match c.derivation_build {
@@ -752,6 +752,7 @@ pub async fn get_dispatched_job(
                 &maybe_user,
                 api_key.as_ref(),
                 c.project,
+                project.public,
             )
             .await?,
             queued_at: c.queued_at.and_utc().to_rfc3339(),
@@ -805,8 +806,7 @@ pub async fn get_dispatched_job(
         outbound_drv_paths(candidates, &mapper);
     }
 
-    let (project, worker_name) =
-        job_names(&state.web_db, &scope, j.project.into(), &j.worker_id).await?;
+    let (project, worker_name) = job_names(&state.web_db, &scope, j.project, &j.worker_id).await?;
 
     let shared_build_id = shared_build_of(&j);
     let build_id: Option<Uuid> = match shared_build_id {
@@ -903,6 +903,7 @@ pub async fn get_dispatched_job(
             &maybe_user,
             api_key.as_ref(),
             j.project,
+            project.public,
         )
         .await?,
         queued_at: j.queued_at.and_utc().to_rfc3339(),
@@ -961,12 +962,11 @@ async fn exec_job_of<C: ConnectionTrait>(
 async fn job_names<C: ConnectionTrait>(
     db: &C,
     scope: &MetricsScope,
-    project: Uuid,
+    project: ProjectId,
     worker: &str,
-) -> Result<(BoardProject, Option<String>), sea_orm::DbErr> {
-    let project = board_projects(db, &[project])
+) -> Result<(gradient_entity::project::Model, Option<String>), sea_orm::DbErr> {
+    let project = by_id::<gradient_entity::project::Entity, _>(db, project)
         .await?
-        .remove(&project)
         .unwrap_or_default();
     let worker_name = WorkerNames::load(db, scope, [worker.to_string()])
         .await?
@@ -991,14 +991,11 @@ async fn can_open_project_page(
     viewer: &Option<MUser>,
     api_key: Option<&ApiKeyContext>,
     project: ProjectId,
+    public: bool,
 ) -> WebResult<bool> {
-    let public = by_id::<gradient_entity::project::Entity, _>(db, project)
-        .await?
-        .is_some_and(|p| p.public);
     match viewer {
-        _ if public => Ok(true),
-        Some(user) => can_view_project(db, user.id, project, api_key).await,
-        None => Ok(false),
+        Some(user) if !public => can_view_project(db, user.id, project, api_key).await,
+        _ => Ok(public),
     }
 }
 
