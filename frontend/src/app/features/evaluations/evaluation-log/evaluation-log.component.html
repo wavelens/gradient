@@ -202,7 +202,7 @@
           }
         }
         @if (ev.status === 'Waiting' && selectedSection() !== 'messages' && selectedBuildId()) {
-          <gr-waiting-notice banner [reason]="ev.waiting_reason" [project]="projectName" [access]="waitingAccess()" />
+          <gr-waiting-notice banner [reason]="ev.waiting_reason" [project]="projectName" [access]="waitingAccess()" [pendingJobLink]="pendingJobLink()" />
         }
         @if (ev.status === 'Building' && activeBuildsCount() === 0 && ev.task_name; as task) {
           @for (job of execJobsWaitingWithReason(); track job.id) {
@@ -255,7 +255,7 @@
             </div>
           } @else if (ev.status === 'Waiting') {
             <div class="queued-hint">
-              <gr-waiting-notice [reason]="ev.waiting_reason" [project]="projectName" [access]="waitingAccess()" />
+              <gr-waiting-notice [reason]="ev.waiting_reason" [project]="projectName" [access]="waitingAccess()" [pendingJobLink]="pendingJobLink()" />
             </div>
           } @else if (ev.status === 'Queued') {
             <div class="queued-hint">

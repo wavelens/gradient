@@ -27,8 +27,14 @@
 }
 
 .waiting-next {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: $spacing-sm;
   margin: $spacing-sm 0 0;
 }
+
+:host(.waiting-notice--banner) .waiting-next { justify-content: flex-start; }
 
 .waiting-hint {
   font-size: $font-size-sm;

@@ -151,6 +151,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const evaluation = this.evaluation();
     return evaluation ? formatDuration(evaluationDuration(evaluation, this.clock.currentTimeMilliseconds())) : '';
   });
+  pendingJobLink = computed(() => (this.authService.isAuthenticated() ? links.boardPendingJob({ evaluation_id: this.evaluationId }) : null));
   activeBuildsCount = signal(0);
   execJobsWaitingWithReason = signal<ExecJobSummary[]>([]);
   execJobStartingId = signal<string | null>(null);

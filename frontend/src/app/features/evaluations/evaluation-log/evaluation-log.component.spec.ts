@@ -1022,6 +1022,19 @@ describe('EvaluationLogComponent', () => {
       started.destroy();
     });
 
+    it.each([
+      [true, '/board/pending/eval-1'],
+      [false, undefined],
+    ] as const)('links a waiting evaluation to its pending job only for a signed-in user (signed in: %s)', (signedIn, href) => {
+      const fixture = setupEvaluationLogPageFixture([], undefined, { status: 'Waiting', waiting_reason: { kind: 'no_cache' } });
+      vi.spyOn(TestBed.inject(AuthService), 'isAuthenticated').mockReturnValue(signedIn);
+      fixture.detectChanges();
+      const jobLink = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLAnchorElement>('gr-waiting-notice a'))
+        .find((link) => link.textContent?.includes('Show job'));
+      expect(jobLink?.getAttribute('href')).toBe(href);
+      fixture.destroy();
+    });
+
     it('explains a Building evaluation with one notice per waiting exec job, each naming and linking its job', () => {
       const fixture = setupEvaluationLogPageFixture([build('ok', 'hash-zlib.drv')], undefined, { status: 'Building', task_name: 'ci' });
       const job = {

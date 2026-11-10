@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import type { WaitingReason } from '@core/models';
 import type { WaitingAccess } from '@shared/evaluation';
 import { WaitingNoticeComponent } from './waiting-notice.component';
@@ -32,6 +32,15 @@ describe('WaitingNoticeComponent', () => {
     const { root } = render({ kind: 'no_cache' }, { manageWorkers: false, manageSubscriptions: false, trigger: false, superuser: false }, true);
     expect(root.querySelector('gr-message-banner')).not.toBeNull();
     expect(root.querySelector('a[grButton]')).toBeNull();
+    expect(root.textContent).toContain('Ask a project admin');
+  });
+
+  it('offers the pending job next to the fix, or alone when there is nothing to fix', () => {
+    const viewer = { manageWorkers: false, manageSubscriptions: false, trigger: false, superuser: false };
+    const { fixture, root } = render({ kind: 'no_cache' }, viewer);
+    fixture.componentRef.setInput('pendingJobLink', TestBed.inject(Router).createUrlTree(['/board', 'pending', 'e1']));
+    fixture.detectChanges();
+    expect(Array.from(root.querySelectorAll('a[grButton]')).map((link) => link.getAttribute('href'))).toEqual(['/board/pending/e1']);
     expect(root.textContent).toContain('Ask a project admin');
   });
 

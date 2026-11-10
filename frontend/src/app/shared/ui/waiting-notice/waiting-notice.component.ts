@@ -36,21 +36,28 @@ import { type WaitingAccess, explainWaiting } from '@shared/evaluation';
           @for (requirement of e.requirements; track requirement) { <li>{{ requirement }}</li> }
         </ul>
       }
-      @if (e.action; as action) {
+      @if (e.action || pendingJobLink()) {
         <div class="waiting-next">
-          @if (action.kind === 'link') {
-            <a grButton size="small" [label]="action.label" [icon]="action.icon" [routerLink]="action.link"></a>
-          } @else {
-            <button grButton size="small" [label]="action.label" [icon]="action.icon"
-                    [loading]="busy()" [disabled]="busy()" (click)="start.emit()"></button>
+          @if (e.action; as action) {
+            @if (action.kind === 'link') {
+              <a grButton size="small" [label]="action.label" [icon]="action.icon" [routerLink]="action.link"></a>
+            } @else {
+              <button grButton size="small" [label]="action.label" [icon]="action.icon"
+                      [loading]="busy()" [disabled]="busy()" (click)="start.emit()"></button>
+            }
+          }
+          @if (pendingJobLink(); as jobLink) {
+            <a grButton size="small" severity="secondary" label="Show job" icon="work" [routerLink]="jobLink"></a>
           }
         </div>
-      } @else if (e.hint) {
+      }
+      @if (!e.action && e.hint) {
         <p class="waiting-next waiting-hint">{{ e.hint }}</p>
       }
     </ng-template>
   `,
   styleUrl: './waiting-notice.component.scss',
+  host: { '[class.waiting-notice--banner]': 'banner()' },
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class WaitingNoticeComponent {
@@ -60,6 +67,7 @@ export class WaitingNoticeComponent {
   banner = input(false, { transform: booleanAttribute });
   subjectLabel = input<string | null>(null);
   subjectLink = input<UrlTree | null>(null);
+  pendingJobLink = input<UrlTree | null>(null);
   busy = input(false, { transform: booleanAttribute });
   start = output<void>();
 

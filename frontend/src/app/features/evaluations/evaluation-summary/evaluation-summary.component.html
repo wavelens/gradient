@@ -35,7 +35,7 @@
       <a slot="actions" grButton label="Full log" icon="article" severity="secondary"
          [routerLink]="links.evaluationLog(project, ev.id)"></a>
       @if (ev.status === 'Waiting') {
-        <gr-waiting-notice slot="banner" banner [reason]="ev.waiting_reason" [project]="project" [access]="waitingAccess()" />
+        <gr-waiting-notice slot="banner" banner [reason]="ev.waiting_reason" [project]="project" [access]="waitingAccess()" [pendingJobLink]="pendingJobLink()" />
       }
 
       @if (countTiles().length) {

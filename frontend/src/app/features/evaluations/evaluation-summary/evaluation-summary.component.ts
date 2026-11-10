@@ -102,6 +102,7 @@ export class EvaluationSummaryComponent implements OnInit {
     const task = this.taskWithUserPermissionsSignal();
     return waitingAccessFrom(task?.permissions ?? [], !!task && accessFromEntity(task).canTrigger, this.auth.user()?.superuser === true);
   });
+  pendingJobLink = computed(() => (this.auth.isAuthenticated() ? links.boardPendingJob({ evaluation_id: this.evaluationId }) : null));
 
   running = computed(() => {
     const evaluation = this.evaluation();
