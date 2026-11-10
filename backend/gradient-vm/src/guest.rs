@@ -180,7 +180,7 @@ impl Guest {
         self.save()
     }
 
-    pub async fn teardown(mut self, units: &GuestUnits) {
+    pub async fn teardown(mut self, units: &GuestUnits) -> bool {
         self.control = None;
         let vfio = self
             .state
@@ -210,6 +210,7 @@ impl Guest {
             }
         };
         remove_guest_dirs(&self.dir, &self.state.per_job_dirs, stopped);
+        stopped
     }
 
     async fn start_unit(&self, units: &GuestUnits) -> Result<()> {

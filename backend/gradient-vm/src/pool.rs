@@ -34,6 +34,7 @@ pub const NO_GUEST_BUDGET: &str = "the worker has no guest budget left for this 
 
 const FIRST_CID: u32 = 3;
 const BOOT_RETRY: Duration = Duration::from_secs(30);
+const GUEST_UNIT_STOP_RETRY_INTERVAL_SECS: u64 = 30;
 
 type Taken = Result<(Guest, BudgetHold), GuestBootError>;
 
@@ -545,7 +546,19 @@ impl GuestPool {
 
     async fn teardown(&self, guest: Guest) {
         self.states.stopped(guest.id());
-        guest.teardown(&self.units).await;
+        let id = guest.id().clone();
+        let dir = guest.dir().to_owned();
+        let per_job_dirs = guest.state().per_job_dirs.clone();
+        let mut stopped = guest.teardown(&self.units).await;
+        while !stopped {
+            warn!(guest = %id, "The guest unit does not stop. It can keep its devices, address and budget and retry after 30 seconds.");
+            tokio::select! {
+                () = tokio::time::sleep(Duration::from_secs(GUEST_UNIT_STOP_RETRY_INTERVAL_SECS)) => {}
+                () = self.stopping.cancelled() => return,
+            }
+            stopped = self.units.stop(&id).await.is_ok();
+        }
+        remove_guest_dirs(&dir, &per_job_dirs, true);
     }
 
     pub async fn stop_boots(&self) {

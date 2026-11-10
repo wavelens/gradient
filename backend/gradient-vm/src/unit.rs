@@ -13,7 +13,7 @@ use crate::state::GuestId;
 
 const UNIT_PREFIX: &str = "gradient-guest@";
 const UNIT_SUFFIX: &str = ".service";
-const STOP_WAIT: Duration = Duration::from_secs(60);
+const STOP_WAIT: Duration = Duration::from_secs(120);
 
 type UnitStatus = (
     String,
