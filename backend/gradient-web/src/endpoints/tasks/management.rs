@@ -611,7 +611,7 @@ pub async fn delete_task_active(
     operation_id = "checkTaskRepository",
     tag = "tasks",
     summary = "Check repository accessibility",
-    description = "Tests whether Gradient can clone the task's repository using the project's SSH key and returns the remote head commit. A `repository` in the body is tested instead of the saved URL, so a new URL can be checked before saving it. A check of the saved URL updates the `repository_fetch` of the task. Requires Admin or Write role; rejects state-managed tasks.\nReturns `400` with `code: \"repository_unreachable\"` and the underlying git error when the repository cannot be fetched.",
+    description = "Tests whether Gradient can clone the task's repository using the project's SSH key and returns the remote head commit. A `repository` in the body is tested instead of the saved URL, so a new URL can be checked before saving it. A check of the saved URL updates the `repository_fetch` of the task. Requires Admin or Write role; rejects state-managed tasks.\nThe endpoint can return ``400`` with ``code: \"repository_unreachable\"`` and a short reason. Repository fetch failures can have one of three causes - no repository at the URL, denied access, or an unreachable server.",
     params(TaskPath),
     request_body = Option<CheckRepositoryRequest>,
     responses((status = OK, description = "Repository is accessible", body = String, content_type = "application/json"), WebError)

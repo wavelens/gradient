@@ -115,35 +115,48 @@ impl SourceError {
             Self::GitCommand(message)
             | Self::GitCommandFailed { stderr: message }
             | Self::GitExecution { error: message } => {
-                let line = message
-                    .lines()
-                    .map(|line| line.trim().trim_start_matches("fatal:").trim())
-                    .find(|line| !line.is_empty())
-                    .unwrap_or(message);
-                readable_reason_for_git_transport_error_line(line)
-                    .unwrap_or(line)
-                    .to_owned()
+                readable_reason_for_git_transport_error(message).to_owned()
             }
-            other => other.to_string(),
+            Self::BranchNotFound { .. }
+            | Self::TagNotFound { .. }
+            | Self::EmptyRemote
+            | Self::InvalidUrl
+            | Self::UrlParsing => self.to_string(),
+            _ => "Gradient failed to check the repository. Details live in the server log."
+                .to_owned(),
         }
     }
 }
 
-fn readable_reason_for_git_transport_error_line(line: &str) -> Option<&'static str> {
-    let line = line.to_lowercase();
-    if ["failed to fill whole buffer", "early eof", "unexpected eof"]
-        .iter()
-        .any(|pattern| line.contains(pattern))
-    {
-        Some(
-            "The server closed the connection before it listed the repository branches. Check that the repository is at this URL.",
-        )
-    } else if line.contains("handshake") {
-        Some(
-            "The secure connection to the server failed during the handshake. Check the URL, the port and server support for this protocol.",
-        )
+/// All network failures share the same reason, so the answer can't reveal which ports are open.
+fn readable_reason_for_git_transport_error(message: &str) -> &'static str {
+    let message = message.to_lowercase();
+    let mentions = |patterns: &[&str]| patterns.iter().any(|p| message.contains(p));
+    if mentions(&[
+        "repository not found",
+        "could not be found",
+        "does not appear to be a git repository",
+        "not exported",
+        "status code: 404",
+        "returned error: 404",
+    ]) {
+        "The server has no repository at this URL."
+    } else if mentions(&[
+        "permission denied",
+        "authentication",
+        "could not read username",
+        "access denied",
+        "unauthorized",
+        "forbidden",
+        "publickey",
+        "status code: 401",
+        "status code: 403",
+        "returned error: 401",
+        "returned error: 403",
+    ]) {
+        "The server denied access. Check that the project's SSH key or access token can read the repository."
     } else {
-        None
+        "Gradient can't list branches of the Git repository at this URL. Check the URL and port. Make sure Gradient can reach the server."
     }
 }
 
@@ -151,16 +164,33 @@ fn readable_reason_for_git_transport_error_line(line: &str) -> Option<&'static s
 mod short_reason_tests {
     use super::SourceError;
 
+    fn reason(stderr: &str) -> String {
+        SourceError::GitCommandFailed {
+            stderr: stderr.into(),
+        }
+        .short_reason_for_user()
+    }
+
     #[test]
-    fn short_reason_for_user_strips_git_failed_wrapper_and_fatal_prefix_and_keeps_first_stderr_line()
-     {
-        let error = SourceError::GitCommandFailed {
-            stderr: "\nfatal: Could not read from remote repository.\n\nPlease make sure".into(),
-        };
-        assert_eq!(
-            error.short_reason_for_user(),
-            "Could not read from remote repository."
-        );
+    fn refused_closed_and_timed_out_connections_share_one_reason_without_the_raw_error() {
+        let refused = reason("Connection refused (os error 111)");
+        for raw in [
+            "failed to fill whole buffer",
+            "connection timed out (os error 110)",
+            "SSH to 10.0.0.5: Kex handshake failed",
+            "failed to connect to 10.0.0.5: port 4013: Connection refused",
+        ] {
+            assert_eq!(reason(raw), refused, "{raw}");
+        }
+        assert!(!refused.contains("os error"), "{refused}");
+    }
+
+    #[test]
+    fn missing_repositories_and_denied_access_get_their_own_reasons() {
+        let missing = reason("remote: Repository not found.");
+        let denied = reason("git@example.com: Permission denied (publickey).");
+        assert_eq!(missing, "The server has no repository at this URL.");
+        assert!(denied.starts_with("The server denied access"), "{denied}");
         assert_eq!(
             SourceError::BranchNotFound {
                 branch: "main".into()
@@ -168,25 +198,12 @@ mod short_reason_tests {
             .short_reason_for_user(),
             "branch main does not exist on the remote"
         );
-    }
-
-    #[test]
-    fn raw_transport_and_handshake_failures_become_readable_reasons_for_user() {
-        let closed = SourceError::GitCommandFailed {
-            stderr: "failed to fill whole buffer".into(),
-        };
         assert!(
-            closed
-                .short_reason_for_user()
-                .starts_with("The server closed the connection")
-        );
-        let handshake = SourceError::GitCommandFailed {
-            stderr: "SSH to example.com: Kex handshake failed".into(),
-        };
-        assert!(
-            handshake
-                .short_reason_for_user()
-                .starts_with("The secure connection to the server failed")
+            !SourceError::Database {
+                reason: "pool timed out".into()
+            }
+            .short_reason_for_user()
+            .contains("pool")
         );
     }
 }

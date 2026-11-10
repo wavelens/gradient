@@ -8,19 +8,35 @@ use super::AdvertisedRef;
 use crate::SourceError;
 use crate::git::pktline::read_advertised_refs;
 use crate::git::url::parse_git_protocol_url;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::time::Duration;
+
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn connect_tcp_with_timeout(host: &str, port: u16) -> std::io::Result<TcpStream> {
+    let mut last_error = std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "Host name resolved to no addresses",
+    );
+    for addr in (host, port).to_socket_addrs()? {
+        match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last_error = e,
+        }
+    }
+    Err(last_error)
+}
 
 /// libgit2 is negotiating protocol v2 with git-daemon, and its `ls-refs` exchange can fail
 /// silently. This plain v0 request without `version=2` is getting an immediate ref advertisement
 /// with HEAD.
 pub(super) fn list_refs_git_protocol(url: &str) -> Result<Vec<AdvertisedRef>, SourceError> {
     use std::io::Write;
-    use std::net::TcpStream;
-    use std::time::Duration;
 
     let (host, port, repo_path) = parse_git_protocol_url(url)?;
 
     let mut stream =
-        TcpStream::connect((host, port)).map_err(|e| SourceError::GitCommandFailed {
+        connect_tcp_with_timeout(host, port).map_err(|e| SourceError::GitCommandFailed {
             stderr: e.to_string(),
         })?;
 
