@@ -20,23 +20,19 @@ export class AuthService {
   private api = inject(ApiService);
   private router = inject(Router);
 
-  // Signals for reactive state management
   private userSignal = signal<UserInfoResponse | null>(null);
-  private tokenSignal = signal<string | null>(null);
   private loadingSignal = signal(false);
-  private tokenRejectedOnStartup = false;
+  private startupSessionCookieWasRejected = false;
 
   // Emits true once the initial auth check is done (regardless of outcome)
   private initializedSubject = new BehaviorSubject(false);
   initialized$ = this.initializedSubject.asObservable().pipe(filter(v => v), take(1));
 
-  // Computed signals (read-only)
   // True when the last probe never reached the server, so the session state is
   // unknown rather than absent.
   private unreachableSignal = signal(false);
 
   user = this.userSignal.asReadonly();
-  token = this.tokenSignal.asReadonly();
   loading = this.loadingSignal.asReadonly();
   serverUnreachable = this.unreachableSignal.asReadonly();
   isAuthenticated = computed(() => !!this.userSignal());
@@ -53,10 +49,6 @@ export class AuthService {
     });
   }
 
-  /**
-   * Initialize authentication state by probing the /user endpoint.
-   * The JWT is stored in an httpOnly cookie so JS never touches it directly.
-   */
   private initializeAuth(): void {
     this.loadUser(() => this.initializedSubject.next(true));
   }
@@ -117,16 +109,16 @@ export class AuthService {
   }
 
   sessionLost(returnUrl: string): void {
-    this.toLogin(returnUrl, this.clearStoredUserAndTokenAndReturnExpiredReason());
+    this.toLogin(returnUrl, this.forgetSignedInUserAndDropSessionReturningExpiredIfSessionExisted());
   }
 
   forgetRejectedSessionAndGetSignInPageUrl(returnUrl: string): UrlTree {
-    return links.login(returnUrl, this.clearStoredUserAndTokenAndReturnExpiredReason());
+    return links.login(returnUrl, this.forgetSignedInUserAndDropSessionReturningExpiredIfSessionExisted());
   }
 
-  private clearStoredUserAndTokenAndReturnExpiredReason(): 'expired' | undefined {
+  private forgetSignedInUserAndDropSessionReturningExpiredIfSessionExisted(): 'expired' | undefined {
     const wasSignedIn = this.isAuthenticated();
-    const expired = wasSignedIn || this.tokenRejectedOnStartup;
+    const expired = wasSignedIn || this.startupSessionCookieWasRejected;
     this.forget();
     if (wasSignedIn) this.api.post('auth/logout', {}, asSessionProbe()).subscribe({ error: () => undefined });
     return expired ? 'expired' : undefined;
@@ -143,13 +135,12 @@ export class AuthService {
   }
 
   getSignInPageUrl(next: string): UrlTree {
-    return links.login(next, this.tokenRejectedOnStartup ? 'expired' : undefined);
+    return links.login(next, this.startupSessionCookieWasRejected ? 'expired' : undefined);
   }
 
   private forget(): void {
-    this.tokenRejectedOnStartup = false;
+    this.startupSessionCookieWasRejected = false;
     this.userSignal.set(null);
-    this.tokenSignal.set(null);
   }
 
   private toLogin(returnUrl: string, reason?: LoginReason): void {
@@ -177,17 +168,14 @@ export class AuthService {
       tap((user) => {
         this.userSignal.set(user);
         this.unreachableSignal.set(false);
-        this.tokenRejectedOnStartup = false;
+        this.startupSessionCookieWasRejected = false;
       }),
       map((user) => user !== null),
       catchError((error: unknown) => {
         const unreachable = error instanceof ApiError && error.unreachable;
         this.unreachableSignal.set(unreachable);
-        this.tokenRejectedOnStartup = error instanceof ApiError && error.status === 401;
-        if (!unreachable) {
-          this.userSignal.set(null);
-          this.tokenSignal.set(null);
-        }
+        this.startupSessionCookieWasRejected = error instanceof ApiError && error.status === 401;
+        if (!unreachable) this.userSignal.set(null);
         return of(false);
       })
     );

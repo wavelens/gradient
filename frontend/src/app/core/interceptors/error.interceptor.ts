@@ -10,7 +10,7 @@ import { PRIMARY_OUTLET, Router } from '@angular/router';
 import { MessageService } from '@gradient/ui/ui';
 import { Observable, catchError, retry, throwError, timer } from 'rxjs';
 import { AuthService } from '@core/services/auth.service';
-import { parseRetryAfterHeaderToMilliseconds } from '@core/services/api.service';
+import { isSessionEndedUnauthorizedResponse, parseRetryAfterHeaderToMilliseconds } from '@core/services/api.service';
 import { SECTION_REQUEST, SESSION_PROBE } from './request-context';
 import { PageRenderTracker } from './page-render-tracker.service';
 
@@ -52,7 +52,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
 
   const handle = (error: HttpErrorResponse): void => {
     const auth = injector.get(AuthService);
-    if (!probe && error.status === 401) {
+    if (!probe && isSessionEndedUnauthorizedResponse(error.status, error.error)) {
       auth.sessionLost(pageUrl(router));
       return;
     }

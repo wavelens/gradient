@@ -71,9 +71,15 @@ function serverMessage(body: unknown): string | undefined {
   return typeof message === 'string' && message ? message : undefined;
 }
 
+export function isSessionEndedUnauthorizedResponse(status: number, body: unknown): boolean {
+  if (status !== 401) return false;
+  const code = readErrorCode(body);
+  return code === undefined || code === SESSION_ENDED_ERROR_CODE;
+}
+
 function toApiError(error: HttpErrorResponse, body: unknown = error.error): ApiError {
   const code = readErrorCode(body);
-  const sessionEnded = error.status === 401 && (code === undefined || code === SESSION_ENDED_ERROR_CODE);
+  const sessionEnded = isSessionEndedUnauthorizedResponse(error.status, body);
   const retryAfterMilliseconds = error.status === 429 ? parseRetryAfterHeaderToMilliseconds(error.headers) : undefined;
   const retryAfterSeconds = retryAfterMilliseconds === undefined ? undefined : Math.max(1, Math.ceil(retryAfterMilliseconds / 1000));
   return new ApiError((sessionEnded ? undefined : serverMessage(body)) ?? statusMessage(error.status, retryAfterSeconds), error.status, code, retryAfterSeconds);

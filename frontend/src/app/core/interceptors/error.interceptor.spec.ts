@@ -71,6 +71,13 @@ describe('errorInterceptor on a lost session', () => {
     expect(auth.sessionLost).toHaveBeenCalledWith('/project/acme/task/app');
   });
 
+  it('keeps the session on a 401 whose error code names another cause, such as wrong credentials', async () => {
+    const { auth } = setup();
+    const rejected = () => throwError(() => new HttpErrorResponse({ status: 401, error: { error: true, code: 'invalid_credentials' } }));
+    await send(rejected, { method: 'POST' }).catch(() => undefined);
+    expect(auth.sessionLost).not.toHaveBeenCalled();
+  });
+
   it('leaves a rejected session probe to the route guards', async () => {
     const { auth } = setup();
     await send(failWith(401), asSessionProbe()).catch(() => undefined);
