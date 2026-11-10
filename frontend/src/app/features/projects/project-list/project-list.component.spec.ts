@@ -16,7 +16,6 @@ import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TeamsService } from '@core/services/teams.service';
-import { UserService } from '@core/services/user.service';
 
 const EMPTY_PAGE = { items: [], total: 0, page: 1 };
 
@@ -25,14 +24,12 @@ function render(
   getPublicProjects: () => Observable<unknown> = () => of(EMPTY_PAGE),
   signedIn = true,
   invitationCount = 0,
-  accessSummary: () => Observable<unknown> = () => of(null),
 ) {
   const projects = vi.fn(getProjects);
   TestBed.configureTestingModule({
     imports: [ProjectListComponent],
     providers: [
       provideRouter([]),
-      { provide: UserService, useValue: { getProjectsCachesAndTeamsCurrentUserCanReach: accessSummary } },
       { provide: TeamsService, useValue: { list: () => of([]) } },
       { provide: PendingInvitesService, useValue: { count: signal(invitationCount), all: signal([...Array(invitationCount).fill({ kind: 'project' }), { kind: 'cache' }]) } },
       { provide: AuthService, useValue: { isAuthenticated: () => signedIn, user: () => (signedIn ? { superuser: false } : null) } },
@@ -145,13 +142,6 @@ describe('ProjectListComponent', () => {
     const { root } = render(() => of(EMPTY_PAGE), () => of(EMPTY_PAGE), false);
     expect(root.textContent).toContain('No public projects');
     expect(root.textContent).not.toContain('No projects yet');
-  });
-
-  it('shows the effective role from the access overview instead of the strongest role', () => {
-    const page = { items: [{ id: 'p1', name: 'acme', display_name: 'Acme', role: 'Admin' }], total: 1, page: 1 };
-    const access = { superuser: false, projects: [{ name: 'acme', display_name: 'Acme', role: 'Write', reasons: [] }], caches: [], teams: [] };
-    const { root } = render(() => of(page), undefined, true, 0, () => of(access));
-    expect(Array.from(root.querySelectorAll('gr-badge')).map((b) => b.textContent?.trim())).toEqual(['Write']);
   });
 
   it('names the owner team next to the project name', () => {

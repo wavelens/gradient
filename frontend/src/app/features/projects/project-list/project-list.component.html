@@ -40,7 +40,7 @@
           >
             <gr-entity-name slot="title" [displayName]="project.display_name" [name]="project.name" [ownerTeam]="project.owner_team" />
             <div slot="meta">
-              @let role = getEffectiveProjectRole(project);
+              @let role = project.role;
               @if (role && role !== 'Admin') {
                 <gr-badge>{{ role }}</gr-badge>
               }

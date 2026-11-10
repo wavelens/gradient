@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { Router, RouterModule } from '@angular/router';
 import { ProjectsService } from '@core/services/projects.service';
@@ -26,7 +26,7 @@ import { links } from '@shared/routing';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, merge } from 'rxjs';
 import { PHASE_SEVERITY } from '@shared/evaluation';
-import { PendingInvitationsBannerComponent, getDisplayNameWithOwnerTeam, loadSignedInUserAccessSummary } from '@shared/access';
+import { PendingInvitationsBannerComponent, getDisplayNameWithOwnerTeam } from '@shared/access';
 
 @Component({
   selector: 'app-project-list',
@@ -61,8 +61,6 @@ export class ProjectListComponent implements OnInit {
   private router = inject(Router);
 
   protected canCreateProject = injectCanCreateProject();
-  protected signedInUserAccess = loadSignedInUserAccessSummary();
-  protected userAccessByProjectName = computed(() => new Map(this.signedInUserAccess()?.projects.map((row) => [row.name, row])));
 
   projects = pagedList<ProjectSummary>('projects', (page) => this.projectsService.getProjects(page, 50));
   showCreateDialog = signal(false);
@@ -93,9 +91,5 @@ export class ProjectListComponent implements OnInit {
   get filteredPublicProjects(): PublicProjectSummary[] {
     const ownedIds = new Set(this.projects.items().map((o) => o.id));
     return this.publicProjects.items().filter((o) => !ownedIds.has(o.id));
-  }
-
-  protected getEffectiveProjectRole(project: ProjectSummary): string | null | undefined {
-    return this.signedInUserAccess() ? this.userAccessByProjectName().get(project.name)?.role : project.role;
   }
 }
