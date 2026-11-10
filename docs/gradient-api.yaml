@@ -7240,7 +7240,7 @@ paths:
       tags:
       - integrations
       summary: Connect a Git host
-      description: Create a webhook receiver for a Gitea, Forgejo, or GitLab host and a status reporter with `access_token` present, in one call. Both integrations share `name`. Fields `inbound.generated_secret` and `inbound.webhook_url` in the response contain the generated webhook secret once and the address to enter into the Git host.
+      description: Create a webhook receiver for a Gitea, Forgejo, or GitLab host and a status reporter with `access_token` present, in one call. Both integrations share `name`. Fields `inbound.generated_secret` and `inbound.webhook_url` in the response contain the generated webhook secret once and the address to enter into the Git host. Existing tasks with repositories on this Git host connect to the new integration. Their task names appear in `connected_tasks`.
       operationId: connectGitHost
       parameters:
       - name: project
@@ -9908,7 +9908,7 @@ paths:
       summary: Check repository accessibility
       description: |-
         Tests whether Gradient can clone the task's repository using the project's SSH key and returns the remote head commit. A `repository` in the body is tested instead of the saved URL, so a new URL can be checked before saving it. A check of the saved URL updates the `repository_fetch` of the task. Requires Admin or Write role; rejects state-managed tasks.
-        Returns `400` with `code: "repository_unreachable"` and the underlying git error when the repository cannot be fetched.
+        The endpoint can return ``400`` with ``code: "repository_unreachable"`` and a short reason. Repository fetch failures can have one of three causes - no repository at the URL, denied access, or an unreachable server.
       operationId: checkTaskRepository
       parameters:
       - name: project
