@@ -612,6 +612,45 @@ async fn a_refused_delivery_is_logged_for_the_integration() {
 }
 
 #[tokio::test]
+async fn a_delivery_with_an_invalid_signature_is_not_logged() {
+    let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");
+    let ciphertext = encrypt_webhook_secret(&crypt_path, "correct-secret").expect("encrypt");
+    let db = mock_db()
+        .append_query_results([vec![project_row("test-project")]])
+        .append_query_results([vec![integration_row(&ciphertext)]])
+        .append_exec_results([
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            },
+        ])
+        .into_connection();
+    let log = db.clone();
+
+    let server =
+        TestServer::new(create_router(make_state(db, Some(crypt_path), None)).expect("router"));
+    let body = GITEA_PUSH_BODY.as_bytes();
+    server
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
+        .add_header("X-Gitea-Event", "push")
+        .add_header("X-Gitea-Signature", gitea_signature("wrong-secret", body))
+        .bytes(body.into())
+        .await
+        .assert_status_unauthorized();
+    drop(server);
+
+    let statements = format!("{:?}", log.into_transaction_log());
+    assert!(
+        !statements.contains("incoming_webhook_delivery"),
+        "{statements}"
+    );
+}
+
+#[tokio::test]
 async fn git_host_webhook_branch_glob_no_match_skipped() {
     let plaintext_secret = "test-secret-plaintext";
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!");

@@ -410,13 +410,13 @@ async fn handle_git_host_webhook(
         warn!(project = %project_name, git_host = %git_host, integration = %integration_name, "Integration not found");
         WebError::from(GitHostHookRefusal::IntegrationNotFound)
     })?;
-    log.integrations.push(integration.id);
-    log.event = Some(first_header(headers, provider.event_headers()).to_owned());
+    let raw_event = first_header(headers, provider.event_headers());
 
-    let encrypted_secret = integration.secret.as_ref().ok_or_else(|| {
+    let Some(encrypted_secret) = integration.secret.as_ref() else {
         warn!(integration_id = %integration.id, "Integration has no secret configured");
-        WebError::from(GitHostHookRefusal::SecretNotConfigured)
-    })?;
+        log.set_integration_and_event(integration.id, raw_event);
+        return Err(GitHostHookRefusal::SecretNotConfigured.into());
+    };
 
     let plaintext_secret = decrypt_secret_with_file(
         &ci.db.config.secrets.crypt_file,
@@ -432,6 +432,7 @@ async fn handle_git_host_webhook(
         warn!(project = %project_name, git_host = %git_host, integration = %integration_name, "Git host webhook: invalid signature");
         return Err(GitHostHookRefusal::InvalidSignature.into());
     }
+    log.set_integration_and_event(integration.id, raw_event);
 
     let allowlist = integration.allowed_ips.clone().unwrap_or_default();
     if !allowlist.is_empty() {
@@ -452,7 +453,6 @@ async fn handle_git_host_webhook(
     }
 
     let integration_id = integration.id;
-    let raw_event = first_header(headers, provider.event_headers());
     let event_type = provider.classify_event(raw_event);
 
     let response = match event_type {

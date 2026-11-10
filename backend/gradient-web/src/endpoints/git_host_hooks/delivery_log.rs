@@ -11,6 +11,8 @@ use gradient_entity::incoming_webhook_delivery::{DeliveryResult, Model};
 use gradient_types::{IncomingWebhookDeliveryId, IntegrationId};
 use tracing::warn;
 
+const MAX_EVENT_NAME_LENGTH: usize = 64;
+
 #[derive(Default)]
 pub(super) struct DeliveryLog {
     pub(super) integrations: Vec<IntegrationId>,
@@ -18,6 +20,11 @@ pub(super) struct DeliveryLog {
 }
 
 impl DeliveryLog {
+    pub(super) fn set_integration_and_event(&mut self, integration: IntegrationId, event: &str) {
+        self.integrations.push(integration);
+        self.event = Some(event.to_owned());
+    }
+
     pub(super) async fn record(&self, db: &WebDb, result: &WebResult<IncomingWebhookResponse>) {
         if self.integrations.is_empty() {
             return;
@@ -40,7 +47,7 @@ fn entry(event: Option<&str>, result: &WebResult<IncomingWebhookResponse>) -> Mo
     let now = gradient_types::now();
     match result {
         Err(e) => Model {
-            event: event.unwrap_or_default().to_owned(),
+            event: truncated_webhook_event_name(event.unwrap_or_default()),
             status_code: i16::try_from(e.status().as_u16()).unwrap_or(i16::MAX),
             result: DeliveryResult::Refused,
             detail: Some(e.public_message()),
@@ -50,7 +57,7 @@ fn entry(event: Option<&str>, result: &WebResult<IncomingWebhookResponse>) -> Mo
         Ok(response) => {
             let (result, detail) = outcome(response);
             Model {
-                event: response.event.clone(),
+                event: truncated_webhook_event_name(&response.event),
                 status_code: 200,
                 result,
                 detail,
@@ -62,6 +69,10 @@ fn entry(event: Option<&str>, result: &WebResult<IncomingWebhookResponse>) -> Mo
             }
         }
     }
+}
+
+fn truncated_webhook_event_name(event: &str) -> String {
+    event.chars().take(MAX_EVENT_NAME_LENGTH).collect()
 }
 
 fn outcome(response: &IncomingWebhookResponse) -> (DeliveryResult, Option<String>) {
@@ -127,5 +138,15 @@ mod tests {
         assert_eq!(entry.result, DeliveryResult::Refused);
         assert_eq!(entry.status_code, 401);
         assert_eq!(entry.detail.as_deref(), Some("invalid webhook signature"));
+    }
+
+    #[test]
+    fn a_long_event_name_is_cut_to_the_limit() {
+        let refused: WebResult<IncomingWebhookResponse> = Err(WebError::Unauthorized(
+            crate::error::ErrorCode::UNAUTHORIZED,
+            "no webhook secret".into(),
+        ));
+        let entry = entry(Some(&"x".repeat(10_000)), &refused);
+        assert_eq!(entry.event.chars().count(), MAX_EVENT_NAME_LENGTH);
     }
 }
