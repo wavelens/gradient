@@ -192,6 +192,7 @@ pub async fn authorize(
     parts.extensions.insert(current_user);
     parts.extensions.insert(MaybeApiKey::from(&decoded));
     parts.extensions.insert(decoded.principal());
+    parts.extensions.insert(decoded.rate_limit_bucket());
     parts.extensions.insert(ClientIp(client_ip));
     Ok(next.run(Request::from_parts(parts, body)).await)
 }
@@ -298,6 +299,7 @@ pub async fn authorize_optional(
             parts.extensions.insert(MaybeUser(Some(user)));
             parts.extensions.insert(MaybeApiKey::from(&decoded));
             parts.extensions.insert(decoded.principal());
+            parts.extensions.insert(decoded.rate_limit_bucket());
         }
         None => {
             parts.extensions.insert(MaybeUser(None));

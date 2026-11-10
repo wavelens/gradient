@@ -16,7 +16,9 @@ mod provider_flow;
 mod scim;
 mod websocket_credential_recheck;
 
-pub use self::api_key::{ApiKeyContext, DecodedRequest, JobPrincipal, MaybeApiKey, Principal};
+pub use self::api_key::{
+    ApiKeyContext, DecodedRequest, JobPrincipal, MaybeApiKey, Principal, RateLimitBucketOwner,
+};
 pub use self::external_login::{PasswordLogin, sign_in_external};
 pub use self::identity_connect::{ConnectRefusal, can_disconnect, connect_identity};
 pub use self::job_scope::{JobScopeRefusal, job_mask};

@@ -206,6 +206,7 @@ async fn decode_api_key(
     };
 
     let user_id = api_key.owned_by;
+    let key = api_key.id;
 
     if last_used_stamps.due(api_key.id.into_inner(), Instant::now())
         && let Err(e) = gradient_db::api_keys::stamp_last_used(db, api_key, now).await
@@ -213,7 +214,11 @@ async fn decode_api_key(
         warn!(error = %e, "api key last_used_at stamp failed");
     }
 
-    Ok(DecodedRequest::ApiKey { user_id, context })
+    Ok(DecodedRequest::ApiKey {
+        user_id,
+        key,
+        context,
+    })
 }
 
 async fn decode_job_token(db: &WebDb, raw: &str) -> Result<DecodedRequest, StatusCode> {

@@ -5,8 +5,15 @@
  */
 
 use axum::extract::connect_info::MockConnectInfo;
+use gradient_entity::api;
+use gradient_entity::ids::ApiId;
+use gradient_fixtures::ids::user_id;
+use gradient_fixtures::mock::{exec_ok, mock_db};
+use gradient_fixtures::rows::user;
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::signed_in;
+use gradient_web::authorization::hash_api_key;
+use sea_orm::MockDatabase;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 
@@ -181,4 +188,52 @@ async fn an_untrusted_peer_cannot_dodge_the_cache_budget_with_a_forwarded_header
 
     assert_ne!(cache_status(&server, "203.0.113.1").await, 429);
     assert_eq!(cache_status(&server, "203.0.113.2").await, 429);
+}
+
+fn api_key_of_the_same_user(raw: &str) -> api::Model {
+    let now = chrono::Utc::now().naive_utc();
+    api::Model {
+        id: ApiId::now_v7(),
+        owned_by: user_id(),
+        name: raw[..1].into(),
+        key: hash_api_key(raw),
+        last_used_at: now,
+        created_at: now,
+        permission: i64::MAX,
+        ..Default::default()
+    }
+}
+
+fn with_requests_of_key(db: MockDatabase, key: &api::Model, requests: usize) -> MockDatabase {
+    let first = db
+        .append_query_results([vec![key.clone()]])
+        .append_exec_results([exec_ok()])
+        .append_query_results([vec![key.clone()]])
+        .append_query_results([vec![user()]]);
+    (1..requests).fold(first, |db, _| {
+        db.append_query_results([vec![key.clone()]])
+            .append_query_results([vec![user()]])
+    })
+}
+
+#[tokio::test]
+async fn api_keys_of_one_user_do_not_share_a_budget() {
+    let busy_raw = "a".repeat(64);
+    let other_raw = "b".repeat(64);
+    let busy = api_key_of_the_same_user(&busy_raw);
+    let other = api_key_of_the_same_user(&other_raw);
+    let db = with_requests_of_key(mock_db(), &busy, 151);
+    let db = with_requests_of_key(db, &other, 1);
+    let server = TestState::new().web_db(db.into_connection()).server();
+    let get_user = |raw: &str| {
+        server
+            .get("/api/v1/user")
+            .add_header("authorization", format!("Bearer GRAD{raw}"))
+    };
+
+    for i in 1..=150 {
+        assert_eq!(get_user(&busy_raw).await.status_code(), 200, "request {i}");
+    }
+    assert_eq!(get_user(&busy_raw).await.status_code(), 429);
+    assert_eq!(get_user(&other_raw).await.status_code(), 200);
 }

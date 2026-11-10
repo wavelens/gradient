@@ -7,7 +7,7 @@
 use crate::permissions::PermissionMask;
 use gradient_db::exec_jobs::tokens::ResolvedJobToken;
 use gradient_types::ids::CacheId;
-use gradient_types::{ExecJobAttemptId, ExecJobId, ProjectId, TaskId, UserId};
+use gradient_types::{ApiId, ExecJobAttemptId, ExecJobId, ProjectId, TaskId, UserId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiKeyContext {
@@ -67,6 +67,13 @@ impl Principal {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RateLimitBucketOwner {
+    User(UserId),
+    ApiKey(ApiId),
+    Job(ExecJobId),
+}
+
 #[derive(Debug, Clone)]
 pub enum DecodedRequest {
     Session {
@@ -74,6 +81,7 @@ pub enum DecodedRequest {
     },
     ApiKey {
         user_id: UserId,
+        key: ApiId,
         context: ApiKeyContext,
     },
     Job {
@@ -105,6 +113,14 @@ impl DecodedRequest {
         match self {
             DecodedRequest::Job { job, .. } => Some(job),
             DecodedRequest::Session { .. } | DecodedRequest::ApiKey { .. } => None,
+        }
+    }
+
+    pub fn rate_limit_bucket(&self) -> RateLimitBucketOwner {
+        match self {
+            DecodedRequest::Session { user_id } => RateLimitBucketOwner::User(*user_id),
+            DecodedRequest::ApiKey { key, .. } => RateLimitBucketOwner::ApiKey(*key),
+            DecodedRequest::Job { job, .. } => RateLimitBucketOwner::Job(job.job),
         }
     }
 

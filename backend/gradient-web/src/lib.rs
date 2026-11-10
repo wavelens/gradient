@@ -55,11 +55,10 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 use uuid::Uuid;
 
-use authorization::{MaybeUser, WebSocketCredentialRecheckDependencies};
+use authorization::{RateLimitBucketOwner, WebSocketCredentialRecheckDependencies};
 use endpoints::{handle_404, metrics};
 use gradient_core::{InitError, ServerState};
 use gradient_scheduler::Scheduler;
-use gradient_types::{MUser, UserId};
 use gradient_util::supervision::ChildSpec;
 use gradient_wire::{PerIpLimiter, ProtoLimiter};
 use std::sync::Arc;
@@ -99,25 +98,21 @@ impl MakeRequestId for MakeRequestUuid {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum RateLimitCallerKey {
-    User(UserId),
+    Caller(RateLimitBucketOwner),
     Ip(IpAddr),
 }
 
 #[derive(Debug, Clone)]
-struct SignedInUserIdOrClientIpKey {
+struct RateLimitBucketOwnerOrClientIpKey {
     client_ip: ClientIpKey,
 }
 
-impl KeyExtractor for SignedInUserIdOrClientIpKey {
+impl KeyExtractor for RateLimitBucketOwnerOrClientIpKey {
     type Key = RateLimitCallerKey;
 
     fn extract<T>(&self, req: &Request<T>) -> Result<Self::Key, GovernorError> {
-        let extensions = req.extensions();
-        let user = extensions
-            .get::<MUser>()
-            .or_else(|| extensions.get::<MaybeUser>().and_then(|m| m.0.as_ref()));
-        match user {
-            Some(user) => Ok(RateLimitCallerKey::User(user.id)),
+        match req.extensions().get::<RateLimitBucketOwner>() {
+            Some(owner) => Ok(RateLimitCallerKey::Caller(*owner)),
             None => self.client_ip.extract(req).map(RateLimitCallerKey::Ip),
         }
     }
@@ -239,7 +234,7 @@ pub fn create_router_with_scheduler(
         trusted_proxies: state.config.network.trusted_proxies.clone().into(),
     };
     let caller_limit = rate_limit(
-        &SignedInUserIdOrClientIpKey {
+        &RateLimitBucketOwnerOrClientIpKey {
             client_ip: key.clone(),
         },
         Duration::from_millis(200),
