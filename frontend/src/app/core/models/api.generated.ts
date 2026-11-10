@@ -1,5 +1,7 @@
 // Generated from docs/gradient-api.yaml by gradient-api-spec. Do not edit.
 
+export type AccessReason = "direct" | "team" | "owner" | "superuser";
+
 export type ActionConfig = {
   recipients: string[];
   subject_template?: string | null;
@@ -61,6 +63,13 @@ export interface ActivityDay {
 export interface AddMemberRequest {
   user: string;
   role: string;
+  add_as_member_immediately?: boolean;
+}
+
+export interface AddTeamMemberRequest {
+  user: string;
+  role: TeamRole;
+  add_as_member_immediately?: boolean;
 }
 
 export type AddUpstreamRequest = {
@@ -161,10 +170,6 @@ export interface AssignedJobSchedulerReasoning {
 }
 
 export type AttemptEndReason = "completed" | "failed" | "timeout" | "lost" | "aborted";
-
-export type AttemptFailureReason = "SubstituteUnavailable" | "Oom" | "DiskFull" | "Network" | "BuilderCrash" | "BuilderNonzero" | "WallClockTimeout" | "SilentTimeout" | "InputsUnavailable" | "WorkerLost" | "NotEnoughResources";
-
-export type AttemptOutcome = "Running" | "Built" | "Substituted" | "Failed" | "Aborted";
 
 export interface AttemptSummary {
   dispatched_job_id?: string | null;
@@ -313,18 +318,6 @@ export interface BoardWorker {
   exec?: ExecOffer | null;
 }
 
-export type BuildAttemptId = string;
-
-export interface BuildAttemptLogRow {
-  id: BuildAttemptId;
-  outcome: AttemptOutcome;
-  reason?: AttemptFailureReason | null;
-  worker?: string | null;
-  started_at?: string | null;
-  finished_at?: string | null;
-  created_at: string;
-}
-
 export interface BuildGraph {
   root: DerivationId;
   nodes: DependencyGraphNode[];
@@ -413,6 +406,7 @@ export interface Cache {
   managed: boolean;
   max_storage_gb: number;
   pull_through: boolean;
+  owner_team?: TeamId | null;
 }
 
 export type CacheId = string;
@@ -440,6 +434,7 @@ export interface CacheResponse {
   created_by: UserId;
   created_at: string;
   managed: boolean;
+  owner_team?: TeamNameAndDisplayName | null;
   can_edit: boolean;
   permissions: CachePermission[];
   role?: string | null;
@@ -497,6 +492,11 @@ export type CacheUpstreamId = string;
 export interface CatalogEntry {
   name: string;
   durable: boolean;
+}
+
+export interface ChangeMemberRoleRequest {
+  user: string;
+  role: string;
 }
 
 export interface CheckRepositoryRequest {
@@ -1003,8 +1003,6 @@ export interface EvaluateRequest {
   walk?: WalkMode | null;
 }
 
-export type EvaluationAction = "abort";
-
 export interface EvaluationFailureSummary {
   compared_with?: ComparedEvaluation | null;
   packages: PackageCounts;
@@ -1363,11 +1361,6 @@ export interface GetUserSettingsResponse {
   managed: boolean;
 }
 
-export interface GiteaOAuthAppConfig {
-  git_host_type: string;
-  instance_base_url: string;
-}
-
 export interface GithubAppManifestRequest {
   host?: string | null;
 }
@@ -1516,7 +1509,6 @@ export interface IntegrationResponse {
   endpoint_url?: string | null;
   has_secret: boolean;
   has_access_token: boolean;
-  access_token_refreshes_automatically: boolean;
   allowed_ips: string[];
   installation_id?: number | null;
   account_login?: string | null;
@@ -1688,10 +1680,11 @@ export interface MakeCacheRequest {
   local_priority?: number | null;
   max_storage_gb?: number | null;
   pull_through?: boolean | null;
+  owner_team?: string | null;
 }
 
 export interface MakeEvaluationRequest {
-  method: EvaluationAction;
+  method: string;
 }
 
 export interface MakeLoginRequest {
@@ -1706,6 +1699,7 @@ export interface MakeProjectRequest {
   description: string;
   public?: boolean | null;
   hide_build_requests?: boolean | null;
+  owner_team?: string | null;
 }
 
 export interface MakeTaskRequest {
@@ -1988,6 +1982,7 @@ export interface PatchCacheRequest {
   local_priority?: number | null;
   max_storage_gb?: number | null;
   pull_through?: boolean | null;
+  owner_team?: string | null;
 }
 
 export type PatchGeneratorKind = "flake_lock" | "exec_tree";
@@ -2020,8 +2015,7 @@ export interface PatchProjectRequest {
   description?: string | null;
   hide_build_requests?: boolean | null;
   allow_exec_in_build_requests?: boolean | null;
-  restrict_evaluation_fetches?: boolean | null;
-  extra_allowed_uri_prefixes?: string[] | null;
+  owner_team?: string | null;
 }
 
 export interface PatchRequest {
@@ -2119,6 +2113,22 @@ export interface PermissionEntry {
   mutating: boolean;
 }
 
+export interface PersonAccessReason {
+  kind: AccessReason;
+  team?: TeamNameAndDisplayName | null;
+  role?: string | null;
+  applies: boolean;
+  managed: boolean;
+}
+
+export interface PersonWithAccessToProjectOrCache {
+  user: string;
+  user_display_name: string;
+  role?: string | null;
+  permissions: string[];
+  reasons: PersonAccessReason[];
+}
+
 export type PrGranularity = "per_run" | "per_input";
 
 export interface ProcessStat {
@@ -2150,9 +2160,8 @@ export interface ProjectResponse {
   public: boolean;
   hide_build_requests: boolean;
   allow_exec_in_build_requests: boolean;
-  restrict_evaluation_fetches: boolean;
-  extra_allowed_uri_prefixes: string[];
   managed: boolean;
+  owner_team?: TeamNameAndDisplayName | null;
   created_by: UserId;
   created_at: string;
   github_app_available: boolean;
@@ -2181,9 +2190,8 @@ export interface ProjectSummary {
   public: boolean;
   hide_build_requests: boolean;
   allow_exec_in_build_requests: boolean;
-  restrict_evaluation_fetches: boolean;
-  extra_allowed_uri_prefixes: string[];
   managed: boolean;
+  owner_team?: TeamNameAndDisplayName | null;
   created_by: UserId;
   created_at: string;
   running_evaluations: number;
@@ -2340,6 +2348,13 @@ export interface RevokeInvitationRequest {
   user: string;
 }
 
+export interface RevokedUserAccessCounts {
+  projects: number;
+  caches: number;
+  teams: number;
+  invitations: number;
+}
+
 export type RoleId = string;
 
 export interface RoleListResponse_CacheRoleOwner {
@@ -2452,7 +2467,6 @@ export interface ServerConfig {
   create_team: CreatePermission;
   create_cache: CreatePermission;
   github_app_enabled: boolean;
-  gitea_oauth_app?: GiteaOAuthAppConfig | null;
   ssh_enabled: boolean;
   ssh_port?: number | null;
   gradient_ci_enabled: boolean;
@@ -2722,6 +2736,14 @@ export interface TeamGrantEntry {
   pending: boolean;
 }
 
+export interface TeamGrantPickerRow {
+  name: string;
+  display_name: string;
+  member_count: number;
+  worker_count: number;
+  caller_is_admin: boolean;
+}
+
 export interface TeamGrants {
   projects: TeamProjectGrant[];
   caches: TeamCacheGrant[];
@@ -2742,6 +2764,11 @@ export interface TeamMemberRequest {
 }
 
 export type TeamMemberSource = "api" | "state" | "group";
+
+export interface TeamNameAndDisplayName {
+  name: string;
+  display_name: string;
+}
 
 export interface TeamProjectGrant {
   project: string;
@@ -2923,6 +2950,21 @@ export interface UrlRequest {
   input_overrides?: InputOverrideBody[];
 }
 
+export interface UserAccessSummary {
+  superuser: boolean;
+  projects: UserAccessibleProjectOrCacheRow[];
+  caches: UserAccessibleProjectOrCacheRow[];
+  teams: UserTeamMembership[];
+}
+
+export interface UserAccessibleProjectOrCacheRow {
+  name: string;
+  display_name: string;
+  owner_team?: TeamNameAndDisplayName | null;
+  role?: string | null;
+  reasons: PersonAccessReason[];
+}
+
 export type UserId = string;
 
 export interface UserInfoResponse {
@@ -2963,6 +3005,13 @@ export interface UserSearchResult {
 }
 
 export type UserSshKeyId = string;
+
+export interface UserTeamMembership {
+  name: string;
+  display_name: string;
+  role: TeamRole;
+  source: TeamMemberSource;
+}
 
 export type Value = unknown;
 
