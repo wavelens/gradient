@@ -720,22 +720,18 @@ export interface DebugInfoRedirect {
   member: string;
 }
 
-export interface DecisionCandidateView {
+export type DecisionCandidateView = JobEvaluationNames & {
   id: string;
   job_id: string;
   kind: number;
   project: string;
-  project_name?: string | null;
-  project_display_name?: string | null;
-  task?: string | null;
-  task_display_name?: string | null;
   build_id?: string | null;
   evaluation_id: string;
   subject?: string | null;
   exec_job?: BoardExecJob | null;
   score: number;
   won: boolean;
-}
+};
 
 export interface DeleteUserRequest {
   password?: string | null;
@@ -863,7 +859,7 @@ export type DispatchedJobDetail = ReportGap & {
 
 export type DispatchedJobId = string;
 
-export interface DispatchedJobSummary {
+export type DispatchedJobSummary = JobEvaluationNames & {
   id: string;
   kind: number;
   project: string;
@@ -876,11 +872,7 @@ export interface DispatchedJobSummary {
   subject?: string | null;
   exec_job?: BoardExecJob | null;
   cluster_job?: string | null;
-  project_name?: string | null;
-  project_display_name?: string | null;
-  task?: string | null;
-  task_display_name?: string | null;
-}
+};
 
 export interface DispatchedJobsResponse {
   jobs: DispatchedJobSummary[];
@@ -1516,6 +1508,13 @@ export interface JobDerivationView {
   pname?: string | null;
 }
 
+export interface JobEvaluationNames {
+  project_name?: string | null;
+  project_display_name?: string | null;
+  task?: string | null;
+  task_display_name?: string | null;
+}
+
 export interface JobEvaluationView {
   repository: string;
   commit: string;
@@ -2036,7 +2035,7 @@ export interface PendingInvitationItem {
   expires_at: string;
 }
 
-export interface PendingJobSummary {
+export type PendingJobSummary = JobEvaluationNames & {
   kind: number;
   project: string;
   evaluation_id: string;
@@ -2046,15 +2045,11 @@ export interface PendingJobSummary {
   subject?: string | null;
   exec_job?: BoardExecJob | null;
   cluster_job?: string | null;
-  project_name?: string | null;
-  project_display_name?: string | null;
-  task?: string | null;
-  task_display_name?: string | null;
   commit?: string | null;
   commit_message?: string | null;
   waiting_reason?: WaitingReason | null;
   permissions: Permission[];
-}
+};
 
 export interface PendingJobsResponse {
   jobs: PendingJobSummary[];

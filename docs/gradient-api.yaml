@@ -16198,64 +16198,50 @@ components:
         member:
           type: string
     DecisionCandidateView:
-      type: object
-      required:
-      - id
-      - job_id
-      - kind
-      - project
-      - evaluation_id
-      - score
-      - won
-      properties:
-        id:
-          type: string
-          format: uuid
-        job_id:
-          type: string
-        kind:
-          type: integer
-          format: int32
-        project:
-          type: string
-          format: uuid
-        project_name:
-          type:
-          - string
-          - 'null'
-        project_display_name:
-          type:
-          - string
-          - 'null'
-        task:
-          type:
-          - string
-          - 'null'
-        task_display_name:
-          type:
-          - string
-          - 'null'
-        build_id:
-          type:
-          - string
-          - 'null'
-          format: uuid
-        evaluation_id:
-          type: string
-          format: uuid
-        subject:
-          type:
-          - string
-          - 'null'
-        exec_job:
-          oneOf:
-          - $ref: '#/components/schemas/BoardExecJob'
-          - type: 'null'
-        score:
-          type: number
-          format: double
-        won:
-          type: boolean
+      allOf:
+      - $ref: '#/components/schemas/JobEvaluationNames'
+      - type: object
+        required:
+        - id
+        - job_id
+        - kind
+        - project
+        - evaluation_id
+        - score
+        - won
+        properties:
+          id:
+            type: string
+            format: uuid
+          job_id:
+            type: string
+          kind:
+            type: integer
+            format: int32
+          project:
+            type: string
+            format: uuid
+          build_id:
+            type:
+            - string
+            - 'null'
+            format: uuid
+          evaluation_id:
+            type: string
+            format: uuid
+          subject:
+            type:
+            - string
+            - 'null'
+          exec_job:
+            oneOf:
+            - $ref: '#/components/schemas/BoardExecJob'
+            - type: 'null'
+          score:
+            type: number
+            format: double
+          won:
+            type: boolean
     DeleteUserRequest:
       type: object
       properties:
@@ -16630,74 +16616,60 @@ components:
       type: string
       format: uuid
     DispatchedJobSummary:
-      type: object
-      required:
-      - id
-      - kind
-      - project
-      - worker_id
-      - dispatched_at
-      - evaluation_id
-      properties:
-        id:
-          type: string
-          format: uuid
-        kind:
-          type: integer
-          format: int32
-        project:
-          type: string
-          format: uuid
-        worker_id:
-          type: string
-        worker_name:
-          type:
-          - string
-          - 'null'
-        score:
-          type:
-          - number
-          - 'null'
-          format: double
-        dispatched_at:
-          type: string
-        build_id:
-          type:
-          - string
-          - 'null'
-          format: uuid
-        evaluation_id:
-          type: string
-          format: uuid
-        subject:
-          type:
-          - string
-          - 'null'
-        exec_job:
-          oneOf:
-          - $ref: '#/components/schemas/BoardExecJob'
-          - type: 'null'
-        cluster_job:
-          type:
-          - string
-          - 'null'
-          format: uuid
-        project_name:
-          type:
-          - string
-          - 'null'
-        project_display_name:
-          type:
-          - string
-          - 'null'
-        task:
-          type:
-          - string
-          - 'null'
-        task_display_name:
-          type:
-          - string
-          - 'null'
+      allOf:
+      - $ref: '#/components/schemas/JobEvaluationNames'
+      - type: object
+        required:
+        - id
+        - kind
+        - project
+        - worker_id
+        - dispatched_at
+        - evaluation_id
+        properties:
+          id:
+            type: string
+            format: uuid
+          kind:
+            type: integer
+            format: int32
+          project:
+            type: string
+            format: uuid
+          worker_id:
+            type: string
+          worker_name:
+            type:
+            - string
+            - 'null'
+          score:
+            type:
+            - number
+            - 'null'
+            format: double
+          dispatched_at:
+            type: string
+          build_id:
+            type:
+            - string
+            - 'null'
+            format: uuid
+          evaluation_id:
+            type: string
+            format: uuid
+          subject:
+            type:
+            - string
+            - 'null'
+          exec_job:
+            oneOf:
+            - $ref: '#/components/schemas/BoardExecJob'
+            - type: 'null'
+          cluster_job:
+            type:
+            - string
+            - 'null'
+            format: uuid
     DispatchedJobsResponse:
       type: object
       required:
@@ -18610,6 +18582,25 @@ components:
           type:
           - string
           - 'null'
+    JobEvaluationNames:
+      type: object
+      properties:
+        project_name:
+          type:
+          - string
+          - 'null'
+        project_display_name:
+          type:
+          - string
+          - 'null'
+        task:
+          type:
+          - string
+          - 'null'
+        task_display_name:
+          type:
+          - string
+          - 'null'
     JobEvaluationView:
       type: object
       required:
@@ -20124,80 +20115,66 @@ components:
           type: string
           format: date-time
     PendingJobSummary:
-      type: object
-      required:
-      - kind
-      - project
-      - evaluation_id
-      - queued_at
-      - dependency_count
-      - permissions
-      properties:
-        kind:
-          type: integer
-          format: int32
-        project:
-          type: string
-          format: uuid
-        evaluation_id:
-          type: string
-          format: uuid
-        build_id:
-          type:
-          - string
-          - 'null'
-          format: uuid
-        queued_at:
-          type: string
-        dependency_count:
-          type: integer
-          format: int32
-          minimum: 0
-        subject:
-          type:
-          - string
-          - 'null'
-        exec_job:
-          oneOf:
-          - $ref: '#/components/schemas/BoardExecJob'
-          - type: 'null'
-        cluster_job:
-          type:
-          - string
-          - 'null'
-          format: uuid
-        project_name:
-          type:
-          - string
-          - 'null'
-        project_display_name:
-          type:
-          - string
-          - 'null'
-        task:
-          type:
-          - string
-          - 'null'
-        task_display_name:
-          type:
-          - string
-          - 'null'
-        commit:
-          type:
-          - string
-          - 'null'
-        commit_message:
-          type:
-          - string
-          - 'null'
-        waiting_reason:
-          oneOf:
-          - $ref: '#/components/schemas/WaitingReason'
-          - type: 'null'
-        permissions:
-          type: array
-          items:
-            $ref: '#/components/schemas/Permission'
+      allOf:
+      - $ref: '#/components/schemas/JobEvaluationNames'
+      - type: object
+        required:
+        - kind
+        - project
+        - evaluation_id
+        - queued_at
+        - dependency_count
+        - permissions
+        properties:
+          kind:
+            type: integer
+            format: int32
+          project:
+            type: string
+            format: uuid
+          evaluation_id:
+            type: string
+            format: uuid
+          build_id:
+            type:
+            - string
+            - 'null'
+            format: uuid
+          queued_at:
+            type: string
+          dependency_count:
+            type: integer
+            format: int32
+            minimum: 0
+          subject:
+            type:
+            - string
+            - 'null'
+          exec_job:
+            oneOf:
+            - $ref: '#/components/schemas/BoardExecJob'
+            - type: 'null'
+          cluster_job:
+            type:
+            - string
+            - 'null'
+            format: uuid
+          commit:
+            type:
+            - string
+            - 'null'
+          commit_message:
+            type:
+            - string
+            - 'null'
+          waiting_reason:
+            oneOf:
+            - $ref: '#/components/schemas/WaitingReason'
+            - type: 'null'
+          permissions:
+            type: array
+            items:
+              $ref: '#/components/schemas/Permission'
     PendingJobsResponse:
       type: object
       required:

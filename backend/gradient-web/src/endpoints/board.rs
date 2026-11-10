@@ -62,10 +62,27 @@ pub struct DispatchedJobSummary {
     pub subject: Option<String>,
     pub exec_job: Option<BoardExecJob>,
     pub cluster_job: Option<Uuid>,
+    #[serde(flatten)]
+    pub evaluation_names: JobEvaluationNames,
+}
+
+#[derive(Serialize, Default, utoipa::ToSchema)]
+pub struct JobEvaluationNames {
     pub project_name: Option<String>,
     pub project_display_name: Option<String>,
     pub task: Option<String>,
     pub task_display_name: Option<String>,
+}
+
+impl JobEvaluationNames {
+    fn new(project: Option<&BoardProject>, evaluation: Option<&BoardEvaluation>) -> Self {
+        Self {
+            project_name: project.map(|p| p.name.clone()),
+            project_display_name: project.map(|p| p.display_name.clone()),
+            task: evaluation.and_then(|e| e.task.clone()),
+            task_display_name: evaluation.and_then(|e| e.task_display_name.clone()),
+        }
+    }
 }
 
 impl DispatchedJobSummary {
@@ -74,23 +91,19 @@ impl DispatchedJobSummary {
         worker_name: Option<String>,
         subjects: &JobSubjects,
         clusters: &HashMap<DispatchedJobId, ClusterJobId>,
-        scope: &MetricsScope,
-        project: Option<&BoardProject>,
-        evaluation: Option<&BoardEvaluation>,
+        show_score: bool,
+        evaluation_names: JobEvaluationNames,
     ) -> Self {
         let subject = subject_of(&job);
         Self {
-            project_name: project.map(|p| p.name.clone()),
-            project_display_name: project.map(|p| p.display_name.clone()),
-            task: evaluation.and_then(|e| e.task.clone()),
-            task_display_name: evaluation.and_then(|e| e.task_display_name.clone()),
+            evaluation_names,
             cluster_job: clusters.get(&job.id).copied().map(Into::into),
             id: job.id.into(),
             kind: i16::from(job.kind),
             project: job.project.into(),
             worker_id: job.worker_id,
             worker_name,
-            score: scope.is_all().then_some(job.score),
+            score: show_score.then_some(job.score),
             dispatched_at: job.dispatched_at.and_utc().to_rfc3339(),
             build_id: subject.and_then(JobSubject::shared_build).map(Into::into),
             evaluation_id: job.evaluation_id.into(),
@@ -134,10 +147,8 @@ pub struct PendingJobSummary {
     pub subject: Option<String>,
     pub exec_job: Option<BoardExecJob>,
     pub cluster_job: Option<Uuid>,
-    pub project_name: Option<String>,
-    pub project_display_name: Option<String>,
-    pub task: Option<String>,
-    pub task_display_name: Option<String>,
+    #[serde(flatten)]
+    pub evaluation_names: JobEvaluationNames,
     pub commit: Option<String>,
     pub commit_message: Option<String>,
     pub waiting_reason: Option<WaitingReason>,
@@ -223,10 +234,7 @@ pub async fn get_pending_jobs(
             });
             let project = projects.get(&Uuid::from(j.project));
             PendingJobSummary {
-                project_name: project.map(|p| p.name.clone()),
-                project_display_name: project.map(|p| p.display_name.clone()),
-                task: evaluation.task,
-                task_display_name: evaluation.task_display_name,
+                evaluation_names: JobEvaluationNames::new(project, Some(&evaluation)),
                 commit: evaluation.commit,
                 commit_message: evaluation.commit_message,
                 waiting_reason: subjects
@@ -341,16 +349,17 @@ pub async fn get_dispatched_jobs(
         .into_iter()
         .map(|j| {
             let worker_name = worker_names.name(&j.worker_id);
-            let project = projects.get(&Uuid::from(j.project));
-            let evaluation = evaluations.get(&j.evaluation_id);
+            let evaluation_names = JobEvaluationNames::new(
+                projects.get(&Uuid::from(j.project)),
+                evaluations.get(&j.evaluation_id),
+            );
             DispatchedJobSummary::new(
                 j,
                 worker_name,
                 &subjects,
                 &clusters,
-                &scope,
-                project,
-                evaluation,
+                scope.is_all(),
+                evaluation_names,
             )
         })
         .collect();
@@ -367,10 +376,8 @@ pub struct DecisionCandidateView {
     pub job_id: String,
     pub kind: i16,
     pub project: Uuid,
-    pub project_name: Option<String>,
-    pub project_display_name: Option<String>,
-    pub task: Option<String>,
-    pub task_display_name: Option<String>,
+    #[serde(flatten)]
+    pub evaluation_names: JobEvaluationNames,
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
     pub subject: Option<String>,
@@ -436,16 +443,14 @@ pub async fn get_assign_decisions(
                 .into_iter()
                 .map(|c| {
                     let subject = candidate_subject(c.kind, &c.job_id, c.evaluation_id);
-                    let project = projects.get(&Uuid::from(c.project));
-                    let evaluation = evaluations.get(&c.evaluation_id);
                     DecisionCandidateView {
+                        evaluation_names: JobEvaluationNames::new(
+                            projects.get(&Uuid::from(c.project)),
+                            evaluations.get(&c.evaluation_id),
+                        ),
                         id: c.id.into(),
                         job_id: c.job_id,
                         kind: c.kind,
-                        project_name: project.map(|p| p.name.clone()),
-                        project_display_name: project.map(|p| p.display_name.clone()),
-                        task: evaluation.and_then(|e| e.task.clone()),
-                        task_display_name: evaluation.and_then(|e| e.task_display_name.clone()),
                         project: c.project.into(),
                         build_id: c.derivation_build.map(Into::into),
                         evaluation_id: c.evaluation_id.into(),
