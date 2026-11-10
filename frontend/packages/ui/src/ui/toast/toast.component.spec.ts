@@ -68,6 +68,45 @@ describe('MessageService and ToastComponent', () => {
     expect(items()).toHaveLength(0);
   });
 
+  describe('placement', () => {
+    const added: HTMLElement[] = [];
+    function fakeHeader(className: string, bottom: number) {
+      const element = document.createElement('header');
+      element.className = className;
+      element.getBoundingClientRect = () => ({ bottom }) as DOMRect;
+      document.body.appendChild(element);
+      added.push(element);
+    }
+    const stack = (fixture: ReturnType<typeof render>['fixture']) => fixture.nativeElement.querySelector('.gr-toast') as HTMLElement;
+
+    afterEach(() => added.splice(0).forEach((element) => element.remove()));
+
+    it('places the stack just below a visible page header', () => {
+      fakeHeader('main-header', 56);
+      fakeHeader('page-layout__header', 140);
+      const { fixture, service } = render();
+      service.add({ summary: 'Saved', life: 0 });
+      fixture.detectChanges();
+      expect(stack(fixture).style.top).toBe('148px');
+    });
+
+    it('keeps the default place when the page header is scrolled under the app header', () => {
+      fakeHeader('main-header', 56);
+      fakeHeader('page-layout__header', 20);
+      const { fixture, service } = render();
+      service.add({ summary: 'Saved', life: 0 });
+      fixture.detectChanges();
+      expect(stack(fixture).style.top).toBe('');
+    });
+
+    it('keeps the default place on pages without a page header', () => {
+      const { fixture, service } = render();
+      service.add({ summary: 'Saved', life: 0 });
+      fixture.detectChanges();
+      expect(stack(fixture).style.top).toBe('');
+    });
+  });
+
   it('keeps a message with life 0 until dismissed', async () => {
     const { fixture, service, items } = render();
     service.add({ summary: 'Sticky', life: 0 });
