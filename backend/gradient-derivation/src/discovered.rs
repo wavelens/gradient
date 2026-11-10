@@ -28,9 +28,10 @@ pub fn discovered_derivation(
 
     let input_sources = drv.input_sources.clone();
 
-    let meta = drv.build_meta();
-    let name = drv.attr_string("name").unwrap_or_default();
-    let pname = crate::derive_pname(drv.attr_string("pname").as_deref(), &name);
+    let attributes = drv.parse_json_attributes();
+    let meta = attributes.build_meta();
+    let name = attributes.attr_string("name").unwrap_or_default();
+    let pname = crate::derive_pname(attributes.attr_string("pname").as_deref(), &name);
     DiscoveredDerivation {
         attr: attr.unwrap_or_default(),
         drv_path,
@@ -43,7 +44,7 @@ pub fn discovered_derivation(
         max_silent_secs: meta.max_silent_secs,
         prefer_local_build: meta.prefer_local_build,
         is_fixed_output: meta.is_fixed_output,
-        allow_substitutes: drv.allow_substitutes(),
+        allow_substitutes: attributes.allow_substitutes(),
         pname,
         ifd: false,
         licenses: Vec::new(),

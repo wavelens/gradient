@@ -39,71 +39,30 @@ pub struct BuildMeta {
 impl Derivation {
     /// Nix is keeping every attribute in the `__json` blob of a `__structuredAttrs` derivation.
     /// Attribute extraction must read that blob before the flat env.
-    fn structured_attrs(&self) -> Option<serde_json::Value> {
-        self.environment
-            .get("__json")
-            .and_then(|s| serde_json::from_str(s).ok())
-    }
-
-    fn attr_strings(
-        attrs: Option<&serde_json::Value>,
-        env: Option<&String>,
-        key: &str,
-    ) -> Vec<String> {
-        match attrs {
-            Some(a) => a
-                .get(key)
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str())
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            None => env
-                .map(|v| {
-                    v.split_whitespace()
-                        .filter(|f| !f.is_empty())
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default(),
-        }
-    }
-
-    fn attr_bool(
-        attrs: Option<&serde_json::Value>,
-        env: Option<&String>,
-        key: &str,
-    ) -> Option<bool> {
-        match attrs {
-            Some(a) => a.get(key).map(|v| match v {
-                serde_json::Value::Bool(b) => *b,
-                serde_json::Value::String(s) => matches!(s.trim(), "1" | "true"),
-                serde_json::Value::Number(n) => n.as_i64().is_some_and(|i| i != 0),
-                _ => false,
-            }),
-            None => env.map(|v| matches!(v.trim(), "1" | "true")),
-        }
-    }
-
-    fn attr_u64(attrs: Option<&serde_json::Value>, env: Option<&String>, key: &str) -> Option<u64> {
-        match attrs {
-            Some(a) => a.get(key).and_then(|v| {
-                v.as_u64()
-                    .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
-            }),
-            None => env.and_then(|v| v.trim().parse().ok()),
+    pub fn parse_json_attributes(&self) -> DerivationAttributesWithStructuredJsonFallback<'_> {
+        DerivationAttributesWithStructuredJsonFallback {
+            derivation: self,
+            structured: self
+                .environment
+                .get("__json")
+                .and_then(|s| serde_json::from_str(s).ok()),
         }
     }
 
     pub fn attr_string(&self, key: &str) -> Option<String> {
-        match self.structured_attrs() {
-            Some(attrs) => attrs.get(key)?.as_str().map(str::to_owned),
-            None => self.environment.get(key).cloned(),
-        }
+        self.parse_json_attributes().attr_string(key)
+    }
+
+    pub fn required_system_features(&self) -> Vec<String> {
+        self.parse_json_attributes().required_system_features()
+    }
+
+    pub fn allow_substitutes(&self) -> bool {
+        self.parse_json_attributes().allow_substitutes()
+    }
+
+    pub fn build_meta(&self) -> BuildMeta {
+        self.parse_json_attributes().build_meta()
     }
 
     pub fn requested_output_paths<'d>(
@@ -115,48 +74,88 @@ impl Derivation {
             .filter(|o| !o.path.is_empty() && requested.contains(&o.name))
             .map(|o| o.path.as_str())
     }
+}
+
+pub struct DerivationAttributesWithStructuredJsonFallback<'d> {
+    derivation: &'d Derivation,
+    structured: Option<serde_json::Value>,
+}
+
+impl DerivationAttributesWithStructuredJsonFallback<'_> {
+    fn env(&self, key: &str) -> Option<&String> {
+        self.derivation.environment.get(key)
+    }
+
+    fn attr_strings(&self, key: &str) -> Vec<String> {
+        match &self.structured {
+            Some(a) => a
+                .get(key)
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            None => self
+                .env(key)
+                .map(|v| v.split_whitespace().map(str::to_owned).collect())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn attr_bool(&self, key: &str) -> Option<bool> {
+        match &self.structured {
+            Some(a) => a.get(key).map(|v| match v {
+                serde_json::Value::Bool(b) => *b,
+                serde_json::Value::String(s) => matches!(s.trim(), "1" | "true"),
+                serde_json::Value::Number(n) => n.as_i64().is_some_and(|i| i != 0),
+                _ => false,
+            }),
+            None => self.env(key).map(|v| matches!(v.trim(), "1" | "true")),
+        }
+    }
+
+    fn attr_u64(&self, key: &str) -> Option<u64> {
+        match &self.structured {
+            Some(a) => a.get(key).and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+            }),
+            None => self.env(key).and_then(|v| v.trim().parse().ok()),
+        }
+    }
+
+    pub fn attr_string(&self, key: &str) -> Option<String> {
+        match &self.structured {
+            Some(attrs) => attrs.get(key)?.as_str().map(str::to_owned),
+            None => self.env(key).cloned(),
+        }
+    }
 
     pub fn required_system_features(&self) -> Vec<String> {
-        let attrs = self.structured_attrs();
-        Self::attr_strings(
-            attrs.as_ref(),
-            self.environment.get("requiredSystemFeatures"),
-            "requiredSystemFeatures",
-        )
+        self.attr_strings("requiredSystemFeatures")
     }
 
     /// Nix is serializing `allowSubstitutes = false` as `""` in the flat env and as JSON `false` in
     /// structured attrs. An absent attribute is allowing substitution.
     pub fn allow_substitutes(&self) -> bool {
-        let attrs = self.structured_attrs();
-        Self::attr_bool(
-            attrs.as_ref(),
-            self.environment.get("allowSubstitutes"),
-            "allowSubstitutes",
-        )
-        .unwrap_or(true)
+        self.attr_bool("allowSubstitutes").unwrap_or(true)
     }
 
     pub fn build_meta(&self) -> BuildMeta {
-        let attrs = self.structured_attrs();
-        let env = |key: &str| self.environment.get(key);
-        let prefer_local_build =
-            Self::attr_bool(attrs.as_ref(), env("preferLocalBuild"), "preferLocalBuild")
-                .unwrap_or(false);
-        let is_fixed_output = self
-            .outputs
-            .iter()
-            .any(|o| matches!(o.as_spec(), DrvOutputSpec::FixedOutput { .. }));
         BuildMeta {
-            timeout_secs: Self::attr_u64(attrs.as_ref(), env("timeout"), "timeout"),
-            max_silent_secs: Self::attr_u64(attrs.as_ref(), env("maxSilent"), "maxSilent"),
-            prefer_local_build,
-            is_fixed_output,
-            required_features: Self::attr_strings(
-                attrs.as_ref(),
-                env("requiredSystemFeatures"),
-                "requiredSystemFeatures",
-            ),
+            timeout_secs: self.attr_u64("timeout"),
+            max_silent_secs: self.attr_u64("maxSilent"),
+            prefer_local_build: self.attr_bool("preferLocalBuild").unwrap_or(false),
+            is_fixed_output: self
+                .derivation
+                .outputs
+                .iter()
+                .any(|o| matches!(o.as_spec(), DrvOutputSpec::FixedOutput { .. })),
+            required_features: self.required_system_features(),
         }
     }
 }
