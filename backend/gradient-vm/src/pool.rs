@@ -196,7 +196,11 @@ impl GuestPool {
 
     async fn claim_warm(&self, warm: WarmGuest, size: GuestSize) -> Taken {
         let WarmGuest { guest, mut hold } = warm;
-        match self.make_room(|| hold.resize(size).then_some(())).await {
+        let held = hold.size();
+        match self
+            .make_room(size, held, || hold.resize(size).then_some(()))
+            .await
+        {
             Ok(()) => Ok((guest, hold)),
             Err(e) => {
                 self.keep_or_stop(guest, hold).await;
@@ -206,15 +210,23 @@ impl GuestPool {
     }
 
     async fn cold_boot(&self, image: GuestImage, size: GuestSize) -> Taken {
-        let hold = self.make_room(|| self.budget.hold(size)).await?;
+        let hold = self
+            .make_room(size, GuestSize::default(), || self.budget.hold(size))
+            .await?;
         let guest = self.boot_image(&image).await?;
         Ok((guest, hold))
     }
 
     async fn make_room<T>(
         &self,
+        wanted: GuestSize,
+        held: GuestSize,
         mut attempt: impl FnMut() -> Option<T>,
     ) -> Result<T, GuestBootError> {
+        if !can_fit_wanted_and_held_sizes_after_stopping_warm_guests(self.capacity(), wanted, held)
+        {
+            return Err(GuestBootError(NO_GUEST_BUDGET.to_owned()));
+        }
         loop {
             if let Some(done) = attempt() {
                 return Ok(done);
@@ -417,7 +429,9 @@ impl GuestPool {
         let custom = custom.to_owned();
         let pool = Arc::clone(self);
         let boot = async move {
-            let hold = pool.make_room(|| pool.budget.hold(size)).await?;
+            let hold = pool
+                .make_room(size, GuestSize::default(), || pool.budget.hold(size))
+                .await?;
             let guest = pool
                 .boot_image(&image)
                 .await
@@ -586,6 +600,19 @@ fn job_size(size: GuestSize, image: &GuestImage) -> GuestSize {
 
 fn warm_boot_holds(budget: &GuestBudget, size: GuestSize, wanted: u32) -> Vec<BudgetHold> {
     (0..wanted).map_while(|_| budget.hold(size)).collect()
+}
+
+fn can_fit_wanted_and_held_sizes_after_stopping_warm_guests(
+    capacity: GuestCapacity,
+    wanted: GuestSize,
+    held: GuestSize,
+) -> bool {
+    let fits = |amount: ResourceAmount, wanted: u64, held: u64| {
+        wanted <= amount.free.saturating_add(held).min(amount.total)
+    };
+    fits(capacity.cpus, u64::from(wanted.cpus), u64::from(held.cpus))
+        && fits(capacity.memory_mb, wanted.memory_mb, held.memory_mb)
+        && fits(capacity.disk_mb, wanted.disk_mb, held.disk_mb)
 }
 
 fn with_warm_guests_free(capacity: GuestCapacity, warm: &[GuestSize]) -> GuestCapacity {
@@ -766,6 +793,28 @@ fn count(n: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_job_over_guest_budget_is_refused_without_stopping_warm_guests_and_job_that_fits_after_eviction_is_accepted()
+     {
+        let amount = |total, free| ResourceAmount { total, free };
+        let capacity = GuestCapacity {
+            cpus: amount(8, 2),
+            memory_mb: amount(8192, 1024),
+            disk_mb: amount(10_000, 10_000),
+        };
+        let wanted = |cpus, memory_mb| GuestSize {
+            cpus,
+            memory_mb,
+            disk_mb: 0,
+        };
+        let check = can_fit_wanted_and_held_sizes_after_stopping_warm_guests;
+
+        assert!(check(capacity, wanted(2, 1024), GuestSize::default()));
+        assert!(!check(capacity, wanted(4, 1024), GuestSize::default()));
+        assert!(check(capacity, wanted(4, 2048), wanted(2, 1024)));
+        assert!(!check(capacity, wanted(16, 1024), wanted(8, 0)));
+    }
 
     fn size(cpus: u32, memory_mb: u64, disk_mb: u64) -> GuestSize {
         GuestSize {
