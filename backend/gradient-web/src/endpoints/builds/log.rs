@@ -82,17 +82,11 @@ pub async fn post_build_log(
         BuildAccessContext::load(&state.web_db, build_id, &Some(user), api_key.as_ref()).await?;
     let shared_build_id = ctx.shared_build.id;
 
-    let initial_attempt = latest_attempt_id(&state.web_db, shared_build_id).await?;
-    let initial_offset = match initial_attempt {
-        Some(attempt) => state.log_storage.read(attempt).await?.len() as u64,
-        None => 0,
-    };
-
     let stream = stream! {
         use gradient_entity::build::BuildStatus;
 
         let mut sent_any = false;
-        let mut tail = LogTail::after(initial_attempt, initial_offset);
+        let mut tail = LogTail::default();
 
         loop {
             tokio::time::sleep(POLL_INTERVAL).await;
