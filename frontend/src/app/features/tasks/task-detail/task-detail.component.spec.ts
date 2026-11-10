@@ -855,6 +855,20 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(component.entryPointsTotal()).toBe(2);
   });
 
+  it('takes the status of a row past the first page from the live event', () => {
+    const building = (id: string) => ({ ...epSummary(id), build_status: 'Building' as const });
+    const { fixture, tasksService, frames } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [building('a')], total: 2, failed_attributes: [] }) },
+    );
+    const component = fixture.componentInstance;
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [building('b')], total: 2, failed_attributes: [] }));
+    component.loadMoreEntryPoints();
+
+    frames.next({ event: 'build.status_changed', at: '', content: { build_id: 'b-b', evaluation_id: 'e1', status: 3 } });
+    expect(component.entryPoints().map(e => `${e.id}:${e.build_status}`)).toEqual(['a:Building', 'b:Completed']);
+  });
+
   /// The row label has to be the field the server sorts by, or the list looks
   /// unordered; the derivation name it used to show is not that field.
   it('heads each attribute set and labels its rows without the set and architecture', () => {

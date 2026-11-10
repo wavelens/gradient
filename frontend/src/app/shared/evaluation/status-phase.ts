@@ -143,3 +143,12 @@ const PENDING_BUILD_STATUSES: ReadonlySet<string> = new Set<BuildStatus>(['Creat
 export function isPendingBuildStatus(status: string): boolean {
   return PENDING_BUILD_STATUSES.has(status);
 }
+
+const BUILD_STATUS_NAMES_BY_STATUS_CODE: readonly BuildStatus[] = [
+  'Created', 'Queued', 'Building', 'Completed', 'FailedPermanent', 'Aborted',
+  'DependencyFailed', 'Substituted', 'FailedTransient', 'FailedTimeout', 'Skipped',
+];
+
+export function buildStatusNameFromStatusCode(code: number | undefined): BuildStatus | undefined {
+  return code === undefined ? undefined : BUILD_STATUS_NAMES_BY_STATUS_CODE[code];
+}

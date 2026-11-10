@@ -59,7 +59,7 @@ import {
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, removeNixErrorInternalsFromEvaluationMessage, buildTally, getBuildCountTextPieces, repositoryWebUrl, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, buildStatusNameFromStatusCode, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, removeNixErrorInternalsFromEvaluationMessage, buildTally, getBuildCountTextPieces, repositoryWebUrl, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 const NO_EVALUATION_SELECTED = 'No evaluation selected.';
 
@@ -299,7 +299,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const statusChanged = this.lastFetchedEntryPointListEvaluationIdAndStatusKey !== this.getEvaluationStatusKey(shown);
     const wait = live && !statusChanged ? this.lastEntryPointsFetch + this.ENTRY_POINTS_LIVE_INTERVAL_MS - Date.now() : 0;
     if (wait <= 0) {
-      this.loadEntryPoints(shown?.id);
+      this.loadEntryPoints(shown?.id, statusChanged);
     } else {
       this.entryPointsReloadTimer ??= setTimeout(() => this.loadEntryPoints(this.selected()?.id), wait);
     }
@@ -342,7 +342,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return eps.map(e => `${e.id}:${e.build_status}:${e.prioritized}:${e.build_time_ms}:${e.has_artefacts}:${JSON.stringify(e.deps)}`).join('|');
   }
 
-  private loadEntryPoints(evaluationId?: string): void {
+  private loadEntryPoints(evaluationId?: string, reloadAllLoadedRows = false): void {
     clearTimeout(this.entryPointsReloadTimer);
     this.entryPointsReloadTimer = undefined;
     const shownPackageListIsFromDifferentEvaluation = this.entryPointsEvalId !== undefined && evaluationId !== this.entryPointsEvalId;
@@ -368,12 +368,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       this.entryPointsError.set(null);
       this.moreEntryPointsError.set(null);
     }
-    // A refresh re-reads the first page only, never the whole scrolled window:
-    // the server walks one dependency closure per entry point it returns, so
-    // re-reading a 500-row window every 4 s costs twenty times what the visible
-    // head costs. Rows past the head keep their last values and are spliced
-    // behind the refreshed page.
-    const limit = TaskDetailComponent.ENTRY_POINTS_PAGE;
+    // Live refreshes reload only the first page. Returned entry points add one dependency closure each for the server to walk. Reloads of a 500-row window every 4 seconds cost 20 times as much. Rows after the first page take build status from live events instead. Reload the entire loaded range once on a change in evaluation status.
+    const limit = reloadAllLoadedRows && !switching
+      ? Math.max(TaskDetailComponent.ENTRY_POINTS_PAGE, this.entryPoints().length)
+      : TaskDetailComponent.ENTRY_POINTS_PAGE;
     const term = this.searchTerm();
     this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, limit, 0, term).subscribe({
       next: (page) => {
@@ -399,7 +397,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         this.entryPoints.set(next);
       },
       error: (error: unknown) => {
-        if (this.selected()?.id !== evaluationId) return;
+        if (this.selected()?.id !== evaluationId || this.searchTerm() !== term) return;
         this.entryPointsLoading.set(false);
         this.entryPointsError.set(error);
       },
@@ -519,6 +517,15 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         const { evaluation_id, progress } = e.content;
         if (evaluation_id && progress) this.activity.update(all => ({ ...this.runningActivity(all), [evaluation_id]: progress }));
       });
+    this.liveSub.add(
+      frames.subscribe(({ content }) => {
+        const status = buildStatusNameFromStatusCode(content.status);
+        if (!status || content.evaluation_id !== this.entryPointsEvalId) return;
+        const rows = this.entryPoints();
+        const index = rows.findIndex(row => row.build_id === content.build_id);
+        if (index >= 0 && rows[index].build_status !== status) this.entryPoints.set(rows.map((row, i) => (i === index ? { ...row, build_status: status } : row)));
+      }),
+    );
     this.liveSub.add(
       frames
         .pipe(filter(e => e.event !== 'evaluation.activity'), auditTime(500))
