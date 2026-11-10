@@ -169,8 +169,18 @@ describe('BoardLiveJobsComponent - assigned subject column', () => {
     const fixture = setupWithAssigned([{ ...ASSIGNED, worker_name: 'Builder One' }, { ...ASSIGNED, id: 'j2' }]);
     fixture.detectChanges();
     const workers = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr'))
-      .map((row) => row.querySelector('td.worker')?.textContent?.trim());
-    expect(workers).toEqual(['Builder One', 'Not shared with this account']);
+      .map((row) => row.querySelector('td.worker'));
+    expect(workers.map((cell) => cell?.textContent?.trim())).toEqual(['Builder One', 'Not shared with this account']);
+    expect(workers.map((cell) => cell?.getAttribute('title'))).toEqual(['Builder One', 'Not shared with this account']);
+  });
+
+  it('calls the tab and the start column by what the user sees, keeping the old query value', () => {
+    const fixture = setupWithAssigned([ASSIGNED]);
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(fixture.componentInstance.assignedAndPendingJobListTabOptions[0]).toEqual({ label: 'Running', value: 'assigned' });
+    expect(Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent?.trim())).toContain('Started');
+    expect(el.querySelector('tbody td.kind')?.textContent?.trim()).toBe('build');
   });
 
   it('lists the nodes of a multi-node job as one cluster job that opens the cluster page', () => {

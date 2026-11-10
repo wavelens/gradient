@@ -106,9 +106,9 @@ interface DecisionRow {
 
         @if (!showDecisions()) {
           @if (assignedRows().length || assignedEmptyText()) {
-          <gr-table class="jobs">
+          <gr-table class="jobs running">
             <thead>
-              <tr><th>Kind</th><th>Project / task</th><th>Worker</th><th>Derivation / Evaluation / Exec</th>@if (superuser()) {<th>Score</th>}<th>Assigned</th><th><span class="sr-only">Details</span></th></tr>
+              <tr><th>Kind</th><th>Project / task</th><th>Worker</th><th>Derivation / Evaluation / Exec</th>@if (superuser()) {<th>Score</th>}<th>Started</th><th><span class="sr-only">Details</span></th></tr>
             </thead>
             <tbody>
               @for (row of assignedRows(); track row.job.id) {
@@ -116,20 +116,21 @@ interface DecisionRow {
                 @let detail = assignedJobDetailPageUrl(j);
                 <tr class="clickable" (click)="router.navigateByUrl(detail)">
                   @let subject = rowSubject(row);
-                  <td>{{ jobKindName(j.kind) }}</td>
+                  @let worker = j.cluster_job ? subJobLabel(row.subJobs) : workerDisplayNameOrNotSharedLabel(j.worker_name);
+                  <td class="kind">{{ jobKindName(j.kind) }}</td>
                   <td class="origin">
                     <app-board-project-task-links [project]="j.project_name" [projectDisplayName]="j.project_display_name"
                                                   [task]="j.task" [taskDisplayName]="j.task_display_name" [evaluation]="j.evaluation_id" />
                   </td>
-                  <td class="mono worker">{{ j.cluster_job ? subJobLabel(row.subJobs) : workerDisplayNameOrNotSharedLabel(j.worker_name) }}</td>
+                  <td class="mono worker" [title]="worker">{{ worker }}</td>
                   <td class="mono subject" [title]="subject">
                     <a [routerLink]="detail" (click)="$event.stopPropagation()">{{ subject }}</a>
                   </td>
                   @if (superuser()) {
-                    <td>{{ j.score | number: scoreDigits }}</td>
+                    <td class="score">{{ j.score | number: scoreDigits }}</td>
                   }
                   <td class="age" [title]="j.dispatched_at | serverDate">{{ j.dispatched_at | relativeTime }}</td>
-                  <td>›</td>
+                  <td class="chevron" aria-hidden="true">›</td>
                 </tr>
               } @empty {
                 <tr><td [attr.colspan]="superuser() ? 7 : 6" class="muted">{{ assignedEmptyText() }}</td></tr>
@@ -151,7 +152,7 @@ interface DecisionRow {
                     <app-board-project-task-links [project]="r.project" [projectDisplayName]="r.projectDisplayName"
                                                   [task]="r.task" [taskDisplayName]="r.taskDisplayName" [evaluation]="r.evaluation" />
                   </td>
-                  <td class="mono worker">{{ r.worker }}</td>
+                  <td class="mono worker" [title]="r.worker">{{ r.worker }}</td>
                   <td class="mono subject" [title]="r.subject">
                     <a [routerLink]="links.boardJob(r.id)" (click)="$event.stopPropagation()">{{ r.subject }}</a>
                   </td>
@@ -238,7 +239,7 @@ export class BoardLiveJobsComponent implements OnInit {
   otherRunning = signal(0);
 
   readonly assignedAndPendingJobListTabOptions = [
-    { label: 'Assigned', value: 'assigned' },
+    { label: 'Running', value: 'assigned' },
     { label: 'Pending', value: 'pending' },
   ] as const;
   view = queryParamSignal<JobListView>('view', 'assigned', oneOf(this.assignedAndPendingJobListTabOptions.map((o) => o.value)));

@@ -16,9 +16,9 @@ tbody tr.negative td { color: var(--gr-status-warning); }
 
 .view-toggle { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
 
-
 td.subject a { display: block; max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-td.origin, td.worker { min-width: 10rem; overflow-wrap: anywhere; }
+td.origin { min-width: 10rem; overflow-wrap: anywhere; }
+td.worker { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 td.age { white-space: nowrap; }
 td.subject a { color: inherit; text-decoration: none; }
 td.subject a:hover { color: var(--gr-status-info); text-decoration: underline; }
@@ -26,13 +26,16 @@ td.waiting .wait { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2
 td.waiting .hint { font-size: $font-size-xs; }
 
 @media (max-width: $breakpoint-md) {
-  gr-table.pending {
-    thead, td.kind { display: none; }
+  gr-table.running, gr-table.pending {
+    thead, td.chevron { display: none; }
     tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.25rem $spacing-sm; padding: $spacing-sm $spacing-md; border-bottom: 1px solid var(--gr-border-subtle); }
     tbody tr:last-child { border-bottom: 0; }
     tbody td { padding: 0; border: 0; min-width: 0; }
+    td.kind { grid-column: 1; grid-row: 1; font-size: $font-size-xs; color: var(--gr-text-muted); text-transform: capitalize; }
     td.age { grid-column: 2; grid-row: 1; }
-    td.subject, td.waiting, td[colspan] { grid-column: 1 / -1; }
+    td.worker { grid-column: 1; max-width: none; }
+    td.score { grid-column: 2; }
+    td.origin, td.subject, td.waiting, td[colspan] { grid-column: 1 / -1; }
     td.subject a { max-width: none; font-size: $font-size-xs; color: var(--gr-text-muted); }
   }
 }
