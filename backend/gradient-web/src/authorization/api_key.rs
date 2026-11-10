@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::permissions::PermissionMask;
+use crate::permissions::{Permission, PermissionMask, mask_from};
 use gradient_db::exec_jobs::tokens::ResolvedJobToken;
 use gradient_types::ids::CacheId;
-use gradient_types::{ApiId, ExecJobAttemptId, ExecJobId, MSession, ProjectId, TaskId, UserId};
+use gradient_types::{
+    ApiId, ExecJobAttemptId, ExecJobId, MSession, MUser, ProjectId, TaskId, UserId,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiKeyContext {
@@ -15,6 +17,15 @@ pub struct ApiKeyContext {
     pub project: Option<ProjectId>,
     pub cache_pin: Option<CacheId>,
     pub allowed_ips: Vec<String>,
+}
+
+impl ApiKeyContext {
+    pub fn has_full_account_access(&self) -> bool {
+        let every_permission = mask_from(Permission::ALL);
+        self.project.is_none()
+            && self.cache_pin.is_none()
+            && self.mask & every_permission == every_permission
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +128,15 @@ impl DecodedRequest {
         }
     }
 
+    pub fn user_with_superuser_allowed_for_credential(&self, mut user: MUser) -> MUser {
+        user.superuser &= match self {
+            DecodedRequest::Session { .. } => true,
+            DecodedRequest::ApiKey { context, .. } => context.has_full_account_access(),
+            DecodedRequest::Job { .. } => false,
+        };
+        user
+    }
+
     pub fn rate_limit_bucket(&self) -> RateLimitBucketOwner {
         match self {
             DecodedRequest::Session { session } => RateLimitBucketOwner::User(session.user_id),
@@ -135,5 +155,64 @@ impl DecodedRequest {
             }),
             None => Principal::User(self.user_id()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn superuser() -> MUser {
+        MUser {
+            superuser: true,
+            ..Default::default()
+        }
+    }
+
+    fn full_key() -> ApiKeyContext {
+        ApiKeyContext {
+            mask: mask_from(Permission::ALL),
+            project: None,
+            cache_pin: None,
+            allowed_ips: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_job_token_never_acts_as_superuser() {
+        let job = DecodedRequest::Job {
+            user_id: UserId::now_v7(),
+            context: full_key(),
+            job: ResolvedJobToken {
+                job: ExecJobId::now_v7(),
+                attempt: ExecJobAttemptId::now_v7(),
+                project: ProjectId::now_v7(),
+                task: TaskId::now_v7(),
+                project_name: "infra".into(),
+                task_name: "master".into(),
+                acting_user: UserId::now_v7(),
+            },
+        };
+
+        assert!(
+            !job.user_with_superuser_allowed_for_credential(superuser())
+                .superuser
+        );
+    }
+
+    #[test]
+    fn only_an_unpinned_key_with_every_permission_keeps_superuser() {
+        let cache_pinned = ApiKeyContext {
+            cache_pin: Some(CacheId::now_v7()),
+            ..full_key()
+        };
+        let view_only = ApiKeyContext {
+            mask: Permission::ViewProject.bit(),
+            ..full_key()
+        };
+
+        assert!(full_key().has_full_account_access());
+        assert!(!cache_pinned.has_full_account_access());
+        assert!(!view_only.has_full_account_access());
     }
 }

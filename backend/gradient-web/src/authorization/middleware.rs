@@ -201,7 +201,9 @@ pub async fn authorize(
     if let DecodedRequest::Session { session } = &decoded {
         parts.extensions.insert(session.clone());
     }
-    parts.extensions.insert(current_user);
+    parts
+        .extensions
+        .insert(decoded.user_with_superuser_allowed_for_credential(current_user));
     parts.extensions.insert(MaybeApiKey::from(&decoded));
     parts.extensions.insert(decoded.principal());
     parts.extensions.insert(decoded.rate_limit_bucket());
@@ -251,6 +253,7 @@ async fn optional_caller(
         return Err(SharedRefusal::AccountDeactivated.into());
     }
 
+    let user = decoded.user_with_superuser_allowed_for_credential(user);
     Ok(Some((user, decoded)))
 }
 

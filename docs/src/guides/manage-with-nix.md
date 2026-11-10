@@ -10,7 +10,7 @@ A Nix setup can declare users, projects, tasks and caches under `services.gradie
 **Requirements:**
 
 - A running instance, see [Quick Start](../get-started/quick-start.md)
-- An API key of a superuser account, from **Settings -> API Keys**
+- A superuser's API key with every permission and no project or cache pin, from **Settings -> API Keys**
 
 ## 1. Export the Running State
 

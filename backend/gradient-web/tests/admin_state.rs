@@ -5,12 +5,71 @@
  */
 
 use axum::http::{Method, StatusCode};
-use gradient_fixtures::mock::mock_db;
+use gradient_entity::api;
+use gradient_fixtures::ids::{project_id, user_id};
+use gradient_fixtures::mock::{exec_ok, mock_db};
 use gradient_fixtures::rows::{live_session, superuser, user};
 use gradient_test_support::web::{make_test_server, make_token};
-use gradient_types::SessionId;
+use gradient_types::permissions::{Permission, PermissionMask, mask_from};
+use gradient_types::{ApiId, ProjectId, SessionId};
+use gradient_web::authorization::hash_api_key;
 use sea_orm::MockDatabase;
 use serde_json::Value;
+
+const RAW_KEY: &str = "superuser-key";
+
+fn superuser_key(permission: PermissionMask, project: Option<ProjectId>) -> api::Model {
+    let now = chrono::Utc::now().naive_utc();
+    api::Model {
+        id: ApiId::now_v7(),
+        owned_by: user_id(),
+        name: "key".into(),
+        key: hash_api_key(RAW_KEY),
+        last_used_at: now,
+        created_at: now,
+        permission,
+        project,
+        ..Default::default()
+    }
+}
+
+fn with_superuser_key(db: MockDatabase, key: api::Model) -> MockDatabase {
+    db.append_query_results([vec![key.clone()]])
+        .append_exec_results([exec_ok()])
+        .append_query_results([vec![key]])
+        .append_query_results([vec![superuser()]])
+}
+
+async fn export_state_status_with_key(key: api::Model) -> StatusCode {
+    let db = with_empty_export(with_superuser_key(mock_db(), key));
+    make_test_server(db.into_connection())
+        .get("/api/v1/admin/state?format=json")
+        .add_header("authorization", format!("Bearer GRAD{RAW_KEY}"))
+        .await
+        .status_code()
+}
+
+#[tokio::test]
+async fn a_limited_api_key_of_a_superuser_is_refused_on_admin_routes() {
+    let view_only = superuser_key(mask_from(&[Permission::ViewProject]), None);
+    let pinned = superuser_key(mask_from(Permission::ALL), Some(project_id()));
+
+    assert_eq!(
+        export_state_status_with_key(view_only).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        export_state_status_with_key(pinned).await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn a_full_api_key_of_a_superuser_reaches_admin_routes() {
+    let full = superuser_key(mask_from(Permission::ALL), None);
+
+    assert_eq!(export_state_status_with_key(full).await, StatusCode::OK);
+}
 
 fn with_user(
     db: MockDatabase,
