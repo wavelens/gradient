@@ -50,6 +50,18 @@ pub async fn stamp_last_used<C: ConnectionTrait>(
     active.update(db).await
 }
 
+pub async fn extend_expiry<C: ConnectionTrait>(
+    db: &C,
+    session: MSession,
+    at: NaiveDateTime,
+) -> Result<MSession, DbErr> {
+    let expires_at = at + MSession::sign_in_session_valid_duration(session.remember_me);
+    let mut active = session.into_active_model();
+    active.expires_at = Set(expires_at);
+    active.last_used_at = Set(at);
+    active.update(db).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -26,8 +26,8 @@ use super::api_key::{ApiKeyContext, DecodedRequest, MaybeApiKey};
 use super::cache_or_project_restricted_api_key_route_access::refuse_request_outside_api_key_scope;
 use super::job_scope::{JobScopeRefusal, job_scope_of_request};
 use super::jwt::{
-    bearer_token, clear_jwt_token_cookie, decode_jwt, extract_bearer_or_cookie,
-    session_cookie_token,
+    bearer_token, clear_jwt_token_cookie, decode_jwt, extend_session_and_return_set_cookie_if_due,
+    extract_bearer_or_cookie, session_cookie_token,
 };
 use crate::audit::{Audit, RequestInfo};
 use crate::client_ip::{ClientIp, resolve_client_ip};
@@ -189,12 +189,25 @@ pub async fn authorize(
         return Err(deny(&audit, Some(user_id), method, path, denial).await);
     }
 
+    let renewed_session_cookie = extend_session_and_return_set_cookie_if_due(
+        &state.web_db,
+        &state.jwt_secret,
+        &decoded,
+        &parts.headers,
+        state.config.server.use_tls,
+    )
+    .await;
+
     parts.extensions.insert(current_user);
     parts.extensions.insert(MaybeApiKey::from(&decoded));
     parts.extensions.insert(decoded.principal());
     parts.extensions.insert(decoded.rate_limit_bucket());
     parts.extensions.insert(ClientIp(client_ip));
-    Ok(next.run(Request::from_parts(parts, body)).await)
+    let mut response = next.run(Request::from_parts(parts, body)).await;
+    if let Some(cookie) = renewed_session_cookie {
+        response.headers_mut().append(SET_COOKIE, cookie);
+    }
+    Ok(response)
 }
 
 async fn job_scope_of_caller(
@@ -286,6 +299,7 @@ pub async fn authorize_optional(
     };
 
     let (mut parts, body) = req.into_parts();
+    let mut renewed_session_cookie = None;
     match caller {
         Some((user, decoded)) => {
             if let Err(refusal) = job_scope_of_caller(&mut parts, &decoded).await {
@@ -296,6 +310,14 @@ pub async fn authorize_optional(
             {
                 return WebError::from(refusal).into_response();
             }
+            renewed_session_cookie = extend_session_and_return_set_cookie_if_due(
+                &state.web_db,
+                &state.jwt_secret,
+                &decoded,
+                &parts.headers,
+                state.config.server.use_tls,
+            )
+            .await;
             parts.extensions.insert(MaybeUser(Some(user)));
             parts.extensions.insert(MaybeApiKey::from(&decoded));
             parts.extensions.insert(decoded.principal());
@@ -308,7 +330,11 @@ pub async fn authorize_optional(
     }
 
     parts.extensions.insert(ClientIp(client_ip));
-    next.run(Request::from_parts(parts, body)).await
+    let mut response = next.run(Request::from_parts(parts, body)).await;
+    if let Some(cookie) = renewed_session_cookie {
+        response.headers_mut().append(SET_COOKIE, cookie);
+    }
+    response
 }
 
 pub async fn update_last_login(db: &WebDb, user: MUser) -> Result<MUser> {

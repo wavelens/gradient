@@ -6,7 +6,7 @@
 
 use crate::audit::Audit;
 use crate::authorization::{
-    clear_jwt_token_cookie, cookie_value, create_session_and_token, oidc_login_create,
+    clear_jwt_token_cookie, cookie_value, create_session_and_token, jwt_cookie, oidc_login_create,
     oidc_login_verify, session_claims, update_last_login,
 };
 use crate::error::{ErrorCode, WebError, WebResult};
@@ -310,7 +310,7 @@ async fn send_registration_attempt_email_to_existing_account_owner(
     operation_id = "loginUser",
     tag = "auth",
     summary = "Login with username/password",
-    description = "Validates credentials and returns a signed JWT. Pass the token as\n`Authorization: Bearer <token>` on subsequent requests.\n`loginname` accepts either the username or the email address.\nSet `remember_me: true` for a long-lived token.",
+    description = "Verify the credentials and return a signed JWT. Pass the token as `Authorization: Bearer <token>` on later requests. Use either a username or an email address for `loginname`. Set `remember_me: true` to get a long-lived token. Sessions expire 24 hours after last use (30 days with `remember_me`). Automatic refreshes of the browser cookie `jwt_token` happen while the session is active. Bearer tokens don't refresh.",
     request_body = MakeLoginRequest,
     responses((status = OK, description = "JWT token", body = String, content_type = "application/json"), WebError)
 )]
@@ -677,19 +677,6 @@ pub async fn post_logout(
         .context("bad cookie")?,
     );
     Ok(response)
-}
-
-pub(super) fn jwt_cookie(token: &str, remember_me: bool, use_tls: bool) -> String {
-    let secure = if use_tls { "; Secure" } else { "" };
-    let base = format!(
-        "jwt_token={}; HttpOnly{}; SameSite=Strict; Path=/",
-        token, secure
-    );
-    if remember_me {
-        format!("{}; Max-Age=2592000", base)
-    } else {
-        base
-    }
 }
 
 #[utoipa::path(

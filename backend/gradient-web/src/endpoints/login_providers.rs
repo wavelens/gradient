@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::auth::{csrf_clear_cookie, csrf_set_cookie, jwt_cookie};
+use super::auth::{csrf_clear_cookie, csrf_set_cookie};
 use crate::audit::Audit;
 use crate::authorization::{
     ConnectRefusal, PasswordLogin, ProviderCallback, ProviderPurpose, can_disconnect,
-    connect_identity, cookie_value, create_session_and_token, provider_authorize,
+    connect_identity, cookie_value, create_session_and_token, jwt_cookie, provider_authorize,
     provider_callback, session_claims, sign_in_external,
 };
 use crate::error::{WebError, WebResult};

@@ -6,7 +6,7 @@
 
 use super::api_key::{ApiKeyContext, DecodedRequest};
 use super::job_scope::job_mask;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use chrono::{Duration, Utc};
 use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
@@ -103,6 +103,28 @@ pub fn session_claims(jwt_secret: &SecretString, headers: &HeaderMap) -> Option<
     verify_claims(jwt_secret, extract_bearer_or_cookie(headers)?).ok()
 }
 
+pub fn jwt_cookie(token: &str, remember_me: bool, use_tls: bool) -> String {
+    let secure = if use_tls { "; Secure" } else { "" };
+    let base = format!("jwt_token={token}; HttpOnly{secure}; SameSite=Strict; Path=/");
+    if remember_me {
+        let max_age = MSession::sign_in_session_valid_duration(true).num_seconds();
+        format!("{base}; Max-Age={max_age}")
+    } else {
+        base
+    }
+}
+
+fn sign_session_jwt(jwt_secret: &SecretString, session: &MSession) -> Result<String, StatusCode> {
+    let claim = Cliams {
+        iat: unix_seconds(Utc::now())?,
+        exp: unix_seconds(session.expires_at.and_utc())?,
+        id: session.user_id,
+        jti: session.id,
+    };
+
+    sign_claims(jwt_secret, &claim).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 pub async fn create_session_and_token(
     db: &WebDb,
     jwt_secret: &SecretString,
@@ -111,41 +133,50 @@ pub async fn create_session_and_token(
     user_agent: Option<String>,
     ip: Option<String>,
 ) -> Result<(SessionId, String), StatusCode> {
-    let now = Utc::now();
-    let lifetime = if remember_me {
-        Duration::days(30)
-    } else {
-        Duration::hours(24)
-    };
-
-    let expires_at = now + lifetime;
-    let session_id = SessionId::now_v7();
+    let now = gradient_types::now();
     let session = MSession {
-        id: session_id,
+        id: SessionId::now_v7(),
         user_id,
-        created_at: now.naive_utc(),
-        expires_at: expires_at.naive_utc(),
-        last_used_at: now.naive_utc(),
+        created_at: now,
+        expires_at: now + MSession::sign_in_session_valid_duration(remember_me),
+        last_used_at: now,
         user_agent,
         ip,
         remember_me,
         ..Default::default()
     };
 
+    let token = sign_session_jwt(jwt_secret, &session)?;
+    let session_id = session.id;
     gradient_db::rows::insert::<ESession, _>(db, session)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let claim = Cliams {
-        iat: unix_seconds(now)?,
-        exp: unix_seconds(expires_at)?,
-        id: user_id,
-        jti: session_id,
-    };
-
-    let token = sign_claims(jwt_secret, &claim).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
     Ok((session_id, token))
+}
+
+pub(super) async fn extend_session_and_return_set_cookie_if_due(
+    db: &WebDb,
+    jwt_secret: &SecretString,
+    decoded: &DecodedRequest,
+    headers: &HeaderMap,
+    use_tls: bool,
+) -> Option<HeaderValue> {
+    let DecodedRequest::Session { session } = decoded else {
+        return None;
+    };
+    let now = gradient_types::now();
+    if bearer_token(headers).is_some() || !session.has_passed_half_validity_at(now) {
+        return None;
+    }
+
+    let session = gradient_db::sessions::extend_expiry(db, session.clone(), now)
+        .await
+        .inspect_err(|e| warn!(error = %e, "failed to extend session expiry"))
+        .ok()?;
+    let token = sign_session_jwt(jwt_secret, &session).ok()?;
+
+    HeaderValue::from_str(&jwt_cookie(&token, session.remember_me, use_tls)).ok()
 }
 
 pub async fn decode_jwt(
@@ -174,12 +205,12 @@ pub async fn decode_jwt(
     }
 
     if last_used_stamps.due(session.id.into_inner(), Instant::now())
-        && let Err(e) = gradient_db::sessions::stamp_last_used(db, session, now).await
+        && let Err(e) = gradient_db::sessions::stamp_last_used(db, session.clone(), now).await
     {
         warn!(error = %e, "session last_used_at stamp failed");
     }
 
-    Ok(DecodedRequest::Session { user_id: claims.id })
+    Ok(DecodedRequest::Session { session })
 }
 
 async fn decode_api_key(

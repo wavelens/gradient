@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, TimeDelta};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -36,8 +36,20 @@ pub enum Relation {
 }
 
 impl Model {
+    pub fn sign_in_session_valid_duration(remember_me: bool) -> TimeDelta {
+        if remember_me {
+            TimeDelta::days(30)
+        } else {
+            TimeDelta::hours(24)
+        }
+    }
+
     pub fn is_usable_at(&self, now: NaiveDateTime) -> bool {
         self.revoked_at.is_none() && self.expires_at >= now
+    }
+
+    pub fn has_passed_half_validity_at(&self, now: NaiveDateTime) -> bool {
+        self.expires_at - now < Self::sign_in_session_valid_duration(self.remember_me) / 2
     }
 }
 

@@ -25,7 +25,7 @@ pub use self::job_scope::{JobScopeRefusal, job_mask};
 pub use self::jwt::{
     Cliams, DownloadClaims, clear_jwt_token_cookie, cookie_value, create_session_and_token,
     decode_download_token, decode_jwt, encode_download_token, generate_api_key, hash_api_key,
-    session_claims,
+    jwt_cookie, session_claims,
 };
 pub use self::middleware::{
     MaybeUser, authorize, authorize_optional, reject_api_key_authentication,
