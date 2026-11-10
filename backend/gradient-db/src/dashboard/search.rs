@@ -13,7 +13,8 @@ crate::sql! {
         params = [UserId, Bool(true)],
         tier = Bulk;
 
-    SEARCH_NARS = concat!("SELECT c.id AS cache_id, c.name AS cache, cp.hash, cp.package FROM cached_path cp \
+    SEARCH_NARS = concat!("SELECT c.id AS cache_id, c.name AS cache, c.display_name AS cache_display_name, \
+        cp.hash, cp.package FROM cached_path cp \
         JOIN cached_path_signature s ON s.cached_path = cp.id JOIN cache c ON c.id = s.cache \
         WHERE (c.id, cp.hash) IN (SELECT * FROM unnest($2::uuid[], $3::text[])) AND ", cache_readable!("$4"), " \
         ORDER BY c.name LIMIT 10"),
@@ -54,6 +55,7 @@ crate::sql! {
 pub struct NarHitRow {
     pub cache_id: CacheId,
     pub cache: String,
+    pub cache_display_name: String,
     pub hash: String,
     pub package: String,
 }
@@ -115,6 +117,7 @@ fn nar_hit_row(r: &QueryResult) -> Result<NarHitRow, DbErr> {
     Ok(NarHitRow {
         cache_id: r.try_get("", "cache_id")?,
         cache: r.try_get("", "cache")?,
+        cache_display_name: r.try_get("", "cache_display_name")?,
         hash: r.try_get("", "hash")?,
         package: r.try_get("", "package")?,
     })

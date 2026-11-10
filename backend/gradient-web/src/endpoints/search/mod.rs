@@ -83,7 +83,7 @@ fn nar_hit(n: NarHitRow, typed: &StoreHash) -> SearchHit {
         kind: HitKind::Nar,
         route: format!("/caches/{}/nars?hash={typed}", n.cache),
         label: n.package,
-        sublabel: n.cache,
+        sublabel: n.cache_display_name,
         starred: false,
     }
 }
@@ -369,6 +369,7 @@ mod tests {
         let nar = BTreeMap::from([
             ("cache_id", Value::from(cache.into_inner())),
             ("cache", Value::from("main")),
+            ("cache_display_name", Value::from("Main Cache")),
             ("hash", Value::from(HASH)),
             ("package", Value::from("hello-2.12.1")),
         ]);
@@ -378,6 +379,7 @@ mod tests {
         assert_eq!(hits[0].kind, HitKind::Nar);
         assert_eq!(hits[0].route, format!("/caches/main/nars?hash={HASH}"));
         assert_eq!(hits[0].label, "hello-2.12.1");
+        assert_eq!(hits[0].sublabel, "Main Cache");
         assert_eq!(statements, 3);
     }
 
