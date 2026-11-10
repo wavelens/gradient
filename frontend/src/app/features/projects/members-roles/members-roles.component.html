@@ -241,7 +241,7 @@
     </gr-form-field>
     <gr-form-field label="Permissions">
       <gr-label-help slot="label" doc="ui/members-and-roles/#project-roles" title="Project permissions" />
-      <app-permission-picker [permissions]="availablePermissions()" [(selection)]="roleForm.permissions" />
+      <app-permission-picker [permissions]="availablePermissions()" viewPermissionIsRequired [(selection)]="roleForm.permissions" />
     </gr-form-field>
   </div>
   <div grDialogFooter>

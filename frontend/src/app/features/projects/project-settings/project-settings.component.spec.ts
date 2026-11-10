@@ -219,8 +219,8 @@ describe('ProjectSettingsComponent - permissions', () => {
     expect(findByText(fixture.nativeElement, 'save changes')).not.toBeNull();
   });
 
-  it('offers SSH key regeneration but no project deletion to a role with both key permissions', async () => {
-    const fixture = setup(writable, ['viewProject', 'manageProjectSettings', 'manageSshKey']);
+  it('offers SSH key regeneration but no project deletion to a role with only the SSH key permission', async () => {
+    const fixture = setup(writable, ['viewProject', 'manageSshKey']);
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'regenerate key')).not.toBeNull();
     expect(findByText(fixture.nativeElement, 'delete project')).toBeNull();
