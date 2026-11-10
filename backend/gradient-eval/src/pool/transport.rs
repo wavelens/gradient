@@ -50,6 +50,9 @@ pub(super) struct SpawnConfig {
 /// with `run_eval_worker`.
 fn eval_subprocess_command(exe: &Path, config: &SpawnConfig) -> Command {
     let mut command = Command::new(exe);
+    command.env_clear().envs(
+        std::env::vars_os().filter(|(name, _)| is_env_var_allowed_in_nix_eval_subprocess(name)),
+    );
     command.arg("--eval-subprocess");
     if config.metrics {
         command.arg("--eval-metrics");
@@ -62,6 +65,39 @@ fn eval_subprocess_command(exe: &Path, config: &SpawnConfig) -> Command {
         command.env(k, v);
     }
     command
+}
+
+fn is_env_var_allowed_in_nix_eval_subprocess(name: &std::ffi::OsStr) -> bool {
+    const NAMES: &[&str] = &[
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "TMPDIR",
+        "TZ",
+        "LANG",
+        "LOCALE_ARCHIVE",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "CURL_CA_BUNDLE",
+        "GIT_SSL_CAINFO",
+        "SSH_AUTH_SOCK",
+        "http_proxy",
+        "https_proxy",
+        "ftp_proxy",
+        "all_proxy",
+        "no_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "FTP_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "RUST_BACKTRACE",
+    ];
+    const PREFIXES: &[&str] = &["NIX_", "XDG_", "LC_", "GRADIENT_WORKER_LOG_"];
+    name.to_str().is_some_and(|name| {
+        NAMES.contains(&name) || PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+    })
 }
 
 /// libnixexpr's `Counter`s stay inert without `NIX_SHOW_STATS`: `total_thunks` and `fn_calls`
@@ -675,6 +711,36 @@ mod tests {
             "{back:?}"
         );
         assert!(!worker.in_flight(), "the call ended in lockstep");
+    }
+
+    #[test]
+    fn worker_secrets_stay_out_of_the_eval_subprocess() {
+        for kept in [
+            "PATH",
+            "HOME",
+            "NIX_REMOTE",
+            "XDG_CACHE_HOME",
+            "SSL_CERT_FILE",
+            "https_proxy",
+            "GRADIENT_WORKER_LOG_LEVEL_DEFAULT",
+        ] {
+            assert!(
+                is_env_var_allowed_in_nix_eval_subprocess(kept.as_ref()),
+                "{kept}"
+            );
+        }
+        for dropped in [
+            "GRADIENT_WORKER_PEERS",
+            "GRADIENT_WORKER_EXEC_SOPS_KEY_FILE",
+            "CREDENTIALS_DIRECTORY",
+            "AWS_SECRET_ACCESS_KEY",
+            "LD_PRELOAD",
+        ] {
+            assert!(
+                !is_env_var_allowed_in_nix_eval_subprocess(dropped.as_ref()),
+                "{dropped}"
+            );
+        }
     }
 
     #[test]
