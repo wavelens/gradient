@@ -14,7 +14,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{LockType, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect, Select, Value,
+    QueryFilter, QueryOrder, QuerySelect, QueryTrait, Select, Value,
 };
 use std::collections::HashMap;
 
@@ -25,7 +25,7 @@ pub async fn by_name<C: ConnectionTrait>(db: &C, name: &str) -> Result<Option<MP
         .await
 }
 
-pub fn reachable_by_user(user: UserId) -> Select<EProject> {
+pub fn reachable_by_user(user: UserId, api_key_project_id: Option<ProjectId>) -> Select<EProject> {
     let reachable = Query::select()
         .column(CProjectAccess::Project)
         .from(gradient_entity::project_access::Entity)
@@ -33,6 +33,9 @@ pub fn reachable_by_user(user: UserId) -> Select<EProject> {
         .to_owned();
     EProject::find()
         .filter(CProject::Id.in_subquery(reachable))
+        .apply_if(api_key_project_id, |query, project| {
+            query.filter(CProject::Id.eq(project))
+        })
         .order_by_asc(CProject::DisplayName)
         .order_by_asc(CProject::Name)
         .order_by_asc(CProject::Id)

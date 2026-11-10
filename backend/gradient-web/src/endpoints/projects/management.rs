@@ -28,7 +28,7 @@ use gradient_sources::generate_ssh_key;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ColumnTrait, QueryFilter, TransactionTrait};
+use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -208,10 +208,10 @@ pub async fn get(
     Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<ProjectSummary>>>> {
-    let mut reachable = gradient_db::projects::reachable_by_user(user.id);
-    if let Some(pinned) = api_key.as_ref().and_then(|key| key.project) {
-        reachable = reachable.filter(CProject::Id.eq(pinned));
-    }
+    let reachable = gradient_db::projects::reachable_by_user(
+        user.id,
+        api_key.as_ref().and_then(|key| key.project),
+    );
     let listing = paginate(reachable, &state.web_db, &params).await?;
 
     let project_ids: Vec<ProjectId> = listing.items.iter().map(|o| o.id).collect();
