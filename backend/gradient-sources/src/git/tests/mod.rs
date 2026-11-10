@@ -8,7 +8,7 @@ mod fixtures;
 
 use super::checkout::{checkout_commit, checkout_commit_into};
 use super::commit_info::{fetch_commit, head_refspec};
-use super::pktline::read_advertised_refs;
+use super::pktline::{MAX_GIT_REF_ADVERTISEMENT_READ_BYTE_COUNT, read_advertised_refs};
 use super::remote::{
     AdvertisedRef, BranchHead, branch_head, list_remote_refs, ls_remote_head, ref_commit,
     tag_commit,
@@ -19,7 +19,10 @@ use fixtures::{FAKE_SHA, FLUSH, ref_line, ref_line_with_caps};
 use gradient_types::branch_key::NO_BRANCH;
 
 fn default_head(reader: &mut dyn std::io::Read) -> Result<BranchHead, SourceError> {
-    branch_head(&read_advertised_refs(reader)?, None)
+    branch_head(
+        &read_advertised_refs(reader, MAX_GIT_REF_ADVERTISEMENT_READ_BYTE_COUNT)?,
+        None,
+    )
 }
 
 fn advertised(name: &str, oid: u8, symref_target: Option<&str>) -> AdvertisedRef {
@@ -246,6 +249,16 @@ fn read_head_from_pktlines_basic() {
 
     let result = default_head(&mut buf.as_slice()).unwrap();
     assert_eq!(hex::encode(&result.commit), FAKE_SHA);
+}
+
+#[test]
+fn an_endless_ref_advertisement_stops_at_the_byte_limit() {
+    let line = ref_line(FAKE_SHA, "refs/heads/main");
+    let unterminated = line.repeat(1000);
+
+    let refs = read_advertised_refs(&mut unterminated.as_slice(), line.len() * 10);
+
+    assert!(matches!(refs, Err(SourceError::GitCommandFailed { .. })));
 }
 
 #[test]

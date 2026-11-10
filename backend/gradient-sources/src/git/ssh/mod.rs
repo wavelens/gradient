@@ -9,6 +9,7 @@ mod target;
 #[cfg(test)]
 mod tests;
 
+use super::git_network_limits::set_libgit2_connect_and_read_timeouts_once;
 use connection::SshCommandStream;
 use git2::transport::{Service, SmartSubtransport, SmartSubtransportStream, Transport};
 use gradient_types::SecretString;
@@ -33,6 +34,7 @@ fn default_openssh_known_hosts_file_paths() -> Vec<PathBuf> {
 
 pub(crate) fn with_private_key<T>(private_key: Option<&str>, operation: impl FnOnce() -> T) -> T {
     register();
+    set_libgit2_connect_and_read_timeouts_once();
     let previous = PRIVATE_KEY.replace(private_key.map(|key| SecretString::new(key.to_owned())));
     let _restore = Restore(previous);
     operation()

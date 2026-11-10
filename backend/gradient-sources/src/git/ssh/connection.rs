@@ -5,6 +5,7 @@
  */
 
 use super::target::SshTarget;
+use crate::git::git_network_limits::STALLED_SERVER_TIMEOUT;
 use russh::ChannelStream;
 use russh::client::{self, Handle, Msg};
 use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
@@ -108,7 +109,20 @@ async fn run(
 
 impl Read for SshCommandStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.runtime.block_on(self.stream.read(buf))
+        self.runtime
+            .block_on(tokio::time::timeout(
+                STALLED_SERVER_TIMEOUT,
+                self.stream.read(buf),
+            ))
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!(
+                        "SSH server sent nothing for {} seconds",
+                        STALLED_SERVER_TIMEOUT.as_secs()
+                    ),
+                )
+            })?
     }
 }
 

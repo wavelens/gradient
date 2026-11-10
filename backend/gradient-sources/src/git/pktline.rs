@@ -8,15 +8,28 @@ use super::remote::AdvertisedRef;
 use crate::SourceError;
 use tracing::debug;
 
+pub(super) const MAX_GIT_REF_ADVERTISEMENT_READ_BYTE_COUNT: usize = 64 * 1024 * 1024;
+
 /// Stop at the flush packet. The remote is normally keeping the connection open after the ref
 /// advertisement.
 pub(super) fn read_advertised_refs(
     reader: &mut dyn std::io::Read,
+    byte_limit: usize,
 ) -> Result<Vec<AdvertisedRef>, SourceError> {
     let mut refs = Vec::new();
     let mut head_target = None;
+    let mut read_bytes = 0;
 
     while let Some(line) = read_pkt_line(reader)? {
+        read_bytes += line.len() + 4;
+        if read_bytes > byte_limit {
+            return Err(SourceError::GitCommandFailed {
+                stderr: format!(
+                    "ref advertisement larger than {} MiB",
+                    byte_limit / (1024 * 1024)
+                ),
+            });
+        }
         let Some((oid, name, capabilities)) = parse_ref_line(&line) else {
             let preview = std::str::from_utf8(&line).unwrap_or("<binary>").trim_end();
             debug!(preview, "pkt-line non-ref");

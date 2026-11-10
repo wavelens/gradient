@@ -5,8 +5,9 @@
  */
 
 use super::context::TaskGitContext;
+use super::git_network_limits::build_fetch_options_with_time_and_size_limits_and_optional_shallow;
 use super::ssh::with_private_key;
-use super::url::{git_transport_url, set_shallow_unless_local};
+use super::url::git_transport_url;
 use crate::SourceError;
 use gradient_types::SecretString;
 use gradient_types::input::vec_to_hex;
@@ -37,8 +38,7 @@ fn fetch_commit_into_temp_repo(url: &str, refspec: &str) -> Result<HeadCommit, S
     })?;
     let repo = git2::Repository::init_bare(temp_dir.path()).map_err(git_error)?;
 
-    let mut fo = git2::FetchOptions::new();
-    set_shallow_unless_local(&mut fo, url);
+    let mut fo = build_fetch_options_with_time_and_size_limits_and_optional_shallow(url, true);
 
     repo.remote_anonymous(url)
         .map_err(git_error)?

@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::git_network_limits::build_fetch_options_with_time_and_size_limits_and_optional_shallow;
 use super::ssh::with_private_key;
-use super::url::{git_transport_url, set_shallow_unless_local};
+use super::url::git_transport_url;
 use anyhow::{Context, Result};
-use git2::{Direction, FetchOptions, Oid, Remote, Repository};
+use git2::{Direction, Oid, Remote, Repository};
 use std::path::Path;
 use tempfile::TempDir;
 use tracing::debug;
@@ -87,10 +88,8 @@ impl<'a> Origin<'a> {
     }
 
     fn fetch(&mut self, refspec: &str, shallow: bool) -> Result<(), git2::Error> {
-        let mut options = FetchOptions::new();
-        if shallow {
-            set_shallow_unless_local(&mut options, self.url);
-        }
+        let mut options =
+            build_fetch_options_with_time_and_size_limits_and_optional_shallow(self.url, shallow);
         self.remote.fetch(&[refspec], Some(&mut options), None)
     }
 }

@@ -7,6 +7,7 @@
 mod checkout;
 mod commit_info;
 mod context;
+mod git_network_limits;
 mod pktline;
 mod remote;
 mod ssh;
