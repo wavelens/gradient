@@ -96,7 +96,7 @@ impl TriggerOut {
     }
 }
 
-fn trigger_integration_id(
+pub(super) fn trigger_integration_id(
     trigger_type: TriggerType,
     config: &serde_json::Value,
 ) -> Option<IntegrationId> {

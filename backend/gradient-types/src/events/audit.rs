@@ -72,6 +72,7 @@ actions! {
     TaskCreate => "task.create",
     TaskUpdate => "task.update",
     TaskDelete => "task.delete",
+    TaskMoveToProject => "task.move",
     TaskStar => "task.star",
     TaskUnstar => "task.unstar",
     TaskActionCreate => "task.action.create",

@@ -21,7 +21,9 @@ use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Readable, RequiresUnmanaged, TaskScope, can};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
+use gradient_db::WebDb;
 use gradient_db::lookup::{by_id, by_ids};
+use gradient_types::actions::ActionConfig;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
@@ -654,7 +656,7 @@ pub async fn post_task_check_repository(
     operation_id = "transferTask",
     tag = "tasks",
     summary = "Move task to another project",
-    description = "Moves the task into the project named in the body. Allowed for the task owner or a member with the edit-task permission, who also needs the create-task permission in the target project. Rejects state-managed tasks and target projects.",
+    description = "Moves the task into the project named in the body. Allowed for the task owner or a member with the edit-task permission, who also needs the create-task permission in the target project. Rejects state-managed tasks and target projects. Reject tasks that use an integration with a Git host in a trigger or action. Return `409` for a name already taken in the target project.",
     params(TaskPath),
     request_body = TransferOwnershipRequest,
     responses((status = OK, description = "Task moved", body = String, content_type = "application/json"), WebError)
@@ -668,6 +670,7 @@ pub async fn post_task_transfer(
         db,
         ..
     }: TaskScope<Member>,
+    audit: Audit,
     Json(body): Json<TransferOwnershipRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let api_key_ref = api_key.as_ref();
@@ -704,10 +707,26 @@ pub async fn post_task_transfer(
     if new_project.id == project.id {
         return Err(TaskRefusal::AlreadyInProject.into());
     }
+    if task_references_git_host_integration(&db.web_db, task.id).await? {
+        return Err(TaskRefusal::CurrentProjectGitHostIntegrationInUse.into());
+    }
 
-    gradient_db::tasks::move_to_project(&db.web_db, task, new_project.id)
-        .await?
+    let moved = gradient_db::tasks::move_to_project(&db.web_db, task, new_project.id)
+        .await
+        .map_err(|e| WebError::from_db_err(e, Resource::Task))?
         .or_not_found(Resource::Task)?;
+
+    audit
+        .write(
+            Action::TaskMoveToProject,
+            EventOwner::task(new_project.id, moved.id),
+            serde_json::json!({
+                "task": moved.name,
+                "from_project_id": project.id.to_string(),
+                "to_project_id": new_project.id.to_string(),
+            }),
+        )
+        .await;
 
     let res = BaseResponse {
         error: false,
@@ -715,4 +734,21 @@ pub async fn post_task_transfer(
     };
 
     Ok(Json(res))
+}
+
+async fn task_references_git_host_integration(db: &WebDb, task: TaskId) -> WebResult<bool> {
+    let triggers = gradient_db::triggers::of_task(db, task).await?;
+    if triggers
+        .iter()
+        .any(|t| super::triggers::trigger_integration_id(t.trigger_type, &t.config).is_some())
+    {
+        return Ok(true);
+    }
+    let actions = gradient_db::actions::of_task(db, task).await?;
+    Ok(actions.into_iter().any(|action| {
+        matches!(
+            serde_json::from_value::<ActionConfig>(action.config),
+            Ok(ActionConfig::GitHostStatusReport { .. } | ActionConfig::OpenPr { .. })
+        )
+    }))
 }
