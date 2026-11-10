@@ -456,6 +456,7 @@ mod tests {
         BuildItem {
             build_started_at: None,
             build_time_ms: ms,
+            continued_in_evaluation: None,
             depth: 0,
             dispatched_job: None,
             has_artefacts: false,

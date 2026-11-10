@@ -843,6 +843,16 @@ describe('EvaluationLogComponent', () => {
       fixture.destroy();
     });
 
+    it('links the newer evaluation that a build of an aborted evaluation continued in', () => {
+      const continued = { id: 'b1', status: 'Building', name: 'hello', derivation_path: 'hash-b1.drv', architecture: 'x86_64-linux', prioritized: false, continued_in_evaluation: 'eval-2' } as unknown as BuildItem;
+      const { fixture } = setupScoped({ build: 'b1' }, of('eval-1'), [continued], 'Aborted');
+      fixture.detectChanges();
+      const banner = (fixture.nativeElement as HTMLElement).querySelector('gr-message-banner');
+      expect(banner?.textContent).toContain('The build continued in');
+      expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/project/proj/log/eval-2');
+      fixture.destroy();
+    });
+
     it('selects the linked build without narrowing the list', () => {
       const { cmp, fixture, getBuilds } = setupScoped({ build: 'b1' });
       expect(getBuilds.mock.calls[0][3]).toBeUndefined();

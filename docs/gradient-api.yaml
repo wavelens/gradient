@@ -5999,7 +5999,7 @@ paths:
         dependency failed is not listed; it is counted under the build that
         caused it.
 
-        `newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present. Exec entry points don't count as packages. Exec jobs report them.
+        `newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present. Exec entry points don't count as packages. Exec jobs report them. A shared build can continue for another evaluation after an abort. Aborted evaluations mark such shared builds as aborted. Those shared builds count as unfinished.
       operationId: getEvaluationSummary
       parameters:
       - name: evaluation
@@ -15069,6 +15069,10 @@ components:
           type: boolean
         ifd:
           type: boolean
+        continued_in_evaluation:
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationId'
+          - type: 'null'
     BuildJobId:
       type: string
       format: uuid

@@ -199,7 +199,13 @@
         }
         @if (selectedSection() !== 'messages' && selectedBuild(); as build) {
           @if (getBuildRowDisplayStatus(build) !== build.status) {
-            <gr-message-banner type="info">This evaluation ended before the build finished. The build continued in a newer evaluation.</gr-message-banner>
+            <gr-message-banner type="info">This evaluation ended before the build finished. The build continued in
+              @if (build.continued_in_evaluation; as continuedIn) {
+                <a [routerLink]="links.evaluationLog(projectName, continuedIn)">a newer evaluation</a>.
+              } @else {
+                a newer evaluation.
+              }
+            </gr-message-banner>
           }
         }
         @if (ev.status === 'Waiting' && selectedSection() !== 'messages' && selectedBuildId()) {

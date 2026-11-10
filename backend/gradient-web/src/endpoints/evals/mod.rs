@@ -11,6 +11,7 @@ mod progress;
 pub mod query;
 mod refusal;
 pub mod report;
+mod shared_build_reuse_after_evaluation_abort;
 pub mod summary;
 pub mod types;
 

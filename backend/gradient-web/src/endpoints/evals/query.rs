@@ -19,6 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::shared_build_reuse_after_evaluation_abort::is_build_continued_after_aborted_evaluation_finished;
 use super::types::{
     BuildItem, BuildsQuery, EntryPointBrief, EvaluationMessageResponse, EvaluationResponse,
     PaginatedBuilds,
@@ -320,6 +321,27 @@ pub async fn get_evaluation_builds(
         &page_shared_build_ids,
     )
     .await?;
+    let continued_shared_build_ids: Vec<DerivationBuildId> = page_shared_build_ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            shared_builds.get(id).is_some_and(|build| {
+                is_build_continued_after_aborted_evaluation_finished(&evaluation, build)
+            })
+        })
+        .collect();
+    let continued_in = match evaluation.task {
+        Some(task) => {
+            gradient_db::build_jobs::newest_other_non_aborted_evaluation_by_shared_build_id(
+                &state.web_db,
+                task,
+                evaluation.id,
+                &continued_shared_build_ids,
+            )
+            .await?
+        }
+        None => HashMap::new(),
+    };
 
     let mut page = Vec::with_capacity(page_slice.len());
     for (_, layer, _, j, status) in &page_slice {
@@ -344,6 +366,7 @@ pub async fn get_evaluation_builds(
             depth: *layer,
             prioritized: with_qos.contains(&j.derivation_build),
             ifd: drv.ifd,
+            continued_in_evaluation: continued_in.get(&j.derivation_build).copied(),
         });
     }
 

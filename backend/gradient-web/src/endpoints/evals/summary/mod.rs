@@ -27,6 +27,7 @@ use std::sync::Arc;
 pub use self::analysis::PackageCounts;
 use self::analysis::{Baseline, EvaluationGraph, Failure, Package};
 use super::EvalAccessContext;
+use super::shared_build_reuse_after_evaluation_abort::shared_build_status_for_evaluation;
 
 const FAILURES_SHOWN: usize = 100;
 const BLOCKED_SHOWN: usize = 20;
@@ -92,7 +93,7 @@ struct LoadedEvaluation {
     operation_id = "getEvaluationSummary",
     tag = "evals",
     summary = "Summarise what went wrong in an evaluation",
-    description = "Returns the builds that failed themselves, each with the packages it\nblocks, the attributes that failed to evaluate, and the packages fixed\nsince the previous evaluation. A build that only failed because a\ndependency failed is not listed; it is counted under the build that\ncaused it.\n\n`newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present. Exec entry points don't count as packages. Exec jobs report them.",
+    description = "Returns the builds that failed themselves, each with the packages it\nblocks, the attributes that failed to evaluate, and the packages fixed\nsince the previous evaluation. A build that only failed because a\ndependency failed is not listed; it is counted under the build that\ncaused it.\n\n`newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present. Exec entry points don't count as packages. Exec jobs report them. A shared build can continue for another evaluation after an abort. Aborted evaluations mark such shared builds as aborted. Those shared builds count as unfinished.",
     params(("evaluation" = EvaluationId, Path)),
     responses((status = OK, description = "Failure summary of the evaluation.", body = EvaluationFailureSummary), WebError)
 )]
@@ -105,7 +106,7 @@ pub async fn get_evaluation_summary(
     let ctx = EvalAccessContext::load(&state.web_db, evaluation_id, &maybe_user, api_key.as_ref())
         .await?;
     let db = &state.web_db;
-    let loaded = LoadedEvaluation::load(db, ctx.evaluation.id).await?;
+    let loaded = LoadedEvaluation::load(db, &ctx.evaluation).await?;
     let compared = compared_evaluation(db, ctx.evaluation.previous).await?;
     let baseline = compared.as_ref().map(|(_, baseline)| baseline);
     let failures = analysis::failures(&loaded.graph, baseline);
@@ -129,13 +130,20 @@ pub async fn get_evaluation_summary(
 }
 
 impl LoadedEvaluation {
-    async fn load<C: ConnectionTrait>(db: &C, evaluation: EvaluationId) -> Result<Self, DbErr> {
-        let jobs = gradient_db::build_jobs::of_evaluation(db, evaluation).await?;
-        let shared = shared_build_statuses(db, &jobs).await?;
+    async fn load<C: ConnectionTrait>(db: &C, evaluation: &MEvaluation) -> Result<Self, DbErr> {
+        let jobs = gradient_db::build_jobs::of_evaluation(db, evaluation.id).await?;
+        let shared = shared_builds(db, &jobs).await?;
         let statuses: HashMap<DerivationId, BuildStatus> = jobs
             .iter()
-            .filter_map(|j| Some((j.derivation, shared.get(&j.derivation_build)?.for_api())))
+            .filter_map(|j| {
+                let build = shared.get(&j.derivation_build)?;
+                Some((
+                    j.derivation,
+                    shared_build_status_for_evaluation(evaluation, build),
+                ))
+            })
             .collect();
+        let evaluation = evaluation.id;
         let packages = gradient_db::entry_points::of_evaluation(db, evaluation)
             .await?
             .into_iter()
@@ -158,16 +166,12 @@ impl LoadedEvaluation {
     }
 }
 
-async fn shared_build_statuses<C: ConnectionTrait>(
+async fn shared_builds<C: ConnectionTrait>(
     db: &C,
     jobs: &[MBuildJob],
-) -> Result<HashMap<DerivationBuildId, BuildStatus>, DbErr> {
+) -> Result<HashMap<DerivationBuildId, MDerivationBuild>, DbErr> {
     let ids: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
-    Ok(by_ids::<EDerivationBuild, _>(db, &ids)
-        .await?
-        .into_iter()
-        .map(|(id, build)| (id, build.status))
-        .collect())
+    by_ids::<EDerivationBuild, _>(db, &ids).await
 }
 
 async fn compared_evaluation<C: ConnectionTrait>(
@@ -192,7 +196,7 @@ async fn compared_evaluation<C: ConnectionTrait>(
         .await?
         .map(|c| vec_to_hex(&c.hash))
         .unwrap_or_default();
-    let loaded = LoadedEvaluation::load(db, previous).await?;
+    let loaded = LoadedEvaluation::load(db, &evaluation).await?;
     let failed = loaded
         .failed_attributes
         .into_iter()

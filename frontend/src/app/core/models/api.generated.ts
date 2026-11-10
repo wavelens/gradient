@@ -314,6 +314,7 @@ export interface BuildItem {
   depth: number;
   prioritized: boolean;
   ifd: boolean;
+  continued_in_evaluation?: EvaluationId | null;
 }
 
 export type BuildJobId = string;

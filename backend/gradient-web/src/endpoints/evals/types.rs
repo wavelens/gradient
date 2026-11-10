@@ -27,6 +27,7 @@ pub struct BuildItem {
     pub depth: u32,
     pub prioritized: bool,
     pub ifd: bool,
+    pub continued_in_evaluation: Option<EvaluationId>,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
