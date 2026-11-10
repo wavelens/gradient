@@ -171,6 +171,13 @@ describe('errorInterceptor on 429', () => {
     expect(navigate).not.toHaveBeenCalled();
     expect(toasts.messages()[0]?.detail).toBe('Try again in 5 seconds.');
   });
+
+  it('leaves a throttled section write to the section', async () => {
+    const { toasts } = setup();
+    const settled = send(failWith(429, new HttpHeaders({ 'retry-after': '5' })), { method: 'POST', ...asSectionRequest() });
+    expect(await settled.catch((e: HttpErrorResponse) => e.status)).toBe(429);
+    expect(toasts.messages()).toEqual([]);
+  });
 });
 
 describe('errorInterceptor on an unavailable server', () => {

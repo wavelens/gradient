@@ -63,7 +63,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
       auth.stillSignedIn().subscribe((signedIn) => signedIn || auth.sessionLost(returnUrl));
       return;
     }
-    if (error.status === 429 && !read) {
+    if (error.status === 429 && !read && !req.context.get(SECTION_REQUEST)) {
       notify(`Try again in ${Math.ceil(throttleWaitMs(error) / 1000)} seconds.`);
       return;
     }

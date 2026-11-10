@@ -87,6 +87,13 @@ describe('RegisterComponent - username check', () => {
     expect(fixture.componentInstance.username!.valid).toBe(true);
     expect(usernameField(root).textContent).not.toContain('Username Check Failed');
   });
+
+  it('asks to wait when the server throttles the check', async () => {
+    const { fixture, root } = setup(() => throwError(() => new ApiError('Too Many Requests', 429)));
+    await typeUsername(fixture, 'dave');
+    expect(usernameField(root).textContent).toContain('Too many checks. Wait a moment');
+    expect(usernameField(root).textContent).not.toContain('Too Many Requests');
+  });
 });
 
 describe('RegisterComponent - password rule', () => {

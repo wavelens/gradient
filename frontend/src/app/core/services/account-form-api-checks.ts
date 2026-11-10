@@ -19,12 +19,10 @@ export function checkUsernameAvailability(auth: AuthService, username: string): 
   return timer(500).pipe(
     switchMap(() => auth.checkUsername(username)),
     map(() => null),
-    catchError((error: unknown) =>
-      of(
-        error instanceof ApiError && !error.unreachable && error.status < 500
-          ? { usernameRefused: error.message }
-          : { usernameCheckFailed: true },
-      ),
-    ),
+    catchError((error: unknown) => {
+      if (!(error instanceof ApiError)) return of({ usernameCheckFailed: true });
+      if (error.status === 429) return of({ usernameRefused: 'Too many checks. Wait a moment' });
+      return of(!error.unreachable && error.status < 500 ? { usernameRefused: error.message } : { usernameCheckFailed: true });
+    }),
   );
 }

@@ -10,7 +10,7 @@ import { BehaviorSubject, Observable, filter, of, take } from 'rxjs';
 import { tap, switchMap, finalize, catchError, map, shareReplay } from 'rxjs/operators';
 import { ApiError, ApiService } from './api.service';
 import { MakeUserRequest, UserInfoResponse } from '@core/models';
-import { asSessionProbe } from '@core/interceptors/request-context';
+import { asSectionRequest, asSessionProbe } from '@core/interceptors/request-context';
 import { links, type LoginReason } from '@shared/routing';
 
 const SIGNED_OUT_KEY = 'gradient-signed-out';
@@ -94,7 +94,7 @@ export class AuthService {
    * Check if username is available
    */
   checkUsername(username: string) {
-    return this.api.post<boolean>('auth/check-username', { username });
+    return this.api.post<boolean>('auth/check-username', { username }, asSectionRequest());
   }
 
   /**
