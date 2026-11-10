@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ElementRef, OnInit, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, Injector, OnInit, afterNextRender, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -102,6 +102,8 @@ export class ApiKeysComponent implements OnInit {
   canCreateCache = injectCanCreateCache();
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private injector = inject(Injector);
 
   loading = signal(true);
   loadError = signal<unknown>(null);
@@ -422,8 +424,17 @@ export class ApiKeysComponent implements OnInit {
       })
       .subscribe(() => {
         this.notify.success('API key deleted');
-        this.loadKeys();
+        const index = this.keys().findIndex((listed) => listed.id === key.id);
+        this.keys.update((keys) => keys.filter((listed) => listed.id !== key.id));
+        afterNextRender(() => this.focusNextApiKeyRowOrHeadingAfterDelete(index), { injector: this.injector });
       });
+  }
+
+  private focusNextApiKeyRowOrHeadingAfterDelete(index: number): void {
+    const host = this.host.nativeElement;
+    const row = host.querySelectorAll('gr-row')[index];
+    const target = row?.querySelector<HTMLElement>('button:not(:disabled)') ?? host.querySelector<HTMLElement>('h1');
+    target?.focus();
   }
 
   permissionTooltip(key: ApiKeyInfo): string {

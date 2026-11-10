@@ -437,6 +437,23 @@ describe('ApiKeysComponent - row actions', () => {
     expect(notify.success).toHaveBeenCalledWith(toast);
   });
 
+  it.each([
+    { deleted: 'CI key', focused: 'the next key', expected: (root: HTMLElement) => root.querySelector('gr-row button') },
+    { deleted: 'Nix key', focused: 'the page heading', expected: (root: HTMLElement) => root.querySelector('h1') },
+  ])('moves focus to $focused after deleting $deleted', async ({ deleted, expected }) => {
+    const fixture = setup([unmanagedKey, managedKey], { deleteApiKey: vi.fn(() => of('ok')) });
+    const root = fixture.nativeElement as HTMLElement;
+    document.body.appendChild(root);
+    onTestFinished(() => root.remove());
+    const row = Array.from(root.querySelectorAll('gr-row')).find((candidate) => candidate.textContent?.includes(deleted))!;
+    fixture.componentInstance.deleteKey(deleted === unmanagedKey.name ? unmanagedKey : managedKey);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(row.isConnected).toBe(false);
+    expect(root.textContent).not.toContain(deleted);
+    expect(document.activeElement).toBe(expected(root));
+  });
+
   it.each(['revoke', 'delete'])('sends no %s when the confirmation is cancelled', (action) => {
     const revokeApiKey = vi.fn(() => of('ok'));
     const deleteApiKey = vi.fn(() => of('ok'));
