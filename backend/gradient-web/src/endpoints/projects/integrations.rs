@@ -386,7 +386,7 @@ pub async fn put_integration(
 
         let mut response = integration_response(&state.web_db, &base, created).await?;
         if link.created_any_integration {
-            response.connected_tasks = connect_tasks(&state.web_db, project.id).await?;
+            response.connected_tasks = connect_tasks(&state.web_db, project.id).await;
         }
         audit
             .write(
@@ -549,7 +549,7 @@ pub(super) async fn create_integrations_and_attach_matching_tasks(
     }
     txn.commit().await?;
 
-    let connected_tasks = connect_tasks(db, shared.project).await?;
+    let connected_tasks = connect_tasks(db, shared.project).await;
     let mut responses = Vec::with_capacity(created.len());
     for (integration, generated_secret) in created {
         let mut response = integration_response(db, base, integration).await?;
@@ -560,9 +560,19 @@ pub(super) async fn create_integrations_and_attach_matching_tasks(
     Ok(responses)
 }
 
-async fn connect_tasks(db: &gradient_db::WebDb, project: ProjectId) -> WebResult<Vec<String>> {
-    let tasks = gradient_db::tasks::of_project(project).all(db).await?;
-    let integrations = gradient_db::integrations::of_project(db, project).await?;
+async fn connect_tasks(db: &gradient_db::WebDb, project: ProjectId) -> Vec<String> {
+    let loaded = async {
+        let tasks = gradient_db::tasks::of_project(project).all(db).await?;
+        let integrations = gradient_db::integrations::of_project(db, project).await?;
+        Ok::<_, sea_orm::DbErr>((tasks, integrations))
+    };
+    let (tasks, integrations) = match loaded.await {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            tracing::warn!(project = %project, error = %e, "Failed to load project tasks and integration to connect tasks to the new integration.");
+            return Vec::new();
+        }
+    };
     let mut connected = Vec::new();
     for task in tasks.iter().filter(|t| !t.managed) {
         match crate::endpoints::tasks::auto_attach::apply(db, task, &integrations).await {
@@ -573,7 +583,7 @@ async fn connect_tasks(db: &gradient_db::WebDb, project: ProjectId) -> WebResult
             }
         }
     }
-    Ok(connected)
+    connected
 }
 
 fn http_endpoint_url(url: &str) -> WebResult<String> {
@@ -746,7 +756,7 @@ pub async fn get_integration_deliveries(
     operation_id = "patchProjectIntegration",
     tag = "integrations",
     summary = "Update integration",
-    description = "Patch-updates an integration. Omit a field to leave it unchanged.\nPass an empty string for `access_token` to **clear** it. Inbound integrations reject an empty `secret` with `400`.\n\n`git_host_type=github` rows are managed by the App and installation; PATCH\nrejects them with `400`. Delete the row to remove the integration.\nState-managed integrations are rejected with `403`.",
+    description = "Patch an integration. Omitted fields stay unchanged.\nAn empty string for `access_token` or `endpoint_url` on an inbound integration **clear** that field. Outbound integrations need both fields and return `400`. Inbound integrations reject an empty `secret` with `400`.\n\nThe App and the installation manage rows in `git_host_type=github`. PATCH\nrequests on these rows receive `400`. To delete an integration, delete its row.\nState-managed integrations receive `403`.",
     params(ProjectPath, ("id" = IntegrationId, Path)),
     request_body = PatchIntegrationRequest,
     responses((status = OK, description = "Updated integration", body = IntegrationResponse), WebError)
@@ -804,10 +814,12 @@ pub async fn patch_integration(
 
     if let Some(url) = body.endpoint_url {
         let trimmed = url.trim();
-        active.endpoint_url = Set(if trimmed.is_empty() {
-            None
-        } else {
-            Some(http_endpoint_url(trimmed)?)
+        active.endpoint_url = Set(match (kind, trimmed.is_empty()) {
+            (IntegrationKind::Outbound, true) => {
+                return Err(ProjectRefusal::InvalidEndpointUrl.into());
+            }
+            (_, true) => None,
+            (_, false) => Some(http_endpoint_url(trimmed)?),
         });
     }
 
@@ -827,13 +839,17 @@ pub async fn patch_integration(
     }
 
     if let Some(token) = body.access_token {
+        let token = token.trim();
+        if token.is_empty() && kind == IntegrationKind::Outbound {
+            return Err(SharedRefusal::EmptyField("access_token").into());
+        }
         active.encrypted_refresh_token = Set(None);
         active.access_token_expires_at = Set(None);
         active.access_token = Set(if token.is_empty() {
             None
         } else {
             Some(
-                encrypt_secret_with_file(&state.config.secrets.crypt_file, &token)
+                encrypt_secret_with_file(&state.config.secrets.crypt_file, token)
                     .context("encrypt token")?,
             )
         });

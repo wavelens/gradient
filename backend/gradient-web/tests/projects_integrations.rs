@@ -517,7 +517,8 @@ async fn inbound_create_with_secret_returns_no_generated_secret() {
 }
 
 #[tokio::test]
-async fn a_failed_task_lookup_after_create_is_reported_as_an_error() {
+async fn inbound_create_returns_200_with_generated_secret_when_project_task_lookup_fails_after_save()
+ {
     let session_id = SessionId::now_v7();
     let db = with_project_manage(with_auth(mock_db(), session_id))
         .append_query_results([Vec::<integration::Model>::new()])
@@ -537,7 +538,10 @@ async fn a_failed_task_lookup_after_create_is_reported_as_an_error() {
         }))
         .await;
 
-    res.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert!(body["message"]["generated_secret"].is_string(), "{body}");
+    assert_eq!(body["message"]["connected_tasks"], serde_json::json!([]));
 }
 
 #[tokio::test]
@@ -576,6 +580,38 @@ async fn outbound_create_needs_endpoint_url_and_access_token() {
                 format!("Bearer {}", make_token(session_id)),
             )
             .json(&request)
+            .await;
+
+        res.assert_status_bad_request();
+        let body: Value = res.json();
+        assert_eq!(body["message"], message);
+    }
+}
+
+#[tokio::test]
+async fn outbound_update_rejects_empty_endpoint_url_and_access_token() {
+    for (body, message) in [
+        (
+            serde_json::json!({ "endpoint_url": " " }),
+            "endpoint_url must be an http or https URL",
+        ),
+        (
+            serde_json::json!({ "access_token": " " }),
+            "access_token must not be empty",
+        ),
+    ] {
+        let session_id = SessionId::now_v7();
+        let row = gitea_outbound_row();
+        let db = with_project_manage(with_auth(mock_db(), session_id))
+            .append_query_results([vec![row.clone()]]);
+
+        let res = server_with_crypt_key(db)
+            .patch(&delete_url(row.id))
+            .add_header(
+                "authorization",
+                format!("Bearer {}", make_token(session_id)),
+            )
+            .json(&body)
             .await;
 
         res.assert_status_bad_request();

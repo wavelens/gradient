@@ -239,7 +239,7 @@ pub async fn post_project_subscribe_cache(
         return Ok(ok_json("Subscription requested".to_string()));
     }
 
-    let unparks_builds = mode.writes_build_outputs_to_cache();
+    let writes_to_cache = mode.writes_build_outputs_to_cache();
     let mode_name = mode_label(&mode);
 
     gradient_db::rows::insert::<EProjectCache, _>(
@@ -258,7 +258,7 @@ pub async fn post_project_subscribe_cache(
 
     // Re-queue the evaluations parked with `WaitingReason::NoCache`. Only ReadWrite and WriteOnly
     // subscriptions unblock builds. ReadOnly subscriptions leave the project without a push target.
-    if unparks_builds
+    if writes_to_cache
         && let Err(e) = gradient_ci::unpark_no_cache_for_project(&state.web_db, project.id).await
     {
         tracing::warn!(
@@ -268,7 +268,9 @@ pub async fn post_project_subscribe_cache(
         );
     }
 
-    enqueue_backfill_signatures(&state.web_db, project.id, cache.id).await;
+    if writes_to_cache {
+        enqueue_backfill_signatures(&state.web_db, project.id, cache.id).await;
+    }
     audit
         .write(
             Action::CacheSubscriptionRequest,
@@ -410,6 +412,7 @@ pub async fn delete_project_subscribe_cache(
         ..
     }: ProjectScope<Requires<can::ManageSubscriptions>>,
     audit: Audit,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache: String = params.param("cache")?;
 
@@ -445,6 +448,7 @@ pub async fn delete_project_subscribe_cache(
     };
 
     gradient_db::rows::delete::<EProjectCache, _>(&db.web_db, subscription).await?;
+    reauth_project_workers(&db.web_db, &scheduler, project.id).await;
     audit
         .write(
             Action::CacheSubscriptionCancel,

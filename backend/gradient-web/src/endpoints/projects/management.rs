@@ -335,8 +335,14 @@ pub async fn put(
 
     // A connected worker is learning about the new project only when it re-auths.
     for team in granted_teams {
-        let workers = gradient_db::teams::team_worker_ids(&state.web_db, team).await?;
-        crate::endpoints::teams::workers::reauth_team_workers(&scheduler, &workers).await;
+        match gradient_db::teams::team_worker_ids(&state.web_db, team).await {
+            Ok(workers) => {
+                crate::endpoints::teams::workers::reauth_team_workers(&scheduler, &workers).await;
+            }
+            Err(e) => {
+                tracing::warn!(team = %team, error = %e, "Failed to read the workers of the team to request re-authentication for the new project");
+            }
+        }
     }
 
     Ok(Json(BaseResponse {
