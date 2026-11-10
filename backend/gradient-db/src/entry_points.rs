@@ -12,6 +12,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, Order, PaginatorTrait, QueryFilter,
     QueryOrder, QuerySelect, Select,
 };
+use std::collections::HashMap;
 
 fn built(evaluation: EvaluationId, search: Option<&str>) -> Select<EEntryPoint> {
     let has_build_job = Query::select()
@@ -74,6 +75,29 @@ pub async fn of_evaluations<C: ConnectionTrait>(
         .filter(CEntryPoint::Evaluation.is_in(evaluations.iter().copied()))
         .all(db)
         .await
+}
+
+pub async fn attribute_paths_by_derivation_id<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+    derivations: &[DerivationId],
+) -> Result<HashMap<DerivationId, Vec<String>>, DbErr> {
+    let entry_points = crate::fetch_in_chunks(derivations, |chunk| {
+        EEntryPoint::find()
+            .filter(CEntryPoint::Evaluation.eq(evaluation))
+            .filter(CEntryPoint::Derivation.is_in(chunk))
+            .order_by_asc(CEntryPoint::Eval)
+            .all(db)
+    })
+    .await?;
+    let mut paths: HashMap<DerivationId, Vec<String>> = HashMap::new();
+    for entry_point in entry_points {
+        paths
+            .entry(entry_point.derivation)
+            .or_default()
+            .push(entry_point.eval);
+    }
+    Ok(paths)
 }
 
 pub async fn by_attribute<C: ConnectionTrait>(

@@ -67,6 +67,7 @@ fn build_rows() -> DatabaseConnection {
         }]])
         .append_query_results([Vec::<gradient_entity::build_attempt::Model>::new()])
         .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+        .append_query_results([Vec::<gradient_entity::entry_point::Model>::new()])
         .into_connection()
 }
 

@@ -299,6 +299,13 @@ pub async fn get_evaluation_builds(
         }
     }
 
+    let entry_points = gradient_db::entry_points::attribute_paths_by_derivation_id(
+        &state.web_db,
+        evaluation.id,
+        &page_drv_ids,
+    )
+    .await?;
+
     // The latest attempt is looked up for the whole page at once. A per-build query here was an N+1
     // that made large build lists take ~10s (#391).
     let page_shared_build_ids: Vec<DerivationBuildId> = page_slice
@@ -361,6 +368,7 @@ pub async fn get_evaluation_builds(
             prioritized: with_qos.contains(&j.derivation_build),
             ifd: drv.ifd,
             continued_in_evaluation: continued_in.get(&j.derivation_build).copied(),
+            entry_points: entry_points.get(&j.derivation).cloned().unwrap_or_default(),
         });
     }
 

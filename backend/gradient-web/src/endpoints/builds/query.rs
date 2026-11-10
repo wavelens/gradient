@@ -39,6 +39,7 @@ pub struct BuildWithOutputs {
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
     pub progress: Option<BuildProgress>,
+    pub entry_points: Vec<String>,
 }
 
 fn running_progress(
@@ -117,6 +118,15 @@ pub async fn get_build(
     .await?
     .contains(&shared_build.id);
 
+    let entry_points = gradient_db::entry_points::attribute_paths_by_derivation_id(
+        &state.web_db,
+        build_job.evaluation,
+        &[derivation.id],
+    )
+    .await?
+    .remove(&derivation.id)
+    .unwrap_or_default();
+
     let build_with_outputs = BuildWithOutputs {
         id: build_job.id,
         evaluation: build_job.evaluation,
@@ -136,6 +146,7 @@ pub async fn get_build(
             shared_build.status,
             Instant::now(),
         ),
+        entry_points,
     };
 
     Ok(ok_json(build_with_outputs))

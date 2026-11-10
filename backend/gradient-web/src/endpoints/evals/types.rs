@@ -34,6 +34,7 @@ pub struct BuildItem {
     pub prioritized: bool,
     pub ifd: bool,
     pub continued_in_evaluation: Option<EvaluationId>,
+    pub entry_points: Vec<String>,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
