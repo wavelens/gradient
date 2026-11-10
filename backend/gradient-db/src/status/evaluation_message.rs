@@ -98,9 +98,7 @@ impl EvaluationFailure<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::mock_db;
-    use sea_orm::Value;
-    use std::collections::BTreeMap;
+    use gradient_fixtures::shape::shape;
 
     fn unmet(architecture: &str, features: &[&str], build_count: u32) -> UnmetRequirement {
         UnmetRequirement {
@@ -123,20 +121,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inserting_evaluation_message_with_existing_text_stores_nothing() {
-        let already_stored = [BTreeMap::from([("num_items", Value::BigInt(Some(1)))])];
-        let db = mock_db()
-            .append_query_results([already_stored])
-            .into_connection();
+    async fn repeated_text_is_stored_once_per_level() {
+        let evaluation = EvaluationId::now_v7();
+        let db = shape().evaluation(evaluation).into_database().await;
+        let connection = db.connection();
         let warning = EvaluationWarning::UpstreamUnanswered {
             url: "https://cache.example",
         };
+        let text = warning.to_string();
 
-        warning
-            .insert(&db, EvaluationId::now_v7())
-            .await
-            .expect("no insert follows the count");
+        for _ in 0..2 {
+            warning
+                .insert(&connection, evaluation)
+                .await
+                .expect("the warning is written");
+        }
+        insert_evaluation_message(
+            &connection,
+            evaluation,
+            MessageLevel::Error,
+            text.clone(),
+            Some("worker".to_owned()),
+        )
+        .await
+        .expect("the error is written");
 
-        assert_eq!(db.into_transaction_log().len(), 1);
+        let mut rows = db.rows::<EEvaluationMessage>().await;
+        rows.sort_by_key(|row| row.id);
+        let levels: Vec<MessageLevel> = rows.into_iter().map(|row| row.level).collect();
+        assert_eq!(levels, [MessageLevel::Warning, MessageLevel::Error]);
+        assert_eq!(db.error_messages(evaluation).await, [text]);
+        db.finish().await;
     }
 }

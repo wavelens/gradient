@@ -186,6 +186,7 @@ pub(super) async fn insert_evaluation_message<C: ConnectionTrait>(
 ) -> Result<(), sea_orm::DbErr> {
     let recorded = EEvaluationMessage::find()
         .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
+        .filter(CEvaluationMessage::Level.eq(level.clone()))
         .filter(CEvaluationMessage::Message.eq(message.as_str()))
         .count(db)
         .await?;
