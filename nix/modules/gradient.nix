@@ -803,9 +803,11 @@ in {
             handle /cache/* {
               reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
             }
-            handle /proto {
-              reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
-            }
+            ${lib.optionalString (cfg.proto.discoverable && cfg.proto.public) ''
+              handle /proto {
+                reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
+              }
+            ''}
 
             ${
               if cfg.frontend.enable then
