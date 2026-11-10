@@ -647,7 +647,7 @@ fn action_test_error_user_reason(error: &anyhow::Error) -> String {
         .chain()
         .find_map(|e| e.downcast_ref::<reqwest::Error>())
     else {
-        return error.root_cause().to_string();
+        return "The action failed. Check the server logs for details.".to_owned();
     };
     let host = http
         .url()
@@ -796,4 +796,20 @@ pub async fn get_delivery(
         .or_not_found(Resource::Delivery)?;
 
     Ok(ok_json(r.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_failure;
+    use crate::error::WebError;
+
+    #[test]
+    fn an_unknown_failure_hides_its_details() {
+        let error = anyhow::anyhow!("open /var/lib/gradient/internal-host.example/key")
+            .context("send to the Git host");
+        let WebError::BadGateway(_, reason) = test_failure(error) else {
+            panic!("an unknown failure reads as a bad gateway");
+        };
+        assert!(!reason.contains("internal-host"), "{reason}");
+    }
 }
