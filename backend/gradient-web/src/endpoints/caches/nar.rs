@@ -5,6 +5,7 @@
  */
 
 use super::helpers::{CacheContext, cache_client_ip};
+use super::refusal::CacheRefusal;
 use crate::api_spec::Binary;
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
@@ -131,7 +132,7 @@ pub async fn upstream_nar(
     }
 
     let Some(object) =
-        fetch_from_upstream_caches(&sources, &upstream_nar_path(&path, query.as_deref()), None)
+        fetch_from_upstream_caches(&sources, &upstream_nar_path(&path, query.as_deref())?, None)
             .await
     else {
         return Err(WebError::not_found(Resource::NarInUpstream));
@@ -174,11 +175,21 @@ fn spawn_fetch_stamp(shutdown: &Shutdown, worker_db: &WorkerDb, cache_id: CacheI
 
 /// axum's `{*path}` capture is dropping the query. Hash-routed upstreams like
 /// `cache.nixos-cuda.org` need `?hash=<storehash>` and answer 404 without it.
-fn upstream_nar_path(path: &str, query: Option<&str>) -> String {
-    match query {
+fn upstream_nar_path(path: &str, query: Option<&str>) -> Result<String, CacheRefusal> {
+    let file = path
+        .strip_prefix("nar/")
+        .ok_or(CacheRefusal::InvalidNarFilePath)?;
+    if file.is_empty()
+        || file
+            .split('/')
+            .any(|seg| seg.is_empty() || seg == ".." || seg == ".")
+    {
+        return Err(CacheRefusal::InvalidNarFilePath);
+    }
+    Ok(match query {
         Some(q) if !q.is_empty() => format!("{path}?{q}"),
         _ => path.to_owned(),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -270,10 +281,27 @@ mod tests {
     #[test]
     fn upstream_nar_path_forwards_query_string() {
         assert_eq!(
-            upstream_nar_path("nar/0njia.nar", Some("hash=6713ipl")),
+            upstream_nar_path("nar/0njia.nar", Some("hash=6713ipl")).unwrap(),
             "nar/0njia.nar?hash=6713ipl"
         );
-        assert_eq!(upstream_nar_path("nar/x.nar", None), "nar/x.nar");
-        assert_eq!(upstream_nar_path("nar/x.nar", Some("")), "nar/x.nar");
+        assert_eq!(upstream_nar_path("nar/x.nar", None).unwrap(), "nar/x.nar");
+        assert_eq!(
+            upstream_nar_path("nar/x.nar", Some("")).unwrap(),
+            "nar/x.nar"
+        );
+    }
+
+    #[test]
+    fn upstream_nar_path_stays_below_nar() {
+        for path in [
+            "",
+            "nar/",
+            "latest/meta-data",
+            "nar/../admin",
+            "nar//x",
+            "nar/./x",
+        ] {
+            assert!(upstream_nar_path(path, None).is_err(), "{path}");
+        }
     }
 }

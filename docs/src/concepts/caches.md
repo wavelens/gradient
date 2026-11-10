@@ -40,6 +40,8 @@ The modes control traffic direction:
 
 Caches declared in [`services.gradient.state`](../reference/state.md#cachesname) accept Internal and HTTP upstream caches (`external` in Nix). Configure Gradient Proto upstream caches in the UI.
 
+Add an upstream cache through the UI or API. Set the URL to a public address. Gradient rejects localhost, loopback, private, link-local, and addresses for cloud metadata at that URL. Declare the upstream cache in `services.gradient.state` to use the cache on an internal network.
+
 Use **Deactivate** to disable an upstream cache while keeping the entry. Use **Activate** to switch it back on. Inactive upstream caches keep their settings. Gradient never queries an inactive upstream cache. Paths then come from the remaining upstream caches. Declared caches also accept **Deactivate** and **Activate**. The next server start will restore the declared `active` value.
 
 Use **Test** on an HTTP upstream cache to fetch its `nix-cache-info` over HTTP/1.1 and over HTTP/2. Both results appear in a notification.

@@ -33,8 +33,10 @@ pub(crate) enum CacheRefusal {
     MaxStorageOutOfRange,
     #[error("Substituter URL is required.")]
     UpstreamUrlRequired,
-    #[error("Substituter URL must start with http:// or https://.")]
-    UpstreamUrlWithoutHttpScheme,
+    #[error("Invalid upstream cache URL: {0}")]
+    UpstreamCacheUrlInvalid(String),
+    #[error("Use only files under `nar/` for upstream NAR paths.")]
+    InvalidNarFilePath,
     #[error("Public key is required for an Http binary cache.")]
     HttpPublicKeyRequired,
     #[error(
@@ -89,7 +91,8 @@ impl Refusal for CacheRefusal {
             | Self::MissingHashQuery
             | Self::MaxStorageOutOfRange
             | Self::UpstreamUrlRequired
-            | Self::UpstreamUrlWithoutHttpScheme
+            | Self::UpstreamCacheUrlInvalid(_)
+            | Self::InvalidNarFilePath
             | Self::HttpPublicKeyRequired
             | Self::ApiKeyOverCleartext
             | Self::RemoteCacheNameRequired

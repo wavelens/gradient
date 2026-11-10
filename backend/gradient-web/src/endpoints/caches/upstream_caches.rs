@@ -25,6 +25,7 @@ use gradient_entity::cache_upstream::{CacheUpstreamKind, CacheUpstreamSource};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::*;
 use gradient_util::http::HttpVersion;
+use gradient_util::http_validation::validate_webhook_url;
 use sea_orm::ActiveValue::Set;
 use sea_orm::IntoActiveModel;
 use serde::{Deserialize, Serialize};
@@ -108,19 +109,17 @@ fn patch_edits_managed_fields(body: &PatchUpstreamRequest) -> bool {
         || body.http1_only.is_some()
 }
 
-fn validate_url(url: &str) -> Result<(), WebError> {
-    let u = url.trim();
-    if u.is_empty() {
+fn validate_upstream_cache_url(url: &str) -> Result<(), WebError> {
+    let url = url.trim();
+    if url.is_empty() {
         return Err(CacheRefusal::UpstreamUrlRequired.into());
     }
-    if !(u.starts_with("http://") || u.starts_with("https://")) {
-        return Err(CacheRefusal::UpstreamUrlWithoutHttpScheme.into());
-    }
+    validate_webhook_url(url).map_err(|e| CacheRefusal::UpstreamCacheUrlInvalid(e.to_string()))?;
     Ok(())
 }
 
 fn validate_http(url: &str, public_key: &str) -> Result<(), WebError> {
-    validate_url(url)?;
+    validate_upstream_cache_url(url)?;
     if public_key.trim().is_empty() {
         return Err(CacheRefusal::HttpPublicKeyRequired.into());
     }
@@ -132,7 +131,7 @@ fn validate_gradient_proto(
     remote_cache: &str,
     api_key: Option<&str>,
 ) -> Result<(), WebError> {
-    validate_url(url)?;
+    validate_upstream_cache_url(url)?;
     if api_key.is_some_and(|k| !k.trim().is_empty()) && !url.trim().starts_with("https://") {
         return Err(CacheRefusal::ApiKeyOverCleartext.into());
     }
@@ -409,9 +408,13 @@ pub async fn patch_cache_upstream(
     if is_external {
         row.mode = Set(CacheSubscriptionMode::ReadOnly);
         if let Some(url) = body.url {
-            row.url = Set(Some(url));
+            validate_upstream_cache_url(&url)?;
+            row.url = Set(Some(url.trim().to_string()));
         }
         if let Some(key) = body.public_key {
+            if key.trim().is_empty() {
+                return Err(CacheRefusal::HttpPublicKeyRequired.into());
+            }
             row.public_key = Set(Some(key));
         }
         if let Some(http1_only) = body.http1_only {
@@ -531,6 +534,21 @@ mod tests {
         assert!(validate_http("https://x", "").is_err());
         assert!(validate_http("not a url", "k").is_err());
         assert!(validate_http("https://cache.nixos.org", "cache.nixos.org-1:abc").is_ok());
+    }
+
+    #[test]
+    fn upstream_cache_url_rejects_internal_addresses() {
+        for url in [
+            "http://169.254.169.254",
+            "http://localhost:8080",
+            "http://127.0.0.1/nix-cache",
+            "http://10.0.0.5",
+            "http://[::1]:5000",
+        ] {
+            assert!(validate_upstream_cache_url(url).is_err(), "{url}");
+            assert!(validate_gradient_proto(url, "prod", None).is_err(), "{url}");
+        }
+        assert!(validate_upstream_cache_url(" https://cache.nixos.org ").is_ok());
     }
 
     #[test]
