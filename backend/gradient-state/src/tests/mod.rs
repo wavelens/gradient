@@ -143,6 +143,23 @@ fn state_task_with_two_default_triggers_rejected() {
 }
 
 #[test]
+fn state_validation_rejects_extra_allowed_url_prefix_with_whitespace() {
+    let mut cfg = reporter_cfg("github", "{}");
+    let project = cfg.projects.get_mut("acme").unwrap();
+    assert!(project.restrict_evaluation_fetches);
+    project.extra_allowed_uri_prefixes = vec!["github:".into(), "https://a https://b".into()];
+
+    let v = cfg.validate();
+
+    let rejected: Vec<_> = v
+        .errors
+        .iter()
+        .filter(|e| e.field == "projects.acme.extra_allowed_uri_prefixes")
+        .collect();
+    assert_eq!(rejected.len(), 1, "{:?}", v.errors);
+}
+
+#[test]
 fn state_reporter_trigger_accepts_declared_inbound_integration() {
     let integrations = r#"{
         "git-host": { "name": "git-host", "project": "acme", "kind": "inbound", "git_host_type": "forgejo", "created_by": "alice" }

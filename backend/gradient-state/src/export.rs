@@ -387,6 +387,8 @@ fn export_project(
         public: project.public,
         hide_build_requests: project.hide_build_requests,
         allow_exec_in_build_requests: project.allow_exec_in_build_requests,
+        restrict_evaluation_fetches: project.restrict_evaluation_fetches,
+        extra_allowed_uri_prefixes: project.extra_allowed_uri_prefixes.clone(),
         created_by: name_or_blank(username, project.created_by),
         members,
         teams,

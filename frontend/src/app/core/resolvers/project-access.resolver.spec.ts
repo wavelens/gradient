@@ -36,6 +36,8 @@ describe('projectAccessResolver', () => {
     public: true,
     hide_build_requests: false,
     allow_exec_in_build_requests: false,
+    restrict_evaluation_fetches: true,
+    extra_allowed_uri_prefixes: [],
     managed: false,
     created_by: 'u1',
     created_at: '2026-01-01T00:00:00',

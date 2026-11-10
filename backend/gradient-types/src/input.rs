@@ -37,6 +37,8 @@ pub enum InputError {
     InvalidFlakeDir(String),
     #[error("Repository URL query `{0}` is not supported, only `dir` is")]
     UnsupportedRepositoryQuery(String),
+    #[error("Keep the allowed URL prefix `{0}` non-empty and without whitespace")]
+    ExtraAllowedUrlPrefixEmptyOrWhitespace(String),
     #[error("Evaluation wildcard cannot have leading or trailing whitespace")]
     EvaluationWildcardWhitespace,
     #[error("Evaluation wildcard cannot have consecutive commas")]
@@ -234,6 +236,15 @@ pub fn check_index_name(s: &str) -> Result<(), InputError> {
 }
 
 pub const RESERVED_TASK_NAMES: &[&str] = &["build-request"];
+
+pub fn check_nix_restricted_evaluation_url_prefix(prefix: &str) -> Result<String, InputError> {
+    if prefix.is_empty() || prefix.contains(char::is_whitespace) {
+        return Err(InputError::ExtraAllowedUrlPrefixEmptyOrWhitespace(
+            prefix.to_owned(),
+        ));
+    }
+    Ok(prefix.to_owned())
+}
 
 pub fn check_task_name(s: &str) -> Result<(), InputError> {
     check_index_name(s)?;
@@ -513,6 +524,26 @@ pub fn decode_blake3_hex(hash: &str) -> Result<Vec<u8>, InputError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_allowed_url_prefix_must_be_one_non_empty_word() {
+        for prefix in [
+            "github:",
+            "https://example.com/archive",
+            "git+ssh://git@h/x.git",
+        ] {
+            assert!(
+                check_nix_restricted_evaluation_url_prefix(prefix).is_ok(),
+                "{prefix}"
+            );
+        }
+        for prefix in ["", "https://a https://b", " https://a", "https://a\n"] {
+            assert!(
+                check_nix_restricted_evaluation_url_prefix(prefix).is_err(),
+                "{prefix:?}"
+            );
+        }
+    }
 
     #[test]
     fn accepts_remote_flake_refs() {

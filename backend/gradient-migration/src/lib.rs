@@ -63,6 +63,7 @@ mod m20261127_000000_delete_worker_registration_for_deleted_project_and_add_proj
 mod m20261128_000000_add_dispatched_at_desc_index_to_dispatched_job;
 mod m20261128_000001_add_view_permission_bit_to_all_roles;
 mod m20261129_000000_integration_token_expiry_columns;
+mod m20261129_000001_add_restrict_evaluation_fetches_and_extra_allowed_uri_prefixes_to_project;
 
 pub struct UpgradeFloor {
     pub release: &'static str,
@@ -151,6 +152,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261128_000000_add_dispatched_at_desc_index_to_dispatched_job::Migration),
             Box::new(m20261128_000001_add_view_permission_bit_to_all_roles::Migration),
             Box::new(m20261129_000000_integration_token_expiry_columns::Migration),
+            Box::new(m20261129_000001_add_restrict_evaluation_fetches_and_extra_allowed_uri_prefixes_to_project::Migration),
         ]
     }
 }

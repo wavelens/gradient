@@ -425,6 +425,8 @@ mod tests {
             public: false,
             hide_build_requests: false,
             allow_exec_in_build_requests: false,
+            restrict_evaluation_fetches: true,
+            extra_allowed_uri_prefixes: vec![],
             created_by: gradient_types::ids::UserId::nil(),
             created_at: gradient_types::now(),
             managed: false,

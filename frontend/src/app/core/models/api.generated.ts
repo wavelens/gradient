@@ -1988,6 +1988,8 @@ export interface PatchProjectRequest {
   description?: string | null;
   hide_build_requests?: boolean | null;
   allow_exec_in_build_requests?: boolean | null;
+  restrict_evaluation_fetches?: boolean | null;
+  extra_allowed_uri_prefixes?: string[] | null;
 }
 
 export interface PatchRequest {
@@ -2116,6 +2118,8 @@ export interface ProjectResponse {
   public: boolean;
   hide_build_requests: boolean;
   allow_exec_in_build_requests: boolean;
+  restrict_evaluation_fetches: boolean;
+  extra_allowed_uri_prefixes: string[];
   managed: boolean;
   created_by: UserId;
   created_at: string;
@@ -2145,6 +2149,8 @@ export interface ProjectSummary {
   public: boolean;
   hide_build_requests: boolean;
   allow_exec_in_build_requests: boolean;
+  restrict_evaluation_fetches: boolean;
+  extra_allowed_uri_prefixes: string[];
   managed: boolean;
   created_by: UserId;
   created_at: string;

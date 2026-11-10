@@ -20129,6 +20129,16 @@ components:
           type:
           - boolean
           - 'null'
+        restrict_evaluation_fetches:
+          type:
+          - boolean
+          - 'null'
+        extra_allowed_uri_prefixes:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
     PatchRequest:
       type: object
       required:
@@ -20501,6 +20511,8 @@ components:
       - public
       - hide_build_requests
       - allow_exec_in_build_requests
+      - restrict_evaluation_fetches
+      - extra_allowed_uri_prefixes
       - managed
       - created_by
       - created_at
@@ -20525,6 +20537,12 @@ components:
           type: boolean
         allow_exec_in_build_requests:
           type: boolean
+        restrict_evaluation_fetches:
+          type: boolean
+        extra_allowed_uri_prefixes:
+          type: array
+          items:
+            type: string
         managed:
           type: boolean
         created_by:
@@ -20581,6 +20599,8 @@ components:
       - public
       - hide_build_requests
       - allow_exec_in_build_requests
+      - restrict_evaluation_fetches
+      - extra_allowed_uri_prefixes
       - managed
       - created_by
       - created_at
@@ -20606,6 +20626,12 @@ components:
           type: boolean
         allow_exec_in_build_requests:
           type: boolean
+        restrict_evaluation_fetches:
+          type: boolean
+        extra_allowed_uri_prefixes:
+          type: array
+          items:
+            type: string
         managed:
           type: boolean
         created_by:

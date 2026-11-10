@@ -24,6 +24,8 @@ pub struct Model {
     pub public: bool,
     pub hide_build_requests: bool,
     pub allow_exec_in_build_requests: bool,
+    pub restrict_evaluation_fetches: bool,
+    pub extra_allowed_uri_prefixes: Vec<String>,
     pub created_by: UserId,
     pub created_at: NaiveDateTime,
     pub managed: bool,
@@ -43,6 +45,14 @@ impl std::fmt::Debug for Model {
             .field(
                 "allow_exec_in_build_requests",
                 &self.allow_exec_in_build_requests,
+            )
+            .field(
+                "restrict_evaluation_fetches",
+                &self.restrict_evaluation_fetches,
+            )
+            .field(
+                "extra_allowed_uri_prefixes",
+                &self.extra_allowed_uri_prefixes,
             )
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)

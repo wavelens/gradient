@@ -5,6 +5,7 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
+use gradient_types::input::check_nix_restricted_evaluation_url_prefix;
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
@@ -32,6 +33,15 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                     format!("projects.{}.id", project.name),
                     format!("Invalid UUID '{}'", id),
                 ),
+            }
+        }
+
+        for prefix in &project.extra_allowed_uri_prefixes {
+            if let Err(e) = check_nix_restricted_evaluation_url_prefix(prefix) {
+                errors.push(
+                    format!("projects.{}.extra_allowed_uri_prefixes", project.name),
+                    e.to_string(),
+                );
             }
         }
 
