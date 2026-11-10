@@ -6,8 +6,7 @@
 
 use super::refusal::CacheRefusal;
 use crate::access::{
-    AccessRefusal, CacheAccess, Caller, caller_cache_mask, has_cache_permission, load_cache,
-    reject_managed_cache,
+    AccessRefusal, CacheAccess, Caller, caller_cache_mask, load_cache, reject_managed_cache,
 };
 use crate::api_spec::CachePath;
 use crate::authorization::ApiKeyContext;
@@ -163,20 +162,37 @@ async fn load_upstream(
         .or_not_found(Resource::UpstreamCache)
 }
 
-async fn require_write_store_permission_for_push_upstream(
+async fn require_store_permissions_to_link_upstream_cache(
     db: &WebDb,
     user: &MUser,
-    upstream_cache: CacheId,
+    upstream: &MCache,
     mode: &CacheSubscriptionMode,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<()> {
-    let permission = CachePermission::WriteStore;
-    if !mode.writes_build_outputs_to_cache()
-        || has_cache_permission(db, user.id, upstream_cache, permission, api_key).await?
-    {
+    let needed: Vec<CachePermission> = [
+        (
+            *mode != CacheSubscriptionMode::WriteOnly && !upstream.public,
+            CachePermission::ReadStore,
+        ),
+        (
+            mode.writes_build_outputs_to_cache(),
+            CachePermission::WriteStore,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(required, permission)| required.then_some(permission))
+    .collect();
+    if needed.is_empty() {
         return Ok(());
     }
-    Err(AccessRefusal::MissingUpstreamCachePermission(permission).into())
+    let mask = caller_cache_mask(db, Caller::User(user), upstream.id, api_key).await?;
+    match needed
+        .into_iter()
+        .find(|&permission| !crate::permissions::cache_mask_grants(mask, permission))
+    {
+        Some(permission) => Err(AccessRefusal::MissingUpstreamCachePermission(permission).into()),
+        None => Ok(()),
+    }
 }
 
 #[utoipa::path(
@@ -233,7 +249,7 @@ pub async fn get_upstream_caches(
     operation_id = "addUpstreamCache",
     tag = "caches",
     summary = "Add upstream cache",
-    description = "Adds an upstream cache. Three types are supported, selected by the `type` discriminator:\n\n- **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.\n- **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.\n- **http** - an arbitrary Nix binary cache URL. Always ReadOnly.\n\nRequires `manageUpstreamCaches`. Internal upstream caches in ReadWrite or WriteOnly mode also require `writeStore` on the upstream cache.",
+    description = "Adds an upstream cache. Three types are supported, selected by the `type` discriminator:\n\n- **internal** - another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.\n- **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.\n- **http** - an arbitrary Nix binary cache URL. Always ReadOnly.\n\nCallers need `manageUpstreamCaches` for this cache. Callers also need `writeStore` for the upstream cache in ReadWrite mode or WriteOnly mode to link an internal upstream cache. Callers need `readStore` for the upstream cache in ReadOnly mode or ReadWrite mode unless the upstream cache is public.",
     params(CachePath),
     request_body = AddUpstreamRequest,
     responses((status = OK, description = "Upstream added - returns the new upstream UUID", body = CacheUpstreamId), WebError)
@@ -267,10 +283,10 @@ pub async fn put_cache_upstream(
                 return Err(CacheRefusal::CacheIsOwnUpstream.into());
             }
             let mode = mode.unwrap_or(CacheSubscriptionMode::ReadWrite);
-            require_write_store_permission_for_push_upstream(
+            require_store_permissions_to_link_upstream_cache(
                 &db.web_db,
                 &user,
-                upstream.id,
+                &upstream,
                 &mode,
                 api_key.as_ref(),
             )
@@ -344,7 +360,7 @@ pub async fn put_cache_upstream(
     operation_id = "patchUpstreamCache",
     tag = "caches",
     summary = "Update upstream cache",
-    description = "Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;\n`url`, `public_key` and `http1_only` may be updated. For internal upstream caches only `mode` and `display_name` apply.\n`active` toggles any upstream cache. An inactive upstream cache is kept but never queried.\nA state-managed cache accepts only `active`, and the next server start restores the declared value.\nRequires `manageUpstreamCaches`. Internal upstream caches in ReadWrite or WriteOnly mode also require `writeStore` on the upstream cache.",
+    description = "Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;\n`url`, `public_key` and `http1_only` may be updated. For internal upstream caches only `mode` and `display_name` apply.\n`active` toggles any upstream cache. An inactive upstream cache is kept but never queried.\nA state-managed cache accepts only `active`, and the next server start restores the declared value.\nCallers need `manageUpstreamCaches` for this cache. Callers also need `writeStore` for the upstream cache in ReadWrite mode or WriteOnly mode to link an internal upstream cache. Callers need `readStore` for the upstream cache in ReadOnly mode or ReadWrite mode unless the upstream cache is public.",
     params(CachePath, ("id" = CacheUpstreamId, Path)),
     request_body = PatchUpstreamRequest,
     responses((status = OK, description = "Updated", body = String, content_type = "application/json"), WebError)
@@ -368,10 +384,13 @@ pub async fn patch_cache_upstream(
     let record = load_upstream(&db.web_db, cache.id, upstream_id).await?;
 
     if let (Some(upstream_cache), Some(mode)) = (record.upstream_cache, &body.mode) {
-        require_write_store_permission_for_push_upstream(
+        let upstream = gradient_db::lookup::by_id::<ECache, _>(&db.web_db, upstream_cache)
+            .await?
+            .or_not_found(Resource::Cache)?;
+        require_store_permissions_to_link_upstream_cache(
             &db.web_db,
             &user,
-            upstream_cache,
+            &upstream,
             mode,
             api_key.as_ref(),
         )

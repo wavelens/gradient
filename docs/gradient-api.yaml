@@ -4702,7 +4702,7 @@ paths:
         - **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.
         - **http** - an arbitrary Nix binary cache URL. Always ReadOnly.
 
-        Requires `manageUpstreamCaches`. Internal upstream caches in ReadWrite or WriteOnly mode also require `writeStore` on the upstream cache.
+        Callers need `manageUpstreamCaches` for this cache. Callers also need `writeStore` for the upstream cache in ReadWrite mode or WriteOnly mode to link an internal upstream cache. Callers need `readStore` for the upstream cache in ReadOnly mode or ReadWrite mode unless the upstream cache is public.
       operationId: addUpstreamCache
       parameters:
       - name: cache
@@ -4780,7 +4780,7 @@ paths:
         `url`, `public_key` and `http1_only` may be updated. For internal upstream caches only `mode` and `display_name` apply.
         `active` toggles any upstream cache. An inactive upstream cache is kept but never queried.
         A state-managed cache accepts only `active`, and the next server start restores the declared value.
-        Requires `manageUpstreamCaches`. Internal upstream caches in ReadWrite or WriteOnly mode also require `writeStore` on the upstream cache.
+        Callers need `manageUpstreamCaches` for this cache. Callers also need `writeStore` for the upstream cache in ReadWrite mode or WriteOnly mode to link an internal upstream cache. Callers need `readStore` for the upstream cache in ReadOnly mode or ReadWrite mode unless the upstream cache is public.
       operationId: patchUpstreamCache
       parameters:
       - name: cache

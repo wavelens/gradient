@@ -36,7 +36,7 @@ pub(crate) enum AccessRefusal {
     KeyPinnedToDifferentCache,
     #[error("Requests to this cache need the \"{}\" permission.", .0.permission_label())]
     MissingCachePermission(CachePermission),
-    #[error("A cache admin can push build outputs to the upstream cache only with the \"{}\" permission on that cache.", .0.permission_label())]
+    #[error("The \"{}\" permission on that cache is mandatory for linking this upstream cache.", .0.permission_label())]
     MissingUpstreamCachePermission(CachePermission),
 }
 
