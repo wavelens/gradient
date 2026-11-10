@@ -564,7 +564,6 @@ in {
             GRADIENT_WORKER_EXEC_IMAGE = "${exec.image}";
             GRADIENT_WORKER_EXEC_DEVICES = builtins.toJSON exec.devices;
             GRADIENT_WORKER_EXEC_MOUNTS = builtins.toJSON exec.mounts;
-            GRADIENT_WORKER_EXEC_CLOUD_HYPERVISOR_BIN = lib.getExe' cfg.packages.cloudHypervisor "cloud-hypervisor";
             GRADIENT_WORKER_EXEC_VIRTIOFSD_BIN = lib.getExe cfg.packages.virtiofsd;
           } // lib.optionalAttrs (cfg.capabilities.exec && exec.sops.keyFile != null) {
             GRADIENT_WORKER_EXEC_SOPS_KEY_FILE = "%d/gradient_worker_exec_sops_key";

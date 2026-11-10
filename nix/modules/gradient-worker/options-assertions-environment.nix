@@ -10,7 +10,6 @@
     [ "exec" "devices" ]
     [ "exec" "mounts" ]
     [ "exec" "allow" "ports" ]
-    [ "exec" "cloudHypervisorBin" ]
     [ "exec" "virtiofsdBin" ]
     [ "build" "cgroup" ]
   ];

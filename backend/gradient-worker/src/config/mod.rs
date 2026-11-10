@@ -9,7 +9,7 @@ mod options;
 pub use options::*;
 
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use gradient_eval::pool::MemoryGuard;
@@ -213,7 +213,7 @@ impl ExecArgs {
         }
     }
 
-    pub fn vm_config(&self, guests_dir: PathBuf, worker_exe: &Path) -> VmConfig {
+    pub fn vm_config(&self, guests_dir: PathBuf) -> VmConfig {
         VmConfig {
             image: self.image.clone().unwrap_or_default(),
             pre_warm: self.pre_warm,
@@ -223,39 +223,19 @@ impl ExecArgs {
             mounts: self.mounts.clone(),
             bridge: self.bridge.clone(),
             subnet: self.subnet.clone(),
-            cloud_hypervisor_bin: self.cloud_hypervisor_bin.clone(),
             virtiofsd_bin: self.virtiofsd_bin.clone(),
             guests_dir,
-            supervisor_command: vec![
-                worker_exe.to_string_lossy().into_owned(),
-                "--exec-cloud-hypervisor-bin".to_owned(),
-                self.cloud_hypervisor_bin.clone(),
-                "--exec-virtiofsd-bin".to_owned(),
-                self.virtiofsd_bin.clone(),
-                "--exec-devices".to_owned(),
-                to_json(&self.devices),
-                "--exec-mounts".to_owned(),
-                to_json(&self.mounts),
-                "--exec-bridge".to_owned(),
-                self.bridge.clone(),
-                "--guest-supervisor".to_owned(),
-            ],
         }
     }
 
     pub fn supervisor_config(&self) -> SupervisorConfig {
         SupervisorConfig {
-            cloud_hypervisor_bin: self.cloud_hypervisor_bin.clone(),
             virtiofsd_bin: self.virtiofsd_bin.clone(),
             devices: self.devices.clone(),
             mounts: self.mounts.clone(),
             bridge: self.bridge.clone(),
         }
     }
-}
-
-fn to_json<T: serde::Serialize>(value: &T) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| "[]".to_owned())
 }
 
 fn parse_token_hashes(raw: &str) -> Vec<(String, String)> {
@@ -382,49 +362,6 @@ mod tests {
                 r#"[{"name":"gpu","vfio":["0000:17:00.0"],"dev":"/dev/kvm"}]"#,
             ])
             .is_err()
-        );
-    }
-
-    #[test]
-    fn the_vm_config_starts_the_supervisor_through_the_worker() {
-        let config = parse(&["--exec-max-pre-warm", "4"]).expect("valid options");
-        let vm = config
-            .exec
-            .vm_config(PathBuf::from("/guests"), Path::new("/bin/gw"));
-
-        assert_eq!(vm.max_pre_warm, 4);
-        assert_eq!(
-            vm.supervisor_command.first().map(String::as_str),
-            Some("/bin/gw")
-        );
-        assert_eq!(
-            vm.supervisor_command.last().map(String::as_str),
-            Some("--guest-supervisor")
-        );
-    }
-
-    #[test]
-    fn the_supervisor_reads_the_devices_mounts_and_bridge_of_its_worker() {
-        let worker = parse(&[
-            "--exec-devices",
-            r#"[{"name":"camera","usb":"1d6b:0002"},{"name":"serial","dev":"/dev/ttyUSB0"}]"#,
-            "--exec-mounts",
-            r#"[{"name":"scratch","path":"/srv/scratch","perJob":true}]"#,
-            "--exec-bridge",
-            "br-guests",
-        ])
-        .expect("valid options");
-        let command = worker
-            .exec
-            .vm_config(PathBuf::from("/guests"), Path::new("/bin/gw"))
-            .supervisor_command;
-        let supervisor =
-            WorkerConfig::try_parse_from(command.iter().map(String::as_str).chain(["/guests/g1"]))
-                .expect("the supervisor command parses");
-
-        assert_eq!(
-            supervisor.exec.supervisor_config(),
-            worker.exec.supervisor_config()
         );
     }
 

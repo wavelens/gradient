@@ -555,7 +555,6 @@ mod tests {
             per_job,
         };
         SupervisorConfig {
-            cloud_hypervisor_bin: "cloud-hypervisor".to_owned(),
             virtiofsd_bin: "virtiofsd".to_owned(),
             devices: vec![
                 DeviceConfig {

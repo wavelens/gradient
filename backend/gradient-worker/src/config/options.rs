@@ -422,10 +422,6 @@ pub struct ExecArgs {
     #[arg(value_delimiter = ',')]
     pub nameservers: Vec<String>,
 
-    /// Path to the `cloud-hypervisor` binary, resolved via `PATH` by default.
-    #[arg(default_value = "cloud-hypervisor")]
-    pub cloud_hypervisor_bin: String,
-
     /// Path to the `virtiofsd` binary, resolved via `PATH` by default.
     #[arg(default_value = "virtiofsd")]
     pub virtiofsd_bin: String,

@@ -64,8 +64,7 @@ impl ExecHost {
             &config.exec.sops_files,
             config.exec.sops_key_file.as_deref(),
         )?;
-        let worker_exe = std::env::current_exe().context("locate the worker binary")?;
-        let vm = config.exec.vm_config(config.guests_dir(), &worker_exe);
+        let vm = config.exec.vm_config(config.guests_dir());
         let units = GuestUnits::connect().await?;
         let devices = DeviceInventory::from_config(&vm.devices, &SysfsProbe);
         let addresses = GuestAddresses::new(&config.exec.subnet, &config.exec.nameservers)
