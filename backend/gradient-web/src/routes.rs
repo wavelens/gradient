@@ -259,6 +259,7 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     caches::management::delete_cache_public
                 ))
                 .routes(routes!(caches::keys::get_cache_key))
+                .routes(routes!(caches::keys::rotate_cache_signing_key))
                 .routes(routes!(caches::upstream_caches::put_cache_upstream))
                 .routes(routes!(
                     caches::upstream_caches::patch_cache_upstream,
@@ -418,6 +419,9 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(commits::get_commit))
                 .routes(routes!(caches::management::get_cache))
                 .routes(routes!(caches::keys::get_cache_public_key))
+                .routes(routes!(
+                    caches::keys::get_cache_public_keys_with_retirement_dates
+                ))
                 .routes(routes!(caches::upstream_caches::get_upstream_caches))
                 .routes(routes!(caches::subscriptions::get_cache_subscribers))
                 .routes(routes!(stats::get_cache_stats))

@@ -345,6 +345,7 @@ fn cached_path_sig_row_fixture() -> gradient_entity::cached_path_signature::Mode
         cached_path: cached_path_id(),
         cache: cache_id(),
         signature: Some(vec![0x42; 64]),
+        previous_signing_key_signature: None,
         created_at: test_date(),
         last_fetched_at: Some(test_date()),
         fetch_count: 3,

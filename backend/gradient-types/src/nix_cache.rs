@@ -49,7 +49,7 @@ pub struct NixPathInfo {
     #[serde(rename = "References")]
     pub references: Vec<String>,
     #[serde(rename = "Sig")]
-    pub sig: String,
+    pub signature_lines: Vec<String>,
     #[serde(rename = "Deriver")]
     pub deriver: Option<String>,
     #[serde(rename = "CA")]
@@ -91,7 +91,9 @@ impl NixPathInfo {
         {
             out.push_str(&format!("Deriver: {}\n", deriver));
         }
-        out.push_str(&format!("Sig: {}\n", self.sig));
+        for signature in &self.signature_lines {
+            out.push_str(&format!("Sig: {signature}\n"));
+        }
         if let Some(ca) = self.ca.as_deref().filter(|ca| !ca.is_empty()) {
             out.push_str(&format!("CA: {}\n", ca));
         }
@@ -134,10 +136,9 @@ pub enum NarInfoParseError {
     InvalidValue { field: &'static str, value: String },
 }
 
-/// Multiple `Sig:` lines are collapsing to the first.
 pub fn parse_narinfo_body(body: &str) -> Result<NixPathInfo, NarInfoParseError> {
     let mut kv: HashMap<&str, &str> = HashMap::new();
-    let mut sig: Option<String> = None;
+    let mut signature_lines: Vec<String> = Vec::new();
 
     for line in body.lines() {
         let Some((k, v)) = line.split_once(':') else {
@@ -146,7 +147,7 @@ pub fn parse_narinfo_body(body: &str) -> Result<NixPathInfo, NarInfoParseError> 
         let k = k.trim();
         let v = v.trim();
         if k == "Sig" {
-            sig.get_or_insert_with(|| v.to_string());
+            signature_lines.push(v.to_string());
         } else {
             kv.insert(k, v);
         }
@@ -182,7 +183,9 @@ pub fn parse_narinfo_body(body: &str) -> Result<NixPathInfo, NarInfoParseError> 
         .collect();
     let deriver = kv.get("Deriver").map(|s| s.to_string());
     let ca = kv.get("CA").map(|s| s.to_string());
-    let sig = sig.ok_or(NarInfoParseError::MissingField("Sig"))?;
+    if signature_lines.is_empty() {
+        return Err(NarInfoParseError::MissingField("Sig"));
+    }
 
     Ok(NixPathInfo {
         store_path,
@@ -193,7 +196,7 @@ pub fn parse_narinfo_body(body: &str) -> Result<NixPathInfo, NarInfoParseError> 
         nar_hash,
         nar_size,
         references,
-        sig,
+        signature_lines,
         deriver,
         ca,
     })
@@ -237,7 +240,7 @@ mod tests {
             nar_hash: "sha256:nhash".into(),
             nar_size: 5678,
             references: vec!["/nix/store/x-a".into(), "/nix/store/y-b".into()],
-            sig: "key:signature".into(),
+            signature_lines: vec!["key:signature".into()],
             deriver: None,
             ca: None,
         }
@@ -355,7 +358,10 @@ mod tests {
             nar_hash: "sha256:bbbb".into(),
             nar_size: 5678,
             references: vec!["dep1-foo".into(), "dep2-bar".into()],
-            sig: "cache.example:abcdef".into(),
+            signature_lines: vec![
+                "cache.example:abcdef".into(),
+                "cache.example:retired".into(),
+            ],
             deriver: Some("zzz-foo.drv".into()),
             ca: None,
         };
@@ -369,7 +375,7 @@ mod tests {
         assert_eq!(parsed.nar_hash, original.nar_hash);
         assert_eq!(parsed.nar_size, original.nar_size);
         assert_eq!(parsed.references, original.references);
-        assert_eq!(parsed.sig, original.sig);
+        assert_eq!(parsed.signature_lines, original.signature_lines);
         assert_eq!(parsed.deriver, original.deriver);
         assert_eq!(parsed.ca, original.ca);
     }

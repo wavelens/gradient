@@ -81,7 +81,7 @@ crate::sql! {
          FROM cached_path cp \
          JOIN cached_path_signature s ON s.cached_path = cp.id \
          WHERE cp.hash = $1 AND s.cache = $2 \
-           AND s.signature IS NOT NULL AND cp.file_hash IS NOT NULL",
+           AND coalesce(s.signature, s.previous_signing_key_signature) IS NOT NULL AND cp.file_hash IS NOT NULL",
         params = [CachedPathHash, CacheId];
 
     CACHE_SERVED_DERIVATION = "SELECT d.id AS id \
@@ -90,7 +90,7 @@ crate::sql! {
          JOIN cached_path cp ON cp.hash = o.hash \
          JOIN cached_path_signature s ON s.cached_path = cp.id \
          WHERE d.hash = $1 AND d.name = $2 AND s.cache = $3 \
-           AND s.signature IS NOT NULL AND cp.file_hash IS NOT NULL \
+           AND coalesce(s.signature, s.previous_signing_key_signature) IS NOT NULL AND cp.file_hash IS NOT NULL \
          LIMIT 1",
         params = [DerivationHash, Text("hello"), CacheId];
 

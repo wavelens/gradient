@@ -87,6 +87,7 @@ id_newtype!(CacheInvitationId);
 id_newtype!(CacheMetricId);
 id_newtype!(CacheSubscriptionRequestId);
 id_newtype!(CacheUpstreamId);
+id_newtype!(RetiredCacheSigningKeyId);
 id_newtype!(UpstreamMetricId);
 id_newtype!(CacheUserId);
 id_newtype!(CachedPathId);

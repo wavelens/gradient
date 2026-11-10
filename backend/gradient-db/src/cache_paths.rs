@@ -47,14 +47,14 @@ crate::sql! {
                    JOIN cached_path_signature s ON s.cached_path = cp.id \
                    JOIN cache c ON c.id = s.cache \
                    WHERE cp.hash = $1 AND s.cache = ANY($2) \
-                   AND s.signature IS NOT NULL AND cp.file_hash IS NOT NULL \
+                   AND coalesce(s.signature, s.previous_signing_key_signature) IS NOT NULL AND cp.file_hash IS NOT NULL \
                    ORDER BY c.name",
         params = [CachedPathHash, CacheIds(4)];
 
     SERVED_HASHES = "SELECT DISTINCT cp.hash FROM cached_path cp \
                      JOIN cached_path_signature s ON s.cached_path = cp.id \
                      WHERE cp.hash = ANY($1) AND s.cache = ANY($2) \
-                     AND s.signature IS NOT NULL AND cp.file_hash IS NOT NULL",
+                     AND coalesce(s.signature, s.previous_signing_key_signature) IS NOT NULL AND cp.file_hash IS NOT NULL",
         params = [CachedPathHashes(64), CacheIds(4)];
 }
 

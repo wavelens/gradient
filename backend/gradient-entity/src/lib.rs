@@ -78,6 +78,7 @@ pub mod project_invitation;
 pub mod project_secret;
 pub mod project_user;
 pub mod pull_request_summary;
+pub mod retired_cache_signing_key;
 pub mod role;
 pub mod server;
 pub mod session;

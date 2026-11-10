@@ -132,12 +132,19 @@ pub(super) async fn get_nar_by_hash(
             .map_err(WebError::from)?
             .or_not_found(Resource::Signature)?;
 
-    let signature = cached_path_sig
-        .signature
-        .ok_or(CacheRefusal::SignaturePending)?;
-
-    let sig =
-        gradient_sources::full_signature_token(&signature, &config.server.serve_url, &cache.name);
+    let signature_lines: Vec<String> = [
+        cached_path_sig.signature,
+        cached_path_sig.previous_signing_key_signature,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|signature| {
+        gradient_sources::full_signature_token(&signature, &config.server.serve_url, &cache.name)
+    })
+    .collect();
+    if signature_lines.is_empty() {
+        return Err(CacheRefusal::SignaturePending.into());
+    }
 
     let file_hash = cached_path_row
         .file_hash
@@ -178,7 +185,7 @@ pub(super) async fn get_nar_by_hash(
         deriver: cached_path_row
             .deriver
             .map(|deriver| original_text(mapper, deriver)),
-        sig,
+        signature_lines,
         ca: cached_path_row.ca,
     })
 }

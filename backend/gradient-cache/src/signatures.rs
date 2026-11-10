@@ -17,6 +17,7 @@ use sea_orm::{
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Notify;
 use tracing::{debug, warn};
 
 const SIGN_SWEEP_BATCH: u64 = 1000;
@@ -57,6 +58,7 @@ pub(crate) struct SignSweep {
     pub(crate) config: Arc<RuntimeConfig>,
     pub(crate) store_path_mapping: Arc<dyn StorePathMapping>,
     pub(crate) period: Duration,
+    pub(crate) wake: Arc<Notify>,
 }
 
 impl Pass for SignSweep {
@@ -65,6 +67,10 @@ impl Pass for SignSweep {
 
     fn period(&self) -> Duration {
         self.period
+    }
+
+    fn wake(&self) -> Option<Arc<Notify>> {
+        Some(Arc::clone(&self.wake))
     }
 
     async fn run(&self) -> Result<(), PassError> {
@@ -102,6 +108,9 @@ impl SignSweep {
 
         if pending.is_empty() {
             return Ok(());
+        }
+        if pending.len() as u64 == SIGN_SWEEP_BATCH {
+            self.wake.notify_one();
         }
 
         let cache_ids: Vec<CacheId> = pending

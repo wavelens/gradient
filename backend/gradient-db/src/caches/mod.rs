@@ -12,12 +12,13 @@ pub mod reach;
 pub mod upstream;
 pub mod usage;
 
+use gradient_entity::retired_cache_signing_key;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::Query;
+use sea_orm::sea_query::{Expr, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter,
-    QueryOrder, Select,
+    QueryOrder, Select, TransactionTrait,
 };
 
 pub async fn by_name<C: ConnectionTrait>(db: &C, name: &str) -> Result<Option<MCache>, DbErr> {
@@ -61,6 +62,62 @@ pub async fn set_public<C: ConnectionTrait>(
     let mut cache: ACache = cache.into();
     cache.public = Set(public);
     cache.update(db).await
+}
+
+pub async fn insert_old_cache_key_row_replace_key_pair_and_move_signatures_to_previous_column<
+    C: TransactionTrait<Transaction = sea_orm::DatabaseTransaction>,
+>(
+    db: &C,
+    cache: MCache,
+    retired_public_key: String,
+    (private_key, public_key): (String, String),
+) -> Result<MCache, DbErr> {
+    let tx = db.begin().await?;
+    let now = gradient_types::now();
+    let created_at = list_retired_signing_keys_for_cache_newest_retirement_first(&tx, cache.id)
+        .await?
+        .first()
+        .map_or(cache.created_at, |newest| newest.retired_at);
+    retired_cache_signing_key::ActiveModel {
+        id: Set(RetiredCacheSigningKeyId::now_v7()),
+        cache: Set(cache.id),
+        public_key: Set(retired_public_key),
+        created_at: Set(created_at),
+        retired_at: Set(now),
+    }
+    .insert(&tx)
+    .await?;
+
+    ECachedPathSignature::update_many()
+        .col_expr(
+            CCachedPathSignature::PreviousSigningKeySignature,
+            Expr::cust("coalesce(signature, previous_signing_key_signature)"),
+        )
+        .col_expr(
+            CCachedPathSignature::Signature,
+            Expr::value(Option::<Vec<u8>>::None),
+        )
+        .filter(CCachedPathSignature::Cache.eq(cache.id))
+        .exec(&tx)
+        .await?;
+
+    let mut cache: ACache = cache.into();
+    cache.private_key = Set(private_key);
+    cache.public_key = Set(public_key);
+    let cache = cache.update(&tx).await?;
+    tx.commit().await?;
+    Ok(cache)
+}
+
+pub async fn list_retired_signing_keys_for_cache_newest_retirement_first<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+) -> Result<Vec<retired_cache_signing_key::Model>, DbErr> {
+    retired_cache_signing_key::Entity::find()
+        .filter(retired_cache_signing_key::Column::Cache.eq(cache))
+        .order_by_desc(retired_cache_signing_key::Column::RetiredAt)
+        .all(db)
+        .await
 }
 
 pub async fn access_of_user<C: ConnectionTrait>(
