@@ -726,7 +726,7 @@
     "flag": "gc-nar-ttl-hours",
     "env": "GRADIENT_GC_NAR_TTL_HOURS",
     "type": "u64",
-    "description": "Hours to keep a cached path outside the live closure of retained evaluations after its\nlast fetch, or its upload if never fetched. These hours always come on top of\n{option}`services.gradient.gc.narUploadGraceHours`. Set it to `0` to keep nothing\nbeyond that grace.",
+    "description": "The number of hours a cache can hold claims for cached paths outside the live closure of\nretained evaluations. Start the count at the last fetch of that cache. Start the count at\nclaim creation when the cache never had a fetch. The system can remove the cached path\nitself once the claims on that path drop to zero. Always add this number to\n{option}`services.gradient.gc.narUploadGraceHours`. Set this option to `0` to keep nothing\nbeyond this grace period.",
     "default": "336",
     "values": []
   },

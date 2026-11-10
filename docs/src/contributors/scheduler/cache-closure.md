@@ -60,7 +60,8 @@ Runtime dependencies live in `derivation_dependency` alongside build dependencie
 | Caller | Trigger |
 |---|---|
 | `demote_cached_output` (`gradient-db/src/caches/demotion.rs`) | Self-heal, operator invalidation, a cache dropping its last claim, a NAR missing from storage |
-| `GcRequest::Paths` (`gradient-graph/src/gc.rs`) | Stale-path eviction and zombie purge |
+| `GcRequest::UnusedCacheClaims` (`gradient-graph/src/gc.rs`) | Stale-path eviction |
+| `GcRequest::Paths` (`gradient-graph/src/gc.rs`) | Zombie purge |
 
 - **One cache's claim:** `Demotion::CacheClaim` can remove only the `cached_path_signature` row of that cache. The retire can follow only after the last signing cache is gone.
 - **Graph writer only:** all callers operate inside the graph writer. The GC scans take place on the pool and hand the deletes to the graph writer.
@@ -98,7 +99,7 @@ The `cache-maintenance` pass in `gradient-cache/src/schedule.rs` runs on a sched
 |---|---|---|
 | Evaluation GC | Terminal evaluations beyond the task's `keep_evaluations`. Failed and aborted ones go before completed ones | The newest terminal evaluation stays. Active evaluations stay and never count toward the limit |
 | Derivation GC | `derivation` rows outside the keep-set, their attempt logs | Created before `gc.orphanDerivationHours` (24) |
-| Stale-path eviction | `cached_path` rows outside `live_cached_paths_cte`, then their objects | Last fetch (or commit) older than `max(gc.narTtlHours, gc.narUploadGraceHours)` (336 h) |
+| Stale-path eviction | Each cache's `cached_path_signature` rows on paths outside `live_cached_paths_cte`, then `cached_path` rows left without a claim and their objects | That cache's last fetch (or the claim's creation) older than `max(gc.narTtlHours, gc.narUploadGraceHours)` (336 h) |
 | Zombie purge | Confirmed rows with the object missing from storage | Storage probe per row. A probe error will preserve the row |
 | Orphan NAR files | Objects without any referencing row | Older than `gc.narUploadGraceHours` (24 h) |
 
@@ -106,6 +107,7 @@ The `cache-maintenance` pass in `gradient-cache/src/schedule.rs` runs on a sched
 - **Path re-check:** re-check each chunk of paths against roots created after the scan (`scanned_at`). Remove objects only for rows the graph writer reported as retired.
 - **Live paths:** outputs of the keep-set's runtime closure, plus the `.drv` NAR and `inputSrcs` of every reachable derivation.
 - **Fetch time:** every NAR download bumps `cached_path_signature.last_fetched_at` and `fetch_count` (`gradient-web/src/endpoints/caches/nar.rs`).
+- **Per-cache storage use:** a cache's use is the sum over its own claims. Evicting a cache's unused claim lowers that cache's use, even while another cache keeps the path.
 
 ## Access
 

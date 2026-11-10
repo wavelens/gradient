@@ -169,7 +169,8 @@ The function work through these steps:
 
 | Caller | Path |
 |---|---|
-| Stale-path eviction, zombie purge | `GcRequest::Paths` -> `retire_stale_paths` in the graph writer |
+| Stale-path eviction | `GcRequest::UnusedCacheClaims` -> `delete_unused_claims` in the graph writer |
+| Zombie purge | `GcRequest::Paths` -> `retire_stale_paths` in the graph writer |
 | Missing inputs, path invalidation | `demote_cached_output` |
 
 Gradient prevent an unbacked terminal-success output instead of repairing one. On a failed NAR commit, the build answer `Retry` and fail. `JobCompleted` wait for every `UploadCommitted` message. A substitution can succeed only with a complete closure for every output. Every retire reset the producers of the deleted paths. A non-zero `unbacked_trusted_outputs` count as a bug report.
@@ -180,7 +181,7 @@ Gradient prevent an unbacked terminal-success output instead of repairing one. O
 |---|---|
 | Evaluation GC (`gc_task_evaluations`, per task, keeping `keep_evaluations`) | Old evaluations. Live evaluations first adopt pending shared builds via `adopt_pending_closures` |
 | Derivation GC (`collect_orphan_derivations`) | Derivations outside the dependency closure of every `entry_point` and `build_job` once they exceed `gc.orphanDerivationHours` (24). This pass also removes their attempt logs from log storage |
-| Stale-path eviction (`evict_expired_cached_paths`) | Unreachable paths with no fetch in `gc.narTtlHours` (336) |
+| Stale-path eviction (`evict_expired_cached_paths`) | Each cache's claims on unreachable paths with no fetch from that cache in `gc.narTtlHours` (336), then paths left without a claim |
 | Orphan NAR files | Stored NARs referenced by no row, probed in batches of 5000 and older than `gc.narUploadGraceHours` (24) |
 
 - Keep the `.drv` and input-source NARs of any derivation with a shared build, regardless of status. Only an evaluation can re-push them.

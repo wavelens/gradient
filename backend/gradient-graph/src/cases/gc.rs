@@ -7,12 +7,13 @@
 use std::collections::BTreeSet;
 
 use chrono::{Duration, NaiveDateTime};
-use gradient_db::maintenance::gc::expired_cached_paths;
+use gradient_db::caches::capacity::cache_used_bytes;
+use gradient_db::maintenance::gc::scan_deletable_path_hashes;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{self, AttemptOutcome};
 use gradient_entity::derivation_build;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::ids::EvaluationId;
+use gradient_entity::ids::{CacheId, EvaluationId};
 use gradient_fixtures::shape::shape;
 
 use super::{
@@ -45,14 +46,29 @@ async fn gc_paths(case: &Case, hashes: impl IntoIterator<Item = String>) -> GcRe
     .await
 }
 
+async fn gc_unused_cache_claims(case: &Case, unused_since: NaiveDateTime) -> GcReport {
+    let hashes = scan_deletable_path_hashes(&case.ctx.worker_db, unused_since)
+        .await
+        .expect("the scan runs");
+    assert!(
+        !hashes.iter().any(|h| h == B_OUT),
+        "live B_OUT listed: {hashes:?}"
+    );
+    case.gc(GcRequest::UnusedCacheClaims {
+        hashes,
+        unused_since,
+        scanned_at: t0(),
+    })
+    .await
+}
+
 async fn gc_evaluations(case: &Case, ids: &[EvaluationId]) -> GcReport {
     case.collect_evaluations(ids).await
 }
 
 // Q23, Q24: the scan alone can tell a live path, so C05 and C07 pass its list to the writer.
 async fn paths_the_scan_lists(case: &Case) -> BTreeSet<String> {
-    let keep_hours = 0;
-    expired_cached_paths(&case.ctx.worker_db, keep_hours)
+    scan_deletable_path_hashes(&case.ctx.worker_db, gradient_types::now())
         .await
         .expect("the scan runs")
         .into_iter()
@@ -475,5 +491,94 @@ async fn c10_evaluation_gc_leaves_the_other_sharing_evaluation_complete() {
     assert_eq!(counters, [2, 2, 0, 1, 0], "after 1: counters(E2)");
     assert_eq!(case.gv(e2).await, gv, "after 1: gv(E2) unchanged");
     case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn c12_unused_claim_deleted_shared_path_kept_until_last_claim() {
+    let (e1, c1, c2) = (EvaluationId::now_v7(), CacheId::now_v7(), CacheId::now_v7());
+    let case = Case::start(
+        chain_done(e1)
+            .derivation(O)
+            .walked()
+            .probed()
+            .drv_cached()
+            .output(O_OUT)
+            .build_status(BuildStatus::Completed)
+            .cached_output(O)
+            .into_cache(c1)
+            .keyed(Case::key())
+            .into_cache(c2)
+            .keyed(Case::key()),
+    )
+    .await;
+    let fetched_at = t0() + Duration::hours(1);
+    for hash in [O_OUT, B_OUT] {
+        case.insert_cache_claim(hash, c1, None, None).await;
+        case.insert_cache_claim(hash, c2, None, Some(fetched_at))
+            .await;
+    }
+    let used = |cache| cache_used_bytes(&case.ctx.worker_db, cache);
+    let shared = used(c2).await.expect("usage of C2");
+    assert_eq!(
+        used(c1).await.expect("usage of C1"),
+        shared,
+        "before: same usage"
+    );
+
+    let report = gc_unused_cache_claims(&case, t0()).await;
+
+    let expected = GcReport {
+        retired: vec![drv_hash(O).to_owned()],
+        deleted_claim_row_count: 1,
+        ..Default::default()
+    };
+    assert_eq!(report, expected, "after 1: report");
+    assert_eq!(
+        case.signature(O_OUT, c1).await,
+        None,
+        "after 1: claim(O_OUT, C1)"
+    );
+    assert!(
+        case.signature(O_OUT, c2).await.is_some(),
+        "after 1: claim(O_OUT, C2)"
+    );
+    assert!(
+        case.signature(B_OUT, c1).await.is_some(),
+        "after 1: live claim(B_OUT, C1)"
+    );
+    assert!(
+        stored(&case, O_OUT).await,
+        "after 1: cached_path(O_OUT) present"
+    );
+    let usage = (
+        used(c1).await.expect("usage of C1"),
+        used(c2).await.expect("usage of C2"),
+    );
+    let o_out = case.find_cached_path(O_OUT).await.and_then(|p| p.file_size);
+    assert_eq!(
+        usage,
+        (shared - o_out.unwrap_or(0), shared),
+        "after 1: usage(C1, C2)"
+    );
+    case.zero_drift("step 1").await;
+
+    let report = gc_unused_cache_claims(&case, fetched_at + Duration::hours(1)).await;
+
+    let expected = GcReport {
+        retired: vec![O_OUT.to_owned()],
+        deleted_claim_row_count: 1,
+        ..Default::default()
+    };
+    assert_eq!(report, expected, "after 2: report");
+    assert!(
+        !stored(&case, O_OUT).await,
+        "after 2: cached_path(O_OUT) retired"
+    );
+    assert!(
+        stored(&case, B_OUT).await,
+        "after 2: cached_path(B_OUT) present"
+    );
+    case.zero_drift("step 2").await;
     case.finish().await;
 }

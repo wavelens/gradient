@@ -79,6 +79,18 @@ gradient_db::sql_fn! {
 }
 
 gradient_db::sql! {
+    GC_DELETE_STALE_CLAIMS = "DELETE FROM cached_path_signature s USING cached_path cp \
+             WHERE s.cached_path = cp.id AND cp.hash = ANY($1::text[]) \
+               AND coalesce(s.last_fetched_at, s.created_at) < $2",
+        params = [CachedPathHashes(64), Now],
+        tier = Sweep;
+
+    GC_UNCLAIMED_OLD_HASHES = "SELECT cp.hash FROM cached_path cp \
+             WHERE cp.hash = ANY($1::text[]) AND cp.created_at < $2 \
+               AND NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)",
+        params = [CachedPathHashes(64), Now],
+        tier = Sweep;
+
     GC_CANDIDATE_ATTEMPTS = "SELECT b.derivation AS derivation, a.id AS attempt \
              FROM build_attempt a JOIN derivation_build b ON b.id = a.derivation_build \
              WHERE b.derivation = ANY($1)",
@@ -133,6 +145,11 @@ pub(crate) async fn apply(ctx: &DbContext, req: GcRequest) -> Result<GcReport> {
         GcRequest::Paths { hashes, scanned_at } => {
             retire_stale_paths(ctx, &hashes, scanned_at).await
         }
+        GcRequest::UnusedCacheClaims {
+            hashes,
+            unused_since,
+            scanned_at,
+        } => delete_unused_claims(ctx, &hashes, unused_since, scanned_at).await,
         GcRequest::Evaluations { ids } => delete_evaluations(ctx, &ids).await,
     }
 }
@@ -186,12 +203,56 @@ async fn retire_stale_paths(
     hashes: &[String],
     scanned_at: NaiveDateTime,
 ) -> Result<GcReport> {
+    let still_stale = recheck_path_hashes(ctx, hashes, scanned_at).await?;
+    retire_path_hashes(ctx, &still_stale).await
+}
+
+async fn delete_unused_claims(
+    ctx: &DbContext,
+    hashes: &[String],
+    unused_since: NaiveDateTime,
+    scanned_at: NaiveDateTime,
+) -> Result<GcReport> {
     let db = &ctx.worker_db;
-    if hashes.is_empty() {
+    let still_stale = recheck_path_hashes(ctx, hashes, scanned_at).await?;
+    if still_stale.is_empty() {
         return Ok(GcReport::default());
     }
 
-    let still_stale: Vec<String> = db
+    let unused_since = Value::ChronoDateTime(Some(unused_since));
+    let deleted_claim_row_count = db
+        .execute_raw(
+            GC_DELETE_STALE_CLAIMS.bind([still_stale.clone().into(), unused_since.clone()]),
+        )
+        .await
+        .context("GC: delete the cache claims unused since the cutoff")?
+        .rows_affected();
+
+    let unclaimed: Vec<String> = db
+        .query_all_raw(GC_UNCLAIMED_OLD_HASHES.bind([still_stale.into(), unused_since]))
+        .await
+        .context("GC: select the paths left without a cache claim")?
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "hash").ok())
+        .collect();
+
+    Ok(GcReport {
+        deleted_claim_row_count,
+        ..retire_path_hashes(ctx, &unclaimed).await?
+    })
+}
+
+async fn recheck_path_hashes(
+    ctx: &DbContext,
+    hashes: &[String],
+    scanned_at: NaiveDateTime,
+) -> Result<Vec<String>> {
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(ctx
+        .worker_db
         .query_all_raw(GC_STALE_AFTER_SCAN.bind([
             hashes.to_vec().into(),
             Value::ChronoDateTime(Some(scanned_at)),
@@ -200,8 +261,11 @@ async fn retire_stale_paths(
         .context("GC: re-check what became live since the scan")?
         .iter()
         .filter_map(|r| r.try_get::<String>("", "hash").ok())
-        .collect();
+        .collect())
+}
 
+async fn retire_path_hashes(ctx: &DbContext, still_stale: &[String]) -> Result<GcReport> {
+    let db = &ctx.worker_db;
     if still_stale.is_empty() {
         return Ok(GcReport::default());
     }
@@ -211,7 +275,7 @@ async fn retire_stale_paths(
     // Postgres is keeping a subtransaction's locks until the outer commit.
     // The release below can therefore never drop one early.
     let savepoint = db.begin().await.context("GC: open the retire savepoint")?;
-    let retired = retire_outputs(&savepoint, &still_stale)
+    let retired = retire_outputs(&savepoint, still_stale)
         .await
         .context("GC: retire the stale paths")?;
     savepoint

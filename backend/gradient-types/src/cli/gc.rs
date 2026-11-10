@@ -16,10 +16,12 @@ pub struct GcArgs {
     #[arg(default_value = "3600")]
     pub interval_secs: NonZeroU64,
 
-    /// Hours to keep a cached path outside the live closure of retained evaluations after its
-    /// last fetch, or its upload if never fetched. These hours always come on top of
-    /// {option}`services.gradient.gc.narUploadGraceHours`. Set it to `0` to keep nothing
-    /// beyond that grace.
+    /// The number of hours a cache can hold claims for cached paths outside the live closure of
+    /// retained evaluations. Start the count at the last fetch of that cache. Start the count at
+    /// claim creation when the cache never had a fetch. The system can remove the cached path
+    /// itself once the claims on that path drop to zero. Always add this number to
+    /// {option}`services.gradient.gc.narUploadGraceHours`. Set this option to `0` to keep nothing
+    /// beyond this grace period.
     #[arg(default_value_t = 336)]
     pub nar_ttl_hours: u64,
 

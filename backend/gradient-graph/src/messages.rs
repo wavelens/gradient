@@ -322,6 +322,11 @@ pub enum GcRequest {
         hashes: Vec<String>,
         scanned_at: NaiveDateTime,
     },
+    UnusedCacheClaims {
+        hashes: Vec<String>,
+        unused_since: NaiveDateTime,
+        scanned_at: NaiveDateTime,
+    },
     Evaluations {
         ids: Vec<EvaluationId>,
     },
@@ -335,6 +340,7 @@ pub struct GcReport {
     pub deleted_derivations: Vec<DerivationId>,
     pub attempt_logs: Vec<BuildAttemptId>,
     pub retired: Vec<String>,
+    pub deleted_claim_row_count: u64,
     pub deleted_evaluations: Vec<EvaluationId>,
     pub deleted_exec_jobs: Vec<ExecJobId>,
 }

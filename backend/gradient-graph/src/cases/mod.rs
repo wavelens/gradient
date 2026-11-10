@@ -197,11 +197,22 @@ impl Case {
     }
 
     pub async fn seed_signature(&self, hash: &str, cache: CacheId, signature: Option<Vec<u8>>) {
+        self.insert_cache_claim(hash, cache, signature, None).await;
+    }
+
+    pub async fn insert_cache_claim(
+        &self,
+        hash: &str,
+        cache: CacheId,
+        signature: Option<Vec<u8>>,
+        last_fetched_at: Option<chrono::NaiveDateTime>,
+    ) {
         cached_path_signature::Model {
             id: CachedPathSignatureId::now_v7(),
             cached_path: self.cached_path(hash).await.id,
             cache,
             signature,
+            last_fetched_at,
             created_at: test_date(),
             ..Default::default()
         }

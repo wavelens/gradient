@@ -5,7 +5,7 @@
  */
 
 use anyhow::{Context, Result};
-use chrono::Duration as ChronoDuration;
+use chrono::{Duration as ChronoDuration, NaiveDateTime};
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 use tracing::{info, warn};
@@ -31,38 +31,44 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-fn expired_cached_paths_sql() -> String {
+fn scan_deletable_path_hashes_sql() -> String {
     format!(
         "{live}
          SELECT cp.hash FROM cached_path cp
          WHERE NOT EXISTS (SELECT 1 FROM live l WHERE l.hash = cp.hash)
-           AND coalesce((SELECT max(s.last_fetched_at) FROM cached_path_signature s
-                         WHERE s.cached_path = cp.id), cp.created_at)
-               < (now() AT TIME ZONE 'UTC') - make_interval(hours => $1::int)",
+           AND (EXISTS (SELECT 1 FROM cached_path_signature s
+                        WHERE s.cached_path = cp.id
+                          AND coalesce(s.last_fetched_at, s.created_at) < $1)
+                OR (cp.created_at < $1
+                    AND NOT EXISTS (SELECT 1 FROM cached_path_signature s
+                                    WHERE s.cached_path = cp.id)))",
         live = crate::graph::walks::live_cached_paths_cte(),
     )
 }
 
 crate::sql_fn! {
-    EXPIRED_CACHED_PATHS = expired_cached_paths_sql,
-        params = [Int(336)],
+    SCAN_DELETABLE_PATH_HASHES = scan_deletable_path_hashes_sql,
+        params = [Now],
         tier = Sweep,
         budget = crate::sql::Budget::sweep().buffers(1_500_000)
             .because("the collector walks every live path before it can name a dead one"),
         flags = [Walk];
 }
 
-pub async fn expired_cached_paths<C>(db: &C, keep_hours: i64) -> Result<Vec<String>, sea_orm::DbErr>
+pub async fn scan_deletable_path_hashes<C>(
+    db: &C,
+    unused_since: NaiveDateTime,
+) -> Result<Vec<String>, sea_orm::DbErr>
 where
     C: ConnectionTrait
         + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>
         + Sync,
 {
-    let walk = crate::graph::walks::begin_walk(db, &EXPIRED_CACHED_PATHS).await?;
+    let walk = crate::graph::walks::begin_walk(db, &SCAN_DELETABLE_PATH_HASHES).await?;
     let rows = walk
-        .query_all_raw(EXPIRED_CACHED_PATHS.bind([sea_orm::Value::Int(Some(
-            i32::try_from(keep_hours).unwrap_or(i32::MAX),
-        ))]))
+        .query_all_raw(
+            SCAN_DELETABLE_PATH_HASHES.bind([sea_orm::Value::ChronoDateTime(Some(unused_since))]),
+        )
         .await?;
     walk.commit().await?;
 
@@ -237,51 +243,6 @@ mod tests {
     use super::*;
     use EvaluationStatus::*;
     use gradient_fixtures::mock::{mock_db, statements};
-
-    fn norm(s: &str) -> String {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
-
-    #[tokio::test]
-    async fn expired_cached_paths_selects_outside_the_live_set_past_the_bound() {
-        use sea_orm::{MockExecResult, Value};
-        use std::collections::BTreeMap;
-
-        let db = mock_db()
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .append_query_results([vec![BTreeMap::from([(
-                "hash".to_owned(),
-                Value::String(Some("abc".into())),
-            )])]])
-            .into_connection();
-
-        let stale = expired_cached_paths(&db, 336).await.unwrap();
-
-        assert_eq!(stale, vec!["abc".to_owned()]);
-        let log = db.into_transaction_log();
-        let stmt = log[0]
-            .statements()
-            .iter()
-            .find(|s| s.sql.contains("FROM cached_path cp"))
-            .expect("the walk issues the stale selection");
-        let sql = norm(&stmt.sql);
-        assert!(
-            sql.contains("WHERE NOT EXISTS (SELECT 1 FROM live l WHERE l.hash = cp.hash)"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(concat!(
-                "coalesce((SELECT max(s.last_fetched_at) FROM cached_path_signature s ",
-                "WHERE s.cached_path = cp.id), cp.created_at) < ",
-                "(now() AT TIME ZONE 'UTC') - make_interval(hours => $1::int)",
-            )),
-            "{sql}"
-        );
-        assert_eq!(stmt.values.as_ref().map(|v| v.0.len()), Some(1));
-    }
 
     use super::evaluations_to_gc as gc;
 
