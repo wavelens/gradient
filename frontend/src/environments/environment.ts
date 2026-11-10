@@ -7,10 +7,6 @@
 import { version } from '../../package.json';
 
 export const environment = {
-  production: false,
   apiUrl: '/api/v1',
   version,
-  oidcEnabled: false,
-  registrationDisabled: false,
-  emailVerificationEnabled: false,
 };
