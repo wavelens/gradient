@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_entity::project;
+use gradient_entity::{project, task_trigger};
 use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{
@@ -85,4 +85,17 @@ async fn rejects_an_unparsable_attr() {
         "unexpected message: {}",
         body["message"]
     );
+}
+
+#[tokio::test]
+async fn accepts_json_null_body_as_empty_object() {
+    let session_id = SessionId::now_v7();
+    let without_default_trigger =
+        || authorized_db(session_id).append_query_results([Vec::<task_trigger::Model>::new()]);
+
+    let empty = evaluate(without_default_trigger(), session_id, json!({})).await;
+    let null = evaluate(without_default_trigger(), session_id, Value::Null).await;
+
+    assert_eq!(null.status_code(), empty.status_code());
+    assert_eq!(null.json::<Value>(), empty.json::<Value>());
 }

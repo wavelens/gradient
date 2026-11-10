@@ -210,9 +210,9 @@ fn first_line_truncated(s: &str, max: usize) -> Option<String> {
 pub async fn post_task_evaluate(
     TaskScope { task, user, db, .. }: TaskScope<Requires<can::TriggerEvaluation>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    body: Option<Json<EvaluateRequest>>,
+    body: Option<Json<Option<EvaluateRequest>>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let body = body.and_then(|Json(b)| b).unwrap_or_default();
     let attr = parse_evaluate_attr(body.attr.as_deref())?;
     let walk_mode = body.walk.unwrap_or_default();
 

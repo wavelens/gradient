@@ -162,7 +162,7 @@ pub async fn post_project_subscribe_cache(
     }: ProjectScope<Requires<can::ManageSubscriptions>>,
     state: State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    body: Option<Json<SubscribeCacheRequest>>,
+    body: Option<Json<Option<SubscribeCacheRequest>>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let cache: String = params.param("cache")?;
 
@@ -194,7 +194,7 @@ pub async fn post_project_subscribe_cache(
     }
 
     let mode = body
-        .and_then(|b| b.mode.clone())
+        .and_then(|Json(b)| b?.mode)
         .unwrap_or(CacheSubscriptionMode::ReadWrite);
 
     let may_approve = user.superuser

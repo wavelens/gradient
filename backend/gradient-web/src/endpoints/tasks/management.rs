@@ -597,9 +597,9 @@ pub async fn post_task_check_repository(
     TaskScope {
         project, task, db, ..
     }: TaskScope<RequiresUnmanaged<can::EditTask>>,
-    body: Option<Json<CheckRepositoryRequest>>,
+    body: Option<Json<Option<CheckRepositoryRequest>>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let requested = body.and_then(|Json(b)| b.repository);
+    let requested = body.and_then(|Json(b)| b?.repository);
     let checks_saved_url = requested
         .as_deref()
         .is_none_or(|url| url.trim() == task.repository);
