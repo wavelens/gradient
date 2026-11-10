@@ -32,6 +32,7 @@ use super::shared_build_reuse_after_evaluation_abort::shared_build_status_for_ev
 const FAILURES_SHOWN: usize = 100;
 const BLOCKED_SHOWN: usize = 20;
 const FIXED_SHOWN: usize = 100;
+const UNFINISHED_SHOWN: usize = 100;
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct EvaluationFailureSummary {
@@ -42,6 +43,7 @@ pub struct EvaluationFailureSummary {
     pub failed_attributes: Vec<FailedAttributeReport>,
     pub fixed: Vec<String>,
     pub fixed_total: usize,
+    pub unfinished_attributes: Vec<String>,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -93,7 +95,7 @@ struct LoadedEvaluation {
     operation_id = "getEvaluationSummary",
     tag = "evals",
     summary = "Summarise what went wrong in an evaluation",
-    description = "Returns the builds that failed themselves, each with the packages it\nblocks, the attributes that failed to evaluate, and the packages fixed\nsince the previous evaluation. A build that only failed because a\ndependency failed is not listed; it is counted under the build that\ncaused it.\n\n`newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present. Exec entry points don't count as packages. Exec jobs report them. A shared build can continue for another evaluation after an abort. Aborted evaluations mark such shared builds as aborted. Those shared builds count as unfinished.",
+    description = "Returns the builds that failed themselves, each with the packages it\nblocks, the attributes that failed to evaluate, and the packages fixed\nsince the previous evaluation. A build that only failed because a\ndependency failed is not listed; it is counted under the build that\ncaused it.\n\n`newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present. Exec entry points don't count as packages. Exec jobs report them. A shared build can continue for another evaluation after an abort. Aborted evaluations mark such shared builds as aborted. Those shared builds count as unfinished. Use `unfinished_attributes` to get up to 100 package names with a build that hasn't finished. Use `packages.unfinished` to get the total count.",
     params(("evaluation" = EvaluationId, Path)),
     responses((status = OK, description = "Failure summary of the evaluation.", body = EvaluationFailureSummary), WebError)
 )]
@@ -126,6 +128,10 @@ pub async fn get_evaluation_summary(
         fixed_total: fixed.len(),
         fixed: fixed.into_iter().take(FIXED_SHOWN).collect(),
         compared_with: compared.map(|(evaluation, _)| evaluation),
+        unfinished_attributes: analysis::unfinished_package_attributes(&loaded.graph)
+            .into_iter()
+            .take(UNFINISHED_SHOWN)
+            .collect(),
     }))
 }
 

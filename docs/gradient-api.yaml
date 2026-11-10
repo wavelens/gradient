@@ -5999,7 +5999,7 @@ paths:
         dependency failed is not listed; it is counted under the build that
         caused it.
 
-        `newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present. Exec entry points don't count as packages. Exec jobs report them. A shared build can continue for another evaluation after an abort. Aborted evaluations mark such shared builds as aborted. Those shared builds count as unfinished.
+        `newly_failing` and `fixed` compare against the evaluation of `compared_with`. That evaluation is the most recent previous evaluation that wasn't aborted. `compared_with` is `null`, all `newly_failing` are `false` and `fixed` is empty when no such evaluation is present. Exec entry points don't count as packages. Exec jobs report them. A shared build can continue for another evaluation after an abort. Aborted evaluations mark such shared builds as aborted. Those shared builds count as unfinished. Use `unfinished_attributes` to get up to 100 package names with a build that hasn't finished. Use `packages.unfinished` to get the total count.
       operationId: getEvaluationSummary
       parameters:
       - name: evaluation
@@ -16938,6 +16938,7 @@ components:
       - failed_attributes
       - fixed
       - fixed_total
+      - unfinished_attributes
       properties:
         compared_with:
           oneOf:
@@ -16963,6 +16964,10 @@ components:
         fixed_total:
           type: integer
           minimum: 0
+        unfinished_attributes:
+          type: array
+          items:
+            type: string
     EvaluationId:
       type: string
       format: uuid

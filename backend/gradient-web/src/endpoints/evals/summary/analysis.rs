@@ -92,6 +92,24 @@ pub(super) fn package_counts(graph: &EvaluationGraph) -> PackageCounts {
     counts
 }
 
+const fn build_not_finished(status: Option<BuildStatus>) -> bool {
+    match status {
+        Some(status) => !(status.is_terminal_success() || status.is_failure()),
+        None => true,
+    }
+}
+
+pub(super) fn unfinished_package_attributes(graph: &EvaluationGraph) -> Vec<String> {
+    let unfinished: BTreeSet<&String> = graph
+        .packages
+        .iter()
+        .filter(|p| build_not_finished(graph.statuses.get(&p.derivation).copied()))
+        .map(|p| &p.attr)
+        .collect();
+
+    unfinished.into_iter().cloned().collect()
+}
+
 /// Builds that failed themselves, the newly failing and the most blocking first.
 pub(super) fn failures(graph: &EvaluationGraph, baseline: Option<&Baseline>) -> Vec<Failure> {
     let dependents = dependents_of(&graph.edges);
@@ -362,5 +380,6 @@ mod tests {
                 unfinished: 1
             }
         );
+        assert_eq!(unfinished_package_attributes(&graph), ["hello"]);
     }
 }

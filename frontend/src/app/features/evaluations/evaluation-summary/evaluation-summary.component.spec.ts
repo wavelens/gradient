@@ -52,6 +52,7 @@ const SUMMARY: EvaluationFailureSummary = {
   failed_attributes: [{ attr: 'packages.broken', message: 'error: assertion failed\n  at flake.nix:9', newly_failing: true }],
   fixed: ['jq'],
   fixed_total: 1,
+  unfinished_attributes: [],
 };
 
 const getTaskInfo = vi.fn();
@@ -183,13 +184,20 @@ describe('EvaluationSummaryComponent', () => {
 
   it('reads an aborted evaluation as aborted, never as a clean run', () => {
     const fixture = setup(
-      { ...SUMMARY, packages: { total: 1, built: 0, failed: 0, blocked: 0, unfinished: 1 }, failures: [], failures_total: 0, failed_attributes: [], compared_with: null },
+      { ...SUMMARY, packages: { total: 1, built: 0, failed: 0, blocked: 0, unfinished: 1 }, failures: [], failures_total: 0, failed_attributes: [], compared_with: null, fixed: [], fixed_total: 0, unfinished_attributes: ['packages.slow'] },
       { ...EVALUATION, status: 'Aborted' },
     );
 
     expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('Aborted · 0 of 1 package built · 1 aborted');
-    expect(text(fixture)).toContain('Aborted package');
+    expect(sections(fixture)).toEqual(['Aborted packages 1']);
+    expect(text(fixture)).toContain('packages.slow');
     expect(text(fixture)).not.toContain('Nothing went wrong');
+  });
+
+  it('lists no remaining packages while the evaluation still runs', () => {
+    const fixture = setup({ ...SUMMARY, unfinished_attributes: ['packages.slow'] }, { ...EVALUATION, status: 'Building', finished_at: null });
+
+    expect(text(fixture)).not.toContain('packages.slow');
   });
 
   it('shows the first error of an evaluation that failed before any package', () => {

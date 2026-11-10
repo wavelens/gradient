@@ -35,17 +35,19 @@
   a { color: var(--gr-text-primary); }
 }
 
-.fixed {
+.attributes {
   display: flex;
   flex-wrap: wrap;
   gap: $spacing-xs $spacing-lg;
   margin: 0;
   padding: 0;
   list-style: none;
-  color: var(--gr-status-success-text);
+  color: var(--gr-text-primary);
   font-size: $font-size-sm;
   overflow-wrap: anywhere;
 }
+
+.fixed { color: var(--gr-status-success-text); }
 
 h2 {
   margin-top: $space-section;

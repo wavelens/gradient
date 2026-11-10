@@ -976,6 +976,7 @@ export interface EvaluationFailureSummary {
   failed_attributes: FailedAttributeReport[];
   fixed: string[];
   fixed_total: number;
+  unfinished_attributes: string[];
 }
 
 export type EvaluationId = string;

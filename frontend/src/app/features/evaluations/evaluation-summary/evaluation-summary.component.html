@@ -93,9 +93,18 @@
         </gr-row-list>
       }
 
+      @if (!running() && s.unfinished_attributes.length) {
+        <h2>Aborted packages <span class="count">{{ s.packages.unfinished }}</span></h2>
+        <ul class="attributes mono">
+          @for (attr of s.unfinished_attributes; track attr) {
+            <li>@for (part of splitAttributePathAfterDots(attr); track $index) {<span>{{ part }}</span><wbr>}</li>
+          }
+        </ul>
+      }
+
       @if (s.fixed.length) {
         <h2>Fixed <span class="count">{{ s.fixed_total }}</span></h2>
-        <ul class="fixed mono">
+        <ul class="attributes fixed mono">
           @for (attr of s.fixed; track attr) {
             <li>@for (part of splitAttributePathAfterDots(attr); track $index) {<span>{{ part }}</span><wbr>}</li>
           }

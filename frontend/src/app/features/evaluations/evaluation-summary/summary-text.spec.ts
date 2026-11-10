@@ -15,6 +15,7 @@ const summary = (packages: Partial<EvaluationFailureSummary['packages']>, evalEr
   failed_attributes: Array.from({ length: evalErrors }, (_, i) => ({ attr: `a${i}`, message: 'boom', newly_failing: false })),
   fixed: [],
   fixed_total: 0,
+  unfinished_attributes: [],
 });
 
 const failure = (over: Partial<FailedBuildSummary>): FailedBuildSummary => ({
