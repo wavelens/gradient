@@ -422,6 +422,10 @@ in {
         message = "services.gradient.worker: a reverse proxy at a time, nginx or caddy, not both";
       }
       {
+        assertion = cfg.reverseProxy.nginx.enable || cfg.reverseProxy.caddy.enable -> cfg.domain != "";
+        message = "Set `services.gradient.worker.domain` if the reverse proxy is active.";
+      }
+      {
         assertion = execOptionsSet -> cfg.capabilities.exec;
         message = "The services.gradient.worker.exec options depend on capabilities.exec. Enable capabilities.exec or unset services.gradient.worker.exec.";
       }
@@ -563,7 +567,14 @@ in {
         virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
           inherit (cfg.reverseProxy.caddy) useACMEHost;
           extraConfig = ''
-            reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
+            handle /proto {
+              reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
+            }
+            handle {
+              respond 404
+            }
+
+            ${cfg.reverseProxy.caddy.extraConfig}
           '';
         };
       };

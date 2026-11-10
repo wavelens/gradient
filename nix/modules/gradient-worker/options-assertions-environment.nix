@@ -98,8 +98,14 @@ in {
         for example from {command}`printf %s "$TOKEN" | sha256sum`.
         Peer ID `*` matches any peer.
         The worker reads this file only with {env}`GRADIENT_WORKER_DISCOVERABLE`.
-        Set it to `null` to accept every server; avoid that in a production setup.
+        Use `null` to accept every server. This value needs {option}`services.gradient.worker.allowDiscoverableWithoutAcceptedServerTokensFile`.
       '';
+    };
+
+    allowDiscoverableWithoutAcceptedServerTokensFile = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Set {option}`services.gradient.worker.discoverable` and leave {option}`services.gradient.worker.acceptedServerTokensFile` unset to accept every server that can connect. This setting is for closed networks only.";
     };
 
     system = {
@@ -188,6 +194,10 @@ in {
     {
       assertion = cfg.capabilities.federate -> cfg.discoverable;
       message = "services.gradient.worker: capabilities.federate and discoverable together, enable both";
+    }
+    {
+      assertion = cfg.discoverable && cfg.acceptedServerTokensFile == null -> cfg.allowDiscoverableWithoutAcceptedServerTokensFile;
+      message = "Enable services.gradient.worker.discoverable without acceptedServerTokensFile and the listener can accept all servers that come to the listener. Set acceptedServerTokensFile, or set allowDiscoverableWithoutAcceptedServerTokensFile to allow that behavior.";
     }
     {
       assertion = !(cfg.system.minFreeRamMb != 0 && cfg.eval.maxMemory != null);
