@@ -9,7 +9,7 @@ use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::header::SET_COOKIE;
-use axum::http::{HeaderMap, HeaderValue};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
 use gradient_db::WebDb;
@@ -85,6 +85,14 @@ pub fn reject_api_key_authentication(api_key: Option<&ApiKeyContext>) -> WebResu
     }
 }
 
+fn token_decode_status_to_web_error(status: StatusCode) -> WebError {
+    if status == StatusCode::INTERNAL_SERVER_ERROR {
+        anyhow::anyhow!("Failed to look up session or API key in the database").into()
+    } else {
+        Denial::UndecodableToken.into()
+    }
+}
+
 fn presented_token(headers: &HeaderMap) -> Result<&str, Denial> {
     if headers.contains_key(AUTHORIZATION) {
         bearer_token(headers).ok_or(Denial::MalformedAuthorizationHeader)
@@ -140,15 +148,19 @@ pub async fn authorize(
         Err(denial) => return Err(deny(&audit, None, method, path, denial).await),
     };
 
-    let Ok(decoded) = decode_jwt(
+    let decoded = match decode_jwt(
         &state.web_db,
         &state.jwt_secret,
         &state.memory.last_used_stamps,
         token_str,
     )
     .await
-    else {
-        return Err(deny(&audit, None, method, path, Denial::UndecodableToken).await);
+    {
+        Ok(decoded) => decoded,
+        Err(StatusCode::UNAUTHORIZED) => {
+            return Err(deny(&audit, None, method, path, Denial::UndecodableToken).await);
+        }
+        Err(status) => return Err(token_decode_status_to_web_error(status)),
     };
 
     let user_id = decoded.user_id();
@@ -206,7 +218,7 @@ async fn optional_caller(
     };
     let decoded = decode_jwt(db, jwt_secret, last_used_stamps, token.to_owned())
         .await
-        .map_err(|_| Denial::UndecodableToken)?;
+        .map_err(token_decode_status_to_web_error)?;
     let allowed_from_here = decoded
         .api_key_context()
         .is_none_or(|context| ip_allowed(client_ip, &context.allowed_ips));

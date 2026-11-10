@@ -4,8 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use axum::http::StatusCode;
 use axum_test::TestServer;
+use gradient_entity::ids::SessionId;
+use gradient_fixtures::mock::mock_db;
 use gradient_test_support::state::TestState;
+use gradient_test_support::web::{make_test_server, make_token};
+use sea_orm::DbErr;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -84,6 +89,28 @@ async fn invalid_jwt_token_cookie_on_optional_auth_route_returns_401_and_clears_
     let set_cookie = set_cookie.to_str().expect("ascii set-cookie");
     assert!(set_cookie.starts_with("jwt_token=;"), "{set_cookie}");
     assert!(set_cookie.contains("Max-Age=0"), "{set_cookie}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_session_lookup_answers_500_and_keeps_the_session_cookie() {
+    for url in ["/api/v1/projects/x", "/api/v1/user/search"] {
+        let db = mock_db()
+            .append_query_errors([DbErr::Custom("pool timed out".into())])
+            .into_connection();
+        let cookie = format!("jwt_token={}", make_token(SessionId::now_v7()));
+
+        let res = make_test_server(db)
+            .get(url)
+            .add_header("cookie", cookie)
+            .await;
+
+        assert_eq!(
+            res.status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{url}"
+        );
+        assert!(res.maybe_header("set-cookie").is_none(), "{url}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
