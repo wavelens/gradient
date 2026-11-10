@@ -13,3 +13,12 @@
   padding-top: $spacing-md;
 }
 
+.connection-test-result {
+  display: block;
+  color: var(--gr-status-success-text);
+  white-space: normal;
+
+  &.failed {
+    color: var(--gr-status-danger-text);
+  }
+}

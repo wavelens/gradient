@@ -359,13 +359,26 @@ describe('UpstreamCachesComponent - connection test', () => {
   it.each([
     [false, true],
     [true, false],
-  ])('keeps the result until dismissed and suggests HTTP/1.1 only when only HTTP/1.1 works (already on: %s)', (http1Only, hinted) => {
+  ])('shows the result in the tested row and suggests HTTP/1.1 only when only HTTP/1.1 works (already on: %s)', (http1Only, hinted) => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [{ ...httpUpstream, http1_only: http1Only }]);
-    Object.assign(TestBed.inject(CachesService), { testUpstream: () => of({ ok: true, message: 'Upstream reachable', http1: probe(true), http2: probe(false) }) });
+    Object.assign(TestBed.inject(CachesService), { testUpstream: () => of({ ok: true, message: 'Reachable over HTTP/1.1 only.', http1: probe(true), http2: probe(false) }) });
     fixture.componentInstance.testUpstream({ ...httpUpstream, http1_only: http1Only });
-    const toast = TestBed.inject(MessageService).messages().at(-1)!;
-    expect(toast.life).toBe(0);
-    expect(toast.detail?.includes('Turn on "HTTP/1.1 only" in Edit.')).toBe(hinted);
+    fixture.detectChanges();
+    const result = (fixture.nativeElement as HTMLElement).querySelector('gr-row .connection-test-result')!;
+    expect(result.textContent).toContain('Reachable over HTTP/1.1 only.');
+    expect(result.classList).not.toContain('failed');
+    expect(result.textContent?.includes('Turn on "HTTP/1.1 only" in Edit.')).toBe(hinted);
+    expect(TestBed.inject(MessageService).messages()).toEqual([]);
+  });
+
+  it('marks an unreachable upstream as failed in its row', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [httpUpstream]);
+    Object.assign(TestBed.inject(CachesService), { testUpstream: () => of({ ok: false, message: 'Unreachable over HTTP/1.1 and HTTP/2.', http1: probe(false), http2: probe(false) }) });
+    fixture.componentInstance.testUpstream(httpUpstream);
+    fixture.detectChanges();
+    const result = (fixture.nativeElement as HTMLElement).querySelector('gr-row .connection-test-result')!;
+    expect(result.classList).toContain('failed');
+    expect(result.textContent).toContain('HTTP/1.1: failed - protocol error');
   });
 });
 

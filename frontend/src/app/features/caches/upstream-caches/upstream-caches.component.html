@@ -47,7 +47,12 @@
             @if (!u.active) {
               <gr-badge severity="neutral">Inactive</gr-badge>
             }
-            <span slot="meta">{{ u.url ?? u.upstream_cache_name ?? u.remote_cache ?? '' }}</span>
+            <span slot="meta">
+              {{ u.url ?? u.upstream_cache_name ?? u.remote_cache ?? '' }}
+              @if (upstreamConnectionTestResultByUpstreamId()[u.id]; as result) {
+                <span class="connection-test-result" role="status" [class.failed]="!result.ok">{{ result.message }} {{ result.detail }}</span>
+              }
+            </span>
             <div slot="actions">
               @if (u.upstream_cache_name; as upstream) {
                 <a grButton icon="arrow_forward" severity="secondary" label="Open cache" [routerLink]="links.cache(upstream)"></a>

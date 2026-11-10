@@ -18,7 +18,6 @@ import {
   FormFieldComponent,
   InputDirective,
   LoadStateComponent,
-  MessageService,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -57,6 +56,12 @@ function publicKeyError(value: string, attempted: boolean): string | null {
     : 'Enter the key in name:key format. Example: cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=.';
 }
 
+interface ConnectionTestResult {
+  ok: boolean;
+  message: string;
+  detail: string;
+}
+
 const hasError = (errors: UpstreamErrors): boolean => Object.values(errors).some((message) => !!message);
 
 @Component({
@@ -93,7 +98,6 @@ export class UpstreamCachesComponent implements OnInit {
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
   private accessSvc = inject(AccessService);
-  private messageService = inject(MessageService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
   showCreateCache = signal(false);
@@ -109,6 +113,7 @@ export class UpstreamCachesComponent implements OnInit {
   addingUpstream = signal(false);
   savingUpstream = signal(false);
   testingUpstreamId = signal<string | null>(null);
+  upstreamConnectionTestResultByUpstreamId = signal<Record<string, ConnectionTestResult>>({});
   togglingUpstreamId = signal<string | null>(null);
 
   upstreamCaches = signal<UpstreamCacheItem[]>([]);
@@ -161,6 +166,7 @@ export class UpstreamCachesComponent implements OnInit {
     this.cachesService.getUpstreamCaches(this.cacheName).subscribe({
       next: (list) => {
         this.upstreamCaches.set(list);
+        this.upstreamConnectionTestResultByUpstreamId.set({});
         this.loading.set(false);
       },
       error: (error: unknown) => {
@@ -337,12 +343,14 @@ export class UpstreamCachesComponent implements OnInit {
       next: (r) => {
         this.testingUpstreamId.set(null);
         const http1OnlyHint = r.http1.ok && !r.http2.ok && !upstream.http1_only ? ' HTTP/1.1 only works. Turn on "HTTP/1.1 only" in Edit.' : '';
-        this.messageService.add({
-          severity: r.ok ? 'success' : 'error',
-          summary: r.message,
-          detail: `HTTP/1.1: ${probeSummary(r.http1)}; HTTP/2: ${probeSummary(r.http2)}.${http1OnlyHint}`,
-          life: 0,
-        });
+        this.upstreamConnectionTestResultByUpstreamId.update((results) => ({
+          ...results,
+          [upstream.id]: {
+            ok: r.ok,
+            message: r.message,
+            detail: `HTTP/1.1: ${probeSummary(r.http1)}; HTTP/2: ${probeSummary(r.http2)}.${http1OnlyHint}`,
+          },
+        }));
       },
       error: (error: unknown) => {
         this.testingUpstreamId.set(null);
