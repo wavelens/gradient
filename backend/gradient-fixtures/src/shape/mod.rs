@@ -23,11 +23,11 @@ use gradient_entity::ids::{
 use gradient_entity::{
     StorePath, build_attempt, build_job, cache, cache_upstream, cached_path, cached_path_signature,
     cluster_attempt, cluster_job, cluster_member, commit, derivation, derivation_build,
-    derivation_dependency, derivation_feature, derivation_metric, derivation_output,
-    dispatched_job, dispatched_job_phase, entry_point, eval_cache_store, eval_split, evaluation,
-    evaluation_flake_input_override, evaluation_input_update, evaluation_metric, feature, project,
-    project_cache, task, task_action, task_flake_input_override, task_trigger, user,
-    worker_registration,
+    derivation_dependency, derivation_feature, derivation_input_source, derivation_metric,
+    derivation_output, dispatched_job, dispatched_job_phase, entry_point, eval_cache_store,
+    eval_split, evaluation, evaluation_flake_input_override, evaluation_input_update,
+    evaluation_metric, feature, project, project_cache, task, task_action,
+    task_flake_input_override, task_trigger, user, worker_registration,
 };
 use sea_orm::DatabaseConnection;
 use uuid::Uuid;
@@ -50,6 +50,7 @@ pub struct Shape {
     pub(super) shared_builds: Vec<derivation_build::Model>,
     pub(super) edges: Vec<derivation_dependency::Model>,
     pub(super) outputs: Vec<derivation_output::Model>,
+    pub(super) derivation_input_sources: Vec<derivation_input_source::Model>,
     pub(super) jobs: Vec<build_job::Model>,
     pub(super) entry_points: Vec<entry_point::Model>,
     pub(super) cached_paths: Vec<cached_path::Model>,
@@ -200,6 +201,14 @@ impl Shape {
         for output in self.outputs.iter_mut().filter(|o| o.derivation == id) {
             output.created_at = at;
             hashes.extend(output.hash.clone());
+        }
+        for source in self
+            .derivation_input_sources
+            .iter_mut()
+            .filter(|s| s.derivation == id)
+        {
+            source.created_at = at;
+            hashes.push(source.hash.clone());
         }
         for path in &mut self.cached_paths {
             if hashes.contains(&path.hash) {
@@ -394,6 +403,31 @@ impl Shape {
         let package = format!("{}.drv", self.derivations[at].name);
         self.stored_path(&hash, &package);
         self
+    }
+
+    pub fn input_source(mut self, path: &str) -> Self {
+        let derivation = self.derivations[self.current_derivation()].id;
+        let store_path =
+            StorePath::parse_stored(path).unwrap_or_else(|_| panic!("{path} is no store path"));
+        self.derivation_input_sources
+            .push(derivation_input_source::Model {
+                derivation,
+                hash: store_path.hash().to_owned(),
+                store_path,
+                created_at: test_date(),
+            });
+        self
+    }
+
+    pub fn add_input_source_and_cache_path(self, path: &str) -> Self {
+        let mut shape = self.input_source(path);
+        let source = shape
+            .derivation_input_sources
+            .last()
+            .expect("the input source just declared");
+        let (hash, package) = (source.hash.clone(), source.store_path.name().to_owned());
+        shape.stored_path(&hash, &package);
+        shape
     }
 
     pub fn cached_output(mut self, path: &str) -> Self {
@@ -713,6 +747,7 @@ mod tests {
     const A_OUT: &str = "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0";
     const B_OUT: &str = "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0";
     const A_DEV: &str = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+    const A_INPUT_SOURCE_PATCH_STORE_PATH_NAME: &str = "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5-fix.patch";
 
     #[tokio::test]
     async fn a_shape_writes_every_table_the_claim_statement_joins() {
@@ -963,6 +998,7 @@ mod tests {
             .drv_cached()
             .output(A_OUT)
             .cached_output(A)
+            .add_input_source_and_cache_path(A_INPUT_SOURCE_PATCH_STORE_PATH_NAME)
             .created_at(earlier)
             .derivation(B)
             .drv_cached()
@@ -973,6 +1009,21 @@ mod tests {
 
         assert_eq!(db.derivation(A).await.created_at, earlier);
         assert_eq!(db.output(A_OUT).await.created_at, earlier);
+        let (source_hash, _) = A_INPUT_SOURCE_PATCH_STORE_PATH_NAME
+            .split_once('-')
+            .expect("a store path name");
+        let sources = db.rows::<derivation_input_source::Entity>().await;
+        let source = sources.first().expect("the input source of A");
+        let owner = db.derivation(A).await.id;
+        assert_eq!(
+            (source.derivation, source.hash.as_str(), source.created_at),
+            (owner, source_hash, earlier)
+        );
+        let source_path = db.cached_path(source_hash).await.expect("the source path");
+        assert_eq!(
+            (source_path.package.as_str(), source_path.created_at),
+            ("fix.patch", earlier)
+        );
         let moved = db.cached_path(A_OUT).await.expect("the output path of A");
         assert_eq!(moved.created_at, earlier);
         let (drv_hash, _) = drv_hash_name(A);

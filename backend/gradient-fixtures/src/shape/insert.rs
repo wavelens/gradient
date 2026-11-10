@@ -7,11 +7,11 @@
 use gradient_entity::{
     build_attempt, build_job, cache, cache_upstream, cached_path, cached_path_signature,
     cluster_attempt, cluster_job, cluster_member, commit, derivation, derivation_build,
-    derivation_dependency, derivation_feature, derivation_metric, derivation_output,
-    dispatched_job, dispatched_job_phase, entry_point, eval_cache_store, eval_split, evaluation,
-    evaluation_flake_input_override, evaluation_input_update, evaluation_metric, feature, project,
-    project_cache, task, task_action, task_flake_input_override, task_trigger, user,
-    worker_registration,
+    derivation_dependency, derivation_feature, derivation_input_source, derivation_metric,
+    derivation_output, dispatched_job, dispatched_job_phase, entry_point, eval_cache_store,
+    eval_split, evaluation, evaluation_flake_input_override, evaluation_input_update,
+    evaluation_metric, feature, project, project_cache, task, task_action,
+    task_flake_input_override, task_trigger, user, worker_registration,
 };
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter};
@@ -48,6 +48,11 @@ pub(super) async fn all(shape: Shape, db: &DatabaseConnection) {
     insert!(db, derivation::Entity, shape.derivations);
     insert!(db, derivation_build::Entity, shape.shared_builds);
     insert!(db, derivation_dependency::Entity, shape.edges);
+    insert!(
+        db,
+        derivation_input_source::Entity,
+        shape.derivation_input_sources
+    );
     insert!(db, cached_path::Entity, shape.cached_paths);
     let verified: Vec<_> = shape
         .outputs
