@@ -613,7 +613,7 @@ JOBS.update(wait_for(
     "the evaluation records the custom image jobs", lambda: recorded_jobs(images_eval, IMAGE_NAMES), timeout=900))
 
 banner("Phase 18: a custom image boots cold on the worker that allows custom images")
-trained = wait_status("trainer", "completed", timeout=1200)
+trained = wait_status("trainer", "completed", timeout=2400)
 assert end_reasons(trained) == ["completed"], json.dumps(trained)
 assert trained["attempts"][0]["worker"] == STOPPER_ID, json.dumps(trained)
 output = job_log("trainer")

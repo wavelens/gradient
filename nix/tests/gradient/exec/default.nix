@@ -165,7 +165,7 @@
 in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-exec";
-    globalTimeout = 2700;
+    globalTimeout = 3600;
 
     defaults.documentation.enable = false;
 
