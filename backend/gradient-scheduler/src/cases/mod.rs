@@ -319,7 +319,14 @@ impl SchedulerCase {
         invariants::s11_a_single_job_list_per_key(&tracked, after);
 
         let rows = Rows::read(&self.db).await;
-        rows.s8_open_builds_within_slots(&self.scheduler.board_workers().await, after);
+        rows.s8_open_builds_within_slots(
+            &self
+                .scheduler
+                .board_workers()
+                .await
+                .expect("the scheduler core lists workers"),
+            after,
+        );
         rows.s12_no_open_job_pending(&self.scheduler, &self.workers_of_other_instances(), after)
             .await;
     }

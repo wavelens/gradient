@@ -1059,6 +1059,7 @@ pub async fn get_board_workers(
     let workers: Vec<_> = scheduler
         .board_workers()
         .await
+        .unwrap_or_default()
         .into_iter()
         .map(|w| (scope.worker_projects(w.authorized_peers.as_ref()), w))
         .collect();
@@ -1239,7 +1240,7 @@ pub async fn get_board_worker_load(
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<WorkerLoad>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
-    let workers = scheduler.board_workers().await;
+    let workers = scheduler.board_workers().await.unwrap_or_default();
     let jobs = scheduler.board_active_jobs().await;
 
     let visible_workers: Vec<&gradient_pool::WorkerInfo> = workers
@@ -1547,7 +1548,7 @@ pub async fn board_live_ws(
         .unwrap_or(MetricsScope::Projects(vec![]));
 
     let rx = state.events.subscribe();
-    let (workers, pending, active) = scheduler.metrics_snapshot().await;
+    let (workers, pending, active) = scheduler.metrics_snapshot().await.unwrap_or_default();
     let initial = Envelope::now(
         worker::QueueDepth {
             workers,

@@ -70,6 +70,7 @@ async fn visible_loads(scheduler: &Scheduler, scope: &MetricsScope) -> Vec<Worke
     scheduler
         .board_workers()
         .await
+        .unwrap_or_default()
         .into_iter()
         .filter(|w| scope.worker_projects(w.authorized_peers.as_ref()).is_some())
         .map(|w| WorkerLoad {

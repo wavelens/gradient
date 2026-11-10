@@ -351,14 +351,36 @@ impl Scheduler {
         self.pre_warm.forget(worker_id);
         self.close_worker_connection(worker_id).await;
         let worker = worker_id.to_owned();
-        let gone = self
+        match self
             .call(|reply| SchedulerMsg::Unregister {
                 worker,
                 grace,
                 reply,
             })
             .await
-            .unwrap_or_default();
+        {
+            Ok(gone) => {
+                self.requeue_disconnected_worker_orphaned_jobs_and_settle_lost_cluster_members(
+                    worker_id, gone,
+                )
+                .await
+            }
+            Err(e) => {
+                warn!(error = %e, %worker_id, "The scheduler core did not respond to the unregister call. Worker jobs don't return to the queue at this point. A recovery sweep can pick them up later.");
+            }
+        }
+        self.reassign_input_fetches_of(worker_id).await;
+        self.db.events.publish(worker::Disconnected {
+            worker_id: worker_id.to_owned(),
+        });
+        self.build_kick.kick();
+    }
+
+    async fn requeue_disconnected_worker_orphaned_jobs_and_settle_lost_cluster_members(
+        &self,
+        worker_id: &str,
+        gone: crate::jobs::Disconnected,
+    ) {
         build::requeue_orphaned_jobs(
             &self.db,
             &self.graph,
@@ -373,11 +395,6 @@ impl Scheduler {
                 warn!(error = %e, %worker_id, key = %lost.key, "settling a lost cluster member failed");
             }
         }
-        self.reassign_input_fetches_of(worker_id).await;
-        self.db.events.publish(worker::Disconnected {
-            worker_id: worker_id.to_owned(),
-        });
-        self.build_kick.kick();
     }
 
     fn reclaim_grace_of(&self, worker_id: &str) -> Duration {
@@ -493,7 +510,7 @@ impl Scheduler {
     }
 
     pub async fn refresh_waiting_state(&self) -> Result<()> {
-        let workers = self.board_workers().await;
+        let workers = self.board_workers().await?;
         let draining = self.draining.is_draining().await;
         let unbuildables = WaitingRefresh {
             db: &self.db,
@@ -509,10 +526,8 @@ impl Scheduler {
         Ok(())
     }
 
-    pub async fn board_workers(&self) -> Vec<gradient_pool::WorkerInfo> {
-        self.call(|reply| SchedulerMsg::Workers { reply })
-            .await
-            .unwrap_or_default()
+    pub async fn board_workers(&self) -> Result<Vec<gradient_pool::WorkerInfo>> {
+        self.call(|reply| SchedulerMsg::Workers { reply }).await
     }
 
     pub async fn mark_worker_draining(&self, worker_id: &str) {

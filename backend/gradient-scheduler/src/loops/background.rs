@@ -254,7 +254,7 @@ impl Pass for BuildHistoryRefit {
 }
 
 async fn instance_metrics_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
-    let c = scheduler.counts().await;
+    let c = scheduler.counts().await?;
     let counts = crate::instance::InstanceCounts {
         active_builds: c.active_builds,
         pending_builds: c.pending_builds,
@@ -308,11 +308,11 @@ impl Pass for WorkerSample {
 }
 
 pub(crate) async fn worker_sample_pass(scheduler: &Scheduler) -> anyhow::Result<()> {
-    let workers = scheduler.board_workers().await;
+    let workers = scheduler.board_workers().await?;
     for info in &workers {
         crate::worker_lifecycle::record_worker_sample(&scheduler.db.worker_db, info).await;
     }
-    let (workers, pending, active) = scheduler.metrics_snapshot().await;
+    let (workers, pending, active) = scheduler.metrics_snapshot().await?;
     scheduler.db.events.publish(worker::QueueDepth {
         workers,
         pending,

@@ -122,15 +122,7 @@ impl Scheduler {
             .unwrap_or(false)
     }
 
-    pub async fn worker_count(&self) -> usize {
-        self.counts().await.workers
-    }
-
     pub async fn workers_info(&self) -> Vec<WorkerInfo> {
-        self.board_workers().await
-    }
-
-    pub async fn pending_job_count(&self) -> usize {
-        self.counts().await.pending
+        self.board_workers().await.unwrap_or_default()
     }
 }

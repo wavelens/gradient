@@ -55,7 +55,7 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
     let rows = dispatch::queued_untracked(&scheduler.db.worker_db).await?;
     let keys: Vec<String> = rows.iter().map(|row| exec_job_key(row.job.id)).collect();
     let untracked: HashSet<String> = scheduler.untracked(keys).await.into_iter().collect();
-    let workers = scheduler.board_workers().await;
+    let workers = scheduler.board_workers().await?;
     let api_url = scheduler.db.config.server.serve_url.clone();
     let new_rows: Vec<&ExecDispatchRow> = rows
         .iter()

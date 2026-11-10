@@ -488,7 +488,7 @@ pub(crate) async fn collect(
         }
     }
 
-    let (workers, pending, active) = scheduler.metrics_snapshot().await;
+    let (workers, pending, active) = scheduler.metrics_snapshot().await.unwrap_or_default();
     obs.workers_connected = workers as i64;
     obs.jobs_pending = pending as i64;
     obs.jobs_active = active as i64;

@@ -233,15 +233,13 @@ impl Scheduler {
             .unwrap_or_default()
     }
 
-    pub async fn counts(&self) -> Counts {
-        self.call(|reply| SchedulerMsg::Counts { reply })
-            .await
-            .unwrap_or_default()
+    pub async fn counts(&self) -> anyhow::Result<Counts> {
+        self.call(|reply| SchedulerMsg::Counts { reply }).await
     }
 
-    pub async fn metrics_snapshot(&self) -> (usize, usize, usize) {
-        let c = self.counts().await;
-        (c.workers, c.pending, c.active)
+    pub async fn metrics_snapshot(&self) -> anyhow::Result<(usize, usize, usize)> {
+        let c = self.counts().await?;
+        Ok((c.workers, c.pending, c.active))
     }
 
     pub async fn pending_jobs_snapshot(&self) -> Vec<jobs::PendingJobInfo> {

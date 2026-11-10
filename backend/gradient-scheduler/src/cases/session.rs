@@ -206,7 +206,10 @@ impl SchedulerCase {
 
     pub async fn request_reauth(&self, worker: &str) {
         self.scheduler.request_reauth(worker).await;
-        self.scheduler.counts().await;
+        self.scheduler
+            .counts()
+            .await
+            .expect("the scheduler core counts");
     }
 
     pub async fn offers_full(&self, worker: &str) -> Offer {

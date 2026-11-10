@@ -86,7 +86,13 @@ impl Scheduler {
                 return;
             }
         };
-        let workers = self.board_workers().await;
+        let workers = match self.board_workers().await {
+            Ok(workers) => workers,
+            Err(e) => {
+                warn!(error = %e, "Failed to read connected workers. No pre-warm count sent.");
+                return;
+            }
+        };
         let changed = self
             .pre_warm
             .changed(pre_warm_counts(&upcoming, &workers))

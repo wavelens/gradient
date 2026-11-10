@@ -341,7 +341,11 @@ impl SchedulerCase {
     }
 
     pub async fn totals(&self) -> Totals {
-        let c = self.scheduler.counts().await;
+        let c = self
+            .scheduler
+            .counts()
+            .await
+            .expect("the scheduler core counts");
         Totals {
             workers: c.workers,
             pending: c.pending,

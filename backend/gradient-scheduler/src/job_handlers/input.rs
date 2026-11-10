@@ -156,7 +156,13 @@ impl Scheduler {
             return;
         }
 
-        let mut workers = self.board_workers().await;
+        let mut workers = match self.board_workers().await {
+            Ok(workers) => workers,
+            Err(e) => {
+                warn!(error = %e, "Can't read connected workers. Skip assignment of input fetches this pass.");
+                return;
+            }
+        };
         let mut load = self.input_waits.assigned_per_worker();
         for fetch in unassigned {
             if !self

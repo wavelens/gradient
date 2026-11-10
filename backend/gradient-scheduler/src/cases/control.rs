@@ -48,7 +48,10 @@ impl SchedulerCase {
 
     pub async fn build_assign_pass(&self, timer_tick: bool, resync: bool) {
         crate::loops::build_assign_pass(&self.scheduler, timer_tick, resync).await;
-        self.scheduler.counts().await;
+        self.scheduler
+            .counts()
+            .await
+            .expect("the scheduler core counts");
     }
 
     pub async fn assign_exec_jobs(&self) {

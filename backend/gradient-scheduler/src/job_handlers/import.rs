@@ -211,7 +211,7 @@ impl Scheduler {
 
         let worker_caps: Vec<BuildWorkerCaps> = self
             .board_workers()
-            .await
+            .await?
             .iter()
             .map(BuildWorkerCaps::from)
             .collect();
