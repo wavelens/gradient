@@ -169,6 +169,7 @@ pub mod can {
             TriggerEvaluation,
             ManageTriggers,
             ManageWebhooks,
+            CreateProject,
         ]
     );
 

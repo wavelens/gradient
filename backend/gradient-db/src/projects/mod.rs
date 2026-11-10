@@ -41,6 +41,14 @@ pub fn reachable_by_user(user: UserId, api_key_project_id: Option<ProjectId>) ->
         .order_by_asc(CProject::Id)
 }
 
+pub async fn all_reachable_by_user(
+    db: &impl ConnectionTrait,
+    user: UserId,
+    api_key_project_id: Option<ProjectId>,
+) -> Result<Vec<MProject>, DbErr> {
+    reachable_by_user(user, api_key_project_id).all(db).await
+}
+
 pub fn all_public() -> Select<EProject> {
     EProject::find()
         .filter(CProject::Public.eq(true))

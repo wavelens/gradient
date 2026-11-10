@@ -170,7 +170,7 @@ services.gradient.state = {
 | `key_file` | string | - | Path to a file that hold the SHA-256 hash of the API token. The hash use lowercase hex and omit the `GRAD` prefix. |
 | `name` | string | attribute name | Name of this API key. |
 | `owned_by` | string | - | Name of the user who own this key. |
-| `permissions` | list of string | `[ ]` | Permissions this key grant, written as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask` or `manageMembers`. |
+| `permissions` | list of string | `[ ]` | Permissions this key grant, written as camelCase identifiers such as `viewProject`, `triggerEvaluation`, `editTask` or `manageMembers`. Sets of Gradient permissions always contain `viewProject`. The key can create projects through `createProject` only with `project = null`. |
 | `project` | null or string | `null` | Project to which this key restrict access. `null` mean no restriction. |
 
 ## `teams.<name>`

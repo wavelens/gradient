@@ -7,12 +7,13 @@
 use crate::access::{Caller, caller_project_mask, key_limited_project_mask};
 use crate::api_spec::ProjectPath;
 use crate::audit::{Audit, changed_fields};
-use crate::authorization::{MaybeApiKey, reject_api_key_authentication};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{CreatedEntityResponse, ok_json, paginate};
 use crate::json_body::JsonBody;
 use crate::names::{ProjectDisplayName, ProjectName};
 use crate::permissions::{Permission, PermissionMask, mask_to_vec};
+use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{ProjectScope, Readable, RequiresUnmanaged, can};
 use anyhow::Context;
@@ -260,7 +261,7 @@ pub async fn get(
     operation_id = "createProject",
     tag = "projects",
     summary = "Create project",
-    description = "Create a new project for the current user. Return the UUID, the name and the URL of the web page. Only signed-in sessions can call this endpoint. API keys cannot create projects.",
+    description = "Create a new project for the current user. Return the UUID, the name, and the URL of the web page. Signed-in sessions can call this endpoint. API keys that have `createProject` and no project pinning can call this endpoint too.",
     request_body = MakeProjectRequest,
     responses((status = OK, description = "Project created", body = CreatedEntityResponse), WebError)
 )]
@@ -272,7 +273,11 @@ pub async fn put(
     Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     JsonBody(body): JsonBody<MakeProjectRequest>,
 ) -> WebResult<Json<BaseResponse<CreatedEntityResponse>>> {
-    reject_api_key_authentication(api_key.as_ref())?;
+    if let Some(key) = api_key.as_ref()
+        && !key.may_create_projects()
+    {
+        return Err(SharedRefusal::MissingPermission.into());
+    }
     require_create_permission(state.config.permissions.create_project, &user)?;
 
     let existing_project =

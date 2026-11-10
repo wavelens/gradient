@@ -53,7 +53,9 @@ impl<'a> StateApplicator<'a> {
                 )
                 .into());
             }
-            let mask = gradient_types::permissions::mask_from(&perms);
+            let mask = gradient_types::permissions::mask_with_view_project_permission(
+                gradient_types::permissions::mask_from(&perms),
+            );
 
             let pinned_project = match &state_api_key.project {
                 None => None,

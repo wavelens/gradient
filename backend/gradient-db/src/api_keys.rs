@@ -79,3 +79,77 @@ pub async fn revoke<C: ConnectionTrait>(
     active.revoked_at = Set(Some(at));
     active.update(db).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::rows;
+    use gradient_migration::{Migrator, MigratorTrait};
+    use gradient_types::permissions::{
+        CachePermission, Permission, PermissionMask, cache_mask_from, mask_from,
+    };
+    use sea_orm_migration::SchemaManager;
+
+    fn key(name: &str, permission: PermissionMask, cache: Option<CacheId>) -> MApi {
+        MApi {
+            id: ApiId::now_v7(),
+            owned_by: rows::user().id,
+            name: name.into(),
+            key: name.into(),
+            permission,
+            cache,
+            last_used_at: gradient_fixtures::test_date(),
+            created_at: gradient_fixtures::test_date(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn migration_adds_view_project_permission_to_non_cache_api_keys_and_keeps_cache_pinned_permission_mask_unchanged()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        crate::rows::insert::<EUser, _>(&conn, rows::user())
+            .await
+            .expect("the owner is written");
+        let cache = crate::rows::insert::<ECache, _>(&conn, rows::cache())
+            .await
+            .expect("the cache is written");
+        let deploy = mask_from(&[Permission::TriggerEvaluation]);
+        let upload = cache_mask_from(&[CachePermission::WriteStore]);
+        let project_key = crate::rows::insert::<EApi, _>(&conn, key("deploy", deploy, None))
+            .await
+            .expect("the project key is written");
+        let cache_key =
+            crate::rows::insert::<EApi, _>(&conn, key("upload", upload, Some(cache.id)))
+                .await
+                .expect("the cache key is written");
+
+        Migrator::migrations()
+            .into_iter()
+            .find(|m| {
+                m.name()
+                    == "m20261202_000000_add_view_project_permission_bit_to_existing_api_keys_not_pinned_to_cache"
+            })
+            .expect("the migration is registered")
+            .up(&SchemaManager::new(&conn))
+            .await
+            .expect("the migration runs");
+
+        let project_key = db
+            .find::<EApi>(project_key.id)
+            .await
+            .expect("the project key exists");
+        let cache_key = db
+            .find::<EApi>(cache_key.id)
+            .await
+            .expect("the cache key exists");
+        assert_eq!(
+            project_key.permission,
+            deploy | Permission::ViewProject.bit()
+        );
+        assert_eq!(cache_key.permission, upload);
+        db.finish().await;
+    }
+}

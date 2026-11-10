@@ -62,8 +62,33 @@ pub fn available_permissions() -> Vec<PermissionEntry> {
     Permission::ALL
         .iter()
         .copied()
+        .filter(|p| !p.is_server_wide())
         .map(PermissionEntry::from)
         .collect()
+}
+
+pub fn available_server_permissions() -> Vec<PermissionEntry> {
+    Permission::ALL
+        .iter()
+        .copied()
+        .filter(|p| p.is_server_wide())
+        .map(PermissionEntry::from)
+        .collect()
+}
+
+pub fn parse_permission_list_for_project_role(
+    wire: &[String],
+    catalogue_hint: &str,
+) -> WebResult<PermissionMask> {
+    let mask = parse_permission_list(wire, catalogue_hint)?;
+    match mask_to_vec(mask & server_wide_mask()).first() {
+        Some(server_wide) => Err(PermissionRefusal::UnknownPermission {
+            permission: server_wide.as_wire_name().to_string(),
+            catalogue_hint: catalogue_hint.to_string(),
+        }
+        .into()),
+        None => Ok(mask),
+    }
 }
 
 /// Empty input is allowed at this layer. Call sites requiring a non-empty set must check the mask

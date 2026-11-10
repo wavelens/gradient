@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::permissions::{Permission, PermissionMask, mask_from};
+use crate::permissions::{Permission, PermissionMask, mask_from, mask_grants};
 use gradient_db::exec_jobs::tokens::ResolvedJobToken;
 use gradient_types::ids::CacheId;
 use gradient_types::{
@@ -25,6 +25,12 @@ impl ApiKeyContext {
         self.project.is_none()
             && self.cache_pin.is_none()
             && self.mask & every_permission == every_permission
+    }
+
+    pub fn may_create_projects(&self) -> bool {
+        self.project.is_none()
+            && self.cache_pin.is_none()
+            && mask_grants(self.mask, Permission::CreateProject)
     }
 }
 

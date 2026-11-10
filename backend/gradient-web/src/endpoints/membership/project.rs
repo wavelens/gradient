@@ -11,7 +11,7 @@ use super::{
 use crate::error::WebResult;
 use crate::permissions::{
     PermissionEntry, PermissionMask, available_permissions, is_builtin_role, mask_to_vec,
-    mask_with_view_project_permission, parse_permission_list,
+    mask_with_view_project_permission, parse_permission_list_for_project_role,
 };
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
@@ -225,10 +225,9 @@ impl Owner for ProjectOwner {
     }
 
     fn parse_permissions(wire: &[String]) -> WebResult<PermissionMask> {
-        Ok(mask_with_view_project_permission(parse_permission_list(
-            wire,
-            "GET /projects/{project}/roles",
-        )?))
+        Ok(mask_with_view_project_permission(
+            parse_permission_list_for_project_role(wire, "GET /projects/{project}/roles")?,
+        ))
     }
 
     async fn role_granted_to_a_team(db: &impl ConnectionTrait, role: RoleId) -> WebResult<bool> {

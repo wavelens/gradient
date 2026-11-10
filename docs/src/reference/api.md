@@ -34,6 +34,10 @@ Responses use the envelope `{ "error": false, "message": <payload> }`. Set `erro
 - The `allowed_ips` field can limit a key to a list of CIDR blocks. Requests from other sources receive `403 forbidden_source_ip`.
 - The server reads `X-Forwarded-For` only from proxies listed in `http.trustedProxies`.
 - API keys cannot create, edit or delete other API keys. Only a session can do this.
+- No key can exceed the permissions of its owner. A key pinned to a project can only grant permissions the owner holds in that project.
+- Every project key includes `viewProject`.
+- `createProject` is valid only on a key without a pin. A key with it can call `PUT /projects` when its owner can create projects.
+- `GET /user/keys/{id}/reach` lists the projects and caches a key can reach, with its permissions on each.
 
 ```sh
 curl -X POST https://gradient.example.com/api/v1/user/keys \

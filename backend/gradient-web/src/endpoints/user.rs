@@ -4,20 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, caller_cache_mask, load_cache};
+use crate::access::{CacheAccess, Caller, caller_cache_mask, caller_project_mask, load_cache};
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::{
     MaybeUser, can_disconnect, generate_api_key, hash_api_key, session_claims,
 };
-use crate::error::{WebError, WebResult, unique_violation};
+use crate::error::{WebError, WebResult, require_create_permission, unique_violation};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::ip_allowlist::normalize_allowed_ips;
 use crate::json_body::JsonBody;
 use crate::lookup::require;
 use crate::names::UserDisplayName;
 use crate::permissions::{
-    PermissionEntry, available_cache_permissions, available_permissions, cache_mask_to_wire,
-    mask_to_vec, parse_cache_permission_list, parse_permission_list,
+    Permission, PermissionEntry, PermissionMask, available_cache_permissions,
+    available_permissions, available_server_permissions, cache_mask_to_wire, mask_grants,
+    mask_to_vec, mask_with_view_project_permission, parse_cache_permission_list,
+    parse_permission_list, server_wide_mask,
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
@@ -63,6 +65,10 @@ enum UserRefusal {
     ApiKeyExpiryShorterThanOneDay,
     #[error("API key cannot grant cache permissions you do not hold.")]
     GrantUnheldCachePermissions,
+    #[error("API key cannot grant project permissions that the owner does not have.")]
+    GrantUnheldProjectPermissions,
+    #[error("Only keys that aren't pinned to a project can call `createProject`.")]
+    ServerWidePermissionOnPinnedKey,
     #[error(
         "Cannot modify profile of an OIDC user. Your profile is managed by your identity provider."
     )]
@@ -79,8 +85,10 @@ impl Refusal for UserRefusal {
             | Self::UsernameConfirmationRequired
             | Self::UsernameConfirmationMismatch
             | Self::GrantUnheldCachePermissions
+            | Self::GrantUnheldProjectPermissions
             | Self::ModifyOidcUserProfile => RefusalStatus::Forbidden,
             Self::UnknownProjectOrNotMember { .. }
+            | Self::ServerWidePermissionOnPinnedKey
             | Self::PinToProjectAndCache
             | Self::NoPermissionsSelected
             | Self::ApiKeyExpiryShorterThanOneDay
@@ -211,6 +219,21 @@ pub struct ApiKeyPermissionsResponse {
     pub available_permissions: Vec<PermissionEntry>,
     #[serde(rename = "availableCache")]
     pub available_cache: Vec<PermissionEntry>,
+    pub server_wide_permissions: Vec<PermissionEntry>,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct ApiKeyVisibleProjectOrCacheWithPermissions {
+    pub name: String,
+    pub display_name: String,
+    pub permissions: Vec<&'static str>,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct ApiKeyVisibleProjectsAndCachesWithPermissionsResponse {
+    pub projects: Vec<ApiKeyVisibleProjectOrCacheWithPermissions>,
+    pub caches: Vec<ApiKeyVisibleProjectOrCacheWithPermissions>,
+    pub create_project: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -558,6 +581,38 @@ async fn held_cache_permissions(
     Ok(mask)
 }
 
+async fn reject_api_key_permissions_not_held_by_owner(
+    db: &WebDb,
+    create_project: gradient_types::CreatePermission,
+    user: &MUser,
+    project: Option<ProjectId>,
+    wire: &[String],
+) -> WebResult<PermissionMask> {
+    let requested = parse_permission_list(wire, "GET /user/keys/permissions")?;
+    if requested == 0 {
+        return Err(UserRefusal::NoPermissionsSelected.into());
+    }
+    let mask = mask_with_view_project_permission(requested);
+    match project {
+        Some(_) if mask & server_wide_mask() != 0 => {
+            Err(UserRefusal::ServerWidePermissionOnPinnedKey.into())
+        }
+        Some(project) => {
+            let granted = caller_project_mask(db, Caller::User(user), project, None).await?;
+            if mask & !granted != 0 {
+                return Err(UserRefusal::GrantUnheldProjectPermissions.into());
+            }
+            Ok(mask)
+        }
+        None => {
+            if mask_grants(mask, Permission::CreateProject) {
+                require_create_permission(create_project, user)?;
+            }
+            Ok(mask)
+        }
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/user/keys/permissions",
@@ -571,6 +626,7 @@ pub async fn get_key_permissions() -> WebResult<Json<BaseResponse<ApiKeyPermissi
     Ok(ok_json(ApiKeyPermissionsResponse {
         available_permissions: available_permissions(),
         available_cache: available_cache_permissions(),
+        server_wide_permissions: available_server_permissions(),
     }))
 }
 
@@ -600,12 +656,90 @@ pub async fn get_keys(
 }
 
 #[utoipa::path(
+    get,
+    path = "/user/keys/{api_id}/reach",
+    operation_id = "getUserKeyReach",
+    tag = "user",
+    summary = "List what an API key can reach",
+    description = "Projects and caches that an API key can reach appear in the list, each with the permissions for the key on that resource. The permissions of the key can't exceed the current role of the owner. A change to the owner's role can change the list. `create_project` is true when the key can call `PUT /projects`. Public projects and public caches stay readable by all keys. They don't appear in the list.",
+    params(("api_id" = ApiId, Path)),
+    responses((status = OK, description = "Projects and caches the key can reach", body = ApiKeyVisibleProjectsAndCachesWithPermissionsResponse), WebError)
+)]
+pub async fn get_key_visible_projects_and_caches_with_permissions(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(api_id): Path<ApiId>,
+) -> WebResult<Json<BaseResponse<ApiKeyVisibleProjectsAndCachesWithPermissionsResponse>>> {
+    let api_key = require::<EApi>(&state.web_db, api_id).await?;
+    if api_key.owned_by != user.id {
+        return Err(WebError::not_found(Resource::ApiKey));
+    }
+
+    if let Some(cache_id) = api_key.cache {
+        let cache = gradient_db::lookup::by_id::<ECache, _>(&state.web_db, cache_id)
+            .await?
+            .or_not_found(Resource::Cache)?;
+        let held = caller_cache_mask(&state.web_db, Caller::User(&user), cache_id, None).await?;
+        let caches = vec![ApiKeyVisibleProjectOrCacheWithPermissions {
+            name: cache.name,
+            display_name: cache.display_name,
+            permissions: cache_mask_to_wire(held & api_key.permission),
+        }]
+        .into_iter()
+        .filter(|cache| !cache.permissions.is_empty())
+        .collect();
+        return Ok(ok_json(
+            ApiKeyVisibleProjectsAndCachesWithPermissionsResponse {
+                projects: Vec::new(),
+                caches,
+                create_project: false,
+            },
+        ));
+    }
+
+    let projects =
+        gradient_db::projects::all_reachable_by_user(&state.web_db, user.id, api_key.project)
+            .await?;
+    let mut grants = gradient_db::access::project_grants(
+        &state.web_db,
+        user.id,
+        projects.iter().map(|project| project.id).collect(),
+    )
+    .await?;
+    let projects = projects
+        .into_iter()
+        .filter_map(|project| {
+            let held = grants.remove(&project.id)?.permissions & api_key.permission;
+            (held != 0).then(|| ApiKeyVisibleProjectOrCacheWithPermissions {
+                name: project.name,
+                display_name: project.display_name,
+                permissions: mask_to_vec(held)
+                    .into_iter()
+                    .map(|p| p.as_wire_name())
+                    .collect(),
+            })
+        })
+        .collect();
+    let create_project = api_key.project.is_none()
+        && mask_grants(api_key.permission, Permission::CreateProject)
+        && require_create_permission(state.config.permissions.create_project, &user).is_ok();
+
+    Ok(ok_json(
+        ApiKeyVisibleProjectsAndCachesWithPermissionsResponse {
+            projects,
+            caches: Vec::new(),
+            create_project,
+        },
+    ))
+}
+
+#[utoipa::path(
     post,
     path = "/user/keys",
     operation_id = "createUserKey",
     tag = "user",
     summary = "Create API key",
-    description = "Creates a new API key. The full key (prefixed with `GRAD`) is returned once -\nit cannot be retrieved again. Use it as `Authorization: Bearer GRAD<key>`.\nPass `expires_in_days` to make the key auto-expire; omit for no expiry.\nA cache-pinned key may only grant cache permissions the caller already\nholds; members of a project subscribed to the cache are treated as\nread-only, so they can mint read-only cache keys.",
+    description = "Create a new API key. Callers receive the full key (with the `GRAD` prefix) one time. No second request can retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to make the key expire automatically. Omit this field to leave the key without expiry. No key can exceed the permissions of the owner. A key pinned to a project or a cache can grant only the caller's permissions there. Members of projects that subscribe to a cache count as read-only, so a caller can issue a read-only cache key. Grant `viewProject` to every project key. `createProject` can only apply to an unpinned key with an owner that can create projects.",
     request_body = CreateApiKeyRequest,
     responses((status = OK, description = "New API key", body = String, content_type = "application/json"), WebError)
 )]
@@ -648,11 +782,15 @@ pub async fn post_keys(
         let m = held_cache_permissions(&state.web_db, &user, cache.id, &body.permissions).await?;
         (m, None, Some(cache.id))
     } else {
-        let m = parse_permission_list(&body.permissions, "GET /user/keys/permissions")?;
-        if m == 0 {
-            return Err(UserRefusal::NoPermissionsSelected.into());
-        }
         let project = resolve_project_pin(&db, user.id, body.project.clone()).await?;
+        let m = reject_api_key_permissions_not_held_by_owner(
+            &state.web_db,
+            state.config.permissions.create_project,
+            &user,
+            project,
+            &body.permissions,
+        )
+        .await?;
         (m, project, None)
     };
 
@@ -737,22 +875,36 @@ pub async fn patch_key(
         }
         active.name = Set(name);
     }
-    let mut new_mask = previous_mask;
-    if let Some(perms) = body.permissions {
-        new_mask = match pinned_cache {
-            Some(cache) => held_cache_permissions(&state.web_db, &user, cache, &perms).await?,
-            None => parse_permission_list(&perms, "GET /user/keys/permissions")?,
-        };
-        if new_mask == 0 {
-            return Err(UserRefusal::NoPermissionsSelected.into());
-        }
-        active.permission = Set(new_mask);
-    }
     let mut new_project = previous_project;
-    if let Some(maybe_name) = body.project {
+    if let Some(maybe_name) = body.project.clone() {
         new_project = resolve_project_pin(&db, user.id, maybe_name).await?;
         active.project = Set(new_project);
     }
+    let mut new_mask = previous_mask;
+    match (pinned_cache, body.permissions) {
+        (Some(cache), Some(perms)) => {
+            new_mask = held_cache_permissions(&state.web_db, &user, cache, &perms).await?;
+        }
+        (Some(_), None) => {}
+        (None, perms) if perms.is_some() || body.project.is_some() => {
+            let wire = perms.unwrap_or_else(|| {
+                mask_to_vec(previous_mask)
+                    .into_iter()
+                    .map(|p| p.as_wire_name().to_string())
+                    .collect()
+            });
+            new_mask = reject_api_key_permissions_not_held_by_owner(
+                &state.web_db,
+                state.config.permissions.create_project,
+                &user,
+                new_project,
+                &wire,
+            )
+            .await?;
+        }
+        (None, _) => {}
+    }
+    active.permission = Set(new_mask);
     if let Some(canon) = normalize_allowed_ips(body.allowed_ips)? {
         active.allowed_ips = Set(if canon.is_empty() { None } else { Some(canon) });
     }

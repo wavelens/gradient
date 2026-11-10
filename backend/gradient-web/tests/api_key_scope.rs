@@ -15,9 +15,12 @@ use gradient_entity::{api, cache, ids::*};
 use gradient_fixtures::ids::{cache_id, project_id, user_id};
 use gradient_fixtures::mock::{exec_ok, mock_db};
 use gradient_fixtures::rows::{cache_member, cache_view_role, user};
+use gradient_test_support::state::TestState;
 use gradient_test_support::web::{make_test_server, make_token, with_auth};
-use gradient_types::consts::BASE_CACHE_ROLE_VIEW_ID;
-use gradient_types::permissions::{CachePermission, Permission, cache_mask_from, mask_from};
+use gradient_types::consts::{BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID};
+use gradient_types::permissions::{
+    CachePermission, Permission, admin_mask, cache_mask_from, mask_from,
+};
 use sea_orm::MockDatabase;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -171,12 +174,24 @@ fn cache_scope_key(raw: &str) -> api::Model {
 }
 
 #[tokio::test]
-async fn api_keys_cannot_create_a_project() {
-    let any_project = "h".repeat(64);
+async fn api_key_without_create_project_permission_cache_pinned_key_and_project_pinned_key_cannot_create_project()
+ {
+    let without_permission = "h".repeat(64);
     let cache_scope = "i".repeat(64);
+    let project_scope = "k".repeat(64);
     for (raw, key) in [
-        (any_project.clone(), key_row(&any_project, i64::MAX, None)),
+        (
+            without_permission.clone(),
+            key_row(&without_permission, admin_mask(), None),
+        ),
         (cache_scope.clone(), cache_scope_key(&cache_scope)),
+        (
+            project_scope.clone(),
+            api::Model {
+                project: Some(project_id()),
+                ..key_row(&project_scope, mask_from(Permission::ALL), None)
+            },
+        ),
     ] {
         let db = with_key(mock_db(), &key);
         let status = refused_with_key(db, &raw, |s| {
@@ -187,8 +202,62 @@ async fn api_keys_cannot_create_a_project() {
             }))
         })
         .await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{:?}", key.cache);
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "{:?} {:?}",
+            key.cache,
+            key.project
+        );
     }
+}
+
+#[tokio::test]
+async fn unpinned_api_key_with_create_project_permission_creates_project() {
+    let raw = "l".repeat(64);
+    let key = key_row(
+        &raw,
+        mask_from(&[Permission::ViewProject, Permission::CreateProject]),
+        None,
+    );
+    let inserted = gradient_fixtures::rows::project_named("fresh");
+    let membership = gradient_entity::project_user::Model {
+        project: inserted.id,
+        ..gradient_fixtures::rows::project_member(BASE_ROLE_ADMIN_ID)
+    };
+    let db = with_key(mock_db(), &key)
+        .append_query_results([Vec::<gradient_entity::project::Model>::new()])
+        .append_query_results([vec![inserted.clone()]])
+        .append_query_results([vec![membership]])
+        .append_query_results([Vec::<gradient_entity::team::Model>::new()])
+        .append_exec_results([exec_ok(), exec_ok()]);
+    let crypt_file = std::env::temp_dir().join(format!("gradient-test-crypt-{}", ApiId::now_v7()));
+    std::fs::write(&crypt_file, "this-is-a-32-byte-crypt-key!!!!").unwrap();
+
+    let res = TestState::new()
+        .web_db(db.into_connection())
+        .cli(|cli| cli.secrets.crypt_file = crypt_file.to_string_lossy().into_owned())
+        .config(|c| c.server.frontend_url = "https://ci.example".into())
+        .server()
+        .put("/api/v1/projects")
+        .add_header("authorization", bearer_key(&raw))
+        .json(&json!({
+            "name": "fresh",
+            "display_name": "Fresh",
+            "description": "",
+        }))
+        .await;
+
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body["message"],
+        json!({
+            "id": inserted.id.to_string(),
+            "name": "fresh",
+            "url": "https://ci.example/project/fresh",
+        })
+    );
 }
 
 #[tokio::test]

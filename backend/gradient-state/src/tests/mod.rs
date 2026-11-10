@@ -826,3 +826,62 @@ fn a_start_evaluation_action_survives_export() {
     assert_eq!(exported.config["task"], "deploy");
     assert_eq!(exported.events, vec!["exec_job.completed".to_string()]);
 }
+
+#[test]
+fn rejects_project_role_with_server_wide_create_project() {
+    let json = r#"{
+        "users": {
+            "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
+        },
+        "projects": {
+            "acme": { "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null", "public": false, "created_by": "alice" }
+        },
+        "roles": {
+            "creator": { "name": "creator", "project": "acme", "permissions": ["viewProject", "createProject"] }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let v = cfg.validate();
+    assert!(
+        v.errors
+            .iter()
+            .any(|e| e.field == "roles.creator.permissions"),
+        "errors: {:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn pinned_state_file_api_key_cannot_list_create_project_but_unpinned_can() {
+    let state_with_key = |project: &str| {
+        let json = format!(
+            r#"{{
+            "users": {{
+                "alice": {{ "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }}
+            }},
+            "projects": {{
+                "acme": {{ "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null", "public": false, "created_by": "alice" }}
+            }},
+            "api_keys": {{
+                "ci": {{ "name": "ci", "key_file": "/dev/null", "owned_by": "alice", "permissions": ["createProject"]{project} }}
+            }}
+        }}"#
+        );
+        serde_json::from_str::<StateConfiguration>(&json)
+            .unwrap()
+            .validate()
+    };
+
+    let pinned = state_with_key(r#", "project": "acme""#);
+    let unpinned = state_with_key("");
+
+    assert!(
+        pinned
+            .errors
+            .iter()
+            .any(|e| e.field == "api_keys.ci.permissions"),
+        "errors: {:?}",
+        pinned.errors
+    );
+    assert!(unpinned.is_valid, "errors: {:?}", unpinned.errors);
+}

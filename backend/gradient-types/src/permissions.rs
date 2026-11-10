@@ -27,6 +27,8 @@ pub enum Permission {
     TriggerEvaluation,
     ManageTriggers,
     ManageWebhooks,
+
+    CreateProject,
 }
 
 pub type PermissionMask = i64;
@@ -48,6 +50,7 @@ impl Permission {
         Permission::TriggerEvaluation,
         Permission::ManageTriggers,
         Permission::ManageWebhooks,
+        Permission::CreateProject,
     ];
 
     /// New permissions must be appended, and an existing one must never be renumbered.
@@ -69,6 +72,7 @@ impl Permission {
             Permission::TriggerEvaluation => 12,
             Permission::ManageTriggers => 13,
             Permission::ManageWebhooks => 14,
+            Permission::CreateProject => 15,
         };
         1_i64 << pos
     }
@@ -90,7 +94,12 @@ impl Permission {
             Permission::TriggerEvaluation => "triggerEvaluation",
             Permission::ManageTriggers => "manageTriggers",
             Permission::ManageWebhooks => "manageWebhooks",
+            Permission::CreateProject => "createProject",
         }
+    }
+
+    pub const fn is_server_wide(self) -> bool {
+        matches!(self, Permission::CreateProject)
     }
 
     pub fn from_wire_name(s: &str) -> Option<Self> {
@@ -122,8 +131,15 @@ pub fn is_mutating(permission: Permission) -> bool {
     !matches!(permission, Permission::ViewProject)
 }
 
+pub fn server_wide_mask() -> PermissionMask {
+    Permission::ALL
+        .iter()
+        .filter(|p| p.is_server_wide())
+        .fold(0, |acc, p| acc | p.bit())
+}
+
 pub fn admin_mask() -> PermissionMask {
-    mask_from(Permission::ALL)
+    mask_from(Permission::ALL) & !server_wide_mask()
 }
 
 pub fn write_mask() -> PermissionMask {
@@ -329,9 +345,14 @@ mod tests {
     #[test]
     fn masks_grant_and_withhold_the_expected_permissions() {
         for p in Permission::ALL.iter().copied() {
-            assert!(mask_grants(admin_mask(), p), "admin missing {p:?}");
+            assert_eq!(
+                mask_grants(admin_mask(), p),
+                !p.is_server_wide(),
+                "admin role and {p:?}"
+            );
             assert!(!mask_grants(0, p), "empty mask granted {p:?}");
         }
+        assert!(!mask_grants(admin_mask(), Permission::CreateProject));
 
         let write = write_mask();
         assert!(!mask_grants(write, Permission::ManageMembers));

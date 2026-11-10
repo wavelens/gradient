@@ -24,11 +24,19 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
         for wire in &role.permissions {
-            if Permission::from_wire_name(wire).is_none() {
-                errors.push(
+            match Permission::from_wire_name(wire) {
+                None => errors.push(
                     format!("roles.{}.permissions", role.name),
                     format!("Unknown permission '{}'", wire),
-                );
+                ),
+                Some(permission) if permission.is_server_wide() => errors.push(
+                    format!("roles.{}.permissions", role.name),
+                    format!(
+                        "The permission '{}' is server-wide. It can't be part of a project role.",
+                        wire
+                    ),
+                ),
+                Some(_) => {}
             }
         }
         if matches!(role.name.as_str(), "Admin" | "Write" | "View") {

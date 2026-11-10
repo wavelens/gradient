@@ -331,6 +331,9 @@ pub(crate) fn account_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(user::patch_key))
                 .routes(routes!(user::post_key_revoke))
                 .routes(routes!(
+                    user::get_key_visible_projects_and_caches_with_permissions
+                ))
+                .routes(routes!(
                     user_ssh_keys::get_ssh_keys,
                     user_ssh_keys::post_ssh_key
                 ))

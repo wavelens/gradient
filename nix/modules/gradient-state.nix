@@ -1185,7 +1185,8 @@
         description = ''
           Permissions granted by the key, as camelCase identifiers such as `viewProject`,
           `triggerEvaluation`, `editTask` or `manageMembers`. It must not be empty.
-          `GET /user/keys/permissions` lists them all.
+          `GET /user/keys/permissions` lists them all. Sets of Gradient permissions always contain
+          `viewProject`. The key can create projects through `createProject` only with `project = null`.
         '';
       };
 

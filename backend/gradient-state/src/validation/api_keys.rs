@@ -22,11 +22,21 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
         for wire in &api_key.permissions {
-            if Permission::from_wire_name(wire).is_none() {
-                errors.push(
+            match Permission::from_wire_name(wire) {
+                None => errors.push(
                     format!("api_keys.{}.permissions", api_key.name),
                     format!("Unknown permission '{}'", wire),
-                );
+                ),
+                Some(permission) if permission.is_server_wide() && api_key.project.is_some() => {
+                    errors.push(
+                        format!("api_keys.{}.permissions", api_key.name),
+                        format!(
+                            "Permission '{}' can apply to the whole server. Remove the project pin or the permission.",
+                            wire
+                        ),
+                    )
+                }
+                Some(_) => {}
             }
         }
         if let Some(project) = &api_key.project
