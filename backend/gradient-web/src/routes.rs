@@ -87,6 +87,7 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     teams::management::put_team
                 ))
                 .routes(routes!(teams::management::get_team_name_available))
+                .routes(routes!(teams::management::get_all_teams))
                 .routes(routes!(
                     teams::management::get_team,
                     teams::management::patch_team,

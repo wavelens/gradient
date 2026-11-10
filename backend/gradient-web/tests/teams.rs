@@ -11,8 +11,9 @@ use gradient_fixtures::mock::{all_statements, exec_ok, mock_db, ran};
 use gradient_fixtures::rows::{superuser, team, team_member};
 use gradient_test_support::state::TestState;
 use gradient_test_support::web::{bearer, make_test_server, signed_in, with_auth, with_auth_as};
-use gradient_types::{CreatePermission, SessionId};
+use gradient_types::{CreatePermission, SessionId, TeamId};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 
 #[tokio::test]
 async fn creating_a_team_respects_the_create_permission() {
@@ -159,6 +160,46 @@ async fn deleting_a_team_withdraws_its_workers_from_the_granted_projects() {
     assert!(
         looked_up_projects,
         "deleting a team must find the projects whose jobs its workers lose"
+    );
+}
+
+fn team_count(team: &team::Model, count: i64) -> BTreeMap<&'static str, sea_orm::Value> {
+    BTreeMap::from([
+        ("team", sea_orm::Value::Uuid(Some(team.id.into_inner()))),
+        ("team_count", sea_orm::Value::BigInt(Some(count))),
+    ])
+}
+
+#[tokio::test]
+async fn all_teams_are_listed_with_counts_and_caller_admin_mark() {
+    let joined = team();
+    let foreign = team::Model {
+        id: TeamId::now_v7(),
+        name: "foreign".into(),
+        display_name: "Foreign".into(),
+        ..team()
+    };
+    let (db, auth) = signed_in();
+    let db = db
+        .append_query_results([vec![team_count(&joined, 2), team_count(&foreign, 1)]])
+        .append_query_results([vec![team_count(&foreign, 3)]])
+        .append_query_results([vec![team_member(TeamRole::Admin)]])
+        .append_query_results([vec![foreign, joined]]);
+    let server = make_test_server(db.into_connection());
+
+    let res = server
+        .get("/api/v1/teams/all")
+        .add_header("authorization", auth)
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(
+        body["message"],
+        json!([
+            { "name": "foreign", "display_name": "Foreign", "member_count": 1, "worker_count": 3, "caller_is_admin": false },
+            { "name": "platform", "display_name": "Platform", "member_count": 2, "worker_count": 0, "caller_is_admin": true },
+        ])
     );
 }
 

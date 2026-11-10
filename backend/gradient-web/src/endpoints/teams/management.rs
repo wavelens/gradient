@@ -160,6 +160,46 @@ pub async fn get_teams(
     Ok(ok_json(items))
 }
 
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct TeamGrantPickerRow {
+    pub name: String,
+    pub display_name: String,
+    pub member_count: u64,
+    pub worker_count: u64,
+    pub caller_is_admin: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/teams/all",
+    operation_id = "listAllTeams",
+    tag = "teams",
+    summary = "List all teams",
+    description = "List all teams in the Grant Team picker for a project or cache. Response fields include the number of members, the number of workers, and whether the caller is an admin of that team. Grants to a team where the caller isn't an admin require approval from that team.",
+    responses((status = OK, description = "OK", body = Vec<TeamGrantPickerRow>), WebError)
+)]
+pub async fn get_all_teams(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
+) -> WebResult<Json<BaseResponse<Vec<TeamGrantPickerRow>>>> {
+    reject_api_key_authentication(api_key.as_ref())?;
+    let rows =
+        gradient_db::teams::all_teams_with_counts_and_role_of_user(&state.web_db, user.id).await?;
+
+    Ok(ok_json(
+        rows.into_iter()
+            .map(|row| TeamGrantPickerRow {
+                caller_is_admin: user.superuser || row.user_role == Some(TeamRole::Admin),
+                name: row.team.name,
+                display_name: row.team.display_name,
+                member_count: row.member_count,
+                worker_count: row.worker_count,
+            })
+            .collect(),
+    ))
+}
+
 #[utoipa::path(
     get,
     path = "/teams/available",
