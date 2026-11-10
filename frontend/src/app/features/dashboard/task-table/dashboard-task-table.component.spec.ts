@@ -215,9 +215,9 @@ describe('DashboardTaskTableComponent', () => {
     expect(values).toEqual([['41 of 45', 'Entry points passed'], ['14m 00s', 'average time']]);
   });
 
-  it('names the project and task by display name and keeps slugs in the link only', () => {
+  it('names the project and task by display name and shows slugs only in the hover title', () => {
     const row = render(null, () => of(PAGE)).root.querySelector<HTMLElement>('gr-row')!;
-    expect(row.querySelector<HTMLElement>('.name')!.title).toBe('Infrastructure / hosts build');
+    expect(row.querySelector<HTMLElement>('.name')!.title).toBe('Infrastructure / hosts build (infra/hosts)');
     expect(row.querySelector('.name')!.textContent).not.toContain('infra ');
     expect(row.querySelector('a.row-link')!.getAttribute('href')).toBe('/project/infra/task/hosts');
   });

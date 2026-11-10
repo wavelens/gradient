@@ -12,7 +12,7 @@ import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
 import { EvaluationStatus, Rail } from '@core/models';
 import { SkeletonComponent } from '@gradient/ui/ui';
-import { StarButtonComponent } from '@shared/ui';
+import { StarButtonComponent, formatEntityLabel } from '@shared/ui';
 import { formatCount } from '@shared/text';
 import { PHASE_COLOR, evaluationPhase } from '@shared/evaluation';
 import { links } from '@shared/routing';
@@ -27,6 +27,7 @@ import { links } from '@shared/routing';
 })
 export class DashboardRailComponent implements OnInit {
   protected readonly links = links;
+  protected readonly formatEntityLabel = formatEntityLabel;
   private dashboard = inject(DashboardService);
   rail = signal<Rail | null>(null);
   failed = signal(false);

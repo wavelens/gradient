@@ -14,7 +14,7 @@
             <span class="row">
               <gr-star-button [target]="{ kind: 'project', project: p.name }" [starredItemDisplayName]="p.display_name" [(starred)]="p.starred" />
               <span class="dot" [style.background]="evaluationStatusDotColor(p.status)"></span>
-              <a class="n" [routerLink]="links.project(p.name)" [title]="p.display_name">{{ p.display_name }}</a>
+              <a class="n" [routerLink]="links.project(p.name)" [title]="formatEntityLabel(p)">{{ p.display_name }}</a>
               @if (!p.tasks) {
                 <span class="count">{{ p.task_count }} {{ p.task_count === 1 ? 'task' : 'tasks' }}</span>
               }
@@ -25,7 +25,7 @@
                   <li>
                     <a class="row" [routerLink]="links.task(p.name, t.name)">
                       <span class="dot" [style.background]="evaluationStatusDotColor(t.status)"></span>
-                      <span class="n" [title]="t.display_name">{{ t.display_name }}</span>
+                      <span class="n" [title]="formatEntityLabel(t)">{{ t.display_name }}</span>
                     </a>
                   </li>
                 }
@@ -44,7 +44,7 @@
           <li>
             <span class="row">
               <gr-star-button [target]="{ kind: 'cache', cache: c.name }" [starredItemDisplayName]="c.display_name" [(starred)]="c.starred" />
-              <a class="n" [routerLink]="links.cache(c.name)" [title]="c.display_name">{{ c.display_name }}</a>
+              <a class="n" [routerLink]="links.cache(c.name)" [title]="formatEntityLabel(c)">{{ c.display_name }}</a>
               <span class="count">{{ count(c.nar_count) }} packages</span>
             </span>
           </li>

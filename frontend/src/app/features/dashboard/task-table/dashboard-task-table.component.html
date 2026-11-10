@@ -42,7 +42,7 @@
               } @else {
                 <gr-icon slot="icon" class="never-run" name="radio_button_unchecked" size="sm" label="Never run" />
               }
-              <span class="name" [title]="label"><span class="project">{{ t.project_display_name }}</span><span class="separator">&nbsp;/&nbsp;</span><span class="task">{{ t.task_display_name }}</span></span>
+              <span class="name" [title]="label + ' (' + t.project + '/' + t.task + ')'"><span class="project">{{ t.project_display_name }}</span><span class="separator">&nbsp;/&nbsp;</span><span class="task">{{ t.task_display_name }}</span></span>
               <span slot="meta" class="meta">
                 @if (t.latest; as l) {
                   @if (waitingReason) {

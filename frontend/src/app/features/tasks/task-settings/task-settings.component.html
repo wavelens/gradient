@@ -223,7 +223,7 @@ width="420px"
 (hide)="onTransferDialogHide()"
 >
 <div>
-  <p>Transfer <strong>{{ task()?.display_name }}</strong> to another project. This action cannot be undone.</p>
+  <p>Transfer <strong><gr-entity-name [displayName]="task()?.display_name" [name]="taskName" /></strong> to another project. This action cannot be undone.</p>
   <gr-form-field label="Target Project">
     <gr-select
       [(ngModel)]="transferProjectName"

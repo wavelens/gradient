@@ -361,6 +361,10 @@ describe('TaskSettingsComponent - write failures', () => {
     component.openTransferOwnershipDialogAndLoadTargetProjects();
     expect(component.showTransferDialog()).toBe(true);
     expect(component.transferTargetProjectOptions()).toEqual([{ label: 'Other Team (other)', value: 'other' }]);
+    fixture.detectChanges();
+    const transferredTask = document.body.querySelector('.gr-dialog gr-entity-name');
+    expect(transferredTask?.querySelector('.entity-name__display')?.textContent).toBe('Demo');
+    expect(transferredTask?.querySelector('.entity-name__slug')?.textContent).toBe('demo');
   });
 
   it('shows a refused transfer inside the open dialog, not on the page', () => {

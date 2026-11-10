@@ -31,7 +31,7 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent, entityToPickerOption, formatEntityLabel } from '@shared/ui';
+import { EntityNameComponent, LabelHelpComponent, entityToPickerOption, formatEntityLabel } from '@shared/ui';
 import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canOpenProjectSettings } from '@shared/access';
 import { fieldChecks, injectRevealFirstInvalid, maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { wildcardError } from '../wildcard-error';
@@ -62,6 +62,7 @@ interface TaskForm {
     RouterModule,
     FormsModule,
     DialogComponent,
+    EntityNameComponent,
     ButtonComponent,
     InputDirective,
     SelectComponent,
