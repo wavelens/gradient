@@ -15,15 +15,13 @@ pub struct ProjectsApi<'a>(pub(crate) &'a Client);
 
 impl ProjectsApi<'_> {
     pub async fn list(&self) -> Result<PaginatedProjectSummary, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            "projects",
-            true,
-        )?;
-        http::decode(req.send().await?).await
+        let (items, total) = self.0.fetch_all_pages_and_total_count("projects").await?;
+        Ok(PaginatedProjectSummary {
+            per_page: i64::try_from(items.len()).unwrap_or(i64::MAX),
+            page: 1,
+            total,
+            items,
+        })
     }
 
     pub async fn available(&self, name: &str) -> Result<bool, ConnectorError> {

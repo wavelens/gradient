@@ -154,6 +154,39 @@ impl Client {
         http::decode(req.send().await?).await
     }
 
+    pub(crate) async fn fetch_all_pages_and_total_count<T: serde::de::DeserializeOwned>(
+        &self,
+        endpoint: &str,
+    ) -> Result<(Vec<T>, i64), ConnectorError> {
+        #[derive(serde::Deserialize)]
+        struct Page<T> {
+            items: Vec<T>,
+            total: i64,
+        }
+        const PER_PAGE: u32 = 100;
+
+        let mut items = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let req = http::request(
+                self.http(),
+                self.base_url(),
+                self.token(),
+                reqwest::Method::GET,
+                endpoint,
+                true,
+            )?
+            .query(&[("page", page), ("per_page", PER_PAGE)]);
+            let batch: Page<T> = http::decode(req.send().await?).await?;
+            let received = batch.items.len();
+            items.extend(batch.items);
+            if received == 0 || i64::try_from(items.len()).unwrap_or(i64::MAX) >= batch.total {
+                return Ok((items, batch.total));
+            }
+            page += 1;
+        }
+    }
+
     pub async fn health(&self) -> Result<String, ConnectorError> {
         let req = http::request(
             self.http(),

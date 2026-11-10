@@ -28,15 +28,13 @@ pub struct CachesApi<'a>(pub(crate) &'a Client);
 
 impl CachesApi<'_> {
     pub async fn list(&self) -> Result<PaginatedCache, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            "caches",
-            true,
-        )?;
-        http::decode(req.send().await?).await
+        let (items, total) = self.0.fetch_all_pages_and_total_count("caches").await?;
+        Ok(PaginatedCache {
+            per_page: i64::try_from(items.len()).unwrap_or(i64::MAX),
+            page: 1,
+            total,
+            items,
+        })
     }
 
     pub async fn create(&self, body: MakeCacheRequest) -> Result<String, ConnectorError> {

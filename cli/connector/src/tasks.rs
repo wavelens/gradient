@@ -13,15 +13,16 @@ pub struct TasksApi<'a>(pub(crate) &'a Client);
 
 impl TasksApi<'_> {
     pub async fn list(&self, project: &str) -> Result<PaginatedTaskResponse, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            &format!("tasks/{project}"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
+        let (items, total) = self
+            .0
+            .fetch_all_pages_and_total_count(&format!("tasks/{project}"))
+            .await?;
+        Ok(PaginatedTaskResponse {
+            per_page: i64::try_from(items.len()).unwrap_or(i64::MAX),
+            page: 1,
+            total,
+            items,
+        })
     }
 
     pub async fn available(&self, project: &str, name: &str) -> Result<bool, ConnectorError> {
