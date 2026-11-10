@@ -7,7 +7,8 @@
 use crate::commands::{completion, task_subcommands};
 use crate::config::*;
 use crate::input::{
-    CommandLineFormField, client_from_config, handle_input, selected_project, selected_task,
+    CommandLineFormField, client_from_config, confirm_delete, handle_input, selected_project,
+    selected_task,
 };
 use crate::output::{Color, ExitKind, Output};
 use clap::Subcommand;
@@ -65,7 +66,11 @@ pub enum Commands {
         wildcard: Option<String>,
     },
     /// Delete the selected task
-    Delete,
+    Delete {
+        /// Delete without a confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
     /// Start an evaluation of the selected task
     Evaluate,
     /// Move the selected task to another project.
@@ -542,8 +547,11 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
         }
 
-        Commands::Delete => {
+        Commands::Delete { yes } => {
             let (project, task) = selected_task(out);
+            if !confirm_delete(&format!("Delete task '{project}/{task}'?"), yes, out) {
+                return;
+            }
 
             let client = client_from_config(out);
             match client.tasks().delete(&project, &task).await {

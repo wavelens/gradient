@@ -6,12 +6,11 @@
 
 use crate::commands::completion;
 use crate::error::CliError;
-use crate::input::client_from_config;
-use crate::output::{ExitKind, Output};
+use crate::input::{client_from_config, confirm_delete};
+use crate::output::Output;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::caches::NarListQuery;
-use std::io::{BufRead, Write};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -45,6 +44,7 @@ pub enum Commands {
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
         hash: String,
+        /// Delete without a confirmation prompt
         #[arg(short = 'y', long)]
         yes: bool,
     },
@@ -135,22 +135,12 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Delete { cache, hash, yes } => {
-            if !yes {
-                if out.is_json() {
-                    out.err(
-                        ExitKind::Usage,
-                        "Refusing to delete without --yes in --json mode",
-                    );
-                }
-                let mut stderr = std::io::stderr();
-                write!(stderr, "Delete NAR {hash} from cache '{cache}'? [y/N]: ").ok();
-                stderr.flush().ok();
-                let mut line = String::new();
-                std::io::stdin().lock().read_line(&mut line).ok();
-                if !matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-                    out.human("Cancelled.");
-                    return;
-                }
+            if !confirm_delete(
+                &format!("Delete NAR {hash} from cache '{cache}'?"),
+                yes,
+                out,
+            ) {
+                return;
             }
             let client = client_from_config(out);
             match client.caches().nar_delete(&cache, &hash).await {

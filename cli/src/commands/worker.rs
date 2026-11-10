@@ -5,7 +5,7 @@
  */
 
 use crate::commands::completion;
-use crate::input::{client_from_config, selected_project};
+use crate::input::{client_from_config, confirm_delete, selected_project};
 use crate::output::Output;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
@@ -35,6 +35,9 @@ pub enum Commands {
         /// Worker ID to unregister
         #[arg(add = ArgValueCompleter::new(completion::complete_workers))]
         worker_id: String,
+        /// Delete without a confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// Print metrics for a worker in the selected project.
     Metrics {
@@ -122,8 +125,15 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
         }
 
-        Commands::Delete { worker_id } => {
+        Commands::Delete { worker_id, yes } => {
             let project = selected_project(out);
+            if !confirm_delete(
+                &format!("Unregister worker {worker_id} from project \"{project}\"?"),
+                yes,
+                out,
+            ) {
+                return;
+            }
 
             let client = client_from_config(out);
             match client.workers().delete(&project, &worker_id).await {

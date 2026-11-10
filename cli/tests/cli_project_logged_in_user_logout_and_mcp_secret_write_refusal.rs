@@ -357,3 +357,21 @@ async fn mcp_allows_listing_secret_names() {
     .success()
     .stdout(predicate::str::contains("can't run here").not());
 }
+
+#[tokio::test]
+async fn project_delete_without_a_terminal_requires_yes() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/projects/proj"))
+        .respond_with(ok(json!("deleted")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let home = temp_home_with_wiremock_gradient_config_token_and_project(&server);
+
+    run_gradient_with_temp_home_stdin_and_args(&home, "y\n", &["project", "delete"])
+        .code(2)
+        .stderr(predicate::str::contains("--yes"));
+    run_gradient_with_temp_home_stdin_and_args(&home, "", &["project", "delete", "--yes"])
+        .success();
+}

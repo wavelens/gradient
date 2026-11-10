@@ -55,6 +55,7 @@ gradient login https://gradient.example.com
 - `GRADIENT_SERVER` and `GRADIENT_TOKEN` replace the saved server and token. Use them in a CI job with no config file, for example. A saved token can go only to the server that stored it. Pass `GRADIENT_TOKEN` too with another `GRADIENT_SERVER`. `gradient config server <url>` with another server can also clear the saved token.
 - Add `--json` to any command for machine-readable output with all prompts disabled.
 - Without a terminal on stdin, or with `--json`, commands never open `$EDITOR`: pass every required field as a flag, otherwise the command fails and names the missing flag.
+- Delete commands ask for confirmation in the terminal. Pass `--yes` (`-y`) to skip the prompt. The delete command fails without `--yes` when there's no terminal or `--json` is present.
 - The `edit` commands open the current values in `$EDITOR` without a field flag. Use any flag to change only those fields and keep the rest untouched. The description can stay empty.
 - A server behind a private CA works once the CA certificate is in the system trust store, e.g. `security.pki.certificateFiles` on NixOS.
 
@@ -123,7 +124,7 @@ gradient account switch work
 | `gradient project show` | - | Display the currently selected project |
 | `gradient project list` | - | List all projects owned by the current user |
 | `gradient project edit` | `--new-name <NEW_NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>` | Change details of the selected project |
-| `gradient project delete` | - | Remove the selected project |
+| `gradient project delete` | `--yes` | Remove the selected project |
 | `gradient project user list` | - | Show all project members |
 | `gradient project user add <USER> [ROLE]` | - | Grant a user access to the project |
 | `gradient project user remove <USER>` | - | Revoke a user's access to the project |
@@ -152,7 +153,7 @@ gradient account switch work
 | `gradient task create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--repository <REPOSITORY>`, `--wildcard <WILDCARD>` | Create a task in the selected project. Fields left empty open in `$EDITOR` |
 | `gradient task list` | - | List all tasks in the selected project |
 | `gradient task edit` | `--new-name <NEW_NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--repository <REPOSITORY>`, `--wildcard <WILDCARD>` | Change details of the selected task |
-| `gradient task delete` | - | Remove the selected task |
+| `gradient task delete` | `--yes` | Remove the selected task |
 | `gradient task evaluate` | - | Trigger a new evaluation of the selected task |
 | `gradient task transfer <PROJECT>` | - | Move the selected task to another project. |
 | `gradient task repository show` | - | Show push and pull request builds, commit status reports and the Git host integrations of the project |
@@ -225,7 +226,7 @@ gradient account switch work
 | `gradient cache create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--priority <PRIORITY>`, `--max-storage-gb <MAX_STORAGE_GB>` | Create a cache. Fields left empty open in `$EDITOR` for completion |
 | `gradient cache list` | - | List all caches owned by the current user |
 | `gradient cache edit <NAME>` | `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--priority <PRIORITY>`, `--max-storage-gb <MAX_STORAGE_GB>` | Change settings of an existing cache |
-| `gradient cache delete <NAME>` | - | Remove a cache |
+| `gradient cache delete <NAME>` | `--yes` | Remove a cache |
 | `gradient cache show <NAME>` | - | Print the public key of a cache |
 | `gradient cache install-netrc --server <SERVER> --cache <CACHE>` | `--server <SERVER>`, `--token <TOKEN>`, `--cache <CACHE>`, `--netrc-file <NETRC_FILE>` | Write a netrc entry for a cache from an existing API key. The server is not contacted. Run as root to write `/etc/nix/netrc` |
 | `gradient cache nar list <CACHE>` | `--hash <HASH>`, `--package <PACKAGE>`, `--sort <SORT>`, `--order <ORDER>`, `--page <PAGE>`, `--per-page <PER_PAGE>`, `--interactive` | List the NARs stored in a cache |
@@ -251,7 +252,7 @@ gradient account switch work
 |---|---|---|
 | `gradient worker register --display-name <DISPLAY_NAME> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--url <URL>`, `--token <TOKEN>` | Add a new worker to the selected project |
 | `gradient worker list` | - | Show every worker in the selected project |
-| `gradient worker delete <WORKER_ID>` | - | Remove a worker from the selected project |
+| `gradient worker delete <WORKER_ID>` | `--yes` | Remove a worker from the selected project |
 | `gradient worker metrics <WORKER_ID>` | - | Print worker load samples, connections and dispatched jobs |
 | `gradient worker check <WORKER_ID>` | - | Check the connection of the worker and the permission to work on the selected project. |
 
@@ -290,7 +291,7 @@ These commands act on the whole instance. They need a superuser account. AI agen
 | `list`, `show <ID>` | - | List webhooks with the result of the last delivery, or print a single webhook. |
 | `create` | `--name <NAME>`, `--url <URL>`, `--event <PATTERN>`, `--active <BOOL>` | Create a webhook and output its signing secret once. Repeat `--event` for multiple patterns. Omit `--event` to send all events. |
 | `edit <ID>` | `--name <NAME>`, `--url <URL>`, `--event <PATTERN>`, `--all-events`, `--active <BOOL>` | Change a webhook. `--event` replaces all event patterns |
-| `delete <ID>` | - | Remove a webhook |
+| `delete <ID>` | `--yes` | Remove a webhook |
 | `deliveries <ID>`, `delivery <ID> <DELIVERY_ID>` | `--limit <N>`, `--offset <N>` | List past deliveries, or print one delivery with its request body and response body. |
 | `rotate-secret <ID>`, `ping <ID>` | - | Replace the signing secret, or send a ``webhook.ping`` event. |
 
@@ -304,7 +305,7 @@ These commands act on the whole instance. They need a superuser account. AI agen
 | `gradient team show <TEAM>` | - | Display the settings of a team |
 | `gradient team create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>` | Create a team and become its admin. Fields left empty open in `$EDITOR` |
 | `gradient team edit <TEAM>` | `--display-name <DISPLAY_NAME>`, `--new-project-users <BOOL>`, `--new-project-workers <BOOL>`, `--new-project-role <ROLE>`, `--oidc-group <GROUP>`, `--scim-group <GROUP>` | Change the settings of a team. Only superusers change the groups and the new project settings |
-| `gradient team delete <TEAM>` | - | Remove a team with its grants, grant requests, invitations and workers |
+| `gradient team delete <TEAM>` | `--yes` | Remove a team with its grants, grant requests, invitations and workers |
 | `gradient team members list <TEAM>` | - | Show the members of a team |
 | `gradient team members add <TEAM> <USER>` | `--role <ROLE>` | Invite a user, `member` by default. A superuser adds the user right away |
 | `gradient team members edit <TEAM> <USER>` | `--role <ROLE>` | Change the role of a member |
@@ -318,7 +319,7 @@ These commands act on the whole instance. They need a superuser account. AI agen
 | `gradient team worker list <TEAM>` | - | Show the workers of a team |
 | `gradient team worker register <TEAM> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--url <URL>`, `--token <TOKEN>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Add a worker that builds for every project granting the team its workers |
 | `gradient team worker edit <TEAM> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--active <BOOL>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Change a team worker. Deactivating aborts its running jobs |
-| `gradient team worker delete <TEAM> <WORKER_ID>` | - | Remove a team worker |
+| `gradient team worker delete <TEAM> <WORKER_ID>` | `--yes` | Remove a team worker |
 | `gradient team worker missing-worker-capabilities <TEAM>` | `--projects <PROJECTS>` | Show what waiting evaluations need that no connected worker offers |
 | `gradient team webhook <VERB> <TEAM>` | see [Webhooks](#webhooks) | Manage team webhooks. See [Webhooks](#webhooks). |
 

@@ -5,7 +5,7 @@
  */
 
 use crate::commands::webhook::{WebhookSubcommands, run_webhook_subcommand};
-use crate::input::{CommandLineFormField, client_from_config, handle_input};
+use crate::input::{CommandLineFormField, client_from_config, confirm_delete, handle_input};
 use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
 use connector::api::{
@@ -59,6 +59,9 @@ pub enum Commands {
     Delete {
         /// Team name
         team: String,
+        /// Delete without a confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// Manage team members
     Members {
@@ -239,6 +242,9 @@ pub enum TeamWorkerSubcommand {
         team: String,
         /// Worker ID
         worker_id: String,
+        /// Delete without a confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// Show what pending evaluations need but no connected worker can provide: build systems and features, network access, secrets, evaluations.
     MissingWorkerCapabilities {
@@ -353,13 +359,18 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
         }
 
-        Commands::Delete { team } => match teams.delete(&team).await {
-            Ok(_) => {
-                out.ok(&serde_json::json!({"deleted": true}));
-                out.human("Team deleted.");
+        Commands::Delete { team, yes } => {
+            if !confirm_delete(&format!("Delete team '{team}'?"), yes, out) {
+                return;
             }
-            Err(e) => out.fail(e),
-        },
+            match teams.delete(&team).await {
+                Ok(_) => {
+                    out.ok(&serde_json::json!({"deleted": true}));
+                    out.human("Team deleted.");
+                }
+                Err(e) => out.fail(e),
+            }
+        }
 
         Commands::Members { cmd } => handle_members(cmd, &client, out).await,
         Commands::PendingInvitations { cmd } => handle_invitations(cmd, &client, out).await,
@@ -637,15 +648,28 @@ async fn handle_workers(cmd: TeamWorkerSubcommand, client: &connector::Client, o
             );
         }
 
-        TeamWorkerSubcommand::Delete { team, worker_id } => report(
-            teams.delete_team_worker(&team, &worker_id).await.map(|_| {
-                (
-                    serde_json::json!({"deleted": true}),
-                    "Deleted worker.".into(),
-                )
-            }),
-            out,
-        ),
+        TeamWorkerSubcommand::Delete {
+            team,
+            worker_id,
+            yes,
+        } => {
+            if !confirm_delete(
+                &format!("Remove worker {worker_id} from team '{team}'?"),
+                yes,
+                out,
+            ) {
+                return;
+            }
+            report(
+                teams.delete_team_worker(&team, &worker_id).await.map(|_| {
+                    (
+                        serde_json::json!({"deleted": true}),
+                        "Deleted worker.".into(),
+                    )
+                }),
+                out,
+            )
+        }
 
         TeamWorkerSubcommand::MissingWorkerCapabilities { team, projects } => {
             match teams

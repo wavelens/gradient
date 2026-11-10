@@ -11,8 +11,8 @@ use crate::commands::webhook::{
 use crate::config::*;
 use crate::error::CliError;
 use crate::input::{
-    CommandLineFormField, ask_for_choice, ask_for_secret, client_from_config, handle_input,
-    is_interactive, selected_project,
+    CommandLineFormField, ask_for_choice, ask_for_secret, client_from_config, confirm_delete,
+    handle_input, is_interactive, selected_project,
 };
 use crate::output::{ExitKind, Output};
 use clap::Subcommand;
@@ -62,7 +62,11 @@ pub enum Commands {
         description: Option<String>,
     },
     /// Delete the selected project
-    Delete,
+    Delete {
+        /// Delete without a confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
     /// Manage members of the selected project
     User {
         #[command(subcommand)]
@@ -379,8 +383,11 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
         }
 
-        Commands::Delete => {
+        Commands::Delete { yes } => {
             let project = selected_project(out);
+            if !confirm_delete(&format!("Delete project \"{project}\"?"), yes, out) {
+                return;
+            }
 
             let client = client_from_config(out);
             match client.projects().delete(&project).await {

@@ -243,6 +243,29 @@ fn parse_edited(
     Ok(values)
 }
 
+pub fn confirm_delete(question: &str, yes: bool, out: Output) -> bool {
+    if yes {
+        return true;
+    }
+    if out.is_json() || !io::stdin().is_terminal() {
+        out.err(
+            ExitKind::Usage,
+            "Specify --yes to delete without a confirmation prompt.",
+        );
+    }
+    eprint!("{question} [y/N]: ");
+    io::stderr().flush().ok();
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .unwrap_or_else(|e| out.fail(CliError::ReadInput(question.to_owned(), e)));
+    let confirmed = matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes");
+    if !confirmed {
+        out.human("Cancelled.");
+    }
+    confirmed
+}
+
 pub fn ask_for_secret(prompt: &str, out: Output) -> String {
     if out.is_json() {
         out.fail(CliError::EmptyField(prompt.to_owned()));

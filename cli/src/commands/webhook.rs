@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::input::client_from_config;
+use crate::input::{client_from_config, confirm_delete};
 use crate::output::Output;
 use clap::{Args, Subcommand};
 use connector::api::{
@@ -74,6 +74,9 @@ pub enum WebhookSubcommands<WebhookOwnerArgs: Args> {
         owner: WebhookOwnerArgs,
         /// Webhook ID
         id: uuid::Uuid,
+        /// Delete without a confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// List past deliveries for a webhook
     Deliveries {
@@ -244,7 +247,10 @@ pub async fn run_webhook_subcommand<WebhookOwnerArgs: Args>(
             }
         }
 
-        WebhookSubcommands::Delete { owner, id } => {
+        WebhookSubcommands::Delete { owner, id, yes } => {
+            if !confirm_delete(&format!("Delete webhook {id}?"), yes, out) {
+                return;
+            }
             match webhooks
                 .delete(&webhooks_for(&owner), &id.to_string())
                 .await

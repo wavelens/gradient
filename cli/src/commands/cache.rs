@@ -11,7 +11,9 @@ use crate::commands::cache_upstream;
 use crate::commands::completion;
 use crate::commands::webhook::{WebhookSubcommands, run_webhook_subcommand};
 use crate::error::CliError;
-use crate::input::{CommandLineFormField, ask_for_secret, client_from_config, handle_input};
+use crate::input::{
+    CommandLineFormField, ask_for_secret, client_from_config, confirm_delete, handle_input,
+};
 use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
@@ -66,6 +68,9 @@ pub enum Commands {
         /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
+        /// Delete without a confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// Print the public key of a cache
     Show {
@@ -300,7 +305,10 @@ pub async fn handle(cmd: Commands, out: Output) {
             }
         }
 
-        Commands::Delete { name } => {
+        Commands::Delete { name, yes } => {
+            if !confirm_delete(&format!("Delete cache \"{name}\"?"), yes, out) {
+                return;
+            }
             let client = client_from_config(out);
             match client.caches().delete(&name).await {
                 Ok(_) => {
