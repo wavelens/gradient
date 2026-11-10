@@ -132,7 +132,7 @@ pub async fn load_page<C: ConnectionTrait>(
     operation_id = "getDashboardTasks",
     tag = "dashboard",
     summary = "Ranked task table of the current user",
-    description = "Tasks of the viewer's projects plus starred tasks of public projects, PR-triggered evaluations excluded.\nRanked by tier (`starred_active`, `active`, `starred`, `team`, `member`), then newest latest evaluation first.\nActive means a non-PR evaluation in the last 14 days. `counts` always covers every task; `total` is the number of tasks matching `filter`.\nTasks with a failed latest evaluation or failed entry points appear under the failing filter. An interrupted latest evaluation doesn't count as failed.",
+    description = "Tasks of the viewer's projects plus starred tasks of public projects, PR-triggered evaluations excluded.\nRanked by tier (`starred_active`, `active`, `starred`, `team`, `member`), then newest latest evaluation first.\nActive means a non-PR evaluation in the last 14 days. `counts` always covers every task; `total` is the number of tasks matching `filter`.\nTasks with a failed latest evaluation or a failed entrypoint appear under the failing filter. Tasks with an aborted latest evaluation don't count as failing.",
     params(TasksQuery),
     responses((status = OK, description = "One page of ranked tasks", body = TasksPage), WebError)
 )]
