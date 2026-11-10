@@ -7,7 +7,7 @@
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    QueryFilter,
+    QueryFilter, QueryOrder,
 };
 use std::collections::HashMap;
 
@@ -41,6 +41,44 @@ pub async fn projects_granted_with_workers<C: ConnectionTrait>(
         .await?
         .into_iter()
         .map(|grant| grant.project)
+        .collect())
+}
+
+pub async fn team_id_to_projects_granted_with_workers<C: ConnectionTrait>(
+    db: &C,
+) -> Result<HashMap<TeamId, Vec<ProjectId>>, DbErr> {
+    let mut projects: HashMap<TeamId, Vec<ProjectId>> = HashMap::new();
+    for grant in ETeamProject::find()
+        .filter(CTeamProject::IncludesWorkers.eq(true))
+        .all(db)
+        .await?
+    {
+        projects.entry(grant.team).or_default().push(grant.project);
+    }
+    Ok(projects)
+}
+
+pub async fn load_all_workers_with_team<C: ConnectionTrait>(
+    db: &C,
+) -> Result<Vec<(MTeamWorker, MTeam)>, DbErr> {
+    let workers = ETeamWorker::find()
+        .order_by_asc(CTeamWorker::CreatedAt)
+        .all(db)
+        .await?;
+    let team_ids: Vec<TeamId> = workers.iter().map(|worker| worker.team).collect();
+    let teams: HashMap<TeamId, MTeam> = ETeam::find()
+        .filter(CTeam::Id.is_in(team_ids))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|team| (team.id, team))
+        .collect();
+    Ok(workers
+        .into_iter()
+        .filter_map(|worker| {
+            let team = teams.get(&worker.team)?.clone();
+            Some((worker, team))
+        })
         .collect())
 }
 

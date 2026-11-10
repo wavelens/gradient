@@ -43,7 +43,6 @@ pub mod user;
 pub mod user_ssh_keys;
 pub mod webhooks;
 pub mod worker_tokens;
-pub mod workers;
 
 use crate::error::{WebError, WebResult};
 use axum::extract::{Json, State};

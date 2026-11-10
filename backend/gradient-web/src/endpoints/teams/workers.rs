@@ -7,6 +7,7 @@
 use super::refusal::TeamRefusal;
 use crate::api_spec::TeamPath;
 use crate::audit::Audit;
+use crate::endpoints::admin::workers::start_or_cancel_worker_admin_drain;
 use crate::endpoints::projects::workers::{
     PatchWorkerRequest, RegisterWorkerRequest, WorkerConnection, WorkerLiveInfo,
     encrypt_for_dialing, live_workers, patch_edits_managed_fields, worker_connection,
@@ -51,6 +52,7 @@ pub struct TeamWorkerEntry {
     pub connection: WorkerConnection,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<WorkerLiveInfo>,
+    pub requested_by_admin: bool,
 }
 
 impl TeamWorkerEntry {
@@ -58,6 +60,7 @@ impl TeamWorkerEntry {
         worker: MTeamWorker,
         connection: WorkerConnection,
         live: Option<WorkerLiveInfo>,
+        requested_by_admin: bool,
     ) -> Self {
         Self {
             worker_id: worker.worker_id,
@@ -74,6 +77,7 @@ impl TeamWorkerEntry {
             enable_build: worker.enable_build,
             connection,
             live,
+            requested_by_admin,
         }
     }
 }
@@ -152,7 +156,13 @@ pub async fn get_team_workers(
     for worker in rows {
         let connection = worker_connection(&live_workers, failures, &worker.worker_id);
         let live = team_worker_live(&live_workers, &worker.worker_id);
-        entries.push(TeamWorkerEntry::new(worker, connection, live));
+        let requested_by_admin = scheduler.drained_workers.contains(&worker.worker_id);
+        entries.push(TeamWorkerEntry::new(
+            worker,
+            connection,
+            live,
+            requested_by_admin,
+        ));
     }
 
     Ok(ok_json(entries))
@@ -245,7 +255,7 @@ pub async fn post_team_worker(
     operation_id = "patchTeamWorker",
     tag = "teams",
     summary = "Change team worker",
-    description = "Needs Admin in the team. Deactivating aborts the worker's running jobs of the granted projects.",
+    description = "Requests require admin permission for the team. Disabling a worker can abort jobs of that worker that run in granted projects. `draining` can start a drain or cancel a drain. The worker can accept no new jobs and can finish jobs in progress.",
     params(TeamPath, ("worker_id" = String, Path)),
     request_body = PatchWorkerRequest,
     responses((status = OK, description = "OK", body = String, content_type = "application/json"), WebError)
@@ -299,6 +309,9 @@ pub async fn patch_team_worker(
         .await;
     } else {
         reauth_team_workers(&scheduler, &workers).await;
+    }
+    if let Some(draining) = body.draining {
+        start_or_cancel_worker_admin_drain(&scheduler, &worker_id, draining).await;
     }
 
     audit

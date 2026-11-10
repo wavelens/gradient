@@ -10,6 +10,7 @@ pub mod maintenance;
 mod refusal;
 pub mod state;
 pub mod tasks;
+pub mod workers;
 
 use crate::endpoints::webhooks::{self, WebhookMount};
 use crate::error::{WebResult, require_superuser};
@@ -42,8 +43,8 @@ pub fn admin_router() -> OpenApiRouter<Arc<ServerState>> {
         .routes(routes!(draining::set_draining))
         .routes(routes!(tasks::list_tasks))
         .routes(routes!(tasks::get_task))
+        .routes(routes!(workers::get_workers))
+        .routes(routes!(workers::get_worker, workers::update_worker))
         .nest("/webhooks", webhooks::router(WebhookMount::Instance))
         .route_layer(from_fn(superuser_only))
-        .routes(routes!(crate::endpoints::workers::get_workers))
-        .routes(routes!(crate::endpoints::workers::get_worker))
 }

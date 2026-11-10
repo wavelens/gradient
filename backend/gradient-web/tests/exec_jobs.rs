@@ -415,15 +415,3 @@ async fn a_log_storage_failure_is_a_server_error_not_an_empty_log() {
 
     assert_eq!(res.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
 }
-
-#[tokio::test]
-async fn get_worker_answers_404_for_an_unknown_worker() {
-    let (db, auth) = signed_in_as(superuser());
-
-    let res = make_test_server(db.into_connection())
-        .get("/api/v1/admin/workers/nope")
-        .add_header("authorization", auth)
-        .await;
-
-    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
-}

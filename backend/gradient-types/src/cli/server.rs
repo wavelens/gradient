@@ -41,10 +41,6 @@ pub struct ServerArgs {
     /// Directory holding the credential files of the declarative state.
     #[arg(default_value = "/run/credentials/gradient-server")]
     pub credentials_dir: PathBuf,
-    /// Expose `GET /api/v1/workers` and worker stats without authentication. Only superusers can
-    /// access those endpoints with `false` (default).
-    #[arg(default_value = "false")]
-    pub public_stats: bool,
     /// Whether to list public projects and caches to everyone. Set this option to `false` for `404`
     /// from `GET /api/v1/projects/public` and `GET /api/v1/caches/public`. Search operations skip
     /// public items. These items don't have the user's membership, share, subscription, or star.

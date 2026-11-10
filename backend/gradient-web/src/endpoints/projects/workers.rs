@@ -171,6 +171,7 @@ pub struct PatchWorkerRequest {
     pub enable_exec: Option<bool>,
     pub enable_eval: Option<bool>,
     pub enable_build: Option<bool>,
+    pub draining: Option<bool>,
 }
 
 pub(crate) fn patch_changes_capabilities(body: &PatchWorkerRequest) -> bool {
@@ -631,6 +632,9 @@ pub async fn patch_project_worker(
     if gradient_db::teams::workers::is_team_worker(&db.web_db, &worker_id).await? {
         return Err(ProjectRefusal::TeamWorkerManagedOnTeamPage.into());
     }
+    if body.draining.is_some() {
+        return Err(ProjectRefusal::ProjectWorkerPageCannotDrainWorkerOnSharedMachine.into());
+    }
 
     let reg = gradient_db::worker_registrations::by_project_and_worker_id(
         &db.web_db, project.id, &worker_id,
@@ -887,6 +891,7 @@ mod tests {
             enable_exec: None,
             enable_eval: None,
             enable_build: None,
+            draining: None,
         }
     }
 

@@ -42,6 +42,8 @@ pub(crate) enum ProjectRefusal {
     WorkerIdBelongsToOtherConnection,
     #[error("team workers are managed on the team page")]
     TeamWorkerManagedOnTeamPage,
+    #[error("A project can't drain a worker. Drain it in the team or admin area.")]
+    ProjectWorkerPageCannotDrainWorkerOnSharedMachine,
     #[error("{reason}")]
     InvalidSecretName { reason: String },
     #[error("secret value is empty")]
@@ -93,6 +95,7 @@ impl Refusal for ProjectRefusal {
             | Self::WorkerIdRegistered
             | Self::WorkerIdBelongsToOtherConnection
             | Self::TeamWorkerManagedOnTeamPage
+            | Self::ProjectWorkerPageCannotDrainWorkerOnSharedMachine
             | Self::ManagedSecret { .. }
             | Self::UnusableSopsKey { .. } => RefusalStatus::Conflict,
         }

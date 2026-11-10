@@ -1,8 +1,3 @@
-<!--
-SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
-SPDX-License-Identifier: AGPL-3.0-only
--->
-
 ## General
 
 | Option | Type | Default | Env | Description |
@@ -15,7 +10,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `localWorker` | bool | `worker.enable` | - | Whether to register the `worker` on this host automatically, with an ID from the hostname and a token and peers file from the first start. The state-declared team `server` is part of every new project. |
 | `port` | port | `3000` | `GRADIENT_PORT` | Port for the Gradient server to listen on. |
 | `publicListing` | bool | `true` | `GRADIENT_PUBLIC_LISTING` | Whether to list public projects and caches to everyone. Set this option to `false` for `404` from `GET /api/v1/projects/public` and `GET /api/v1/caches/public`. Search operations skip public items. These items don't have the user's membership, share, subscription, or star. Cache dashboards skip public caches. These caches don't have membership, share, or subscription. Stars, dashboards, and direct links still work for public projects, tasks, and caches. |
-| `publicStats` | bool | `false` | `GRADIENT_PUBLIC_STATS` | Expose `GET /api/v1/workers` and worker stats without authentication. Only superusers can access those endpoints with `false` (default). |
 | `retentionDays` | unsigned int | `90` | `GRADIENT_RETENTION_DAYS` | Days to keep job assignment records, finished deliveries, worker connection history, webhook and task action deliveries, expired sessions and CLI logins. Finished admin tasks, the audit log, per-build resource samples and finished cluster jobs share the same limit. Removed resource samples no longer feed build predictions. Finished cluster jobs without remaining members go on the next hourly pass. Active cluster jobs and the newest finished admin task of each kind stay exempt. Open worker connections stay until the next connection of the same worker. Set it to `0` to keep every record forever. |
 | `serveUrl` | string | derived | `GRADIENT_SERVE_URL` | Public URL of Gradient. Set this for a URL other than `domain`, for example behind a port mapping. |
 | `useQuic` | bool | `false` | `GRADIENT_USE_QUIC` | Whether to enable advertising HTTP/3 (QUIC) to clients. |

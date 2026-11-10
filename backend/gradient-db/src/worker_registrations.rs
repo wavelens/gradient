@@ -21,6 +21,15 @@ pub async fn by_worker_id<C: ConnectionTrait>(
         .await
 }
 
+pub async fn all_worker_registrations<C: ConnectionTrait>(
+    db: &C,
+) -> Result<Vec<MWorkerRegistration>, DbErr> {
+    EWorkerRegistration::find()
+        .order_by_asc(CWorkerRegistration::CreatedAt)
+        .all(db)
+        .await
+}
+
 pub async fn of_project<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
