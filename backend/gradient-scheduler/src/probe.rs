@@ -19,7 +19,10 @@ use gradient_graph::Graph;
 use gradient_types::*;
 use gradient_util::supervision::{Pass, PassError};
 use sea_orm::sea_query::Query;
-use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait};
+use sea_orm::{
+    ColumnTrait, EntityTrait, JoinType, QueryFilter, QueryOrder, QuerySelect, QueryTrait,
+    RelationTrait,
+};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{Mutex, Notify, Semaphore};
 use tracing::debug;
@@ -39,6 +42,7 @@ pub(crate) struct UpstreamProbe {
     wake: Arc<Notify>,
     inbox: Inbox,
     swept: Mutex<Instant>,
+    failed_probe_build_ids: Mutex<HashSet<DerivationId>>,
 }
 
 impl UpstreamProbe {
@@ -51,28 +55,43 @@ impl UpstreamProbe {
             wake: db.memory.probe_requests.wake(),
             inbox: Mutex::new(db.memory.probe_requests.take_inbox()),
             swept: Mutex::new(Instant::now()),
+            failed_probe_build_ids: Mutex::default(),
         }
     }
 
     async fn probe_pass(&self) -> Result<()> {
         let started = Instant::now();
         let mut requested = drain_requests(&self.inbox).await;
-        if requested.is_empty() && sweep_due(&self.swept).await {
-            requested.extend(unanswered_need(&self.db).await?);
-        }
+        requested.extend(self.failed_probe_build_ids.lock().await.drain());
+        let mut sweeping = requested.is_empty() && sweep_due(&self.swept).await;
+        let mut swept_up_to = None;
 
-        while !requested.is_empty() {
-            let mut shared_builds: Vec<DerivationId> = requested.into_iter().collect();
+        loop {
+            if requested.is_empty() && sweeping {
+                let page = unanswered_need(&self.db, swept_up_to).await?;
+                sweeping = page.len() == PROBE_BATCH;
+                swept_up_to = page.last().copied();
+                requested.extend(page);
+            }
+            if requested.is_empty() {
+                return Ok(());
+            }
+
+            let mut shared_builds: Vec<DerivationId> = requested.drain().collect();
             shared_builds.sort_unstable();
-            self.probe_round(shared_builds).await?;
+            if let Err(e) = self.probe_round(shared_builds.clone()).await {
+                self.failed_probe_build_ids
+                    .lock()
+                    .await
+                    .extend(shared_builds);
+                return Err(e);
+            }
             if started.elapsed() > PROBE_DESCENT {
-                break;
+                return Ok(());
             }
 
             requested = drain_requests(&self.inbox).await;
         }
-
-        Ok(())
     }
 
     async fn probe_round(&self, shared_builds: Vec<DerivationId>) -> Result<()> {
@@ -157,8 +176,8 @@ async fn sweep_due(swept: &Mutex<Instant>) -> bool {
 /// The request channel is in memory. A process stopping between the commit and the send is leaving
 /// shared builds nothing will ever ask about. The need is stopping at an unanswered one, and
 /// nothing below it would ever build again.
-async fn unanswered_need(db: &WorkerDb) -> Result<Vec<DerivationId>> {
-    Ok(unanswered_need_query()
+async fn unanswered_need(db: &WorkerDb, after: Option<DerivationId>) -> Result<Vec<DerivationId>> {
+    Ok(unanswered_need_query(after)
         .all(db)
         .await
         .context("find needed builds the upstream probe was never asked about")?
@@ -167,7 +186,7 @@ async fn unanswered_need(db: &WorkerDb) -> Result<Vec<DerivationId>> {
         .collect())
 }
 
-fn unanswered_need_query() -> sea_orm::Select<EDerivationBuild> {
+fn unanswered_need_query(after: Option<DerivationId>) -> sea_orm::Select<EDerivationBuild> {
     let named = Query::select()
         .column(CBuildJob::DerivationBuild)
         .from(EBuildJob::default())
@@ -181,6 +200,10 @@ fn unanswered_need_query() -> sea_orm::Select<EDerivationBuild> {
         .filter(CDerivationBuild::Wanted.eq(true))
         .filter(CDerivation::Walked.eq(true))
         .filter(CDerivationBuild::Id.in_subquery(named))
+        .apply_if(after, |query, after| {
+            query.filter(CDerivationBuild::Derivation.gt(after))
+        })
+        .order_by_asc(CDerivationBuild::Derivation)
         .limit(PROBE_BATCH as u64)
 }
 
@@ -381,7 +404,7 @@ impl UpstreamProbe {
     }
 
     pub(crate) async fn sweep(&self) -> Result<()> {
-        let need = unanswered_need(&self.db).await?;
+        let need = unanswered_need(&self.db, None).await?;
         self.probe_round(need).await
     }
 }
@@ -431,7 +454,7 @@ mod tests {
     #[test]
     fn the_sweep_reads_only_walked_shared_builds_an_evaluation_names() {
         use sea_orm::QueryTrait as _;
-        let sql = unanswered_need_query()
+        let sql = unanswered_need_query(None)
             .build(DatabaseBackend::Postgres)
             .to_string();
         assert!(sql.contains(r#""derivation"."walked" = TRUE"#), "{sql}");
@@ -439,6 +462,23 @@ mod tests {
             sql.contains(
                 r#""derivation_build"."id" IN (SELECT "derivation_build" FROM "build_job")"#
             ),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn the_sweep_query_for_unasked_builds_continues_after_last_derivation_id_in_order() {
+        use sea_orm::QueryTrait as _;
+        let last = DerivationId::now_v7();
+        let sql = unanswered_need_query(Some(last))
+            .build(DatabaseBackend::Postgres)
+            .to_string();
+        assert!(
+            sql.contains(&format!(r#""derivation_build"."derivation" > '{last}'"#)),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(r#"ORDER BY "derivation_build"."derivation" ASC"#),
             "{sql}"
         );
     }
