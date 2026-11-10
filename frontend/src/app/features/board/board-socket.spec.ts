@@ -69,6 +69,26 @@ describe('subscribeToBoardSocketWithReload', () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
+  it('holds the reload while the tab is hidden and runs it once the tab is visible again', () => {
+    let visibility: DocumentVisibilityState = 'hidden';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    const reload = vi.fn();
+    TestBed.runInInjectionContext(() => subscribeToBoardSocketWithReload(reload));
+    vi.advanceTimersByTime(1500);
+    const event = { event: 'worker.job_dispatched', at: '', content: {} } as BoardLiveEvent;
+
+    events.next(event);
+    vi.advanceTimersByTime(1500);
+    events.next(event);
+    vi.advanceTimersByTime(1500);
+    expect(reload).not.toHaveBeenCalled();
+
+    visibility = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
   it('reloads at most once per burst of events', () => {
     const reload = vi.fn();
     TestBed.runInInjectionContext(() => subscribeToBoardSocketWithReload(reload));
