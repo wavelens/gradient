@@ -13,6 +13,7 @@ import { ConfirmService } from '@shared/confirm';
 import { ManagedDisableDirective, formatMemberNameForConfirmDialog, teamRoleValueToDisplayLabel, type MemberPlace } from '@shared/access';
 import { PENDING_INVITATION_REVOKE_FAILURE, getPendingInvitationRevocationConsequenceSentence } from '@shared/access/pending-invitation-revoke-dialog-texts';
 import { ServerTimestampToLocalDateTimePipe } from '@shared/text';
+import { EntityNameComponent } from '@shared/ui';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import type { MembersPageRequests } from './members-page-requests';
@@ -22,6 +23,7 @@ import type { MembersPageRequests } from './members-page-requests';
   standalone: true,
   imports: [
     ButtonComponent,
+    EntityNameComponent,
     LoadStateComponent,
     RowComponent,
     RowListComponent,
@@ -46,8 +48,8 @@ import type { MembersPageRequests } from './members-page-requests';
         <gr-row-list>
           @for (invitation of invitations(); track invitation.user) {
             <gr-row icon="mail">
-              <span class="mono">{{ invitation.user }}</span>
-              <span slot="meta">@if (invitation.name !== invitation.user) { {{ invitation.name }} · }Role {{ teamRoleValueToDisplayLabel(invitation.role) }} · Expires {{ invitation.expires_at | serverDate }}</span>
+              <gr-entity-name [displayName]="invitation.name" [name]="invitation.user" />
+              <span slot="meta">Role {{ teamRoleValueToDisplayLabel(invitation.role) }} · Expires {{ invitation.expires_at | serverDate }}</span>
               <button
                 slot="actions"
                 grButton

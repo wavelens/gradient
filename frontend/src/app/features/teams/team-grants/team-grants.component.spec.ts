@@ -148,8 +148,10 @@ describe('TeamGrantsComponent', () => {
 
   describe('for users', () => {
     it('lists only the grants that include users, with their role', () => {
-      const { text } = setup('project', 'users');
-      expect(text()).toContain('Platform');
+      const { fixture, text } = setup('project', 'users');
+      const name = (fixture.nativeElement as HTMLElement).querySelector('gr-row gr-entity-name');
+      expect(name?.querySelector('.entity-name__display')?.textContent?.trim()).toBe('Platform');
+      expect(name?.querySelector('.entity-name__slug')?.textContent?.trim()).toBe('platform');
       expect(text()).toContain('Role View');
       expect(text()).not.toContain('Ops');
       expect(text()).not.toContain('QA');
@@ -388,7 +390,7 @@ describe('TeamGrantsComponent', () => {
       expect(confirm).toHaveBeenCalledWith(
         expect.objectContaining({
           title: 'Remove access for Platform',
-          target: 'Platform',
+          target: 'Platform (platform)',
           consequence: 'Members of Platform lose their role on this cache.',
         }),
       );

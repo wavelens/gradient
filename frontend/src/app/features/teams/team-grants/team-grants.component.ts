@@ -252,7 +252,7 @@ export class TeamGrantsComponent implements OnInit {
           : workers
             ? `Stop using ${team} workers`
             : `Remove access for ${team}`,
-        target: team,
+        target: formatEntityLabel({ display_name: grant.display_name, name: grant.team }),
         consequence: this.removalConsequence(grant),
         confirmLabel: grant.pending ? 'Withdraw' : 'Remove',
         failure: "Couldn't remove team access",

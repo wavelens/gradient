@@ -26,13 +26,13 @@ function person(reasons: PersonAccessReason[], role: string | null = 'View'): Pe
 describe('access reason labels', () => {
   it('names every source of access a person has', () => {
     expect(getAccessReasonLabel(direct('Write'))).toBe('Direct');
-    expect(getAccessReasonLabel(fromTeam('View'))).toBe('From Alice Team');
-    expect(getAccessReasonLabel({ kind: 'owner', team: alice, role: 'Admin', applies: true, managed: false })).toBe('From Alice Team (owner)');
+    expect(getAccessReasonLabel(fromTeam('View'))).toBe('From Alice Team (alice-team)');
+    expect(getAccessReasonLabel({ kind: 'owner', team: alice, role: 'Admin', applies: true, managed: false })).toBe('From owner team Alice Team (alice-team)');
     expect(getAccessReasonLabel({ kind: 'superuser', applies: true, managed: false })).toBe('Instance administrator');
   });
 
   it('marks team access that a direct role overrides and rows from the server configuration', () => {
-    expect(getAccessReasonLabel(fromTeam('View', false))).toBe('From Alice Team, overridden by direct role');
+    expect(getAccessReasonLabel(fromTeam('View', false))).toBe('From Alice Team (alice-team), overridden by direct role');
     expect(getAccessReasonLabel(direct('Admin', { managed: true }))).toBe('Direct · server configuration');
   });
 
@@ -41,7 +41,7 @@ describe('access reason labels', () => {
     expect(row).toEqual(expect.objectContaining({ user: 'carol', displayName: 'Carol', role: 'Admin', directRole: 'Admin', locked: true }));
     expect(row.sources).toEqual([
       { label: 'Direct · server configuration', team: null },
-      { label: 'From Alice Team, overridden by direct role', team: 'alice-team' },
+      { label: 'From Alice Team (alice-team), overridden by direct role', team: 'alice-team' },
     ]);
   });
 
@@ -49,15 +49,15 @@ describe('access reason labels', () => {
     const row = copyPeopleRowAfterRoleSave(toPeopleListRowFromAccessPerson(person([fromTeam('View')])), 'Write');
     expect(row.role).toBe('Write');
     expect(row.directRole).toBe('Write');
-    expect(row.sources.map((source) => source.label)).toEqual(['Direct', 'From Alice Team, overridden by direct role']);
+    expect(row.sources.map((source) => source.label)).toEqual(['Direct', 'From Alice Team (alice-team), overridden by direct role']);
   });
 });
 
 describe('remove member sentence', () => {
   it('names the team access that remains after the direct role goes', () => {
     const row = toPeopleListRowFromAccessPerson(person([direct('Write'), fromTeam('View', false)]));
-    expect(getRemoveMemberDialogSentence('project', row, false)).toBe('Roles for carol still include View through Alice Team.');
-    expect(getRemoveMemberDialogSentence('project', row, true)).toBe('You keep View through Alice Team.');
+    expect(getRemoveMemberDialogSentence('project', row, false)).toBe('Roles for carol still include View through Alice Team (alice-team).');
+    expect(getRemoveMemberDialogSentence('project', row, true)).toBe('You keep View through Alice Team (alice-team).');
     expect(getTeamsProvidingAccessAfterDirectRoleRemoval(row)).toEqual([alice]);
   });
 

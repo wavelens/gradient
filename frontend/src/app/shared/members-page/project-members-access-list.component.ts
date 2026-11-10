@@ -9,12 +9,13 @@ import { FormsModule } from '@angular/forms';
 import { BadgeComponent, ButtonComponent, RowComponent, RowListComponent, SelectComponent, TooltipDirective } from '@gradient/ui/ui';
 import type { AccessState } from '@core/models';
 import { ManagedDisableDirective, teamRoleValueToDisplayLabel } from '@shared/access';
+import { EntityNameComponent } from '@shared/ui';
 import type { PeopleListRow } from './access-reason-label';
 
 @Component({
   selector: 'app-project-members-access-list',
   standalone: true,
-  imports: [FormsModule, BadgeComponent, ButtonComponent, RowComponent, RowListComponent, SelectComponent, TooltipDirective, ManagedDisableDirective],
+  imports: [FormsModule, BadgeComponent, ButtonComponent, EntityNameComponent, RowComponent, RowListComponent, SelectComponent, TooltipDirective, ManagedDisableDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <gr-row-list>
@@ -22,8 +23,8 @@ import type { PeopleListRow } from './access-reason-label';
       @for (row of rows(); track row.user) {
         @let soleAdminReason = memberOnlyAdminDisabledReason()(row.user);
         <gr-row icon="person">
-          <span class="mono">{{ row.user }}</span>
-          <span slot="meta">@if (row.displayName && row.displayName !== row.user) { {{ row.displayName }} · }@for (source of row.sources; track $index) {@if (!$first) { · }{{ source.label }} }</span>
+          <gr-entity-name [displayName]="row.displayName" [name]="row.user" />
+          <span slot="meta">@for (source of row.sources; track $index) {@if (!$first) { · }{{ source.label }} }</span>
           <div slot="actions">
             @if (access().canEdit && !row.locked) {
               <gr-select

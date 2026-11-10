@@ -7,7 +7,7 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { LoadStateComponent, MessageBannerComponent, RowComponent, RowListComponent, SettingsSectionComponent } from '@gradient/ui/ui';
 import type { UserAccessSummary, UserAccessibleProjectOrCacheRow, UserTeamMembership } from '@core/models';
-import { entityKindToIconName } from '@shared/ui';
+import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { links } from '@shared/routing';
 import { getAccessReasonLabel } from '@shared/members-page/access-reason-label';
 import { teamMemberSourceLabels } from '@shared/members-page/members-page-requests';
@@ -16,7 +16,7 @@ import { teamRoleValueToDisplayLabel } from './team-access';
 @Component({
   selector: 'app-user-access-summary-sections',
   standalone: true,
-  imports: [LoadStateComponent, MessageBannerComponent, RowComponent, RowListComponent, SettingsSectionComponent],
+  imports: [EntityNameComponent, LoadStateComponent, MessageBannerComponent, RowComponent, RowListComponent, SettingsSectionComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @let access = summary();
@@ -33,8 +33,8 @@ import { teamRoleValueToDisplayLabel } from './team-access';
         <gr-settings-section title="Projects" [card]="false">
           <gr-row-list>
             @for (project of access.projects; track project.name) {
-              <gr-row [icon]="entityKindToIconName.project" [link]="links.project(project.name)" [linkLabel]="'Open project ' + project.display_name">
-                {{ project.display_name }}
+              <gr-row [icon]="entityKindToIconName.project" [link]="links.project(project.name)" [linkLabel]="'Open project ' + formatEntityLabel(project)">
+                <gr-entity-name [displayName]="project.display_name" [name]="project.name" [ownerTeam]="project.owner_team" />
                 <span slot="meta">{{ describeProjectOrCacheAccess(project) }}</span>
               </gr-row>
             }
@@ -45,8 +45,8 @@ import { teamRoleValueToDisplayLabel } from './team-access';
         <gr-settings-section title="Caches" [card]="false">
           <gr-row-list>
             @for (cache of access.caches; track cache.name) {
-              <gr-row [icon]="entityKindToIconName.cache" [link]="links.cache(cache.name)" [linkLabel]="'Open cache ' + cache.display_name">
-                {{ cache.display_name }}
+              <gr-row [icon]="entityKindToIconName.cache" [link]="links.cache(cache.name)" [linkLabel]="'Open cache ' + formatEntityLabel(cache)">
+                <gr-entity-name [displayName]="cache.display_name" [name]="cache.name" [ownerTeam]="cache.owner_team" />
                 <span slot="meta">{{ describeProjectOrCacheAccess(cache) }}</span>
               </gr-row>
             }
@@ -57,8 +57,8 @@ import { teamRoleValueToDisplayLabel } from './team-access';
         <gr-settings-section title="Teams" [card]="false">
           <gr-row-list>
             @for (team of access.teams; track team.name) {
-              <gr-row [icon]="entityKindToIconName.team" [link]="links.team(team.name)" [linkLabel]="'Open team ' + team.display_name">
-                {{ team.display_name }}
+              <gr-row [icon]="entityKindToIconName.team" [link]="links.team(team.name)" [linkLabel]="'Open team ' + formatEntityLabel(team)">
+                <gr-entity-name [displayName]="team.display_name" [name]="team.name" />
                 <span slot="meta">{{ describeTeamMembership(team) }}</span>
               </gr-row>
             }
@@ -70,6 +70,7 @@ import { teamRoleValueToDisplayLabel } from './team-access';
 })
 export class UserAccessSummarySectionsComponent {
   protected readonly entityKindToIconName = entityKindToIconName;
+  protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
 
   summary = input.required<UserAccessSummary>();

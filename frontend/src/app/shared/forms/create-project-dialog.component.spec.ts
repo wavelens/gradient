@@ -137,7 +137,7 @@ describe('CreateProjectDialogComponent', () => {
   it('preselects the only team of the user as owner team', async () => {
     const createProject = vi.fn(() => of('id'));
     const { type, submit, ownerTeamField } = await setup(createProject, { teams: [INFRA] });
-    expect(ownerTeamField()?.textContent).toContain('Infra');
+    expect(ownerTeamField()?.textContent).toContain('Infra (infra)');
     await type('#project-display-name', 'Acme');
     await submit();
     expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ owner_team: 'infra' }));

@@ -15,11 +15,11 @@ import { TeamsService } from '@core/services/teams.service';
 import { ConfirmRequest, ConfirmService } from '@shared/confirm';
 import { PendingInvitationsAndTeamGrantRequestsComponent } from './pending-invitations-and-team-grant-requests.component';
 
-const invitation = (user: string) => ({ user, name: user, role: 'View', created_at: '2026-11-01T10:00:00', expires_at: '2026-11-08T10:00:00' });
+const invitation = (user: string, name = user) => ({ user, name, role: 'View', created_at: '2026-11-01T10:00:00', expires_at: '2026-11-08T10:00:00' });
 
 function setup(kind: MemberPlace, confirmAnswer: 'confirm' | 'cancel' = 'confirm') {
   const requests = {
-    invitations: vi.fn(() => of([invitation('bob'), invitation('erin')])),
+    invitations: vi.fn(() => of([invitation('bob', 'Bob Builder'), invitation('erin')])),
     revokeInvitation: vi.fn(() => of('ok')),
   };
   const notify = { success: vi.fn(), failure: vi.fn() };
@@ -46,6 +46,13 @@ function setup(kind: MemberPlace, confirmAnswer: 'confirm' | 'cancel' = 'confirm
 }
 
 describe('PendingInvitationsAndTeamGrantRequestsComponent', () => {
+  it('shows the display name of an invited person with the username beside it', () => {
+    const [bob, erin] = Array.from(setup('project').root.querySelectorAll('gr-entity-name'));
+    expect(bob.querySelector('.entity-name__display')?.textContent?.trim()).toBe('Bob Builder');
+    expect(bob.querySelector('.entity-name__slug')?.textContent?.trim()).toBe('bob');
+    expect(erin.querySelector('.entity-name__slug')).toBeNull();
+  });
+
   it('drops a revoked invitation from the list', () => {
     const { fixture, root, requests, notify, revokeButton } = setup('project');
     revokeButton('bob').click();

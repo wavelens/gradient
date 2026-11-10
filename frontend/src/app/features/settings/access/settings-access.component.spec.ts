@@ -57,10 +57,20 @@ function rowMeta(root: HTMLElement, href: string): string {
 describe('SettingsAccessComponent', () => {
   it('lists every project, cache and team with the role and where it comes from', () => {
     const { root } = render(() => of(summary));
-    expect(rowMeta(root, '/project/acme')).toBe('Role Write · Direct · From Alice Team (owner), overridden by direct role');
-    expect(rowMeta(root, '/caches/main')).toBe('Role View · From Alice Team');
+    expect(rowMeta(root, '/project/acme')).toBe('Role Write · Direct · From owner team Alice Team (alice-team), overridden by direct role');
+    expect(rowMeta(root, '/caches/main')).toBe('Role View · From Alice Team (alice-team)');
     expect(rowMeta(root, '/team/alice-team')).toBe('Role Admin · Direct · server configuration');
     expect(root.querySelector('gr-message-banner')).toBeNull();
+  });
+
+  it('shows the display name of every project, cache and team with the slug beside it', () => {
+    const { root } = render(() => of(summary));
+    const name = (href: string) => root.querySelector(`a[href="${href}"]`)?.closest('gr-row')?.querySelector('gr-entity-name');
+    expect(name('/project/acme')?.querySelector('.entity-name__display')?.textContent?.trim()).toBe('Acme');
+    expect(name('/project/acme')?.querySelector('.entity-name__slug')?.textContent?.trim()).toBe('acme');
+    expect(name('/project/acme')?.getAttribute('title')).toBe('Acme (acme) · Alice Team');
+    expect(name('/caches/main')?.querySelector('.entity-name__slug')?.textContent?.trim()).toBe('main');
+    expect(name('/team/alice-team')?.querySelector('.entity-name__slug')?.textContent?.trim()).toBe('alice-team');
   });
 
   it('says that an instance administrator can open everything', () => {
@@ -80,6 +90,6 @@ describe('SettingsAccessComponent', () => {
     getAccess.mockImplementation(() => of(summary));
     fixture.componentInstance.load();
     fixture.detectChanges();
-    expect(rowMeta(root, '/caches/main')).toBe('Role View · From Alice Team');
+    expect(rowMeta(root, '/caches/main')).toBe('Role View · From Alice Team (alice-team)');
   });
 });

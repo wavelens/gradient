@@ -118,7 +118,7 @@ function tabLabels(root: HTMLElement): string[] {
 }
 
 function rowMeta(root: HTMLElement, user: string): string {
-  const row = Array.from(root.querySelectorAll('gr-row')).find((entry) => entry.querySelector('.mono')?.textContent?.trim() === user);
+  const row = Array.from(root.querySelectorAll('gr-row')).find((entry) => entry.querySelector('.entity-name__slug')?.textContent?.trim() === user);
   return row?.querySelector('[slot="meta"]')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
@@ -146,9 +146,16 @@ describe('MembersPageComponent tabs', () => {
 describe('MembersPageComponent people', () => {
   it('names where the access of every person comes from', () => {
     const { root } = setup(projectRoute(admin));
-    expect(rowMeta(root, 'carol')).toBe('Carol · Direct · From Alice Team, overridden by direct role');
-    expect(rowMeta(root, 'dave')).toBe('Dave · From Alice Team (owner)');
-    expect(rowMeta(root, 'root')).toBe('Root · Instance administrator');
+    expect(rowMeta(root, 'carol')).toBe('Direct · From Alice Team (alice-team), overridden by direct role');
+    expect(rowMeta(root, 'dave')).toBe('From owner team Alice Team (alice-team)');
+    expect(rowMeta(root, 'root')).toBe('Instance administrator');
+  });
+
+  it('shows the display name of every person with the username beside it', () => {
+    const name = setup(projectRoute(admin)).root.querySelector('gr-row gr-entity-name');
+    expect(name?.querySelector('.entity-name__display')?.textContent?.trim()).toBe('Alice');
+    expect(name?.querySelector('.entity-name__slug')?.textContent?.trim()).toBe('alice');
+    expect(name?.getAttribute('title')).toBe('Alice (alice)');
   });
 
   it('shows roles as read-only badges without Invite Member to a viewer', () => {
@@ -177,8 +184,8 @@ describe('MembersPageComponent people', () => {
     const { fixture, projects, confirm, notify } = setup(projectRoute(admin));
     fixture.componentInstance.removeMember('carol');
     const request = confirm.mock.calls[0][0];
-    expect(request.consequence).toBe('Roles for carol still include View through Alice Team.');
-    expect(request.consequenceLink?.label).toBe('Open Alice Team');
+    expect(request.consequence).toBe('Roles for carol still include View through Alice Team (alice-team).');
+    expect(request.consequenceLink?.label).toBe('Open Alice Team (alice-team)');
     expect(String(request.consequenceLink?.link)).toBe('/team/alice-team');
     expect(projects.removeMember).toHaveBeenCalledWith('acme', 'carol');
     expect(notify.success).toHaveBeenCalledWith('Member deleted');
@@ -203,7 +210,7 @@ describe('MembersPageComponent other places', () => {
   it('lists the people of a cache to its members', () => {
     const { root, caches } = setup(cacheRoute(viewer, 'View'));
     expect(caches.getAccess).toHaveBeenCalledWith('main');
-    expect(rowMeta(root, 'dave')).toBe('Dave · From Alice Team (owner)');
+    expect(rowMeta(root, 'dave')).toBe('From owner team Alice Team (alice-team)');
   });
 
   it('lists team members with their source and offers People and Pending to team admins', () => {
@@ -215,6 +222,6 @@ describe('MembersPageComponent other places', () => {
     });
     expect(teams.members).toHaveBeenCalledWith('platform');
     expect(tabLabels(root)).toEqual(['People', 'Pending']);
-    expect(rowMeta(root, 'erin')).toBe('Erin · From a group in the identity provider');
+    expect(rowMeta(root, 'erin')).toBe('From a group in the identity provider');
   });
 });

@@ -11,6 +11,7 @@ import { catchError, of } from 'rxjs';
 import { FormFieldComponent, SelectComponent } from '@gradient/ui/ui';
 import { TeamsService } from '@core/services/teams.service';
 import type { TeamNameAndDisplayName, TeamSummary } from '@core/models';
+import { entityToPickerOption } from '@shared/ui';
 
 @Component({
   selector: 'app-owner-team-select',
@@ -43,7 +44,7 @@ export class OwnerTeamSelectComponent {
     const preselected = this.preselectedOwnerTeam();
     const teams: TeamNameAndDisplayName[] = this.signedInUserTeams();
     const choices = preselected && !teams.some((team) => team.name === preselected.name) ? [preselected, ...teams] : teams;
-    return [{ label: 'No team', value: null as string | null }, ...choices.map((team) => ({ label: team.display_name || team.name, value: team.name }))];
+    return [{ label: 'No team', value: null as string | null }, ...choices.map((team) => entityToPickerOption(team))];
   });
 
   readonly ownerTeamNameToSend = computed(() => {

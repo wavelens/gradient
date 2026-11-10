@@ -47,6 +47,7 @@ import {
 import { ConfirmService } from '@shared/confirm';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { links, type MembersPageTab } from '@shared/routing';
+import { formatEntityLabel } from '@shared/ui';
 import { TeamGrantsComponent } from '@features/teams/team-grants/team-grants.component';
 import {
   type PeopleListRow,
@@ -281,7 +282,7 @@ export class MembersPageComponent implements OnInit {
           ? getMemberRemovalConsequenceSentence('team', user, signedInUser)
           : getRemoveMemberDialogSentence(this.kind, row, signedInUser),
         consequenceLink: keepingTeam
-          ? { label: `Open ${keepingTeam.display_name || keepingTeam.name}`, link: links.team(keepingTeam.name) }
+          ? { label: `Open ${formatEntityLabel(keepingTeam)}`, link: links.team(keepingTeam.name) }
           : undefined,
         confirmLabel: 'Remove',
         failure: "Couldn't delete member",

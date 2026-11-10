@@ -5,6 +5,7 @@
  */
 
 import type { PersonAccessReason, PersonWithAccessToProjectOrCache, TeamNameAndDisplayName } from '@core/models';
+import { formatEntityLabel } from '@shared/ui';
 
 export interface PeopleListRow {
   user: string;
@@ -18,7 +19,7 @@ export interface PeopleListRow {
 
 export type AddNowOrInviteChoice = 'add-now' | 'invite';
 
-const teamName = (team: TeamNameAndDisplayName | null | undefined): string => team?.display_name || team?.name || '';
+const teamName = (team: TeamNameAndDisplayName | null | undefined): string => (team ? formatEntityLabel(team) : '');
 
 const isTeamReason = (reason: PersonAccessReason): boolean => reason.kind === 'team' || reason.kind === 'owner';
 
@@ -26,7 +27,7 @@ export function getAccessReasonLabel(reason: PersonAccessReason): string {
   const base = {
     direct: 'Direct',
     team: `From ${teamName(reason.team)}`,
-    owner: `From ${teamName(reason.team)} (owner)`,
+    owner: `From owner team ${teamName(reason.team)}`,
     superuser: 'Instance administrator',
   }[reason.kind];
   const applying = reason.applies ? base : `${base}, overridden by direct role`;
