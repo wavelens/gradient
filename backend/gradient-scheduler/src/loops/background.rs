@@ -248,7 +248,7 @@ impl Pass for BuildHistoryRefit {
             .refresh(&self.scheduler.db.worker_db)
             .await
             .map_err(anyhow::Error::from)?;
-        history.refit(self.scheduler.db.config.server.retention_days);
+        history.refit().await;
         Ok(())
     }
 }

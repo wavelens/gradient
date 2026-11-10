@@ -396,7 +396,7 @@ impl SchedulerCase {
             .refresh(&self.scheduler.db.worker_db)
             .await
             .expect("the build history reads the metric rows");
-        history.refit(0);
+        history.refit().await;
     }
 
     pub async fn eval_history(&self, now: NaiveDateTime) -> EvalHistory {

@@ -15,6 +15,7 @@ use arc_swap::ArcSwap;
 use gradient_pool::estimate::{BuildEstimate, GroupKey, Model, Sample};
 use gradient_types::ids::DerivationId;
 use sea_orm::{ConnectionTrait, DbErr};
+use tracing::warn;
 
 pub use store::Changes;
 use store::SampleStore;
@@ -24,6 +25,7 @@ pub struct BuildHistory {
     store: Mutex<SampleStore>,
     model: ArcSwap<Model>,
     fitted: AtomicBool,
+    retention_days: u32,
 }
 
 impl BuildHistory {
@@ -33,27 +35,50 @@ impl BuildHistory {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    pub fn new_with_retention_days(retention_days: u32) -> Self {
+        Self {
+            retention_days,
+            ..Self::default()
+        }
+    }
+
+    fn oldest_retained_sample_creation_time(&self) -> Option<chrono::NaiveDateTime> {
+        (self.retention_days > 0)
+            .then(|| gradient_types::now() - chrono::Duration::days(i64::from(self.retention_days)))
+    }
+
     pub async fn refresh(&self, db: &impl ConnectionTrait) -> Result<(), DbErr> {
         let newest = self.store().newest;
-        let loaded = load::load_since(db, newest).await?;
+        let loaded =
+            load::load_since(db, newest, self.oldest_retained_sample_creation_time()).await?;
         self.store().add(loaded);
         if !self.fitted.load(Ordering::Acquire) {
-            self.refit(0);
+            self.refit().await;
         }
         Ok(())
     }
 
-    pub fn refit(&self, retention_days: u32) {
+    pub async fn refit(&self) {
         let samples = {
             let mut store = self.store();
-            if retention_days > 0 {
-                store.prune_before(
-                    gradient_types::now() - chrono::Duration::days(i64::from(retention_days)),
-                );
+            if let Some(oldest) = self.oldest_retained_sample_creation_time() {
+                store.prune_before(oldest);
             }
+            if self.fitted.load(Ordering::Acquire) && !store.samples_changed_since_last_fit {
+                return;
+            }
+            store.samples_changed_since_last_fit = false;
             store.samples()
         };
-        self.model.store(Arc::new(Model::fit(&samples)));
+        let model = match tokio::task::spawn_blocking(move || Model::fit(&samples)).await {
+            Ok(model) => model,
+            Err(e) => {
+                warn!(error = %e, "fitting the build history model failed; keeping the last model");
+                self.store().samples_changed_since_last_fit = true;
+                return;
+            }
+        };
+        self.model.store(Arc::new(model));
         self.fitted.store(true, Ordering::Release);
         self.store().changes = Changes::everything();
     }

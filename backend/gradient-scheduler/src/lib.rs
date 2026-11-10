@@ -113,7 +113,7 @@ impl Scheduler {
             job_policy: Arc::clone(&state.extensions.worker_job_policy),
             core: Arc::new(tokio::sync::watch::channel(None).0),
             cluster: ClusterAttempts::default(),
-            scoring: Scoring::new(policy),
+            scoring: Scoring::new(policy, state.config.server.retention_days),
             build_kick: BuildKick::default(),
             draining: draining::Draining::default(),
             connection_failures: Arc::default(),

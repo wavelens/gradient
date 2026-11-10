@@ -60,6 +60,7 @@ pub(crate) struct SampleStore {
     by_pname: HashMap<(String, String), Vec<usize>>,
     oom_cores: HashMap<DerivationId, u32>,
     pub newest: Option<NaiveDateTime>,
+    pub samples_changed_since_last_fit: bool,
     pub changes: Changes,
 }
 
@@ -70,6 +71,7 @@ impl SampleStore {
                 continue;
             }
             self.changes.record(&row.sample);
+            self.samples_changed_since_last_fit = true;
             self.newest = self.newest.max(Some(row.created_at));
             if row.oom_killed
                 && let Some(cores) = row.sample.cores
@@ -117,6 +119,9 @@ impl SampleStore {
     }
 
     pub fn prune_before(&mut self, oldest: NaiveDateTime) {
+        if self.rows.iter().all(|r| r.created_at >= oldest) {
+            return;
+        }
         let newest = self.newest;
         let kept: Vec<LoadedSample> = std::mem::take(&mut self.rows)
             .into_iter()
@@ -125,6 +130,7 @@ impl SampleStore {
         *self = Self::default();
         self.add(kept);
         self.newest = newest;
+        self.samples_changed_since_last_fit = true;
     }
 }
 

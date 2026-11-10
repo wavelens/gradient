@@ -49,18 +49,24 @@ struct SampleRow {
 pub(crate) async fn load_since(
     db: &impl ConnectionTrait,
     newest: Option<NaiveDateTime>,
+    oldest_retained_sample_creation_time: Option<NaiveDateTime>,
 ) -> Result<Vec<LoadedSample>, DbErr> {
-    let rows = SampleRow::find_by_statement(BUILD_SAMPLES_SINCE.bind([read_since(newest).into()]))
+    let since = read_since(newest, oldest_retained_sample_creation_time);
+    let rows = SampleRow::find_by_statement(BUILD_SAMPLES_SINCE.bind([since.into()]))
         .all(db)
         .await?;
 
     Ok(rows.into_iter().map(SampleRow::into_loaded).collect())
 }
 
-fn read_since(newest: Option<NaiveDateTime>) -> NaiveDateTime {
-    newest.map_or(chrono::DateTime::UNIX_EPOCH.naive_utc(), |t| {
-        t - REFRESH_OVERLAP
-    })
+fn read_since(
+    newest: Option<NaiveDateTime>,
+    oldest_retained_sample_creation_time: Option<NaiveDateTime>,
+) -> NaiveDateTime {
+    newest
+        .map(|t| t - REFRESH_OVERLAP)
+        .or(oldest_retained_sample_creation_time)
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH.naive_utc())
 }
 
 impl SampleRow {
@@ -106,9 +112,24 @@ mod tests {
 
     #[test]
     fn the_first_read_starts_inside_the_range_of_a_postgres_timestamp() {
-        assert_eq!(read_since(None), chrono::DateTime::UNIX_EPOCH.naive_utc());
+        assert_eq!(
+            read_since(None, None),
+            chrono::DateTime::UNIX_EPOCH.naive_utc()
+        );
         let newest = gradient_types::now();
-        assert_eq!(read_since(Some(newest)), newest - REFRESH_OVERLAP);
+        assert_eq!(read_since(Some(newest), None), newest - REFRESH_OVERLAP);
+    }
+
+    #[test]
+    fn the_first_read_starts_at_the_retention_window() {
+        let newest = gradient_types::now();
+        let kept_since = newest - chrono::Duration::days(30);
+
+        assert_eq!(read_since(None, Some(kept_since)), kept_since);
+        assert_eq!(
+            read_since(Some(newest), Some(kept_since)),
+            newest - REFRESH_OVERLAP
+        );
     }
 
     #[test]

@@ -2524,8 +2524,8 @@ mod tests {
         assert_eq!(max_cores_of(&tracker, "torch-again"), None);
     }
 
-    #[test]
-    fn only_builds_of_a_package_with_new_samples_are_estimated_again() {
+    #[tokio::test]
+    async fn only_builds_of_a_package_with_new_samples_are_estimated_again() {
         let mut tracker = JobTracker::new();
         let killed = keyed_build(&mut tracker, "torch", "torch");
         keyed_build(&mut tracker, "hello", "hello");
@@ -2548,11 +2548,14 @@ mod tests {
         assert_eq!(wanted, vec!["torch".to_owned()]);
         assert!(history.take_changes().is_empty());
 
-        history.refit(0);
+        history.refit().await;
         assert_eq!(
             tracker.estimates_to_refresh(&history.take_changes()).len(),
             2
         );
+
+        history.refit().await;
+        assert!(history.take_changes().is_empty());
     }
 
     #[test]

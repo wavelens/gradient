@@ -23,13 +23,13 @@ pub(crate) struct Scoring {
 }
 
 impl Scoring {
-    pub(crate) fn new(policy: Arc<dyn ScoringPolicy>) -> Self {
+    pub(crate) fn new(policy: Arc<dyn ScoringPolicy>, retention_days: u32) -> Self {
         Self {
             policy,
             instance: Arc::new(ArcSwap::from_pointee(InstanceContext::default())),
             eval_history: Arc::new(ArcSwap::from_pointee(EvalHistory::default())),
             assessments: Arc::default(),
-            build_history: Arc::default(),
+            build_history: Arc::new(BuildHistory::new_with_retention_days(retention_days)),
         }
     }
 }
