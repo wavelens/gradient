@@ -96,6 +96,37 @@ Add the deploy key from step **Access** under **Settings -> Deploy Keys** for a 
 
 Existing tasks keep the same settings under **Task settings -> Repository**. Tokens with admin permissions have the **Install webhook** button and the **Install deploy key** button.
 
+## OAuth2 Connection
+
+The administrator can register Gradient once as an OAuth2 application on a Gitea or Forgejo instance. Project members can then connect a Git host without pasting a token.
+
+1. Open the **Settings -> Applications -> OAuth2 Applications** of the user or organization on the Git host.
+2. Set the redirect URI to `https://gradient.example.com/api/v1/integrations/oauth/callback` and create a confidential client. Save the client secret to a file.
+3. Configure Gradient on NixOS.
+
+```nix
+services.gradient.giteaApp = {
+  enable = true;
+  instanceBaseUrl = "https://codeberg.org";
+  gitHostType = "forgejo"; # (1)!
+  clientId = "3f1b6c2a-9d4e-4a7b-8c1d-2e5f7a9b0c13";
+  clientSecretFile = "/run/secrets/gitea-oauth-client-secret";
+};
+```
+
+1.  `gitea` for Gitea.
+
+Project members:
+
+1. Open **Integrations** in the project. Click **Connect with Forgejo (codeberg.org)**.
+2. Enter a name and click **Continue**. Approve access on the Git host.
+3. Gradient set up a webhook receiver and a status reporter with this name. The browser went back to the integrations page.
+
+- Forgejo and Gitea don't add scopes to OAuth2 tokens. An OAuth2 token can access the full account that approved it. Approve the token with the bot account from Step 1.
+- Gradient can refresh the access token automatically. The status reporter can show **Automatic refresh of the token**. Enter a token in **Edit** to replace the OAuth2 token and end the refresh.
+- Gradient can install webhooks on the repositories of tasks that connect to a new integration. The authorizing account must have admin rights on each repository.
+- A Gradient server can have at most one OAuth2 application, so only one Gitea or Forgejo instance can use this connection.
+
 ## Declarative Setup
 
 ```nix
