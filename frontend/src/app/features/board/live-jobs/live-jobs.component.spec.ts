@@ -291,7 +291,7 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
     return fixture;
   }
 
-  it('surfaces passed-over and negative candidate scores when scope is "incl. passed over"', () => {
+  it('surfaces passed-over and negative candidate scores when scope includes passed over jobs', () => {
     const fixture = setupDecisions();
     const cmp = fixture.componentInstance;
     cmp.setScoreScope('all');
@@ -333,7 +333,7 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
     fixture.detectChanges();
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
 
-    expect(text).not.toContain('incl. passed over');
+    expect(text).not.toContain('Include passed over jobs');
     expect(text).not.toContain('superuser');
     expect(text).toContain('No running jobs');
     expect(getAssignmentDecisions).not.toHaveBeenCalled();

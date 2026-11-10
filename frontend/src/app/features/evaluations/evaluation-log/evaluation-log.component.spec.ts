@@ -437,6 +437,7 @@ describe('EvaluationLogComponent', () => {
       const { fixture, cmp } = setup();
       fixture.detectChanges();
       cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
+      cmp.loading.set(false);
       cmp.builds.set([target({ id: 'b1' }), target({ id: 'b2', dispatched_job: 'job-2' })]);
       fixture.detectChanges();
 
@@ -454,6 +455,7 @@ describe('EvaluationLogComponent', () => {
       const { fixture, cmp } = setup();
       fixture.detectChanges();
       cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
+      cmp.loading.set(false);
       cmp.builds.set([target({ id: 'b1' }), target({ id: 'b2' })]);
       fixture.detectChanges();
       const select = vi.spyOn(cmp, 'selectBuild');
@@ -475,6 +477,7 @@ describe('EvaluationLogComponent', () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
       fixture.detectChanges();
       cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
+      cmp.loading.set(false);
       cmp.builds.set([target({ id: 'b1' })]);
       fixture.detectChanges();
 
@@ -489,6 +492,7 @@ describe('EvaluationLogComponent', () => {
       const { fixture, cmp } = setup();
       fixture.detectChanges();
       cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
+      cmp.loading.set(false);
       cmp.builds.set([build('b1', '/nix/store/hash-run-r9-evaluations-package-42.drv')]);
       fixture.detectChanges();
 

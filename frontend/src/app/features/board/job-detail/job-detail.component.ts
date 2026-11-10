@@ -332,11 +332,6 @@ interface RuleRow {
             }
           </gr-popover>
 
-          @if (s.candidates) {
-            <h3>Runner-up candidates</h3>
-            <pre>{{ s.candidates | json }}</pre>
-          }
-
           <section class="ctx worker">
             <h3>Worker context</h3>
             <gr-table class="kv">
@@ -469,7 +464,7 @@ interface RuleRow {
             <a class="mono exec-link" [routerLink]="links.boardExecJob(ex)">{{ jobSubjectLabel(p.subject, ex) }}</a>
           </div>
         } @else if (p.subject) {
-          <div><span class="label">{{ p.kind === 1 ? 'Derivation' : 'Repository' }}</span><span class="mono">{{ p.subject }}</span></div>
+          <div><span class="label">{{ p.kind === BUILD_KIND ? 'Derivation' : 'Repository' }}</span><span class="mono">{{ p.subject }}</span></div>
         }
         @if (evaluationJobCommitLabel(p); as commit) {
           <div><span class="label">Commit</span><span class="mono commit" [title]="p.commit">{{ commit }}</span></div>
@@ -601,6 +596,7 @@ export class BoardJobDetailComponent implements OnInit {
   });
 
   protected readonly jobKindName = jobKindName;
+  protected readonly BUILD_KIND = BUILD_KIND;
   protected readonly EXEC_KIND = EXEC_KIND;
   protected readonly jobSubjectLabel = jobSubjectLabel;
   protected readonly evaluationJobCommitLabel = evaluationJobCommitLabel;

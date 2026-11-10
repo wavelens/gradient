@@ -233,16 +233,6 @@ export const routes: Routes = [
             (m) => m.EvaluationSummaryComponent
           ),
       },
-      {
-        path: 'log',
-        title: 'Evaluation log',
-        resolve: { projectAccess: projectAccessResolver },
-        data: { hideFooter: true },
-        loadComponent: () =>
-          import('./features/evaluations/evaluation-log/evaluation-log.component').then(
-            (m) => m.EvaluationLogComponent
-          ),
-      },
     ],
   },
 

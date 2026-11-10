@@ -83,17 +83,17 @@ interface DecisionRow {
           @if (superuser()) {
             <label>Scores
               <select [ngModel]="scoreScope()" (ngModelChange)="setScoreScope($event)">
-                <option value="current">assigned</option>
-                <option value="all">incl. passed over</option>
+                <option value="current">Assigned jobs only</option>
+                <option value="all">Include passed over jobs</option>
               </select>
             </label>
           }
           <label>Type
             <select [ngModel]="kindFilter()" (ngModelChange)="kindFilter.set($event)">
-              <option value="all">all</option>
-              <option value="eval">eval</option>
-              <option value="build">build</option>
-              <option value="exec">exec</option>
+              <option value="all">All</option>
+              <option value="eval">Eval</option>
+              <option value="build">Build</option>
+              <option value="exec">Exec</option>
             </select>
           </label>
           @if (superuser()) {

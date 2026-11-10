@@ -103,16 +103,17 @@
                 <span class="sidebar-group-count">{{ plural(group.builds.length, 'build') }}</span>
               </button>
               @for (build of group.collapsed ? [] : group.builds; track build.id) {
+                @let buildRowLabel = buildDisplayName(build.name) + (build.ifd ? ' (import from derivation: evaluation waited for this build)' : '');
                 <div
                   class="build-item"
                   [style.--build-status-color]="buildStatusColor(getBuildRowDisplayStatus(build))"
                   [class.selected]="selectedBuildId() === build.id"
                   [attr.data-build-id]="build.id"
                   (contextmenu)="openBuildMenu($event, build, buildMenu)"
-                  [title]="buildDisplayName(build.name)"
+                  [title]="buildRowLabel"
                 >
                   <button type="button" class="sidebar-row-link"
-                          [attr.aria-label]="buildDisplayName(build.name)"
+                          [attr.aria-label]="buildRowLabel"
                           [attr.aria-pressed]="selectedBuildId() === build.id"
                           (click)="selectBuild(build, true)"
                           (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(build.id, 1)"

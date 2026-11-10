@@ -306,10 +306,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.scopeBuildId.set(query.get('package'));
     this.initialShowEval = query.get('eval') !== null;
     this.initialBuildId = this.initialShowEval ? null : query.get('build') ?? query.get('package');
-    if (!this.evaluationId) {
-      this.loading.set(false);
-      return;
-    }
     const resolved = this.route.snapshot.data?.['evaluationAccess'] as EvaluationWithOptionalTask | undefined;
     if (!resolved) return this.loadEvaluation();
     this.setEvaluationAndStartLiveUpdates(resolved.evaluation);
