@@ -42,7 +42,6 @@ pub enum ClientMessage {
         cpu_core_score: u32,
         zone: Option<String>,
         endpoint: Option<String>,
-        #[proto(34, default)]
         build_cores: Option<u32>,
         #[proto(43, default)]
         exec: Option<Box<ExecInventory>>,
@@ -54,7 +53,6 @@ pub enum ClientMessage {
         disk_speed_mbps: Option<f32>,
         upload_speed_mbps: Option<f32>,
         download_speed_mbps: Option<f32>,
-        #[proto(33, default)]
         build_peak_ram_mb: Option<Vec<(String, u64)>>,
         #[proto(42, default)]
         lifetime_left_secs: Option<u64>,
@@ -140,7 +138,6 @@ pub enum ClientMessage {
     EvalCachePull {
         job_id: String,
         fingerprint: String,
-        #[proto(38, default)]
         applied: Vec<String>,
     },
 
@@ -201,47 +198,40 @@ pub enum ClientMessage {
         request_id: u64,
     },
 
-    #[proto(32)]
     ImportRequest {
         job_id: String,
         request_id: String,
         drv_paths: Vec<String>,
     },
 
-    #[proto(35)]
     InputRequest {
         job_id: String,
         request_id: String,
         request: String,
     },
 
-    #[proto(35)]
     InputFetched {
         fetch_id: String,
         outcome: InputOutcome,
     },
 
-    #[proto(35)]
     InputFetchProgress {
         fetch_id: String,
         bytes_done: u64,
         bytes_total: Option<u64>,
     },
 
-    #[proto(40)]
     EvalSourceReady {
         job_id: String,
         store_path: String,
         fingerprint: String,
     },
 
-    #[proto(40)]
     EvalShardsPlanned {
         job_id: String,
         shards: Vec<EvalShardSpec>,
     },
 
-    #[proto(40)]
     EvalShardRequest {
         job_id: String,
         have_source: bool,

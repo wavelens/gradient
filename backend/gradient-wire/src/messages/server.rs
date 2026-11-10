@@ -163,21 +163,18 @@ pub enum ServerMessage {
         tokens: Vec<(String, String)>,
     },
 
-    #[proto(32)]
     ImportResult {
         job_id: String,
         request_id: String,
         outcome: ImportOutcome,
     },
 
-    #[proto(35)]
     InputResult {
         job_id: String,
         request_id: String,
         outcome: InputOutcome,
     },
 
-    #[proto(35)]
     FetchInput {
         fetch_id: String,
         project: String,
@@ -185,7 +182,6 @@ pub enum ServerMessage {
         ssh_key: Option<SecretString>,
     },
 
-    #[proto(35)]
     InputProgress {
         job_id: String,
         request_id: String,
@@ -193,7 +189,6 @@ pub enum ServerMessage {
         bytes_total: Option<u64>,
     },
 
-    #[proto(40)]
     EvalShardReply {
         job_id: String,
         outcome: EvalShardOutcome,

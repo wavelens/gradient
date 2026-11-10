@@ -162,9 +162,7 @@ pub struct BuildSpec {
     pub outputs: Vec<DerivationOutput>,
     pub timeout_secs: Option<u64>,
     pub max_silent_secs: Option<u64>,
-    #[proto(34, default)]
     pub build_cores: Option<u32>,
-    #[proto(36, default)]
     pub input_realisations: Vec<Realisation>,
 }
 
@@ -256,7 +254,6 @@ pub enum EvalCachePullOutcome {
         total_bytes: u64,
         stream_token: String,
     },
-    #[proto(38)]
     Segments {
         keys: Vec<String>,
         fetch: Vec<SegmentFetch>,
@@ -341,7 +338,6 @@ pub enum UploadObject {
     EvalCache {
         fingerprint: String,
     },
-    #[proto(38)]
     EvalCacheSegment {
         fingerprint: String,
     },
@@ -444,9 +440,7 @@ pub struct DiscoveredDerivation {
     pub is_fixed_output: bool,
     pub allow_substitutes: bool,
     pub pname: Option<String>,
-    #[proto(32, default)]
     pub ifd: bool,
-    #[proto(37, default)]
     pub licenses: Vec<License>,
     #[proto(43, default)]
     pub exec: Option<ExecSpec>,
@@ -464,7 +458,6 @@ pub enum License {
 #[derive(Proto, Debug, Clone, PartialEq, Eq)]
 pub enum ImportOutcome {
     Completed {
-        #[proto(36, default)]
         realisations: Vec<Realisation>,
     },
     Failed {
@@ -562,9 +555,7 @@ pub struct EvalStatsReport {
     pub worker_id: String,
     pub per_entry_point: Vec<EvalAttrCost>,
     pub flake_nodes: Vec<FlakeOutputNode>,
-    #[proto(39, default)]
     pub sets: Vec<EvalSetCost>,
-    #[proto(39, default)]
     pub subtrees: Vec<EvalSubtreeCost>,
 }
 

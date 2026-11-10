@@ -71,9 +71,11 @@ fn flake_input_sources_reach_only_a_server_of_version_56() {
 }
 
 #[test]
-fn split_evaluation_messages_round_trip_and_need_proto_40() {
+fn split_evaluation_messages_encode_and_decode_at_oldest_supported_protocol_version() {
     use crate::codec::{from_bytes, to_bytes};
-    use crate::messages::{ClientMessage, ServerMessage};
+    use crate::messages::{ClientMessage, PROTO_VERSIONS, ServerMessage};
+
+    let oldest = *PROTO_VERSIONS.start();
     use crate::types::{EvalShard, EvalShardOutcome, EvalShardSpec, FinishedShard};
 
     let spec = EvalShardSpec {
@@ -102,9 +104,8 @@ fn split_evaluation_messages_round_trip_and_need_proto_40() {
         },
     ];
     for message in client {
-        let bytes = to_bytes(&message, 40).unwrap();
-        assert_eq!(from_bytes::<ClientMessage>(bytes, 40).unwrap(), message);
-        assert!(to_bytes(&message, 39).is_err(), "{message:?}");
+        let bytes = to_bytes(&message, oldest).unwrap();
+        assert_eq!(from_bytes::<ClientMessage>(bytes, oldest).unwrap(), message);
     }
 
     let outcomes = [
@@ -129,9 +130,8 @@ fn split_evaluation_messages_round_trip_and_need_proto_40() {
             job_id: "eval:e".into(),
             outcome,
         };
-        let bytes = to_bytes(&reply, 40).unwrap();
-        assert_eq!(from_bytes::<ServerMessage>(bytes, 40).unwrap(), reply);
-        assert!(to_bytes(&reply, 39).is_err());
+        let bytes = to_bytes(&reply, oldest).unwrap();
+        assert_eq!(from_bytes::<ServerMessage>(bytes, oldest).unwrap(), reply);
     }
 }
 
