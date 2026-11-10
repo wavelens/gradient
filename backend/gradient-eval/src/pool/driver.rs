@@ -51,28 +51,19 @@ pub async fn run_eval_driver(
                 return Ok(0);
             }
             EvalRequest::Plan {
-                repository,
+                eval_target,
                 wildcards,
-                input_overrides,
             } => worker
-                .plan(repository, wildcards, input_overrides, &dependencies)
+                .plan(eval_target, wildcards, &dependencies)
                 .await
                 .map(|(shards, errors)| json!({"kind": "plan_ok", "shards": shards, "errors": errors})),
             EvalRequest::List {
-                repository,
+                eval_target,
                 wildcards,
                 only,
-                input_overrides,
                 run_overrides,
             } => worker
-                .list(
-                    repository,
-                    wildcards,
-                    only,
-                    input_overrides,
-                    run_overrides,
-                    &dependencies,
-                )
+                .list(eval_target, wildcards, only, run_overrides, &dependencies)
                 .await
                 .map(|l| {
                     json!({
@@ -83,11 +74,8 @@ pub async fn run_eval_driver(
                         "errors": l.errors,
                     })
                 }),
-            EvalRequest::Fingerprint {
-                repository,
-                input_overrides,
-            } => worker
-                .fingerprint(repository, input_overrides)
+            EvalRequest::Fingerprint { eval_target } => worker
+                .fingerprint(eval_target)
                 .await
                 .map(|fingerprint| json!({"kind": "fingerprint_ok", "fingerprint": fingerprint})),
             EvalRequest::FetchInput { .. } => {

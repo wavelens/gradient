@@ -21,7 +21,8 @@ use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
 use gradient_eval::pool::MemoryGuard;
 use gradient_sources::{
-    AttrError, DerivationResolver, FlakeDiscovery, Resolved, ResolvedDerivation, ShardSpec,
+    AttrError, DerivationResolver, FlakeDiscovery, FlakeEvalTarget, Resolved, ResolvedDerivation,
+    ShardSpec,
 };
 use gradient_wire::codec;
 use gradient_wire::messages::{
@@ -221,10 +222,9 @@ pub async fn evaluate_derivations(
     updater: &mut JobUpdater,
     abort: &mut super::AbortSignal,
 ) -> Result<()> {
-    let repo = build_flake_url(job, local_flake_path);
     let start = Instant::now();
-    let eval_overrides = eval_input_overrides(job, local_flake_path);
-    let mut sharing = match eval_cache_fingerprint(evaluator, repo, &eval_overrides).await {
+    let eval_target = build_job_eval_target(job, local_flake_path);
+    let mut sharing = match eval_cache_fingerprint(evaluator, &eval_target).await {
         Some(fingerprint) => {
             let path = PathBuf::from(eval_cache_path(evaluator, &fingerprint));
             share_eval_cache(path, updater, fingerprint).await
@@ -296,8 +296,7 @@ fn eval_cache_file(cache_dir: &str, fingerprint: &str) -> String {
 
 pub(super) async fn eval_cache_fingerprint(
     evaluator: &WorkerEvaluator,
-    repo: String,
-    overrides: &[(String, String)],
+    eval_target: &FlakeEvalTarget,
 ) -> Option<String> {
     if !evaluator.eval_cache_share {
         return None;
@@ -305,7 +304,7 @@ pub(super) async fn eval_cache_fingerprint(
 
     evaluator
         .resolver
-        .fingerprint(repo, overrides)
+        .fingerprint(eval_target)
         .await
         .unwrap_or_else(|e| {
             warn!(error = %e, "eval-cache fingerprint failed; evaluating local-only");
@@ -313,7 +312,18 @@ pub(super) async fn eval_cache_fingerprint(
         })
 }
 
-pub(super) fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
+pub(super) fn build_job_eval_target(
+    job: &FlakeJob,
+    local_flake_path: Option<&str>,
+) -> FlakeEvalTarget {
+    FlakeEvalTarget {
+        repository: build_flake_url(job, local_flake_path),
+        input_overrides: eval_input_overrides(job, local_flake_path),
+        nix_evaluation_fetch_url_access: job.nix_evaluation_fetch_url_access.clone(),
+    }
+}
+
+fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
     with_flake_dir(
         source_flake_url(job, local_flake_path),
         job.flake_dir.as_deref(),
@@ -344,10 +354,7 @@ fn with_flake_dir(flake_ref: String, flake_dir: Option<&str>) -> String {
     }
 }
 
-pub(super) fn eval_input_overrides(
-    job: &FlakeJob,
-    local_flake_path: Option<&str>,
-) -> Vec<(String, String)> {
+fn eval_input_overrides(job: &FlakeJob, local_flake_path: Option<&str>) -> Vec<(String, String)> {
     let declared: std::collections::BTreeSet<String> = local_flake_path
         .and_then(|p| {
             super::fetch::flake_root(std::path::Path::new(p), job.flake_dir.as_deref()).ok()
@@ -1012,13 +1019,8 @@ pub(super) async fn plan_shards_with(
 ) -> Result<(Vec<ShardSpec>, Vec<AttrError>)> {
     let imports = Imports::new(reporter, drv_reader, abort.clone());
     let dependencies = EvalDependencySource::new(imports);
-    let overrides = eval_input_overrides(job, local_flake_path);
-    let planned = resolver.plan_shards(
-        build_flake_url(job, local_flake_path),
-        job.wildcards.clone(),
-        &overrides,
-        &dependencies,
-    );
+    let eval_target = build_job_eval_target(job, local_flake_path);
+    let planned = resolver.plan_shards(&eval_target, job.wildcards.clone(), &dependencies);
 
     let (shards, errors) = unless_aborted(&mut abort.clone(), planned)
         .await
@@ -1118,9 +1120,8 @@ async fn discover(
     found: mpsc::UnboundedSender<ResolvedDerivation>,
     listing: Listing,
 ) -> Result<FlakeDiscovery> {
-    let repo = build_flake_url(job, local_flake_path);
-    let eval_overrides = eval_input_overrides(job, local_flake_path);
-    debug!(repo = %repo, "listing flake derivations");
+    let eval_target = build_job_eval_target(job, local_flake_path);
+    debug!(repo = %eval_target.repository, "listing flake derivations");
 
     let imports = EvalDependencySource::new(imports.clone());
     let send = move |resolved: Vec<ResolvedDerivation>| {
@@ -1134,9 +1135,8 @@ async fn discover(
             Listing::Wildcards => {
                 resolver
                     .list_flake_derivations(
-                        repo,
+                        &eval_target,
                         job.wildcards.clone(),
-                        &eval_overrides,
                         job.run_overrides.as_deref(),
                         &imports,
                         &send,
@@ -1146,10 +1146,9 @@ async fn discover(
             Listing::Given(shards) => {
                 resolver
                     .list_given_shards(
-                        repo,
+                        &eval_target,
                         shards,
                         &job.wildcards,
-                        &eval_overrides,
                         job.run_overrides.as_deref(),
                         &imports,
                         &send,
@@ -1381,6 +1380,7 @@ mod tests {
             input_update: None,
             flake_dir: None,
             run_overrides: None,
+            nix_evaluation_fetch_url_access: Default::default(),
         }
     }
 
@@ -1835,9 +1835,8 @@ mod tests {
     impl DerivationResolver for StalledResolver {
         async fn list_flake_derivations(
             &self,
-            _: String,
+            _: &gradient_sources::FlakeEvalTarget,
             _: Vec<String>,
-            _: &[(String, String)],
             _: Option<&str>,
             _: &dyn gradient_sources::EvalDependencies,
             _: gradient_sources::FoundDerivations<'_>,
@@ -2021,9 +2020,8 @@ mod tests {
     impl DerivationResolver for WaitsForTheWalk {
         async fn list_flake_derivations(
             &self,
-            _: String,
+            _: &gradient_sources::FlakeEvalTarget,
             _: Vec<String>,
-            _: &[(String, String)],
             _: Option<&str>,
             _: &dyn gradient_sources::EvalDependencies,
             found: gradient_sources::FoundDerivations<'_>,
@@ -2147,9 +2145,8 @@ mod tests {
     impl DerivationResolver for ResolvesExec {
         async fn list_flake_derivations(
             &self,
-            _: String,
+            _: &gradient_sources::FlakeEvalTarget,
             _: Vec<String>,
-            _: &[(String, String)],
             _: Option<&str>,
             _: &dyn gradient_sources::EvalDependencies,
             found: gradient_sources::FoundDerivations<'_>,

@@ -6,6 +6,7 @@
 
 use std::num::NonZeroU64;
 
+use crate::input::check_nix_restricted_evaluation_url_prefix;
 use clap::Args;
 use gradient_derive::config_group;
 
@@ -33,6 +34,10 @@ pub struct EvalArgs {
     /// Seconds between eval cache eviction passes.
     #[arg(default_value = "3600")]
     pub cache_sweep_interval_secs: NonZeroU64,
+
+    /// Allowed URL prefixes that each project evaluation can fetch from in addition to the inputs locked in `flake.lock`. Evaluations in Nix under `restrict-eval` make `builtins.fetchTree`, `fetchurl` and `fetchTarball` fail on other URLs. Prefixes also cover URLs under them. A scheme-only entry such as `github:` can allow the whole scheme. Projects can add prefixes of their own or disable the restriction.
+    #[arg(value_delimiter = ',', value_parser = check_nix_restricted_evaluation_url_prefix)]
+    pub allowed_uri_prefixes: Vec<String>,
 }
 
 impl EvalArgs {

@@ -811,6 +811,16 @@
     "values": []
   },
   {
+    "group": "eval",
+    "field": "allowed_uri_prefixes",
+    "flag": "eval-allowed-uri-prefixes",
+    "env": "GRADIENT_EVAL_ALLOWED_URI_PREFIXES",
+    "type": "Vec<String>",
+    "description": "Allowed URL prefixes that each project evaluation can fetch from in addition to the inputs locked in `flake.lock`. Evaluations in Nix under `restrict-eval` make `builtins.fetchTree`, `fetchurl` and `fetchTarball` fail on other URLs. Prefixes also cover URLs under them. A scheme-only entry such as `github:` can allow the whole scheme. Projects can add prefixes of their own or disable the restriction.",
+    "default": null,
+    "values": []
+  },
+  {
     "group": "build",
     "field": "max_attempts",
     "flag": "build-max-attempts",

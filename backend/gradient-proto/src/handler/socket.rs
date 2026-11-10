@@ -198,7 +198,7 @@ mod tests {
     };
 
     fn fetch_job() -> Job {
-        Job::Flake(FlakeJob {
+        Job::Flake(Box::new(FlakeJob {
             steps: vec![FlakeStep::FetchFlake],
             source: FlakeSource::Repository {
                 url: "git+ssh://git@example.com/repo".into(),
@@ -210,7 +210,8 @@ mod tests {
             input_update: None,
             flake_dir: None,
             run_overrides: None,
-        })
+            nix_evaluation_fetch_url_access: Default::default(),
+        }))
     }
 
     #[test]

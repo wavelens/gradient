@@ -433,6 +433,7 @@ fn a_flake_job_carries_its_flake_directory() {
         input_update: None,
         flake_dir: Some("nix".into()),
         run_overrides: None,
+        nix_evaluation_fetch_url_access: Default::default(),
     };
     assert_eq!(
         from_bytes::<FlakeJob>(to_bytes(&job, 48).unwrap(), 48).unwrap(),
@@ -440,6 +441,38 @@ fn a_flake_job_carries_its_flake_directory() {
     );
     let older: FlakeJob = from_bytes(to_bytes(&job, 47).unwrap(), 47).unwrap();
     assert_eq!(older.flake_dir, None);
+}
+
+#[test]
+fn flake_job_fetch_url_access_round_trips_and_v60_restricted_default() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::types::{FlakeJob, FlakeSource, FlakeStep, NixEvaluationFetchUrlAccess};
+
+    let job = FlakeJob {
+        steps: vec![FlakeStep::EvaluateFlake],
+        source: FlakeSource::Repository {
+            url: "https://h/o/r".into(),
+            commit: "0".repeat(40),
+        },
+        wildcards: vec!["*".into()],
+        timeout_secs: None,
+        input_overrides: vec![],
+        input_update: None,
+        flake_dir: None,
+        run_overrides: None,
+        nix_evaluation_fetch_url_access: NixEvaluationFetchUrlAccess::UnrestrictedEvaluation,
+    };
+    assert_eq!(
+        from_bytes::<FlakeJob>(to_bytes(&job, 61).unwrap(), 61).unwrap(),
+        job
+    );
+    let older: FlakeJob = from_bytes(to_bytes(&job, 60).unwrap(), 60).unwrap();
+    assert_eq!(
+        older.nix_evaluation_fetch_url_access,
+        NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+            extra_allowed_uri_prefixes: vec![],
+        }
+    );
 }
 
 #[test]

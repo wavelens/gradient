@@ -130,6 +130,25 @@ impl NixEvaluator {
         })
     }
 
+    pub fn set_restrict_eval_and_allowed_uris(
+        &self,
+        allowed_uris: Option<&[String]>,
+    ) -> Result<()> {
+        match allowed_uris {
+            Some(uris) => {
+                self.state
+                    .set_evaluator_setting("allowed-uris", &uris.join(" "))?;
+                self.state.set_evaluator_setting("restrict-eval", "true")?;
+            }
+            None => {
+                self.state.set_evaluator_setting("restrict-eval", "false")?;
+                self.state.set_evaluator_setting("allowed-uris", "")?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn stats(&self) -> Result<nix_bindings::EvalStats> {
         self.state
             .stats()

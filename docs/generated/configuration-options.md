@@ -73,6 +73,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `eval.allowedUriPrefixes` | list of string | `[ ]` | `GRADIENT_EVAL_ALLOWED_URI_PREFIXES` | Allowed URL prefixes that each project evaluation can fetch from in addition to the inputs locked in `flake.lock`. Evaluations in Nix under `restrict-eval` make `builtins.fetchTree`, `fetchurl` and `fetchTarball` fail on other URLs. Prefixes also cover URLs under them. A scheme-only entry such as `github:` can allow the whole scheme. Projects can add prefixes of their own or disable the restriction. |
 | `eval.cache.maxAgeDays` | unsigned int | `30` | `GRADIENT_EVAL_CACHE_MAX_AGE_DAYS` | Days since the last compaction after which the eval cache of a flake fingerprint leaves with all its segments, regardless of the size limit. |
 | `eval.cache.maxTotalBytes` | unsigned int | `10737418240` | `GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES` | Total size in bytes of the shared eval caches, counted after compaction. The eval cache of a flake fingerprint leaves with all its segments, least recently compacted first, until the total is within this size. |
 | `eval.cache.sweepIntervalSecs` | positive int | `3600` | `GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS` | Seconds between eval cache eviction passes. |

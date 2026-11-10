@@ -715,6 +715,7 @@ mod tests {
             input_update: None,
             flake_dir: None,
             run_overrides: None,
+            nix_evaluation_fetch_url_access: Default::default(),
         }
     }
 
@@ -756,6 +757,7 @@ mod tests {
             input_update: None,
             flake_dir: None,
             run_overrides: None,
+            nix_evaluation_fetch_url_access: Default::default(),
         };
         let credentials = crate::proto::credentials::CredentialStore::new();
         let mut reporter = RecordingJobReporter::new();

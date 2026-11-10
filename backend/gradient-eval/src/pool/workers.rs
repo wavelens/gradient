@@ -322,6 +322,7 @@ pub(super) mod tests {
     )]
 
     use super::*;
+    use crate::ipc::placeholder_repo_eval_target;
     use std::time::Duration;
     use tokio::process::Command;
 
@@ -415,8 +416,7 @@ pub(super) mod tests {
 
         let mut worker = pool.acquire().await.expect("acquire");
         let call = worker.plan(
-            "repo".into(),
-            vec![],
+            placeholder_repo_eval_target(),
             vec![],
             &super::super::RefuseDependencies("a test"),
         );
@@ -449,8 +449,7 @@ pub(super) mod tests {
         let mut worker = pool.acquire().await.expect("acquire");
         let (shards, errors) = worker
             .plan(
-                "repo".into(),
-                vec![],
+                placeholder_repo_eval_target(),
                 vec![],
                 &super::super::RefuseDependencies("a test"),
             )

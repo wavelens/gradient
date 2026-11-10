@@ -26,8 +26,8 @@ use tracing::{info, warn};
 
 use super::AbortSignal;
 use super::eval::{
-    CorruptEvalCache, WorkerEvaluator, build_eval_stats_report, build_flake_url, corrupt_cache_in,
-    drop_corrupt_cache, eval_cache_fingerprint, eval_cache_path, eval_input_overrides,
+    CorruptEvalCache, WorkerEvaluator, build_eval_stats_report, build_job_eval_target,
+    corrupt_cache_in, drop_corrupt_cache, eval_cache_fingerprint, eval_cache_path,
     evaluate_shard_with, plan_shards_with, report_failed_attrs,
 };
 use super::eval_cache_sharing::{EVAL_CACHE_FLUSH_INTERVAL, EvalCacheSharing, share_eval_cache};
@@ -275,9 +275,8 @@ pub(super) async fn run_primary(
     let thunks = counted_thunks(context.evaluator);
     let sink = updater.eval_progress_sink();
     let server = updater.concurrent();
-    let repo = build_flake_url(context.job, Some(source_path));
-    let overrides = eval_input_overrides(context.job, Some(source_path));
-    let fingerprint = eval_cache_fingerprint(context.evaluator, repo, &overrides).await;
+    let eval_target = build_job_eval_target(context.job, Some(source_path));
+    let fingerprint = eval_cache_fingerprint(context.evaluator, &eval_target).await;
     let announced = fingerprint.clone().unwrap_or_default();
     let announce = async {
         pushed.await?;

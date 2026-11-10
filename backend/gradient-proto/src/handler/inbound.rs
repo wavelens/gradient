@@ -1519,6 +1519,7 @@ pub(in crate::handler) mod fixture {
                 input_update: None,
                 flake_dir: None,
                 run_overrides: None,
+                nix_evaluation_fetch_url_access: Default::default(),
             },
             required_paths: vec![],
             queued_at: gradient_types::now(),

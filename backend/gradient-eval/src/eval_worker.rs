@@ -13,7 +13,8 @@ use tracing::{error, trace};
 use crate::flake_walk::{FlakeWalker, Resolved};
 use crate::frames::Frames;
 use crate::ipc::{
-    EVAL_IPC_VERSION, EvalRequest, EvalResponse, ResolvedItem, decode_request, read_frame,
+    EVAL_IPC_VERSION, EvalRequest, EvalResponse, FlakeEvalTarget, ResolvedItem, decode_request,
+    read_frame,
 };
 use crate::nix_eval::{FetchHook, NixEvaluator, RealiseHook, StatsReader};
 use crate::stats::{AttrCost, StatsDelta};
@@ -209,32 +210,29 @@ fn answer_requests<R: Read, W: Write>(
                 message: "an answer arrived outside a request to the parent".to_string(),
             },
             EvalRequest::Plan {
-                repository,
+                eval_target,
                 wildcards,
-                input_overrides,
             } => with_evaluator(evaluator, |ev| {
                 // Warnings from priming the prefix attrset are resurfacing in every shard.
                 // Per-attr eval errors are captured here, because a thrown shard root
                 // is leaving no shard for a later `List` to re-hit.
                 frames.begin();
-                let planned = walkers.with(ev, &repository, &input_overrides, |walker| {
-                    walker.plan_shards(&wildcards)
-                });
+                let planned =
+                    walkers.with(ev, &eval_target, |walker| walker.plan_shards(&wildcards));
                 frames.end(None);
                 or_err(planned.map(|(shards, errors)| EvalResponse::PlanOk { shards, errors }))
             }),
             EvalRequest::List {
-                repository,
+                eval_target,
                 wildcards,
                 only,
-                input_overrides,
                 run_overrides,
             } => with_evaluator(evaluator, |ev| {
                 frames.begin();
                 // The derivation path is resolved where the attribute was forced, so a member
                 // is evaluated in the same subprocess.
                 let (result, warnings) = capture_warnings_during(|| {
-                    walkers.with(ev, &repository, &input_overrides, |walker| {
+                    walkers.with(ev, &eval_target, |walker| {
                         let (attrs, deferred, errors) =
                             walker.discover_split(&wildcards, only.as_deref())?;
                         let items = attrs
@@ -265,17 +263,22 @@ fn answer_requests<R: Read, W: Write>(
                 git_ssh_command,
             } => with_evaluator(evaluator, |ev| {
                 or_err(
-                    ev.fetch_tree(&request, git_ssh_command.as_deref())
+                    ev.set_restrict_eval_and_allowed_uris(None)
+                        .and_then(|()| ev.fetch_tree(&request, git_ssh_command.as_deref()))
                         .map(|response| EvalResponse::FetchOk { response }),
                 )
             }),
-            EvalRequest::Fingerprint {
-                repository,
-                input_overrides,
-            } => with_evaluator(evaluator, |ev| {
+            EvalRequest::Fingerprint { eval_target } => with_evaluator(evaluator, |ev| {
                 or_err(
-                    ev.fingerprint(&repository, &input_overrides)
-                        .map(|fingerprint| EvalResponse::FingerprintOk { fingerprint }),
+                    ev.set_restrict_eval_and_allowed_uris(
+                        eval_target
+                            .nix_evaluation_fetch_url_access
+                            .extra_allowed_uri_prefixes(),
+                    )
+                    .and_then(|()| {
+                        ev.fingerprint(&eval_target.repository, &eval_target.input_overrides)
+                    })
+                    .map(|fingerprint| EvalResponse::FingerprintOk { fingerprint }),
                 )
             }),
         };
@@ -303,9 +306,8 @@ fn or_err(result: anyhow::Result<EvalResponse>) -> EvalResponse {
     })
 }
 
-/// The cache key is including the input overrides.
-/// A pooled worker must never hand out a stale locked flake for a new override set.
-type CachedWalker<'ev> = (String, Vec<(String, String)>, FlakeWalker<'ev>);
+/// Input overrides, fetch URL access and the full evaluation target define the cache key. Pooled workers never pass old locked flakes or looser fetch restrictions to a new target.
+type CachedWalker<'ev> = (FlakeEvalTarget, Option<Vec<String>>, FlakeWalker<'ev>);
 
 struct WalkerCache<'ev> {
     entry: Option<CachedWalker<'ev>>,
@@ -315,30 +317,42 @@ impl<'ev> WalkerCache<'ev> {
     fn open(
         &mut self,
         ev: &'ev NixEvaluator,
-        repository: &str,
-        overrides: &[(String, String)],
+        eval_target: &FlakeEvalTarget,
     ) -> anyhow::Result<&FlakeWalker<'ev>> {
         let stale = self
             .entry
             .as_ref()
-            .is_none_or(|(repo, ovr, _)| repo != repository || ovr.as_slice() != overrides);
+            .is_none_or(|(cached, _, _)| cached != eval_target);
         if stale {
             self.entry = None;
-            let walker = ev.walker(repository, overrides)?;
-            self.entry = Some((repository.to_string(), overrides.to_vec(), walker));
+            let extra = eval_target
+                .nix_evaluation_fetch_url_access
+                .extra_allowed_uri_prefixes();
+            ev.set_restrict_eval_and_allowed_uris(extra)?;
+            let walker = ev.walker(&eval_target.repository, &eval_target.input_overrides)?;
+            let allowed_uris = extra
+                .map(|extra| {
+                    walker.input_fetch_urls().map(|mut urls| {
+                        urls.extend_from_slice(extra);
+                        urls
+                    })
+                })
+                .transpose()?;
+            self.entry = Some((eval_target.clone(), allowed_uris, walker));
         }
 
-        Ok(&self.entry.as_ref().expect("entry just ensured").2)
+        let (_, allowed_uris, walker) = self.entry.as_ref().expect("entry just ensured");
+        ev.set_restrict_eval_and_allowed_uris(allowed_uris.as_deref())?;
+        Ok(walker)
     }
 
     fn with<T>(
         &mut self,
         ev: &'ev NixEvaluator,
-        repository: &str,
-        overrides: &[(String, String)],
+        eval_target: &FlakeEvalTarget,
         f: impl FnOnce(&FlakeWalker<'ev>) -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
-        f(self.open(ev, repository, overrides)?)
+        f(self.open(ev, eval_target)?)
     }
 }
 

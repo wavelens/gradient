@@ -7,7 +7,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_derivation::Derivation;
-use gradient_wire::types::{ExecSpec, License};
+use gradient_wire::types::{ExecSpec, License, NixEvaluationFetchUrlAccess};
 
 pub type ResolvedDerivation = (String, Result<Resolved>);
 
@@ -30,6 +30,13 @@ pub type FoundDerivations<'a> = &'a (dyn Fn(Vec<ResolvedDerivation>) + Send + Sy
 pub struct ShardSpec {
     pub pattern: String,
     pub only: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FlakeEvalTarget {
+    pub repository: String,
+    pub input_overrides: Vec<(String, String)>,
+    pub nix_evaluation_fetch_url_access: NixEvaluationFetchUrlAccess,
 }
 
 #[derive(Debug, Default)]
@@ -68,16 +75,11 @@ impl EvalDependencies for RefuseDependencies {
 /// Production impls must run inside `tokio::task::spawn_blocking`. The embedded Nix C API with
 /// Boehm GC cannot run on signal-blocked Tokio workers.
 #[async_trait]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Shard lists pass the repository, both override types, dependencies and sinks."
-)]
 pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
     async fn list_flake_derivations(
         &self,
-        repository: String,
+        eval_target: &FlakeEvalTarget,
         wildcards: Vec<String>,
-        overrides: &[(String, String)],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
@@ -85,9 +87,8 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
 
     async fn plan_shards(
         &self,
-        _repository: String,
+        _eval_target: &FlakeEvalTarget,
         _wildcards: Vec<String>,
-        _overrides: &[(String, String)],
         _dependencies: &dyn EvalDependencies,
     ) -> Result<(Vec<ShardSpec>, Vec<AttrError>)> {
         anyhow::bail!("this resolver cannot plan shards")
@@ -95,10 +96,9 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
 
     async fn list_given_shards(
         &self,
-        _repository: String,
+        _eval_target: &FlakeEvalTarget,
         _shards: Vec<ShardSpec>,
         _wildcards: &[String],
-        _overrides: &[(String, String)],
         _run_overrides: Option<&str>,
         _dependencies: &dyn EvalDependencies,
         _found: FoundDerivations<'_>,

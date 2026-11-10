@@ -8,8 +8,8 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use gradient_derivation::Derivation;
 use gradient_sources::{
-    AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FoundDerivations,
-    ResolvedDerivation,
+    AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FlakeEvalTarget,
+    FoundDerivations, ResolvedDerivation,
 };
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -85,18 +85,18 @@ impl FakeDerivationResolver {
 impl DerivationResolver for FakeDerivationResolver {
     async fn list_flake_derivations(
         &self,
-        repository: String,
+        eval_target: &FlakeEvalTarget,
         _wildcards: Vec<String>,
-        _overrides: &[(String, String)],
         _run_overrides: Option<&str>,
         _dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
     ) -> Result<FlakeDiscovery> {
+        let repository = &eval_target.repository;
         let attrs = self
             .flake_attrs
             .lock()
             .unwrap()
-            .get(&repository)
+            .get(repository)
             .cloned()
             .unwrap_or_default();
         let drv_paths = self.drv_paths.lock().unwrap();
@@ -122,7 +122,7 @@ impl DerivationResolver for FakeDerivationResolver {
                 .flake_errors
                 .lock()
                 .unwrap()
-                .get(&repository)
+                .get(repository)
                 .cloned()
                 .unwrap_or_default(),
             ..Default::default()

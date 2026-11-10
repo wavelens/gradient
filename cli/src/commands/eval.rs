@@ -7,7 +7,7 @@
 use crate::commands::attr_spec;
 use clap::Args;
 use etcetera::base_strategy::{BaseStrategy, choose_base_strategy};
-use gradient_eval::ipc::{License, ResolvedItem};
+use gradient_eval::ipc::{FlakeEvalTarget, License, ResolvedItem};
 use gradient_eval::pool::{
     EvalPool, EvalPoolConfig, MemoryGuard, RefuseDependencies, default_workers,
 };
@@ -117,11 +117,16 @@ async fn evaluate(
     let dependencies = RefuseDependencies("the local evaluation");
     let found = |items: Vec<ResolvedItem>| items.into_iter().map(Job::from_item).for_each(print);
 
+    let eval_target = FlakeEvalTarget {
+        repository: flake_ref,
+        input_overrides: Vec::new(),
+        nix_evaluation_fetch_url_access: Default::default(),
+    };
     let evaluated = if all_concrete(&wildcards) {
-        pool.list_attrs(flake_ref, wildcards, &[], &dependencies, &found)
+        pool.list_attrs(&eval_target, wildcards, &dependencies, &found)
             .await
     } else {
-        pool.list_shards(flake_ref, wildcards, &[], None, &dependencies, &found)
+        pool.list_shards(&eval_target, wildcards, None, &dependencies, &found)
             .await
     };
 

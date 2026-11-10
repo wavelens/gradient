@@ -30,7 +30,7 @@ use crate::full_caches::park_on_full_caches;
 use crate::instance::EvalHistory;
 use crate::jobs::{PendingEvalJob, PendingJob, continuation_job_key};
 use gradient_db::exec_jobs::continuations::{self, ContinuationRow};
-use gradient_wire::types::{FlakeJob, FlakeStep, RequiredPath};
+use gradient_wire::types::{FlakeJob, FlakeStep, NixEvaluationFetchUrlAccess, RequiredPath};
 
 pub(crate) struct EvalDispatch {
     pub(crate) scheduler: Arc<Scheduler>,
@@ -105,7 +105,12 @@ async fn assign_queued_evaluations(scheduler: &Scheduler) -> anyhow::Result<()> 
         return Ok(());
     }
 
-    let maps = EvalAssignMaps::load(&scheduler.db.worker_db, &evals).await?;
+    let maps = EvalAssignMaps::load(
+        &scheduler.db.worker_db,
+        &evals,
+        &scheduler.allowed_uri_prefixes,
+    )
+    .await?;
     let split_fetch = scheduler.has_idle_eval_only_worker().await;
     let eval_history = scheduler.scoring.eval_history.load();
 
@@ -153,7 +158,12 @@ pub(crate) async fn assign_continuations(scheduler: &Scheduler) -> anyhow::Resul
         .filter(|c| untracked.contains(&continuation_job_key(c.job)))
         .collect();
     let evals: Vec<MEvaluation> = queued.iter().map(|c| c.evaluation.clone()).collect();
-    let maps = EvalAssignMaps::load(&scheduler.db.worker_db, &evals).await?;
+    let maps = EvalAssignMaps::load(
+        &scheduler.db.worker_db,
+        &evals,
+        &scheduler.allowed_uri_prefixes,
+    )
+    .await?;
     let eval_history = scheduler.scoring.eval_history.load();
 
     for continuation in queued {
@@ -192,6 +202,7 @@ fn continuation_eval_job(
         None,
     );
     job.run_overrides = pending.job.run_overrides.clone();
+    job.nix_evaluation_fetch_url_access = pending.job.nix_evaluation_fetch_url_access.clone();
     Some(PendingEvalJob {
         job,
         required_paths,
@@ -308,6 +319,12 @@ fn assemble_eval_job(
         return None;
     };
 
+    flake_job.nix_evaluation_fetch_url_access = maps
+        .project_fetch_url_accesses
+        .get(&project_id)
+        .cloned()
+        .unwrap_or_default();
+
     let estimate = eval_history.for_job(task_id, &flake_job.steps);
 
     Some(PendingEvalJob {
@@ -338,7 +355,12 @@ pub(crate) async fn pending_eval_jobs(
         return Ok(Vec::new());
     }
 
-    let maps = EvalAssignMaps::load(&scheduler.db.worker_db, &evaluations).await?;
+    let maps = EvalAssignMaps::load(
+        &scheduler.db.worker_db,
+        &evaluations,
+        &scheduler.allowed_uri_prefixes,
+    )
+    .await?;
     let eval_history = scheduler.scoring.eval_history.load();
     Ok(evaluations
         .iter()
@@ -354,11 +376,16 @@ struct EvalAssignMaps {
     sidecars: HashMap<EvaluationId, gradient_entity::evaluation_input_update::Model>,
     overrides: HashMap<EvaluationId, Vec<gradient_wire::types::FlakeInputOverride>>,
     projects: HashMap<TaskId, ProjectId>,
+    project_fetch_url_accesses: HashMap<ProjectId, NixEvaluationFetchUrlAccess>,
     build_request_tasks: HashSet<TaskId>,
 }
 
 impl EvalAssignMaps {
-    async fn load(db: &WorkerDb, evals: &[MEvaluation]) -> Result<Self, sea_orm::DbErr> {
+    async fn load(
+        db: &WorkerDb,
+        evals: &[MEvaluation],
+        allowed_uri_prefixes: &[String],
+    ) -> Result<Self, sea_orm::DbErr> {
         use sea_orm::QueryOrder;
 
         let commit_ids: Vec<CommitId> = evals
@@ -417,7 +444,20 @@ impl EvalAssignMaps {
             ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
         })
         .await?;
-        let projects = tasks.iter().map(|t| (t.id, t.project)).collect();
+        let projects: HashMap<TaskId, ProjectId> =
+            tasks.iter().map(|t| (t.id, t.project)).collect();
+        let project_ids: Vec<ProjectId> = projects.values().copied().collect();
+        let project_fetch_url_accesses =
+            by_ids::<gradient_entity::project::Entity, _>(db, &project_ids)
+                .await?
+                .into_iter()
+                .map(|(id, project)| {
+                    (
+                        id,
+                        build_nix_evaluation_fetch_url_access(&project, allowed_uri_prefixes),
+                    )
+                })
+                .collect();
         let build_request_tasks = tasks
             .iter()
             .filter(|t| gradient_db::build_request_task::is_build_request_task(t))
@@ -429,8 +469,26 @@ impl EvalAssignMaps {
             sidecars,
             overrides,
             projects,
+            project_fetch_url_accesses,
             build_request_tasks,
         })
+    }
+}
+
+fn build_nix_evaluation_fetch_url_access(
+    project: &gradient_entity::project::Model,
+    allowed_uri_prefixes: &[String],
+) -> NixEvaluationFetchUrlAccess {
+    if !project.restrict_evaluation_fetches {
+        return NixEvaluationFetchUrlAccess::UnrestrictedEvaluation;
+    }
+
+    NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+        extra_allowed_uri_prefixes: allowed_uri_prefixes
+            .iter()
+            .chain(&project.extra_allowed_uri_prefixes)
+            .cloned()
+            .collect(),
     }
 }
 
@@ -466,6 +524,7 @@ pub(crate) fn flake_job_for_eval_source(
             input_update,
             flake_dir: None,
             run_overrides: None,
+            nix_evaluation_fetch_url_access: Default::default(),
         };
         let required = vec![RequiredPath {
             path: repository.to_owned(),
@@ -497,6 +556,7 @@ pub(crate) fn flake_job_for_eval_source(
         input_update,
         flake_dir: location.flake_dir.map(str::to_owned),
         run_overrides: None,
+        nix_evaluation_fetch_url_access: Default::default(),
     };
 
     (job, Vec::new())
@@ -519,8 +579,41 @@ pub(crate) async fn project_id_for_eval(db: &WorkerDb, eval: &MEvaluation) -> Op
 
 #[cfg(test)]
 mod eval_source_tests {
-    use super::{flake_job_for_eval_source, member_job};
-    use gradient_wire::types::{FlakeSource, FlakeStep};
+    use super::{build_nix_evaluation_fetch_url_access, flake_job_for_eval_source, member_job};
+    use gradient_wire::types::{FlakeSource, FlakeStep, NixEvaluationFetchUrlAccess};
+
+    #[test]
+    fn project_opted_out_of_restricted_evaluation_fetches_gets_unrestricted_evaluation_access() {
+        let project = gradient_entity::project::Model {
+            restrict_evaluation_fetches: false,
+            extra_allowed_uri_prefixes: vec!["https://project.example".into()],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            build_nix_evaluation_fetch_url_access(&project, &["github:".into()]),
+            NixEvaluationFetchUrlAccess::UnrestrictedEvaluation
+        );
+    }
+
+    #[test]
+    fn restricted_project_gets_server_url_prefixes_then_its_extra_prefixes() {
+        let project = gradient_entity::project::Model {
+            restrict_evaluation_fetches: true,
+            extra_allowed_uri_prefixes: vec!["https://project.example".into()],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            build_nix_evaluation_fetch_url_access(&project, &["github:".into()]),
+            NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+                extra_allowed_uri_prefixes: vec![
+                    "github:".into(),
+                    "https://project.example".into()
+                ],
+            }
+        );
+    }
 
     #[test]
     fn cached_source_assigns_with_fetch() {

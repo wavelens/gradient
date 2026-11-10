@@ -15,8 +15,8 @@ use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tracing::{debug, trace, warn};
 
 use crate::ipc::{
-    AttrError, DiscoveryShard, EVAL_IPC_VERSION, EvalRequest, EvalResponse, MAX_FRAME_BYTES,
-    ResolvedItem, decode_response, encode_request,
+    AttrError, DiscoveryShard, EVAL_IPC_VERSION, EvalRequest, EvalResponse, FlakeEvalTarget,
+    MAX_FRAME_BYTES, ResolvedItem, decode_response, encode_request,
 };
 use crate::stats::StatsDelta;
 
@@ -363,17 +363,15 @@ impl EvalWorker {
 
     pub(super) async fn plan(
         &mut self,
-        repository: String,
+        eval_target: FlakeEvalTarget,
         wildcards: Vec<String>,
-        input_overrides: Vec<(String, String)>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Vec<DiscoveryShard>, Vec<AttrError>)> {
         self.served = true;
         self.call(
             EvalRequest::Plan {
-                repository,
+                eval_target,
                 wildcards,
-                input_overrides,
             },
             "Plan",
             dependencies,
@@ -387,20 +385,18 @@ impl EvalWorker {
 
     pub(super) async fn list(
         &mut self,
-        repository: String,
+        eval_target: FlakeEvalTarget,
         wildcards: Vec<String>,
         only: Option<Vec<String>>,
-        input_overrides: Vec<(String, String)>,
         run_overrides: Option<String>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<Listing> {
         self.served = true;
         self.call(
             EvalRequest::List {
-                repository,
+                eval_target,
                 wildcards,
                 only,
-                input_overrides,
                 run_overrides,
             },
             "List",
@@ -427,14 +423,10 @@ impl EvalWorker {
 
     pub(super) async fn fingerprint(
         &mut self,
-        repository: String,
-        input_overrides: Vec<(String, String)>,
+        eval_target: FlakeEvalTarget,
     ) -> Result<Option<String>> {
         self.call(
-            EvalRequest::Fingerprint {
-                repository,
-                input_overrides,
-            },
+            EvalRequest::Fingerprint { eval_target },
             "Fingerprint",
             &RefuseDependencies("the fingerprint"),
             |resp| match resp {
@@ -530,7 +522,7 @@ impl std::fmt::Debug for EvalWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::{decode_request, encode_response};
+    use crate::ipc::{decode_request, encode_response, placeholder_repo_eval_target};
 
     #[derive(Default)]
     struct RecordingDependencies {
@@ -602,9 +594,8 @@ mod tests {
 
     fn plan_request() -> EvalRequest {
         EvalRequest::Plan {
-            repository: "repo".into(),
+            eval_target: placeholder_repo_eval_target(),
             wildcards: vec![],
-            input_overrides: vec![],
         }
     }
 
@@ -632,7 +623,7 @@ mod tests {
         let dependencies = RecordingDependencies::default();
 
         let (shards, errors) = worker
-            .plan("repo".into(), vec![], vec![], &dependencies)
+            .plan(placeholder_repo_eval_target(), vec![], &dependencies)
             .await
             .expect("the final frame after the build request");
 
@@ -669,7 +660,7 @@ mod tests {
         let dependencies = RecordingDependencies::default();
 
         worker
-            .plan("repo".into(), vec![], vec![], &dependencies)
+            .plan(placeholder_repo_eval_target(), vec![], &dependencies)
             .await
             .expect("the final frame after the input request");
 

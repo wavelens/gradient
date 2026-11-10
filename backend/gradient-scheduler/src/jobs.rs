@@ -220,7 +220,7 @@ impl PendingJob {
 
     pub(crate) fn into_job(self, cores: Option<u32>) -> Option<Job> {
         match self {
-            PendingJob::Eval(j) => Some(Job::Flake(j.job)),
+            PendingJob::Eval(j) => Some(Job::Flake(Box::new(j.job))),
             PendingJob::Build(mut j) => {
                 j.job.build.build_cores = cores;
                 Some(Job::Build(j.job))
@@ -2313,6 +2313,7 @@ mod tests {
                 input_update: None,
                 flake_dir: None,
                 run_overrides: None,
+                nix_evaluation_fetch_url_access: Default::default(),
             },
             required_paths: vec![],
             queued_at: gradient_types::now(),
@@ -2350,6 +2351,7 @@ mod tests {
                 input_update: None,
                 flake_dir: None,
                 run_overrides: None,
+                nix_evaluation_fetch_url_access: Default::default(),
             },
             required_paths: vec![],
             queued_at: gradient_types::now(),
@@ -2710,6 +2712,7 @@ mod tests {
             input_update: None,
             flake_dir: None,
             run_overrides: None,
+            nix_evaluation_fetch_url_access: Default::default(),
         }
     }
 
@@ -3782,6 +3785,7 @@ mod tests {
             input_update: None,
             flake_dir: None,
             run_overrides: None,
+            nix_evaluation_fetch_url_access: Default::default(),
         };
         assert!(is_fetch_only(&fetch_only));
 

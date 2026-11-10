@@ -10,12 +10,13 @@ use gradient_derivation::{Derivation, parse_drv};
 use gradient_eval::ipc::{DiscoveryShard, ResolvedItem};
 use gradient_eval::pool::{CallStats, EvalPool, EvalPoolConfig, LiveThunks, MemoryGuard};
 use gradient_sources::{
-    AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FoundDerivations, Resolved,
-    ResolvedDerivation, ShardSpec,
+    AttrError, DerivationResolver, EvalDependencies, FlakeDiscovery, FlakeEvalTarget,
+    FoundDerivations, Resolved, ResolvedDerivation, ShardSpec,
 };
 use gradient_util::store_path::nix_store_path;
 use gradient_util::sync::Mutex;
 use gradient_wire::types::License;
+use gradient_wire::types::NixEvaluationFetchUrlAccess;
 use std::sync::Arc;
 
 use super::eval_stats::{EvalStatsAccumulator, EvalStatsTotals};
@@ -38,6 +39,27 @@ impl gradient_eval::pool::EvalDependencies for SourceDependencies<'_> {
 
     async fn fetch_input(&self, request: String) -> Result<String, String> {
         self.0.fetch_input(request).await
+    }
+}
+
+fn eval_target_to_flake_eval_target(
+    eval_target: &FlakeEvalTarget,
+) -> gradient_eval::ipc::FlakeEvalTarget {
+    use gradient_eval::ipc::NixEvaluationFetchUrlAccess as IpcAccess;
+
+    gradient_eval::ipc::FlakeEvalTarget {
+        repository: eval_target.repository.clone(),
+        input_overrides: eval_target.input_overrides.clone(),
+        nix_evaluation_fetch_url_access: match &eval_target.nix_evaluation_fetch_url_access {
+            NixEvaluationFetchUrlAccess::UnrestrictedEvaluation => {
+                IpcAccess::UnrestrictedEvaluation
+            }
+            NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+                extra_allowed_uri_prefixes,
+            } => IpcAccess::LockedInputsPlusExtraUrlPrefixes {
+                extra_allowed_uri_prefixes: extra_allowed_uri_prefixes.clone(),
+            },
+        },
     }
 }
 
@@ -122,12 +144,10 @@ impl WorkerPoolResolver {
         self.pool.shutdown().await;
     }
 
-    pub async fn fingerprint(
-        &self,
-        repository: String,
-        overrides: &[(String, String)],
-    ) -> Result<Option<String>> {
-        self.pool.fingerprint(repository, overrides).await
+    pub async fn fingerprint(&self, eval_target: &FlakeEvalTarget) -> Result<Option<String>> {
+        self.pool
+            .fingerprint(&eval_target_to_flake_eval_target(eval_target))
+            .await
     }
 
     pub fn take_eval_stats(&self) -> EvalStatsTotals {
@@ -148,9 +168,8 @@ impl WorkerPoolResolver {
 impl DerivationResolver for WorkerPoolResolver {
     async fn list_flake_derivations(
         &self,
-        repository: String,
+        eval_target: &FlakeEvalTarget,
         wildcards: Vec<String>,
-        overrides: &[(String, String)],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
@@ -161,9 +180,8 @@ impl DerivationResolver for WorkerPoolResolver {
         let discovery = self
             .pool
             .list_shards(
-                repository,
+                &eval_target_to_flake_eval_target(eval_target),
                 wildcards,
-                overrides,
                 run_overrides,
                 &SourceDependencies(dependencies),
                 &found_items,
@@ -179,17 +197,15 @@ impl DerivationResolver for WorkerPoolResolver {
 
     async fn plan_shards(
         &self,
-        repository: String,
+        eval_target: &FlakeEvalTarget,
         wildcards: Vec<String>,
-        overrides: &[(String, String)],
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Vec<ShardSpec>, Vec<AttrError>)> {
         let (shards, errors) = self
             .pool
             .plan(
-                repository,
+                &eval_target_to_flake_eval_target(eval_target),
                 wildcards,
-                overrides,
                 &SourceDependencies(dependencies),
             )
             .await?;
@@ -202,10 +218,9 @@ impl DerivationResolver for WorkerPoolResolver {
 
     async fn list_given_shards(
         &self,
-        repository: String,
+        eval_target: &FlakeEvalTarget,
         shards: Vec<ShardSpec>,
         wildcards: &[String],
-        overrides: &[(String, String)],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundDerivations<'_>,
@@ -223,10 +238,9 @@ impl DerivationResolver for WorkerPoolResolver {
         let discovery = self
             .pool
             .list_given(
-                repository,
+                &eval_target_to_flake_eval_target(eval_target),
                 shards,
                 wildcards,
-                overrides,
                 run_overrides,
                 &SourceDependencies(dependencies),
                 &found_items,

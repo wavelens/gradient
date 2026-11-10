@@ -39,7 +39,7 @@ impl std::ops::BitOrAssign for GradientCapabilities {
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum Job {
-    Flake(FlakeJob),
+    Flake(Box<FlakeJob>),
     Build(BuildJob),
     #[proto(43)]
     Exec(Box<ExecJob>),
@@ -106,6 +106,24 @@ pub struct FlakeJob {
     pub flake_dir: Option<String>,
     #[proto(57, default)]
     pub run_overrides: Option<String>,
+    #[proto(61, default)]
+    pub nix_evaluation_fetch_url_access: NixEvaluationFetchUrlAccess,
+}
+
+#[derive(Proto, Debug, Clone, PartialEq, Eq)]
+pub enum NixEvaluationFetchUrlAccess {
+    UnrestrictedEvaluation,
+    LockedInputsPlusExtraUrlPrefixes {
+        extra_allowed_uri_prefixes: Vec<String>,
+    },
+}
+
+impl Default for NixEvaluationFetchUrlAccess {
+    fn default() -> Self {
+        Self::LockedInputsPlusExtraUrlPrefixes {
+            extra_allowed_uri_prefixes: Vec::new(),
+        }
+    }
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

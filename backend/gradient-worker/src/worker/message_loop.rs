@@ -1226,7 +1226,8 @@ async fn run_job(
     let job_abort = abort.clone();
     match job {
         Job::Flake(flake_job) => {
-            let run = executor.execute_flake_job(flake_job, updater, credentials, job_abort, split);
+            let run =
+                executor.execute_flake_job(*flake_job, updater, credentials, job_abort, split);
             until_aborted(run, abort).await
         }
         Job::Build(build_job) => {

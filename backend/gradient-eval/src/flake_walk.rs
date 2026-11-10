@@ -28,9 +28,22 @@ pub struct Resolved {
     pub exec: Option<ExecApp>,
 }
 
+// These lines reflect the fetch of each lock node in call-flake.nix. All URLs then match the URL that Nix can check against allowed-uris. Inputs with relative paths stay out. Git inputs get the shallow attribute from fetchTree.
+const LOCKED_INPUT_FETCH_URLS_NIX_EXPRESSION: &str = r#"exported:
+  let
+    nodes = builtins.attrValues (builtins.fromJSON exported).lockFile.nodes;
+    isFetched = node: node ? locked
+      && !(node.locked.type == "path" && builtins.substring 0 1 node.locked.path != "/");
+    fetchAttrs = node:
+      let attrs = node.info or { } // removeAttrs node.locked [ "dir" ];
+      in if attrs.type == "git" then { shallow = true; } // attrs else attrs;
+  in
+  builtins.concatStringsSep " "
+    (map (node: builtins.flakeRefToString (fetchAttrs node)) (builtins.filter isFetched nodes))"#;
+
 pub struct FlakeWalker<'a> {
     cache: EvalCache,
-    _locked: LockedFlake,
+    locked: LockedFlake,
     state: &'a EvalState,
 }
 
@@ -49,9 +62,20 @@ impl<'a> FlakeWalker<'a> {
 
         Ok(FlakeWalker {
             cache,
-            _locked: locked,
+            locked,
             state,
         })
+    }
+
+    pub fn input_fetch_urls(&self) -> Result<Vec<String>> {
+        let exported = self.state.make_string(&self.locked.export_json()?)?;
+        let urls = self
+            .state
+            .eval_from_string(LOCKED_INPUT_FETCH_URLS_NIX_EXPRESSION, "/")?
+            .call(&exported)?
+            .as_string()?;
+
+        Ok(urls.split_whitespace().map(str::to_owned).collect())
     }
 
     fn root(&self) -> Result<CursorNode<'_>> {

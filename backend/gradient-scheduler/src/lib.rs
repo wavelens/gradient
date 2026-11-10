@@ -93,6 +93,7 @@ pub struct Scheduler {
     pub(crate) unplaceable_exec_jobs: unplaceable_exec_jobs::UnplaceableExecJobs,
     expected_reclaims: Arc<gradient_util::sync::Mutex<Vec<KeptAssignment>>>,
     pub guest_channels: Arc<GuestChannels>,
+    pub(crate) allowed_uri_prefixes: Arc<[String]>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -124,6 +125,7 @@ impl Scheduler {
             unplaceable_exec_jobs: Default::default(),
             guest_channels: GuestChannels::new(),
             expected_reclaims: Arc::default(),
+            allowed_uri_prefixes: state.config.eval.allowed_uri_prefixes.clone().into(),
         }
     }
 

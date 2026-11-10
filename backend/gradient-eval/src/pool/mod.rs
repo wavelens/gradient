@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 
-use crate::ipc::{AttrError, DiscoveryShard, ResolvedItem};
+use crate::ipc::{AttrError, DiscoveryShard, FlakeEvalTarget, ResolvedItem};
 
 use self::fan_out::{
     DiscoveryCall, MAX_CRASH_ATTEMPTS, crashed_listing, discovery_calls, entry_point_of,
@@ -114,9 +114,8 @@ impl EvalPool {
     /// siblings costs orders of magnitude more than the evaluation itself.
     pub async fn list_attrs(
         &self,
-        repository: String,
+        eval_target: &FlakeEvalTarget,
         attrs: Vec<String>,
-        overrides: &[(String, String)],
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
@@ -135,10 +134,9 @@ impl EvalPool {
             .collect();
         let mut discovery = self
             .run_calls(
-                repository,
+                eval_target,
                 calls,
                 &[],
-                overrides,
                 None,
                 dependencies,
                 &recording,
@@ -163,20 +161,14 @@ impl EvalPool {
     /// Plan, then list every shard over the pool, splitting crashed batches.
     pub async fn list_shards(
         &self,
-        repository: String,
+        eval_target: &FlakeEvalTarget,
         wildcards: Vec<String>,
-        overrides: &[(String, String)],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
     ) -> Result<Discovery> {
         let (shards, plan_errors) = self
-            .plan(
-                repository.clone(),
-                wildcards.clone(),
-                overrides,
-                dependencies,
-            )
+            .plan(eval_target, wildcards.clone(), dependencies)
             .await?;
         let excludes = excludes_of(&wildcards);
         let calls = discovery_calls(shards, &excludes, self.workers.max());
@@ -188,10 +180,9 @@ impl EvalPool {
 
         let mut discovery = self
             .run_calls(
-                repository,
+                eval_target,
                 calls,
                 &excludes,
-                overrides,
                 run_overrides,
                 dependencies,
                 found,
@@ -206,15 +197,14 @@ impl EvalPool {
 
     pub async fn plan(
         &self,
-        repository: String,
+        eval_target: &FlakeEvalTarget,
         wildcards: Vec<String>,
-        overrides: &[(String, String)],
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Vec<DiscoveryShard>, Vec<AttrError>)> {
         self.remember_patterns(&wildcards);
         let mut worker = self.workers.acquire().await?;
         match worker
-            .plan(repository, wildcards, overrides.to_vec(), dependencies)
+            .plan(eval_target.clone(), wildcards, dependencies)
             .await
         {
             Ok(planned) => Ok(planned),
@@ -233,16 +223,11 @@ impl EvalPool {
             .collect();
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "given shards arrive with their repository, both override kinds and the sink"
-    )]
     pub async fn list_given(
         &self,
-        repository: String,
+        eval_target: &FlakeEvalTarget,
         shards: Vec<DiscoveryShard>,
         wildcards: &[String],
-        overrides: &[(String, String)],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
@@ -251,10 +236,9 @@ impl EvalPool {
         let excludes = excludes_of(wildcards);
         let calls = discovery_calls(shards, &excludes, self.workers.max());
         self.run_calls(
-            repository,
+            eval_target,
             calls,
             &excludes,
-            overrides,
             run_overrides,
             dependencies,
             found,
@@ -269,10 +253,9 @@ impl EvalPool {
     )]
     async fn run_calls(
         &self,
-        repository: String,
+        eval_target: &FlakeEvalTarget,
         calls: Vec<DiscoveryCall>,
         excludes: &[String],
-        overrides: &[(String, String)],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
         found: FoundItems<'_>,
@@ -284,12 +267,11 @@ impl EvalPool {
         let calls_seen = Mutex::new(Vec::<CallStats>::new());
         let deferred = Mutex::new(Vec::<DiscoveryShard>::new());
         {
-            let repo = repository.as_str();
             let (listed_attrs, warnings, errors, calls_seen, deferred) =
                 (&listed_attrs, &warnings, &errors, &calls_seen, &deferred);
             pooled_fan_out(self.workers.max(), calls, |call| async move {
                 let (listing, call_stats) = self
-                    .list_shard(repo, call, overrides, run_overrides, dependencies)
+                    .list_shard(eval_target, call, run_overrides, dependencies)
                     .await?;
                 let fresh: Vec<ResolvedItem> = {
                     let mut listed = lock(listed_attrs);
@@ -336,22 +318,15 @@ impl EvalPool {
 
     async fn list_shard(
         &self,
-        repository: &str,
+        eval_target: &FlakeEvalTarget,
         call: DiscoveryCall,
-        overrides: &[(String, String)],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Listing, Option<CallStats>)> {
         let mut attempt = 0;
         loop {
             match self
-                .list_once(
-                    repository,
-                    call.clone(),
-                    overrides,
-                    run_overrides,
-                    dependencies,
-                )
+                .list_once(eval_target, call.clone(), run_overrides, dependencies)
                 .await
             {
                 Ok((listing, stats)) => return Ok((listing, Some(stats))),
@@ -370,9 +345,8 @@ impl EvalPool {
 
     async fn list_once(
         &self,
-        repository: &str,
+        eval_target: &FlakeEvalTarget,
         call: DiscoveryCall,
-        overrides: &[(String, String)],
         run_overrides: Option<&str>,
         dependencies: &dyn EvalDependencies,
     ) -> Result<(Listing, CallStats)> {
@@ -383,10 +357,9 @@ impl EvalPool {
         let started = Instant::now();
         match worker
             .list(
-                repository.to_string(),
+                eval_target.clone(),
                 call.wildcards,
                 call.only,
-                overrides.to_vec(),
                 run_overrides.map(str::to_owned),
                 dependencies,
             )
@@ -429,13 +402,9 @@ impl EvalPool {
         }
     }
 
-    pub async fn fingerprint(
-        &self,
-        repository: String,
-        overrides: &[(String, String)],
-    ) -> Result<Option<String>> {
+    pub async fn fingerprint(&self, eval_target: &FlakeEvalTarget) -> Result<Option<String>> {
         let mut worker = self.workers.acquire().await?;
-        match worker.fingerprint(repository, overrides.to_vec()).await {
+        match worker.fingerprint(eval_target.clone()).await {
             Ok(v) => Ok(v),
             Err(e) => {
                 worker.mark_dead();
@@ -456,7 +425,7 @@ fn excludes_of(wildcards: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::EvalResponse;
+    use crate::ipc::{EvalResponse, placeholder_repo_eval_target};
     use crate::pool::workers::tests::{
         replying_worker, replying_worker_sequence, replying_worker_times,
     };
@@ -516,9 +485,8 @@ mod tests {
         let found_ref = &found;
         let discovery = pool
             .list_given(
-                "repo".into(),
+                &placeholder_repo_eval_target(),
                 vec![given],
-                &[],
                 &[],
                 None,
                 &RefuseDependencies("the test"),
@@ -546,10 +514,9 @@ mod tests {
 
         let discovery = pool
             .list_given(
-                "repo".into(),
+                &placeholder_repo_eval_target(),
                 vec![given],
                 &["hydraJobs.**".into(), "!hydraJobs.perl.broken".into()],
-                &[],
                 None,
                 &RefuseDependencies("the test"),
                 &|_| {},
@@ -590,9 +557,8 @@ mod tests {
         let found_ref = &found;
         let discovery = pool
             .list_shards(
-                "repo".into(),
+                &placeholder_repo_eval_target(),
                 vec!["legacyPackages.x86_64-linux.*".into()],
-                &[],
                 None,
                 &RefuseDependencies("the test"),
                 &move |items| lock(found_ref).extend(items),
@@ -630,9 +596,8 @@ mod tests {
         let found_ref = &found;
         let discovery = pool
             .list_attrs(
-                "repo".into(),
+                &placeholder_repo_eval_target(),
                 vec!["packages.x86_64-linux.hello".into()],
-                &[],
                 &RefuseDependencies("the test"),
                 &move |items| lock(found_ref).extend(items),
             )
@@ -674,9 +639,8 @@ mod tests {
 
         let discovery = pool
             .list_attrs(
-                "repo".into(),
+                &placeholder_repo_eval_target(),
                 vec!["hydraJobs.a".into()],
-                &[],
                 &RefuseDependencies("the test"),
                 &|_| {},
             )
@@ -712,9 +676,8 @@ mod tests {
 
         let discovery = pool
             .list_attrs(
-                "repo".into(),
+                &placeholder_repo_eval_target(),
                 vec!["hydraJobs.a".into(), "hydraJobs.b".into()],
-                &[],
                 &RefuseDependencies("the test"),
                 &|_| {},
             )
@@ -741,9 +704,8 @@ mod tests {
 
         let discovery = pool
             .list_attrs(
-                "repo".into(),
+                &placeholder_repo_eval_target(),
                 vec!["packages.x86_64-linux.nope".into()],
-                &[],
                 &RefuseDependencies("the test"),
                 &|_| {},
             )

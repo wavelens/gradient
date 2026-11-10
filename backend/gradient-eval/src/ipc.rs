@@ -14,7 +14,7 @@ use crate::stats::{AttrCost, StatsDelta};
 
 /// The version must be bumped whenever the frame layout or a type's rkyv shape changes.
 /// A mismatch can only happen when the binary is replaced mid-run.
-pub const EVAL_IPC_VERSION: u8 = 18;
+pub const EVAL_IPC_VERSION: u8 = 19;
 
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
@@ -56,30 +56,79 @@ impl From<crate::wildcard_walk::Shard> for DiscoveryShard {
     }
 }
 
+#[derive(
+    Debug, Clone, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
+)]
+#[rkyv(derive(Debug))]
+#[serde(rename_all = "snake_case")]
+pub enum NixEvaluationFetchUrlAccess {
+    UnrestrictedEvaluation,
+    LockedInputsPlusExtraUrlPrefixes {
+        extra_allowed_uri_prefixes: Vec<String>,
+    },
+}
+
+impl NixEvaluationFetchUrlAccess {
+    pub fn extra_allowed_uri_prefixes(&self) -> Option<&[String]> {
+        match self {
+            Self::UnrestrictedEvaluation => None,
+            Self::LockedInputsPlusExtraUrlPrefixes {
+                extra_allowed_uri_prefixes,
+            } => Some(extra_allowed_uri_prefixes),
+        }
+    }
+}
+
+impl Default for NixEvaluationFetchUrlAccess {
+    fn default() -> Self {
+        Self::LockedInputsPlusExtraUrlPrefixes {
+            extra_allowed_uri_prefixes: Vec::new(),
+        }
+    }
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
+)]
+#[rkyv(derive(Debug))]
+pub struct FlakeEvalTarget {
+    pub repository: String,
+    #[serde(default)]
+    pub input_overrides: Vec<(String, String)>,
+    #[serde(default)]
+    pub nix_evaluation_fetch_url_access: NixEvaluationFetchUrlAccess,
+}
+
+#[cfg(test)]
+pub(crate) fn placeholder_repo_eval_target() -> FlakeEvalTarget {
+    FlakeEvalTarget {
+        repository: "repo".into(),
+        input_overrides: Vec::new(),
+        nix_evaluation_fetch_url_access: NixEvaluationFetchUrlAccess::default(),
+    }
+}
+
 #[derive(Debug, Clone, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize)]
 #[rkyv(derive(Debug))]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EvalRequest {
     Plan {
-        repository: String,
+        #[serde(flatten)]
+        eval_target: FlakeEvalTarget,
         wildcards: Vec<String>,
-        #[serde(default)]
-        input_overrides: Vec<(String, String)>,
     },
     List {
-        repository: String,
+        #[serde(flatten)]
+        eval_target: FlakeEvalTarget,
         wildcards: Vec<String>,
         #[serde(default)]
         only: Option<Vec<String>>,
         #[serde(default)]
-        input_overrides: Vec<(String, String)>,
-        #[serde(default)]
         run_overrides: Option<String>,
     },
     Fingerprint {
-        repository: String,
-        #[serde(default)]
-        input_overrides: Vec<(String, String)>,
+        #[serde(flatten)]
+        eval_target: FlakeEvalTarget,
     },
     FetchInput {
         request: String,
@@ -238,6 +287,27 @@ pub fn read_frame<R: Read>(r: &mut R) -> std::io::Result<Option<Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_request_without_fetch_url_field_decodes_restricted() {
+        let line = r#"{"op":"plan","repository":"path:/r","wildcards":["*"]}"#;
+
+        let EvalRequest::Plan { eval_target, .. } = serde_json::from_str(line).unwrap() else {
+            panic!("a plan request");
+        };
+
+        assert_eq!(
+            eval_target,
+            FlakeEvalTarget {
+                repository: "path:/r".into(),
+                input_overrides: vec![],
+                nix_evaluation_fetch_url_access:
+                    NixEvaluationFetchUrlAccess::LockedInputsPlusExtraUrlPrefixes {
+                        extra_allowed_uri_prefixes: vec![],
+                    },
+            }
+        );
+    }
 
     #[test]
     fn frames_roundtrip_and_eof_between_frames_is_clean() {
