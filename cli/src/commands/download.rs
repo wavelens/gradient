@@ -76,9 +76,11 @@ pub async fn handle_download(
             .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Create, &out_dir, e)));
     }
 
+    let destinations =
+        build_product_download_destination_path_with_collision_subdirectory(&flat, &selection);
     let mut downloaded: Vec<String> = Vec::new();
 
-    for idx in selection {
+    for (idx, relative_dest) in selection.into_iter().zip(destinations) {
         let p = &flat[idx];
         let display_name = product_filename(p.product);
         out.human(format!("Downloading {}...", display_name));
@@ -93,7 +95,7 @@ pub async fn handle_download(
                 format!("Failed to download {}: {}", display_name, e),
             ),
         };
-        let dest = out_dir.join(safe_relative_name(&display_name));
+        let dest = out_dir.join(relative_dest);
         if let Some(parent) = dest.parent()
             && !parent.as_os_str().is_empty()
         {
@@ -163,16 +165,35 @@ pub(crate) fn product_filename(p: &ProductArtefact) -> String {
         .unwrap_or_else(|| p.name.clone())
 }
 
+fn build_product_download_destination_path_with_collision_subdirectory(
+    flat: &[FlatProduct<'_>],
+    selection: &[usize],
+) -> Vec<PathBuf> {
+    let names: Vec<PathBuf> = selection
+        .iter()
+        .map(|&idx| safe_relative_name(&product_filename(flat[idx].product)))
+        .collect();
+    names
+        .iter()
+        .zip(selection)
+        .map(|(name, &idx)| {
+            if names.iter().filter(|other| *other == name).count() > 1 {
+                safe_relative_name(flat[idx].attr).join(name)
+            } else {
+                name.clone()
+            }
+        })
+        .collect()
+}
+
 pub(crate) fn safe_relative_name(name: &str) -> PathBuf {
-    let stripped = name.trim_start_matches('/');
-    let mut buf = PathBuf::new();
-    for comp in Path::new(stripped).components() {
-        use std::path::Component;
-        match comp {
-            Component::Normal(c) => buf.push(c),
-            _ => buf.push(comp.as_os_str()),
-        }
-    }
+    let buf: PathBuf = Path::new(name)
+        .components()
+        .filter_map(|comp| match comp {
+            std::path::Component::Normal(c) => Some(c),
+            _ => None,
+        })
+        .collect();
     if buf.as_os_str().is_empty() {
         PathBuf::from("download")
     } else {
@@ -399,5 +420,39 @@ mod tests {
         let err = select_by_attrs(&flat, &["nope".to_string()]).unwrap_err();
         assert!(err.contains("packages.x86_64-linux.my-app"));
         assert!(err.contains("packages.x86_64-linux.cli"));
+    }
+
+    #[test]
+    fn safe_relative_name_stays_inside_the_target_directory() {
+        assert_eq!(safe_relative_name("a.tgz"), PathBuf::from("a.tgz"));
+        assert_eq!(
+            safe_relative_name("/etc/passwd"),
+            PathBuf::from("etc/passwd")
+        );
+        assert_eq!(
+            safe_relative_name("../../.bashrc"),
+            PathBuf::from(".bashrc")
+        );
+        assert_eq!(safe_relative_name("a/./../b"), PathBuf::from("a/b"));
+        assert_eq!(safe_relative_name(".."), PathBuf::from("download"));
+    }
+
+    #[test]
+    fn products_with_the_same_file_name_go_to_their_entry_point_directory() {
+        let mut tree = make_tree();
+        tree.entry_points[1].outputs[0].products[0].path = "/p/my-app-1.0.tar.gz".into();
+        let flat = flatten_products(&tree);
+
+        assert_eq!(
+            build_product_download_destination_path_with_collision_subdirectory(&flat, &[0, 1]),
+            vec![
+                PathBuf::from("packages.x86_64-linux.my-app/my-app-1.0.tar.gz"),
+                PathBuf::from("packages.x86_64-linux.cli/my-app-1.0.tar.gz"),
+            ]
+        );
+        assert_eq!(
+            build_product_download_destination_path_with_collision_subdirectory(&flat, &[1]),
+            vec![PathBuf::from("my-app-1.0.tar.gz")]
+        );
     }
 }

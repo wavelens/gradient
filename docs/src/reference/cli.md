@@ -343,6 +343,8 @@ Add `-i` to switch a command from plain output to a full-screen view. This flag 
 
 An interactive choice of evaluation and build products in `gradient download`. `--evaluation` and `--products all` (or `1,3-5`) are skipping the pickers. A positional `'#packages.x86_64-linux.app'` (comma-separated for more) can select by attribute instead of `--products`.
 
+Artifacts from different entry points that share a file name go into separate folders. Folder names derive from the attribute of each entry point (for example `packages.x86_64-linux.app/`).
+
 ## Local Evaluation
 
 Run the worker's evaluator on the local machine with `gradient eval`, in the same way as `nix-eval-jobs`. Output is one JSON line per attribute with `attr`, `attrPath` and `drvPath`. A failed attribute produces a line with `error`.

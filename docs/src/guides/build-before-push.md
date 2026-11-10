@@ -21,6 +21,7 @@ gradient build .#hello
 ```
 
 - The CLI uploads all tracked files, including uncommitted changes.
+- Symlinks to tracked files in the repository upload the contents of those files. Symlinks that point outside the repository stop the build with an error. Symlinks to directories, Git submodules, and broken symlinks stay out of the upload, with a warning.
 - Files without changes skip a second upload.
 - A worker evaluates the upload as the project's `build-request` task.
 - Workers produce the build results.

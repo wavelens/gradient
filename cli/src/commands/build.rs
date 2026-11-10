@@ -121,6 +121,13 @@ pub(crate) async fn submit_build_request(
         out.err(ExitKind::Api, format!("Failed to read git index: {}", e));
     });
 
+    let repo_root = workdir.canonicalize().unwrap_or_else(|e| {
+        out.err(
+            ExitKind::Api,
+            format!("Failed to resolve repository directory: {e}"),
+        );
+    });
+
     let mut entries: Vec<TrackedFile> = Vec::new();
     for entry in index.iter() {
         let path = match String::from_utf8(entry.path.clone()) {
@@ -128,10 +135,20 @@ pub(crate) async fn submit_build_request(
             Err(_) => continue,
         };
         let abs = workdir.join(&path);
-        if !abs.is_file() {
-            continue;
+        match check_tracked_path_within_repo_root(&repo_root, &abs) {
+            GitIndexPathUploadCheckResult::UploadFile => entries.push(TrackedFile { path, abs }),
+            GitIndexPathUploadCheckResult::GitIndexPathDoesNotExistInWorkingTree => {}
+            GitIndexPathUploadCheckResult::PathNotUploadableFile => out.progress(format!(
+                "Skip {path}: not a regular file (directory symlink, git submodule, or broken symlink)."
+            )),
+            GitIndexPathUploadCheckResult::SymlinkTargetOutsideRepository(target) => out.err(
+                ExitKind::Usage,
+                format!(
+                    "Refuse to upload {path}: it points to {target} through a symlink, outside the repository.",
+                    target = target.display()
+                ),
+            ),
         }
-        entries.push(TrackedFile { path, abs });
     }
 
     if entries.is_empty() {
@@ -456,6 +473,33 @@ pub(crate) struct TrackedFile {
     pub(crate) abs: PathBuf,
 }
 
+#[derive(Debug, PartialEq)]
+enum GitIndexPathUploadCheckResult {
+    UploadFile,
+    GitIndexPathDoesNotExistInWorkingTree,
+    PathNotUploadableFile,
+    SymlinkTargetOutsideRepository(PathBuf),
+}
+
+fn check_tracked_path_within_repo_root(
+    repo_root: &Path,
+    abs: &Path,
+) -> GitIndexPathUploadCheckResult {
+    let Ok(metadata) = abs.symlink_metadata() else {
+        return GitIndexPathUploadCheckResult::GitIndexPathDoesNotExistInWorkingTree;
+    };
+    if !metadata.is_file() && !metadata.is_symlink() {
+        return GitIndexPathUploadCheckResult::PathNotUploadableFile;
+    }
+    match abs.canonicalize() {
+        Ok(target) if !target.starts_with(repo_root) => {
+            GitIndexPathUploadCheckResult::SymlinkTargetOutsideRepository(target)
+        }
+        Ok(target) if target.is_file() => GitIndexPathUploadCheckResult::UploadFile,
+        _ => GitIndexPathUploadCheckResult::PathNotUploadableFile,
+    }
+}
+
 #[cfg(not(feature = "nix"))]
 fn hash_file(path: &Path) -> std::io::Result<(String, i64)> {
     let mut hasher = blake3::Hasher::new();
@@ -475,8 +519,60 @@ fn hash_file(path: &Path) -> std::io::Result<(String, i64)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{failure_message, normalize_installable, normalize_target, result_link_name};
+    use super::{
+        GitIndexPathUploadCheckResult, check_tracked_path_within_repo_root, failure_message,
+        normalize_installable, normalize_target, result_link_name,
+    };
     use connector::api::EvaluationStatus;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn tracked_paths_upload_only_files_inside_the_repository() {
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("id_ed25519");
+        std::fs::write(&secret, "key").unwrap();
+
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path().canonicalize().unwrap();
+        std::fs::write(root.join("flake.nix"), "{}").unwrap();
+        std::fs::create_dir(root.join("lib")).unwrap();
+        symlink("flake.nix", root.join("in-repo-link")).unwrap();
+        symlink(&secret, root.join("leaking-link")).unwrap();
+        symlink("lib", root.join("directory-link")).unwrap();
+        symlink("gone", root.join("broken-link")).unwrap();
+
+        let check = |name: &str| check_tracked_path_within_repo_root(&root, &root.join(name));
+        assert_eq!(
+            check("flake.nix"),
+            GitIndexPathUploadCheckResult::UploadFile
+        );
+        assert_eq!(
+            check("in-repo-link"),
+            GitIndexPathUploadCheckResult::UploadFile
+        );
+        assert_eq!(
+            check("leaking-link"),
+            GitIndexPathUploadCheckResult::SymlinkTargetOutsideRepository(
+                secret.canonicalize().unwrap()
+            )
+        );
+        assert_eq!(
+            check("directory-link"),
+            GitIndexPathUploadCheckResult::PathNotUploadableFile
+        );
+        assert_eq!(
+            check("lib"),
+            GitIndexPathUploadCheckResult::PathNotUploadableFile
+        );
+        assert_eq!(
+            check("broken-link"),
+            GitIndexPathUploadCheckResult::PathNotUploadableFile
+        );
+        assert_eq!(
+            check("deleted.nix"),
+            GitIndexPathUploadCheckResult::GitIndexPathDoesNotExistInWorkingTree
+        );
+    }
 
     #[test]
     fn only_a_completed_evaluation_succeeds() {
