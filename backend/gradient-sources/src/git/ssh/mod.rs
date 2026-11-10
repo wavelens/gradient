@@ -13,6 +13,7 @@ use connection::SshCommandStream;
 use git2::transport::{Service, SmartSubtransport, SmartSubtransportStream, Transport};
 use gradient_types::SecretString;
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::sync::Once;
 use target::SshTarget;
 
@@ -20,6 +21,14 @@ const SCHEMES: [&str; 3] = ["ssh", "ssh+git", "git+ssh"];
 
 thread_local! {
     static PRIVATE_KEY: RefCell<Option<SecretString>> = const { RefCell::new(None) };
+    static KNOWN_HOSTS_FILE_PATHS: RefCell<Vec<PathBuf>> =
+        RefCell::new(default_openssh_known_hosts_file_paths());
+}
+
+fn default_openssh_known_hosts_file_paths() -> Vec<PathBuf> {
+    let system = PathBuf::from("/etc/ssh/ssh_known_hosts");
+    let user = std::env::home_dir().map(|home| home.join(".ssh").join("known_hosts"));
+    std::iter::once(system).chain(user).collect()
 }
 
 pub(crate) fn with_private_key<T>(private_key: Option<&str>, operation: impl FnOnce() -> T) -> T {
@@ -51,11 +60,20 @@ fn register() {
 
 fn transport(remote: &git2::Remote<'_>) -> Result<Transport, git2::Error> {
     let private_key = PRIVATE_KEY.with_borrow(Clone::clone);
-    Transport::smart(remote, false, SshSubtransport { private_key })
+    let known_hosts_files = KNOWN_HOSTS_FILE_PATHS.with_borrow(Clone::clone);
+    Transport::smart(
+        remote,
+        false,
+        SshSubtransport {
+            private_key,
+            known_hosts_files,
+        },
+    )
 }
 
 struct SshSubtransport {
     private_key: Option<SecretString>,
+    known_hosts_files: Vec<PathBuf>,
 }
 
 impl SmartSubtransport for SshSubtransport {
@@ -82,7 +100,7 @@ impl SmartSubtransport for SshSubtransport {
         let target = SshTarget::parse(url).map_err(|e| git2::Error::from_str(&e.to_string()))?;
         let command = target.command(program);
 
-        SshCommandStream::open(&target, key, command)
+        SshCommandStream::open(&target, key, command, self.known_hosts_files.clone())
             .map(|stream| Box::new(stream) as Box<dyn SmartSubtransportStream>)
             .map_err(|e| git2::Error::from_str(&format!("SSH to {}: {e}", target.host)))
     }

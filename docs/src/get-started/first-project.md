@@ -67,6 +67,8 @@ Open the project page and select **Create Task**. Then fill in the two fields in
 !!! tip "Private Repositories"
     Each project ships with an SSH key, listed under **Settings -> SSH Key**. Add the public key as a deploy key on the Git host to access private repositories.
 
+The Gradient server and all workers check the host key of the Git host for repository URLs that use SSH. The server and all workers accept only the keys that `/etc/ssh/ssh_known_hosts` or `~/.ssh/known_hosts` list for the service user. Use `programs.ssh.knownHosts` to add a Git host on NixOS.
+
 ## 5. Start an Evaluation
 
 Press **Start Evaluation** on the task page. Gradient will then scan the flake and locate every derivation that fit the wildcard. All those builds go to the worker.

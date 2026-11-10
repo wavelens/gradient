@@ -9,38 +9,62 @@ use russh::ChannelStream;
 use russh::client::{self, Handle, Msg};
 use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use std::io::{self, Read, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::runtime::Runtime;
 
-struct AnyHostKey;
+struct OpenSshKnownHostsHostKeyVerifier {
+    host: String,
+    port: u16,
+    known_hosts_files: Vec<PathBuf>,
+}
 
-impl client::Handler for AnyHostKey {
+impl client::Handler for OpenSshKnownHostsHostKeyVerifier {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _key: &PublicKeyOrCertificate,
+        key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        let PublicKeyOrCertificate::PublicKey { key, .. } = key else {
+            return Ok(false);
+        };
+        for file in &self.known_hosts_files {
+            if russh::keys::check_known_hosts_path(&self.host, self.port, key, file)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
 pub(super) struct SshCommandStream {
     stream: ChannelStream<Msg>,
-    _session: Handle<AnyHostKey>,
+    _session: Handle<OpenSshKnownHostsHostKeyVerifier>,
     runtime: Runtime,
 }
 
 impl SshCommandStream {
-    pub fn open(target: &SshTarget, key: PrivateKey, command: String) -> io::Result<Self> {
+    pub fn open(
+        target: &SshTarget,
+        key: PrivateKey,
+        command: String,
+        known_hosts_files: Vec<PathBuf>,
+    ) -> io::Result<Self> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
             .build()?;
         let (session, stream) = runtime
-            .block_on(run(target, key, command))
-            .map_err(io::Error::other)?;
+            .block_on(run(target, key, command, known_hosts_files))
+            .map_err(|error| match error {
+                russh::Error::UnknownKey => io::Error::other(format!(
+                    "the host key for {} does not appear in /etc/ssh/ssh_known_hosts or ~/.ssh/known_hosts",
+                    target.host
+                )),
+                error => io::Error::other(error),
+            })?;
 
         Ok(Self {
             stream,
@@ -54,13 +78,19 @@ async fn run(
     target: &SshTarget,
     key: PrivateKey,
     command: String,
-) -> Result<(Handle<AnyHostKey>, ChannelStream<Msg>), russh::Error> {
+    known_hosts_files: Vec<PathBuf>,
+) -> Result<(Handle<OpenSshKnownHostsHostKeyVerifier>, ChannelStream<Msg>), russh::Error> {
     let config = Arc::new(client::Config {
         preferred: gradient_util::ssh::ALGORITHMS,
         ..Default::default()
     });
+    let verifier = OpenSshKnownHostsHostKeyVerifier {
+        host: target.host.clone(),
+        port: target.port,
+        known_hosts_files,
+    };
     let mut session =
-        client::connect(config, (target.host.as_str(), target.port), AnyHostKey).await?;
+        client::connect(config, (target.host.as_str(), target.port), verifier).await?;
 
     let key = PrivateKeyWithHashAlg::new(Arc::new(key), None);
     if !session

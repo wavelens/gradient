@@ -6,6 +6,7 @@
 
 #![allow(clippy::disallowed_methods, reason = "test SSH server")]
 
+use super::KNOWN_HOSTS_FILE_PATHS;
 use crate::git::commit_info::{fetch_commit, head_refspec};
 use crate::git::remote::ls_remote_head;
 use russh::keys::{PrivateKey, PublicKey};
@@ -100,10 +101,12 @@ async fn run_in_shell(channel: Channel<Msg>, handle: Handle, command: String) {
     let _ = handle.close(id).await;
 }
 
-async fn serve_git_over_ssh(client_key: PublicKey) -> u16 {
+async fn serve_git_over_ssh(client_key: PublicKey) -> (u16, PublicKey) {
+    let host_key = decode(&ed25519_pem());
+    let host_public_key = host_key.public_key().clone();
     let config = Arc::new(russh::server::Config {
         methods: MethodSet::from(&[MethodKind::PublicKey][..]),
-        keys: vec![decode(&ed25519_pem())],
+        keys: vec![host_key],
         preferred: gradient_util::ssh::ALGORITHMS,
         ..Default::default()
     });
@@ -125,7 +128,7 @@ async fn serve_git_over_ssh(client_key: PublicKey) -> u16 {
         }
     });
 
-    port
+    (port, host_public_key)
 }
 
 fn commit(repo: &git2::Repository, message: &str) -> git2::Oid {
@@ -148,11 +151,21 @@ async fn a_repository_is_listed_and_fetched_over_ssh_with_the_project_key() {
     let tip = commit(&repo, "second");
 
     let client_pem = ed25519_pem();
-    let port = serve_git_over_ssh(decode(&client_pem).public_key().clone()).await;
+    let (port, host_key) = serve_git_over_ssh(decode(&client_pem).public_key().clone()).await;
     let ssh_url = format!("ssh://git@127.0.0.1:{port}{}", dir.path().display());
+    let known_hosts = dir.path().join("known_hosts");
+    std::fs::write(
+        &known_hosts,
+        format!("[127.0.0.1]:{port} {}\n", host_key.to_openssh().unwrap()),
+    )
+    .unwrap();
 
-    let (head, fetched, wrong_key) = tokio::task::spawn_blocking(move || {
+    let (unknown_host, head, fetched, wrong_key) = tokio::task::spawn_blocking(move || {
+        KNOWN_HOSTS_FILE_PATHS.set(Vec::new());
+        let unknown_host = ls_remote_head(&ssh_url, Some(&client_pem), None);
+        KNOWN_HOSTS_FILE_PATHS.set(vec![known_hosts]);
         (
+            unknown_host,
             ls_remote_head(&ssh_url, Some(&client_pem), None),
             fetch_commit(&ssh_url, Some(&client_pem), &head_refspec(None)),
             ls_remote_head(&ssh_url, Some(&ed25519_pem()), None),
@@ -161,6 +174,7 @@ async fn a_repository_is_listed_and_fetched_over_ssh_with_the_project_key() {
     .await
     .unwrap();
 
+    assert!(unknown_host.is_err());
     let head = head.unwrap();
     assert_eq!(head.branch, "refs/heads/main");
     assert_eq!(head.commit, tip.as_bytes());

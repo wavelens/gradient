@@ -161,7 +161,7 @@ async fn ssh_key_env(
         .await
         .context("write SSH key file")?;
     let ssh_command = format!(
-        "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
+        "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes",
         binpath_ssh,
         kf.path().display()
     );
@@ -333,9 +333,9 @@ mod tests {
         let seen = downloader.seen.lock();
         let (command, key) = &seen[0];
         assert!(
-            command
-                .as_deref()
-                .is_some_and(|c| c.starts_with("/bin/ssh -i ")),
+            command.as_deref().is_some_and(
+                |c| c.starts_with("/bin/ssh -i ") && c.contains("-o StrictHostKeyChecking=yes")
+            ),
             "{command:?}"
         );
         assert_eq!(key.as_deref(), Some("PRIVATE KEY"));
