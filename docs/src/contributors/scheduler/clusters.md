@@ -86,7 +86,7 @@ The `cluster-dispatch` pass can run every 5 s. It can also run whenever `Request
 |---|---|
 | Every member accepted | `StartCluster` to every member |
 | A member rejected | Attempt closed `PrepareFailed`, `AbortCluster` to every member, cluster waiting again after 30 s |
-| `scheduler.clusterPrepareTimeoutSecs` passed without every acceptance | Same as a reject |
+| `scheduler.clusterPrepareTimeoutSecs` passed before the attempt started | Same as a reject |
 | A held member reporting `JobFailed` before the start (hold expired, drain, `AbortJob`) | Same as a reject. The report never reach the build or evaluation |
 | The claim is lost | Nothing written. The member go back to the assignment pass, and those pass re-read their cluster |
 

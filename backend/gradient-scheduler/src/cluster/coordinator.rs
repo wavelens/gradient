@@ -173,7 +173,7 @@ impl Attempts {
     pub fn overdue(&self, now: Instant) -> Vec<ClusterAttemptId> {
         self.attempts
             .iter()
-            .filter(|(_, s)| !s.started && !s.all_accepted && s.deadline <= now)
+            .filter(|(_, s)| !s.started && s.deadline <= now)
             .map(|(a, _)| *a)
             .collect()
     }
@@ -519,13 +519,13 @@ mod tests {
     }
 
     #[test]
-    fn an_attempt_every_member_accepted_is_never_overdue() {
+    fn an_accepted_attempt_that_never_starts_is_overdue() {
         let now = Instant::now();
-        let (mut book, _) = book(now);
+        let (mut book, attempt) = book(now);
         book.accept("build:a", None);
         book.accept("build:b", None);
 
-        assert!(book.overdue(now + Duration::from_secs(1)).is_empty());
+        assert_eq!(book.overdue(now + Duration::from_secs(1)), vec![attempt]);
     }
 
     #[test]
