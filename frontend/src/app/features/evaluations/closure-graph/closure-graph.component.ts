@@ -39,6 +39,8 @@ const NODE_PADDING = 28;
 const ROW_HEIGHT = 56;
 const COLUMN_WIDTH = 320;
 const LINK_OPACITY = '0.35';
+const MIN_PACKAGE_BOX_HEIGHT = 4;
+const MIN_DIAGRAM_WIDTH_FOR_HEIGHT_ONLY_FIT = 576;
 
 type LaidNode = SankeyNode & { x0: number; x1: number; y0: number; y1: number; depth: number };
 type LaidLink = { source: LaidNode; target: LaidNode; width?: number; value: number };
@@ -228,23 +230,27 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     const nodeLayer = document.createElementNS(SVG_NS, 'g');
     for (const n of nodes) {
       const rect = document.createElementNS(SVG_NS, 'rect');
+      const centerY = (n.y0 + n.y1) / 2;
+      const height = Math.max(MIN_PACKAGE_BOX_HEIGHT, n.y1 - n.y0);
       rect.setAttribute('x', `${n.x0}`);
-      rect.setAttribute('y', `${n.y0}`);
+      rect.setAttribute('y', `${centerY - height / 2}`);
       rect.setAttribute('width', `${n.x1 - n.x0}`);
-      rect.setAttribute('height', `${Math.max(1, n.y1 - n.y0)}`);
+      rect.setAttribute('height', `${height}`);
       rect.style.setProperty('fill', this.fill(n));
       rect.setAttribute('rx', '1');
+      rect.setAttribute('tabindex', '0');
+      rect.setAttribute('role', 'img');
+      rect.setAttribute('aria-label', this.nodeTooltip(n).replace('\n', ', '));
       rect.appendChild(this.titleEl(this.nodeTooltip(n)));
-      rect.addEventListener('mouseenter', () => this.highlight(n));
-      rect.addEventListener('mouseleave', () => this.clearHighlight());
+      for (const show of ['mouseenter', 'focus']) rect.addEventListener(show, () => this.highlight(n));
+      for (const hide of ['mouseleave', 'blur']) rect.addEventListener(hide, () => this.clearHighlight());
       nodeLayer.appendChild(rect);
       this.nodeEls.set(n.id, [rect]);
 
-      if (n.y1 - n.y0 < 3) continue; // skip labels on slivers to cut clutter
       const text = document.createElementNS(SVG_NS, 'text');
       const leftHalf = n.x0 < width / 2;
       text.setAttribute('x', `${leftHalf ? n.x1 + 5 : n.x0 - 5}`);
-      text.setAttribute('y', `${(n.y0 + n.y1) / 2}`);
+      text.setAttribute('y', `${centerY}`);
       text.setAttribute('dy', '0.35em');
       text.setAttribute('text-anchor', leftHalf ? 'start' : 'end');
       text.style.setProperty('fill', 'var(--gr-text-primary)');
@@ -300,19 +306,20 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     this.zoomAt(mx, my, event.deltaY > 0 ? 0.9 : 1.1);
   }
 
-  onSvgMousedown(event: MouseEvent): void {
+  onSvgPointerDown(event: PointerEvent): void {
     if (event.button !== 0) return;
+    this.svgRef.nativeElement.setPointerCapture?.(event.pointerId);
     this.isPanning = true;
     this.panStart = { x: event.clientX, y: event.clientY, tx: this.tx(), ty: this.ty() };
   }
 
-  onMousemove(event: MouseEvent): void {
+  moveClosureDiagramDuringPointerDrag(event: PointerEvent): void {
     if (!this.isPanning) return;
     this.tx.set(this.panStart.tx + event.clientX - this.panStart.x);
     this.ty.set(this.panStart.ty + event.clientY - this.panStart.y);
   }
 
-  onMouseup(): void {
+  endClosureDiagramPointerDrag(): void {
     this.isPanning = false;
   }
 
@@ -343,10 +350,11 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
     const gw = this.bounds.maxX - this.bounds.minX + pad * 2;
     const gh = this.bounds.maxY - this.bounds.minY + pad * 2;
     if (gw <= 0 || gh <= 0) return;
-    const s = Math.min(rect.width / gw, rect.height / gh, 1.2);
+    const fitHeightOnly = rect.width < MIN_DIAGRAM_WIDTH_FOR_HEIGHT_ONLY_FIT;
+    const s = Math.min(fitHeightOnly ? Infinity : rect.width / gw, rect.height / gh, 1.2);
     this.zone.run(() => {
       this.scale.set(s);
-      this.tx.set(rect.width / 2 - ((this.bounds.minX + this.bounds.maxX) / 2) * s);
+      this.tx.set(fitHeightOnly ? (pad - this.bounds.minX) * s : rect.width / 2 - ((this.bounds.minX + this.bounds.maxX) / 2) * s);
       this.ty.set(rect.height / 2 - ((this.bounds.minY + this.bounds.maxY) / 2) * s);
     });
   }

@@ -65,10 +65,10 @@
     @if (nodeCount() > 0) {
       <svg #svgEl class="sankey-svg"
         (wheel)="onWheel($event)"
-        (mousedown)="onSvgMousedown($event)"
-        (mousemove)="onMousemove($event)"
-        (mouseup)="onMouseup()"
-        (mouseleave)="onMouseup()"
+        (pointerdown)="onSvgPointerDown($event)"
+        (pointermove)="moveClosureDiagramDuringPointerDrag($event)"
+        (pointerup)="endClosureDiagramPointerDrag()"
+        (pointercancel)="endClosureDiagramPointerDrag()"
       >
         <g #graphEl [attr.transform]="transform()"></g>
       </svg>

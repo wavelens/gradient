@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { blockedLine, failureKind, failureTitle, firstLine, getEvaluationSummaryCountTiles, headline } from './summary-text';
+import { blockedLine, failureKind, failureTitle, firstLine, getEvaluationSummaryCountTiles, headline, splitAttributePathAfterDots } from './summary-text';
 import { EvaluationFailureSummary, EvaluationStatus, FailedBuildSummary } from '@core/models';
 
 const summary = (packages: Partial<EvaluationFailureSummary['packages']>, evalErrors = 0): EvaluationFailureSummary => ({
@@ -63,6 +63,11 @@ describe('evaluation summary text', () => {
   it('shows no tiles until the evaluation found its packages', () => {
     expect(getEvaluationSummaryCountTiles(summary({ total: 0 }), 'EvaluatingDerivation')).toEqual([]);
     expect(getEvaluationSummaryCountTiles(summary({ total: 0 }, 1), 'Failed')).toEqual([]);
+  });
+
+  it('lets attribute paths wrap after each dot', () => {
+    expect(splitAttributePathAfterDots('packages.x86_64-linux.depfail')).toEqual(['packages.', 'x86_64-linux.', 'depfail']);
+    expect(splitAttributePathAfterDots('hello')).toEqual(['hello']);
   });
 
   it('reports a clean evaluation', () => {

@@ -63,6 +63,10 @@ export function failureTitle(failure: FailedBuildSummary): string {
   return failure.attributes.length ? failure.attributes.join(', ') : failure.name;
 }
 
+export function splitAttributePathAfterDots(path: string): string[] {
+  return path.match(/[^.]*(\.|$)/g)?.filter(Boolean) ?? [path];
+}
+
 export function blockedLine(failure: FailedBuildSummary): string {
   if (!failure.blocked_total) return '';
   const named = failure.blocked.slice(0, BLOCKED_NAMED);

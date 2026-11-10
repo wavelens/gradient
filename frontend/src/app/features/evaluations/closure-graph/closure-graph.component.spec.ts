@@ -107,6 +107,28 @@ describe('ClosureGraphComponent - diagram', () => {
     fixture.destroy();
   });
 
+  it('lets keyboard users focus a package and read its name and size', async () => {
+    const { fixture } = setup('build', undefined, {
+      ...emptyGraph, roots: ['ok'], total_size_bytes: 120, node_count: 1,
+      nodes: [{ id: 'ok', name: 'ok', path: '/nix/store/hash-ok', nar_size: 120 }],
+    });
+    const root = fixture.nativeElement as HTMLElement;
+
+    await vi.waitFor(() => expect(root.querySelector('svg rect')).not.toBeNull(), { timeout: 5000 });
+    const rect = root.querySelector('svg rect')!;
+    expect(rect.getAttribute('tabindex')).toBe('0');
+    expect(rect.getAttribute('aria-label')).toMatch(/^ok, closure 120 B/);
+    expect(Number(rect.getAttribute('height'))).toBeGreaterThanOrEqual(4);
+
+    rect.dispatchEvent(new FocusEvent('focus'));
+    fixture.detectChanges();
+    expect(root.querySelector('.header-meta')?.textContent).toContain('ok contributes to');
+    rect.dispatchEvent(new FocusEvent('blur'));
+    fixture.detectChanges();
+    expect(root.querySelector('.header-meta')?.textContent).not.toContain('contributes to');
+    fixture.destroy();
+  });
+
   it('titles an evaluation closure by its task, not by one of its roots or the commit', () => {
     const { fixture } = setup('eval', undefined, {
       ...emptyGraph, roots: ['deployment', 'docs'], total_size_bytes: 120, node_count: 2,

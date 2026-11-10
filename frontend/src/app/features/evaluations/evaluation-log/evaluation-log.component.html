@@ -111,7 +111,7 @@
                   [class.selected]="selectedBuildId() === build.id"
                   [attr.data-build-id]="build.id"
                   (contextmenu)="openBuildMenu($event, build, buildMenu)"
-                  [title]="build.name"
+                  [title]="buildDisplayName(build.name)"
                 >
                   <button type="button" class="sidebar-row-link"
                           [attr.aria-label]="buildDisplayName(build.name)"
@@ -120,7 +120,8 @@
                           (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(build.id, 1)"
                           (keydown.arrowup)="$event.preventDefault(); selectAdjacentBuild(build.id, -1)"></button>
                   <span class="build-dot"></span>
-                  <span class="build-name">{{ buildDisplayName(build.name) }}</span>
+                  @let nameParts = splitNameHeadAndTail(buildDisplayName(build.name));
+                  <span class="build-name"><span class="build-name-head">{{ nameParts.head }}</span><span class="build-name-tail">{{ nameParts.tail }}</span></span>
                   @if (build.ifd) { <gr-badge severity="info">IFD</gr-badge> }
                   @let statusLabel = buildStatusLabel(getBuildRowDisplayStatus(build));
                   @if (statusLabel !== group.label) { <span class="build-status-label">{{ statusLabel }}</span> }

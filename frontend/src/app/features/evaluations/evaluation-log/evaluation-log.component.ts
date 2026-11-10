@@ -76,6 +76,7 @@ import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, b
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
+const packageNameVisibleTrailingCharacterCount = 10;
 
 @Component({
   selector: 'app-evaluation-log',
@@ -1318,6 +1319,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   readonly buildDisplayName = packageNameFromDerivationPath;
+
+  protected splitNameHeadAndTail(name: string): { head: string; tail: string } {
+    const cut = Math.max(0, name.length - packageNameVisibleTrailingCharacterCount);
+    return { head: name.slice(0, cut), tail: name.slice(cut) };
+  }
 
   protected readonly buildStatusLabel = buildStatusLabel;
   protected readonly abortedWithoutBuildsTitle = abortedWithoutBuildsTitle;

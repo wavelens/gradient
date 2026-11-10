@@ -57,6 +57,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
     max-width: 40vw;
   }
 
@@ -66,13 +67,23 @@
     gap: $spacing-xs;
     font-size: $font-size-sm;
     color: var(--gr-text-secondary);
+    flex-wrap: wrap;
     margin-top: 2px;
 
+    span { white-space: nowrap; }
     .sep { opacity: 0.4; }
     .warn { color: var(--gr-text-secondary); }
   }
 
   .header-controls { display: flex; gap: $spacing-xs; flex-shrink: 0; }
+
+  @media (max-width: $breakpoint-sm) {
+    flex-wrap: wrap;
+    padding: $spacing-sm $spacing-md;
+
+    .header-left { flex-basis: 100%; }
+    .header-name { max-width: none; }
+  }
 }
 
 .ctrl-btn {
@@ -94,8 +105,15 @@
   width: 100%;
   cursor: grab;
   display: block;
+  touch-action: none;
 
   &:active { cursor: grabbing; }
+
+  rect:focus-visible {
+    outline: none;
+    stroke: var(--gr-focus-ring);
+    stroke-width: 2;
+  }
 
   text {
     user-select: none;

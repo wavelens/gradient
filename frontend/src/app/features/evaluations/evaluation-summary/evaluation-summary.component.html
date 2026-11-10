@@ -60,7 +60,7 @@
             <gr-row [link]="links.evaluationLog(project, ev.id, { build: failure.build_id })"
                     [linkLabel]="'Log of ' + failureTitle(failure)">
               <gr-status-icon slot="icon" phase="failure" size="sm" />
-              <span class="mono">{{ failureTitle(failure) }}</span>
+              <span class="mono">@for (part of splitAttributePathAfterDots(failureTitle(failure)); track $index) {<span>{{ part }}</span><wbr>}</span>
               @if (blockedLine(failure); as blocked) {
                 <span slot="meta">{{ blocked }}</span>
               }
@@ -83,7 +83,7 @@
             <gr-row [link]="links.evaluationLog(project, ev.id, { messages: true })"
                     [linkLabel]="'Evaluation log of ' + failed.attr">
               <gr-status-icon slot="icon" phase="failure" size="sm" />
-              <span class="mono">{{ failed.attr }}</span>
+              <span class="mono">@for (part of splitAttributePathAfterDots(failed.attr); track $index) {<span>{{ part }}</span><wbr>}</span>
               <span slot="meta">{{ firstLine(failed.message) }}</span>
               @if (failed.newly_failing) {
                 <gr-badge slot="actions" severity="danger">New</gr-badge>
@@ -97,7 +97,7 @@
         <h2>Fixed <span class="count">{{ s.fixed_total }}</span></h2>
         <ul class="fixed mono">
           @for (attr of s.fixed; track attr) {
-            <li>{{ attr }}</li>
+            <li>@for (part of splitAttributePathAfterDots(attr); track $index) {<span>{{ part }}</span><wbr>}</li>
           }
         </ul>
       }

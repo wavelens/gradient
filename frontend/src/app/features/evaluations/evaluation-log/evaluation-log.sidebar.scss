@@ -86,18 +86,25 @@
 }
 
 .build-name {
+  display: flex;
   flex: 1;
   min-width: 0;
   font-size: $font-size-sm;
   color: var(--gr-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre;
   transition: color $transition-fast;
 
   .build-item:hover &,
   .build-item.selected & { color: var(--gr-text-primary); }
 }
+
+.build-name-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.build-name-tail { flex-shrink: 0; }
 
 .build-status-label {
   font-size: $font-size-xs;

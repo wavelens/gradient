@@ -43,7 +43,7 @@ import {
 } from '@shared/evaluation';
 import { CurrentTimeSignal, formatDuration, plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { EvalStatusBadgeComponent, LiveStatusComponent, StatusIconComponent, WaitingNoticeComponent } from '@shared/ui';
-import { blockedLine, failureKind, failureTitle, firstLine, getEvaluationSummaryCountTiles, headline } from './summary-text';
+import { blockedLine, failureKind, failureTitle, firstLine, getEvaluationSummaryCountTiles, headline, splitAttributePathAfterDots } from './summary-text';
 
 const SUMMARY_REFRESH_MS = 1000;
 
@@ -163,6 +163,7 @@ export class EvaluationSummaryComponent implements OnInit {
   protected readonly failureKind = failureKind;
   protected readonly failureTitle = failureTitle;
   protected readonly firstLine = firstLine;
+  protected readonly splitAttributePathAfterDots = splitAttributePathAfterDots;
   protected readonly blockedLine = blockedLine;
   protected readonly plural = plural;
 

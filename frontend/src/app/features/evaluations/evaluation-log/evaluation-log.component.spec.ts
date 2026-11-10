@@ -485,6 +485,19 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.selectedBuildId()).toBe('b1');
     });
 
+    it('names a build by its package and keeps the end of a long name visible', () => {
+      const { fixture, cmp } = setup();
+      fixture.detectChanges();
+      cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
+      cmp.visibleBuilds.set([build('b1', '/nix/store/hash-run-r9-evaluations-package-42.drv')]);
+      fixture.detectChanges();
+
+      const item = (fixture.nativeElement as HTMLElement).querySelector('.build-item')!;
+      expect(item.getAttribute('title')).toBe('run-r9-evaluations-package-42');
+      expect(item.querySelector('.build-name')?.textContent).toBe('run-r9-evaluations-package-42');
+      expect(item.querySelector('.build-name-tail')?.textContent).toBe('package-42');
+    });
+
     describe('prioritize', () => {
       function withTrigger(cmp: EvaluationLogComponent): EvaluationLogComponent {
         cmp.access.set({ managed: false, canEdit: false, canTrigger: true });
