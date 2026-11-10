@@ -50,8 +50,24 @@ def banner(msg):
     print(f"\n=== {msg} ===")
 
 
+def query_unfinished_shared_builds_blocking_evaluations_table():
+    queries = [
+        "SELECT d.name, db.status, db.wanted, db.cache_available, db.probed, db.fetchable, db.substituted, "
+        "db.blocking_deps, db.missing_runtime_deps, db.unneeded_outputs FROM derivation_build db "
+        "JOIN derivation d ON d.id = db.derivation "
+        "WHERE db.status IN (0, 1, 2, 8, 10) AND (db.wanted OR db.status IN (1, 2)) ORDER BY db.status, d.name",
+        "SELECT p.name AS parent, c.name AS dependency, cb.status, cb.wanted, cb.cache_available, cb.probed, "
+        "cb.fetchable, cb.blocking_deps, cb.missing_runtime_deps, cb.unneeded_outputs FROM derivation_build pb "
+        "JOIN derivation p ON p.id = pb.derivation JOIN derivation_dependency e ON e.derivation = pb.derivation "
+        "JOIN derivation c ON c.id = e.dependency JOIN derivation_build cb ON cb.derivation = c.id "
+        "WHERE pb.wanted AND pb.status IN (0, 10) AND cb.status NOT IN (3, 7) ORDER BY p.name",
+    ]
+    return "\n".join(
+        server.execute(f"runuser -u postgres -- psql -d gradient -c {shlex.quote(query)}")[1] for query in queries)
+
+
 def fleet_tail():
-    parts = []
+    parts = ["--- unfinished shared builds ---\n" + query_unfinished_shared_builds_blocking_evaluations_table()]
     for node in WORKERS:
         parts.append(f"--- {node.name} worker journal ---\n" + node.execute(
             "journalctl -u gradient-worker --no-pager -n 60")[1])
