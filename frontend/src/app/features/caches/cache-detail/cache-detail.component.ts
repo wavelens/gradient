@@ -11,6 +11,7 @@ import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
+import { ConfigService } from '@core/services/config.service';
 import { injectCacheAccess, injectCacheAccessData } from '@core/resolvers/inject-access';
 import {
   BadgeComponent,
@@ -98,6 +99,7 @@ export class CacheDetailComponent implements OnInit {
   private cachesService = inject(CachesService);
   private crumbs = inject(BreadcrumbsService);
   private stars = inject(StarsService);
+  private config = inject(ConfigService);
   protected authService = inject(AuthService);
 
   private access = injectCacheAccessData();
@@ -197,7 +199,7 @@ export class CacheDetailComponent implements OnInit {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
     this.starTarget = { kind: 'cache', cache: this.cacheName };
     this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
-    this.serverUrl = window.location.origin;
+    this.serverUrl = this.config.serveUrl;
     this.cacheUrl = `${this.serverUrl}/cache/${this.cacheName}`;
     this.loadStats();
     this.loadSubscribers();

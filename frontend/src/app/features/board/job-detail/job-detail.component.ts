@@ -34,11 +34,11 @@ import {
   CurrentTimeSignal,
   ServerTimestampToLocalDateTimePipe,
 } from '@shared/text';
-import { LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent } from '@shared/ui';
+import { EvalStatusBadgeComponent, LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent } from '@shared/ui';
 import { Title } from '@angular/platform-browser';
 import { composeTitle } from '@core/title/gradient-title-strategy';
 import { JobTimelineComponent } from './job-timeline.component';
-import { BUILD_KIND, EXEC_KIND, jobKindName, jobSubjectLabel, pendingJobPageId } from '../job-kind';
+import { BUILD_KIND, EXEC_KIND, evaluationJobCommitLabel, jobKindName, jobSubjectLabel, pendingJobPageId } from '../job-kind';
 import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
 import { scoringRuleClassNameToReadableLabel, schedulerScoreDecimalPipeDigitsFormat } from '../scoring-rule-label';
 import { abortExecJobConfirm } from '@features/exec-jobs/exec-job-status';
@@ -62,7 +62,7 @@ import {
 import { links } from '@shared/routing';
 import { removeAnsiEscapeSequences } from '@shared/log';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
-import { EMPTY, Observable, switchMap, tap } from 'rxjs';
+import { EMPTY, Observable, catchError, of, switchMap, tap, throwError } from 'rxjs';
 
 type PendingLookup = 'pending' | 'left' | 'not-found';
 
@@ -104,7 +104,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LoadStateComponent, BadgeComponent, LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent],
+  imports: [CommonModule, ServerTimestampToLocalDateTimePipe, RouterModule, DialogComponent, ButtonComponent, IconComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent, LoadStateComponent, BadgeComponent, EvalStatusBadgeComponent, LabelHelpComponent, StatusBadgeComponent, WaitingNoticeComponent],
   template: `
     <div class="top-row phone-icon-buttons">
       <a [routerLink]="boardJobBackLink.href" class="back" (click)="goBack($event)">
@@ -128,7 +128,11 @@ interface RuleRow {
       <section class="ids">
         <div>
           <span class="label">Project</span>
-          <a class="project-link" [routerLink]="links.project(j.project_name)">{{ j.project_display_name || j.project_name }}</a>
+          @if (j.can_view_project) {
+            <a class="project-link" [routerLink]="links.project(j.project_name)">{{ j.project_display_name || j.project_name }}</a>
+          } @else {
+            <span class="project-name">{{ j.project_display_name || j.project_name }}</span>
+          }
         </div>
         <div>
           <span class="label">Worker</span>
@@ -138,14 +142,22 @@ interface RuleRow {
             <span class="mono worker-name">{{ workerDisplayNameOrNotSharedLabel(j.worker_name) }}</span>
           }
         </div>
-        <div>
-          <span class="label">Log</span>
-          @if (j.evaluation) {
-            <a class="log-link" [routerLink]="links.evaluationLog(j.project_name, j.evaluation_id, { build: j.build_id })" [title]="j.evaluation_id">Open log</a>
-          } @else {
-            <span class="muted">Evaluation deleted</span>
-          }
-        </div>
+        @if (j.can_view_project) {
+          <div>
+            <span class="label">Log</span>
+            @if (j.evaluation) {
+              <a class="log-link" [routerLink]="links.evaluationLog(j.project_name, j.evaluation_id, { build: j.build_id })" [title]="j.evaluation_id">Open log</a>
+            } @else {
+              <span class="muted">Evaluation deleted</span>
+            }
+          </div>
+        }
+        @if (j.retried_by; as retry) {
+          <div>
+            <span class="label">Retry</span>
+            <a class="mono retry-link" [routerLink]="links.boardJob(retry)" [title]="retry">{{ retry.slice(0, 8) }}</a>
+          </div>
+        }
         @if (j.cluster_job) {
           <div>
             <span class="label">Cluster job</span>
@@ -165,10 +177,17 @@ interface RuleRow {
                 <td class="mono" [title]="ev.commit">{{ ev.commit.slice(0, 12) }}@if (ev.commit_message) { <span class="muted"> {{ ev.commit_message }}</span> }</td>
               </tr>
               <tr><td class="label">Wildcard</td><td class="mono">{{ ev.wildcard }}</td></tr>
+              <tr><td class="label">Status</td><td><gr-eval-status-badge class="evaluation-status" [status]="ev.status" /></td></tr>
               @if (ev.task) {
                 <tr>
                   <td class="label">Task</td>
-                  <td><a class="task-link" [routerLink]="links.task(j.project_name, ev.task, j.evaluation_id)">{{ ev.task_display_name || ev.task }}</a></td>
+                  <td>
+                    @if (j.can_view_project) {
+                      <a class="task-link" [routerLink]="links.task(j.project_name, ev.task, j.evaluation_id)">{{ ev.task_display_name || ev.task }}</a>
+                    } @else {
+                      {{ ev.task_display_name || ev.task }}
+                    }
+                  </td>
                 </tr>
               }
             </tbody>
@@ -183,7 +202,13 @@ interface RuleRow {
             <tbody>
               <tr>
                 <td class="label">Task</td>
-                <td><a class="task-link" [routerLink]="links.task(j.project_name, ex.task, j.evaluation_id)">{{ j.evaluation?.task_display_name || ex.task }}</a></td>
+                <td>
+                  @if (j.can_view_project) {
+                    <a class="task-link" [routerLink]="links.task(j.project_name, ex.task, j.evaluation_id)">{{ j.evaluation?.task_display_name || ex.task }}</a>
+                  } @else {
+                    {{ j.evaluation?.task_display_name || ex.task }}
+                  }
+                </td>
               </tr>
               <tr>
                 <td class="label">Entry point</td>
@@ -439,6 +464,9 @@ interface RuleRow {
         } @else if (p.subject) {
           <div><span class="label">{{ p.kind === 1 ? 'Derivation' : 'Repository' }}</span><span class="mono">{{ p.subject }}</span></div>
         }
+        @if (evaluationJobCommitLabel(p); as commit) {
+          <div><span class="label">Commit</span><span class="mono commit" [title]="p.commit">{{ commit }}</span></div>
+        }
         <div>
           <span class="label">Evaluation</span>
           @if (p.project_name; as project) {
@@ -459,7 +487,12 @@ interface RuleRow {
       </section>
     } @else if (pendingLookup() === 'not-found') {
       <header class="head"><h1>Job not found</h1></header>
-      <p class="muted">No pending or running job has this ID.</p>
+      @if (pendingJobEvaluationLink(); as e) {
+        <p class="muted">The job left the queue. No worker ran it.</p>
+        <a grButton class="open-evaluation" label="Open evaluation" severity="secondary" size="small" [routerLink]="links.evaluationLog(e.project, e.evaluation)"></a>
+      } @else {
+        <p class="muted">No pending or running job has this ID.</p>
+      }
     } @else {
       <gr-load-state [loading]="loadError() === null" [error]="loadError()" empty
                      loadingMessage="Loading job..." errorTitle="Couldn't load job" (retry)="reload()" />
@@ -532,6 +565,7 @@ export class BoardJobDetailComponent implements OnInit {
   pending = signal<PendingJobSummary | null>(null);
   loadError = signal<unknown>(null);
   pendingLookup = signal<PendingLookup | null>(null);
+  pendingJobEvaluationLink = signal<{ project: string; evaluation: string } | null>(null);
   private jobId: string | null = null;
   private descriptions = signal<Map<string, string>>(new Map());
   activeRule = signal<RuleDescription | null>(null);
@@ -560,6 +594,7 @@ export class BoardJobDetailComponent implements OnInit {
   protected readonly jobKindName = jobKindName;
   protected readonly EXEC_KIND = EXEC_KIND;
   protected readonly jobSubjectLabel = jobSubjectLabel;
+  protected readonly evaluationJobCommitLabel = evaluationJobCommitLabel;
   protected readonly workerDisplayNameOrNotSharedLabel = workerDisplayNameOrNotSharedLabel;
   protected readonly scoreDigits = schedulerScoreDecimalPipeDigitsFormat;
   protected readonly formatBytes = formatBytes;
@@ -678,6 +713,7 @@ export class BoardJobDetailComponent implements OnInit {
     this.pending.set(null);
     this.loadError.set(null);
     this.pendingLookup.set(null);
+    this.pendingJobEvaluationLink.set(null);
     this.build.set(null);
     this.buildDialog.set(false);
     if (this.route.snapshot.data['pending'] === true) {
@@ -709,12 +745,16 @@ export class BoardJobDetailComponent implements OnInit {
           this.pendingLookup.set('pending');
           return EMPTY;
         }
-        return this.board.getAssignedJobs().pipe(
-          tap((assigned) => {
+        return this.board.getLatestAssignmentForEvaluation(id).pipe(
+          catchError((error: unknown) => (error as { status?: number } | null)?.status === 404 ? of(null) : throwError(() => error)),
+          tap((latest) => {
             if (this.jobId !== id) return;
-            const running = assigned.jobs.find((j) => pendingJobPageId(j) === id);
-            if (running) void this.router.navigateByUrl(links.boardJob(running.id), { replaceUrl: true });
-            else this.pendingLookup.set(this.pending() ? 'left' : 'not-found');
+            if (latest?.dispatched_job_id) {
+              void this.router.navigateByUrl(links.boardJob(latest.dispatched_job_id), { replaceUrl: true });
+              return;
+            }
+            this.pendingJobEvaluationLink.set(latest ? { project: latest.project_name, evaluation: latest.evaluation_id } : null);
+            this.pendingLookup.set(this.pending() ? 'left' : 'not-found');
           }),
         );
       }),

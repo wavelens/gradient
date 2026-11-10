@@ -126,6 +126,13 @@ describe('DashboardTaskTableComponent', () => {
     expect(values).toEqual(['Aborted', '']);
   });
 
+  it('marks a deactivated task without evaluations as disabled', async () => {
+    const deactivated = { ...row('hosts'), active: false, latest: null, entry_points: null };
+    const { f, root } = render(null, () => of({ ...PAGE, tasks: [deactivated] }));
+    await settle(f);
+    expect(root.querySelector('gr-row .meta')?.textContent?.trim()).toBe('Disabled');
+  });
+
   it('puts a neutral icon in the status slot of a task that never ran', async () => {
     const neverRun = { ...row('hosts'), latest: null, entry_points: null };
     const { f, root } = render(null, () => of({ ...PAGE, tasks: [neverRun, row('docs')] }));

@@ -31,6 +31,7 @@ export class ConfigService {
   sshPort: number | null = null;
   gradientCiEnabled = false;
   gradientCiUrl = 'https://servers.gradient.ci';
+  serveUrl = globalThis.location?.origin ?? '';
   logoUrl: string | null = null;
   execEnabled = false;
   publicListing = true;
@@ -71,6 +72,7 @@ export class ConfigService {
           this.sshPort = res.message.ssh_port ?? null;
           this.gradientCiEnabled = res.message.gradient_ci_enabled ?? false;
           this.gradientCiUrl = res.message.gradient_ci_url ?? this.gradientCiUrl;
+          this.serveUrl = res.message.serve_url?.replace(/\/+$/, '') || this.serveUrl;
           this.logoUrl = res.message.logo_url ?? null;
           this.execEnabled = res.message.exec_enabled;
           this.publicListing = res.message.public_listing;

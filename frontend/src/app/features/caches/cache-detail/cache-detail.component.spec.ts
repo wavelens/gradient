@@ -14,6 +14,7 @@ import { CacheDetailComponent } from './cache-detail.component';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { StarsService } from '@core/services/stars.service';
+import { ConfigService } from '@core/services/config.service';
 
 const OWN_KEY = 'public.gradient.ci-main:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M=';
 const UPSTREAM_KEY = 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=';
@@ -56,6 +57,15 @@ describe('CacheDetailComponent cache usage instructions', () => {
     expect(component.trustedPublicKeys()).toEqual([OWN_KEY]);
     expect(component.nixConfSnippet()).toContain(OWN_KEY);
     expect(component.nixConfSnippet()).not.toContain(UPSTREAM_KEY);
+  });
+
+  it('builds the substituter URL from the server serve URL', () => {
+    const component = setup();
+    TestBed.inject(ConfigService).serveUrl = 'https://ci.example.org';
+    component.ngOnInit();
+
+    expect(component.nixConfSnippet()).toContain('extra-substituters = https://ci.example.org/cache/main');
+    expect(component.installNetrcCommand).toContain('--server https://ci.example.org ');
   });
 
   // A cache whose key has not been generated yet must not render a snippet that

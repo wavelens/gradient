@@ -54,8 +54,10 @@
                   @if (t.evaluationNoNumbersText === null && t.entryPointsPassedCountText) {
                     <span class="passed-on-phone" [class.failing]="t.failedEntryPointCountText">&nbsp;· {{ t.entryPointsPassedRatioWithUnitText }}</span>
                   }
-                } @else {
+                } @else if (t.active) {
                   No evaluations yet
+                } @else {
+                  Disabled
                 }
               </span>
               <div slot="actions" class="cells">

@@ -249,7 +249,7 @@ const DECISIONS: AssignDecisionView[] = [
     kind: 1,
     winner: 'j1',
     candidates: [
-      { id: 'c1', job_id: 'j1', kind: 1, project: 'o1', build_id: 'b1', evaluation_id: 'e1', subject: 'win', score: 12, won: true },
+      { id: 'c1', job_id: 'j1', kind: 1, project: 'o1', project_name: 'infra', project_display_name: 'Infrastructure', task: 'ci', task_display_name: 'CI', build_id: 'b1', evaluation_id: 'e1', subject: 'win', score: 12, won: true },
       { id: 'c2', job_id: 'j2', kind: 1, project: 'o2', build_id: 'b2', evaluation_id: 'e2', subject: 'loser', score: -8, won: false },
     ],
   },
@@ -295,6 +295,7 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('Passed over');
     expect(text).toContain('-8');
+    expect((fixture.nativeElement as HTMLElement).querySelector('td.origin app-board-project-task-links')?.textContent?.trim()).toBe('Infrastructure / CI');
     expect(rows.every((r) => r.worker === 'Builder One')).toBe(true);
     expect((fixture.nativeElement as HTMLElement).querySelector('.banner')?.textContent?.trim()).toBe('No running jobs');
   });
@@ -372,6 +373,15 @@ describe('BoardLiveJobsComponent - pending view toggle', () => {
     fixture.detectChanges();
     expect(el.textContent).not.toContain('Failed to load jobs');
     expect(el.querySelector('tbody td.subject')?.textContent?.trim()).toBe('hello-2.12.1');
+  });
+
+  it('names a pending evaluation job by its commit instead of the repository', () => {
+    const pending: PendingJobSummary = {
+      kind: 0, project: 'o1', evaluation_id: 'e1', queued_at: '2026-06-08T00:00:00Z', dependency_count: 0,
+      subject: 'https://example.com/r.git', commit: 'abcdef1234567', commit_message: 'Fix the build', permissions: [],
+    };
+    const fixture = setup({ view: 'pending' }, () => of({ jobs: [pending], other_pending: 0 }));
+    expect((fixture.nativeElement as HTMLElement).querySelector('tbody td.subject')?.textContent?.trim()).toBe('abcdef12 Fix the build');
   });
 
   it('lists a pending exec job and opens it by its exec job id', () => {

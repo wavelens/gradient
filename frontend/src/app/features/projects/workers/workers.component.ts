@@ -157,7 +157,7 @@ export class WorkersComponent implements OnInit {
     if (!worker.active) return 'Inactive';
     const live = worker.live;
     if (live) return `Connected · ${live.assigned_job_count}/${live.max_concurrent_builds} jobs`;
-    return worker.connected ? 'Connected' : 'Offline';
+    return worker.connected ? 'Connected, no jobs for this project (reconnect with the project token)' : 'Offline';
   }
 
   private menuFor(worker: ProjectWorkerEntry): MenuItem[] {

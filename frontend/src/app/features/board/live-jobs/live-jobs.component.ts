@@ -17,7 +17,7 @@ import { BoardProjectTaskLinksComponent } from '../project-task-links.component'
 import { subscribeToBoardSocketWithReload } from '../board-socket';
 import { workerDisplayNameOrNotSharedLabel } from '../worker-label';
 import { schedulerScoreDecimalPipeDigitsFormat } from '../scoring-rule-label';
-import { BoardRow, JobKindName, collapseClusters, jobKindName, jobSubjectLabel } from '../job-kind';
+import { BoardRow, JobKindName, collapseClusters, evaluationJobCommitLabel, jobKindName, jobSubjectLabel } from '../job-kind';
 import { DispatchedJobSummary, PendingJobSummary, AssignDecisionView } from '@core/models';
 import { links, oneOf, queryParamSignal } from '@shared/routing';
 import { type WaitingExplanation, explainWaiting, waitingAccessFrom } from '@shared/evaluation';
@@ -53,6 +53,11 @@ interface DecisionRow {
   worker: string;
   kind: number;
   subject: string;
+  project?: string | null;
+  projectDisplayName?: string | null;
+  task?: string | null;
+  taskDisplayName?: string | null;
+  evaluation: string;
   score: number;
   won: boolean;
 }
@@ -135,13 +140,17 @@ interface DecisionRow {
         } @else {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Decision</th><th>Kind</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>Decided</th><th><span class="sr-only">Details</span></th></tr>
+              <tr><th>Decision</th><th>Kind</th><th>Project / task</th><th>Worker</th><th>Derivation / Evaluation / Exec</th><th>Score</th><th>Decided</th><th><span class="sr-only">Details</span></th></tr>
             </thead>
             <tbody>
               @for (r of visibleDecisionRows(); track r.id + r.at) {
                 <tr [class.negative]="r.score < 0" class="clickable" (click)="router.navigateByUrl(links.boardJob(r.id))">
                   <td>{{ r.won ? 'Won' : 'Passed over' }}</td>
                   <td>{{ jobKindName(r.kind) }}</td>
+                  <td class="origin">
+                    <app-board-project-task-links [project]="r.project" [projectDisplayName]="r.projectDisplayName"
+                                                  [task]="r.task" [taskDisplayName]="r.taskDisplayName" [evaluation]="r.evaluation" />
+                  </td>
                   <td class="mono worker">{{ r.worker }}</td>
                   <td class="mono subject" [title]="r.subject">
                     <a [routerLink]="links.boardJob(r.id)" (click)="$event.stopPropagation()">{{ r.subject }}</a>
@@ -151,7 +160,7 @@ interface DecisionRow {
                   <td>›</td>
                 </tr>
               } @empty {
-                <tr><td colspan="7" class="muted">No recent decisions.</td></tr>
+                <tr><td colspan="8" class="muted">No recent decisions.</td></tr>
               }
             </tbody>
           </gr-table>
@@ -284,9 +293,10 @@ export class BoardLiveJobsComponent implements OnInit {
     jobCountLine(this.pendingRows().length, this.pendingRows().length, this.otherPending(), 'pending'));
 
   rowSubject({ job, subJobs }: BoardRow<DispatchedJobSummary | PendingJobSummary>): string {
-    if (!job.cluster_job) return jobSubjectLabel(job.subject, job.exec_job);
+    const subject = evaluationJobCommitLabel(job) ?? job.subject;
+    if (!job.cluster_job) return jobSubjectLabel(subject, job.exec_job);
     const exec = job.exec_job ? { ...job.exec_job, nodes: 1 } : job.exec_job;
-    return `${jobSubjectLabel(job.subject, exec)} (cluster, ${this.subJobLabel(subJobs)})`;
+    return `${jobSubjectLabel(subject, exec)} (cluster, ${this.subJobLabel(subJobs)})`;
   }
 
   subJobLabel(count: number): string {
@@ -319,6 +329,11 @@ export class BoardLiveJobsComponent implements OnInit {
           worker: d.worker_name ?? d.worker_id,
           kind: c.kind,
           subject: jobSubjectLabel(c.subject, c.exec_job),
+          project: c.project_name,
+          projectDisplayName: c.project_display_name,
+          task: c.task,
+          taskDisplayName: c.task_display_name,
+          evaluation: c.evaluation_id,
           score: c.score,
           won: c.won,
         });

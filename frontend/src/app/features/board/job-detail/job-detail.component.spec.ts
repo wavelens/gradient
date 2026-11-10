@@ -170,7 +170,7 @@ function setup(board: Partial<BoardService> = {}, id = 'job-1', pending = false)
         useValue: {
           getJob: () => of(DETAIL),
           getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
-          getAssignedJobs: () => of({ jobs: [], other_running: 0 }),
+          getLatestAssignmentForEvaluation: () => throwError(() => ({ status: 404 })),
           getScoringRules: () => of([]),
           ...board,
         },
@@ -440,15 +440,29 @@ describe('BoardJobDetailComponent - pending route', () => {
     expect(el.textContent).not.toContain('Not found or access denied');
   });
 
-  it('opens the running job when a worker has already taken it', () => {
-    const fixture = setup({
-      getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
-      getAssignedJobs: () => of({ jobs: [{ id: 'job-7', kind: 1, project: 'o1', worker_id: 'w1', dispatched_at: '2026-06-08T00:01:00Z', evaluation_id: 'e1', build_id: 'b9' }], other_running: 0 }),
-    }, 'b9', true);
+  it('opens the latest assignment when a worker has already taken the job', () => {
+    const getLatestAssignmentForEvaluation = vi.fn(() => of({ dispatched_job_id: 'job-7', evaluation_id: 'e1', project_name: 'sandbox' }));
+    const fixture = setup({ getPendingJobs: () => of({ jobs: [], other_pending: 0 }), getLatestAssignmentForEvaluation }, 'b9', true);
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
     fixture.componentInstance.reload();
+    expect(getLatestAssignmentForEvaluation).toHaveBeenCalledWith('b9');
     expect(String(navigate.mock.calls[0]?.[0])).toBe('/board/jobs/job-7');
     expect(navigate.mock.calls[0]?.[1]).toEqual({ replaceUrl: true });
+  });
+
+  it('links the evaluation of a job that left the queue without an assignment', () => {
+    const el = setup({
+      getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
+      getLatestAssignmentForEvaluation: () => of({ dispatched_job_id: null, evaluation_id: 'e1', project_name: 'sandbox' }),
+    }, 'e1', true).nativeElement as HTMLElement;
+    expect(el.querySelector('h1')?.textContent).toBe('Job not found');
+    expect(el.querySelector('a.open-evaluation')?.getAttribute('href')).toBe('/project/sandbox/log/e1');
+  });
+
+  it('shows the commit of a pending evaluation job', () => {
+    const pending: PendingJobSummary = { ...PENDING, kind: 0, build_id: null, subject: 'https://example.com/r.git', commit: 'abcdef1234567', commit_message: 'Fix the build' };
+    const el = setup({ getPendingJobs: () => of({ jobs: [pending], other_pending: 0 }) }, 'e1', true).nativeElement as HTMLElement;
+    expect(el.querySelector('section.ids .commit')?.textContent).toBe('abcdef12 Fix the build');
   });
 
   it('does not match a pending build of the same evaluation for an evaluation id', () => {
@@ -913,5 +927,23 @@ describe('BoardJobDetailComponent - display names', () => {
     const el = setup({ getJob: () => of(job) }).nativeElement as HTMLElement;
     expect(el.querySelector('h1')?.textContent?.trim()).toBe('Exec Task: apps.run');
     expect(el.querySelector('section.exec a.task-link')?.textContent?.trim()).toBe('Exec Task');
+  });
+});
+
+describe('BoardJobDetailComponent - project access and evaluation', () => {
+  it('shows the project and task as text and hides the log link without project access', () => {
+    const el = setup({ getJob: () => of({ ...EVAL_DETAIL, can_view_project: false }) }).nativeElement as HTMLElement;
+    expect(el.querySelector('section.ids .project-link')).toBeNull();
+    expect(el.querySelector('section.ids .project-name')?.textContent).toBe('Project One');
+    expect(el.querySelector('section.ids .log-link')).toBeNull();
+    expect(el.querySelector('section.evaluation .task-link')).toBeNull();
+    expect(el.querySelector('section.evaluation')?.textContent).toContain('ci');
+  });
+
+  it('shows the evaluation status and links the retry job', () => {
+    const job: AssignedJobDetail = { ...EVAL_DETAIL, retried_by: 'job-2', evaluation: { ...EVAL_DETAIL.evaluation!, status: 'Failed' } };
+    const el = setup({ getJob: () => of(job) }).nativeElement as HTMLElement;
+    expect(el.querySelector('section.evaluation .evaluation-status')?.textContent?.trim()).toBe('Failed');
+    expect(el.querySelector('section.ids .retry-link')?.getAttribute('href')).toBe('/board/jobs/job-2');
   });
 });

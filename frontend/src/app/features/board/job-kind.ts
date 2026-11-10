@@ -5,11 +5,13 @@
  */
 
 import { BoardExecJob } from '@core/models';
+import { commitLabel } from '@shared/evaluation';
 
 export type JobKindName = 'eval' | 'build' | 'exec';
 
 const KIND_NAMES: JobKindName[] = ['eval', 'build', 'exec'];
 
+export const EVAL_KIND = KIND_NAMES.indexOf('eval');
 export const EXEC_KIND = KIND_NAMES.indexOf('exec');
 export const BUILD_KIND = KIND_NAMES.indexOf('build');
 
@@ -21,6 +23,11 @@ export function jobSubjectLabel(subject?: string | null, exec?: BoardExecJob | n
   if (!exec) return subject ?? '-';
   const node = exec.nodes > 1 ? ` (node ${exec.node_index})` : '';
   return `${exec.entry_point}${node}`;
+}
+
+export function evaluationJobCommitLabel(job: { kind: number; commit?: string | null; commit_message?: string | null }): string | null {
+  if (job.kind !== EVAL_KIND || !job.commit) return null;
+  return job.commit_message ? `${commitLabel(job.commit)} ${job.commit_message}` : commitLabel(job.commit);
 }
 
 export function pendingJobPageId(row: { exec_job?: { id: string } | null; build_id?: string | null; evaluation_id: string }): string {
