@@ -2491,6 +2491,44 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/builds/{build}/attempts:
+    get:
+      tags:
+      - builds
+      summary: List of Build Attempts
+      description: |-
+        All attempts of a build appear newest first. Retries of a build open a new attempt. Logs of earlier attempts remain. Pass the `id` of an attempt as the `attempt` query parameter to the endpoints for the build log to read the log of that attempt.
+
+        **Access:** Same as `GET /builds/{build}/log`.
+      operationId: getBuildAttempts
+      parameters:
+      - name: build
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/BuildJobId'
+      responses:
+        '200':
+          description: Build attempts, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BuildAttemptLogRow'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
   /api/v1/builds/{build}/closure:
     get:
       tags:
@@ -2753,6 +2791,12 @@ paths:
         required: true
         schema:
           $ref: '#/components/schemas/BuildJobId'
+      - name: attempt
+        in: query
+        description: The attempt to read logs from, as listed in `GET /builds/{build}/attempts`. The default is the latest attempt.
+        required: false
+        schema:
+          $ref: '#/components/schemas/BuildAttemptId'
       responses:
         '200':
           description: Build log
@@ -2826,6 +2870,12 @@ paths:
           type: integer
           format: int32
           minimum: 0
+      - name: attempt
+        in: query
+        description: The attempt to read logs from, as listed in `GET /builds/{build}/attempts`. The default is the latest attempt.
+        required: false
+        schema:
+          $ref: '#/components/schemas/BuildAttemptId'
       responses:
         '200':
           description: Chunk plaintext
@@ -2857,6 +2907,12 @@ paths:
         required: true
         schema:
           $ref: '#/components/schemas/BuildJobId'
+      - name: attempt
+        in: query
+        description: The attempt to read logs from, as listed in `GET /builds/{build}/attempts`. The default is the latest attempt.
+        required: false
+        schema:
+          $ref: '#/components/schemas/BuildAttemptId'
       responses:
         '200':
           description: Chunk index
@@ -2915,6 +2971,12 @@ paths:
         required: false
         schema:
           type: string
+      - name: attempt
+        in: query
+        description: The attempt to read logs from, as listed in `GET /builds/{build}/attempts`. The default is the latest attempt.
+        required: false
+        schema:
+          $ref: '#/components/schemas/BuildAttemptId'
       responses:
         '200':
           description: Line range plaintext
@@ -2956,6 +3018,12 @@ paths:
         required: false
         schema:
           type: boolean
+      - name: attempt
+        in: query
+        description: The attempt to read logs from, as listed in `GET /builds/{build}/attempts`. The default is the latest attempt.
+        required: false
+        schema:
+          $ref: '#/components/schemas/BuildAttemptId'
       responses:
         '200':
           description: NDJSON stream of search hits, terminated by a done frame
@@ -14553,6 +14621,28 @@ components:
       - timeout
       - lost
       - aborted
+    AttemptFailureReason:
+      type: string
+      enum:
+      - SubstituteUnavailable
+      - Oom
+      - DiskFull
+      - Network
+      - BuilderCrash
+      - BuilderNonzero
+      - WallClockTimeout
+      - SilentTimeout
+      - InputsUnavailable
+      - WorkerLost
+      - NotEnoughResources
+    AttemptOutcome:
+      type: string
+      enum:
+      - Running
+      - Built
+      - Substituted
+      - Failed
+      - Aborted
     AttemptSummary:
       type: object
       required:
@@ -15005,6 +15095,41 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ExecOffer'
           - type: 'null'
+    BuildAttemptId:
+      type: string
+      format: uuid
+    BuildAttemptLogRow:
+      type: object
+      required:
+      - id
+      - outcome
+      - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/BuildAttemptId'
+        outcome:
+          $ref: '#/components/schemas/AttemptOutcome'
+        reason:
+          oneOf:
+          - $ref: '#/components/schemas/AttemptFailureReason'
+          - type: 'null'
+        worker:
+          type:
+          - string
+          - 'null'
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
     BuildGraph:
       type: object
       required:

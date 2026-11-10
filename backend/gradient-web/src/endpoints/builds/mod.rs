@@ -5,6 +5,7 @@
  */
 
 pub mod actions;
+pub mod attempts;
 pub mod closure;
 pub mod downloads;
 pub mod graph;
@@ -15,6 +16,7 @@ mod refusal;
 pub mod sbom;
 
 pub use self::actions::{post_build_abort, post_build_prioritize, post_build_retry};
+pub use self::attempts::get_build_attempts;
 pub use self::closure::{
     ClosureEdge, ClosureGraph, ClosureNode, build_closure_graph, build_runtime_closure_graph,
     derivation_closure_reachable, get_build_closure, get_build_runtime_closure, get_eval_closure,
@@ -162,9 +164,18 @@ async fn reachable_projects_accessible(
     Ok(false)
 }
 
-pub(super) async fn effective_log_id(
+pub(super) async fn build_attempt_id_for_log(
     db: &WebDb,
     shared_build: &MDerivationBuild,
-) -> Option<BuildAttemptId> {
-    latest_attempt_id(db, shared_build.id).await.ok().flatten()
+    requested: Option<BuildAttemptId>,
+) -> WebResult<Option<BuildAttemptId>> {
+    let Some(requested) = requested else {
+        return Ok(latest_attempt_id(db, shared_build.id).await?);
+    };
+
+    by_id::<EBuildAttempt, _>(db, requested)
+        .await?
+        .filter(|attempt| attempt.derivation_build == shared_build.id)
+        .map(|attempt| Some(attempt.id))
+        .ok_or_else(|| WebError::not_found(Resource::Log))
 }

@@ -149,6 +149,10 @@ export interface AssignedJobSchedulerReasoning {
 
 export type AttemptEndReason = "completed" | "failed" | "timeout" | "lost" | "aborted";
 
+export type AttemptFailureReason = "SubstituteUnavailable" | "Oom" | "DiskFull" | "Network" | "BuilderCrash" | "BuilderNonzero" | "WallClockTimeout" | "SilentTimeout" | "InputsUnavailable" | "WorkerLost" | "NotEnoughResources";
+
+export type AttemptOutcome = "Running" | "Built" | "Substituted" | "Failed" | "Aborted";
+
 export interface AttemptSummary {
   dispatched_job_id?: string | null;
   substitute: boolean;
@@ -294,6 +298,18 @@ export interface BoardWorker {
   ram_free_mb?: number | null;
   ram_total_mb?: number | null;
   exec?: ExecOffer | null;
+}
+
+export type BuildAttemptId = string;
+
+export interface BuildAttemptLogRow {
+  id: BuildAttemptId;
+  outcome: AttemptOutcome;
+  reason?: AttemptFailureReason | null;
+  worker?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at: string;
 }
 
 export interface BuildGraph {

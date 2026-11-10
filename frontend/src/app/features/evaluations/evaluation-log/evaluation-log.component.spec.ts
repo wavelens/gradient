@@ -19,7 +19,7 @@ import { EMPTY, NEVER, type Observable, Subject, map, of, throwError } from 'rxj
 import { ApiError } from '@core/services/api.service';
 import { ConfirmService, type ConfirmRequest } from '@shared/confirm';
 import { NotifyService } from '@core/services/notify.service';
-import { UserInfoResponse, BuildItem, BuildWithOutputs, EvaluationResponse, EvaluationStatus, ExecJobSummary } from '@core/models';
+import { UserInfoResponse, BuildAttemptLogRow, BuildItem, BuildWithOutputs, EvaluationResponse, EvaluationStatus, ExecJobSummary } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import type { LogViewerComponent } from '@shared/log';
 
@@ -722,12 +722,35 @@ describe('EvaluationLogComponent', () => {
       const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ message: chunkIndex }) });
       vi.stubGlobal('fetch', fetchMock);
       cmp.builds.set([build('b1', 'hash-hello.drv', 'Completed')]);
+      cmp.selectedBuildId.set('b1');
       cmp.logLoading.set(true);
       await (cmp as unknown as Internals).fetchInitialLogs('b1');
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(cmp.serverLog()?.total).toBe(4200);
       expect(cmp.logLineCount()).toBe(4200);
       expect(cmp.logLoading()).toBe(false);
+    });
+
+    it('opens the log of an earlier attempt and returns to the latest one', async () => {
+      const { cmp } = setup();
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ message: chunkIndex }) });
+      vi.stubGlobal('fetch', fetchMock);
+      const attempt = (id: string, outcome: BuildAttemptLogRow['outcome']): BuildAttemptLogRow =>
+        ({ id, outcome, reason: null, worker: null, started_at: null, finished_at: null, created_at: '2026-01-01T00:00:00' });
+      const [latest, earlier] = [attempt('a2', 'Built'), attempt('a1', 'Failed')];
+      cmp.builds.set([build('b1', 'hash-hello.drv', 'Completed')]);
+      cmp.selectedBuildId.set('b1');
+      cmp.selectedBuildAttempts.set([latest, earlier]);
+
+      cmp.selectAttemptLog(earlier);
+      await vi.waitFor(() => expect(cmp.logLoading()).toBe(false));
+      expect(cmp.selectedAttemptId()).toBe('a1');
+      expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining('builds/b1/log/chunks?attempt=a1'), expect.anything());
+
+      cmp.selectAttemptLog(latest);
+      await vi.waitFor(() => expect(cmp.logLoading()).toBe(false));
+      expect(cmp.selectedAttemptId()).toBeNull();
+      expect(fetchMock).toHaveBeenLastCalledWith(expect.stringMatching(/builds\/b1\/log\/chunks$/), expect.anything());
     });
 
     it('keeps the #L line link in the URL for the first log only', () => {
@@ -791,6 +814,7 @@ describe('EvaluationLogComponent', () => {
             getBuild,
             getBuilds,
             getEvaluationMessages: () => of([]),
+            getBuildAttempts: () => of([]),
           } },
         ],
       });
@@ -826,6 +850,7 @@ describe('EvaluationLogComponent', () => {
             getBuild,
             getBuilds,
             getEvaluationMessages: () => of([]),
+            getBuildAttempts: () => of([]),
           } },
         ],
       });
@@ -931,6 +956,7 @@ describe('EvaluationLogComponent', () => {
             getEvaluation: () => of({ id: 'eval-1', status: 'Failed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null, ...evaluation }),
             getBuilds,
             getEvaluationMessages: () => of([]),
+            getBuildAttempts: () => of([]),
           } },
         ],
       });
@@ -1112,6 +1138,7 @@ describe('EvaluationLogComponent', () => {
             getEvaluation,
             getBuilds: () => of({ builds, total: builds.length, active_count: 0 }),
             getEvaluationMessages: () => of([]),
+            getBuildAttempts: () => of([]),
           } },
           { provide: LiveService, useValue: { connect: () => frames } },
         ],
@@ -1199,6 +1226,7 @@ describe('EvaluationLogComponent', () => {
               builds: [build('b1', 'hash-hello.drv', state.build)], total: 1, active_count: state.build === 'Building' ? 1 : 0,
             }),
             getEvaluationMessages: () => of([]),
+            getBuildAttempts: () => of([]),
             abortEvaluation: () => of('ok'),
           } },
           { provide: LiveService, useValue: { connect: () => frames } },
@@ -1248,6 +1276,7 @@ describe('EvaluationLogComponent', () => {
             getBuild,
             getBuilds: () => of({ builds: [build('b1', 'hash-hello.drv', 'Building')], total: 1, active_count: 1 }),
             getEvaluationMessages: () => of([]),
+            getBuildAttempts: () => of([]),
           } },
           { provide: LiveService, useValue: { connect: () => frames } },
         ],
@@ -1468,6 +1497,7 @@ describe('EvaluationLogComponent', () => {
             }),
             getBuilds: () => of({ builds: [], total: 0, active_count: 0 }),
             getEvaluationMessages: () => of([]),
+            getBuildAttempts: () => of([]),
           } },
         ],
       });
@@ -1507,6 +1537,7 @@ describe('EvaluationLogComponent', () => {
             getEvaluation: () => of(EVALUATION),
             getBuilds: () => of({ builds: [], total: 0, active_count: 0 }),
             getEvaluationMessages: () => of([]),
+            getBuildAttempts: () => of([]),
             ...service,
           } },
         ],
@@ -1585,6 +1616,7 @@ describe('EvaluationLogComponent', () => {
           getEvaluation,
           getBuilds: () => of({ builds: [], total: 0, active_count: 0 }),
           getEvaluationMessages: () => of([]),
+          getBuildAttempts: () => of([]),
         } },
         { provide: TasksService, useValue: { getTask, getTaskInfo: () => NEVER } },
       ],

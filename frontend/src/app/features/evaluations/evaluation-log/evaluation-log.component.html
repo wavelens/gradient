@@ -218,6 +218,34 @@
                                [busy]="execJobStartingId() === job.id" (start)="runWaitingExecJob(job)" />
           }
         }
+        @if (selectedSection() !== 'messages' && selectedBuildAttempts().length > 1) {
+          <gr-table class="build-attempts">
+            <thead>
+              <tr>
+                <th>Attempt</th>
+                <th>Result</th>
+                <th>Worker</th>
+                <th>Start</th>
+                <th class="num">Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (attempt of selectedBuildAttempts(); track attempt.id; let i = $index, count = $count) {
+                @let shown = (selectedAttemptId() ?? selectedBuildAttempts()[0].id) === attempt.id;
+                <tr class="is-clickable" [class.is-selected]="shown" (click)="selectAttemptLog(attempt)">
+                  <td>
+                    <button type="button" class="build-attempt-link" [attr.aria-pressed]="shown">#{{ count - i }}</button>
+                    @if (i === 0) { <gr-badge severity="info">Latest</gr-badge> }
+                  </td>
+                  <td>{{ buildAttemptOutcomeText(attempt) }}</td>
+                  <td class="mono">{{ attempt.worker ?? '-' }}</td>
+                  <td>{{ attempt.started_at ?? attempt.created_at | serverDate }}</td>
+                  <td class="num mono">{{ formatBuildAttemptDurationText(attempt) }}</td>
+                </tr>
+              }
+            </tbody>
+          </gr-table>
+        }
         @if (selectedSection() === 'messages') {
           <div class="messages-panel">
             <gr-load-state [loading]="messagesLoading()" [error]="messagesError()" [empty]="messages().length === 0" flat

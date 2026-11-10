@@ -25,6 +25,7 @@ use crate::ids::{BuildAttemptId, BuildJobId, DerivationBuildId, DispatchedJobId}
     Serialize,
     IntoPrimitive,
     TryFromPrimitive,
+    utoipa::ToSchema,
 )]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum AttemptOutcome {
@@ -54,6 +55,7 @@ pub enum AttemptOutcome {
     Serialize,
     IntoPrimitive,
     TryFromPrimitive,
+    utoipa::ToSchema,
 )]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum AttemptFailureReason {
@@ -132,6 +134,12 @@ pub enum Relation {
         to = "super::dispatched_job::Column::Id"
     )]
     DispatchedJob,
+}
+
+impl Related<super::dispatched_job::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::DispatchedJob.def()
+    }
 }
 
 impl ActiveModelBehavior for ActiveModel {}

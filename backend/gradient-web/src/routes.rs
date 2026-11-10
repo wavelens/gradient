@@ -373,6 +373,7 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(builds::closure::get_eval_runtime_closure))
                 .routes(routes!(builds::query::get_build))
                 .routes(routes!(builds::log::get_build_log))
+                .routes(routes!(builds::attempts::get_build_attempts))
                 .routes(routes!(builds::log_chunks::get_build_log_chunks))
                 .routes(routes!(builds::log_chunks::get_build_log_chunk))
                 .routes(routes!(builds::log_chunks::get_build_log_lines))

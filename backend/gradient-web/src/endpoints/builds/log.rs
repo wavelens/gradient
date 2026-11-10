@@ -8,7 +8,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use async_stream::stream;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
@@ -18,12 +18,20 @@ use gradient_db::lookup::by_id;
 use gradient_db::scheduling::build_attempt::latest_attempt_id;
 use gradient_db::status::log_tail::LogTail;
 use gradient_types::*;
+use serde::Deserialize;
 use std::sync::Arc;
 use tokio::time::Duration;
 
 use super::BuildAccessContext;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct BuildLogAttemptQuery {
+    /// The attempt to read logs from, as listed in `GET /builds/{build}/attempts`. The default is the latest attempt.
+    pub attempt: Option<BuildAttemptId>,
+}
 
 #[utoipa::path(
     get,
@@ -32,7 +40,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
     tag = "builds",
     summary = "Get build log",
     description = "Returns the complete build log as a single string. Empty string if no log is available yet.\n\nA `Substituted` build (its outputs came from a cache) has no log of its\nown, so the log of the most recent prior build of the same derivation is\nreturned instead. The chunk/lines endpoints fall back the same way.\n\n**Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.",
-    params(("build" = BuildJobId, Path)),
+    params(("build" = BuildJobId, Path), BuildLogAttemptQuery),
     responses((status = OK, description = "Build log", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn get_build_log(
@@ -40,10 +48,13 @@ pub async fn get_build_log(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(build_id): Path<BuildJobId>,
+    Query(query): Query<BuildLogAttemptQuery>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let ctx =
         BuildAccessContext::load(&state.web_db, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log = match super::effective_log_id(&state.web_db, &ctx.shared_build).await {
+    let log = match super::build_attempt_id_for_log(&state.web_db, &ctx.shared_build, query.attempt)
+        .await?
+    {
         Some(key) => state.log_storage.read(key).await?,
         None => String::new(),
     };

@@ -250,6 +250,23 @@ pub async fn latest_attempt_worker<C: ConnectionTrait>(
     Ok(job.map(|j| j.worker_id))
 }
 
+pub async fn list_build_attempts_with_worker_id_newest_first<C: ConnectionTrait>(
+    db: &C,
+    derivation_build: DerivationBuildId,
+) -> Result<Vec<(Model, Option<String>)>, DbErr> {
+    let rows = Entity::find()
+        .filter(Column::DerivationBuild.eq(derivation_build))
+        .order_by_desc(Column::CreatedAt)
+        .find_also_related(gradient_entity::dispatched_job::Entity)
+        .all(db)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(attempt, job)| (attempt, job.map(|j| j.worker_id)))
+        .collect())
+}
+
 pub async fn finish_latest_attempt<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,

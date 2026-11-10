@@ -15,6 +15,7 @@ import {
   EvaluationMessageResponse,
   PaginatedBuilds,
   BuildWithOutputs,
+  BuildAttemptLogRow,
   BuildGraph,
   ClosureGraph,
 } from '@core/models';
@@ -83,6 +84,10 @@ export class EvaluationsService {
 
   getBuildLog(buildId: string): Observable<string> {
     return this.api.get<string>(`builds/${buildId}/log`);
+  }
+
+  getBuildAttempts(buildId: string): Observable<BuildAttemptLogRow[]> {
+    return this.api.get<BuildAttemptLogRow[]>(`builds/${buildId}/attempts`);
   }
 
   getBuildGraph(buildId: string): Observable<BuildGraph> {

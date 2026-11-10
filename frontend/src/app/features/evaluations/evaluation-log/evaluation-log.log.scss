@@ -92,3 +92,29 @@
 }
 
 .download-panel { height: 100%; }
+
+.build-attempts {
+  flex-shrink: 0;
+  max-height: 30%;
+  margin: $spacing-sm $spacing-lg;
+  overflow-y: auto;
+
+  td { white-space: nowrap; }
+
+  .mono { font-family: $font-family-mono; }
+
+  tr.is-selected > td {
+    background: var(--gr-surface-hover);
+    font-weight: 600;
+  }
+}
+
+.build-attempt-link {
+  margin-right: $spacing-sm;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
