@@ -1329,15 +1329,6 @@ struct Substitutable {
     unneeded: Vec<(DerivationId, String)>,
 }
 
-impl Substitutable {
-    fn partly_or_held_here(mut self, held_here: &BTreeSet<DerivationId>) -> Self {
-        let partly: BTreeSet<DerivationId> = self.unneeded.iter().map(|(d, _)| *d).collect();
-        self.shared_builds
-            .retain(|d| partly.contains(d) || held_here.contains(d));
-        self
-    }
-}
-
 fn held_here(
     outputs: &[MDerivationOutput],
     stored_here: impl Fn(&MDerivationOutput) -> bool,
@@ -1542,8 +1533,9 @@ async fn waiting_inputs<C: ConnectionTrait>(
     Ok(inputs)
 }
 
-/// Outputs our cache held before the probe never come back as hits, so a shared build missing only
-/// unneeded outputs besides them, or nothing our cache does not store, is fetched instead of built.
+/// Outputs that our cache held before the probe never come back as hits. Outputs that an earlier
+/// probe already found upstream never come back as hits either. A shared build missing only
+/// unneeded outputs apart from those outputs is fetched instead of built.
 async fn substitute_available(
     ctx: &DbContext,
     shared_builds: &[DerivationId],
@@ -1584,11 +1576,7 @@ async fn substitute_available(
         .await
         .context("find the outputs a wanted parent needs")?;
     let held_here = held_here(&outputs, stored_here);
-    let mut found_builds = substitutable(&outputs, available, &needed);
-    if matches!(found, Found::HeldBeforeTheProbe) {
-        found_builds = found_builds.partly_or_held_here(&held_here);
-    }
-    let flipped = flip_cache_available(db, found_builds).await?;
+    let flipped = flip_cache_available(db, substitutable(&outputs, available, &needed)).await?;
 
     let mut present = flipped.partly.clone();
     present.extend(flipped.all.iter().filter(|d| held_here.contains(d)));
