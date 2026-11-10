@@ -33,7 +33,7 @@ mod store_paths;
 
 use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
-use axum::extract::{ConnectInfo, DefaultBodyLimit, MatchedPath};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, FromRef, MatchedPath};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use governor::middleware::NoOpMiddleware;
@@ -55,7 +55,7 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 use uuid::Uuid;
 
-use authorization::MaybeUser;
+use authorization::{MaybeUser, WebSocketCredentialRecheckDependencies};
 use endpoints::{handle_404, metrics};
 use gradient_core::{InitError, ServerState};
 use gradient_scheduler::Scheduler;
@@ -136,6 +136,17 @@ fn rate_limit<K: KeyExtractor>(
         .ok_or_else(|| InitError::NetworkConfig("invalid rate-limit configuration".into()))?;
 
     Ok(Arc::new(config))
+}
+
+impl FromRef<Arc<ServerState>> for WebSocketCredentialRecheckDependencies {
+    fn from_ref(state: &Arc<ServerState>) -> Self {
+        Self {
+            web_db: state.web_db.clone(),
+            jwt_secret: state.jwt_secret.clone(),
+            last_used_stamps: Arc::clone(&state.memory.last_used_stamps),
+            events: state.events.clone(),
+        }
+    }
 }
 
 pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {

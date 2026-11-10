@@ -34,4 +34,6 @@ pub use self::provider_flow::{
     ProviderCallback, ProviderPurpose, provider_authorize, provider_callback,
 };
 pub use self::scim::authorize_scim;
-pub use self::websocket_credential_recheck::LiveStreamAuthToken;
+pub use self::websocket_credential_recheck::{
+    LiveStreamAuthToken, WebSocketCredentialRecheckDependencies,
+};

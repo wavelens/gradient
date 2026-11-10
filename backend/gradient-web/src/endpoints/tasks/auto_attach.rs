@@ -6,11 +6,12 @@
 
 use crate::endpoints::git_host_hooks::installation::github_full_name;
 use gradient_ci::IntegrationKind;
-use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::{
-    GitHostType, MIntegration, MTask, MTaskAction, MTaskTrigger, TaskActionId, TaskTriggerId,
+    GitHostType, GitHubAppConfig, MIntegration, MTask, MTaskAction, MTaskTrigger, TaskActionId,
+    TaskTriggerId,
 };
 use sea_orm::{ConnectionTrait, TransactionTrait};
 
@@ -196,8 +197,13 @@ pub(crate) async fn apply<C: ConnectionTrait>(
     Ok(attached)
 }
 
-async fn bind_github_app(state: &ServerState, task: &MTask) -> anyhow::Result<()> {
-    let Some(app) = state.config.github_app.as_ref() else {
+async fn bind_github_app(
+    web_db: &WebDb,
+    http: &reqwest::Client,
+    github_app: Option<&GitHubAppConfig>,
+    task: &MTask,
+) -> anyhow::Result<()> {
+    let Some(app) = github_app else {
         return Ok(());
     };
     let Some(full_name) = github_full_name(&task.repository) else {
@@ -206,17 +212,14 @@ async fn bind_github_app(state: &ServerState, task: &MTask) -> anyhow::Result<()
     let pem = tokio::fs::read_to_string(&app.private_key_file).await?;
     let Some((installation_id, account)) =
         gradient_git_host::github_app::get_repository_installation(
-            &state.http,
-            app.app_id,
-            &pem,
-            &full_name,
+            http, app.app_id, &pem, &full_name,
         )
         .await?
     else {
         return Ok(());
     };
 
-    let txn = state.web_db.inner().begin().await?;
+    let txn = web_db.inner().begin().await?;
     let installation = gradient_ci::upsert_github_installation(
         &txn,
         task.project,
@@ -239,12 +242,17 @@ async fn bind_github_app(state: &ServerState, task: &MTask) -> anyhow::Result<()
     Ok(())
 }
 
-pub(crate) async fn connect_repository(state: &ServerState, task: &MTask) {
-    if let Err(e) = bind_github_app(state, task).await {
+pub(crate) async fn connect_repository(
+    web_db: &WebDb,
+    http: &reqwest::Client,
+    github_app: Option<&GitHubAppConfig>,
+    task: &MTask,
+) {
+    if let Err(e) = bind_github_app(web_db, http, github_app, task).await {
         tracing::warn!(task = %task.id, error = %e, "Failed to link the repository to the GitHub App's installation");
     }
-    let attached = match gradient_db::integrations::of_project(&state.web_db, task.project).await {
-        Ok(integrations) => apply(&state.web_db, task, &integrations).await,
+    let attached = match gradient_db::integrations::of_project(web_db, task.project).await {
+        Ok(integrations) => apply(web_db, task, &integrations).await,
         Err(e) => Err(e),
     };
     if let Err(e) = attached {

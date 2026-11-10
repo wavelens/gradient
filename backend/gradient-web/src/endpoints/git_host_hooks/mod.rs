@@ -75,21 +75,20 @@ pub async fn github_app_webhook(
 ) -> WebResult<Json<BaseResponse<IncomingWebhookResponse>>> {
     let mut log = DeliveryLog::default();
     let result =
-        handle_github_app_webhook(&state, &scheduler, peer, &headers, &body, &mut log).await;
+        handle_github_app_webhook(&state.ci(), &scheduler, peer, &headers, &body, &mut log).await;
     log.record(&state.web_db, &result).await;
     result.map(ok_json)
 }
 
 async fn handle_github_app_webhook(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     peer: Option<std::net::SocketAddr>,
     headers: &HeaderMap,
     body: &Bytes,
     log: &mut DeliveryLog,
 ) -> WebResult<IncomingWebhookResponse> {
-    let ci = state.ci();
-    let Some(github_app) = state.config.github_app.clone() else {
+    let Some(github_app) = ci.db.config.github_app.clone() else {
         warn!(
             "GitHub App webhook received but GitHub App is not fully configured \
              (requires GRADIENT_GITHUB_APP_ID, GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE, \
@@ -118,7 +117,7 @@ async fn handle_github_app_webhook(
     let peer_ip = peer
         .map(|p| p.ip())
         .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let client_ip = resolve_client_ip(headers, peer_ip, &state.config.network.trusted_proxies);
+    let client_ip = resolve_client_ip(headers, peer_ip, &ci.db.config.network.trusted_proxies);
 
     let event = headers
         .get("X-GitHub-Event")
@@ -136,9 +135,8 @@ async fn handle_github_app_webhook(
             Some(PushOutcome::Build(parsed)) => {
                 let urls = parsed.repository_urls.clone();
                 log.integrations =
-                    github_app_integrations(&ci, body, &urls, client_ip, "push").await;
-                let outcome =
-                    route_github_app_push(&ci, scheduler, &log.integrations, parsed).await;
+                    github_app_integrations(ci, body, &urls, client_ip, "push").await;
+                let outcome = route_github_app_push(ci, scheduler, &log.integrations, parsed).await;
                 IncomingWebhookResponse::new("push", urls, outcome)
             }
         },
@@ -148,8 +146,8 @@ async fn handle_github_app_webhook(
             };
             let urls = parsed.repository_urls.clone();
             log.integrations =
-                github_app_integrations(&ci, body, &urls, client_ip, "pull_request").await;
-            let outcome = route_github_app_pr(&ci, scheduler, &log.integrations, parsed).await;
+                github_app_integrations(ci, body, &urls, client_ip, "pull_request").await;
+            let outcome = route_github_app_pr(ci, scheduler, &log.integrations, parsed).await;
             IncomingWebhookResponse::new("pull_request", urls, outcome)
         }
         "merge_group" => match ParsedMergeGroupEvent::from_github(body) {
@@ -158,9 +156,9 @@ async fn handle_github_app_webhook(
             Some(MergeGroupOutcome::Build(parsed)) => {
                 let urls = parsed.repository_urls.clone();
                 log.integrations =
-                    github_app_integrations(&ci, body, &urls, client_ip, "merge_group").await;
+                    github_app_integrations(ci, body, &urls, client_ip, "merge_group").await;
                 let outcome =
-                    route_github_app_merge_group(&ci, scheduler, &log.integrations, parsed).await;
+                    route_github_app_merge_group(ci, scheduler, &log.integrations, parsed).await;
                 IncomingWebhookResponse::new("merge_group", urls, outcome)
             }
         },
@@ -169,22 +167,21 @@ async fn handle_github_app_webhook(
                 return Err(GitHostHookRefusal::MalformedPayload.into());
             };
             let urls = parsed.repository_urls.clone();
-            log.integrations =
-                github_app_integrations(&ci, body, &urls, client_ip, "release").await;
-            let outcome = route_github_app_release(&ci, scheduler, &log.integrations, parsed).await;
+            log.integrations = github_app_integrations(ci, body, &urls, client_ip, "release").await;
+            let outcome = route_github_app_release(ci, scheduler, &log.integrations, parsed).await;
             IncomingWebhookResponse::new("release", urls, outcome)
         }
         "installation" | "installation_repositories" => {
-            handle_github_installation(&state.web_db, body).await;
+            handle_github_installation(&ci.db.web_db, body).await;
             IncomingWebhookResponse::empty(&event)
         }
         "check_run" => {
-            approval::handle_github_check_run(&ci, scheduler, body).await;
+            approval::handle_github_check_run(ci, scheduler, body).await;
             IncomingWebhookResponse::empty(&event)
         }
         "issue_comment" => {
             commands::handle_issue_comment(
-                &ci,
+                ci,
                 scheduler,
                 GitHostType::GitHub,
                 None,
@@ -195,7 +192,7 @@ async fn handle_github_app_webhook(
             IncomingWebhookResponse::empty(&event)
         }
         "pull_request_review" => {
-            approval::handle_pull_request_review(&ci, GitHostType::GitHub, None, body, client_ip)
+            approval::handle_pull_request_review(ci, GitHostType::GitHub, None, body, client_ip)
                 .await;
             IncomingWebhookResponse::empty(&event)
         }
@@ -355,14 +352,22 @@ pub async fn git_host_webhook(
     body: Bytes,
 ) -> WebResult<Json<BaseResponse<IncomingWebhookResponse>>> {
     let mut log = DeliveryLog::default();
-    let result =
-        handle_git_host_webhook(&state, &scheduler, peer, target, &headers, &body, &mut log).await;
+    let result = handle_git_host_webhook(
+        &state.ci(),
+        &scheduler,
+        peer,
+        target,
+        &headers,
+        &body,
+        &mut log,
+    )
+    .await;
     log.record(&state.web_db, &result).await;
     result.map(ok_json)
 }
 
 async fn handle_git_host_webhook(
-    state: &Arc<ServerState>,
+    ci: &CiContext,
     scheduler: &Arc<Scheduler>,
     peer: Option<std::net::SocketAddr>,
     (git_host, project_name, integration_name): (String, String, String),
@@ -370,12 +375,11 @@ async fn handle_git_host_webhook(
     body: &Bytes,
     log: &mut DeliveryLog,
 ) -> WebResult<IncomingWebhookResponse> {
-    let ci = state.ci();
     let Some(git_host_type) = GitHostType::from_path_segment(&git_host) else {
         warn!(git_host = %git_host, "Unknown Git host path segment");
         return Err(GitHostHookRefusal::IntegrationNotFound.into());
     };
-    let Some(provider) = state.git_host.get(git_host_type).cloned() else {
+    let Some(provider) = ci.git_host.get(git_host_type).cloned() else {
         warn!(git_host = %git_host, "No Git host provider registered");
         return Err(GitHostHookRefusal::IntegrationNotFound.into());
     };
@@ -383,7 +387,7 @@ async fn handle_git_host_webhook(
         return Err(GitHostHookRefusal::UnsupportedGitHost.into());
     }
 
-    let project = gradient_db::projects::by_name(&state.web_db, project_name.as_str())
+    let project = gradient_db::projects::by_name(&ci.db.web_db, project_name.as_str())
         .await
         .inspect_err(|e| {
             warn!(error = %e, project = %project_name, "DB error looking up project for Git host webhook");
@@ -392,7 +396,7 @@ async fn handle_git_host_webhook(
         .ok_or(GitHostHookRefusal::IntegrationNotFound)?;
 
     let integration = gradient_db::integrations::by_name(
-        &state.web_db,
+        &ci.db.web_db,
         project.id,
         IntegrationKind::Inbound,
         integration_name.as_str(),
@@ -415,7 +419,7 @@ async fn handle_git_host_webhook(
     })?;
 
     let plaintext_secret = decrypt_secret_with_file(
-        &state.config.secrets.crypt_file,
+        &ci.db.config.secrets.crypt_file,
         encrypted_secret,
     )
     .inspect_err(|e| {
@@ -434,7 +438,7 @@ async fn handle_git_host_webhook(
         let peer_ip = peer
             .map(|p| p.ip())
             .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-        let client_ip = resolve_client_ip(headers, peer_ip, &state.config.network.trusted_proxies);
+        let client_ip = resolve_client_ip(headers, peer_ip, &ci.db.config.network.trusted_proxies);
         if !ip_allowed(client_ip, &allowlist) {
             warn!(
                 project = %project_name,
@@ -457,7 +461,7 @@ async fn handle_git_host_webhook(
             Some(PushOutcome::Ignored) => IncomingWebhookResponse::empty("push"),
             Some(PushOutcome::Build(parsed)) => {
                 let outcome =
-                    trigger_push_for_integration(&ci, scheduler, integration_id, &parsed).await;
+                    trigger_push_for_integration(ci, scheduler, integration_id, &parsed).await;
                 IncomingWebhookResponse::new("push", parsed.repository_urls, outcome)
             }
         },
@@ -469,7 +473,7 @@ async fn handle_git_host_webhook(
             let approval_ctx = approval::PullRequestApprovalContext::from(&parsed);
             let head_clone = parsed.head_repo_clone_url.clone();
             let outcome = trigger_pr_for_integration(
-                &ci,
+                ci,
                 scheduler,
                 integration_id,
                 &urls,
@@ -493,7 +497,7 @@ async fn handle_git_host_webhook(
             };
             let urls = parsed.repository_urls.clone();
             let outcome = trigger_release_for_integration(
-                &ci,
+                ci,
                 scheduler,
                 integration_id,
                 &urls,
@@ -510,9 +514,9 @@ async fn handle_git_host_webhook(
                 .map(|p| p.ip())
                 .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
             let client_ip =
-                resolve_client_ip(headers, peer_ip, &state.config.network.trusted_proxies);
+                resolve_client_ip(headers, peer_ip, &ci.db.config.network.trusted_proxies);
             commands::handle_issue_comment(
-                &ci,
+                ci,
                 scheduler,
                 git_host_type,
                 Some(integration_id),
@@ -527,9 +531,9 @@ async fn handle_git_host_webhook(
                 .map(|p| p.ip())
                 .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
             let client_ip =
-                resolve_client_ip(headers, peer_ip, &state.config.network.trusted_proxies);
+                resolve_client_ip(headers, peer_ip, &ci.db.config.network.trusted_proxies);
             approval::handle_pull_request_review(
-                &ci,
+                ci,
                 git_host_type,
                 Some(integration_id),
                 body,

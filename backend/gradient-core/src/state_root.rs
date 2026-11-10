@@ -41,7 +41,7 @@ use crate::login_provider::LoginMethods;
 #[derive(Debug)]
 pub struct InstanceMemory {
     pub db: DbMemory,
-    pub last_used_stamps: Debounce<Uuid>,
+    pub last_used_stamps: Arc<Debounce<Uuid>>,
     pub cache_traffic: Arc<CacheTraffic>,
     pub build_progress: Arc<Latest<DerivationBuildId, BuildProgress>>,
     pub eval_progress: Arc<Latest<EvaluationId, EvaluationProgress>>,
@@ -83,8 +83,8 @@ pub type ServerState = AppState;
 
 pub const LAST_USED_STAMP_INTERVAL: Duration = Duration::from_secs(60);
 
-pub fn last_used_stamps() -> Debounce<Uuid> {
-    Debounce::new(LAST_USED_STAMP_INTERVAL)
+pub fn last_used_stamps() -> Arc<Debounce<Uuid>> {
+    Arc::new(Debounce::new(LAST_USED_STAMP_INTERVAL))
 }
 
 pub const BUILD_PROGRESS_TTL: Duration = Duration::from_secs(15);

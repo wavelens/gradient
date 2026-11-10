@@ -4,19 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use axum::extract::FromRequestParts;
+use axum::extract::{FromRef, FromRequestParts};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
-use gradient_core::ServerState;
+use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
 use gradient_types::events::audit::Action;
 use gradient_types::events::{Event, EventRx};
 use gradient_types::*;
+use gradient_util::debounce::Debounce;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{Instant, interval_at};
+use uuid::Uuid;
 
 use super::jwt::{decode_jwt, extract_bearer_or_cookie};
 use super::middleware::MaybeUser;
@@ -34,8 +36,16 @@ const AUDIT_ACTIONS_REQUIRING_WEBSOCKET_CREDENTIAL_RECHECK: &[Action] = &[
 /// The socket can stay open only while the session or API key that opened it is valid. Rechecks occur on every matching audit event and at a fixed interval and that interval can also cover changes on other server instances and accounts that an admin disabled.
 pub struct LiveStreamAuthToken(Option<SignedInCaller>);
 
+#[derive(Clone)]
+pub struct WebSocketCredentialRecheckDependencies {
+    pub(crate) web_db: WebDb,
+    pub(crate) jwt_secret: SecretString,
+    pub(crate) last_used_stamps: Arc<Debounce<Uuid>>,
+    pub(crate) events: EventBus,
+}
+
 struct SignedInCaller {
-    state: Arc<ServerState>,
+    dependencies: WebSocketCredentialRecheckDependencies,
     token: String,
     user: UserId,
     audit_events: EventRx,
@@ -76,16 +86,16 @@ impl SignedInCaller {
     }
 
     async fn should_keep_stream_open(&self) -> bool {
-        let state = &self.state;
+        let dependencies = &self.dependencies;
         let decoded = decode_jwt(
-            &state.web_db,
-            &state.jwt_secret,
-            &state.memory.last_used_stamps,
+            &dependencies.web_db,
+            &dependencies.jwt_secret,
+            &dependencies.last_used_stamps,
             self.token.clone(),
         )
         .await;
         match decoded {
-            Ok(decoded) => match by_id::<EUser, _>(&state.web_db, decoded.user_id()).await {
+            Ok(decoded) => match by_id::<EUser, _>(&dependencies.web_db, decoded.user_id()).await {
                 Ok(user) => user.is_some_and(|user| user.active),
                 Err(_) => true,
             },
@@ -94,24 +104,28 @@ impl SignedInCaller {
     }
 }
 
-impl FromRequestParts<Arc<ServerState>> for LiveStreamAuthToken {
+impl<S> FromRequestParts<S> for LiveStreamAuthToken
+where
+    S: Send + Sync,
+    WebSocketCredentialRecheckDependencies: FromRef<S>,
+{
     type Rejection = Infallible;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &Arc<ServerState>,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let user = parts
             .extensions
             .get::<MUser>()
             .or_else(|| parts.extensions.get::<MaybeUser>()?.0.as_ref())
             .map(|user| user.id);
         let token = extract_bearer_or_cookie(&parts.headers);
-        Ok(Self(user.zip(token).map(|(user, token)| SignedInCaller {
-            state: Arc::clone(state),
-            token: token.to_owned(),
-            user,
-            audit_events: state.events.subscribe(),
+        Ok(Self(user.zip(token).map(|(user, token)| {
+            let dependencies = WebSocketCredentialRecheckDependencies::from_ref(state);
+            SignedInCaller {
+                audit_events: dependencies.events.subscribe(),
+                dependencies,
+                token: token.to_owned(),
+                user,
+            }
         })))
     }
 }
@@ -134,25 +148,27 @@ mod tests {
         }
     }
 
-    fn api_key_caller(user: UserId) -> (Arc<ServerState>, LiveStreamAuthToken) {
+    fn api_key_caller(user: UserId) -> (EventBus, LiveStreamAuthToken) {
         let db = mock_db()
             .append_query_results([Vec::<api::Model>::new()])
             .into_connection();
         let state = TestState::new().web_db(db).build();
+        let dependencies = WebSocketCredentialRecheckDependencies::from_ref(&state);
+        let events = dependencies.events.clone();
         let caller = SignedInCaller {
-            state: Arc::clone(&state),
+            audit_events: events.subscribe(),
+            dependencies,
             token: format!("GRAD{}", "k".repeat(64)),
             user,
-            audit_events: state.events.subscribe(),
         };
-        (state, LiveStreamAuthToken(Some(caller)))
+        (events, LiveStreamAuthToken(Some(caller)))
     }
 
     #[tokio::test]
     async fn a_revoked_api_key_ends_the_stream_right_after_its_audit_event() {
         let user = UserId::now_v7();
-        let (state, credentials) = api_key_caller(user);
-        state.events.publish(audited(Action::ApiKeyRevoke, user));
+        let (events, credentials) = api_key_caller(user);
+        events.publish(audited(Action::ApiKeyRevoke, user));
 
         tokio::time::timeout(
             Duration::from_secs(5),
@@ -165,7 +181,7 @@ mod tests {
     #[tokio::test]
     async fn only_credential_events_of_the_same_user_trigger_a_recheck() {
         let user = UserId::now_v7();
-        let (_state, credentials) = api_key_caller(user);
+        let (_events, credentials) = api_key_caller(user);
         let caller = credentials.0.expect("signed in");
 
         assert!(caller.ends_credentials(&Event::Audit(audited(Action::SessionRevoke, user))));

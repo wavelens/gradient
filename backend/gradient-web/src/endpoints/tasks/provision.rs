@@ -83,9 +83,9 @@ impl Target {
     }
 }
 
-fn decrypt(state: &ServerState, encrypted: &str) -> WebResult<SecretString> {
+fn decrypt(crypt_file: &str, encrypted: &str) -> WebResult<SecretString> {
     Ok(
-        decrypt_secret_with_file(&state.config.secrets.crypt_file, encrypted)
+        decrypt_secret_with_file(crypt_file, encrypted)
             .context("decrypt integration credential")?,
     )
 }
@@ -134,14 +134,14 @@ pub async fn post_install_webhook(
     .url_for(inbound)
     .ok_or(ProvisionError::Unsupported("GitHub"))?;
     let secret = decrypt(
-        &state,
+        &state.config.secrets.crypt_file,
         inbound
             .secret
             .as_deref()
             .ok_or(TaskRefusal::ProvisionSecretMissing)?,
     )?;
     let token = decrypt(
-        &state,
+        &state.config.secrets.crypt_file,
         outbound
             .access_token
             .as_deref()
@@ -187,7 +187,7 @@ pub async fn post_install_deploy_key(
         IntegrationKind::Outbound,
     )?;
     let token = decrypt(
-        &state,
+        &state.config.secrets.crypt_file,
         outbound
             .access_token
             .as_deref()

@@ -270,7 +270,13 @@ pub async fn put(
     };
     gradient_db::triggers::insert(&state.web_db, default_trigger).await?;
 
-    auto_attach::connect_repository(&state, &task).await;
+    auto_attach::connect_repository(
+        &state.web_db,
+        &state.http,
+        state.config.github_app.as_ref(),
+        &task,
+    )
+    .await;
 
     audit
         .write(
@@ -424,7 +430,13 @@ pub async fn patch_task(
         .map_err(|e| WebError::from_db_err(e, Resource::TaskName))?;
 
     if repository_changed {
-        auto_attach::connect_repository(&state, &updated).await;
+        auto_attach::connect_repository(
+            &state.web_db,
+            &state.http,
+            state.config.github_app.as_ref(),
+            &updated,
+        )
+        .await;
     }
 
     audit.write(Action::TaskUpdate, owner, fields).await;
