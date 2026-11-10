@@ -74,7 +74,8 @@
   flex-wrap: wrap;
   align-items: center;
   gap: $spacing-sm;
-  flex-shrink: 0;
+  min-width: 0;
+  max-width: 100%;
   margin-left: auto;
 }
 
@@ -182,6 +183,12 @@
   }
 
   .info-bar-left { margin-left: 0; }
+
+  .info-bar-right {
+    flex-basis: 100%;
+    margin-left: 0;
+    padding-bottom: $spacing-xs;
+  }
 
   .log-sidebar {
     position: absolute;
