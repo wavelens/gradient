@@ -43,41 +43,6 @@ async fn upload_blobs_decodes_counts() {
 }
 
 #[tokio::test]
-async fn upload_source_nar_returns_started_build() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/api/v1/build-requests/source"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-                "evaluation": "00000000-0000-0000-0000-000000000001", "task": "00000000-0000-0000-0000-000000000002", "commit": "00000000-0000-0000-0000-000000000003", "cache": "my-cache"
-            }))),
-        )
-        .mount(&server)
-        .await;
-
-    let client = Client::builder()
-        .base_url(server.uri())
-        .token("t")
-        .build()
-        .unwrap();
-    let resp = client
-        .build_requests()
-        .upload_source_nar(
-            "my-project",
-            Some("pkg"),
-            Some("x86_64-linux"),
-            b"nar".to_vec(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        resp.evaluation.to_string(),
-        "00000000-0000-0000-0000-000000000001"
-    );
-    assert_eq!(resp.cache.as_deref(), Some("my-cache"));
-}
-
-#[tokio::test]
 async fn submit_manifest_returns_session() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

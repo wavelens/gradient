@@ -4,6 +4,7 @@
 use crate::api::{
     ExecJobLog, ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary,
 };
+use crate::http::encode_url_component;
 use crate::http::io_error;
 use crate::{Client, ConnectorError, http};
 use futures::{SinkExt, Stream, StreamExt};
@@ -20,16 +21,22 @@ impl ExecJobsApi<'_> {
         &self,
         evaluation: &str,
     ) -> Result<Vec<ExecJobSummary>, ConnectorError> {
-        self.get_json(&format!("evals/{evaluation}/exec")).await
+        self.get_json(&format!("evals/{}/exec", encode_url_component(evaluation)))
+            .await
     }
 
     pub async fn get(&self, job: &str) -> Result<ExecJobResponse, ConnectorError> {
-        self.get_json(&format!("exec/{job}")).await
+        self.get_json(&format!("exec/{}", encode_url_component(job)))
+            .await
     }
 
     pub async fn log(&self, job: &str, offset: u64) -> Result<ExecJobLog, ConnectorError> {
-        self.get_json(&format!("exec/{job}/log?offset={offset}"))
-            .await
+        self.get_json(&format!(
+            "exec/{}/log?offset={}",
+            encode_url_component(job),
+            encode_url_component(offset)
+        ))
+        .await
     }
 
     pub async fn abort(&self, job: &str) -> Result<String, ConnectorError> {
@@ -38,15 +45,18 @@ impl ExecJobsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("exec/{job}/abort"),
+            &format!("exec/{}/abort", encode_url_component(job)),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
     pub async fn attach_program_terminal(&self, job: &str) -> Result<GuestSocket, ConnectorError> {
-        self.open_guest_socket(&format!("exec/{job}/shell?attach=true"))
-            .await
+        self.open_guest_socket(&format!(
+            "exec/{}/shell?attach=true",
+            encode_url_component(job)
+        ))
+        .await
     }
 
     pub async fn open_port_forward(
@@ -54,8 +64,12 @@ impl ExecJobsApi<'_> {
         job: &str,
         port: u16,
     ) -> Result<GuestSocket, ConnectorError> {
-        self.open_guest_socket(&format!("exec/{job}/forward?port={port}"))
-            .await
+        self.open_guest_socket(&format!(
+            "exec/{}/forward?port={}",
+            encode_url_component(job),
+            encode_url_component(port)
+        ))
+        .await
     }
 
     pub async fn list_output_files(
@@ -68,7 +82,7 @@ impl ExecJobsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("exec/{job}/outputs"),
+            &format!("exec/{}/outputs", encode_url_component(job)),
             true,
         )?
         .query(&node.map(|node| vec![("node", node)]).unwrap_or_default());
@@ -85,7 +99,7 @@ impl ExecJobsApi<'_> {
         let token = self.0.token().ok_or(ConnectorError::Unauthorized)?;
         let mut url = reqwest::Url::parse(&http::build_url(
             self.0.base_url(),
-            &format!("exec/{job}/outputs"),
+            &format!("exec/{}/outputs", encode_url_component(job)),
         ))
         .map_err(io_error)?;
         url.path_segments_mut()
@@ -123,7 +137,11 @@ impl ExecJobsApi<'_> {
     ) -> Result<String, ConnectorError> {
         let method = if keep { Method::POST } else { Method::DELETE };
         self.0
-            .send_authenticated_request(method, &format!("exec/{job}/keep-vm-running"), None::<&()>)
+            .send_authenticated_request(
+                method,
+                &format!("exec/{}/keep-vm-running", encode_url_component(job)),
+                None::<&()>,
+            )
             .await
     }
 
@@ -134,7 +152,7 @@ impl ExecJobsApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::GET,
-                &format!("exec/{job}/pull-requests"),
+                &format!("exec/{}/pull-requests", encode_url_component(job)),
                 None::<&()>,
             )
             .await
@@ -146,8 +164,11 @@ impl ExecJobsApi<'_> {
         node: Option<u32>,
     ) -> Result<GuestSocket, ConnectorError> {
         let query = node.map(|node| format!("?node={node}")).unwrap_or_default();
-        self.open_guest_socket(&format!("exec/{job}/console{query}"))
-            .await
+        self.open_guest_socket(&format!(
+            "exec/{}/console{query}",
+            encode_url_component(job)
+        ))
+        .await
     }
 
     async fn open_guest_socket(&self, endpoint: &str) -> Result<GuestSocket, ConnectorError> {

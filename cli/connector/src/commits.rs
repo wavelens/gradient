@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::Commit;
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 
@@ -14,7 +15,7 @@ impl CommitsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("commits/{commit}"),
+            &format!("commits/{}", encode_url_component(commit)),
             true,
         )?;
         http::decode(req.send().await?).await

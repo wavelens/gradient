@@ -5,6 +5,7 @@ use crate::api::{
     CreateIntegrationRequest, IntegrationResponse, IntegrationSummaryResponse,
     PatchIntegrationRequest,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 
@@ -17,7 +18,7 @@ impl IntegrationsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/integrations"),
+            &format!("projects/{}/integrations", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -33,7 +34,7 @@ impl IntegrationsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PUT,
-            &format!("projects/{project}/integrations"),
+            &format!("projects/{}/integrations", encode_url_component(project)),
             true,
         )?
         .json(&body);
@@ -49,7 +50,10 @@ impl IntegrationsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/integrations/summary"),
+            &format!(
+                "projects/{}/integrations/summary",
+                encode_url_component(project)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -65,7 +69,11 @@ impl IntegrationsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/integrations/{id}"),
+            &format!(
+                "projects/{}/integrations/{}",
+                encode_url_component(project),
+                encode_url_component(id)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -82,7 +90,11 @@ impl IntegrationsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("projects/{project}/integrations/{id}"),
+            &format!(
+                "projects/{}/integrations/{}",
+                encode_url_component(project),
+                encode_url_component(id)
+            ),
             true,
         )?
         .json(&body);
@@ -95,7 +107,11 @@ impl IntegrationsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("projects/{project}/integrations/{id}"),
+            &format!(
+                "projects/{}/integrations/{}",
+                encode_url_component(project),
+                encode_url_component(id)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await

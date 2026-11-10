@@ -208,6 +208,19 @@ pub(crate) fn build_url(base: &str, path: &str) -> String {
     )
 }
 
+pub(crate) fn encode_url_component(value: impl std::fmt::Display) -> String {
+    value
+        .to_string()
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                char::from(byte).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
 pub(crate) async fn decode_cli_poll(res: Response) -> Result<CliPollOutcome, ConnectorError> {
     let status = res.status();
     let bytes = res.bytes().await?;
@@ -346,6 +359,15 @@ pub(crate) fn io_error(error: impl std::error::Error + Send + Sync + 'static) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_user_supplied_name_stays_one_url_component() {
+        assert_eq!(encode_url_component("web-app_1.x~"), "web-app_1.x~");
+        assert_eq!(encode_url_component("a/b?c#d"), "a%2Fb%3Fc%23d");
+        assert_eq!(encode_url_component("x&y=1 z"), "x%26y%3D1%20z");
+        assert_eq!(encode_url_component("ü"), "%C3%BC");
+        assert_eq!(encode_url_component(42), "42");
+    }
 
     #[test]
     fn websockets_use_the_websocket_scheme_of_the_server() {

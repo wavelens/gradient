@@ -5,6 +5,7 @@ use crate::api::{
     BlobsResponse, ChunkReceived, DispatchRequest, DispatchResponse, InputOverrideBody,
     ManifestRequest, ManifestResponse, RunOptions, SourceFinalize,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use bytes::Bytes;
 use reqwest::Method;
@@ -50,7 +51,7 @@ impl BuildRequestsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("build-requests/{session}/blobs"),
+            &format!("build-requests/{}/blobs", encode_url_component(session)),
             true,
         )?
         .multipart(form);
@@ -58,37 +59,6 @@ impl BuildRequestsApi<'_> {
             .send_request_and_timeout_when_no_progress_for_idle_limit(req)
             .await?;
         http::decode(res).await
-    }
-
-    pub async fn upload_source_nar(
-        &self,
-        project: &str,
-        target: Option<&str>,
-        system: Option<&str>,
-        nar_bytes: Vec<u8>,
-    ) -> Result<DispatchResponse, ConnectorError> {
-        let mut form = reqwest::multipart::Form::new().part(
-            "nar",
-            reqwest::multipart::Part::bytes(nar_bytes).file_name("source.nar"),
-        );
-        if let Some(t) = target {
-            form = form.text("target", t.to_owned());
-        }
-
-        if let Some(s) = system {
-            form = form.text("system", s.to_owned());
-        }
-
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::POST,
-            &format!("build-requests/source?project={project}"),
-            true,
-        )?
-        .multipart(form);
-        http::decode(req.send().await?).await
     }
 
     pub async fn upload_source_chunk(
@@ -104,7 +74,12 @@ impl BuildRequestsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PUT,
-            &format!("build-requests/source/{upload}/chunk?offset={offset}&project={project}"),
+            &format!(
+                "build-requests/source/{}/chunk?offset={}&project={}",
+                encode_url_component(upload),
+                encode_url_component(offset),
+                encode_url_component(project)
+            ),
             true,
         )?
         .header(CONTENT_TYPE, "application/octet-stream")
@@ -143,7 +118,11 @@ impl BuildRequestsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("build-requests/source/{upload}/finalize?project={project}"),
+            &format!(
+                "build-requests/source/{}/finalize?project={}",
+                encode_url_component(upload),
+                encode_url_component(project)
+            ),
             true,
         )?
         .json(&body);
@@ -160,7 +139,7 @@ impl BuildRequestsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("build-requests/{session}/dispatch"),
+            &format!("build-requests/{}/dispatch", encode_url_component(session)),
             true,
         )?
         .json(&body);

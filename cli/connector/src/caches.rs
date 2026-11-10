@@ -10,6 +10,7 @@ use crate::api::{
     RoleListResponseCacheRoleOwner, RoleResponseCacheRoleOwner, SubscriptionRequestItem,
     TeamGrantEntry, UpstreamCacheItem, UpstreamTestResponse,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -69,7 +70,7 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("caches/{cache}"),
+            &format!("caches/{}", encode_url_component(cache)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -85,7 +86,7 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("caches/{cache}"),
+            &format!("caches/{}", encode_url_component(cache)),
             true,
         )?
         .json(&body);
@@ -98,7 +99,7 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("caches/{cache}"),
+            &format!("caches/{}", encode_url_component(cache)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -110,7 +111,7 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("caches/{cache}/key"),
+            &format!("caches/{}/key", encode_url_component(cache)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -122,7 +123,7 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("caches/{cache}/public-key"),
+            &format!("caches/{}/public-key", encode_url_component(cache)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -134,7 +135,7 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("caches/{cache}/stats"),
+            &format!("caches/{}/stats", encode_url_component(cache)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -149,7 +150,7 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("caches/{cache}/upstream-caches"),
+            &format!("caches/{}/upstream-caches", encode_url_component(cache)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -165,7 +166,7 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PUT,
-            &format!("caches/{cache}/upstream-caches"),
+            &format!("caches/{}/upstream-caches", encode_url_component(cache)),
             true,
         )?
         .json(&body);
@@ -183,7 +184,11 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("caches/{cache}/upstream-caches/{id}"),
+            &format!(
+                "caches/{}/upstream-caches/{}",
+                encode_url_component(cache),
+                encode_url_component(id)
+            ),
             true,
         )?
         .json(&body);
@@ -200,7 +205,11 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("caches/{cache}/upstream-caches/{id}"),
+            &format!(
+                "caches/{}/upstream-caches/{}",
+                encode_url_component(cache),
+                encode_url_component(id)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -214,7 +223,11 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::POST,
-                &format!("caches/{cache}/upstream-caches/{id}/test"),
+                &format!(
+                    "caches/{}/upstream-caches/{}/test",
+                    encode_url_component(cache),
+                    encode_url_component(id)
+                ),
                 None::<&()>,
             )
             .await
@@ -224,7 +237,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::POST,
-                &format!("caches/{cache}/active"),
+                &format!("caches/{}/active", encode_url_component(cache)),
                 None::<&()>,
             )
             .await
@@ -234,7 +247,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::DELETE,
-                &format!("caches/{cache}/active"),
+                &format!("caches/{}/active", encode_url_component(cache)),
                 None::<&()>,
             )
             .await
@@ -244,7 +257,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::POST,
-                &format!("caches/{cache}/public"),
+                &format!("caches/{}/public", encode_url_component(cache)),
                 None::<&()>,
             )
             .await
@@ -254,7 +267,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::DELETE,
-                &format!("caches/{cache}/public"),
+                &format!("caches/{}/public", encode_url_component(cache)),
                 None::<&()>,
             )
             .await
@@ -264,7 +277,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::GET,
-                &format!("caches/{cache}/members"),
+                &format!("caches/{}/members", encode_url_component(cache)),
                 None::<&()>,
             )
             .await
@@ -278,7 +291,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::POST,
-                &format!("caches/{cache}/members"),
+                &format!("caches/{}/members", encode_url_component(cache)),
                 Some(&body),
             )
             .await
@@ -292,7 +305,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::PATCH,
-                &format!("caches/{cache}/members"),
+                &format!("caches/{}/members", encode_url_component(cache)),
                 Some(&body),
             )
             .await
@@ -306,7 +319,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::DELETE,
-                &format!("caches/{cache}/members"),
+                &format!("caches/{}/members", encode_url_component(cache)),
                 Some(&body),
             )
             .await
@@ -319,7 +332,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::GET,
-                &format!("caches/{cache}/invitations"),
+                &format!("caches/{}/invitations", encode_url_component(cache)),
                 None::<&()>,
             )
             .await
@@ -333,7 +346,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::DELETE,
-                &format!("caches/{cache}/invitations"),
+                &format!("caches/{}/invitations", encode_url_component(cache)),
                 Some(&body),
             )
             .await
@@ -344,7 +357,11 @@ impl CachesApi<'_> {
         cache: &str,
     ) -> Result<RoleListResponseCacheRoleOwner, ConnectorError> {
         self.0
-            .send_authenticated_request(Method::GET, &format!("caches/{cache}/roles"), None::<&()>)
+            .send_authenticated_request(
+                Method::GET,
+                &format!("caches/{}/roles", encode_url_component(cache)),
+                None::<&()>,
+            )
             .await
     }
 
@@ -356,7 +373,11 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::GET,
-                &format!("caches/{cache}/roles/{role}"),
+                &format!(
+                    "caches/{}/roles/{}",
+                    encode_url_component(cache),
+                    encode_url_component(role)
+                ),
                 None::<&()>,
             )
             .await
@@ -368,7 +389,11 @@ impl CachesApi<'_> {
         body: CreateRoleRequest,
     ) -> Result<RoleResponseCacheRoleOwner, ConnectorError> {
         self.0
-            .send_authenticated_request(Method::POST, &format!("caches/{cache}/roles"), Some(&body))
+            .send_authenticated_request(
+                Method::POST,
+                &format!("caches/{}/roles", encode_url_component(cache)),
+                Some(&body),
+            )
             .await
     }
 
@@ -381,7 +406,11 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::PATCH,
-                &format!("caches/{cache}/roles/{role}"),
+                &format!(
+                    "caches/{}/roles/{}",
+                    encode_url_component(cache),
+                    encode_url_component(role)
+                ),
                 Some(&body),
             )
             .await
@@ -395,7 +424,11 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::DELETE,
-                &format!("caches/{cache}/roles/{role}"),
+                &format!(
+                    "caches/{}/roles/{}",
+                    encode_url_component(cache),
+                    encode_url_component(role)
+                ),
                 None::<&()>,
             )
             .await
@@ -406,7 +439,11 @@ impl CachesApi<'_> {
         cache: &str,
     ) -> Result<Vec<TeamGrantEntry>, ConnectorError> {
         self.0
-            .send_authenticated_request(Method::GET, &format!("caches/{cache}/teams"), None::<&()>)
+            .send_authenticated_request(
+                Method::GET,
+                &format!("caches/{}/teams", encode_url_component(cache)),
+                None::<&()>,
+            )
             .await
     }
 
@@ -416,7 +453,11 @@ impl CachesApi<'_> {
         body: GrantCacheRequest,
     ) -> Result<String, ConnectorError> {
         self.0
-            .send_authenticated_request(Method::POST, &format!("caches/{cache}/teams"), Some(&body))
+            .send_authenticated_request(
+                Method::POST,
+                &format!("caches/{}/teams", encode_url_component(cache)),
+                Some(&body),
+            )
             .await
     }
 
@@ -429,7 +470,11 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::PATCH,
-                &format!("caches/{cache}/teams/{team}"),
+                &format!(
+                    "caches/{}/teams/{}",
+                    encode_url_component(cache),
+                    encode_url_component(team)
+                ),
                 Some(&body),
             )
             .await
@@ -443,7 +488,11 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::DELETE,
-                &format!("caches/{cache}/teams/{team}"),
+                &format!(
+                    "caches/{}/teams/{}",
+                    encode_url_component(cache),
+                    encode_url_component(team)
+                ),
                 None::<&()>,
             )
             .await
@@ -456,7 +505,7 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::GET,
-                &format!("caches/{cache}/subscribers"),
+                &format!("caches/{}/subscribers", encode_url_component(cache)),
                 None::<&()>,
             )
             .await
@@ -469,7 +518,10 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::GET,
-                &format!("caches/{cache}/subscription-requests"),
+                &format!(
+                    "caches/{}/subscription-requests",
+                    encode_url_component(cache)
+                ),
                 None::<&()>,
             )
             .await
@@ -483,7 +535,11 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::POST,
-                &format!("caches/{cache}/subscription-requests/{project}"),
+                &format!(
+                    "caches/{}/subscription-requests/{}",
+                    encode_url_component(cache),
+                    encode_url_component(project)
+                ),
                 None::<&()>,
             )
             .await
@@ -497,7 +553,11 @@ impl CachesApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::DELETE,
-                &format!("caches/{cache}/subscription-requests/{project}"),
+                &format!(
+                    "caches/{}/subscription-requests/{}",
+                    encode_url_component(cache),
+                    encode_url_component(project)
+                ),
                 None::<&()>,
             )
             .await
@@ -532,7 +592,7 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("caches/{cache}/nars"),
+            &format!("caches/{}/nars", encode_url_component(cache)),
             true,
         )?
         .query(&qs);
@@ -545,7 +605,11 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("caches/{cache}/nars/{hash}"),
+            &format!(
+                "caches/{}/nars/{}",
+                encode_url_component(cache),
+                encode_url_component(hash)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -557,59 +621,10 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("caches/{cache}/nars/stats"),
+            &format!("caches/{}/nars/stats", encode_url_component(cache)),
             true,
         )?;
         http::decode(req.send().await?).await
-    }
-
-    pub async fn nar_upload(
-        &self,
-        cache: &str,
-        narinfo: NarinfoPart,
-        nar_bytes: Vec<u8>,
-    ) -> Result<(), ConnectorError> {
-        let narinfo_json = serde_json::to_string(&narinfo).map_err(ConnectorError::Decode)?;
-        let nar = bytes::Bytes::from(nar_bytes);
-        let resp = http::send_upload(&self.0.transfer_no_progress_timer(), || {
-            let form = reqwest::multipart::Form::new()
-                .text("narinfo", narinfo_json.clone())
-                .part(
-                    "nar",
-                    reqwest::multipart::Part::stream_with_length(
-                        reqwest::Body::from(nar.clone()),
-                        nar.len() as u64,
-                    )
-                    .file_name("nar"),
-                );
-            Ok(http::request(
-                self.0.http(),
-                self.0.base_url(),
-                self.0.token(),
-                Method::POST,
-                &format!("caches/{cache}/nars"),
-                true,
-            )?
-            .multipart(form))
-        })
-        .await?;
-        let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(ConnectorError::Unauthorized);
-        }
-        if !status.is_success() {
-            let bytes = resp.bytes().await?;
-            let message = if let Ok(env) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                env.get("message")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| String::from_utf8_lossy(&bytes).into_owned())
-            } else {
-                String::from_utf8_lossy(&bytes).into_owned()
-            };
-            return Err(ConnectorError::Api { status, message });
-        }
-        Ok(())
     }
 
     /// The returned staged byte count is authoritative. The caller must set its next offset to it
@@ -628,7 +643,12 @@ impl CachesApi<'_> {
                 self.0.base_url(),
                 self.0.token(),
                 Method::PUT,
-                &format!("caches/{cache}/nars/{store_hash}/chunk?offset={offset}"),
+                &format!(
+                    "caches/{}/nars/{}/chunk?offset={}",
+                    encode_url_component(cache),
+                    encode_url_component(store_hash),
+                    encode_url_component(offset)
+                ),
                 true,
             )?
             .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
@@ -652,7 +672,11 @@ impl CachesApi<'_> {
                 self.0.base_url(),
                 self.0.token(),
                 Method::POST,
-                &format!("caches/{cache}/nars/{store_hash}/finalize"),
+                &format!(
+                    "caches/{}/nars/{}/finalize",
+                    encode_url_component(cache),
+                    encode_url_component(store_hash)
+                ),
                 true,
             )?
             .json(&narinfo))
@@ -668,7 +692,11 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("caches/{cache}/nars/{hash}"),
+            &format!(
+                "caches/{}/nars/{}",
+                encode_url_component(cache),
+                encode_url_component(hash)
+            ),
             true,
         )?;
         let resp = req.send().await?;

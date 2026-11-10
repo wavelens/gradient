@@ -7,6 +7,7 @@ use crate::api::{
     InviteTokenRequest, PaginatedSessionInfo, PatchApiKeyRequest, PatchUserSettingsRequest,
     SshKeyInfo, UserInfoResponse,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 
@@ -106,7 +107,7 @@ impl UserApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("user/keys/{api_id}"),
+            &format!("user/keys/{}", encode_url_component(api_id)),
             true,
         )?
         .json(&body);
@@ -146,7 +147,7 @@ impl UserApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("user/keys/{api_id}/revoke"),
+            &format!("user/keys/{}/revoke", encode_url_component(api_id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -186,7 +187,7 @@ impl UserApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("user/ssh-keys/{ssh_key_id}"),
+            &format!("user/ssh-keys/{}", encode_url_component(ssh_key_id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -220,7 +221,7 @@ impl UserApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("user/sessions/{session_id}"),
+            &format!("user/sessions/{}", encode_url_component(session_id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -279,7 +280,7 @@ impl UserApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("user/identities/{provider}"),
+            &format!("user/identities/{}", encode_url_component(provider)),
             true,
         )?;
         http::decode(req.send().await?).await

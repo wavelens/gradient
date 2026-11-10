@@ -5,6 +5,7 @@ use crate::api::{
     CreateFlakeInputOverrideRequest, DeletedResponse, FlakeInputOverrideOut,
     UpdateFlakeInputOverrideRequest,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::{Method, RequestBuilder};
 
@@ -23,7 +24,11 @@ impl TaskFlakeInputOverridesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             method,
-            &format!("tasks/{project}/{task}/flake-inputs{rest}"),
+            &format!(
+                "tasks/{}/{}/flake-inputs{rest}",
+                encode_url_component(project),
+                encode_url_component(task)
+            ),
             true,
         )
     }
@@ -53,7 +58,12 @@ impl TaskFlakeInputOverridesApi<'_> {
         task: &str,
         id: &str,
     ) -> Result<FlakeInputOverrideOut, ConnectorError> {
-        let req = self.request(Method::GET, project, task, &format!("/{id}"))?;
+        let req = self.request(
+            Method::GET,
+            project,
+            task,
+            &format!("/{}", encode_url_component(id)),
+        )?;
         http::decode(req.send().await?).await
     }
 
@@ -73,7 +83,12 @@ impl TaskFlakeInputOverridesApi<'_> {
             body["url"] = url.into();
         }
         let req = self
-            .request(Method::PATCH, project, task, &format!("/{id}"))?
+            .request(
+                Method::PATCH,
+                project,
+                task,
+                &format!("/{}", encode_url_component(id)),
+            )?
             .json(&body);
         http::decode(req.send().await?).await
     }
@@ -84,7 +99,12 @@ impl TaskFlakeInputOverridesApi<'_> {
         task: &str,
         id: &str,
     ) -> Result<DeletedResponse, ConnectorError> {
-        let req = self.request(Method::DELETE, project, task, &format!("/{id}"))?;
+        let req = self.request(
+            Method::DELETE,
+            project,
+            task,
+            &format!("/{}", encode_url_component(id)),
+        )?;
         http::decode(req.send().await?).await
     }
 }

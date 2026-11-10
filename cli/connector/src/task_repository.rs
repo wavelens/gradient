@@ -5,6 +5,7 @@ use crate::api::{
     InstallDeployKeyRequest, InstallWebhookRequest, TaskRepositoryResponse,
     UpdateTaskRepositoryRequest,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::{Method, RequestBuilder};
 
@@ -23,7 +24,11 @@ impl TaskRepositoryConnectionApi<'_> {
             self.0.base_url(),
             self.0.token(),
             method,
-            &format!("tasks/{project}/{task}/repository{rest}"),
+            &format!(
+                "tasks/{}/{}/repository{rest}",
+                encode_url_component(project),
+                encode_url_component(task)
+            ),
             true,
         )
     }

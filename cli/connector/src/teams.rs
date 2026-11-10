@@ -7,6 +7,7 @@ use crate::api::{
     TeamDemand, TeamGrants, TeamMemberItem, TeamMemberRequest, TeamRequestItem, TeamResponse,
     TeamSummary, TeamWorkerEntry,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::{Method, RequestBuilder};
 use serde::de::DeserializeOwned;
@@ -38,7 +39,11 @@ impl TeamsApi<'_> {
     }
 
     pub async fn get(&self, team: &str) -> Result<TeamResponse, ConnectorError> {
-        Self::send(self.request(Method::GET, &format!("teams/{team}"))?).await
+        Self::send(self.request(
+            Method::GET,
+            &format!("teams/{}", encode_url_component(team)),
+        )?)
+        .await
     }
 
     pub async fn update(
@@ -47,18 +52,29 @@ impl TeamsApi<'_> {
         body: PatchTeamRequest,
     ) -> Result<String, ConnectorError> {
         Self::send(
-            self.request(Method::PATCH, &format!("teams/{team}"))?
-                .json(&body),
+            self.request(
+                Method::PATCH,
+                &format!("teams/{}", encode_url_component(team)),
+            )?
+            .json(&body),
         )
         .await
     }
 
     pub async fn delete(&self, team: &str) -> Result<String, ConnectorError> {
-        Self::send(self.request(Method::DELETE, &format!("teams/{team}"))?).await
+        Self::send(self.request(
+            Method::DELETE,
+            &format!("teams/{}", encode_url_component(team)),
+        )?)
+        .await
     }
 
     pub async fn list_members(&self, team: &str) -> Result<Vec<TeamMemberItem>, ConnectorError> {
-        Self::send(self.request(Method::GET, &format!("teams/{team}/members"))?).await
+        Self::send(self.request(
+            Method::GET,
+            &format!("teams/{}/members", encode_url_component(team)),
+        )?)
+        .await
     }
 
     pub async fn add_user(
@@ -67,8 +83,11 @@ impl TeamsApi<'_> {
         body: TeamMemberRequest,
     ) -> Result<String, ConnectorError> {
         Self::send(
-            self.request(Method::POST, &format!("teams/{team}/members"))?
-                .json(&body),
+            self.request(
+                Method::POST,
+                &format!("teams/{}/members", encode_url_component(team)),
+            )?
+            .json(&body),
         )
         .await
     }
@@ -79,8 +98,11 @@ impl TeamsApi<'_> {
         body: TeamMemberRequest,
     ) -> Result<String, ConnectorError> {
         Self::send(
-            self.request(Method::PATCH, &format!("teams/{team}/members"))?
-                .json(&body),
+            self.request(
+                Method::PATCH,
+                &format!("teams/{}/members", encode_url_component(team)),
+            )?
+            .json(&body),
         )
         .await
     }
@@ -91,8 +113,11 @@ impl TeamsApi<'_> {
         body: RemoveTeamMemberRequest,
     ) -> Result<String, ConnectorError> {
         Self::send(
-            self.request(Method::DELETE, &format!("teams/{team}/members"))?
-                .json(&body),
+            self.request(
+                Method::DELETE,
+                &format!("teams/{}/members", encode_url_component(team)),
+            )?
+            .json(&body),
         )
         .await
     }
@@ -101,7 +126,11 @@ impl TeamsApi<'_> {
         &self,
         team: &str,
     ) -> Result<Vec<PendingInvitationItem>, ConnectorError> {
-        Self::send(self.request(Method::GET, &format!("teams/{team}/invitations"))?).await
+        Self::send(self.request(
+            Method::GET,
+            &format!("teams/{}/invitations", encode_url_component(team)),
+        )?)
+        .await
     }
 
     pub async fn withdraw_team_invitation(
@@ -110,8 +139,11 @@ impl TeamsApi<'_> {
         body: RevokeInvitationRequest,
     ) -> Result<String, ConnectorError> {
         Self::send(
-            self.request(Method::DELETE, &format!("teams/{team}/invitations"))?
-                .json(&body),
+            self.request(
+                Method::DELETE,
+                &format!("teams/{}/invitations", encode_url_component(team)),
+            )?
+            .json(&body),
         )
         .await
     }
@@ -120,7 +152,11 @@ impl TeamsApi<'_> {
         &self,
         team: &str,
     ) -> Result<Vec<TeamRequestItem>, ConnectorError> {
-        Self::send(self.request(Method::GET, &format!("teams/{team}/requests"))?).await
+        Self::send(self.request(
+            Method::GET,
+            &format!("teams/{}/requests", encode_url_component(team)),
+        )?)
+        .await
     }
 
     pub async fn approve_grant_request(
@@ -128,8 +164,15 @@ impl TeamsApi<'_> {
         team: &str,
         request_id: &str,
     ) -> Result<String, ConnectorError> {
-        Self::send(self.request(Method::POST, &format!("teams/{team}/requests/{request_id}"))?)
-            .await
+        Self::send(self.request(
+            Method::POST,
+            &format!(
+                "teams/{}/requests/{}",
+                encode_url_component(team),
+                encode_url_component(request_id)
+            ),
+        )?)
+        .await
     }
 
     pub async fn reject_team_grant_request(
@@ -139,7 +182,11 @@ impl TeamsApi<'_> {
     ) -> Result<String, ConnectorError> {
         Self::send(self.request(
             Method::DELETE,
-            &format!("teams/{team}/requests/{request_id}"),
+            &format!(
+                "teams/{}/requests/{}",
+                encode_url_component(team),
+                encode_url_component(request_id)
+            ),
         )?)
         .await
     }
@@ -148,14 +195,22 @@ impl TeamsApi<'_> {
         &self,
         team: &str,
     ) -> Result<TeamGrants, ConnectorError> {
-        Self::send(self.request(Method::GET, &format!("teams/{team}/grants"))?).await
+        Self::send(self.request(
+            Method::GET,
+            &format!("teams/{}/grants", encode_url_component(team)),
+        )?)
+        .await
     }
 
     pub async fn list_team_workers(
         &self,
         team: &str,
     ) -> Result<Vec<TeamWorkerEntry>, ConnectorError> {
-        Self::send(self.request(Method::GET, &format!("teams/{team}/workers"))?).await
+        Self::send(self.request(
+            Method::GET,
+            &format!("teams/{}/workers", encode_url_component(team)),
+        )?)
+        .await
     }
 
     pub async fn register_team_worker(
@@ -164,8 +219,11 @@ impl TeamsApi<'_> {
         body: RegisterWorkerRequest,
     ) -> Result<RegisteredTeamWorker, ConnectorError> {
         Self::send(
-            self.request(Method::POST, &format!("teams/{team}/workers"))?
-                .json(&body),
+            self.request(
+                Method::POST,
+                &format!("teams/{}/workers", encode_url_component(team)),
+            )?
+            .json(&body),
         )
         .await
     }
@@ -177,8 +235,15 @@ impl TeamsApi<'_> {
         body: PatchWorkerRequest,
     ) -> Result<String, ConnectorError> {
         Self::send(
-            self.request(Method::PATCH, &format!("teams/{team}/workers/{worker_id}"))?
-                .json(&body),
+            self.request(
+                Method::PATCH,
+                &format!(
+                    "teams/{}/workers/{}",
+                    encode_url_component(team),
+                    encode_url_component(worker_id)
+                ),
+            )?
+            .json(&body),
         )
         .await
     }
@@ -188,8 +253,15 @@ impl TeamsApi<'_> {
         team: &str,
         worker_id: &str,
     ) -> Result<String, ConnectorError> {
-        Self::send(self.request(Method::DELETE, &format!("teams/{team}/workers/{worker_id}"))?)
-            .await
+        Self::send(self.request(
+            Method::DELETE,
+            &format!(
+                "teams/{}/workers/{}",
+                encode_url_component(team),
+                encode_url_component(worker_id)
+            ),
+        )?)
+        .await
     }
 
     pub async fn get_team_workers_demand_missing_capabilities(
@@ -197,7 +269,10 @@ impl TeamsApi<'_> {
         team: &str,
         projects: Option<&str>,
     ) -> Result<TeamDemand, ConnectorError> {
-        let mut req = self.request(Method::GET, &format!("teams/{team}/workers/demand"))?;
+        let mut req = self.request(
+            Method::GET,
+            &format!("teams/{}/workers/demand", encode_url_component(team)),
+        )?;
         if let Some(projects) = projects {
             req = req.query(&[("projects", projects)]);
         }

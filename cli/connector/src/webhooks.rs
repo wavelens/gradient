@@ -5,6 +5,7 @@ use crate::api::{
     CreateWebhookRequest, CreateWebhookResponse, DeletedResponse, DeliveryDetailWebhookDeliveryId,
     DeliveryListItemWebhookDeliveryId, RotatedSecret, UpdateWebhookRequest, WebhookResponse,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::{Method, RequestBuilder};
 use serde::de::DeserializeOwned;
@@ -20,9 +21,11 @@ pub enum WebhookResource {
 impl WebhookResource {
     fn webhooks_path_prefix(&self) -> String {
         match self {
-            Self::Project(project) => format!("projects/{project}/webhooks"),
-            Self::Team(team) => format!("teams/{team}/webhooks"),
-            Self::Cache(cache) => format!("caches/{cache}/webhooks"),
+            Self::Project(project) => {
+                format!("projects/{}/webhooks", encode_url_component(project))
+            }
+            Self::Team(team) => format!("teams/{}/webhooks", encode_url_component(team)),
+            Self::Cache(cache) => format!("caches/{}/webhooks", encode_url_component(cache)),
             Self::Instance => "admin/webhooks".to_owned(),
         }
     }
@@ -71,7 +74,12 @@ impl WebhooksApi<'_> {
         owner: &WebhookResource,
         id: &str,
     ) -> Result<WebhookResponse, ConnectorError> {
-        Self::send(self.request(Method::GET, owner, &format!("/{id}"))?).await
+        Self::send(self.request(
+            Method::GET,
+            owner,
+            &format!("/{}", encode_url_component(id)),
+        )?)
+        .await
     }
 
     pub async fn update(
@@ -81,8 +89,12 @@ impl WebhooksApi<'_> {
         body: UpdateWebhookRequest,
     ) -> Result<WebhookResponse, ConnectorError> {
         Self::send(
-            self.request(Method::PATCH, owner, &format!("/{id}"))?
-                .json(&body),
+            self.request(
+                Method::PATCH,
+                owner,
+                &format!("/{}", encode_url_component(id)),
+            )?
+            .json(&body),
         )
         .await
     }
@@ -92,7 +104,12 @@ impl WebhooksApi<'_> {
         owner: &WebhookResource,
         id: &str,
     ) -> Result<DeletedResponse, ConnectorError> {
-        Self::send(self.request(Method::DELETE, owner, &format!("/{id}"))?).await
+        Self::send(self.request(
+            Method::DELETE,
+            owner,
+            &format!("/{}", encode_url_component(id)),
+        )?)
+        .await
     }
 
     pub async fn list_webhook_delivery_attempts(
@@ -102,7 +119,11 @@ impl WebhooksApi<'_> {
         limit: Option<u64>,
         offset: Option<u64>,
     ) -> Result<Vec<DeliveryListItemWebhookDeliveryId>, ConnectorError> {
-        let mut req = self.request(Method::GET, owner, &format!("/{id}/deliveries"))?;
+        let mut req = self.request(
+            Method::GET,
+            owner,
+            &format!("/{}/deliveries", encode_url_component(id)),
+        )?;
         if let Some(limit) = limit {
             req = req.query(&[("limit", limit)]);
         }
@@ -121,7 +142,11 @@ impl WebhooksApi<'_> {
         Self::send(self.request(
             Method::GET,
             owner,
-            &format!("/{id}/deliveries/{delivery_id}"),
+            &format!(
+                "/{}/deliveries/{}",
+                encode_url_component(id),
+                encode_url_component(delivery_id)
+            ),
         )?)
         .await
     }
@@ -131,7 +156,12 @@ impl WebhooksApi<'_> {
         owner: &WebhookResource,
         id: &str,
     ) -> Result<RotatedSecret, ConnectorError> {
-        Self::send(self.request(Method::POST, owner, &format!("/{id}/rotate-secret"))?).await
+        Self::send(self.request(
+            Method::POST,
+            owner,
+            &format!("/{}/rotate-secret", encode_url_component(id)),
+        )?)
+        .await
     }
 
     pub async fn send_webhook_test_ping(
@@ -139,6 +169,11 @@ impl WebhooksApi<'_> {
         owner: &WebhookResource,
         id: &str,
     ) -> Result<DeliveryListItemWebhookDeliveryId, ConnectorError> {
-        Self::send(self.request(Method::POST, owner, &format!("/{id}/test"))?).await
+        Self::send(self.request(
+            Method::POST,
+            owner,
+            &format!("/{}/test", encode_url_component(id)),
+        )?)
+        .await
     }
 }

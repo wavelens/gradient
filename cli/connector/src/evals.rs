@@ -5,6 +5,7 @@ use crate::api::{
     ArtefactTree, ClosureGraph, EvaluationFailureSummary, EvaluationMessageResponse,
     EvaluationResponse, FlakeGraphNode, MakeEvaluationRequest, OutputArtefacts, PaginatedBuilds,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, DownloadedBinaryFile, LiveUpdateEvent, http};
 use futures::stream::Stream;
 use reqwest::Method;
@@ -31,7 +32,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("evals/{id}"),
+            &format!("evals/{}", encode_url_component(id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -43,7 +44,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("evals/{id}"),
+            &format!("evals/{}", encode_url_component(id)),
             true,
         )?
         .json(&MakeEvaluationRequest {
@@ -58,7 +59,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("evals/{id}/builds"),
+            &format!("evals/{}/builds", encode_url_component(id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -73,7 +74,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("evals/{id}/builds"),
+            &format!("evals/{}/builds", encode_url_component(id)),
             true,
         )?;
         http::json_lines(req.send().await?).await
@@ -88,7 +89,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("evals/{id}/messages"),
+            &format!("evals/{}/messages", encode_url_component(id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -100,7 +101,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("evals/{id}/artefacts"),
+            &format!("evals/{}/artefacts", encode_url_component(id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -112,7 +113,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("evals/{id}/retry"),
+            &format!("evals/{}/retry", encode_url_component(id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -124,7 +125,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("evals/{id}/prioritize"),
+            &format!("evals/{}/prioritize", encode_url_component(id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -136,7 +137,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("evals/{id}/summary"),
+            &format!("evals/{}/summary", encode_url_component(id)),
             false,
         )?;
         http::decode(req.send().await?).await
@@ -152,7 +153,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("evals/{id}/report"),
+            &format!("evals/{}/report", encode_url_component(id)),
             true,
         )?
         .query(parameters);
@@ -165,7 +166,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("evals/{id}/closure"),
+            &format!("evals/{}/closure", encode_url_component(id)),
             false,
         )?;
         http::decode(req.send().await?).await
@@ -177,7 +178,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("evals/{id}/runtime-closure"),
+            &format!("evals/{}/runtime-closure", encode_url_component(id)),
             false,
         )?;
         http::decode(req.send().await?).await
@@ -189,7 +190,7 @@ impl EvalsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("evals/{id}/flake-graph"),
+            &format!("evals/{}/flake-graph", encode_url_component(id)),
             false,
         )?;
         http::decode(req.send().await?).await
@@ -200,7 +201,11 @@ impl EvalsApi<'_> {
         id: &str,
     ) -> Result<impl Stream<Item = Result<LiveUpdateEvent, ConnectorError>> + use<>, ConnectorError>
     {
-        http::open_live_events_websocket_stream(self.0, &format!("evals/{id}/live")).await
+        http::open_live_events_websocket_stream(
+            self.0,
+            &format!("evals/{}/live", encode_url_component(id)),
+        )
+        .await
     }
 }
 

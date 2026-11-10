@@ -5,6 +5,7 @@ use crate::api::{
     ActionResponse, CreateActionRequest, CreateActionResponse, DeletedResponse,
     DeliveryDetailTaskActionDeliveryId, DeliveryListItem, UpdateActionRequest,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::{Method, RequestBuilder};
 
@@ -23,7 +24,11 @@ impl TaskActionsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             method,
-            &format!("tasks/{project}/{task}/actions{rest}"),
+            &format!(
+                "tasks/{}/{}/actions{rest}",
+                encode_url_component(project),
+                encode_url_component(task)
+            ),
             true,
         )
     }
@@ -53,7 +58,12 @@ impl TaskActionsApi<'_> {
         task: &str,
         id: &str,
     ) -> Result<ActionResponse, ConnectorError> {
-        let req = self.request(Method::GET, project, task, &format!("/{id}"))?;
+        let req = self.request(
+            Method::GET,
+            project,
+            task,
+            &format!("/{}", encode_url_component(id)),
+        )?;
         http::decode(req.send().await?).await
     }
 
@@ -65,7 +75,12 @@ impl TaskActionsApi<'_> {
         body: &UpdateActionRequest,
     ) -> Result<ActionResponse, ConnectorError> {
         let req = self
-            .request(Method::PATCH, project, task, &format!("/{id}"))?
+            .request(
+                Method::PATCH,
+                project,
+                task,
+                &format!("/{}", encode_url_component(id)),
+            )?
             .json(body);
         http::decode(req.send().await?).await
     }
@@ -76,7 +91,12 @@ impl TaskActionsApi<'_> {
         task: &str,
         id: &str,
     ) -> Result<DeletedResponse, ConnectorError> {
-        let req = self.request(Method::DELETE, project, task, &format!("/{id}"))?;
+        let req = self.request(
+            Method::DELETE,
+            project,
+            task,
+            &format!("/{}", encode_url_component(id)),
+        )?;
         http::decode(req.send().await?).await
     }
 
@@ -88,7 +108,12 @@ impl TaskActionsApi<'_> {
         limit: Option<u64>,
         offset: Option<u64>,
     ) -> Result<Vec<DeliveryListItem>, ConnectorError> {
-        let mut req = self.request(Method::GET, project, task, &format!("/{id}/deliveries"))?;
+        let mut req = self.request(
+            Method::GET,
+            project,
+            task,
+            &format!("/{}/deliveries", encode_url_component(id)),
+        )?;
         if let Some(limit) = limit {
             req = req.query(&[("limit", limit)]);
         }
@@ -109,7 +134,11 @@ impl TaskActionsApi<'_> {
             Method::GET,
             project,
             task,
-            &format!("/{id}/deliveries/{delivery_id}"),
+            &format!(
+                "/{}/deliveries/{}",
+                encode_url_component(id),
+                encode_url_component(delivery_id)
+            ),
         )?;
         http::decode(req.send().await?).await
     }
@@ -120,7 +149,12 @@ impl TaskActionsApi<'_> {
         task: &str,
         id: &str,
     ) -> Result<serde_json::Value, ConnectorError> {
-        let req = self.request(Method::POST, project, task, &format!("/{id}/test"))?;
+        let req = self.request(
+            Method::POST,
+            project,
+            task,
+            &format!("/{}/test", encode_url_component(id)),
+        )?;
         http::decode(req.send().await?).await
     }
 }

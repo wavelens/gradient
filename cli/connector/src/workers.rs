@@ -5,6 +5,7 @@ use crate::api::{
     PatchWorkerRequest, ProjectWorkerEntry, RegisterWorkerRequest, RegisterWorkerResponse,
     WorkerMetricsResponse, WorkerTestResponse,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 
@@ -17,7 +18,7 @@ impl WorkersApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/workers"),
+            &format!("projects/{}/workers", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -33,7 +34,7 @@ impl WorkersApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("projects/{project}/workers"),
+            &format!("projects/{}/workers", encode_url_component(project)),
             true,
         )?
         .json(&body);
@@ -51,7 +52,11 @@ impl WorkersApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("projects/{project}/workers/{worker_id}"),
+            &format!(
+                "projects/{}/workers/{}",
+                encode_url_component(project),
+                encode_url_component(worker_id)
+            ),
             true,
         )?
         .json(&body);
@@ -66,7 +71,11 @@ impl WorkersApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::GET,
-                &format!("projects/{project}/workers/{worker_id}/metrics"),
+                &format!(
+                    "projects/{}/workers/{}/metrics",
+                    encode_url_component(project),
+                    encode_url_component(worker_id)
+                ),
                 None::<&()>,
             )
             .await
@@ -80,7 +89,11 @@ impl WorkersApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::POST,
-                &format!("projects/{project}/workers/{worker_id}/test"),
+                &format!(
+                    "projects/{}/workers/{}/test",
+                    encode_url_component(project),
+                    encode_url_component(worker_id)
+                ),
                 None::<&()>,
             )
             .await
@@ -92,7 +105,11 @@ impl WorkersApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("projects/{project}/workers/{worker_id}"),
+            &format!(
+                "projects/{}/workers/{}",
+                encode_url_component(project),
+                encode_url_component(worker_id)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await

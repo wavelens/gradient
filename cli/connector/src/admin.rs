@@ -5,6 +5,7 @@ use crate::api::{
     AdminTaskDto, DrainingResponse, GithubAppManifestRequest, GithubAppManifestResponse,
     ManifestResult, SetDrainingRequest, StartDeepGcResponse, WorkerInfo,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 
@@ -30,7 +31,7 @@ impl AdminApi<'_> {
         self.0
             .send_authenticated_request(
                 Method::GET,
-                &format!("admin/workers/{worker}"),
+                &format!("admin/workers/{}", encode_url_component(worker)),
                 None::<&()>,
             )
             .await
@@ -89,7 +90,11 @@ impl AdminApi<'_> {
 
     pub async fn get_admin_task_by_id(&self, task: &str) -> Result<AdminTaskDto, ConnectorError> {
         self.0
-            .send_authenticated_request(Method::GET, &format!("admin/tasks/{task}"), None::<&()>)
+            .send_authenticated_request(
+                Method::GET,
+                &format!("admin/tasks/{}", encode_url_component(task)),
+                None::<&()>,
+            )
             .await
     }
 

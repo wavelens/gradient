@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{CreatePullRequestRequest, PullRequestResponse};
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 use std::time::Duration;
@@ -20,7 +21,11 @@ impl PullRequestsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{project}/{task}/pull-requests"),
+            &format!(
+                "tasks/{}/{}/pull-requests",
+                encode_url_component(project),
+                encode_url_component(task)
+            ),
             true,
         )?
         .json(&body);

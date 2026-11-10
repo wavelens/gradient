@@ -6,6 +6,7 @@ use crate::api::{
     PaginatedEntryPoints, PaginatedTaskResponse, PatchTaskRequest, TaskDetailsResponse,
     TaskMetricsResponse, TaskResponse, TransferOwnershipRequest, TriggerOut, UpdateTriggerRequest,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 
@@ -15,7 +16,7 @@ impl TasksApi<'_> {
     pub async fn list(&self, project: &str) -> Result<PaginatedTaskResponse, ConnectorError> {
         let (items, total) = self
             .0
-            .fetch_all_pages_and_total_count(&format!("tasks/{project}"))
+            .fetch_all_pages_and_total_count(&format!("tasks/{}", encode_url_component(project)))
             .await?;
         Ok(PaginatedTaskResponse {
             per_page: i64::try_from(items.len()).unwrap_or(i64::MAX),
@@ -31,7 +32,7 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/available"),
+            &format!("tasks/{}/available", encode_url_component(project)),
             true,
         )?
         .query(&[("name", name)]);
@@ -44,7 +45,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/{proj}"),
+            &format!(
+                "tasks/{}/{}",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -60,7 +65,7 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PUT,
-            &format!("tasks/{project}"),
+            &format!("tasks/{}", encode_url_component(project)),
             true,
         )?
         .json(&body);
@@ -78,7 +83,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("tasks/{project}/{proj}"),
+            &format!(
+                "tasks/{}/{}",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?
         .json(&body);
@@ -91,7 +100,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("tasks/{project}/{proj}"),
+            &format!(
+                "tasks/{}/{}",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -107,7 +120,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/{proj}/details"),
+            &format!(
+                "tasks/{}/{}/details",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -144,7 +161,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/{proj}/entry-points{query}"),
+            &format!(
+                "tasks/{}/{}/entry-points{query}",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -160,7 +181,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{project}/{proj}/check-repository"),
+            &format!(
+                "tasks/{}/{}/check-repository",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -177,7 +202,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{project}/{proj}/evaluate"),
+            &format!(
+                "tasks/{}/{}/evaluate",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         let req = match commit {
@@ -197,7 +226,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/{proj}/evaluations"),
+            &format!(
+                "tasks/{}/{}/evaluations",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -209,7 +242,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{project}/{proj}/active"),
+            &format!(
+                "tasks/{}/{}/active",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -221,7 +258,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("tasks/{project}/{proj}/active"),
+            &format!(
+                "tasks/{}/{}/active",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -237,7 +278,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/{proj}/metrics"),
+            &format!(
+                "tasks/{}/{}/metrics",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -253,7 +298,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/{proj}/entry-point-metrics"),
+            &format!(
+                "tasks/{}/{}/entry-point-metrics",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -272,7 +321,11 @@ impl TasksApi<'_> {
             self.0.token(),
             Method::GET,
             &format!(
-                "tasks/{project}/{proj}/entry-point-downloads?eval={eval}&filename={filename}"
+                "tasks/{}/{}/entry-point-downloads?eval={}&filename={}",
+                encode_url_component(project),
+                encode_url_component(proj),
+                encode_url_component(eval),
+                encode_url_component(filename)
             ),
             false,
         )?;
@@ -296,7 +349,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/{proj}/badge"),
+            &format!(
+                "tasks/{}/{}/badge",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             false,
         )?;
         http::decode_raw_string(req.send().await?).await
@@ -312,7 +369,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/{proj}/triggers"),
+            &format!(
+                "tasks/{}/{}/triggers",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -329,7 +390,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{project}/{proj}/triggers"),
+            &format!(
+                "tasks/{}/{}/triggers",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?
         .json(&body);
@@ -347,7 +412,12 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/{proj}/triggers/{id}"),
+            &format!(
+                "tasks/{}/{}/triggers/{}",
+                encode_url_component(project),
+                encode_url_component(proj),
+                encode_url_component(id)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -365,7 +435,12 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("tasks/{project}/{proj}/triggers/{id}"),
+            &format!(
+                "tasks/{}/{}/triggers/{}",
+                encode_url_component(project),
+                encode_url_component(proj),
+                encode_url_component(id)
+            ),
             true,
         )?
         .json(&body);
@@ -383,7 +458,12 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("tasks/{project}/{proj}/triggers/{id}"),
+            &format!(
+                "tasks/{}/{}/triggers/{}",
+                encode_url_component(project),
+                encode_url_component(proj),
+                encode_url_component(id)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -400,7 +480,11 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{project}/{proj}/transfer"),
+            &format!(
+                "tasks/{}/{}/transfer",
+                encode_url_component(project),
+                encode_url_component(proj)
+            ),
             true,
         )?
         .json(&TransferOwnershipRequest {
@@ -420,7 +504,12 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{project}/{proj}/triggers/{id}/default"),
+            &format!(
+                "tasks/{}/{}/triggers/{}/default",
+                encode_url_component(project),
+                encode_url_component(proj),
+                encode_url_component(id)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -437,7 +526,12 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{project}/{proj}/triggers/{id}/test"),
+            &format!(
+                "tasks/{}/{}/triggers/{}/test",
+                encode_url_component(project),
+                encode_url_component(proj),
+                encode_url_component(id)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await

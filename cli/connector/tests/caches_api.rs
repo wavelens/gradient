@@ -74,39 +74,6 @@ async fn get_cache_stats_returns_stats() {
 }
 
 #[tokio::test]
-async fn nar_upload_posts_multipart() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/api/v1/caches/mycache/nars"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-            "error": false,
-            "message": { "store_path": "/nix/store/aa-x", "created": true }
-        })))
-        .mount(&server)
-        .await;
-
-    let client = Client::builder()
-        .base_url(server.uri())
-        .token("t")
-        .build()
-        .unwrap();
-    let info = connector::api::NarinfoPart {
-        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x".into(),
-        file_hash: "sha256:a".into(),
-        file_size: 3,
-        nar_size: 3,
-        nar_hash: "sha256:b".into(),
-        references: vec![],
-        deriver: None,
-    };
-    client
-        .caches()
-        .nar_upload("mycache", info, vec![1, 2, 3])
-        .await
-        .expect("upload");
-}
-
-#[tokio::test]
 async fn a_busy_chunk_upload_is_retried_after_the_servers_delay() {
     let server = MockServer::start().await;
     Mock::given(method("PUT"))

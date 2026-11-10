@@ -8,6 +8,7 @@ use crate::api::{
     ProjectSecretSummary, PutProjectSecretRequest, RemoveMemberRequest, RevokeInvitationRequest,
     RoleResponseProjectRoleOwner, SopsRecipientResponse, TeamGrantEntry,
 };
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 
@@ -56,7 +57,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}"),
+            &format!("projects/{}", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -72,7 +73,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("projects/{project}"),
+            &format!("projects/{}", encode_url_component(project)),
             true,
         )?
         .json(&body);
@@ -85,7 +86,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("projects/{project}"),
+            &format!("projects/{}", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -97,7 +98,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/users"),
+            &format!("projects/{}/users", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -113,7 +114,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("projects/{project}/users"),
+            &format!("projects/{}/users", encode_url_component(project)),
             true,
         )?
         .json(&body);
@@ -130,7 +131,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("projects/{project}/users"),
+            &format!("projects/{}/users", encode_url_component(project)),
             true,
         )?
         .json(&body);
@@ -147,7 +148,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("projects/{project}/users"),
+            &format!("projects/{}/users", encode_url_component(project)),
             true,
         )?
         .json(&body);
@@ -163,7 +164,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/roles"),
+            &format!("projects/{}/roles", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -179,7 +180,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("projects/{project}/roles"),
+            &format!("projects/{}/roles", encode_url_component(project)),
             true,
         )?
         .json(&body);
@@ -196,7 +197,11 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/roles/{role_id}"),
+            &format!(
+                "projects/{}/roles/{}",
+                encode_url_component(project),
+                encode_url_component(role_id)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -213,7 +218,11 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("projects/{project}/roles/{role_id}"),
+            &format!(
+                "projects/{}/roles/{}",
+                encode_url_component(project),
+                encode_url_component(role_id)
+            ),
             true,
         )?
         .json(&body);
@@ -230,7 +239,11 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("projects/{project}/roles/{role_id}"),
+            &format!(
+                "projects/{}/roles/{}",
+                encode_url_component(project),
+                encode_url_component(role_id)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -242,7 +255,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/ssh"),
+            &format!("projects/{}/ssh", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -254,7 +267,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("projects/{project}/ssh"),
+            &format!("projects/{}/ssh", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -269,7 +282,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/subscribe"),
+            &format!("projects/{}/subscribe", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -281,7 +294,11 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("projects/{project}/subscribe/{cache}"),
+            &format!(
+                "projects/{}/subscribe/{}",
+                encode_url_component(project),
+                encode_url_component(cache)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -293,7 +310,11 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("projects/{project}/subscribe/{cache}"),
+            &format!(
+                "projects/{}/subscribe/{}",
+                encode_url_component(project),
+                encode_url_component(cache)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -308,7 +329,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/secrets"),
+            &format!("projects/{}/secrets", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -324,7 +345,11 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/secrets/{name}"),
+            &format!(
+                "projects/{}/secrets/{}",
+                encode_url_component(project),
+                encode_url_component(name)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -341,7 +366,11 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PUT,
-            &format!("projects/{project}/secrets/{name}"),
+            &format!(
+                "projects/{}/secrets/{}",
+                encode_url_component(project),
+                encode_url_component(name)
+            ),
             true,
         )?
         .json(&body);
@@ -358,7 +387,11 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("projects/{project}/secrets/{name}"),
+            &format!(
+                "projects/{}/secrets/{}",
+                encode_url_component(project),
+                encode_url_component(name)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -373,7 +406,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/sops-recipient"),
+            &format!("projects/{}/sops-recipient", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -385,7 +418,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("projects/{project}/public"),
+            &format!("projects/{}/public", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -397,7 +430,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("projects/{project}/public"),
+            &format!("projects/{}/public", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -412,7 +445,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/teams"),
+            &format!("projects/{}/teams", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -428,7 +461,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("projects/{project}/teams"),
+            &format!("projects/{}/teams", encode_url_component(project)),
             true,
         )?
         .json(&body);
@@ -446,7 +479,11 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("projects/{project}/teams/{team}"),
+            &format!(
+                "projects/{}/teams/{}",
+                encode_url_component(project),
+                encode_url_component(team)
+            ),
             true,
         )?
         .json(&body);
@@ -463,7 +500,11 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("projects/{project}/teams/{team}"),
+            &format!(
+                "projects/{}/teams/{}",
+                encode_url_component(project),
+                encode_url_component(team)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -478,7 +519,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("projects/{project}/invitations"),
+            &format!("projects/{}/invitations", encode_url_component(project)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -494,7 +535,7 @@ impl ProjectsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("projects/{project}/invitations"),
+            &format!("projects/{}/invitations", encode_url_component(project)),
             true,
         )?
         .json(&body);

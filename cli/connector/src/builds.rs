@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{BuildGraph, BuildProduct, BuildWithOutputs, ClosureGraph};
+use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, DownloadedBinaryFile, LiveUpdateEvent, http};
 use futures::stream::{Stream, StreamExt};
 use reqwest::Method;
@@ -15,7 +16,7 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{id}"),
+            &format!("builds/{}", encode_url_component(id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -30,7 +31,7 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{id}/log"),
+            &format!("builds/{}/log", encode_url_component(id)),
             true,
         )?;
         Ok(
@@ -45,7 +46,7 @@ impl BuildsApi<'_> {
                         self.0.base_url(),
                         self.0.token(),
                         Method::POST,
-                        &format!("builds/{id}/log"),
+                        &format!("builds/{}/log", encode_url_component(id)),
                         true,
                     )?
                     .send()
@@ -71,7 +72,7 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{id}/log/lines"),
+            &format!("builds/{}/log/lines", encode_url_component(id)),
             true,
         )?
         .query(&query);
@@ -98,7 +99,7 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{id}/log/search"),
+            &format!("builds/{}/log/search", encode_url_component(id)),
             true,
         )?
         .query(&[("q", q), ("case", if case { "true" } else { "false" })]);
@@ -111,7 +112,7 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{id}/graph"),
+            &format!("builds/{}/graph", encode_url_component(id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -140,7 +141,11 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("builds/{id}/{action}"),
+            &format!(
+                "builds/{}/{}",
+                encode_url_component(id),
+                encode_url_component(action)
+            ),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -152,7 +157,7 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{id}/closure"),
+            &format!("builds/{}/closure", encode_url_component(id)),
             false,
         )?;
         http::decode(req.send().await?).await
@@ -164,7 +169,7 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{id}/runtime-closure"),
+            &format!("builds/{}/runtime-closure", encode_url_component(id)),
             false,
         )?;
         http::decode(req.send().await?).await
@@ -176,7 +181,7 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{id}/sbom"),
+            &format!("builds/{}/sbom", encode_url_component(id)),
             false,
         )?;
         http::decode_downloaded_file(req.send().await?).await
@@ -187,7 +192,11 @@ impl BuildsApi<'_> {
         id: &str,
     ) -> Result<impl Stream<Item = Result<LiveUpdateEvent, ConnectorError>> + use<>, ConnectorError>
     {
-        http::open_live_events_websocket_stream(self.0, &format!("builds/{id}/live")).await
+        http::open_live_events_websocket_stream(
+            self.0,
+            &format!("builds/{}/live", encode_url_component(id)),
+        )
+        .await
     }
 
     pub async fn downloads(&self, id: &str) -> Result<Vec<BuildProduct>, ConnectorError> {
@@ -196,7 +205,7 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{id}/downloads"),
+            &format!("builds/{}/downloads", encode_url_component(id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -208,7 +217,7 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{id}/download-token"),
+            &format!("builds/{}/download-token", encode_url_component(id)),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -226,7 +235,11 @@ impl BuildsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("builds/{build_id}/download/{filename}"),
+            &format!(
+                "builds/{}/download/{}",
+                encode_url_component(build_id),
+                encode_url_component(filename)
+            ),
             true,
         )?;
         let res = timer
