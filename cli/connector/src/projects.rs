@@ -3,10 +3,9 @@
 
 use crate::api::{
     AddMemberRequest, CacheSubscriptionItem, ChangeMemberRoleRequest, CreateRoleRequest,
-    CreatedEntityResponse,
-    GrantProjectRequest, MakeProjectRequest, MemberItem, PaginatedProjectSummary,
-    PatchProjectGrantRequest, PatchProjectRequest, PatchRoleRequest, PendingInvitationItem,
-    PersonWithAccessToProjectOrCache, ProjectResponse, ProjectSecretSummary,
+    CreatedEntityResponse, GrantProjectRequest, MakeProjectRequest, MemberItem,
+    PaginatedProjectSummary, PatchProjectGrantRequest, PatchProjectRequest, PatchRoleRequest,
+    PendingInvitationItem, PersonWithAccessToProjectOrCache, ProjectResponse, ProjectSecretSummary,
     PutProjectSecretRequest, RemoveMemberRequest, RevokeInvitationRequest,
     RoleResponseProjectRoleOwner, SopsRecipientResponse, TeamGrantEntry,
 };

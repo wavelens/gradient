@@ -3,10 +3,9 @@
 
 use crate::api::{
     AddTeamMemberRequest, CreatedEntityResponse, MakeTeamRequest, PatchTeamRequest,
-    PatchWorkerRequest,
-    PendingInvitationItem, RegisterWorkerRequest, RegisteredTeamWorker, RemoveTeamMemberRequest,
-    RevokeInvitationRequest, TeamDemand, TeamGrants, TeamMemberItem, TeamMemberRequest,
-    TeamRequestItem, TeamResponse, TeamSummary, TeamWorkerEntry,
+    PatchWorkerRequest, PendingInvitationItem, RegisterWorkerRequest, RegisteredTeamWorker,
+    RemoveTeamMemberRequest, RevokeInvitationRequest, TeamDemand, TeamGrants, TeamMemberItem,
+    TeamMemberRequest, TeamRequestItem, TeamResponse, TeamSummary, TeamWorkerEntry,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
