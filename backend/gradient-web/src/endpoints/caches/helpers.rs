@@ -6,7 +6,7 @@
 
 use super::refusal::CacheRefusal;
 use crate::access::effective_cache_mask;
-use crate::authorization::{DecodedRequest, decode_jwt};
+use crate::authorization::{ApiKeyContext, DecodedRequest, decode_jwt};
 use crate::client_ip::resolve_client_ip;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
@@ -90,13 +90,26 @@ async fn require_cache_auth(
     else {
         return Err(CacheRefusal::AuthenticationRequired.into());
     };
-    let readable = effective_cache_mask(db, user.id, cache.id, decoded.api_key_context())
-        .await?
-        .is_some_and(|mask| cache_mask_grants(mask, CachePermission::ReadStore));
-    if !readable {
-        return Err(CacheRefusal::AuthenticationRequired.into());
+    let api_key = decoded.api_key_context();
+    if can_read_store(db, &user, cache, api_key).await? {
+        return Ok(());
     }
-    Ok(())
+    let unpinned_key = api_key.is_some_and(|key| key.cache_pin.is_none());
+    if unpinned_key && can_read_store(db, &user, cache, None).await? {
+        return Err(CacheRefusal::ApiKeyNotPinnedToCache.into());
+    }
+    Err(CacheRefusal::AuthenticationRequired.into())
+}
+
+async fn can_read_store(
+    db: &WebDb,
+    user: &MUser,
+    cache: &MCache,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<bool> {
+    Ok(effective_cache_mask(db, user.id, cache.id, api_key)
+        .await?
+        .is_some_and(|mask| cache_mask_grants(mask, CachePermission::ReadStore)))
 }
 
 pub(super) async fn get_nar_by_hash(

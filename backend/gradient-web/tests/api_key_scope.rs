@@ -242,11 +242,32 @@ async fn any_project_key_cannot_pull_from_a_member_cache() {
         mock_db().append_query_results([vec![private_cache()]]),
         &view_project_key(&raw),
     )
+    .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+    .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
     .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()]);
     assert_eq!(
         pull_status(db, &format!("GRAD{raw}")).await,
         StatusCode::UNAUTHORIZED
     );
+}
+
+#[tokio::test]
+async fn any_project_key_of_a_cache_member_is_told_to_use_a_cache_key() {
+    let raw = "r".repeat(64);
+    let db = with_key(
+        mock_db().append_query_results([vec![private_cache()]]),
+        &view_project_key(&raw),
+    )
+    .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+    .append_query_results([vec![cache_member(BASE_CACHE_ROLE_VIEW_ID)]])
+    .append_query_results([vec![cache_view_role()]]);
+    let server = make_test_server(db.into_connection());
+    let res = server
+        .get("/cache/test-cache/nix-cache-info")
+        .add_header("authorization", basic(&format!("GRAD{raw}")))
+        .await;
+    res.assert_status(StatusCode::UNAUTHORIZED);
+    assert!(res.text().contains("pin to this cache"), "{}", res.text());
 }
 
 #[tokio::test]
