@@ -44,6 +44,12 @@ describe('NotifyService', () => {
     expect(messages.messages()).toEqual([expect.objectContaining({ severity: 'success', summary: 'Role saved' })]);
   });
 
+  it('leaves an expired session to the sign-in redirect', () => {
+    const { notify, messages } = setup();
+    notify.failure("Couldn't start evaluation", new ApiError('Your session has ended', 401));
+    expect(messages.messages()).toEqual([]);
+  });
+
   it('never shows the text of a programming error', () => {
     const { notify, messages } = setup();
     notify.failure('Failed to delete webhook', new TypeError('x is undefined'));
