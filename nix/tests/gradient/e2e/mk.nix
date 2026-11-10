@@ -2344,11 +2344,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     server.succeed(f"test -e {probe_object}")
 
     def age(hashes, hours):
-        """Backdate the commit and the last fetch of `hashes` by `hours`."""
+        """Move the commit, cache claim, and last fetch for `hashes` back by `hours`."""
         listed = "', '".join(hashes)
         sql(f"UPDATE cached_path SET created_at = created_at - interval '{hours} hours' "
             f"WHERE hash IN ('{listed}');")
-        sql(f"UPDATE cached_path_signature SET last_fetched_at = last_fetched_at - interval '{hours} hours' "
+        sql(f"UPDATE cached_path_signature SET created_at = created_at - interval '{hours} hours', "
+            f"last_fetched_at = last_fetched_at - interval '{hours} hours' "
             f"WHERE cached_path IN (SELECT id FROM cached_path WHERE hash IN ('{listed}'));")
 
     age([upload_hash], 26)
