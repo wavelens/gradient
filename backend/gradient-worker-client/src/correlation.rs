@@ -301,7 +301,7 @@ pub async fn known_derivations_with_timeout(
     Ok(answers.into_iter().flatten().collect())
 }
 
-pub async fn known_derivations_chunk(
+async fn known_derivations_chunk(
     job_id: &str,
     writer: &ReconnectingWriter,
     waiters: &KnownDerivationWaiters,
@@ -371,7 +371,7 @@ pub async fn cache_query_with_timeout(
     Ok(answers.into_iter().flatten().collect())
 }
 
-pub async fn cache_query_chunk(
+async fn cache_query_chunk(
     job_id: &str,
     writer: &ReconnectingWriter,
     cache_waiters: &CacheWaiters,

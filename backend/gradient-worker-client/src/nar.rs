@@ -529,26 +529,6 @@ async fn http_put(url: &str, body: Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-pub fn compress_nar(raw_nar: &[u8]) -> Result<(Vec<u8>, CompressedNarMeta)> {
-    let nar_size = raw_nar.len() as u64;
-    let nar_hash = sha256_nix32(raw_nar);
-
-    let mut encoder = nar_encoder(
-        Vec::with_capacity(raw_nar.len() / 2),
-        compression_threads(Some(nar_size)),
-    )?;
-    encoder.write_all(raw_nar).context("compress with zstd")?;
-    let compressed = encoder.finish().context("finish zstd encoder")?;
-
-    let meta = CompressedNarMeta {
-        file_hash: sha256_nix32(&compressed),
-        file_size: compressed.len() as u64,
-        nar_hash,
-        nar_size,
-    };
-    Ok((compressed, meta))
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct PathMeta {
     pub nar_size: Option<u64>,
@@ -587,6 +567,26 @@ mod tests {
     )]
 
     use super::*;
+
+    fn compress_nar(raw_nar: &[u8]) -> Result<(Vec<u8>, CompressedNarMeta)> {
+        let nar_size = raw_nar.len() as u64;
+        let nar_hash = sha256_nix32(raw_nar);
+
+        let mut encoder = nar_encoder(
+            Vec::with_capacity(raw_nar.len() / 2),
+            compression_threads(Some(nar_size)),
+        )?;
+        encoder.write_all(raw_nar).context("compress with zstd")?;
+        let compressed = encoder.finish().context("finish zstd encoder")?;
+
+        let meta = CompressedNarMeta {
+            file_hash: sha256_nix32(&compressed),
+            file_size: compressed.len() as u64,
+            nar_hash,
+            nar_size,
+        };
+        Ok((compressed, meta))
+    }
     use gradient_wire::session::frame::BULK_CHUNK_SIZE;
     use gradient_wire::testing::MockProtoServer;
     use gradient_wire::testing::ServedUpload;
