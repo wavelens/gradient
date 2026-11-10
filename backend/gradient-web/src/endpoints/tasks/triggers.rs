@@ -11,10 +11,11 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
-use crate::scope::{Member, Requires, TaskScope, can};
+use crate::scope::{Member, Requires, RequiresUnmanaged, TaskScope, can};
 use anyhow::Context;
 use axum::{Extension, Json};
 use chrono::Utc;
+use gradient_ci::IntegrationKind;
 use gradient_ci::trigger::InputUpdateOutcome;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::ServerState;
@@ -111,13 +112,32 @@ pub(super) fn trigger_integration_id(
 
 async fn load_integrations_for_triggers<C: ConnectionTrait>(
     db: &C,
+    project: ProjectId,
     rows: &[MTaskTrigger],
 ) -> WebResult<HashMap<IntegrationId, MIntegration>> {
     let ids: Vec<IntegrationId> = rows
         .iter()
         .filter_map(|t| trigger_integration_id(t.trigger_type, &t.config))
         .collect();
-    Ok(by_ids::<EIntegration, _>(db, &ids).await?)
+    let mut integrations = by_ids::<EIntegration, _>(db, &ids).await?;
+    integrations.retain(|_, integration| integration.project == project);
+    Ok(integrations)
+}
+
+async fn check_trigger_config_integration_belongs_to_project_and_is_inbound<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+    config: &TriggerConfig,
+) -> WebResult<()> {
+    let integration_id = match config {
+        TriggerConfig::ReporterPush { integration_id, .. }
+        | TriggerConfig::ReporterPullRequest { integration_id, .. } => *integration_id,
+        TriggerConfig::Polling { .. } | TriggerConfig::Time { .. } => return Ok(()),
+    };
+    match gradient_db::integrations::by_id_in_project(db, project, integration_id).await? {
+        Some(integration) if integration.kind == IntegrationKind::Inbound => Ok(()),
+        _ => Err(TaskRefusal::RepositoryIntegrationMismatch.into()),
+    }
 }
 
 #[derive(Deserialize, Debug, ToSchema)]
@@ -151,7 +171,7 @@ pub async fn list(
 ) -> WebResult<Json<BaseResponse<Vec<TriggerOut>>>> {
     let rows = gradient_db::triggers::of_task(&db.web_db, proj.id).await?;
 
-    let integrations = load_integrations_for_triggers(&db.web_db, &rows).await?;
+    let integrations = load_integrations_for_triggers(&db.web_db, proj.project, &rows).await?;
 
     Ok(ok_json(
         rows.into_iter()
@@ -171,12 +191,18 @@ pub async fn list(
     responses((status = OK, description = "Trigger created", body = TriggerOut), WebError)
 )]
 pub async fn create(
-    TaskScope { task: proj, db, .. }: TaskScope<Requires<can::ManageTriggers>>,
+    TaskScope { task: proj, db, .. }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
     Json(body): Json<CreateTriggerRequest>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     body.config
         .validate()
         .map_err(|e| TaskRefusal::InvalidTriggerConfig(e.to_string()))?;
+    check_trigger_config_integration_belongs_to_project_and_is_inbound(
+        &db.web_db,
+        proj.project,
+        &body.config,
+    )
+    .await?;
 
     let now = Utc::now().naive_utc();
     let trigger_type = body.config.trigger_type();
@@ -195,7 +221,8 @@ pub async fn create(
     let row = gradient_db::triggers::insert(&db.web_db, trigger).await?;
 
     let integrations =
-        load_integrations_for_triggers(&db.web_db, std::slice::from_ref(&row)).await?;
+        load_integrations_for_triggers(&db.web_db, proj.project, std::slice::from_ref(&row))
+            .await?;
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
@@ -223,7 +250,8 @@ pub async fn read(
         .or_not_found(Resource::Trigger)?;
 
     let integrations =
-        load_integrations_for_triggers(&db.web_db, std::slice::from_ref(&row)).await?;
+        load_integrations_for_triggers(&db.web_db, proj.project, std::slice::from_ref(&row))
+            .await?;
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
@@ -243,7 +271,7 @@ pub async fn update(
         db,
         params,
         ..
-    }: TaskScope<Requires<can::ManageTriggers>>,
+    }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
     Json(body): Json<UpdateTriggerRequest>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let id: TaskTriggerId = params.param("id")?;
@@ -255,6 +283,12 @@ pub async fn update(
     if let Some(ref cfg) = body.config {
         cfg.validate()
             .map_err(|e| TaskRefusal::InvalidTriggerConfig(e.to_string()))?;
+        check_trigger_config_integration_belongs_to_project_and_is_inbound(
+            &db.web_db,
+            proj.project,
+            cfg,
+        )
+        .await?;
     }
 
     let mut active: ATaskTrigger = row.into();
@@ -271,7 +305,8 @@ pub async fn update(
     let updated = gradient_db::triggers::update(&db.web_db, active).await?;
 
     let integrations =
-        load_integrations_for_triggers(&db.web_db, std::slice::from_ref(&updated)).await?;
+        load_integrations_for_triggers(&db.web_db, proj.project, std::slice::from_ref(&updated))
+            .await?;
     Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 
@@ -290,7 +325,7 @@ pub async fn delete_one(
         db,
         params,
         ..
-    }: TaskScope<Requires<can::ManageTriggers>>,
+    }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
     let id: TaskTriggerId = params.param("id")?;
 
@@ -323,7 +358,7 @@ pub async fn set_default(
         db,
         params,
         ..
-    }: TaskScope<Requires<can::ManageTriggers>>,
+    }: TaskScope<RequiresUnmanaged<can::ManageTriggers>>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
     let id: TaskTriggerId = params.param("id")?;
 
@@ -336,7 +371,8 @@ pub async fn set_default(
     txn.commit().await?;
 
     let integrations =
-        load_integrations_for_triggers(&db.web_db, std::slice::from_ref(&updated)).await?;
+        load_integrations_for_triggers(&db.web_db, proj.project, std::slice::from_ref(&updated))
+            .await?;
     Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 
