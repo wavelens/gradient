@@ -251,6 +251,13 @@ describe('ActionFormComponent', () => {
     expect(emitted!.events).toEqual(['exec_job.completed']);
   });
 
+  it('names each task to evaluate by display name and slug', () => {
+    const fixture = createFixture(true);
+    fixture.componentRef.setInput('tasks', [{ id: 't-1', name: 'deploy', display_name: 'Deploy Prod' }]);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.taskOptions()).toEqual([{ label: 'Deploy Prod (deploy)', value: 't-1' }]);
+  });
+
   it('offers the exec tree generator and sends it without the flake lock fields', () => {
     const fixture = createFixture(true);
     fixture.detectChanges();
@@ -360,5 +367,35 @@ describe('ActionFormComponent - validation', () => {
     const { emitted, errors } = submitAndCollect(fixture);
     expect(errors).toEqual([expect.stringContaining('{input}')]);
     expect(emitted).toEqual([]);
+  });
+
+  function shownErrors(): (string | undefined)[] {
+    return Array.from(document.querySelectorAll('.gr-dialog .field-error')).map((e) => e.textContent?.trim());
+  }
+
+  it('shows no error when the user leaves an empty field without typing', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    const name = document.querySelector<HTMLInputElement>('#action-name')!;
+    name.dispatchEvent(new Event('blur'));
+    fixture.detectChanges();
+    expect(shownErrors()).toEqual([]);
+    name.value = 'x';
+    name.dispatchEvent(new Event('input'));
+    name.dispatchEvent(new Event('blur'));
+    name.value = '';
+    name.dispatchEvent(new Event('input'));
+    name.dispatchEvent(new Event('blur'));
+    fixture.detectChanges();
+    expect(shownErrors()).toEqual(['Enter a name for the action.']);
+  });
+
+  it('hides the errors of a failed submit after the type changes', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    expect(submitAndCollect(fixture).errors.length).toBeGreaterThan(0);
+    fixture.componentInstance.onTypeChange('start_evaluation');
+    fixture.detectChanges();
+    expect(shownErrors()).toEqual([]);
   });
 });

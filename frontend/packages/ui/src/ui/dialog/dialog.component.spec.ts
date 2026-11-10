@@ -8,6 +8,7 @@ import { InteractivityChecker } from '@angular/cdk/a11y';
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { DialogComponent } from './dialog.component';
+import { SelectComponent } from '../select/select.component';
 
 @Component({
   standalone: true,
@@ -333,5 +334,31 @@ describe('DialogComponent', () => {
     escape();
     fixture.detectChanges();
     expect(document.documentElement.style.overflow).toBe('');
+  });
+
+  it('closes an open dropdown on the first Escape and the dialog on the second', async () => {
+    @Component({
+      standalone: true,
+      imports: [DialogComponent, SelectComponent],
+      template: `<gr-dialog [(visible)]="open" header="Pick"><gr-select [options]="['a', 'b']" /></gr-dialog>`,
+    })
+    class HostWithSelect {
+      open = signal(true);
+    }
+    TestBed.configureTestingModule({ providers: [{ provide: InteractivityChecker, useClass: LayoutFreeInteractivityChecker }] });
+    const fixture = TestBed.createComponent(HostWithSelect);
+    await fixture.whenStable();
+    const trigger = document.querySelector<HTMLButtonElement>('.gr-dialog .gr-select__trigger')!;
+    const pressEscape = () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    trigger.click();
+    fixture.detectChanges();
+    expect(document.querySelectorAll('.gr-select__option')).toHaveLength(2);
+    pressEscape();
+    fixture.detectChanges();
+    expect(document.querySelectorAll('.gr-select__option')).toHaveLength(0);
+    expect(fixture.componentInstance.open()).toBe(true);
+    pressEscape();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.open()).toBe(false);
   });
 });

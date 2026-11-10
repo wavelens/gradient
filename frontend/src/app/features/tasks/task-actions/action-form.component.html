@@ -14,7 +14,7 @@
 >
   <div #actionForm class="action-form-fields">
   <gr-form-field label="Name" for="action-name" required [invalid]="showError('name')" [error]="errors().name ?? ''">
-    <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" (blur)="touch('name')" (keyup.enter)="onSubmit()" />
+    <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" (blur)="touch('name', name())" (keyup.enter)="onSubmit()" />
   </gr-form-field>
 
   <gr-form-field label="Type" for="action-type">
@@ -41,7 +41,7 @@
         id="action-recipients"
         [ngModel]="recipientsRaw()"
         (ngModelChange)="recipientsRaw.set($event)"
-        (blur)="touch('recipients')"
+        (blur)="touch('recipients', recipientsRaw())"
         (keyup.enter)="onSubmit()"
         placeholder="alice@example.com, ops@example.com"
       />
@@ -75,7 +75,7 @@
         id="action-url"
         [ngModel]="url()"
         (ngModelChange)="url.set($event)"
-        (blur)="touch('url')"
+        (blur)="touch('url', url())"
         (keyup.enter)="onSubmit()"
         placeholder="https://example.com/hook"
       />
@@ -106,7 +106,7 @@
         id="action-homeserver"
         [ngModel]="homeserver()"
         (ngModelChange)="homeserver.set($event)"
-        (blur)="touch('homeserver')"
+        (blur)="touch('homeserver', homeserver())"
         (keyup.enter)="onSubmit()"
         placeholder="https://matrix.example.org"
       />
@@ -117,7 +117,7 @@
         id="action-room"
         [ngModel]="roomId()"
         (ngModelChange)="roomId.set($event)"
-        (blur)="touch('roomId')"
+        (blur)="touch('roomId', roomId())"
         (keyup.enter)="onSubmit()"
         placeholder="!abc:example.org"
       />
@@ -131,7 +131,7 @@
         autocomplete="off"
         [ngModel]="secretValue()"
         (ngModelChange)="secretValue.set($event)"
-        (blur)="touch('matrixToken')"
+        (blur)="touch('matrixToken', secretValue())"
         (keyup.enter)="onSubmit()"
         [placeholder]="mode() === 'edit' ? 'Leave blank to keep the stored token' : ''"
       />
@@ -148,7 +148,7 @@
         autocomplete="off"
         [ngModel]="secretValue()"
         (ngModelChange)="secretValue.set($event)"
-        (blur)="touch('slackUrl')"
+        (blur)="touch('slackUrl', secretValue())"
         (keyup.enter)="onSubmit()"
         [placeholder]="mode() === 'edit' ? 'Leave blank to keep the stored URL' : 'https://hooks.slack.com/services/...'"
       />
@@ -226,7 +226,7 @@
         id="pr-branch-pattern"
         [ngModel]="prBranchPattern()"
         (ngModelChange)="prBranchPattern.set($event)"
-        (blur)="touch('branchPattern')"
+        (blur)="touch('branchPattern', prBranchPattern())"
         (keyup.enter)="onSubmit()"
         [placeholder]="defaultBranchPattern()"
       />
@@ -287,7 +287,7 @@
         <app-action-events
           [selected]="events()"
           [eventNamePrefixes]="taskFamilies"
-          (selectedChange)="events.set($event); touch('events')"
+          (selectedChange)="events.set($event); touch('events', $event)"
         />
       }
     </gr-form-field>

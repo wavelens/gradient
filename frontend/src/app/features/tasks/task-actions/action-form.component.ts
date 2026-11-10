@@ -30,7 +30,7 @@ import {
   InputDirective,
   SelectComponent,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent, entityToPickerOption } from '@shared/ui';
+import { LabelHelpComponent, entityToPickerOption, type DisplayNameAndName } from '@shared/ui';
 import { fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
 import { links } from '@shared/routing';
 
@@ -41,9 +41,8 @@ interface IntegrationOption {
   display_name: string;
 }
 
-interface TaskOption {
+interface TaskOption extends DisplayNameAndName {
   id: string;
-  name: string;
 }
 
 const DEFAULT_BRANCH_PATTERN: Record<PatchGeneratorKind, string> = {
@@ -249,7 +248,8 @@ export class ActionFormComponent implements OnChanges {
     return (this.submitAttempted() || this.touched().has(field)) && !!this.errors()[field];
   }
 
-  touch(field: ActionField): void {
+  touch(field: ActionField, value: string | readonly unknown[]): void {
+    if (value.length === 0 && !this.touched().has(field)) return;
     this.touched.update((fields) => new Set(fields).add(field));
   }
 
@@ -359,6 +359,8 @@ export class ActionFormComponent implements OnChanges {
 
   onTypeChange(newType: ActionType): void {
     this.type.set(newType);
+    this.submitAttempted.set(false);
+    this.touched.set(new Set());
     this.resetConfigFields();
     if (newType === 'git_host_status_report') this.events.set([...GIT_HOST_STATUS_EVENTS]);
   }

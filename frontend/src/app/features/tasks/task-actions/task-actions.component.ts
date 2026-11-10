@@ -114,7 +114,7 @@ export class TaskActionsComponent implements OnInit {
   actions = signal<ActionResponse[]>([]);
   outboundIntegrations = signal<IntegrationOption[]>([]);
   mailTeams = signal<string[]>([]);
-  projectTasks = signal<{ id: string; name: string }[]>([]);
+  projectTasks = signal<{ id: string; name: string; display_name: string }[]>([]);
 
   editingAction = signal<ActionResponse | null>(null);
   showCreateDialog = signal(false);
@@ -181,7 +181,7 @@ export class TaskActionsComponent implements OnInit {
 
   private loadProjectTasks(): void {
     this.tasksService.getTasks(this.projectName, 1, 100).subscribe({
-      next: (page) => this.projectTasks.set(page.items.map((t) => ({ id: t.id, name: t.name }))),
+      next: (page) => this.projectTasks.set(page.items.map((t) => ({ id: t.id, name: t.name, display_name: t.display_name }))),
       error: () => this.projectTasks.set([]),
     });
   }
