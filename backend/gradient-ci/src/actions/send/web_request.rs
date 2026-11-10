@@ -32,7 +32,6 @@ pub(crate) async fn execute_send_web_request(
         if let Some(signature) = crate::webhooks::sign(decrypted.as_bytes(), body.as_bytes()) {
             req = req.header("X-Gradient-Signature", signature);
         }
-        req = req.bearer_auth(decrypted);
     }
     let resp = req.send().await.context("send HTTP request")?;
     action_result_from_http_response("Web request target", resp).await

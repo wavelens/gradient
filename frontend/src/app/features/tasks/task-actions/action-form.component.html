@@ -84,7 +84,7 @@
       <span slot="hint">@if (mode() === 'edit') {
           Leave blank to keep existing token; enter to replace.
         } @else {
-          Sent as <code>Authorization: Bearer &lt;token&gt;</code>. Shown once after creation.
+          Signs each request body in <code>X-Gradient-Signature</code>. Shown once after creation.
         }</span>
       <div class="token-row">
         <input

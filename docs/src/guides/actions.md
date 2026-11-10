@@ -102,7 +102,6 @@ Every delivery arrives as a `POST` request with a JSON body. The `content` field
 | Header | Value |
 |---|---|
 | `X-Gradient-Event` | Name of the event |
-| `Authorization` | `Bearer <token>` with the token only |
 | `X-Gradient-Signature` | `sha256=<HMAC-SHA256 of the body, with the token as key>` with the token only |
 
 A receiver can verify the signature to reject requests not sent by Gradient.
