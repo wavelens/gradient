@@ -113,6 +113,12 @@ describe('TeamSettingsComponent', () => {
     expect(update).toHaveBeenCalledWith('platform', { new_project_workers: true });
   });
 
+  it('names the new project grants by what they give the team', () => {
+    const { fixture } = setup(true);
+    const labels = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-checkbox'), (checkbox) => checkbox.textContent?.trim());
+    expect(labels).toEqual(['Default role for members on team projects', 'Add team workers to all new projects']);
+  });
+
   it('picks a role only while new projects grant the team users, starting at View', async () => {
     const { fixture } = setup(true);
     await fixture.whenStable();
