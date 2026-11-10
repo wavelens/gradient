@@ -33,7 +33,7 @@ if ! API_KEY=$(<"${GRADIENT_API_KEY}"); then
 fi
 
 api() {
-  curl --silent --fail --max-time 10 --header "Authorization: Bearer $API_KEY" "$@"
+  curl --silent --fail --max-time 10 --header @<(printf 'Authorization: Bearer %s\n' "$API_KEY") "$@"
 }
 
 resolve_microvms() {
