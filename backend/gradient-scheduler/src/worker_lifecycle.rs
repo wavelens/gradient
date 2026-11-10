@@ -412,10 +412,6 @@ impl Scheduler {
                 "left held jobs to the session their worker reconnected on"
             );
         }
-        let unreclaimed = self
-            .call(|reply| SchedulerMsg::ReturnUnreclaimed { unreclaimed, reply })
-            .await
-            .unwrap_or_default();
         self.requeue_held(unreclaimed).await;
     }
 
@@ -455,18 +451,25 @@ impl Scheduler {
             .collect();
         let rows: Vec<DispatchedJobId> = held.iter().map(|(_, h)| h.assignment_id).collect();
         if let Err(e) = abandon_open_assignments(&self.db.worker_db, &rows).await {
-            warn!(error = %e, "closing the rows of held jobs failed");
-            return;
+            warn!(error = %e, "Failed to close held job rows. They stay held until the next sweep.");
+            return self.put_back_in_reclaim_hold(held).await;
         }
-        let keys: Vec<String> = held.into_iter().map(|(key, _)| key).collect();
+        let keys: Vec<String> = held.iter().map(|(key, _)| key.clone()).collect();
         let reopened = match keys_with_open_assignment(&self.db.worker_db, &keys).await {
             Ok(reopened) => reopened,
             Err(e) => {
-                warn!(error = %e, "reading the open rows of held jobs failed");
-                return;
+                warn!(error = %e, "Failed to read held jobs that another instance dispatched again. They remain held until the next sweep.");
+                return self.put_back_in_reclaim_hold(held).await;
             }
         };
-        let keys: Vec<String> = keys.into_iter().filter(|k| !reopened.contains(k)).collect();
+        let unreclaimed: Vec<_> = held
+            .into_iter()
+            .filter(|(key, _)| !reopened.contains(key))
+            .collect();
+        let keys: Vec<String> = unreclaimed.iter().map(|(key, _)| key.clone()).collect();
+        let _ = self
+            .call(|reply| SchedulerMsg::ReturnUnreclaimed { unreclaimed, reply })
+            .await;
         info!(
             jobs = keys.len(),
             dispatched_again = reopened.len(),
@@ -481,6 +484,12 @@ impl Scheduler {
         )
         .await;
         self.build_kick.kick();
+    }
+
+    async fn put_back_in_reclaim_hold(&self, held: Vec<(String, AwaitingReclaim)>) {
+        let _ = self
+            .call(|reply| SchedulerMsg::PutBackInReclaimHold { held, reply })
+            .await;
     }
 
     pub async fn refresh_waiting_state(&self) -> Result<()> {

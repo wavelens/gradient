@@ -111,7 +111,11 @@ pub enum SchedulerMsg {
     },
     ReturnUnreclaimed {
         unreclaimed: Vec<(String, AwaitingReclaim)>,
-        reply: RpcReplyPort<Vec<(String, AwaitingReclaim)>>,
+        reply: RpcReplyPort<()>,
+    },
+    PutBackInReclaimHold {
+        held: Vec<(String, AwaitingReclaim)>,
+        reply: RpcReplyPort<()>,
     },
     Reclaim {
         worker: String,
@@ -939,7 +943,6 @@ impl Actor for CoreActor {
                 } else {
                     core.tracker.take_unlisted(&reg.worker, &HashSet::new())
                 };
-                core.return_unreclaimed(&unreclaimed);
                 info!(worker = %reg.worker, "worker registered");
                 let _ = reply.send(Some(Registered {
                     last_seen,
@@ -980,16 +983,18 @@ impl Actor for CoreActor {
                 listed,
                 reply,
             } => {
-                let unlisted = core.tracker.take_unlisted(&worker, &listed);
-                core.return_unreclaimed(&unlisted);
-                let _ = reply.send(unlisted);
+                let _ = reply.send(core.tracker.take_unlisted(&worker, &listed));
             }
             SchedulerMsg::TakeUnreclaimed { now, reply } => {
                 let _ = reply.send(core.tracker.take_unreclaimed(now));
             }
+            SchedulerMsg::PutBackInReclaimHold { held, reply } => {
+                core.tracker.hold_again(held);
+                let _ = reply.send(());
+            }
             SchedulerMsg::ReturnUnreclaimed { unreclaimed, reply } => {
                 core.return_unreclaimed(&unreclaimed);
-                let _ = reply.send(unreclaimed);
+                let _ = reply.send(());
             }
             SchedulerMsg::IsConnected { worker, reply } => {
                 let _ = reply.send(core.pool.is_connected(&worker));

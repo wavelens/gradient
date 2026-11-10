@@ -1943,6 +1943,46 @@ async fn w40_second_connection_for_live_worker_id_is_refused_and_first_session_k
     case.finish().await;
 }
 
+#[tokio::test]
+async fn w41_held_build_stays_held_when_closing_dispatch_rows_fails_and_next_sweep_requeues_it_after_database_recovers()
+ {
+    use sea_orm::ConnectionTrait;
+
+    let case = SchedulerCase::start(shape().one(EvaluationId::now_v7(), A, A_OUT)).await;
+    case.connect_reclaiming(W1, w_all(), &[]).await;
+    let (a, a1) = building_on_w1(&case).await;
+    case.disconnect(W1).await;
+
+    let db = case.db.connection();
+    db.execute_unprepared(
+        "CREATE FUNCTION refuse_row_update() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN RAISE EXCEPTION 'refused'; END $$; \
+         CREATE TRIGGER refuse_row_update BEFORE UPDATE ON dispatched_job \
+         FOR EACH ROW EXECUTE FUNCTION refuse_row_update();",
+    )
+    .await
+    .expect("the trigger installs");
+    case.requeue_unreclaimed_after(Duration::from_secs(600))
+        .await;
+    assert!(!case.pending(&a).await, "after 2: pending(build:A)");
+    assert!(case.tracked(&a).await, "after 2: build:A still held");
+
+    db.execute_unprepared("DROP TRIGGER refuse_row_update ON dispatched_job;")
+        .await
+        .expect("the trigger drops");
+    case.requeue_unreclaimed_after(Duration::from_secs(600))
+        .await;
+    assert_eq!(
+        closes(&case.assignments(&a).await),
+        vec![(a1, Some(DispatchedJobOutcome::Abandoned))],
+        "after 3: dj(build:A)"
+    );
+    assert!(case.pending(&a).await, "after 3: pending(build:A)");
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
 fn reattached_keys(reclaimed: &Reclaimed) -> Vec<(String, DispatchedJobId)> {
     reclaimed
         .reattached
