@@ -734,6 +734,69 @@ async fn f11_an_import_request_from_a_session_not_running_the_job_is_ignored() {
     case.finish().await;
 }
 
+#[tokio::test]
+async fn f12_a_disconnected_evaluating_worker_drops_pending_import_waits_and_the_wait_count_is_zero()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(startable_import(e1)).await;
+    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
+    case.connect(W2, w_all(), &[]).await;
+    let (x, a2) = claimed_by_w2(&case).await;
+    waiting_import(&case, e1).await;
+
+    case.disconnect(W1).await;
+    assert_eq!(case.import_waits(), 0, "after 3: the import wait is gone");
+    case.check("step 3").await;
+
+    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.complete(W2, &x, a2, Vec::new(), 5).await;
+    case.build_assign_pass(false, false).await;
+    let lost = case.signals(W1);
+    assert!(
+        matches!(lost.as_slice(), [SessionSignal::Close { .. }]),
+        "after 4: signals(W1) == [Close{{_}}] only, got {lost:?}"
+    );
+    case.signals(W2);
+    case.check("step 4").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn f13_worker_resending_same_import_request_keeps_one_wait_and_gets_one_answer() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(startable_import(e1)).await;
+    evaluating(&case, e1, batch(&[(X, X_OUT)])).await;
+    case.connect(W2, w_all(), &[]).await;
+    let (x, a2) = claimed_by_w2(&case).await;
+    waiting_import(&case, e1).await;
+
+    case.import_request(W1, &eval_key(e1), "r1", &[drv_path(X)])
+        .await;
+    assert_eq!(case.signals(W1), vec![], "after 3: signals(W1)");
+    assert_eq!(case.import_waits(), 1, "after 3: still one import wait");
+    case.check("step 3").await;
+
+    case.commit_nar(output_nar(X, X_OUT)).await;
+    case.complete(W2, &x, a2, Vec::new(), 5).await;
+    case.build_assign_pass(false, false).await;
+    assert_eq!(
+        without_offers(case.signals(W1)),
+        vec![answer(
+            e1,
+            "r1",
+            ImportOutcome::Completed {
+                realisations: Vec::new()
+            }
+        )],
+        "after 4: one answer to W1"
+    );
+    case.signals(W2);
+    case.check("step 4").await;
+
+    case.finish().await;
+}
+
 fn importing(evaluation: EvaluationId, imports: &[&str], entry_status: BuildStatus) -> Shape {
     let mut seed = shape().evalq(evaluation);
     for path in imports {

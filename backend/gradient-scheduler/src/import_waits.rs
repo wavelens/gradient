@@ -62,6 +62,8 @@ impl Waits {
     }
 
     pub fn register(&mut self, wait: ImportWait) {
+        self.waits
+            .retain(|w| !(w.job_id == wait.job_id && w.request_id == wait.request_id));
         self.waits.push(wait);
     }
 
@@ -211,6 +213,10 @@ impl ImportWaits {
 
     pub async fn drop_evaluations(&self, evaluations: &HashSet<EvaluationId>) -> usize {
         self.0.lock().drop_evaluations(evaluations)
+    }
+
+    pub async fn release_import_waits_for_worker(&self, worker: &str) {
+        self.0.lock().waits.retain(|w| w.worker != worker);
     }
 }
 

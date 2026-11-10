@@ -261,7 +261,18 @@ async fn i07_an_input_request_from_a_build_job_is_dropped() {
 
     case.input_request(W1, build.job_id(), "r1", SSH_REQUEST)
         .await;
-    assert_eq!(fetches_of(&case, &[W1, W2]), vec![], "after 2: no fetch");
+    assert_eq!(
+        without_offers(case.signals(W1)),
+        vec![SessionSignal::InputResult {
+            job_id: build.job_id().to_owned(),
+            request_id: "r1".into(),
+            outcome: InputOutcome::Failed {
+                message: "job for this input request is not a running evaluation".into(),
+            },
+        }],
+        "after 2: signals(W1) refuse the request"
+    );
+    assert_eq!(fetches_of(&case, &[W2]), vec![], "after 2: no fetch");
     assert_eq!(case.input_waits(), 0, "after 2: no wait opened");
     case.check("step 2").await;
 
@@ -473,6 +484,32 @@ async fn i12_an_unplaced_fetch_waits_when_no_other_worker_qualifies() {
         "after 3: W3 takes the fetch"
     );
     case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn i13_duplicate_input_request_keeps_one_waiting_request_and_answers_once() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().evalq(e1)).await;
+    evaluating(&case, W1, e1).await;
+    case.connect(W2, w_fetch(), &[]).await;
+    case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
+        .await;
+    case.input_request(W1, &eval_key(e1), "r1", SSH_REQUEST)
+        .await;
+    let fetch = single_fetch(&case, &[W1, W2]);
+    assert_eq!(case.input_waits(), 1, "after 1: one waiting request");
+    case.check("step 1").await;
+
+    case.input_fetched(W2, &fetch.fetch_id, fetched()).await;
+    assert_eq!(
+        without_offers(case.signals(W1)),
+        vec![result(e1, "r1", fetched())],
+        "after 2: one answer to W1"
+    );
+    assert_eq!(case.input_waits(), 0, "after 2: no input wait left");
+    case.check("step 2").await;
 
     case.finish().await;
 }

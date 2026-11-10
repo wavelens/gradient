@@ -30,7 +30,16 @@ impl Scheduler {
         request: String,
     ) -> Result<()> {
         let Some(PendingJob::Eval(job)) = self.active_job(job_id).await else {
-            debug!(%worker_id, %job_id, "input request from a job that is no running evaluation; dropped");
+            debug!(%worker_id, %job_id, "input request from a job without an evaluation. answer with failure");
+            let refusal = SessionSignal::InputResult {
+                job_id: job_id.to_owned(),
+                request_id,
+                outcome: InputOutcome::Failed {
+                    message: "job for this input request is not a running evaluation".to_owned(),
+                },
+            };
+            self.signal_workers(vec![(worker_id.to_owned(), refusal)])
+                .await;
             return Ok(());
         };
         let waiter = InputWaiter {

@@ -58,8 +58,13 @@ pub struct InputWaits(Arc<Mutex<HashMap<String, InputWait>>>);
 
 impl InputWaits {
     pub fn register(&self, new: NewInputWait) {
-        self.0
-            .lock()
+        let mut waits = self.0.lock();
+        for wait in waits.values_mut() {
+            wait.waiters.retain(|w| {
+                !(w.job_id == new.waiter.job_id && w.request_id == new.waiter.request_id)
+            });
+        }
+        waits
             .entry(new.fetch_key)
             .or_insert_with(|| InputWait {
                 request: new.request,

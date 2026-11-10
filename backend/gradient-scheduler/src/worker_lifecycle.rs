@@ -370,6 +370,9 @@ impl Scheduler {
             }
         }
         self.reassign_input_fetches_of(worker_id).await;
+        self.import_waits
+            .release_import_waits_for_worker(worker_id)
+            .await;
         self.db.events.publish(worker::Disconnected {
             worker_id: worker_id.to_owned(),
         });
