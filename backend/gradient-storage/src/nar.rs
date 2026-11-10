@@ -378,11 +378,14 @@ impl NarStore {
             None => return Err(crate::digest::VerifyError::Missing),
         }
         if rehash {
-            let bytes = self
-                .get_object(path)
+            let (_, stream) = self
+                .get_stream_object(path, None)
                 .await?
                 .ok_or(crate::digest::VerifyError::Missing)?;
-            crate::digest::verify_nar_bytes(&bytes, expected_file_hash, expected_size)?;
+            let reader = tokio_util::io::StreamReader::new(
+                stream.map(|chunk| chunk.map_err(std::io::Error::other)),
+            );
+            crate::digest::verify_nar_reader(reader, expected_file_hash, expected_size).await?;
         }
 
         Ok(())
