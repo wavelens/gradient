@@ -10,7 +10,7 @@
 @if (cache(); as c) {
     <app-server-configuration-managed-banner [access]="access()" kind="cache" showReadOnlyNote />
     <gr-settings-section title="General">
-      <gr-form-field label="Name" for="cache-name">
+      <gr-form-field label="Name" for="cache-name" hint="This name is part of the URL and can't be changed here. Change the display name instead.">
         <input grInput id="cache-name" [value]="c.name" disabled />
       </gr-form-field>
 

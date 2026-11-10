@@ -86,6 +86,12 @@ describe('CacheSettingsComponent - first load', () => {
     expect(fixture.componentInstance.loading()).toBe(false);
     expect(getCache).not.toHaveBeenCalled();
   });
+
+  it('says why the locked name cannot change and points to the display name', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const nameField = (fixture.nativeElement as HTMLElement).querySelector('#cache-name')!.closest('gr-form-field')!;
+    expect(nameField.querySelector('.hint')?.textContent).toContain('display name');
+  });
 });
 
 describe('CacheSettingsComponent - access gating', () => {

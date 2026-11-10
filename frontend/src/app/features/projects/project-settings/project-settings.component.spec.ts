@@ -102,6 +102,13 @@ describe('ProjectSettingsComponent - validation and unsaved edits', () => {
     return writes;
   }
 
+  it('says why the locked name cannot change and points to the display name', async () => {
+    const fixture = setup(admin);
+    await settled(fixture);
+    const nameField = (fixture.nativeElement as HTMLElement).querySelector('#project-name')!.closest('gr-form-field')!;
+    expect(nameField.querySelector('.hint')?.textContent).toContain('display name');
+  });
+
   it('disables Save without a hint while nothing changed', async () => {
     const fixture = setup(admin);
     await settled(fixture);

@@ -10,7 +10,7 @@
 @if (project(); as project) {
   <app-server-configuration-managed-banner [access]="access()" kind="project" showReadOnlyNote />
   <gr-settings-section title="General">
-    <gr-form-field label="Name" for="project-name">
+    <gr-form-field label="Name" for="project-name" hint="This name is part of the URL and can't be changed here. Change the display name instead.">
       <input
         grInput
         id="project-name"
