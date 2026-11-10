@@ -6,12 +6,13 @@
 
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { EMPTY, Observable, Subject, catchError, interval, map, startWith, switchMap } from 'rxjs';
+import { EMPTY, Observable, Subject, catchError, filter, map, switchMap, tap } from 'rxjs';
 import { BoardService } from '@core/services/board.service';
 import { FormsModule } from '@angular/forms';
 import { LoadStateComponent, TabSwitchComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { oneOf, queryParamSignal } from '@shared/routing';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { clockTime, monthDay, monthDayClockTime, formatCount, formatDuration } from '@shared/text';
 import { alignSeries, windowBuckets } from './storage-chart';
 import { BoardStorage } from '@core/models';
@@ -154,18 +155,29 @@ export class BoardStorageComponent implements OnInit {
     )
   );
 
+  constructor() {
+    runReloadIntervalWhileTabVisible(() => {
+      const hours = this.hours();
+      return this.fetch(hours, true).pipe(
+        filter(() => hours === this.hours()),
+        tap((v) => this.setStorageViewAndClearLoadError(v)),
+      );
+    }, REFRESH_MS);
+  }
+
   ngOnInit(): void {
     this.reload
       .pipe(
-        switchMap(() => interval(REFRESH_MS).pipe(startWith(-1))),
-        switchMap((tick) => this.fetch(this.hours(), tick >= 0)),
+        switchMap(() => this.fetch(this.hours(), false)),
         takeUntilDestroyed(this.destroyRef)
       )
-      .subscribe((v) => {
-        this.view.set(v);
-        this.loadError.set(null);
-      });
+      .subscribe((v) => this.setStorageViewAndClearLoadError(v));
     this.reload.next();
+  }
+
+  private setStorageViewAndClearLoadError(v: StorageView): void {
+    this.view.set(v);
+    this.loadError.set(null);
   }
 
   select(hours: number): void {

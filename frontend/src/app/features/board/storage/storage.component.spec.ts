@@ -108,3 +108,29 @@ describe('BoardStorageComponent', () => {
     expect(getStorage).toHaveBeenLastCalledWith(24);
   });
 });
+
+describe('BoardStorageComponent - timed reload', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('reloads every minute only while the tab is visible', () => {
+    vi.useFakeTimers();
+    let visibility: DocumentVisibilityState = 'hidden';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    const getStorage = vi.fn((_hours: number) => of(EMPTY));
+    TestBed.configureTestingModule({
+      imports: [BoardStorageComponent],
+      providers: [provideRouter([]), { provide: BoardService, useValue: { getStorage } }],
+    });
+    TestBed.createComponent(BoardStorageComponent).detectChanges();
+
+    vi.advanceTimersByTime(180_000);
+    expect(getStorage).toHaveBeenCalledTimes(1);
+
+    visibility = 'visible';
+    vi.advanceTimersByTime(60_000);
+    expect(getStorage).toHaveBeenCalledTimes(2);
+  });
+});

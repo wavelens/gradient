@@ -251,3 +251,54 @@ describe('BoardHealthComponent', () => {
     TestBed.resetTestingModule();
   });
 });
+
+describe('BoardHealthComponent - admin tasks', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  function setupWithTaskRequests(listTasks: ReturnType<typeof vi.fn>): ComponentFixture<BoardHealthComponent> {
+    TestBed.configureTestingModule({
+      imports: [BoardHealthComponent],
+      providers: [
+        provideRouter([]),
+        { provide: BoardService, useValue: { getHealth: () => of(HEALTH) } },
+        { provide: AdminService, useValue: { listTasks } },
+      ],
+    });
+    const fixture = TestBed.createComponent(BoardHealthComponent);
+    fixture.detectChanges();
+    return fixture;
+  }
+
+  it('shows a failed task list request with Try Again instead of an empty list', () => {
+    const listTasks = vi.fn()
+      .mockReturnValueOnce(throwError(() => new Error('tasks endpoint failed')))
+      .mockReturnValue(of([TASK]));
+    const fixture = setupWithTaskRequests(listTasks);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Failed to load admin tasks');
+    expect(root.textContent).not.toContain('No admin tasks yet.');
+
+    root.querySelector<HTMLButtonElement>('.gr-load-state__error button')?.click();
+    fixture.detectChanges();
+    expect(listTasks).toHaveBeenCalledTimes(2);
+    expect(root.textContent).toContain('Deep GC');
+  });
+
+  it('reloads the task list on a timer only while a task is still running', () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const listTasks = vi.fn()
+      .mockReturnValueOnce(of([TASK]))
+      .mockReturnValue(of([{ ...TASK, status: 'completed' }]));
+    setupWithTaskRequests(listTasks);
+
+    vi.advanceTimersByTime(5_000);
+    expect(listTasks).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(20_000);
+    expect(listTasks).toHaveBeenCalledTimes(2);
+  });
+});

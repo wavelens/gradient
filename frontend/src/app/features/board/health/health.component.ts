@@ -6,6 +6,7 @@
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { EMPTY, Observable, tap } from 'rxjs';
 import { ButtonComponent, CardGridComponent, LoadStateComponent, TableComponent, StatCardComponent } from '@gradient/ui/ui';
 import { BoardService } from '@core/services/board.service';
 import { AdminService } from '@core/services/admin.service';
@@ -13,7 +14,9 @@ import { NotifyService } from '@core/services/notify.service';
 import { ConfirmService } from '@shared/confirm';
 import { formatBytes, formatDuration, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { BoardHealth, AdminTaskDto } from '@core/models';
+import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 
+const adminTaskListPollIntervalMs = 5_000;
 const TASK_KIND_LABELS: Record<string, string> = { deep_gc: 'Deep GC' };
 const DEEP_GC_PASS_LABELS: Record<string, string> = {
   blobs: 'Blobs',
@@ -103,23 +106,26 @@ export function formatDeepGcCheckpointLabel(checkpoint: string): string {
         }
       </div>
 
-      <gr-table class="http">
-        <thead><tr><th>Task</th><th>Status</th><th>Step</th><th>Created</th><th>Finished</th><th>Error</th></tr></thead>
-        <tbody>
-          @for (t of tasks(); track t.id) {
-            <tr>
-              <td>{{ taskKindLabel(t.kind) }}</td>
-              <td>{{ t.status }}</td>
-              <td class="muted">{{ t.checkpoint && t.status !== 'completed' ? checkpointLabel(t.checkpoint) : '-' }}</td>
-              <td>{{ t.created_at | serverDate }}</td>
-              <td>{{ t.finished_at ? (t.finished_at | serverDate) : '-' }}</td>
-              <td [class.bad]="!!t.error">{{ t.error ?? '' }}</td>
-            </tr>
-          } @empty {
-            <tr><td colspan="6" class="muted">No admin tasks yet.</td></tr>
-          }
-        </tbody>
-      </gr-table>
+      <gr-load-state [loading]="tasks() === null && taskListLoadError() === null" [empty]="tasks() === null" [error]="taskListLoadError()"
+                     errorTitle="Failed to load admin tasks" flat (retry)="loadTasks()">
+        <gr-table class="http">
+          <thead><tr><th>Task</th><th>Status</th><th>Step</th><th>Created</th><th>Finished</th><th>Error</th></tr></thead>
+          <tbody>
+            @for (t of tasks() ?? []; track t.id) {
+              <tr>
+                <td>{{ taskKindLabel(t.kind) }}</td>
+                <td>{{ t.status }}</td>
+                <td class="muted">{{ t.checkpoint && t.status !== 'completed' ? checkpointLabel(t.checkpoint) : '-' }}</td>
+                <td>{{ t.created_at | serverDate }}</td>
+                <td>{{ t.finished_at ? (t.finished_at | serverDate) : '-' }}</td>
+                <td [class.bad]="!!t.error">{{ t.error ?? '' }}</td>
+              </tr>
+            } @empty {
+              <tr><td colspan="6" class="muted">No admin tasks yet.</td></tr>
+            }
+          </tbody>
+        </gr-table>
+      </gr-load-state>
     }
     </gr-load-state>
   `,
@@ -135,7 +141,10 @@ export class BoardHealthComponent implements OnInit {
   health = signal<BoardHealth | null>(null);
   healthLoading = signal(true);
   healthError = signal<unknown>(null);
-  tasks = signal<AdminTaskDto[]>([]);
+  tasks = signal<AdminTaskDto[] | null>(null);
+  taskListLoadError = signal<unknown>(null);
+  private hasPendingOrRunningMaintenanceTasks = computed(() =>
+    (this.tasks() ?? []).some((t) => t.status === 'pending' || t.status === 'running'));
   drainBusy = signal(false);
   readonly supervisedLoopsThatHaveRestartsErrorsOrTimeouts = computed(() =>
     (this.health()?.supervised ?? []).filter((l) => l.restarts > 0 || l.pass_errors > 0 || l.pass_timeouts > 0 || !!l.last_error));
@@ -148,8 +157,20 @@ export class BoardHealthComponent implements OnInit {
     return formatDuration(value * 1000);
   }
 
-  private loadTasks(): void {
-    this.admin.listTasks().subscribe((t) => this.tasks.set(t));
+  constructor() {
+    runReloadIntervalWhileTabVisible(
+      () => (this.hasPendingOrRunningMaintenanceTasks() ? this.requestAdminMaintenanceTasks() : EMPTY),
+      adminTaskListPollIntervalMs,
+    );
+  }
+
+  private requestAdminMaintenanceTasks(): Observable<AdminTaskDto[]> {
+    return this.admin.listTasks().pipe(tap((t) => this.tasks.set(t)));
+  }
+
+  loadTasks(): void {
+    this.taskListLoadError.set(null);
+    this.requestAdminMaintenanceTasks().subscribe({ error: (error: unknown) => this.taskListLoadError.set(error) });
   }
 
   runDeepGc(): void {
