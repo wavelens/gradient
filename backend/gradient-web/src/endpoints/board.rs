@@ -326,12 +326,25 @@ pub async fn get_dispatched_jobs(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
 ) -> WebResult<Json<BaseResponse<DispatchedJobsResponse>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
-    let open = gradient_db::worker_registrations::open_dispatched_jobs(&state.web_db, 500).await?;
-
-    let (visible, other_running): (Vec<_>, Vec<_>) = open
-        .into_iter()
-        .partition(|j| scope.allows(&Uuid::from(j.project)));
-    let other_running = other_running.len() as u64;
+    let projects: Option<Vec<ProjectId>> = scope
+        .project_ids()
+        .map(|ids| ids.into_iter().map(ProjectId::from).collect());
+    let visible = gradient_db::worker_registrations::open_dispatched_jobs(
+        &state.web_db,
+        projects.as_deref(),
+        500,
+    )
+    .await?;
+    let other_running = match &projects {
+        Some(projects) => {
+            gradient_db::worker_registrations::count_running_dispatched_jobs_not_in_project_ids(
+                &state.web_db,
+                projects,
+            )
+            .await?
+        }
+        None => 0,
+    };
 
     let subjects = JobSubjects::load(&state.web_db, visible.iter().filter_map(subject_of)).await?;
     let ids: Vec<DispatchedJobId> = visible.iter().map(|j| j.id).collect();

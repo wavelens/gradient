@@ -8,7 +8,7 @@ use gradient_entity::{dispatched_job, worker_connection, worker_sample};
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, QueryTrait,
 };
 
 pub async fn by_worker_id<C: ConnectionTrait>(
@@ -136,13 +136,28 @@ pub async fn insert<C: ConnectionTrait>(
 
 pub async fn open_dispatched_jobs<C: ConnectionTrait>(
     db: &C,
+    projects: Option<&[ProjectId]>,
     limit: u64,
 ) -> Result<Vec<dispatched_job::Model>, DbErr> {
     dispatched_job::Entity::find()
         .filter(dispatched_job::Column::FinishedAt.is_null())
+        .apply_if(projects, |query, projects| {
+            query.filter(dispatched_job::Column::Project.is_in(projects.iter().copied()))
+        })
         .order_by_desc(dispatched_job::Column::DispatchedAt)
         .limit(limit)
         .all(db)
+        .await
+}
+
+pub async fn count_running_dispatched_jobs_not_in_project_ids<C: ConnectionTrait>(
+    db: &C,
+    projects: &[ProjectId],
+) -> Result<u64, DbErr> {
+    dispatched_job::Entity::find()
+        .filter(dispatched_job::Column::FinishedAt.is_null())
+        .filter(dispatched_job::Column::Project.is_not_in(projects.iter().copied()))
+        .count(db)
         .await
 }
 
@@ -229,6 +244,44 @@ mod tests {
             .expect("the project is deleted");
 
         assert!(db.rows::<EWorkerRegistration>().await.is_empty());
+        db.finish().await;
+    }
+
+    fn running_job(project: ProjectId) -> dispatched_job::Model {
+        dispatched_job::Model {
+            id: gradient_entity::ids::DispatchedJobId::now_v7(),
+            project,
+            worker_id: "w1".into(),
+            score_breakdown: serde_json::json!({}),
+            worker_context: serde_json::json!({}),
+            job_context: serde_json::json!({}),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn running_jobs_outside_the_visible_projects_are_counted_but_not_listed() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        let (visible, hidden) = (ProjectId::now_v7(), ProjectId::now_v7());
+        for project in [visible, hidden, hidden] {
+            crate::rows::insert::<dispatched_job::Entity, _>(&conn, running_job(project))
+                .await
+                .expect("the job is written");
+        }
+
+        let listed = open_dispatched_jobs(&conn, Some(&[visible]), 500)
+            .await
+            .expect("the visible jobs are read");
+        let hidden_count = count_running_dispatched_jobs_not_in_project_ids(&conn, &[visible])
+            .await
+            .expect("the hidden jobs are counted");
+
+        assert_eq!(
+            listed.iter().map(|job| job.project).collect::<Vec<_>>(),
+            vec![visible]
+        );
+        assert_eq!(hidden_count, 2);
         db.finish().await;
     }
 }
