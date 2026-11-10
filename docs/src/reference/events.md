@@ -22,7 +22,7 @@ All three payloads use one JSON structure: websocket messages, webhook bodies, a
 {
   "event": "build.completed",
   "at": "2026-09-26T12:00:00.123Z",
-  "content": { "build_id": "...", "derivation_build": "...", "evaluation_id": "...", "status": 3, "task": "...", "project": "..." }
+  "content": { "build_id": "...", "derivation_build": "...", "evaluation_id": "...", "status": 3, "status_name": "Completed", "task": "...", "project": "..." }
 }
 ```
 
@@ -45,6 +45,8 @@ All three payloads use one JSON structure: websocket messages, webhook bodies, a
 | `cache.changed`, `cache.nar.fetched`, `cache.narinfo.served`, `cache.nar.signed` | no | cache traffic. `cache.nar.signed` marks a fresh upload as signed into a cache |
 
 Every `build.*` event with a per-evaluation `build_id` also includes `derivation_build`. That field identifies the shared build, and `worker.job_dispatched` names this same build as its `build_id`.
+
+`build.*`, `evaluation.*` and `exec_job.*` events include a numeric `status` plus `status_name`, the same status name the REST API can return (for example `Completed` or `running`).
 
 ## Webhooks
 

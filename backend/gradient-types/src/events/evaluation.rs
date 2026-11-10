@@ -138,6 +138,10 @@ impl EventKind for Reported {
             self.phase.name()
         ))
     }
+
+    fn status_name(&self) -> Option<serde_json::Value> {
+        serde_json::to_value(EvaluationStatus::try_from(i32::from(self.status)).ok()?).ok()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

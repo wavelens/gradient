@@ -34,7 +34,15 @@ pub struct StatusChanged {
     pub evaluation_id: EvaluationId,
     pub status: i16,
 }
-firehose!(StatusChanged, names::BUILD_STATUS_CHANGED);
+
+impl EventKind for StatusChanged {
+    const NAME: &'static str = names::BUILD_STATUS_CHANGED;
+    const DURABLE: bool = false;
+
+    fn status_name(&self) -> Option<serde_json::Value> {
+        serde_json::to_value(BuildStatus::try_from(i32::from(self.status)).ok()?).ok()
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Reported {
@@ -100,6 +108,10 @@ impl EventKind for Reported {
 
     fn key(&self) -> Option<String> {
         Some(format!("build:{}:{}", self.build_id, self.status))
+    }
+
+    fn status_name(&self) -> Option<serde_json::Value> {
+        serde_json::to_value(BuildStatus::try_from(i32::from(self.status)).ok()?).ok()
     }
 }
 

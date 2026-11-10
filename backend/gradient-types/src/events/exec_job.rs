@@ -77,6 +77,10 @@ impl EventKind for Reported {
         let attempt = self.attempt.map(|a| a.to_string()).unwrap_or_default();
         Some(format!("exec_job:{}:{attempt}:{}", self.job, self.status))
     }
+
+    fn status_name(&self) -> Option<serde_json::Value> {
+        serde_json::to_value(ExecJobStatus::try_from(self.status).ok()?).ok()
+    }
 }
 
 #[cfg(test)]

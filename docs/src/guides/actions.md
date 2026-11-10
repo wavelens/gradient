@@ -95,7 +95,7 @@ Every delivery arrives as a `POST` request with a JSON body. The `content` field
 {
   "event": "build.failed",
   "at": "2026-09-26T12:00:00.123Z",
-  "content": { "build_id": "...", "evaluation_id": "...", "task": "...", "project": "...", "status": 4 }
+  "content": { "build_id": "...", "evaluation_id": "...", "task": "...", "project": "...", "status": 4, "status_name": "FailedPermanent" }
 }
 ```
 

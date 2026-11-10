@@ -99,6 +99,10 @@ pub trait EventKind: Serialize {
     fn personal(&self) -> bool {
         false
     }
+
+    fn status_name(&self) -> Option<serde_json::Value> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
@@ -147,7 +151,15 @@ macro_rules! events {
 
             pub fn content(&self) -> serde_json::Value {
                 match self {
-                    $(Event::$variant(e) => serde_json::to_value(e).unwrap_or_default()),*
+                    $(Event::$variant(e) => {
+                        let mut content = serde_json::to_value(e).unwrap_or_default();
+                        if let (Some(status_name), Some(fields)) =
+                            (e.status_name(), content.as_object_mut())
+                        {
+                            fields.insert("status_name".into(), status_name);
+                        }
+                        content
+                    }),*
                 }
             }
 
@@ -211,5 +223,49 @@ mod tests {
         let catalog = Event::catalog();
         let names: HashSet<_> = catalog.iter().map(|e| e.name).collect();
         assert_eq!(names.len(), catalog.len());
+    }
+
+    #[test]
+    fn job_status_event_json_has_readable_status_name() {
+        use gradient_entity::{
+            build::BuildStatus, evaluation::EvaluationStatus, exec_job::ExecJobStatus,
+        };
+
+        let build = Event::from(build::Reported {
+            status: i16::from(BuildStatus::FailedPermanent),
+            ..Default::default()
+        });
+        let changed = Event::from(build::StatusChanged {
+            build_id: Default::default(),
+            derivation_build: Default::default(),
+            evaluation_id: Default::default(),
+            status: i16::from(BuildStatus::Queued),
+        });
+        let evaluation = Event::from(evaluation::Reported {
+            status: i16::from(EvaluationStatus::Building),
+            ..Default::default()
+        });
+        let exec_job = Event::from(exec_job::Reported {
+            status: i16::from(ExecJobStatus::Running),
+            ..Default::default()
+        });
+
+        assert_eq!(build.content()["status"], 4);
+        assert_eq!(build.content()["status_name"], "FailedPermanent");
+        assert_eq!(changed.content()["status_name"], "Queued");
+        assert_eq!(evaluation.content()["status_name"], "Building");
+        assert_eq!(exec_job.content()["status_name"], "running");
+    }
+
+    #[test]
+    fn event_with_unknown_or_missing_status_has_no_status_name_in_json_content() {
+        let unknown = Event::from(build::Reported {
+            status: 99,
+            ..Default::default()
+        });
+        let without_status = Event::from(cache::Changed {});
+
+        assert!(unknown.content().get("status_name").is_none());
+        assert!(without_status.content().get("status_name").is_none());
     }
 }
