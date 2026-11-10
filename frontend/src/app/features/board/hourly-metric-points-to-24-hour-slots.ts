@@ -6,7 +6,6 @@
 
 import type { MetricSeries } from '@shared/ui';
 import { clockTime, serverTime } from '@shared/text';
-import { windowBuckets } from './storage/storage-chart';
 
 const HOUR_MS = 3_600_000;
 
@@ -18,7 +17,8 @@ export interface HourlyMetricInputSeries<T extends { bucket_start: string }> {
 }
 
 function getLast24HourlySlotStartTimestamps(now: number): number[] {
-  return windowBuckets('hour', 24, now - HOUR_MS);
+  const currentHourStartMs = Math.floor(now / HOUR_MS) * HOUR_MS;
+  return Array.from({ length: 24 }, (_, i) => currentHourStartMs - (23 - i) * HOUR_MS);
 }
 
 function formatHourSlotStartTimestampsAsClockTimeAxisLabels(slots: number[]): string[] {
