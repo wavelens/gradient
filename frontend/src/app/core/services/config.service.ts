@@ -4,15 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, retry, timer } from 'rxjs';
 import { environment } from '@environments/environment';
 import { CreatePermission, GiteaOAuthAppConfig, LoginProviderInfo, ServerConfig } from '@core/models';
+
+const serverConfigLoadExtraAttemptCount = 3;
+const startupConfigFetchBaseDelayMilliseconds = 500;
 
 @Injectable({ providedIn: 'root' })
 export class ConfigService {
   private http = inject(HttpClient);
+  private readonly fetchFailed = signal(false);
+
+  readonly serverConfigFetchFailedAfterRetries = this.fetchFailed.asReadonly();
 
   backendVersion = '';
   backendCommit: string | null = null;
@@ -51,12 +57,17 @@ export class ConfigService {
 
   load(): Promise<void> {
     return firstValueFrom(
-      this.http.get<{ error: boolean; message: ServerConfig }>(
-        `${environment.apiUrl}/config`
-      )
+      this.http.get<{ error: boolean; message: ServerConfig }>(`${environment.apiUrl}/config`).pipe(
+        retry({
+          count: serverConfigLoadExtraAttemptCount,
+          delay: (_error, attempt) => timer(startupConfigFetchBaseDelayMilliseconds * 2 ** (attempt - 1)),
+        }),
+      ),
     )
       .then((res) => {
-        if (!res.error) {
+        if (res.error) {
+          this.fetchFailed.set(true);
+        } else {
           this.backendVersion = res.message.version;
           this.backendCommit = res.message.commit ?? null;
           this.oidcEnabled = res.message.oidc_enabled;
@@ -81,8 +92,6 @@ export class ConfigService {
           this.maxKeepEvaluationsPerTask = res.message.max_keep_evaluations_per_task ?? null;
         }
       })
-      .catch(() => {
-        // Keep defaults if config fetch fails
-      });
+      .catch(() => this.fetchFailed.set(true));
   }
 }

@@ -126,6 +126,17 @@ describe('App', () => {
     vi.useRealTimers();
   });
 
+  it('Load failures of server settings replace the page with a reload screen.', async () => {
+    TestBed.overrideProvider(ConfigService, { useValue: { serverConfigFetchFailedAfterRetries: () => true, backendVersion: '' } });
+    const fixture = TestBed.createComponent(App);
+    await TestBed.inject(Router).navigateByUrl('/');
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('gr-empty-state')?.textContent).toContain('Cannot Connect to Server');
+    expect(root.querySelector('app-header')).toBeNull();
+    expect(root.querySelector('router-outlet')).toBeNull();
+  });
+
   it('names the deployed commit next to the version in the footer', async () => {
     Object.assign(TestBed.inject(ConfigService), { backendVersion: '2.0.1', backendCommit: '455a55591f5f49fe6251d936cdc94d44a7c87df5' });
     const fixture = TestBed.createComponent(App);

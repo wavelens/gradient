@@ -10,7 +10,7 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { of, timer } from 'rxjs';
 import { filter, map, skip, switchMap } from 'rxjs/operators';
 import { FooterComponent, FooterLink } from '@gradient/ui/chrome';
-import { LoadingSpinnerComponent, ToastComponent } from '@gradient/ui/ui';
+import { EmptyStateComponent, LoadingSpinnerComponent, ToastComponent } from '@gradient/ui/ui';
 import { AppHeaderComponent } from '@shared/chrome/header/header.component';
 import { CommandPaletteComponent } from '@shared/chrome/command-palette/command-palette.component';
 import { AuthService } from '@core/services/auth.service';
@@ -34,7 +34,7 @@ const FOOTER_LINKS: FooterLink[] = [
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent, WhatsNewDialogComponent, ConfirmDialogComponent, ToastComponent, LoadingSpinnerComponent],
+  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent, WhatsNewDialogComponent, ConfirmDialogComponent, ToastComponent, LoadingSpinnerComponent, EmptyStateComponent],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './app.scss'
@@ -43,10 +43,10 @@ export class App {
   authService = inject(AuthService);
   private router = inject(Router);
   private theme = inject(ThemeService);
-  private config = inject(ConfigService);
+  protected readonly config = inject(ConfigService);
 
   protected readonly footerLinks = FOOTER_LINKS;
-  private readonly main = viewChild.required<ElementRef<HTMLElement>>('main');
+  private readonly main = viewChild<ElementRef<HTMLElement>>('main');
   protected get version(): string | null {
     const { backendVersion, backendCommit } = this.config;
     if (!backendVersion) return null;
@@ -62,7 +62,8 @@ export class App {
   }
 
   private moveFocusToMainAfterRouteChange(): void {
-    const main = this.main().nativeElement;
+    const main = this.main()?.nativeElement;
+    if (!main) return;
     const focused = document.activeElement;
     if (focused && focused !== document.body && main.contains(focused)) return;
     main.focus({ preventScroll: true });
@@ -70,7 +71,11 @@ export class App {
 
   protected skipToMain(event: Event): void {
     event.preventDefault();
-    this.main().nativeElement.focus();
+    this.main()?.nativeElement.focus();
+  }
+
+  protected reloadPage(): void {
+    globalThis.location.reload();
   }
 
   protected readonly isRouteNavigationTakingLong = toSignal(

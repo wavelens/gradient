@@ -4,27 +4,39 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<a class="gr-skip-link" href="#main-content" (click)="skipToMain($event)">Skip to main content</a>
-<app-header />
+@if (config.serverConfigFetchFailedAfterRetries()) {
+  <main id="main-content" class="app-main app-unreachable">
+    <gr-empty-state
+      icon="cloud_off"
+      title="Cannot Connect to Server"
+      message="Gradient can't load its configuration from the server. Reload the page after the server recovers."
+      actionLabel="Reload"
+      (actionClick)="reloadPage()"
+    />
+  </main>
+} @else {
+  <a class="gr-skip-link" href="#main-content" (click)="skipToMain($event)">Skip to main content</a>
+  <app-header />
 
-@if (authService.isAuthenticated()) {
+  @if (authService.isAuthenticated()) {
+    @defer (on idle) {
+      <app-command-palette />
+      <app-whats-new-dialog />
+    }
+  }
+
+  <main #main id="main-content" class="app-main" tabindex="-1" [attr.aria-busy]="isRouteNavigationTakingLong() || null">
+    @if (isRouteNavigationTakingLong() && routeData() === null) {
+      <gr-loading-spinner message="Loading page..." />
+    }
+    <router-outlet />
+  </main>
   @defer (on idle) {
-    <app-command-palette />
-    <app-whats-new-dialog />
+    <app-confirm-dialog />
   }
-}
+  <gr-toast />
 
-<main #main id="main-content" class="app-main" tabindex="-1" [attr.aria-busy]="isRouteNavigationTakingLong() || null">
-  @if (isRouteNavigationTakingLong() && routeData() === null) {
-    <gr-loading-spinner message="Loading page..." />
+  @if (showFooter()) {
+    <gr-footer [links]="footerLinks" [note]="version" />
   }
-  <router-outlet />
-</main>
-@defer (on idle) {
-  <app-confirm-dialog />
-}
-<gr-toast />
-
-@if (showFooter()) {
-  <gr-footer [links]="footerLinks" [note]="version" />
 }
