@@ -380,6 +380,12 @@ describe('ExecJobPageComponent', () => {
     fixture.detectChanges();
     expect(root.querySelector('gr-log-viewer')).toBeNull();
     expect(root.querySelector('gr-job-timeline .phases')?.textContent).toContain('epoch-3');
+    expect(root.querySelector('gr-job-timeline .unfinished-note')).toBeNull();
+  });
+
+  it('notes on the timeline of a running job that more phases follow', () => {
+    const { fixture } = setup('running', SSH, { view: 'timeline' });
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-job-timeline .unfinished-note')).not.toBeNull();
   });
 
   it('keeps the info tab of a waiting job open across polls', async () => {

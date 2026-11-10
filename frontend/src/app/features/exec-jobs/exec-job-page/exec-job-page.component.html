@@ -212,7 +212,7 @@
             <gr-label-help doc="ui/job-board/#job-inspection" title="About the worker timeline" />
           </div>
           <div class="timeline">
-            <gr-job-timeline [phases]="job.timeline" />
+            <gr-job-timeline [phases]="job.timeline" [jobFinished]="!open()" />
           </div>
         } @else {
           <gr-log-viewer [lines]="logLines()" [marker]="phaseMarker">

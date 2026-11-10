@@ -87,6 +87,7 @@ describe('DashboardTaskTableComponent', () => {
     const reason = root.querySelector('.meta .waiting')?.textContent?.trim() ?? '';
     expect(reason).not.toBe('');
     expect(root.querySelector('gr-status-icon')?.getAttribute('aria-label')).toBe(reason);
+    expect(root.querySelector('gr-status-icon')?.getAttribute('data-phase')).toBe('waiting');
   });
 
   it('names failed entry points next to the passed count in danger text and on the phone meta line', async () => {

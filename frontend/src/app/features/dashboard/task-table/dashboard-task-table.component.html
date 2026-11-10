@@ -38,7 +38,7 @@
             @let label = t.project_display_name + ' / ' + t.task_display_name;
             <gr-row [link]="links.task(t.project, t.task)" [linkLabel]="label">
               @if (t.latest; as l) {
-                <gr-status-icon slot="icon" size="sm" [phase]="phase(l.status)" [label]="waitingReason ?? l.status" />
+                <gr-status-icon slot="icon" size="sm" [phase]="phase(l.status, l.waiting_reason)" [label]="waitingReason ?? l.status" />
               } @else {
                 <gr-icon slot="icon" class="never-run" name="radio_button_unchecked" size="sm" label="Never run" />
               }
