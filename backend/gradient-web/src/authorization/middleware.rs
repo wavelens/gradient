@@ -108,18 +108,24 @@ async fn deny(
     path: String,
     denial: impl Refusal,
 ) -> WebError {
-    audit
-        .write_as(
-            user_id,
-            Action::AuthDeny,
-            EventOwner::default(),
-            serde_json::json!({
-                "reason": denial.to_string(),
-                "method": method,
-                "path": path,
-            }),
-        )
-        .await;
+    let reason = denial.to_string();
+    match user_id {
+        Some(user_id) => {
+            audit
+                .write_as(
+                    Some(user_id),
+                    Action::AuthDeny,
+                    EventOwner::default(),
+                    serde_json::json!({
+                        "reason": reason,
+                        "method": method,
+                        "path": path,
+                    }),
+                )
+                .await;
+        }
+        None => tracing::debug!(reason, method, path, "Rejected request with no known user"),
+    }
 
     denial.into()
 }
