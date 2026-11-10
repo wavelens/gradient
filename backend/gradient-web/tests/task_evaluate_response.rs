@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use axum::http::StatusCode;
 use gradient_entity::{project, task_trigger};
 use gradient_fixtures::ids::{project_id, user_id};
 use gradient_fixtures::mock::mock_db;
@@ -96,6 +97,7 @@ async fn accepts_json_null_body_as_empty_object() {
     let empty = evaluate(without_default_trigger(), session_id, json!({})).await;
     let null = evaluate(without_default_trigger(), session_id, Value::Null).await;
 
+    assert_eq!(empty.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(null.status_code(), empty.status_code());
     assert_eq!(null.json::<Value>(), empty.json::<Value>());
 }
