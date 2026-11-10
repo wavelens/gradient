@@ -55,6 +55,17 @@ describe('gr-header menu', () => {
     expect(isOpen()).toBe(false);
   });
 
+  it('announces the open menu as a modal dialog and drops the role when closed', () => {
+    const drawer = () => root().querySelector('.header-menu-and-toggle-focus-trap') as HTMLElement;
+    expect(drawer().getAttribute('role')).toBeNull();
+    openMenu();
+    expect(drawer().getAttribute('role')).toBe('dialog');
+    expect(drawer().getAttribute('aria-modal')).toBe('true');
+    expect(drawer().getAttribute('aria-label')).toBe('Menu');
+    openMenu();
+    expect(drawer().getAttribute('aria-modal')).toBeNull();
+  });
+
   it('closes after a navigation', async () => {
     openMenu();
     await TestBed.inject(Router).navigateByUrl('/projects');

@@ -69,6 +69,38 @@ describe('App', () => {
     expect(document.activeElement).toBe(mains[0]);
   });
 
+  it('moves focus to main after each client navigation but not on the first page load', async () => {
+    const fixture = TestBed.createComponent(App);
+    const router = TestBed.inject(Router);
+    const main = () => fixture.nativeElement.querySelector('main') as HTMLElement;
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+
+    await router.navigateByUrl('/');
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(outside);
+
+    await router.navigateByUrl('/bare');
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(main());
+    outside.remove();
+  });
+
+  it('leaves focus inside the page when the page itself kept or set it', async () => {
+    const fixture = TestBed.createComponent(App);
+    const router = TestBed.inject(Router);
+    await router.navigateByUrl('/');
+    await fixture.whenStable();
+    const field = document.createElement('input');
+    fixture.nativeElement.querySelector('main').appendChild(field);
+    field.focus();
+
+    await router.navigateByUrl('/bare');
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(field);
+  });
+
   it('marks the main area busy and shows a spinner while the first page waits for its data', async () => {
     vi.useFakeTimers();
     slowGuard = new Subject<boolean>();

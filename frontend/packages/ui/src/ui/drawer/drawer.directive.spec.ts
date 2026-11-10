@@ -86,6 +86,15 @@ describe('DrawerDirective', () => {
     expect(document.activeElement).toBe(toggle);
   });
 
+  it('stays open when a menu inside it already handled Escape', async () => {
+    const { fixture, first, openDrawer } = await render();
+    await openDrawer();
+    first.addEventListener('keydown', (event) => event.preventDefault());
+    first.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.open()).toBe(true);
+  });
+
   it('escape keypresses do nothing while closed', async () => {
     const { fixture, escape } = await render();
     const spy = vi.spyOn(fixture.componentInstance.open, 'set');

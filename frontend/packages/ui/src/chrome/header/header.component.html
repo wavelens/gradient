@@ -23,7 +23,14 @@
       <ng-content select="[slot=search]" />
     </div>
 
-    <div class="header-menu-and-toggle-focus-trap" [grDrawer]="menuOpen()" (grDrawerClose)="closeMenu()">
+    <div
+      class="header-menu-and-toggle-focus-trap"
+      [attr.role]="menuOpen() ? 'dialog' : null"
+      [attr.aria-modal]="menuOpen() ? 'true' : null"
+      [attr.aria-label]="menuOpen() ? 'Menu' : null"
+      [grDrawer]="menuOpen()"
+      (grDrawerClose)="closeMenu()"
+    >
       <div id="header-menu" class="header-menu">
         <nav class="header-nav" aria-label="Main">
           @for (item of navigationLinksWithCurrentPageSignals(); track item.link.href) {

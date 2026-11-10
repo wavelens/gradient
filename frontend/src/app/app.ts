@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, DestroyRef, ElementRef, inject, computed, viewChild, ChangeDetectionStrategy } from '@angular/core';
+import { Component, DestroyRef, ElementRef, Injector, afterNextRender, inject, computed, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { Router, RouterOutlet, NavigationCancel, NavigationEnd, NavigationError, NavigationSkipped, NavigationStart } from '@angular/router';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { of, timer } from 'rxjs';
-import { filter, map, switchMap } from 'rxjs/operators';
+import { filter, map, skip, switchMap } from 'rxjs/operators';
 import { FooterComponent, FooterLink } from '@gradient/ui/chrome';
 import { LoadingSpinnerComponent, ToastComponent } from '@gradient/ui/ui';
 import { AppHeaderComponent } from '@shared/chrome/header/header.component';
@@ -55,6 +55,17 @@ export class App {
 
   constructor() {
     inject(DestroyRef).onDestroy(followOverscroll(window));
+    const injector = inject(Injector);
+    this.router.events
+      .pipe(filter((e) => e instanceof NavigationEnd), skip(1), takeUntilDestroyed())
+      .subscribe(() => afterNextRender(() => this.moveFocusToMainAfterRouteChange(), { injector }));
+  }
+
+  private moveFocusToMainAfterRouteChange(): void {
+    const main = this.main().nativeElement;
+    const focused = document.activeElement;
+    if (focused && focused !== document.body && main.contains(focused)) return;
+    main.focus({ preventScroll: true });
   }
 
   protected skipToMain(event: Event): void {

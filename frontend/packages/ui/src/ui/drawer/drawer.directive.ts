@@ -14,7 +14,7 @@ const keyboardTabFocusableElementSelector =
   selector: '[grDrawer]',
   standalone: true,
   host: {
-    '(document:keydown.escape)': 'onEscape()',
+    '(document:keydown.escape)': 'onEscape($event)',
     '(keydown)': 'wrapFocusInsideDrawerOnTab($event)',
   },
 })
@@ -40,8 +40,8 @@ export class DrawerDirective {
     });
   }
 
-  protected onEscape(): void {
-    if (this.open()) this.closed.emit();
+  protected onEscape(event: Event): void {
+    if (this.open() && !event.defaultPrevented) this.closed.emit();
   }
 
   protected wrapFocusInsideDrawerOnTab(event: KeyboardEvent): void {
