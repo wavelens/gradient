@@ -11,6 +11,7 @@ use crate::authorization::{
 };
 use crate::error::{WebError, WebResult, unique_violation};
 use crate::helpers::{OptionExt, ok_json, paginate};
+use crate::ip_allowlist::normalize_allowed_ips;
 use crate::json_body::JsonBody;
 use crate::lookup::require;
 use crate::names::UserDisplayName;
@@ -555,24 +556,6 @@ async fn held_cache_permissions(
         return Err(UserRefusal::GrantUnheldCachePermissions.into());
     }
     Ok(mask)
-}
-
-fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>, WebError> {
-    let Some(entries) = raw else { return Ok(None) };
-    if entries.is_empty() {
-        return Ok(Some(Vec::new()));
-    }
-    let mut out = Vec::with_capacity(entries.len());
-    for e in entries {
-        let canon = crate::ip_allowlist::normalize_entry(&e).map_err(|err| {
-            SharedRefusal::InvalidAllowedIp {
-                entry: e.to_string(),
-                reason: err.to_string(),
-            }
-        })?;
-        out.push(canon);
-    }
-    Ok(Some(out))
 }
 
 #[utoipa::path(

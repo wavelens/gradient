@@ -293,25 +293,12 @@ pub async fn create_action(
         return Err(TaskRefusal::NoMailRecipients.into());
     }
 
-    let integration_id = match &body.config {
-        ActionConfig::GitHostStatusReport { integration_id }
-        | ActionConfig::OpenPr { integration_id, .. } => Some(*integration_id),
-        _ => None,
-    };
-    if let Some(integration_id) = integration_id {
-        let integration =
-            gradient_db::integrations::by_id_in_project(&state.web_db, project.id, integration_id)
-                .await?;
-        match integration {
-            Some(row) if row.kind == IntegrationKind::Outbound => {}
-            Some(_) => {
-                return Err(TaskRefusal::IntegrationNotOutbound.into());
-            }
-            None => {
-                return Err(TaskRefusal::OutboundIntegrationNotFound.into());
-            }
-        }
-    }
+    ensure_task_action_integration_is_outbound_and_belongs_to_project(
+        &state.web_db,
+        project.id,
+        &body.config,
+    )
+    .await?;
 
     let existing = gradient_db::actions::by_name(&state.web_db, proj.id, &body.name).await?;
     if existing.is_some() {
@@ -427,30 +414,17 @@ pub async fn update_action(
         validate_destination(new_cfg)?;
         validate_mail_teams(&state.web_db, project.id, new_cfg).await?;
         validate_start_target(&state.web_db, project.id, new_cfg).await?;
-        match new_cfg {
-            ActionConfig::SendMail { recipients, .. } if recipients.is_empty() => {
-                return Err(TaskRefusal::NoMailRecipients.into());
-            }
-            ActionConfig::GitHostStatusReport { integration_id }
-            | ActionConfig::OpenPr { integration_id, .. } => {
-                let integration = gradient_db::integrations::by_id_in_project(
-                    &state.web_db,
-                    project.id,
-                    *integration_id,
-                )
-                .await?;
-                match integration {
-                    Some(r) if r.kind == IntegrationKind::Outbound => {}
-                    Some(_) => {
-                        return Err(TaskRefusal::IntegrationNotOutbound.into());
-                    }
-                    None => {
-                        return Err(TaskRefusal::OutboundIntegrationNotFound.into());
-                    }
-                }
-            }
-            _ => {}
+        if let ActionConfig::SendMail { recipients, .. } = new_cfg
+            && recipients.is_empty()
+        {
+            return Err(TaskRefusal::NoMailRecipients.into());
         }
+        ensure_task_action_integration_is_outbound_and_belongs_to_project(
+            &state.web_db,
+            project.id,
+            new_cfg,
+        )
+        .await?;
     }
 
     if let Some(ref evs) = body.events {
@@ -804,6 +778,23 @@ pub async fn get_delivery(
         .or_not_found(Resource::Delivery)?;
 
     Ok(ok_json(r.into()))
+}
+
+async fn ensure_task_action_integration_is_outbound_and_belongs_to_project(
+    db: &impl sea_orm::ConnectionTrait,
+    project: ProjectId,
+    config: &ActionConfig,
+) -> WebResult<()> {
+    let (ActionConfig::GitHostStatusReport { integration_id }
+    | ActionConfig::OpenPr { integration_id, .. }) = config
+    else {
+        return Ok(());
+    };
+    match gradient_db::integrations::by_id_in_project(db, project, *integration_id).await? {
+        Some(row) if row.kind == IntegrationKind::Outbound => Ok(()),
+        Some(_) => Err(TaskRefusal::IntegrationNotOutbound.into()),
+        None => Err(TaskRefusal::OutboundIntegrationNotFound.into()),
+    }
 }
 
 #[cfg(test)]

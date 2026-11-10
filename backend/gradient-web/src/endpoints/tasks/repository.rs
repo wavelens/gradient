@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::auto_attach::integration_serves_repository;
+use super::auto_attach::{
+    STATUS_ACTION_NAME, default_pull_request_trigger_actions, integration_serves_repository,
+};
 use super::refusal::TaskRefusal;
 use super::{RepositoryFetchStatus, error_message_if_caller_can_edit_task};
 use crate::access::load_membership_with_permissions;
@@ -28,8 +30,6 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::TransactionTrait;
 use serde::{Deserialize, Serialize};
-
-const STATUS_ACTION_NAME: &str = "Report status to Git host";
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
 pub struct RepositoryIntegration {
@@ -422,9 +422,7 @@ pub async fn put_task_repository(
         .map(|integration_id| {
             let actions = match wiring.pull_request.first() {
                 Some((_, TriggerConfig::ReporterPullRequest { actions, .. })) => actions.clone(),
-                _ => ["opened", "synchronize", "reopened"]
-                    .map(String::from)
-                    .to_vec(),
+                _ => default_pull_request_trigger_actions(),
             };
             TriggerConfig::ReporterPullRequest {
                 integration_id,
@@ -554,7 +552,8 @@ async fn sync_status_action(
                     ..Default::default()
                 },
             )
-            .await?;
+            .await
+            .map_err(|e| WebError::from_unique_violation(e, TaskRefusal::ActionNameTaken))?;
         }
         _ => {}
     }

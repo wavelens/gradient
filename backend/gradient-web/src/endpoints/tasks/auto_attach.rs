@@ -19,6 +19,14 @@ use gradient_types::{
 };
 use sea_orm::ConnectionTrait;
 
+pub(crate) const STATUS_ACTION_NAME: &str = "Report status to Git host";
+
+pub(crate) fn default_pull_request_trigger_actions() -> Vec<String> {
+    ["opened", "synchronize", "reopened"]
+        .map(String::from)
+        .to_vec()
+}
+
 #[derive(Debug, Default, PartialEq)]
 struct AutoAttach {
     inbound: Option<MIntegration>,
@@ -147,9 +155,7 @@ pub(crate) async fn apply<C: ConnectionTrait>(
             TriggerConfig::ReporterPullRequest {
                 integration_id: inbound.id,
                 branches: vec![],
-                actions: ["opened", "synchronize", "reopened"]
-                    .map(String::from)
-                    .to_vec(),
+                actions: default_pull_request_trigger_actions(),
                 require_approval: true,
             },
         ];
@@ -187,7 +193,7 @@ pub(crate) async fn apply<C: ConnectionTrait>(
         let action = MTaskAction {
             id: TaskActionId::now_v7(),
             task: task.id,
-            name: "Report status to Git host".into(),
+            name: STATUS_ACTION_NAME.into(),
             action_type: cfg.action_type(),
             config: cfg.to_db_json(),
             events: serde_json::json!([]),

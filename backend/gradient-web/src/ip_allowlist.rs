@@ -6,6 +6,8 @@
 
 //! An empty list is allowing all sources, for compatibility with existing rows.
 
+use crate::error::WebError;
+use crate::refusal::SharedRefusal;
 use ipnet::IpNet;
 use std::net::IpAddr;
 
@@ -26,6 +28,25 @@ pub enum IpAllowlistError {
     Empty,
     #[error("not a valid IP or CIDR: {0}")]
     Invalid(String),
+}
+
+pub(crate) fn normalize_allowed_ips(
+    raw: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, WebError> {
+    let Some(entries) = raw else { return Ok(None) };
+    entries
+        .into_iter()
+        .map(|entry| {
+            normalize_entry(&entry).map_err(|err| {
+                SharedRefusal::InvalidAllowedIp {
+                    entry: entry.clone(),
+                    reason: err.to_string(),
+                }
+                .into()
+            })
+        })
+        .collect::<Result<Vec<_>, WebError>>()
+        .map(Some)
 }
 
 pub fn normalize_entry(raw: &str) -> Result<String, IpAllowlistError> {

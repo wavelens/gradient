@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, ProjectAccess, load_project};
-use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::builds::closure::sum_output_sizes;
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::ok_json;
 use crate::resource::Resource;
-use axum::extract::{Path, Query, State};
-use axum::{Extension, Json};
+use crate::scope::{Readable, TaskScope};
+use axum::Json;
+use axum::extract::{Query, State};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_db::graph::{
@@ -53,26 +52,9 @@ pub struct TaskMetricsResponse {
     responses((status = OK, description = "Task metrics", body = TaskMetricsResponse), WebError)
 )]
 pub async fn get_task_metrics(
+    TaskScope { task, .. }: TaskScope<Readable>,
     state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<TaskMetricsResponse>>> {
-    let project = load_project(
-        &state.0.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Readable {
-            label: Resource::Task,
-        },
-    )
-    .await?;
-
-    let task = gradient_db::tasks::by_name(&state.web_db, project.id, &task)
-        .await?
-        .or_not_found(Resource::Task)?;
-
     let evaluations = gradient_db::evaluations::get_newest_completed_or_failed_task_evaluations(
         &state.web_db,
         task.id,
@@ -222,27 +204,10 @@ pub struct EntryPointMetricsResponse {
     responses((status = OK, description = "Entry point metrics", body = EntryPointMetricsResponse), WebError)
 )]
 pub async fn get_entry_point_metrics(
+    TaskScope { task, .. }: TaskScope<Readable>,
     state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Extension(api_key): Extension<MaybeApiKey>,
-    Path((project, task)): Path<(String, String)>,
     Query(params): Query<EntryPointMetricsQuery>,
 ) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
-    let project = load_project(
-        &state.0.db(),
-        Caller::from(&maybe_user),
-        api_key.as_ref(),
-        project,
-        ProjectAccess::Readable {
-            label: Resource::Task,
-        },
-    )
-    .await?;
-
-    let task = gradient_db::tasks::by_name(&state.web_db, project.id, &task)
-        .await?
-        .or_not_found(Resource::Task)?;
-
     let entry_points = gradient_db::entry_points::newest_entry_points_for_task_attribute_path(
         &state.web_db,
         task.id,
@@ -437,12 +402,10 @@ mod tests {
     responses((status = OK, description = "Per-evaluation metric points", body = TaskMetricsResponse), WebError)
 )]
 pub async fn task_evaluation_metrics(
+    scope: TaskScope<Readable>,
     state: State<Arc<ServerState>>,
-    maybe_user: Extension<MaybeUser>,
-    api_key: Extension<MaybeApiKey>,
-    path: Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<TaskMetricsResponse>>> {
-    get_task_metrics(state, maybe_user, api_key, path).await
+    get_task_metrics(scope, state).await
 }
 
 #[utoipa::path(
@@ -456,11 +419,9 @@ pub async fn task_evaluation_metrics(
     responses((status = OK, description = "Per-evaluation entry-point metric points", body = EntryPointMetricsResponse), WebError)
 )]
 pub async fn task_entry_point_metrics(
+    scope: TaskScope<Readable>,
     state: State<Arc<ServerState>>,
-    maybe_user: Extension<MaybeUser>,
-    api_key: Extension<MaybeApiKey>,
-    path: Path<(String, String)>,
     query: Query<EntryPointMetricsQuery>,
 ) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
-    get_entry_point_metrics(state, maybe_user, api_key, path, query).await
+    get_entry_point_metrics(scope, state, query).await
 }

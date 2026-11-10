@@ -13,6 +13,7 @@ use crate::api_spec::ProjectPath;
 use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
+use crate::ip_allowlist::normalize_allowed_ips;
 use crate::json_body::JsonBody;
 use crate::names::IntegrationName;
 use crate::refusal::SharedRefusal;
@@ -130,24 +131,6 @@ fn integration_audit_metadata(integration: &IntegrationResponse) -> serde_json::
         "kind": integration.kind,
         "git_host_type": integration.git_host_type,
     })
-}
-
-fn normalize_allowed_ips(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>, WebError> {
-    let Some(entries) = raw else { return Ok(None) };
-    if entries.is_empty() {
-        return Ok(Some(Vec::new()));
-    }
-    let mut out = Vec::with_capacity(entries.len());
-    for e in entries {
-        let canon = crate::ip_allowlist::normalize_entry(&e).map_err(|err| {
-            SharedRefusal::InvalidAllowedIp {
-                entry: e.clone(),
-                reason: err.to_string(),
-            }
-        })?;
-        out.push(canon);
-    }
-    Ok(Some(out))
 }
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
