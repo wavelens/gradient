@@ -5383,6 +5383,7 @@ paths:
         Tasks of the viewer's projects plus starred tasks of public projects, PR-triggered evaluations excluded.
         Ranked by tier (`starred_active`, `active`, `starred`, `team`, `member`), then newest latest evaluation first.
         Active means a non-PR evaluation in the last 14 days. `counts` always covers every task; `total` is the number of tasks matching `filter`.
+        Tasks with a failed latest evaluation or failed entry points appear under the failing filter. An interrupted latest evaluation doesn't count as failed.
       operationId: getDashboardTasks
       parameters:
       - name: filter

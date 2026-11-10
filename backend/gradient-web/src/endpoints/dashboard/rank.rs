@@ -145,11 +145,11 @@ impl TaskRow {
             .and(latest_outcomes)
             .zip(f.previous.and_then(|p| outcomes.get(&p)))
             .map(|(l, p)| l.failing - p.failing);
-        let failing = f
-            .latest
-            .as_ref()
-            .is_some_and(|l| l.status == EvaluationStatus::Failed)
-            || latest_outcomes.is_some_and(|o| o.failing > 0);
+        let failing = match f.latest.as_ref().map(|l| l.status) {
+            Some(EvaluationStatus::Failed) => true,
+            Some(EvaluationStatus::Aborted) => false,
+            _ => latest_outcomes.is_some_and(|o| o.failing > 0),
+        };
         TaskRow {
             tier: Tier::of(f.starred, f.recent_14d > 0, f.team),
             entry_points: latest_outcomes,
@@ -420,6 +420,13 @@ mod tests {
         );
         let o = outcomes(&f, 1, 1);
         assert!(TaskRow::build(f, &o).matches(Filter::Failing));
+    }
+
+    #[test]
+    fn an_aborted_latest_evaluation_is_not_failing() {
+        let f = facts("a", false, 1, false, Some((EvaluationStatus::Aborted, 20)));
+        let o = outcomes(&f, 2, 0);
+        assert!(!TaskRow::build(f, &o).matches(Filter::Failing));
     }
 
     #[test]
