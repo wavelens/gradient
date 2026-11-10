@@ -2739,7 +2739,7 @@ paths:
       - builds
       summary: Get build log
       description: |-
-        Returns the complete build log as a single string. Empty string if no log is available yet.
+        Return the full build log. Return an empty string when no log is present yet. Use a query parameter, `format`, to choose `plain` (remove color codes) or `ansi` (keep color codes). Requests that specify `Accept: text/plain` get the raw text of the log. The default value is `plain`. Other requests get the log as a JSON string. The default value is `ansi`. Logs of failed builds end with `Full log: <url>`. That line is a link to the web page of this build. That line is a replacement for the `nix log` command from nix. That command can run only on the server.
 
         A `Substituted` build (its outputs came from a cache) has no log of its
         own, so the log of the most recent prior build of the same derivation is
@@ -2753,6 +2753,11 @@ paths:
         required: true
         schema:
           $ref: '#/components/schemas/BuildJobId'
+      - name: format
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/BuildLogOutputFormat'
       responses:
         '200':
           description: Build log
@@ -2768,6 +2773,9 @@ paths:
                     type: boolean
                   message:
                     type: string
+            text/plain:
+              schema:
+                type: string
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -3153,7 +3161,7 @@ paths:
         required: true
       responses:
         '200':
-          description: Cache UUID
+          description: Cache created
           content:
             application/json:
               schema:
@@ -3165,7 +3173,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    type: string
+                    $ref: '#/components/schemas/CreatedEntityResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -6977,7 +6985,7 @@ paths:
       tags:
       - projects
       summary: Create project
-      description: Create a new project for the current user. Only a signed-in session can call this endpoint. API keys can't create projects. `owner_team` places the project in a team with the caller as a member. Members of that team then receive the default role for members on team projects.
+      description: Create a new project for the current user. The response fields list the project UUID, the project name, and the URL of the web page for the project. A signed-in session can call this endpoint. An API key with `createProject` and no project pinning can also call this endpoint. Use the `owner_team` field to name a team with the caller as a member. Place the project in that team. Members of that team receive the default role for members of team projects.
       operationId: createProject
       requestBody:
         content:
@@ -6987,7 +6995,7 @@ paths:
         required: true
       responses:
         '200':
-          description: Project UUID
+          description: Project created
           content:
             application/json:
               schema:
@@ -6999,7 +7007,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    type: string
+                    $ref: '#/components/schemas/CreatedEntityResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -7303,7 +7311,7 @@ paths:
       tags:
       - integrations
       summary: Connect a Git host
-      description: Create a webhook receiver for a Gitea, Forgejo, or GitLab host and a status reporter with `access_token` present, in one call. Both integrations share `name`. Fields `inbound.generated_secret` and `inbound.webhook_url` in the response contain the generated webhook secret once and the address to enter into the Git host. Existing tasks with repositories on this Git host connect to the new integration. Their task names appear in `connected_tasks`.
+      description: Create a webhook receiver and a status reporter for a Gitea, Forgejo or GitLab host in one call with `access_token` set. Both integrations share `name`. The `inbound.generated_secret` and `inbound.webhook_url` fields in the response contain the generated webhook secret (shown once) and the address to enter in the Git host. These integrations don't add triggers or actions to a task. Use `GET /projects/{project}/trigger-suggestions` to list the push triggers and pull request triggers that a task can add.
       operationId: connectGitHost
       parameters:
       - name: project
@@ -7659,6 +7667,44 @@ paths:
       responses:
         '200':
           description: Project is now private
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/repository-check:
+    post:
+      tags:
+      - tasks
+      summary: Check repository access before creating a task
+      description: 'Test whether Gradient can clone `repository` with the SSH key of the project. Return the head commit of the remote. Use this check before task creation, for example in the task wizard. Callers need create-task permission. Reject state-managed projects. Return `400` with `code: "repository_unreachable"` and a short reason after a failed check.'
+      operationId: checkProjectRepository
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RepositoryAccessCheckRequest'
+        required: true
+      responses:
+        '200':
+          description: Repository is accessible
           content:
             application/json:
               schema:
@@ -8392,6 +8438,45 @@ paths:
                     type: boolean
                   message:
                     type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/projects/{project}/trigger-suggestions:
+    get:
+      tags:
+      - triggers
+      summary: Suggest push and pull request triggers
+      description: Return the push triggers and pull request triggers that tasks with `repository` can add. Gradient can build them from the project's webhook receiver for that Git host. The list is empty if no webhook receiver can handle the host, or if several can. Gradient doesn't save the suggestions. Use the endpoint for task creation or the endpoint for trigger creation to create them.
+      operationId: listTriggerSuggestions
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repository
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Recommended Triggers
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TriggerConfig'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -9239,7 +9324,7 @@ paths:
       tags:
       - tasks
       summary: Create task
-      description: Creates a new task in the project. `wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.
+      description: Create a new task in a project. `wildcard` is a selector for an attribute in Nix, such as `packages.x86_64-linux` or `checks`. Entries in `triggers` list the triggers for the new task. The first entry is the default trigger. New tasks with no `triggers` get one polling trigger for the default branch of the repository. Use an empty list to create a task with no triggers. Project integrations add no triggers and no actions.
       operationId: createTask
       parameters:
       - name: project
@@ -9255,7 +9340,7 @@ paths:
         required: true
       responses:
         '200':
-          description: Task UUID
+          description: Created a task.
           content:
             application/json:
               schema:
@@ -9267,7 +9352,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    type: string
+                    $ref: '#/components/schemas/CreatedEntityResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -10042,6 +10127,49 @@ paths:
       security:
       - {}
       - bearerAuth: []
+  /api/v1/tasks/{project}/{task}/duplicate:
+    post:
+      tags:
+      - tasks
+      summary: Duplicate task
+      description: Create a copy of a task with a new `name` and `display_name`. Task settings, exec settings, triggers, and actions carry over to the copy. All triggers in the copy run with `branch`. Requests need create-task permission in the project. Requests for state-managed projects fail. Return the UUID, the name, and the URL of the web page for the new task.
+      operationId: duplicateTask
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DuplicateTaskRequest'
+        required: true
+      responses:
+        '200':
+          description: Created a copy of the task.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/CreatedEntityResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/tasks/{project}/{task}/entry-point-downloads:
     get:
       tags:
@@ -10220,7 +10348,7 @@ paths:
       - tasks
       summary: Trigger evaluation
       description: |-
-        Start an evaluation on the branch of the default trigger for the task. Return the evaluation UUID in `message`. The caller can track the run through `GET /evals/{id}` or the `GET /evals/{id}/live` stream. This run counts as manual. It does not record the default trigger and does not change the `last_fired_at` of that trigger. Outcomes for running evaluations follow the concurrency policy of the task.
+        Start an evaluation on the branch for the default trigger of the task. The fields in the response give the evaluation UUID in `message.id`, the task as `project/task` in `message.name`, and the evaluation page in `message.url`. The caller can track the run through `GET /evals/{id}` or the `GET /evals/{id}/live` stream. This run counts as manual. It does not record the default trigger and does not change the `last_fired_at` of that trigger. Outcomes for running evaluations follow the concurrency policy of the task.
         A `commit` instead evaluates that commit alongside the task's own runs.
         `POST /evals/{evaluation}/retry` re-runs the failed builds of a finished
         evaluation.
@@ -10247,7 +10375,7 @@ paths:
               - type: 'null'
       responses:
         '200':
-          description: Evaluation UUID
+          description: Evaluation started
           content:
             application/json:
               schema:
@@ -10259,7 +10387,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    type: string
+                    $ref: '#/components/schemas/CreatedEntityResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -10684,48 +10812,6 @@ paths:
         required: true
         schema:
           type: string
-      responses:
-        '200':
-          description: Repository connection
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - error
-                - message
-                properties:
-                  error:
-                    type: boolean
-                  message:
-                    $ref: '#/components/schemas/TaskRepositoryResponse'
-        default:
-          $ref: '#/components/responses/Error'
-      security:
-      - bearerAuth: []
-    put:
-      tags:
-      - tasks
-      summary: Update repository connection
-      description: Configure push and pull request builds and commit status reports for a task in one call. Gradient can sync one push trigger, one pull request trigger and one status report action per task with the request. Turn off a build or status report to disable the existing row and keep the settings. Callers need permission to manage triggers and actions. Reject tasks under state management.
-      operationId: updateTaskRepository
-      parameters:
-      - name: project
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: task
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateTaskRepositoryRequest'
-        required: true
       responses:
         '200':
           description: Repository connection
@@ -11227,7 +11313,7 @@ paths:
                   error:
                     type: boolean
                   message:
-                    type: string
+                    $ref: '#/components/schemas/CreatedEntityResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -12611,13 +12697,7 @@ paths:
       tags:
       - user
       summary: Create API key
-      description: |-
-        Creates a new API key. The full key (prefixed with `GRAD`) is returned once -
-        it cannot be retrieved again. Use it as `Authorization: Bearer GRAD<key>`.
-        Pass `expires_in_days` to make the key auto-expire; omit for no expiry.
-        A cache-pinned key may only grant cache permissions the caller already
-        holds; members of a project subscribed to the cache are treated as
-        read-only, so they can mint read-only cache keys.
+      description: 'Create a new API key. Callers receive the full key (with the `GRAD` prefix) one time. No second request can retrieve that key. Use this value as `Authorization: Bearer GRAD<key>`. Pass `expires_in_days` to make the key expire automatically. Omit this field to leave the key without expiry. No key can exceed the permissions of the owner. A key pinned to a project or a cache can grant only the caller''s permissions there. Members of projects that subscribe to a cache count as read-only, so a caller can issue a read-only cache key. Grant `viewProject` to every project key. `createProject` can only apply to an unpinned key with an owner that can create projects.'
       operationId: createUserKey
       requestBody:
         content:
@@ -12737,6 +12817,38 @@ paths:
                     type: boolean
                   message:
                     $ref: '#/components/schemas/ApiKeyInfo'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/user/keys/{api_id}/reach:
+    get:
+      tags:
+      - user
+      summary: List what an API key can reach
+      description: Projects and caches that an API key can reach appear in the list, each with the permissions for the key on that resource. The permissions of the key can't exceed the current role of the owner. A change to the owner's role can change the list. `create_project` is true when the key can call `PUT /projects`. Public projects and public caches stay readable by all keys. They don't appear in the list.
+      operationId: getUserKeyReach
+      parameters:
+      - name: api_id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ApiId'
+      responses:
+        '200':
+          description: Projects and caches the key can reach
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/ApiKeyVisibleProjectsAndCachesWithPermissionsResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -14675,12 +14787,17 @@ components:
       required:
       - available_permissions
       - availableCache
+      - server_wide_permissions
       properties:
         available_permissions:
           type: array
           items:
             $ref: '#/components/schemas/PermissionEntry'
         availableCache:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionEntry'
+        server_wide_permissions:
           type: array
           items:
             $ref: '#/components/schemas/PermissionEntry'
@@ -14691,6 +14808,38 @@ components:
       properties:
         name:
           type: string
+    ApiKeyVisibleProjectOrCacheWithPermissions:
+      type: object
+      required:
+      - name
+      - display_name
+      - permissions
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+    ApiKeyVisibleProjectsAndCachesWithPermissionsResponse:
+      type: object
+      required:
+      - projects
+      - caches
+      - create_project
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiKeyVisibleProjectOrCacheWithPermissions'
+        caches:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiKeyVisibleProjectOrCacheWithPermissions'
+        create_project:
+          type: boolean
     ArtefactTree:
       type: object
       required:
@@ -15239,6 +15388,7 @@ components:
       - depth
       - prioritized
       - ifd
+      - entry_points
       properties:
         id:
           $ref: '#/components/schemas/BuildJobId'
@@ -15277,6 +15427,10 @@ components:
           oneOf:
           - $ref: '#/components/schemas/EvaluationId'
           - type: 'null'
+        entry_points:
+          type: array
+          items:
+            type: string
     BuildJobId:
       type: string
       format: uuid
@@ -15399,6 +15553,7 @@ components:
       - ifd
       - created_at
       - updated_at
+      - entry_points
       properties:
         id:
           $ref: '#/components/schemas/BuildJobId'
@@ -15438,6 +15593,10 @@ components:
           oneOf:
           - $ref: '#/components/schemas/BuildProgress'
           - type: 'null'
+        entry_points:
+          type: array
+          items:
+            type: string
     Cache:
       type: object
       required:
@@ -16380,6 +16539,19 @@ components:
           $ref: '#/components/schemas/WebhookResponse'
         secret:
           type: string
+    CreatedEntityResponse:
+      type: object
+      required:
+      - id
+      - name
+      - url
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
     DashboardStats:
       type: object
       required:
@@ -16915,6 +17087,19 @@ components:
       properties:
         draining:
           type: boolean
+    DuplicateTaskRequest:
+      type: object
+      required:
+      - name
+      - display_name
+      - branch
+      properties:
+        name:
+          $ref: '#/components/schemas/IndexName'
+        display_name:
+          $ref: '#/components/schemas/DisplayName'
+        branch:
+          type: string
     DurationsHeatmap:
       type: object
       required:
@@ -18461,6 +18646,16 @@ components:
         created_at:
           type: string
           format: date-time
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
     HitKind:
       type: string
       enum:
@@ -18663,7 +18858,6 @@ components:
       - created_by
       - created_at
       - managed
-      - connected_tasks
       properties:
         id:
           $ref: '#/components/schemas/IntegrationId'
@@ -18713,10 +18907,6 @@ components:
           type:
           - string
           - 'null'
-        connected_tasks:
-          type: array
-          items:
-            type: string
     IntegrationSummaryResponse:
       type: object
       required:
@@ -19287,6 +19477,16 @@ components:
           type:
           - boolean
           - 'null'
+        exec_enabled:
+          type:
+          - boolean
+          - 'null'
+        triggers:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/TriggerConfig'
     MakeTeamRequest:
       type: object
       required:
@@ -20447,6 +20647,7 @@ components:
       - triggerEvaluation
       - manageTriggers
       - manageWebhooks
+      - createProject
     PermissionEntry:
       type: object
       required:
@@ -20805,32 +21006,6 @@ components:
         created_at:
           type: string
           format: date-time
-    PullRequestBuild:
-      type: object
-      required:
-      - trigger_id
-      - integration_id
-      - active
-      - branches
-      - require_approval
-      properties:
-        trigger_id:
-          $ref: '#/components/schemas/TaskTriggerId'
-        integration_id:
-          $ref: '#/components/schemas/IntegrationId'
-        active:
-          type: boolean
-        branches:
-          type: array
-          items:
-            type: string
-        require_approval:
-          type: boolean
-        last_fired_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
     PullRequestResponse:
       type: object
       required:
@@ -20845,34 +21020,6 @@ components:
           format: int64
         branch:
           type: string
-    PushBuild:
-      type: object
-      required:
-      - trigger_id
-      - integration_id
-      - active
-      - branches
-      - tags
-      properties:
-        trigger_id:
-          $ref: '#/components/schemas/TaskTriggerId'
-        integration_id:
-          $ref: '#/components/schemas/IntegrationId'
-        active:
-          type: boolean
-        branches:
-          type: array
-          items:
-            type: string
-        tags:
-          type: array
-          items:
-            type: string
-        last_fired_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
     PutProjectSecretRequest:
       type: object
       required:
@@ -21065,6 +21212,13 @@ components:
           - integer
           - 'null'
           format: int64
+    RepositoryAccessCheckRequest:
+      type: object
+      required:
+      - repository
+      properties:
+        repository:
+          type: string
     RepositoryFetchStatus:
       type: object
       required:
@@ -21549,6 +21703,7 @@ components:
       - task_name
       - project
       - reason
+      - reason_text
       properties:
         task_id:
           $ref: '#/components/schemas/TaskId'
@@ -21557,6 +21712,8 @@ components:
         project:
           type: string
         reason:
+          $ref: '#/components/schemas/TaskEvaluationNotStartedReason'
+        reason_text:
           type: string
     SopsRecipientResponse:
       type: object
@@ -21825,6 +21982,7 @@ components:
       - active
       - created_at
       - keep_evaluations
+      - branches
       - queue
       - last_evaluations
       - can_edit
@@ -21861,6 +22019,17 @@ components:
           oneOf:
           - $ref: '#/components/schemas/RepositoryFetchStatus'
           - type: 'null'
+        branches:
+          type: array
+          items:
+            type:
+            - string
+            - 'null'
+        next_polling_trigger_check_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
         queue:
           $ref: '#/components/schemas/QueueSummary'
         last_evaluations:
@@ -21877,6 +22046,17 @@ components:
             $ref: '#/components/schemas/Permission'
         managed:
           type: boolean
+    TaskEvaluationNotStartedReason:
+      type: string
+      enum:
+      - same_commit
+      - filter
+      - tag_not_found
+      - concurrency
+      - commit_message
+      - error
+      - input_update_running
+      - input_update_not_configured
     TaskId:
       type: string
       format: uuid
@@ -21953,14 +22133,6 @@ components:
           oneOf:
           - $ref: '#/components/schemas/RepositoryFetchStatus'
           - type: 'null'
-        build_on_push:
-          oneOf:
-          - $ref: '#/components/schemas/PushBuild'
-          - type: 'null'
-        build_on_pull_request:
-          oneOf:
-          - $ref: '#/components/schemas/PullRequestBuild'
-          - type: 'null'
         last_event:
           oneOf:
           - $ref: '#/components/schemas/IncomingWebhookDeliveryResponse'
@@ -21988,6 +22160,7 @@ components:
       - description
       - repository
       - wildcard
+      - recent_evaluations
       - force_evaluation
       - created_by
       - created_at
@@ -22000,6 +22173,7 @@ components:
       - multi_node_evaluation
       - exec_enabled
       - only_evaluate
+      - branches
       - can_edit
       - can_trigger
       - permissions
@@ -22028,6 +22202,10 @@ components:
           oneOf:
           - $ref: '#/components/schemas/EvaluationStatus'
           - type: 'null'
+        recent_evaluations:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryBar'
         force_evaluation:
           type: boolean
         created_by:
@@ -22058,6 +22236,17 @@ components:
           oneOf:
           - $ref: '#/components/schemas/RepositoryFetchStatus'
           - type: 'null'
+        branches:
+          type: array
+          items:
+            type:
+            - string
+            - 'null'
+        next_polling_trigger_check_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
         can_edit:
           type: boolean
         can_trigger:
@@ -22550,6 +22739,10 @@ components:
         properties:
           cron:
             type: string
+          branch:
+            type:
+            - string
+            - 'null'
           type:
             type: string
             enum:
@@ -22664,37 +22857,6 @@ components:
           type:
           - string
           - 'null'
-    UpdateTaskRepositoryRequest:
-      type: object
-      properties:
-        inbound_integration:
-          oneOf:
-          - $ref: '#/components/schemas/IntegrationId'
-          - type: 'null'
-        build_on_push:
-          type: boolean
-        push_branches:
-          type: array
-          items:
-            type: string
-        push_tags:
-          type: array
-          items:
-            type: string
-        build_on_pull_request:
-          type: boolean
-        pull_request_branches:
-          type: array
-          items:
-            type: string
-        require_approval:
-          type: boolean
-        outbound_integration:
-          oneOf:
-          - $ref: '#/components/schemas/IntegrationId'
-          - type: 'null'
-        report_status:
-          type: boolean
     UpdateTriggerRequest:
       type: object
       properties:
