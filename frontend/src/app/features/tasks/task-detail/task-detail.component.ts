@@ -59,7 +59,7 @@ import {
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, getBuildCountTextPieces, repositoryWebUrl, type BuildTally, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 const NO_EVALUATION_SELECTED = 'No evaluation selected.';
 
@@ -880,6 +880,12 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   protected readonly buildTally = buildTally;
+  protected readonly getBuildCountTextPieces = getBuildCountTextPieces;
+
+  protected buildCountTitle(tally: BuildTally): string {
+    const line = getBuildCountTextPieces(tally).map((piece) => piece.text).join(' · ');
+    return tally.overall > tally.total ? `${line} · ${tally.overall} build count (substituted builds included)` : line;
+  }
   protected readonly plural = plural;
   protected readonly abortedWithoutBuildsTitle = abortedWithoutBuildsTitle;
 

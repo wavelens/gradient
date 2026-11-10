@@ -251,8 +251,8 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
   font-size: $font-size-sm;
   flex-wrap: wrap;
 
-  b { color: var(--gr-text-primary); }
-  .tally-overall, .tally-not-built, .tally-aborted { color: var(--gr-text-muted); }
+  .tally-built { color: var(--gr-text-primary); font-weight: 600; }
+  .tally-blocked, .tally-aborted { color: var(--gr-text-muted); }
   .tally-failed { color: var(--gr-status-danger-text); font-weight: 600; }
   .eval-only { display: inline-flex; align-items: center; gap: $spacing-xs; color: var(--gr-text-secondary); }
   .dur { display: inline-flex; align-items: center; gap: $spacing-xs; gr-icon { color: var(--gr-text-muted); } }

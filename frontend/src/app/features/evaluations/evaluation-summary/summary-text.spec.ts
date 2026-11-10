@@ -32,13 +32,13 @@ const failure = (over: Partial<FailedBuildSummary>): FailedBuildSummary => ({
 
 describe('evaluation summary text', () => {
   it('counts failed and dependency failed packages, and attributes that failed to evaluate on their own', () => {
-    expect(headline(summary({ built: 15, failed: 2, blocked: 3 }, 1), 'Failed')).toBe('5 packages did not build, 1 attribute failed to evaluate');
+    expect(headline(summary({ built: 15, failed: 2, blocked: 3 }, 1), 'Failed')).toBe('15 of 20 packages built · 2 failed · 3 blocked · 1 attribute failed to evaluate');
     expect(headline(summary({ built: 20 }, 2), 'Failed')).toBe('2 attributes failed to evaluate');
   });
 
   it('names an aborted evaluation and what it left unbuilt', () => {
-    expect(headline(summary({ built: 19, unfinished: 1 }), 'Aborted')).toBe('Aborted, 1 package not built');
-    expect(headline(summary({ built: 18, failed: 1, unfinished: 1 }), 'Aborted')).toBe('Aborted, 1 package did not build, 1 package not built');
+    expect(headline(summary({ built: 19, unfinished: 1 }), 'Aborted')).toBe('Aborted · 19 of 20 packages built · 1 aborted');
+    expect(headline(summary({ built: 18, failed: 1, unfinished: 1 }), 'Aborted')).toBe('Aborted · 18 of 20 packages built · 1 failed · 1 aborted');
   });
 
   it('says that an evaluation failed when it stopped before any package', () => {
@@ -54,8 +54,8 @@ describe('evaluation summary text', () => {
   it('splits the headline counts into failed, blocked, built and unbuilt tiles, labelled by count', () => {
     const tiles = (s: EvaluationFailureSummary, status: EvaluationStatus = 'Completed') =>
       getEvaluationSummaryCountTiles(s, status).map((t) => `${t.label} ${t.value}`);
-    expect(tiles(summary({ built: 1, failed: 1, blocked: 1, unfinished: 1 }, 2))).toEqual(['Failed package 1', 'Blocked package 1', 'Built package 1', 'Unbuilt package 1']);
-    expect(tiles(summary({ built: 5, unfinished: 15 }))).toEqual(['Failed packages 0', 'Blocked packages 0', 'Built packages 5', 'Unbuilt packages 15']);
+    expect(tiles(summary({ built: 1, failed: 1, blocked: 1, unfinished: 1 }, 2))).toEqual(['Failed package 1', 'Blocked package 1', 'Built package 1', 'Aborted package 1']);
+    expect(tiles(summary({ built: 5, unfinished: 15 }))).toEqual(['Failed packages 0', 'Blocked packages 0', 'Built packages 5', 'Aborted packages 15']);
     expect(tiles(summary({ built: 5, unfinished: 15 }), 'Building')).toEqual(['Failed packages 0', 'Blocked packages 0', 'Built packages 5', 'Remaining packages 15']);
     expect(tiles(summary({ built: 5 }), 'Waiting')).toEqual([]);
   });
@@ -75,7 +75,7 @@ describe('evaluation summary text', () => {
   });
 
   it('separates a CI fault from a build error', () => {
-    expect(failureKind('FailedPermanent')).toEqual({ label: 'Build failed', severity: 'danger' });
+    expect(failureKind('FailedPermanent')).toEqual({ label: 'Failed', severity: 'danger' });
     expect(failureKind('FailedTimeout').severity).toBe('warning');
     expect(failureKind('FailedTransient').severity).toBe('warning');
   });

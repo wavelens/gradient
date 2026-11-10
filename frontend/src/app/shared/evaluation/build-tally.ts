@@ -5,24 +5,39 @@
  */
 
 import type { BuildStatusCounts, EvaluationStatus } from '@core/models';
+import { plural } from '@shared/text';
 import { countBuildStatusesAfterEvaluationFinished } from './evaluation-build-view';
 
-export interface BuildTally {
-  done: number;
+export interface BuildCounts {
+  built: number;
   total: number;
-  overall: number;
   failed: number;
-  notBuilt: number;
+  blocked: number;
   aborted: number;
+}
+
+export interface BuildTally extends BuildCounts {
+  overall: number;
   counts: BuildStatusCounts;
 }
 
-/** The numbers next to the bar match the fill and count the builds that gr-segmented-bar can draw. Canceled builds and builds that a dependency failure left unbuilt count as complete. Substitute builds add to the overall total only. */
+export interface CountLineTextPiece {
+  text: string;
+  tone: 'built' | 'failed' | 'blocked' | 'aborted';
+}
+
+/** One count line for the task page, the evaluation log and the summary. The single denominator includes every build that this evaluation needed to build. Substituted builds count only when nothing else needed a build, so the numbers match the bar. */
 export function buildTally(counts: BuildStatusCounts, evaluationStatus: EvaluationStatus): BuildTally {
   const c = countBuildStatusesAfterEvaluationFinished(counts, evaluationStatus);
-  const done = c.completed + c.failed + c.aborted + c.dependency_failed;
-  const total = done + c.building + c.queued;
-  const overall = total + c.substituted;
-  const counted = { overall, failed: c.failed, notBuilt: c.dependency_failed, aborted: c.aborted, counts: c };
-  return total === 0 ? { done: c.substituted, total: c.substituted, ...counted } : { done, total, ...counted };
+  const total = c.completed + c.failed + c.aborted + c.dependency_failed + c.building + c.queued;
+  const settled = { failed: c.failed, blocked: c.dependency_failed, aborted: c.aborted, overall: total + c.substituted, counts: c };
+  return total === 0 ? { built: c.substituted, total: c.substituted, ...settled } : { built: c.completed, total, ...settled };
+}
+
+export function getBuildCountTextPieces(counts: BuildCounts, unit?: string): CountLineTextPiece[] {
+  const settled: [number, CountLineTextPiece['tone']][] = [[counts.failed, 'failed'], [counts.blocked, 'blocked'], [counts.aborted, 'aborted']];
+  return [
+    { text: `${counts.built} of ${unit ? plural(counts.total, unit) : counts.total} built`, tone: 'built' },
+    ...settled.filter(([count]) => count > 0).map(([count, tone]) => ({ text: `${count} ${tone}`, tone })),
+  ];
 }

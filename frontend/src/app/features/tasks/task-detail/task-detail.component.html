@@ -148,13 +148,7 @@
                 @let tally = buildTally(sel.builds, sel.status);
                 @if (tally.overall > 0) {
                   <gr-segmented-bar class="eval-bar" [counts]="tally.counts" />
-                  <span>
-                    <b>{{ tally.done }} / {{ plural(tally.total, 'build') }}</b>
-                    @if (tally.failed > 0) { · <span class="tally-failed">{{ tally.failed }} failed</span> }
-                    @if (tally.notBuilt > 0) { · <span class="tally-not-built">{{ tally.notBuilt }} not built</span> }
-                    @if (tally.aborted > 0) { · <span class="tally-aborted">{{ tally.aborted }} aborted</span> }
-                    @if (tally.overall > tally.total) { · <span class="tally-overall">{{ tally.overall }} total</span> }
-                  </span>
+                  <span [title]="buildCountTitle(tally)">@for (piece of getBuildCountTextPieces(tally); track piece.tone) {@if (!$first) { · }<span class="tally-{{ piece.tone }}">{{ piece.text }}</span>}</span>
                 }
               }
               @if (sel.started_at) {
@@ -218,7 +212,7 @@
                     <span class="chip-arch mono">{{ ep.architecture }}</span>
                     @if (!sel.only_evaluate) {
                       <gr-segmented-bar class="pkg-bar" [counts]="depTally.counts" />
-                      <span class="pkg-deps" [title]="'Builds in total, including substituted ones: ' + depTally.overall">{{ depTally.done }} / {{ plural(depTally.total, 'build') }}@if (depTally.failed > 0) { · <span class="tally-failed">{{ depTally.failed }} failed</span> }@if (depTally.notBuilt > 0) { · <span class="tally-not-built">{{ depTally.notBuilt }} not built</span> }@if (depTally.aborted > 0) { · <span class="tally-aborted">{{ depTally.aborted }} aborted</span> }</span>
+                      <span class="pkg-deps" [title]="buildCountTitle(depTally)">@for (piece of getBuildCountTextPieces(depTally); track piece.tone) {@if (!$first) { · }<span class="tally-{{ piece.tone }}">{{ piece.text }}</span>}</span>
                       <span class="pkg-time">
                         {{ pkgDuration(sel, ep) }}
                         @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }

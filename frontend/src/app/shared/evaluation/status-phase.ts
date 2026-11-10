@@ -83,7 +83,7 @@ const BUILD_STATUS_LABEL: Record<BuildStatus, string> = {
   FailedTransient: 'Worker fault',
   FailedTimeout: 'Timed out',
   Aborted: 'Aborted',
-  DependencyFailed: 'Dependency failed',
+  DependencyFailed: 'Blocked',
   Skipped: 'Skipped',
 };
 

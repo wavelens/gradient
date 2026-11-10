@@ -287,7 +287,7 @@
         } @else if (selectedBuild()?.status === 'DependencyFailed' && !logLineCount()) {
           <div class="queued-hint dependency-failed-hint">
             <gr-icon name="link_off" size="xl" />
-            <span class="queued-title">Dependency failed</span>
+            <span class="queued-title">{{ buildStatusLabel('DependencyFailed') }}</span>
             <span class="queued-sub">This build did not run because a dependency failed. Open the failed dependency to see why.</span>
             <div class="dependency-failed-actions">
               @for (dep of failedDependencies(); track dep.id) {

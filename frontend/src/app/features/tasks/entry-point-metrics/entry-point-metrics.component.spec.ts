@@ -49,7 +49,7 @@ describe('EntryPointMetricsComponent', () => {
     const statuses = ['Completed', 'DependencyFailed', 'Completed', 'FailedTransient', 'Aborted'];
     const { root } = render(() => of({ points: statuses.map(point), keep_evaluations: 30 }));
     const cards = [...root.querySelectorAll('.summary-card')].map((c) => [c.querySelector('.summary-value')!.textContent!.trim(), c.querySelector('.summary-label')!.textContent!.trim()]);
-    expect(cards).toEqual([['2', 'Completed'], ['1', 'Dependency failed'], ['1', 'Worker fault'], ['1', 'Aborted'], ['5', 'Total evaluations']]);
+    expect(cards).toEqual([['2', 'Completed'], ['1', 'Blocked'], ['1', 'Worker fault'], ['1', 'Aborted'], ['5', 'Total evaluations']]);
   });
 
   it('offers View Closure only when the newest build succeeded', () => {

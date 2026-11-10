@@ -39,7 +39,7 @@ export function buildDurationTextForEvaluation(build: BuildTimesInEvaluation, ev
     return formatDuration(Math.max(0, serverTime(evaluation.finished_at).getTime() - serverTime(build.build_started_at).getTime()));
   }
   // A build that started before the evaluation existed served an earlier evaluation. Its build time doesn't count for this evaluation.
-  if (!isPendingBuildStatus(build.status) && build.build_started_at && evaluation?.created_at
+  if (!isPendingBuildStatus(build.status) && build.status !== 'Substituted' && build.build_started_at && evaluation?.created_at
     && serverTime(build.build_started_at).getTime() < serverTime(evaluation.created_at).getTime()) return 'reused';
   const ms = buildDuration(build, nowMs);
   return ms == null ? '' : formatDuration(ms);

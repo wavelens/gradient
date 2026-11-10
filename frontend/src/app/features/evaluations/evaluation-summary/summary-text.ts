@@ -6,7 +6,7 @@
 
 import type { BuildStatus, EvaluationFailureSummary, EvaluationStatus, FailedBuildSummary } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
-import { buildStatusLabel, isEvaluationNotStartedStatus, isRunningEvaluationStatus } from '@shared/evaluation';
+import { buildStatusLabel, getBuildCountTextPieces, isEvaluationNotStartedStatus, isRunningEvaluationStatus } from '@shared/evaluation';
 import { removeAnsiEscapeSequences } from '@shared/log';
 import { plural } from '@shared/text';
 
@@ -31,7 +31,7 @@ export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary
     countTile(built, 'Built package', 'Built packages'),
     isRunningEvaluationStatus(status)
       ? countTile(unfinished, 'Remaining package', 'Remaining packages')
-      : countTile(unfinished, 'Unbuilt package', 'Unbuilt packages'),
+      : countTile(unfinished, 'Aborted package', 'Aborted packages'),
   ];
 }
 
@@ -42,15 +42,13 @@ export function headline(summary: EvaluationFailureSummary, status: EvaluationSt
     return total ? `Still running, ${built} of ${plural(total, 'package')} built so far` : 'Still evaluating';
   }
   const failedAttributes = summary.failed_attributes.length;
-  const problems = [
-    ...(failed + blocked > 0 ? [`${plural(failed + blocked, 'package')} did not build`] : []),
+  const parts = [
+    ...(status === 'Aborted' ? ['Aborted'] : []),
+    ...(built < total ? getBuildCountTextPieces({ built, total, failed, blocked, aborted: unfinished }, 'package').map((piece) => piece.text) : []),
     ...(failedAttributes > 0 ? [`${plural(failedAttributes, 'attribute')} failed to evaluate`] : []),
   ];
-  const notBuilt = unfinished > 0 ? [`${plural(unfinished, 'package')} not built`] : [];
-  if (status === 'Aborted') return ['Aborted', ...problems, ...notBuilt].join(', ');
-  if (problems.length) return problems.join(', ');
+  if (parts.length) return parts.join(' · ');
   if (status === 'Failed') return 'Evaluation failed';
-  if (notBuilt.length) return notBuilt[0];
 
   return `All ${plural(total, 'package')} built`;
 }
@@ -59,7 +57,7 @@ export function headline(summary: EvaluationFailureSummary, status: EvaluationSt
 export function failureKind(status: BuildStatus): { label: string; severity: BadgeSeverity } {
   if (status === 'FailedTimeout' || status === 'FailedTransient') return { label: buildStatusLabel(status), severity: 'warning' };
 
-  return { label: 'Build failed', severity: 'danger' };
+  return { label: buildStatusLabel('FailedPermanent'), severity: 'danger' };
 }
 
 export function failureTitle(failure: FailedBuildSummary): string {

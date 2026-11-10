@@ -24,7 +24,7 @@ function countSegments(counts: BuildStatusCounts): CountSegment[] {
   return ORDER.map(tone => ({
     tone,
     pct: (c[tone] / total) * 100,
-    label: tone === 'aborted' && counts.dependency_failed > 0 ? `${counts.aborted} aborted, ${counts.dependency_failed} not built` : `${c[tone]} ${tone}`,
+    label: tone === 'aborted' && counts.dependency_failed > 0 ? `${counts.aborted} aborted, ${counts.dependency_failed} blocked` : `${c[tone]} ${tone}`,
   }));
 }
 

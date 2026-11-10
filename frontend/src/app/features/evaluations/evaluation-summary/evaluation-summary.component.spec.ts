@@ -96,7 +96,7 @@ describe('EvaluationSummaryComponent', () => {
   it('opens with the verdict and splits the failures by the compared evaluation', () => {
     const fixture = setup(SUMMARY);
 
-    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('3 packages did not build, 1 attribute failed to evaluate');
+    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('16 of 20 packages built · 1 failed · 2 blocked · 1 attribute failed to evaluate');
     expect(sections(fixture)).toEqual(['Newly failing 1', 'Still failing 1', 'Failed to evaluate 1', 'Fixed 1']);
     expect(text(fixture)).toContain('2 new failures and 1 fix since the previous evaluation at aaaaaaaa');
     expect((fixture.nativeElement as HTMLElement).querySelector('.compared a')?.getAttribute('href')).toBe('/project/testproject/summary/e1');
@@ -187,8 +187,8 @@ describe('EvaluationSummaryComponent', () => {
       { ...EVALUATION, status: 'Aborted' },
     );
 
-    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('Aborted, 1 package not built');
-    expect(text(fixture)).toContain('Unbuilt package');
+    expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).toContain('Aborted · 0 of 1 package built · 1 aborted');
+    expect(text(fixture)).toContain('Aborted package');
     expect(text(fixture)).not.toContain('Nothing went wrong');
   });
 
@@ -217,7 +217,7 @@ describe('EvaluationSummaryComponent', () => {
     await new Promise((resolve) => setTimeout(resolve, 1100));
     fixture.detectChanges();
 
-    expect(heading()).toContain('Aborted, 1 package not built');
+    expect(heading()).toContain('Aborted · 0 of 1 package built · 1 aborted');
     expect(frames.observed).toBe(false);
   });
 

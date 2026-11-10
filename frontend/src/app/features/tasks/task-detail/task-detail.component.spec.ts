@@ -620,11 +620,11 @@ describe('TaskDetailComponent - in-progress state (#452)', () => {
     expect(badge).toBeTruthy();
   });
 
-  it('names failed, not built and substituted builds in the header counter', () => {
+  it('counts built, failed, blocked and aborted builds against one total in the header', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true },
       { primaryStatus: 'Failed', primary: { builds: { ...zeroCounts(), completed: 1, failed: 1, dependency_failed: 1, aborted: 1, substituted: 2 } } });
     const counter = (fixture.nativeElement as HTMLElement).querySelector('.bar-line > span')?.textContent?.replace(/\s+/g, ' ').trim();
-    expect(counter).toBe('4 / 4 builds · 1 failed · 1 not built · 1 aborted · 6 total');
+    expect(counter).toBe('1 of 4 built · 1 failed · 1 blocked · 1 aborted');
   });
 
   it('draws the shared build of an aborted evaluation as aborted, not as building stripes', () => {

@@ -411,7 +411,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     skipped: 6,
   };
 
-  /// The sidebar sections follow display order. Failed and Dependency failed builds come right after Building. Sections get their label from buildStatusLabel. Rows for a status other than the section label show their own status label, for example a timed out build under Failed. Statuses this list doesn't recognize map to `Other`. All builds appear in the list.
+  /// The sidebar sections follow display order. Failed and Blocked builds come right after Building. Sections get their label from buildStatusLabel. Rows for a status other than the section label show their own status label, for example a timed out build under Failed. Statuses this list doesn't recognize map to `Other`. All builds appear in the list.
   private readonly buildGroups: { key: string; label: string; members: string[]; phase: StatusPhase }[] = [
     { key: 'building', label: buildStatusLabel('Building'), members: ['building'], phase: 'running' },
     { key: 'failed', label: buildStatusLabel('FailedPermanent'), members: ['failed'], phase: 'failure' },
