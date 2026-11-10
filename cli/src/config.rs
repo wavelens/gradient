@@ -79,6 +79,17 @@ impl SavedLogin {
         self.get(ConfigKey::Server)
     }
 
+    fn set_server_url_and_clear_saved_auth_token_from_other_server(&mut self, server: String) {
+        let same_server = self
+            .server
+            .as_deref()
+            .is_some_and(|saved| saved.trim_end_matches('/') == server.trim_end_matches('/'));
+        if !same_server {
+            self.auth_token = None;
+        }
+        self.server = Some(server);
+    }
+
     fn set_selected_project_and_clear_task_from_other_project(&mut self, project: String) {
         let task_in_other_project = self
             .selected_task
@@ -206,7 +217,7 @@ pub fn invocation_token_is_from_env_var() -> bool {
 fn apply_invocation_settings_to_saved_login(mut login: SavedLogin) -> SavedLogin {
     let overrides = invocation_overrides();
     if let Some(server) = &overrides.server {
-        login.server = Some(server.clone());
+        login.set_server_url_and_clear_saved_auth_token_from_other_server(server.clone());
     }
     if let Some(token) = &overrides.token {
         login.auth_token = Some(token.clone());
@@ -348,6 +359,9 @@ pub fn set_or_get_by_name(
 
 pub fn set_value(key: ConfigKey, value: String, quiet: bool) {
     update_or_create_saved_login_in_config_file(|login| match key {
+        ConfigKey::Server => {
+            login.set_server_url_and_clear_saved_auth_token_from_other_server(value.clone())
+        }
         ConfigKey::SelectedProject => {
             login.set_selected_project_and_clear_task_from_other_project(value.clone())
         }
@@ -478,6 +492,23 @@ mod tests {
         login.set_selected_project_and_clear_task_from_other_project("b".into());
         assert_eq!(login.selected_project.as_deref(), Some("b"));
         assert_eq!(login.selected_task, None);
+    }
+
+    #[test]
+    fn a_token_is_not_carried_over_to_another_server() {
+        let mut login = SavedLogin {
+            server: Some("https://a.example/".into()),
+            auth_token: Some("t".into()),
+            ..Default::default()
+        };
+        login.set_server_url_and_clear_saved_auth_token_from_other_server(
+            "https://a.example".into(),
+        );
+        assert_eq!(login.token(), Some("t".into()));
+        login.set_server_url_and_clear_saved_auth_token_from_other_server(
+            "https://b.example".into(),
+        );
+        assert_eq!(login.token(), None);
     }
 
     #[test]

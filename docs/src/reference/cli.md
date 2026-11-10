@@ -52,7 +52,7 @@ gradient login https://gradient.example.com
 - With multiple projects available, the CLI asks which one to select.
 - Settings live in `~/.config/gradient/accounts.toml` (or `$XDG_CONFIG_HOME/gradient`). Only the owner can read the file, since it holds the login tokens.
 - `gradient config <key> [value]` reads or writes one of `server`, `authtoken`, `selectedproject`, `selectedtask` for the current account.
-- `GRADIENT_SERVER` and `GRADIENT_TOKEN` replace the saved server and token, e.g. in CI jobs without a config file.
+- `GRADIENT_SERVER` and `GRADIENT_TOKEN` replace the saved server and token. Use them in a CI job with no config file, for example. A saved token can go only to the server that stored it. Pass `GRADIENT_TOKEN` too with another `GRADIENT_SERVER`. `gradient config server <url>` with another server can also clear the saved token.
 - Add `--json` to any command for machine-readable output with all prompts disabled.
 - Without a terminal on stdin, or with `--json`, commands never open `$EDITOR`: pass every required field as a flag, otherwise the command fails and names the missing flag.
 - A server behind a private CA works once the CA certificate is in the system trust store, e.g. `security.pki.certificateFiles` on NixOS.

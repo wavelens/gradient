@@ -40,12 +40,33 @@ pub fn server_base(out: Output) -> String {
 
 pub fn client_from_config(out: Output) -> Client {
     let server = server_base(out);
+    let token = saved_login_for_invocation().token();
+    if token.is_some() && is_unencrypted_http_url_to_non_loopback_host(&server) {
+        out.progress(format!(
+            "Warning: {server} is plain http. Requests carry the API token unencrypted."
+        ));
+    }
     let mut b = Client::builder().base_url(server);
-    if let Some(t) = saved_login_for_invocation().token() {
+    if let Some(t) = token {
         b = b.token(t);
     }
     b.build()
         .unwrap_or_else(|e| out.err(ExitKind::Api, format!("client init failed: {}", e)))
+}
+
+fn is_unencrypted_http_url_to_non_loopback_host(server: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(server) else {
+        return false;
+    };
+    let loopback = match url.host_str() {
+        Some("localhost") => true,
+        Some(host) => host
+            .trim_matches(['[', ']'])
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback()),
+        None => false,
+    };
+    url.scheme() == "http" && !loopback
 }
 
 pub struct Inputs {
@@ -250,6 +271,25 @@ mod tests {
 
     fn fields(names: &[&str]) -> Vec<(String, Option<String>)> {
         names.iter().map(|n| (n.to_string(), None)).collect()
+    }
+
+    #[test]
+    fn only_plain_http_to_a_remote_host_is_unencrypted() {
+        assert!(is_unencrypted_http_url_to_non_loopback_host(
+            "http://ci.example"
+        ));
+        assert!(!is_unencrypted_http_url_to_non_loopback_host(
+            "https://ci.example"
+        ));
+        assert!(!is_unencrypted_http_url_to_non_loopback_host(
+            "http://localhost:3000"
+        ));
+        assert!(!is_unencrypted_http_url_to_non_loopback_host(
+            "http://127.0.0.1"
+        ));
+        assert!(!is_unencrypted_http_url_to_non_loopback_host(
+            "http://[::1]:8080"
+        ));
     }
 
     #[test]
