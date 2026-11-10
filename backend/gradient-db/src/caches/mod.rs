@@ -14,10 +14,10 @@ pub mod usage;
 
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{LockType, Query};
+use sea_orm::sea_query::Query;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, Select,
+    QueryOrder, Select,
 };
 
 pub async fn by_name<C: ConnectionTrait>(db: &C, name: &str) -> Result<Option<MCache>, DbErr> {
@@ -28,16 +28,6 @@ pub async fn by_ids<C: ConnectionTrait>(db: &C, ids: &[CacheId]) -> Result<Vec<M
     ECache::find()
         .filter(CCache::Id.is_in(ids.iter().copied()))
         .all(db)
-        .await
-}
-
-pub async fn lock_for_admin_change<C: ConnectionTrait>(
-    db: &C,
-    cache: CacheId,
-) -> Result<Option<MCache>, DbErr> {
-    ECache::find_by_id(cache)
-        .lock(LockType::NoKeyUpdate)
-        .one(db)
         .await
 }
 

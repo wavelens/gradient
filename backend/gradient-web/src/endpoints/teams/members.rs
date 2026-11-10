@@ -231,7 +231,7 @@ pub async fn patch_team_members(
     let target = find_user_by_username(&db.web_db, &body.user).await?;
     let tx = db.web_db.inner().begin().await?;
     if body.role != TeamRole::Admin {
-        gradient_db::teams::lock_for_admin_change(&tx, team.id).await?;
+        gradient_db::lookup::lock_for_admin_change::<ETeam, _>(&tx, team.id).await?;
     }
     let membership = gradient_db::teams::members::membership(&tx, team.id, target.id)
         .await?
@@ -274,7 +274,7 @@ pub async fn delete_team_members(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let target = find_user_by_username(&db.web_db, &body.user).await?;
     let tx = db.web_db.inner().begin().await?;
-    gradient_db::teams::lock_for_admin_change(&tx, team.id).await?;
+    gradient_db::lookup::lock_for_admin_change::<ETeam, _>(&tx, team.id).await?;
     let membership = gradient_db::teams::members::membership(&tx, team.id, target.id)
         .await?
         .ok_or(SharedRefusal::NotAMember(Resource::Team))?;

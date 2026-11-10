@@ -233,7 +233,7 @@ impl Owner for CacheOwner {
     }
 
     async fn lock_for_admin_change(db: &impl ConnectionTrait, owner: CacheId) -> WebResult<()> {
-        gradient_db::caches::lock_for_admin_change(db, owner).await?;
+        gradient_db::lookup::lock_for_admin_change::<ECache, _>(db, owner).await?;
         Ok(())
     }
 

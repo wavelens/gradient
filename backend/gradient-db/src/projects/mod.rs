@@ -11,7 +11,7 @@ pub mod workers;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{LockType, Query};
+use sea_orm::sea_query::Query;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect, QueryTrait, Select, Value,
@@ -178,16 +178,6 @@ pub async fn count_members_with_role<C: ConnectionTrait>(
         .filter(CProjectUser::Project.eq(project))
         .filter(CProjectUser::Role.eq(role))
         .count(db)
-        .await
-}
-
-pub async fn lock_for_admin_change<C: ConnectionTrait>(
-    db: &C,
-    project: ProjectId,
-) -> Result<Option<MProject>, DbErr> {
-    EProject::find_by_id(project)
-        .lock(LockType::NoKeyUpdate)
-        .one(db)
         .await
 }
 

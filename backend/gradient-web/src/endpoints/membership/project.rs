@@ -236,7 +236,7 @@ impl Owner for ProjectOwner {
     }
 
     async fn lock_for_admin_change(db: &impl ConnectionTrait, owner: ProjectId) -> WebResult<()> {
-        gradient_db::projects::lock_for_admin_change(db, owner).await?;
+        gradient_db::lookup::lock_for_admin_change::<EProject, _>(db, owner).await?;
         Ok(())
     }
 

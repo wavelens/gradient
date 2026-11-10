@@ -7,7 +7,7 @@
 use crate::{DbContext, fetch_in_chunks};
 use anyhow::{Context, Result};
 use gradient_types::*;
-use sea_orm::sea_query::FromValueTuple;
+use sea_orm::sea_query::{FromValueTuple, LockType};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, Iterable, ModelTrait, PrimaryKeyToColumn,
     PrimaryKeyTrait, QueryFilter, QuerySelect, Value,
@@ -32,6 +32,14 @@ where
     C: ConnectionTrait,
 {
     E::find_by_id(id).lock_exclusive().one(db).await
+}
+
+pub async fn lock_for_admin_change<E, C>(db: &C, id: Key<E>) -> Result<Option<E::Model>, DbErr>
+where
+    E: EntityTrait,
+    C: ConnectionTrait,
+{
+    E::find_by_id(id).lock(LockType::NoKeyUpdate).one(db).await
 }
 
 pub async fn by_ids<E, C>(db: &C, ids: &[Key<E>]) -> Result<HashMap<Key<E>, E::Model>, DbErr>
