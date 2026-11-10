@@ -6,7 +6,7 @@
 
 use super::approval::{PullRequestApprovalContext, on_approval_granted, sender_is_trusted};
 use super::fanout::trigger_pr_for_integration;
-use super::installation::resolve_github_app_targets;
+use super::installation::{resolve_github_app_targets, task_serves_repository};
 use super::payloads::CommentPayload;
 use gradient_ci::CiContext;
 use gradient_ci::pull_request_summary::enable_pull_request_summary;
@@ -19,6 +19,7 @@ use gradient_scheduler::Scheduler;
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -215,9 +216,11 @@ struct CommentRoute<'a> {
 }
 
 async fn handle_comment_for_integration(ctx: &CommentRoute<'_>) -> bool {
-    let task_ids = match gradient_db::triggers::active_pull_request_tasks_of_integration(
+    let task_ids = match load_active_pull_request_tasks_for_event_repository(
         &ctx.ci.db.web_db,
         ctx.integration_id,
+        ctx.owner,
+        ctx.repo,
     )
     .await
     {
@@ -433,6 +436,36 @@ pub(super) async fn first_task_with_reporter(
     None
 }
 
+pub(super) async fn load_active_pull_request_tasks_for_event_repository(
+    db: &WebDb,
+    integration_id: IntegrationId,
+    owner: &str,
+    repo: &str,
+) -> Result<Vec<TaskId>, sea_orm::DbErr> {
+    let task_ids =
+        gradient_db::triggers::active_pull_request_tasks_of_integration(db, integration_id).await?;
+    let tasks = gradient_db::lookup::by_ids::<ETask, _>(db, &task_ids).await?;
+    Ok(filter_task_ids_by_repository_url_owner_and_name(
+        task_ids, &tasks, owner, repo,
+    ))
+}
+
+fn filter_task_ids_by_repository_url_owner_and_name(
+    task_ids: Vec<TaskId>,
+    tasks: &HashMap<TaskId, MTask>,
+    owner: &str,
+    repo: &str,
+) -> Vec<TaskId> {
+    task_ids
+        .into_iter()
+        .filter(|id| {
+            tasks
+                .get(id)
+                .is_some_and(|task| task_serves_repository(&task.repository, owner, repo))
+        })
+        .collect()
+}
+
 async fn fetch_pr_snapshot(
     ci: &CiContext,
     task_ids: &[TaskId],
@@ -579,8 +612,34 @@ pub(super) fn github_installation_id_from_comment_body(body: &[u8]) -> Option<i6
 
 #[cfg(test)]
 mod tests {
-    use super::{CommentEvent, GradientCommand, parse_comment_event, parse_gradient_command};
-    use gradient_types::GitHostType;
+    use super::{
+        CommentEvent, GradientCommand, filter_task_ids_by_repository_url_owner_and_name,
+        parse_comment_event, parse_gradient_command,
+    };
+    use gradient_types::{GitHostType, MTask, TaskId};
+    use std::collections::HashMap;
+
+    #[test]
+    fn approval_tasks_stay_in_the_event_repository() {
+        let task = |n: u128, repository: &str| MTask {
+            id: TaskId::new(uuid::Uuid::from_u128(n)),
+            repository: repository.to_string(),
+            ..Default::default()
+        };
+        let repo_a = task(1, "https://github.com/acme/A.git");
+        let repo_b = task(2, "git@github.com:acme/b.git");
+        let task_ids = vec![repo_a.id, repo_b.id];
+        let tasks = HashMap::from([(repo_a.id, repo_a.clone()), (repo_b.id, repo_b.clone())]);
+
+        assert_eq!(
+            filter_task_ids_by_repository_url_owner_and_name(task_ids.clone(), &tasks, "acme", "a"),
+            vec![repo_a.id]
+        );
+        assert_eq!(
+            filter_task_ids_by_repository_url_owner_and_name(task_ids, &tasks, "acme", "b"),
+            vec![repo_b.id]
+        );
+    }
 
     fn event_of(git_host: GitHostType, value: serde_json::Value) -> CommentEvent {
         parse_comment_event(git_host, &serde_json::to_vec(&value).unwrap())

@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::commands::{first_task_with_reporter, github_installation_id_from_comment_body};
-use super::installation::resolve_github_app_targets;
+use super::commands::{
+    first_task_with_reporter, github_installation_id_from_comment_body,
+    load_active_pull_request_tasks_for_event_repository,
+};
+use super::installation::{resolve_github_app_targets, task_serves_repository};
 use super::payloads::GithubCheckRunRequestedAction;
 use gradient_ci::CiContext;
 use gradient_ci::{APPROVAL_ACTION_ID, find_approval_gated_eval, unpark_approval};
@@ -85,6 +88,19 @@ pub(super) async fn handle_github_check_run(
     let Some(task_id) = eval.task else {
         return;
     };
+    let task_repository = by_id::<ETask, _>(&ci.db.web_db, task_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|task| task.repository);
+    if !task_repository.is_some_and(|url| task_serves_repository(&url, owner, repo)) {
+        warn!(
+            evaluation_id = %eval.id,
+            %full_name,
+            "Rejecting approval click - the evaluation belongs to another repository"
+        );
+        return;
+    }
 
     if !sender_is_trusted(ci, task_id, owner, repo, sender.login).await {
         warn!(
@@ -251,9 +267,11 @@ pub(super) async fn handle_pull_request_review(
     };
 
     for integration_id in &integration_ids {
-        let task_ids = match gradient_db::triggers::active_pull_request_tasks_of_integration(
+        let task_ids = match load_active_pull_request_tasks_for_event_repository(
             &ci.db.web_db,
             *integration_id,
+            owner,
+            repo,
         )
         .await
         {

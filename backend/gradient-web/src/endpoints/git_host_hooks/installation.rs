@@ -153,6 +153,11 @@ pub(super) fn event_repo_matches_task(event_repo_urls: &[String], task_repositor
     }
 }
 
+pub(super) fn task_serves_repository(task_repository: &str, owner: &str, repo: &str) -> bool {
+    repo_identity(task_repository)
+        .is_some_and(|identity| identity == format!("{owner}/{repo}").to_ascii_lowercase())
+}
+
 pub(super) async fn resolve_github_app_targets(
     db: &WebDb,
     installation_id: i64,
