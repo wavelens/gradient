@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { NEVER, Observable, of, throwError } from 'rxjs';
+import { NEVER, Observable, map, of, tap, throwError, timer } from 'rxjs';
 import type { Mock } from 'vitest';
 import { DashboardComponent } from './dashboard.component';
 import { signal } from '@angular/core';
@@ -90,6 +90,25 @@ describe('DashboardComponent', () => {
       expect(service.tasks).toHaveBeenCalledTimes(2);
       expect(service.rail).toHaveBeenCalledTimes(2);
       expect(service.activity).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still refreshes the task rows when a faster section fails or another one hangs', () => {
+    vi.useFakeTimers();
+    try {
+      render({ projects: [{ name: 'p', display_name: 'P', starred: false, tier: 'member', status: null, task_count: 1 }], caches: [] });
+      let deliveredTaskPages = 0;
+      service.tasks.mockImplementation(() =>
+        timer(500).pipe(map(() => ({ counts: { all: 0, failing: 0, starred: 0 }, total: 0, tasks: [] })), tap(() => deliveredTaskPages++)),
+      );
+      service.activity.mockImplementation(() => throwError(() => ({ status: 503 })));
+      service.stats.mockImplementation(() => NEVER);
+      vi.advanceTimersByTime(15_500);
+      expect(deliveredTaskPages).toBe(1);
+      vi.advanceTimersByTime(15_000);
+      expect(deliveredTaskPages).toBe(2);
     } finally {
       vi.useRealTimers();
     }

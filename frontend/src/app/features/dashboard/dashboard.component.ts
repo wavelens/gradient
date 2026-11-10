@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, computed, signal, viewChild } from '@angular/core';
-import { merge } from 'rxjs';
+import { EMPTY } from 'rxjs';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { ButtonComponent, MessageBannerComponent } from '@gradient/ui/ui';
 import { PendingInvitationsBannerComponent } from '@shared/access';
@@ -40,9 +40,6 @@ export class DashboardComponent {
   private tasks = viewChild(DashboardTaskTableComponent);
   private activity = viewChild(DashboardActivityComponent);
   private rail = viewChild(DashboardRailComponent);
-  private reloadableRenderedDashboardSections = computed(() =>
-    [this.stats(), this.tasks(), this.activity(), this.rail()].filter((section) => section !== undefined),
-  );
   private dashboardSectionComponentsWithErrorBannerNames = computed(() => [
     { component: this.stats(), name: 'statistics' },
     { component: this.activity(), name: 'activity' },
@@ -60,8 +57,8 @@ export class DashboardComponent {
   }
 
   constructor() {
-    runReloadIntervalWhileTabVisible(() =>
-      merge(...this.reloadableRenderedDashboardSections().map((section) => section.reloadSilentlyKeepingContentOnError())),
-    );
+    for (const section of [this.stats, this.tasks, this.activity, this.rail]) {
+      runReloadIntervalWhileTabVisible(() => section()?.reloadSilentlyKeepingContentOnError() ?? EMPTY);
+    }
   }
 }
