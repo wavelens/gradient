@@ -122,17 +122,24 @@ describe('ConnectRepositoryComponent', () => {
 
   it('warns about a missing cache before the task exists, since creating it starts the first evaluation', () => {
     const el = render({}, {}).nativeElement as HTMLElement;
-    expect(el.querySelector('[data-testid="cache-missing"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="no-cache-banner"]')).not.toBeNull();
   });
 
   it('shows no cache warning when the project has an active cache', () => {
     const fixture = render({}, {}, { getSubscribedCaches: () => of([{ name: 'main', status: 'active' }]) });
-    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="cache-missing"]')).toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="no-cache-banner"]')).toBeNull();
   });
 
   it('keeps the cache warning when the only active cache is read-only', () => {
     const fixture = render({}, {}, { getSubscribedCaches: () => of([{ name: 'main', status: 'active', mode: 'ReadOnly' }]) });
-    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="cache-missing"]')).not.toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="no-cache-banner"]')).not.toBeNull();
+  });
+
+  it('names a pending subscription request instead of asking for a new cache', () => {
+    const fixture = render({}, {}, { getSubscribedCaches: () => of([{ name: 'main', status: 'pending', mode: 'ReadWrite' }]) });
+    const banner = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="no-cache-banner"]');
+    expect(banner?.textContent).toContain('Subscription request pending');
+    expect(banner?.querySelector('a')?.getAttribute('href')).toBe('/project/acme/caches');
   });
 
   it('shows the no-access state instead of the form to a role that cannot create tasks, without a request', () => {

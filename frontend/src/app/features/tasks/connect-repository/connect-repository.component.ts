@@ -22,7 +22,7 @@ import {
   SubmitDirective,
 } from '@gradient/ui/ui';
 import { CacheSubscriptionItem, TaskRepositoryResponse } from '@core/models';
-import { hasActiveCacheSubscriptionWithWriteAccess } from '@features/projects/project-no-active-writable-cache-subscription-warning.component';
+import { ProjectNoActiveWritableCacheSubscriptionWarningComponent, hasActiveCacheSubscriptionWithWriteAccess } from '@features/projects/project-no-active-writable-cache-subscription-warning.component';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -56,6 +56,7 @@ function repositoryName(url: string): string {
   standalone: true,
   imports: [
     FormsModule,
+    ProjectNoActiveWritableCacheSubscriptionWarningComponent,
     RouterLink,
     ButtonComponent,
     FormFieldComponent,
