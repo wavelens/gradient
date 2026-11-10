@@ -183,6 +183,7 @@ export class JobTimelineComponent implements OnDestroy {
     const labelWidth = phaseLabelColumnWidth(host.clientWidth);
 
     this.chart.setOption({
+      animation: !t.reducedMotion,
       grid: { left: labelWidth + 8, right: 24, top: 8, bottom: 28, containLabel: false },
       xAxis: {
         type: 'value',

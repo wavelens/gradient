@@ -39,6 +39,7 @@ export function resolveChartTheme(): ChartTheme {
       read('--gr-chart-orange'),
       read('--gr-chart-teal'),
     ],
+    reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
   };
 }
 

@@ -23,7 +23,16 @@ const THEME = {
   border: '#2d333b',
   surface: '#21262d',
   palette: ['#3b82f6', '#ef4444', '#22c55e', '#f97316'],
+  reducedMotion: false,
 };
+
+describe('chart motion', () => {
+  it('draws in quickly and not at all when the system asks for reduced motion', () => {
+    const series = { type: 'line' as const, series: one, categories: cats };
+    expect(buildMetricChartOption(series, THEME)).toMatchObject({ animation: true, animationDuration: 300 });
+    expect(buildMetricChartOption(series, { ...THEME, reducedMotion: true }).animation).toBe(false);
+  });
+});
 
 describe('chart tooltip', () => {
   it('is themed rather than left on the ECharts light default', () => {
@@ -128,6 +137,12 @@ describe('buildMetricChartOption presentation', () => {
   it('caps the value axis at a fixed maximum when given', () => {
     const opt = buildMetricChartOption({ type: 'line', series: one, categories: cats, yAxisMax: 100 }, THEME);
     expect((opt.yAxis as any).max).toBe(100);
+    expect((opt.yAxis as any).interval).toBe(25);
+  });
+
+  it('keeps the last time label of a wide line chart inside the plot', () => {
+    const label = (buildMetricChartOption({ type: 'line', series: one, categories: cats }, THEME).xAxis as any).axisLabel;
+    expect(label).toMatchObject({ alignMinLabel: 'left', alignMaxLabel: 'right' });
   });
 
   it('caps only the primary axis of a dual-axis chart', () => {

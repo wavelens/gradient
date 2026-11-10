@@ -46,7 +46,10 @@ export interface ChartTheme {
   border: string;
   surface: string;
   palette: string[];
+  reducedMotion: boolean;
 }
+
+const CHART_DRAW_IN_DURATION_MS = 300;
 
 const isXY = (d: MetricSeries['data']): d is MetricPointXY[] =>
   d.length > 0 && typeof d[0] === 'object' && d[0] !== null;
@@ -87,6 +90,9 @@ export function buildMetricChartOption(requested: MetricChartConfig, theme: Char
   const format = cfg.valueFormatter ?? ((v: number) => String(v));
   const base: EChartsOption = {
     backgroundColor: 'transparent',
+    animation: !theme.reducedMotion,
+    animationDuration: CHART_DRAW_IN_DURATION_MS,
+    animationDurationUpdate: CHART_DRAW_IN_DURATION_MS,
     color: cfg.colors?.length ? [...cfg.colors] : theme.palette,
     legend: {
       show: cfg.series.length > 1,
@@ -122,7 +128,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   const hasBars = cfg.series.some((s) => kindOf(s) === 'bar') || cfg.type === 'bar';
   const inset = cfg.horizontal ? undefined : cfg.inset;
   const boundaryGap = hasBars || !!inset;
-  const edgeLabels = cfg.compact && !boundaryGap ? { alignMinLabel: 'left' as const, alignMaxLabel: 'right' as const } : {};
+  const edgeLabels = !boundaryGap ? { alignMinLabel: 'left' as const, alignMaxLabel: 'right' as const } : {};
   const categoryLabelTruncationOptions = cfg.compact && cfg.horizontal ? {} : { overflow: 'truncate' as const, width: MAX_CATEGORY_AXIS_LABEL_WIDTH_PIXELS };
   const categoryLabel = { ...axisLabel(theme), hideOverlap: true, ...categoryLabelTruncationOptions, ...edgeLabels };
   const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], inverse: !!cfg.horizontal, boundaryGap, axisLabel: categoryLabel, axisLine: axisLine(theme) };
@@ -138,7 +144,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
       min: (extent: { min: number }) => Math.min(0, extent.min),
       max: byteTicks?.max ?? max,
       ...(areAllSeriesValuesWholeNumbers(axisSeries) ? { minInterval: 1 } : {}),
-      ...(byteTicks ? { interval: byteTicks.interval } : {}),
+      ...(byteTicks ? { interval: byteTicks.interval } : max !== undefined ? { interval: max / (cfg.compact ? COMPACT_AXIS_TICKS : AXIS_TICKS) } : {}),
       nameTextStyle: { color: theme.text },
       axisLabel: { ...axisLabel(theme), hideOverlap: true, formatter: (v: number) => fmt(v) },
       axisLine: axisLine(theme),
