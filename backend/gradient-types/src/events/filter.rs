@@ -34,15 +34,38 @@ impl EventFilter {
 
     pub fn validate(patterns: &[String]) -> Result<(), String> {
         if patterns.len() > Self::MAX_PATTERNS {
-            return Err(format!("at most {} event patterns", Self::MAX_PATTERNS));
+            return Err(format!(
+                "Use at most {} event patterns.",
+                Self::MAX_PATTERNS
+            ));
         }
-        for p in patterns {
-            let allowed = p
-                .bytes()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"._*".contains(&c));
-            if p.is_empty() || p.len() > Self::MAX_PATTERN_LEN || !allowed || p.contains("**") {
-                return Err(format!("invalid event pattern '{p}'"));
-            }
+        patterns
+            .iter()
+            .try_for_each(|p| Self::validate_event_name_pattern(p))
+    }
+
+    fn validate_event_name_pattern(p: &str) -> Result<(), String> {
+        if p.is_empty() {
+            return Err("Event patterns can't be empty.".to_owned());
+        }
+        if p.len() > Self::MAX_PATTERN_LEN {
+            return Err(format!(
+                "Event pattern \"{p}\" is longer than {} characters.",
+                Self::MAX_PATTERN_LEN
+            ));
+        }
+        let allowed = p
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"._*".contains(&c));
+        if !allowed {
+            return Err(format!(
+                "Event pattern \"{p}\" can contain only lowercase letters, digits, dots, underscores and *."
+            ));
+        }
+        if p.contains("**") {
+            return Err(format!(
+                "The event pattern \"{p}\" can't contain **. Use a single * instead."
+            ));
         }
         Ok(())
     }
@@ -122,10 +145,12 @@ mod tests {
     #[test]
     fn patterns_outside_the_name_alphabet_are_rejected() {
         assert!(EventFilter::validate(&["build.*".into(), "task.star".into()]).is_ok());
-        assert!(EventFilter::validate(&["Build.*".into()]).is_err());
-        assert!(EventFilter::validate(&["a**b".into()]).is_err());
-        assert!(EventFilter::validate(&["x".repeat(129)]).is_err());
-        assert!(EventFilter::validate(&vec!["build.*".to_owned(); 65]).is_err());
+        let refusal = |patterns: &[String]| EventFilter::validate(patterns).unwrap_err();
+        assert!(refusal(&["Build.*".into()]).contains("only lowercase letters"));
+        assert!(refusal(&["a**b".into()]).contains("single *"));
+        assert!(refusal(&["".into()]).contains("can't be empty"));
+        assert!(refusal(&["x".repeat(129)]).contains("longer than 128 characters"));
+        assert!(refusal(&vec!["build.*".to_owned(); 65]).contains("at most 64"));
     }
 
     #[test]
