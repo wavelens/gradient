@@ -132,7 +132,7 @@ async fn a_busy_chunk_upload_is_retried_after_the_servers_delay() {
         .unwrap();
     let received = client
         .caches()
-        .nar_upload_chunk("mycache", "abc", 0, vec![1, 2, 3])
+        .nar_upload_chunk("mycache", "abc", 0, bytes::Bytes::from_static(&[1, 2, 3]))
         .await
         .expect("retried past the 503");
     assert_eq!(received, 3);

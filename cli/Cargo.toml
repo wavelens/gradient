@@ -115,6 +115,7 @@ eval = ["dep:gradient-eval"]
 [dependencies]
 anyhow        = { workspace = true }
 blake3        = { workspace = true }
+bytes         = { workspace = true }
 clap          = { workspace = true }
 clap_complete = { workspace = true }
 crossterm     = { workspace = true }

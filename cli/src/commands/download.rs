@@ -8,8 +8,10 @@ use crate::commands::attr_spec;
 use crate::error::{CliError, FileAction};
 use crate::input::{client_from_config, flush_stdout, selected_task};
 use crate::output::{ExitKind, Output};
+use connector::ConnectorError;
 use connector::api::{ArtefactTree, ProductArtefact};
-use std::io;
+use futures::{Stream, StreamExt, pin_mut};
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 pub async fn handle_download(
@@ -80,12 +82,12 @@ pub async fn handle_download(
         let p = &flat[idx];
         let display_name = product_filename(p.product);
         out.human(format!("Downloading {}...", display_name));
-        let bytes = match client
+        let chunks = match client
             .builds()
             .download_file(&p.build_id, &display_name)
             .await
         {
-            Ok(b) => b,
+            Ok(chunks) => chunks,
             Err(e) => out.err(
                 ExitKind::from(&e),
                 format!("Failed to download {}: {}", display_name, e),
@@ -98,8 +100,9 @@ pub async fn handle_download(
             std::fs::create_dir_all(parent)
                 .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Create, parent, e)));
         }
-        std::fs::write(&dest, bytes)
-            .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Write, &dest, e)));
+        write_downloaded_byte_chunks_to_file(chunks, &dest)
+            .await
+            .unwrap_or_else(|e| out.fail(e));
         out.human(format!("  wrote {}", dest.display()));
         downloaded.push(dest.display().to_string());
     }
@@ -129,6 +132,27 @@ fn flatten_products(tree: &ArtefactTree) -> Vec<FlatProduct<'_>> {
         }
     }
     out
+}
+
+pub(crate) async fn write_downloaded_byte_chunks_to_file(
+    chunks: impl Stream<Item = Result<impl AsRef<[u8]>, ConnectorError>>,
+    dest: &Path,
+) -> Result<(), CliError> {
+    let mut file =
+        std::fs::File::create(dest).map_err(|e| CliError::file(FileAction::Write, dest, e))?;
+    pin_mut!(chunks);
+    let written = async {
+        while let Some(chunk) = chunks.next().await {
+            file.write_all(chunk?.as_ref())
+                .map_err(|e| CliError::file(FileAction::Write, dest, e))?;
+        }
+        Ok(())
+    }
+    .await;
+    if written.is_err() {
+        let _ = std::fs::remove_file(dest);
+    }
+    written
 }
 
 pub(crate) fn product_filename(p: &ProductArtefact) -> String {

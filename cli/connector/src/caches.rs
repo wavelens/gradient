@@ -573,7 +573,7 @@ impl CachesApi<'_> {
     ) -> Result<(), ConnectorError> {
         let narinfo_json = serde_json::to_string(&narinfo).map_err(ConnectorError::Decode)?;
         let nar = bytes::Bytes::from(nar_bytes);
-        let resp = http::send_upload(|| {
+        let resp = http::send_upload(&self.0.transfer_no_progress_timer(), || {
             let form = reqwest::multipart::Form::new()
                 .text("narinfo", narinfo_json.clone())
                 .part(
@@ -621,20 +621,21 @@ impl CachesApi<'_> {
         cache: &str,
         store_hash: &str,
         offset: u64,
-        chunk: Vec<u8>,
+        chunk: bytes::Bytes,
     ) -> Result<u64, ConnectorError> {
-        let chunk = bytes::Bytes::from(chunk);
-        let resp = http::send_upload(|| {
+        let timer = self.0.transfer_no_progress_timer();
+        let resp = http::send_upload(&timer, || {
             Ok(http::request(
-                self.0.http(),
+                self.0.stream_http(),
                 self.0.base_url(),
                 self.0.token(),
                 Method::PUT,
                 &format!("caches/{cache}/nars/{store_hash}/chunk?offset={offset}"),
                 true,
             )?
-            .header("Content-Type", "application/octet-stream")
-            .body(chunk.clone()))
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .header(reqwest::header::CONTENT_LENGTH, chunk.len())
+            .body(timer.request_body_stream_from_bytes_recording_progress(chunk.clone())))
         })
         .await?;
         let received: ChunkReceived = http::decode(resp).await?;
@@ -647,7 +648,7 @@ impl CachesApi<'_> {
         store_hash: &str,
         narinfo: NarinfoPart,
     ) -> Result<(), ConnectorError> {
-        let resp = http::send_upload(|| {
+        let resp = http::send_upload(&self.0.transfer_no_progress_timer(), || {
             Ok(http::request(
                 self.0.http(),
                 self.0.base_url(),

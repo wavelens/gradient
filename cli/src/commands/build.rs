@@ -265,17 +265,14 @@ async fn start_via_manifest(
             manifest.missing.iter().map(String::as_str).collect();
         let abs_by_path: std::collections::HashMap<&str, &PathBuf> =
             entries.iter().map(|e| (e.path.as_str(), &e.abs)).collect();
-        let mut form = reqwest::multipart::Form::new();
+        let mut blobs_by_hash = Vec::new();
         for (path, hash, _) in &hashed {
             if !missing.contains(hash.as_str()) {
                 continue;
             }
             let abs = abs_by_path[path.as_str()];
             match std::fs::read(abs) {
-                Ok(bytes) => {
-                    let part = reqwest::multipart::Part::bytes(bytes).file_name(hash.clone());
-                    form = form.part(hash.clone(), part);
-                }
+                Ok(bytes) => blobs_by_hash.push((hash.clone(), bytes.into())),
                 Err(e) => {
                     if !quiet {
                         out.progress(format!("Failed to read {}: {}", abs.display(), e));
@@ -287,7 +284,7 @@ async fn start_via_manifest(
 
         match client
             .build_requests()
-            .upload_blobs(&manifest.session.to_string(), form)
+            .upload_blobs(&manifest.session.to_string(), blobs_by_hash)
             .await
         {
             Ok(resp) => {
@@ -434,19 +431,21 @@ async fn download_result_dir(
     dir_name: &str,
     out: Output,
 ) {
-    use crate::commands::download::{product_filename, safe_relative_name};
+    use crate::commands::download::{
+        product_filename, safe_relative_name, write_downloaded_byte_chunks_to_file,
+    };
 
     let dir = PathBuf::from(dir_name);
     let mut wrote = 0usize;
     for output in &ep.outputs {
         for product in &output.products {
             let name = product_filename(product);
-            let bytes = match client
+            let chunks = match client
                 .builds()
                 .download_file(&ep.build_id.to_string(), &name)
                 .await
             {
-                Ok(b) => b,
+                Ok(chunks) => chunks,
                 Err(e) => {
                     out.progress(format!("Failed to download {}: {}", name, e));
                     continue;
@@ -456,8 +455,8 @@ async fn download_result_dir(
             if let Some(parent) = dest.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            if let Err(e) = std::fs::write(&dest, bytes) {
-                out.progress(format!("Failed to write {}: {}", dest.display(), e));
+            if let Err(e) = write_downloaded_byte_chunks_to_file(chunks, &dest).await {
+                out.progress(format!("Failed to download {}: {}", name, e));
                 continue;
             }
             wrote += 1;

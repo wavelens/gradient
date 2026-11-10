@@ -218,16 +218,20 @@ impl BuildsApi<'_> {
         &self,
         build_id: &str,
         filename: &str,
-    ) -> Result<bytes::Bytes, ConnectorError> {
+    ) -> Result<impl Stream<Item = Result<bytes::Bytes, ConnectorError>> + use<>, ConnectorError>
+    {
+        let timer = self.0.transfer_no_progress_timer();
         let req = http::request(
-            self.0.http(),
+            self.0.stream_http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
             &format!("builds/{build_id}/download/{filename}"),
             true,
         )?;
-        let res = req.send().await?;
+        let res = timer
+            .send_request_and_timeout_when_no_progress_for_idle_limit(req)
+            .await?;
         let status = res.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(ConnectorError::Unauthorized);
@@ -238,6 +242,6 @@ impl BuildsApi<'_> {
                 message: res.text().await.unwrap_or_default(),
             });
         }
-        Ok(res.bytes().await?)
+        Ok(timer.response_body_byte_stream_failing_after_idle_timeout(res))
     }
 }

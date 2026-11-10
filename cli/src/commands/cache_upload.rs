@@ -92,11 +92,12 @@ pub(crate) async fn upload_bytes(cache: &str, ni: Narinfo, bytes: Vec<u8>, out: 
         deriver: ni.deriver,
     };
 
+    let bytes = bytes::Bytes::from(bytes);
     let total = bytes.len() as u64;
     let mut offset = 0u64;
     while offset < total {
         let end = (offset as usize + UPLOAD_CHUNK_SIZE).min(bytes.len());
-        let chunk = bytes[offset as usize..end].to_vec();
+        let chunk = bytes.slice(offset as usize..end);
         match client
             .caches()
             .nar_upload_chunk(cache, &store_hash, offset, chunk)

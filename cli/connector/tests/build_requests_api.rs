@@ -28,11 +28,18 @@ async fn upload_blobs_decodes_counts() {
         .unwrap();
     let resp = client
         .build_requests()
-        .upload_blobs("sess-1", reqwest::multipart::Form::new())
+        .upload_blobs(
+            "sess-1",
+            vec![("hash-a".into(), bytes::Bytes::from_static(b"blob-content"))],
+        )
         .await
         .unwrap();
     assert_eq!(resp.uploaded, 118);
     assert_eq!(resp.remaining, 0);
+    let requests = server.received_requests().await.unwrap();
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(body.contains("filename=\"hash-a\""), "{body}");
+    assert!(body.contains("blob-content"), "{body}");
 }
 
 #[tokio::test]

@@ -57,12 +57,13 @@ pub async fn start_via_nar(
     }
 
     let upload = blake3::hash(&nar).to_hex().to_string();
+    let nar = bytes::Bytes::from(nar);
     let requests = client.build_requests();
     let total = nar.len() as u64;
     let mut offset = 0u64;
     while offset < total {
         let end = (offset as usize + SOURCE_UPLOAD_CHUNK_SIZE).min(nar.len());
-        let chunk = nar[offset as usize..end].to_vec();
+        let chunk = nar.slice(offset as usize..end);
         match requests
             .upload_source_chunk(&upload, project, offset, chunk)
             .await

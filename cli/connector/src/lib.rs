@@ -44,6 +44,7 @@ pub struct Client {
 struct ClientInner {
     http: reqwest::Client,
     stream_http: reqwest::Client,
+    timeout: Duration,
     base_url: String,
     token: Option<String>,
 }
@@ -58,6 +59,9 @@ impl Client {
     }
     pub(crate) fn stream_http(&self) -> &reqwest::Client {
         &self.inner.stream_http
+    }
+    pub(crate) fn transfer_no_progress_timer(&self) -> http::TransferNoProgressTimer {
+        http::TransferNoProgressTimer::new(self.inner.timeout)
     }
     pub(crate) fn base_url(&self) -> &str {
         &self.inner.base_url
@@ -198,6 +202,7 @@ impl ClientBuilder {
             inner: Arc::new(ClientInner {
                 http,
                 stream_http,
+                timeout,
                 base_url,
                 token: self.token,
             }),

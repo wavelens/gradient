@@ -4,12 +4,14 @@
 use crate::api::ErrorResponseBody;
 use crate::auth::CliPollOutcome;
 use crate::{Client, ConnectorError};
+use bytes::Bytes;
 use futures::stream::{Stream, StreamExt};
 use reqwest::{Method, RequestBuilder, Response};
 use reqwest_streams::JsonStreamResponse;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::{Message, http::HeaderValue};
@@ -79,12 +81,15 @@ pub(crate) async fn json_lines<T: DeserializeOwned + Send + 'static>(
 /// A `503` (upload budget full) or `429` (request rate limit) with `Retry-After` is resent after
 /// that delay, at least one second since the rate limit rounds sub-second waits down to `0`.
 pub(crate) async fn send_upload(
+    timer: &TransferNoProgressTimer,
     build: impl Fn() -> Result<RequestBuilder, ConnectorError>,
 ) -> Result<Response, ConnectorError> {
     const ATTEMPTS: u32 = 20;
     let mut attempt = 1;
     loop {
-        let resp = build()?.send().await?;
+        let resp = timer
+            .send_request_and_timeout_when_no_progress_for_idle_limit(build()?)
+            .await?;
         let wait = matches!(
             resp.status(),
             reqwest::StatusCode::SERVICE_UNAVAILABLE | reqwest::StatusCode::TOO_MANY_REQUESTS
@@ -99,6 +104,99 @@ pub(crate) async fn send_upload(
             }
             _ => return Ok(resp),
         }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct TransferNoProgressTimer {
+    last_progress: Arc<Mutex<Instant>>,
+    idle_limit: Duration,
+}
+
+impl TransferNoProgressTimer {
+    const BODY_PIECE_SIZE: usize = 256 * 1024;
+
+    pub(crate) fn new(idle_limit: Duration) -> Self {
+        Self {
+            last_progress: Arc::new(Mutex::new(Instant::now())),
+            idle_limit,
+        }
+    }
+
+    fn record_progress(&self) {
+        *self
+            .last_progress
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Instant::now();
+    }
+
+    fn idle_deadline(&self) -> Instant {
+        *self
+            .last_progress
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            + self.idle_limit
+    }
+
+    fn stalled_error(&self) -> ConnectorError {
+        ConnectorError::Io(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!(
+                "Transfer stalled: no data moved for {} seconds",
+                self.idle_limit.as_secs()
+            ),
+        ))
+    }
+
+    pub(crate) fn request_body_stream_from_bytes_recording_progress(
+        &self,
+        bytes: Bytes,
+    ) -> reqwest::Body {
+        let timer = self.clone();
+        let pieces = (0..bytes.len())
+            .step_by(Self::BODY_PIECE_SIZE)
+            .map(move |start| bytes.slice(start..(start + Self::BODY_PIECE_SIZE).min(bytes.len())));
+        reqwest::Body::wrap_stream(futures::stream::iter(pieces).map(move |piece| {
+            timer.record_progress();
+            Ok::<_, std::io::Error>(piece)
+        }))
+    }
+
+    pub(crate) async fn send_request_and_timeout_when_no_progress_for_idle_limit(
+        &self,
+        request: RequestBuilder,
+    ) -> Result<Response, ConnectorError> {
+        self.record_progress();
+        let send = request.send();
+        tokio::pin!(send);
+        loop {
+            let deadline = self.idle_deadline();
+            tokio::select! {
+                response = &mut send => return Ok(response?),
+                () = tokio::time::sleep_until(deadline.into()) => {
+                    if Instant::now() >= self.idle_deadline() {
+                        return Err(self.stalled_error());
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn response_body_byte_stream_failing_after_idle_timeout(
+        self,
+        response: Response,
+    ) -> impl Stream<Item = Result<Bytes, ConnectorError>> {
+        futures::stream::unfold(Some(Box::pin(response.bytes_stream())), move |body| {
+            let timer = self.clone();
+            async move {
+                let mut body = body?;
+                match tokio::time::timeout(timer.idle_limit, body.next()).await {
+                    Ok(Some(piece)) => Some((piece.map_err(ConnectorError::from), Some(body))),
+                    Ok(None) => None,
+                    Err(_) => Some((Err(timer.stalled_error()), None)),
+                }
+            }
+        })
     }
 }
 

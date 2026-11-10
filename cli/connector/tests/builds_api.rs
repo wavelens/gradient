@@ -5,6 +5,7 @@ mod connector_test_websocket_server;
 
 use connector::{Client, ConnectorError};
 use connector_test_websocket_server::start_local_websocket_server_with_text_frames_returning_http_base_url;
+use futures::StreamExt;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -55,12 +56,44 @@ async fn download_file_returns_bytes() {
         .token("t")
         .build()
         .unwrap();
-    let bytes = client
+    let pieces: Vec<_> = client
         .builds()
         .download_file("b1", "result.tar.gz")
         .await
+        .unwrap()
+        .collect()
+        .await;
+    let bytes: Vec<u8> = pieces
+        .into_iter()
+        .flat_map(|piece| piece.unwrap().to_vec())
+        .collect();
+    assert_eq!(bytes, b"binary-data");
+}
+
+#[tokio::test]
+async fn a_download_without_progress_fails_after_the_idle_limit() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/builds/b1/download/result.tar.gz"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(b"binary-data".to_vec())
+                .set_delay(std::time::Duration::from_secs(5)),
+        )
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .timeout(std::time::Duration::from_secs(1))
+        .build()
         .unwrap();
-    assert_eq!(&bytes[..], b"binary-data");
+    let Err(ConnectorError::Io(error)) = client.builds().download_file("b1", "result.tar.gz").await
+    else {
+        panic!("a stalled download must fail with a timeout");
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
 }
 
 #[expect(

@@ -6,7 +6,9 @@ use crate::api::{
     ManifestRequest, ManifestResponse, RunOptions, SourceFinalize,
 };
 use crate::{Client, ConnectorError, http};
+use bytes::Bytes;
 use reqwest::Method;
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
 
 pub struct BuildRequestsApi<'a>(pub(crate) &'a Client);
 
@@ -30,10 +32,21 @@ impl BuildRequestsApi<'_> {
     pub async fn upload_blobs(
         &self,
         session: &str,
-        form: reqwest::multipart::Form,
+        blobs_by_hash: Vec<(String, Bytes)>,
     ) -> Result<BlobsResponse, ConnectorError> {
+        let timer = self.0.transfer_no_progress_timer();
+        let form = blobs_by_hash.into_iter().fold(
+            reqwest::multipart::Form::new(),
+            |form, (hash, blob)| {
+                let length = blob.len() as u64;
+                let body = timer.request_body_stream_from_bytes_recording_progress(blob);
+                let part = reqwest::multipart::Part::stream_with_length(body, length)
+                    .file_name(hash.clone());
+                form.part(hash, part)
+            },
+        );
         let req = http::request(
-            self.0.http(),
+            self.0.stream_http(),
             self.0.base_url(),
             self.0.token(),
             Method::POST,
@@ -41,7 +54,10 @@ impl BuildRequestsApi<'_> {
             true,
         )?
         .multipart(form);
-        http::decode(req.send().await?).await
+        let res = timer
+            .send_request_and_timeout_when_no_progress_for_idle_limit(req)
+            .await?;
+        http::decode(res).await
     }
 
     pub async fn upload_source_nar(
@@ -80,19 +96,24 @@ impl BuildRequestsApi<'_> {
         upload: &str,
         project: &str,
         offset: u64,
-        chunk: Vec<u8>,
+        chunk: Bytes,
     ) -> Result<u64, ConnectorError> {
+        let timer = self.0.transfer_no_progress_timer();
         let req = http::request(
-            self.0.http(),
+            self.0.stream_http(),
             self.0.base_url(),
             self.0.token(),
             Method::PUT,
             &format!("build-requests/source/{upload}/chunk?offset={offset}&project={project}"),
             true,
         )?
-        .header("Content-Type", "application/octet-stream")
-        .body(chunk);
-        let received: ChunkReceived = http::decode(req.send().await?).await?;
+        .header(CONTENT_TYPE, "application/octet-stream")
+        .header(CONTENT_LENGTH, chunk.len())
+        .body(timer.request_body_stream_from_bytes_recording_progress(chunk));
+        let res = timer
+            .send_request_and_timeout_when_no_progress_for_idle_limit(req)
+            .await?;
+        let received: ChunkReceived = http::decode(res).await?;
         Ok(received.received.unsigned_abs())
     }
 
