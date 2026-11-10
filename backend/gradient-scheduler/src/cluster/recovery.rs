@@ -47,7 +47,11 @@ impl Scheduler {
                 Ok(())
             }
             Recorded::Decided(attempt, fate) => self.resolve_attempt(attempt, fate).await,
-            Recorded::Late(_, report) if matches!(report.job(), Some(PendingJob::Exec(_))) => {
+            Recorded::Late(resolution, report)
+                if matches!(report.job(), Some(PendingJob::Exec(_))) =>
+            {
+                self.send_late_report_exec_node_attempt_close_transition(resolution, report)
+                    .await;
                 Ok(())
             }
             Recorded::Late(resolution, report) => {

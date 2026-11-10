@@ -76,6 +76,21 @@ pub fn node_ends(
     reported.chain(survived).collect()
 }
 
+fn settle_late_node_report_after_cluster_resolution(
+    resolution: Resolution,
+    report: MemberReport,
+) -> (Vec<ExecNodeEnd>, ClusterNext) {
+    let nodes = node_ends(vec![report], Vec::new(), survivors_end(resolution));
+    let next = match cluster_next(resolution) {
+        ClusterNext::Restart { .. } => ClusterNext::Restart {
+            consume_retry: false,
+        },
+        ClusterNext::End => ClusterNext::End,
+    };
+
+    (nodes, next)
+}
+
 fn failure_reason(job: &PendingJob, kind: BuildFailureKind) -> AttemptEndReason {
     let custom_image = matches!(job, PendingJob::Exec(exec) if exec.image_path.is_some());
     attempt_end_reason(kind, custom_image)
@@ -111,6 +126,21 @@ impl Scheduler {
             .await
         {
             warn!(error = %e, ?next, "settling an exec cluster failed");
+        }
+    }
+
+    pub async fn send_late_report_exec_node_attempt_close_transition(
+        &self,
+        resolution: Resolution,
+        report: MemberReport,
+    ) {
+        let (nodes, next) = settle_late_node_report_after_cluster_resolution(resolution, report);
+        if let Err(e) = self
+            .graph
+            .transition(Transition::ExecClusterSettled { nodes, next })
+            .await
+        {
+            warn!(error = %e, ?next, "closing the attempt of a late exec node failed");
         }
     }
 }
@@ -201,6 +231,36 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_late_node_report_closes_its_attempt_without_spending_another_retry() {
+        let late = ExecJobAttemptId::now_v7();
+
+        let (ends, next) = settle_late_node_report_after_cluster_resolution(
+            resolution(Fate::Restart, true),
+            MemberReport::Completed { job: node(late) },
+        );
+
+        assert_eq!(
+            ends,
+            vec![ExecNodeEnd {
+                attempt: late,
+                reason: AttemptEndReason::Completed,
+                message: None,
+            }]
+        );
+        assert_eq!(
+            next,
+            ClusterNext::Restart {
+                consume_retry: false
+            }
+        );
+        let (_, ended) = settle_late_node_report_after_cluster_resolution(
+            resolution(Fate::Fail, false),
+            MemberReport::Completed { job: node(late) },
+        );
+        assert_eq!(ended, ClusterNext::End);
     }
 
     #[test]
