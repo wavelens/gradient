@@ -571,31 +571,28 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.loadEntryPoints(this.selected()?.id);
   }
 
-  /// Ctrl/Cmd+F searches the packages; left/right arrows step through the evaluation strip, Home and End jump to its ends.
   @HostListener('document:keydown', ['$event'])
-  onKeydown(e: KeyboardEvent): void {
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f' && this.selected()) {
-      e.preventDefault();
-      this.openSearch();
-      return;
-    }
+  openPackageSearchOnControlOrCommandFKeydownInEvaluationDetail(e: KeyboardEvent): void {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== 'f' || !this.selected()) return;
+    if (!(e.target instanceof Element && e.target.closest('#evaluation-detail-panel'))) return;
+    e.preventDefault();
+    this.openSearch();
+  }
+
+  onEvaluationTabListKeydown(e: KeyboardEvent): void {
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-    const target = e.target as HTMLElement | null;
-    const focusOnEvaluationTab = target?.getAttribute('role') === 'tab' && target.classList.contains('eval-card');
-    const isArrow = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
-    if (!isArrow && !(focusOnEvaluationTab && (e.key === 'Home' || e.key === 'End'))) return;
-    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
     const list = this.evaluations();
     if (!list.length) return;
     const cur = this.selected();
     const idx = cur ? list.findIndex(x => x.id === cur.id) : 0;
-    const next = { ArrowLeft: idx - 1, ArrowRight: idx + 1, Home: 0, End: list.length - 1 }[e.key];
+    const next = ({ ArrowLeft: idx - 1, ArrowRight: idx + 1, Home: 0, End: list.length - 1 } as Record<string, number | undefined>)[e.key];
+    if (next === undefined) return;
     if (next < 0 || next >= list.length || next === idx) return;
     e.preventDefault();
     this.select(list[next]);
     requestAnimationFrame(() => {
       const card = this.host.nativeElement.querySelector('.eval-card.selected') as HTMLElement | null;
-      if (focusOnEvaluationTab) card?.focus({ preventScroll: true });
+      card?.focus({ preventScroll: true });
       card?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
     });
   }
@@ -800,6 +797,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   reportDialogOpen = signal(false);
+  diagnosticReportEvaluation = signal<EvaluationSummary | null>(null);
   reportBusy = signal(false);
   reportError = signal<string | null>(null);
   reportOptions = signal<ReportOptions>({
@@ -815,12 +813,13 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   openReportDialog(): void {
+    this.diagnosticReportEvaluation.set(this.selected());
     this.reportError.set(null);
     this.reportDialogOpen.set(true);
   }
 
   generateReport(): void {
-    const evaluation = this.selected();
+    const evaluation = this.diagnosticReportEvaluation();
     if (!evaluation || this.reportBusy()) return;
 
     this.reportBusy.set(true);

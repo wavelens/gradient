@@ -1285,6 +1285,30 @@ describe('TaskDetailComponent diagnostic report', () => {
     expect(dialog?.querySelector('gr-message-banner')?.textContent).toContain('Instance context needs the Manage Workers permission');
   });
 
+  it('keeps the evaluation behind the open report dialog on an arrow key and exports the one it opened for', () => {
+    const downloadReport = vi.fn(() => NEVER);
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true }, { extraEvals: [evalSummary('e2', 'Completed')] });
+    vi.spyOn(tasksService, 'downloadReport').mockImplementation(downloadReport);
+    const c = fixture.componentInstance;
+    c.openReportDialog();
+    fixture.detectChanges();
+    const panel = document.querySelector('.gr-dialog') as HTMLElement;
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    expect(c.selected()?.id).toBe('e1');
+
+    c.select(c.evaluations()[1]);
+    c.generateReport();
+    expect(downloadReport).toHaveBeenCalledWith('e1', expect.anything());
+  });
+
+  it('leaves Ctrl+F to the browser while focus is outside the evaluation panel', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const find = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, cancelable: true, bubbles: true });
+    document.body.dispatchEvent(find);
+    expect(find.defaultPrevented).toBe(false);
+    expect(fixture.nativeElement.querySelector(".pkg-search input")).toBeNull();
+  });
+
   it('clears the previous report error when the dialog opens again', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
       downloadReport: () => throwError(() => new Error('Http failure response for /report: 403 Forbidden')),
@@ -1380,7 +1404,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
     const raf = vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(0);
     const pressed = (init: KeyboardEventInit) => {
       const e = new KeyboardEvent('keydown', { key: 'ArrowRight', cancelable: true, ...init });
-      comp.onKeydown(e);
+      comp.onEvaluationTabListKeydown(e);
       return e.defaultPrevented;
     };
     expect(pressed({ altKey: true })).toBe(false);
@@ -1793,8 +1817,8 @@ describe('TaskDetailComponent - package search', () => {
     fixture.nativeElement.querySelector('.pkg-search input') as HTMLInputElement | null;
 
   function openSearch(fixture: ComponentFixture<TaskDetailComponent>): { find: KeyboardEvent; input: HTMLInputElement } {
-    const find = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, cancelable: true });
-    fixture.componentInstance.onKeydown(find);
+    const find = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, cancelable: true, bubbles: true });
+    fixture.nativeElement.querySelector('#evaluation-detail-panel').dispatchEvent(find);
     fixture.detectChanges();
     TestBed.tick();
     return { find, input: searchField(fixture)! };

@@ -78,7 +78,7 @@
               [attr.aria-disabled]="!isEvaluationTabStripScrolledAwayFromStart() || null"
               aria-label="Show new evaluations" (click)="scrollEvaluationTabStripByDirection(-1)"></button>
       <div class="strip-wrap pad gr-scroll-fade-row" #evaluationTabsScrollElement (scroll)="updateEvaluationTabScrollArrows()">
-        <div class="eval-strip" role="tablist" aria-label="Evaluation">
+        <div class="eval-strip" role="tablist" aria-label="Evaluation" (keydown)="onEvaluationTabListKeydown($event)">
           @for (e of evaluations(); track e.id) {
             @let isSelected = selected()?.id === e.id;
             <button type="button" role="tab" class="eval-card" [id]="'evaluation-tab-' + e.id"
