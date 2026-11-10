@@ -139,8 +139,10 @@ impl EventKind for Reported {
         ))
     }
 
-    fn status_name(&self) -> Option<serde_json::Value> {
-        serde_json::to_value(EvaluationStatus::try_from(i32::from(self.status)).ok()?).ok()
+    fn status_name(&self) -> Option<String> {
+        EvaluationStatus::try_from(i32::from(self.status))
+            .ok()
+            .map(super::status_as_snake_case_name)
     }
 }
 

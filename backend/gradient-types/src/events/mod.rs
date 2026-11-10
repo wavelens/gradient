@@ -100,9 +100,21 @@ pub trait EventKind: Serialize {
         false
     }
 
-    fn status_name(&self) -> Option<serde_json::Value> {
+    fn status_name(&self) -> Option<String> {
         None
     }
+}
+
+pub(crate) fn status_as_snake_case_name(status: impl std::fmt::Debug) -> String {
+    let variant = format!("{status:?}");
+    let mut name = String::with_capacity(variant.len() + 4);
+    for (index, character) in variant.chars().enumerate() {
+        if character.is_uppercase() && index > 0 {
+            name.push('_');
+        }
+        name.extend(character.to_lowercase());
+    }
+    name
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
@@ -156,7 +168,7 @@ macro_rules! events {
                         if let (Some(status_name), Some(fields)) =
                             (e.status_name(), content.as_object_mut())
                         {
-                            fields.insert("status_name".into(), status_name);
+                            fields.insert("status_name".into(), status_name.into());
                         }
                         content
                     }),*
@@ -251,9 +263,9 @@ mod tests {
         });
 
         assert_eq!(build.content()["status"], 4);
-        assert_eq!(build.content()["status_name"], "FailedPermanent");
-        assert_eq!(changed.content()["status_name"], "Queued");
-        assert_eq!(evaluation.content()["status_name"], "Building");
+        assert_eq!(build.content()["status_name"], "failed_permanent");
+        assert_eq!(changed.content()["status_name"], "queued");
+        assert_eq!(evaluation.content()["status_name"], "building");
         assert_eq!(exec_job.content()["status_name"], "running");
     }
 

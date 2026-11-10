@@ -39,8 +39,10 @@ impl EventKind for StatusChanged {
     const NAME: &'static str = names::BUILD_STATUS_CHANGED;
     const DURABLE: bool = false;
 
-    fn status_name(&self) -> Option<serde_json::Value> {
-        serde_json::to_value(BuildStatus::try_from(i32::from(self.status)).ok()?).ok()
+    fn status_name(&self) -> Option<String> {
+        BuildStatus::try_from(i32::from(self.status))
+            .ok()
+            .map(super::status_as_snake_case_name)
     }
 }
 
@@ -110,8 +112,10 @@ impl EventKind for Reported {
         Some(format!("build:{}:{}", self.build_id, self.status))
     }
 
-    fn status_name(&self) -> Option<serde_json::Value> {
-        serde_json::to_value(BuildStatus::try_from(i32::from(self.status)).ok()?).ok()
+    fn status_name(&self) -> Option<String> {
+        BuildStatus::try_from(i32::from(self.status))
+            .ok()
+            .map(super::status_as_snake_case_name)
     }
 }
 

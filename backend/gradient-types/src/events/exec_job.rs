@@ -78,8 +78,10 @@ impl EventKind for Reported {
         Some(format!("exec_job:{}:{attempt}:{}", self.job, self.status))
     }
 
-    fn status_name(&self) -> Option<serde_json::Value> {
-        serde_json::to_value(ExecJobStatus::try_from(self.status).ok()?).ok()
+    fn status_name(&self) -> Option<String> {
+        ExecJobStatus::try_from(self.status)
+            .ok()
+            .map(super::status_as_snake_case_name)
     }
 }
 
