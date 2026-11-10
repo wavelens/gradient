@@ -3237,7 +3237,7 @@ paths:
       tags:
       - caches
       summary: Get cache
-      description: Return details of a cache. A public cache is visible to all callers. A private cache is visible to cache members and to members of a subscribed project (same visibility as ``GET /caches``). Other callers receive ``404``. Use ``permissions`` for the actions that a caller can run on this cache. Cache members get the cache role. Members of a subscribed project get ``viewCache`` and ``readStore``.
+      description: Return the details of a cache. All callers can view public caches. Cache members and members of a subscribed project can view private caches. The visibility is the same as GET /caches. Other callers get a 404. Use permissions for the actions that a caller can run on this cache. Cache members get the permissions of their own cache role. The value of role is their strongest cache role. Members of a subscribed project get viewCache and readStore. role is null for every caller who isn't a cache member.
       operationId: getCache
       parameters:
       - name: cache
@@ -15372,6 +15372,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CachePermission'
+        role:
+          type:
+          - string
+          - 'null'
     CacheRoleOwner:
       type: object
       properties:

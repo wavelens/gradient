@@ -12,6 +12,7 @@ use crate::permissions::{
 };
 use crate::refusal::{Change, Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
+use gradient_db::access::CacheRoleAndPermissionMask;
 use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
 use gradient_db::{DbContext, WebDb};
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
@@ -458,29 +459,63 @@ pub async fn effective_cache_mask(
     cache_id: CacheId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<Option<i64>> {
-    if let Some(mask) = cache_role_mask(db, user_id, cache_id, api_key).await? {
-        return Ok(Some(mask));
+    Ok(
+        effective_cache_role_and_mask(db, user_id, cache_id, api_key)
+            .await?
+            .map(|grant| grant.permissions),
+    )
+}
+
+pub async fn effective_cache_role_and_mask(
+    db: &WebDb,
+    user_id: UserId,
+    cache_id: CacheId,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<Option<CacheRoleAndPermissionMask>> {
+    if let Some(grant) =
+        cache_member_role_and_permission_mask(db, user_id, cache_id, api_key).await?
+    {
+        return Ok(Some(grant));
     }
     if is_cache_project_subscriber(db, user_id, cache_id, api_key).await? {
-        return Ok(Some(crate::permissions::cache_view_mask()));
+        return Ok(Some(CacheRoleAndPermissionMask {
+            role: None,
+            permissions: crate::permissions::cache_view_mask(),
+        }));
     }
     Ok(None)
 }
 
-/// Only a key that is pinned to that cache can reach the cache through cache roles. The key permissions cap the role.
 async fn cache_role_mask(
     db: &WebDb,
     user_id: UserId,
     cache_id: CacheId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<Option<i64>> {
+    Ok(
+        cache_member_role_and_permission_mask(db, user_id, cache_id, api_key)
+            .await?
+            .map(|grant| grant.permissions),
+    )
+}
+
+/// Only a key that is pinned to that cache can reach the cache through cache roles. The key permissions cap the role.
+async fn cache_member_role_and_permission_mask(
+    db: &WebDb,
+    user_id: UserId,
+    cache_id: CacheId,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<Option<CacheRoleAndPermissionMask>> {
     if api_key.is_some_and(|key| key.cache_pin != Some(cache_id)) {
         return Ok(None);
     }
     Ok(
-        gradient_db::access::cache_permission_mask(db, cache_id, user_id)
+        gradient_db::access::load_cache_member_role_and_permission_mask(db, cache_id, user_id)
             .await?
-            .map(|role_mask| api_key.map_or(role_mask, |key| role_mask & key.mask)),
+            .map(|grant| CacheRoleAndPermissionMask {
+                permissions: api_key.map_or(grant.permissions, |key| grant.permissions & key.mask),
+                ..grant
+            }),
     )
 }
 
@@ -1535,11 +1570,17 @@ mod tests {
                 .append_query_results([vec![cache_role_fixture()]])
                 .into_connection();
             let state = make_state(db);
-            let mask = effective_cache_mask(&state.web_db, user.id, cache_fixture(false).id, None)
-                .await
-                .expect("query ok")
-                .expect("member has a mask");
-            assert_eq!(mask, crate::permissions::cache_admin_mask());
+            let access = effective_cache_role_and_mask(
+                &state.web_db,
+                user.id,
+                cache_fixture(false).id,
+                None,
+            )
+            .await
+            .expect("query ok")
+            .expect("member has a mask");
+            assert_eq!(access.permissions, crate::permissions::cache_admin_mask());
+            assert_eq!(access.role.as_deref(), Some("Admin"));
         });
     }
 
@@ -1553,11 +1594,17 @@ mod tests {
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .into_connection();
             let state = make_state(db);
-            let mask = effective_cache_mask(&state.web_db, user.id, cache_fixture(false).id, None)
-                .await
-                .expect("query ok")
-                .expect("subscriber gets view-only mask");
-            assert_eq!(mask, crate::permissions::cache_view_mask());
+            let access = effective_cache_role_and_mask(
+                &state.web_db,
+                user.id,
+                cache_fixture(false).id,
+                None,
+            )
+            .await
+            .expect("query ok")
+            .expect("subscriber gets view-only mask");
+            assert_eq!(access.permissions, crate::permissions::cache_view_mask());
+            assert_eq!(access.role, None);
         });
     }
 

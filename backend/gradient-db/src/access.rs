@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+use gradient_types::consts::{
+    BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
+    BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
+};
 use gradient_types::permissions::PermissionMask;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
@@ -29,11 +32,27 @@ pub async fn project_permission_mask<C: ConnectionTrait>(
     Ok(Some(mask))
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CacheRoleAndPermissionMask {
+    pub role: Option<String>,
+    pub permissions: PermissionMask,
+}
+
 pub async fn cache_permission_mask<C: ConnectionTrait>(
     db: &C,
     cache: CacheId,
     user: UserId,
 ) -> Result<Option<PermissionMask>, DbErr> {
+    Ok(load_cache_member_role_and_permission_mask(db, cache, user)
+        .await?
+        .map(|grant| grant.permissions))
+}
+
+pub async fn load_cache_member_role_and_permission_mask<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+    user: UserId,
+) -> Result<Option<CacheRoleAndPermissionMask>, DbErr> {
     let roles: Vec<RoleId> = ECacheAccess::find()
         .filter(CCacheAccess::Cache.eq(cache))
         .filter(CCacheAccess::User.eq(user))
@@ -46,13 +65,25 @@ pub async fn cache_permission_mask<C: ConnectionTrait>(
         return Ok(None);
     }
 
-    let mask = ECacheRole::find()
+    let roles = ECacheRole::find()
         .filter(CCacheRole::Id.is_in(roles))
         .all(db)
-        .await?
+        .await?;
+    let permissions = roles.iter().fold(0, |mask, role| mask | role.permission);
+    let role = roles
         .into_iter()
-        .fold(0, |mask, role| mask | role.permission);
-    Ok(Some(mask))
+        .max_by_key(|role| cache_role_rank(role.id))
+        .map(|role| role.name);
+    Ok(Some(CacheRoleAndPermissionMask { role, permissions }))
+}
+
+fn cache_role_rank(role: RoleId) -> u8 {
+    match role {
+        BASE_CACHE_ROLE_ADMIN_ID => 3,
+        BASE_CACHE_ROLE_WRITE_ID => 2,
+        BASE_CACHE_ROLE_VIEW_ID => 0,
+        _ => 1,
+    }
 }
 
 pub async fn reaches_project<C: ConnectionTrait>(
@@ -293,5 +324,34 @@ mod tests {
             .expect("access");
         assert!(cache_mask_grants(mask, CachePermission::ReadStore));
         assert!(cache_mask_grants(mask, CachePermission::WriteStore));
+    }
+
+    #[tokio::test]
+    async fn the_strongest_cache_role_names_the_membership() {
+        let row = |role| MCacheAccess {
+            cache: CacheId::now_v7(),
+            user: UserId::now_v7(),
+            role,
+        };
+        let role = |id, name: &str| MCacheRole {
+            id,
+            name: name.into(),
+            ..Default::default()
+        };
+        let custom = RoleId::now_v7();
+        let db = mock_db()
+            .append_query_results([vec![row(BASE_CACHE_ROLE_VIEW_ID), row(custom)]])
+            .append_query_results([vec![
+                role(BASE_CACHE_ROLE_VIEW_ID, "View"),
+                role(custom, "Uploader"),
+            ]])
+            .into_connection();
+
+        let grant =
+            load_cache_member_role_and_permission_mask(&db, CacheId::now_v7(), UserId::now_v7())
+                .await
+                .expect("query")
+                .expect("access");
+        assert_eq!(grant.role.as_deref(), Some("Uploader"));
     }
 }

@@ -20,7 +20,7 @@ import { CachePermission, RoleResponse_CacheRoleOwner } from '@core/models';
 
 function activatedRouteStub(canEdit = false, permissions?: CachePermission[]) {
   const data = cacheAccessData({ managed: false, canEdit, canTrigger: canEdit });
-  if (permissions) data.cacheAccess.cache.permissions = permissions;
+  if (permissions) Object.assign(data.cacheAccess.cache, { permissions, role: permissions.length ? data.cacheAccess.cache.role : null });
   return {
     snapshot: { paramMap: convertToParamMap({ cache: 'my-cache' }) },
     parent: { data: of(data) },

@@ -57,7 +57,7 @@ function setup(kind: 'project' | 'cache', part?: GrantedPart, superuser = false,
   const fixture = TestBed.createComponent(TeamGrantsComponent);
   fixture.componentRef.setInput('kind', kind);
   fixture.componentRef.setInput('name', 'acme');
-  if (kind === 'cache') fixture.componentRef.setInput('cacheWithViewerPermissions', { permissions: cachePermissions });
+  if (kind === 'cache') fixture.componentRef.setInput('cacheWithViewerPermissions', { role: 'Admin', permissions: cachePermissions });
   if (part) fixture.componentRef.setInput('grants', part);
   fixture.componentRef.setInput('roles', ['Admin', 'Write', 'View']);
   fixture.componentRef.setInput('canEdit', true);

@@ -410,6 +410,7 @@ export interface CacheResponse {
   managed: boolean;
   can_edit: boolean;
   permissions: CachePermission[];
+  role?: string | null;
 }
 
 export interface CacheRoleOwner {

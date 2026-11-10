@@ -5,7 +5,7 @@
  */
 
 use super::refusal::CacheRefusal;
-use crate::access::effective_cache_mask;
+use crate::access::effective_cache_role_and_mask;
 use crate::api_spec::CachePath;
 use crate::audit::{Audit, changed_fields};
 use crate::authorization::{ApiKeyContext, MaybeApiKey, reject_api_key_authentication};
@@ -14,7 +14,7 @@ use crate::helpers::ok_json;
 use crate::json_body::JsonBody;
 use crate::names::{CacheDisplayName, CacheName};
 use crate::permissions::{
-    CachePermission, Permission, PermissionMask, cache_mask_grants, cache_mask_to_vec, mask_grants,
+    CachePermission, Permission, cache_mask_grants, cache_mask_to_vec, mask_grants,
 };
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
@@ -24,6 +24,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::access::CacheRoleAndPermissionMask;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_sources::{format_cache_public_key, generate_signing_key};
@@ -70,10 +71,13 @@ pub struct CacheResponse {
     pub managed: bool,
     pub can_edit: bool,
     pub permissions: Vec<CachePermission>,
+    pub role: Option<String>,
 }
 
 impl CacheResponse {
-    fn new(cache: MCache, public_key: String, permissions: PermissionMask) -> Self {
+    fn new(cache: MCache, public_key: String, access: Option<CacheRoleAndPermissionMask>) -> Self {
+        let (role, permissions) =
+            access.map_or((None, 0), |access| (access.role, access.permissions));
         Self {
             id: cache.id,
             name: cache.name,
@@ -91,6 +95,7 @@ impl CacheResponse {
             managed: cache.managed,
             can_edit: cache_mask_grants(permissions, CachePermission::ManageCacheSettings),
             permissions: cache_mask_to_vec(permissions),
+            role,
         }
     }
 }
@@ -312,7 +317,7 @@ pub async fn get_public_caches(
     operation_id = "getCache",
     tag = "caches",
     summary = "Get cache",
-    description = "Return details of a cache. A public cache is visible to all callers. A private cache is visible to cache members and to members of a subscribed project (same visibility as ``GET /caches``). Other callers receive ``404``. Use ``permissions`` for the actions that a caller can run on this cache. Cache members get the cache role. Members of a subscribed project get ``viewCache`` and ``readStore``.",
+    description = "Return the details of a cache. All callers can view public caches. Cache members and members of a subscribed project can view private caches. The visibility is the same as GET /caches. Other callers get a 404. Use permissions for the actions that a caller can run on this cache. Cache members get the permissions of their own cache role. The value of role is their strongest cache role. Members of a subscribed project get viewCache and readStore. role is null for every caller who isn't a cache member.",
     params(CachePath),
     responses((status = OK, description = "Cache details", body = CacheResponse), WebError)
 )]
@@ -332,14 +337,15 @@ pub async fn get_cache(
     )
     .context("derive public key")?;
 
-    let permissions = match &maybe_user {
-        Some(user) => effective_cache_mask(&state.web_db, user.id, cache.id, api_key.as_ref())
-            .await?
-            .unwrap_or(0),
-        None => 0,
+    let access = match &maybe_user {
+        Some(user) => {
+            effective_cache_role_and_mask(&state.web_db, user.id, cache.id, api_key.as_ref())
+                .await?
+        }
+        None => None,
     };
 
-    Ok(ok_json(CacheResponse::new(cache, public_key, permissions)))
+    Ok(ok_json(CacheResponse::new(cache, public_key, access)))
 }
 
 #[utoipa::path(

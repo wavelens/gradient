@@ -81,7 +81,7 @@ export class TeamGrantsComponent implements OnInit {
 
   kind = input.required<'project' | 'cache'>();
   name = input.required<string>();
-  cacheWithViewerPermissions = input<Pick<CacheResponse, 'permissions'> | null>();
+  cacheWithViewerPermissions = input<Pick<CacheResponse, 'role' | 'permissions'> | null>();
   grants = input<GrantedPart>('users');
   roles = input<string[]>([]);
   canEdit = input(false);

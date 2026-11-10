@@ -40,7 +40,7 @@ function cacheFor(access: AccessState) {
 
 function activatedRouteStub(access: AccessState, permissions?: CachePermission[]): ActivatedRoute {
   const data = cacheAccessData(access, cacheFor(access));
-  if (permissions) data.cacheAccess.cache.permissions = permissions;
+  if (permissions) Object.assign(data.cacheAccess.cache, { permissions, role: permissions.length ? data.cacheAccess.cache.role : null });
   return {
     snapshot: { paramMap: convertToParamMap({ cache: 'demo' }) },
     data: of({}),

@@ -63,5 +63,6 @@ export function taskAccessData(access: AccessState, task: Partial<TaskDetailsRes
 
 export function cacheAccessData(access: AccessState, cache: Partial<CacheResponse> = {}) {
   const permissions: CachePermission[] = access.canEdit ? EVERY_CACHE_PERMISSION : ['viewCache', 'readStore'];
-  return { cacheAccess: { cache: { ...cache, managed: access.managed, permissions } as CacheResponse, access } };
+  const role = access.canEdit ? 'Admin' : 'View';
+  return { cacheAccess: { cache: { role, ...cache, managed: access.managed, permissions } as CacheResponse, access } };
 }
