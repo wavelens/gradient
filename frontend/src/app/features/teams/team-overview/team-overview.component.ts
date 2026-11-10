@@ -6,7 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
 import { AuthService } from '@core/services/auth.service';
@@ -15,6 +15,7 @@ import { NotifyService } from '@core/services/notify.service';
 import { TeamResponse, TeamGrants, TeamRequestItem } from '@core/models';
 import { ConfirmService } from '@shared/confirm';
 import { canManageTeam } from '@shared/access';
+import { CreateCacheDialogComponent, CreateProjectDialogComponent, injectCanCreateCache, injectCanCreateProject } from '@shared/forms';
 import {
   ButtonComponent,
   CopyFieldComponent,
@@ -39,6 +40,8 @@ import { runReloadIntervalWhileTabVisible } from '@shared/paging';
     CopyFieldComponent,
     LoadStateComponent,
     TeamWorkersComponent,
+    CreateProjectDialogComponent,
+    CreateCacheDialogComponent,
     PageLayoutComponent,
     RowComponent,
     RowListComponent,
@@ -57,6 +60,7 @@ export class TeamOverviewComponent implements OnInit {
   private authService = inject(AuthService);
   private notify = inject(NotifyService);
   private confirm = inject(ConfirmService);
+  private router = inject(Router);
 
   private resolvedTeam = injectTeam();
 
@@ -70,6 +74,12 @@ export class TeamOverviewComponent implements OnInit {
   busy = signal<string | null>(null);
 
   isAdmin = computed(() => canManageTeam(this.team(), this.authService.user()));
+  canSetOwnerTeam = computed(() => this.team()?.role != null || this.authService.user()?.superuser === true);
+  canCreateProject = injectCanCreateProject();
+  canCreateCache = injectCanCreateCache();
+  isCreateProjectDialogOpen = signal(false);
+  isCreateCacheDialogOpen = signal(false);
+
   constructor() {
     runReloadIntervalWhileTabVisible(() => merge(
       this.grantsLoadError() !== null ? EMPTY : this.teams.grants(this.teamName).pipe(tap((grants) => this.grants.set(grants))),
@@ -83,7 +93,15 @@ export class TeamOverviewComponent implements OnInit {
     this.loadGrants();
   }
 
-  grantMeta(grant: { role?: string | null; users: boolean; workers: boolean }): string {
+  openCreatedProject(name: string): void {
+    this.router.navigateByUrl(links.project(name));
+  }
+
+  openCreatedCache(name: string): void {
+    this.router.navigateByUrl(links.cache(name));
+  }
+
+  grantMeta(grant:{ role?: string | null; users: boolean; workers: boolean }): string {
     const parts: string[] = [];
     if (grant.users) parts.push(`Members get ${grant.role ?? 'unknown role'}`);
     if (grant.workers) parts.push('Workers');

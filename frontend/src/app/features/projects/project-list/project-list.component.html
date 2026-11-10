@@ -5,7 +5,7 @@
 -->
 
 <gr-page-layout title="Projects" [subtitle]="authService.isAuthenticated() ? 'My projects' : 'Public projects on this server. Sign in to see your own.'">
-  @if (canCreateProject && projects.items().length) {
+  @if (canCreateProject() && projects.items().length) {
     <button slot="actions" grButton label="Create Project" icon="add" (click)="openCreateDialog()"></button>
   } @else if (!authService.isAuthenticated()) {
     <a slot="actions" grButton label="Sign in" icon="login" [routerLink]="links.login(links.projects().toString())"></a>
@@ -24,9 +24,9 @@
         slot="empty"
         [icon]="entityKindToIconName.project"
         title="No projects yet"
-        [message]="canCreateProject ? 'Create your first project to get started with Gradient' : 'Ask a project administrator to add this account to a project.'"
+        [message]="canCreateProject() ? 'Create your first project to get started with Gradient' : 'Ask a project administrator to add this account to a project.'"
       >
-        @if (canCreateProject) {
+        @if (canCreateProject()) {
           <button slot="action" grButton label="Create Project" (click)="openCreateDialog()"></button>
         }
       </gr-empty-state>
@@ -34,14 +34,15 @@
         @for (project of projects.items(); track project.id) {
           <gr-nav-card
             [icon]="entityKindToIconName.project"
-            [title]="formatEntityLabel(project)"
+            [title]="formatEntityLabel(project, project.owner_team)"
             [description]="project.description"
             [link]="links.project(project.name)"
           >
-            <gr-entity-name slot="title" [displayName]="project.display_name" [name]="project.name" />
+            <gr-entity-name slot="title" [displayName]="project.display_name" [name]="project.name" [ownerTeam]="project.owner_team" />
             <div slot="meta">
-              @if (project.role && project.role !== 'Admin') {
-                <gr-badge>{{ project.role }}</gr-badge>
+              @let role = getEffectiveProjectRole(project);
+              @if (role && role !== 'Admin') {
+                <gr-badge>{{ role }}</gr-badge>
               }
               @if (project.public) {
                 <gr-badge>Public</gr-badge>
@@ -92,62 +93,4 @@
   </gr-load-state>
 </gr-page-layout>
 
-<!-- Create Project Dialog -->
-<gr-dialog
-  #createDialog
-  header="Create Project"
-  [(visible)]="showCreateDialog"
-  [error]="createError()"
-  [busy]="creating()"
-  [confirmDiscard]="createFormChanges.changed()"
-  width="500px"
->
-  <div #createForm>
-    <app-name-fields
-      noun="project"
-      [names]="names"
-      [submitAttempted]="createAttempted()"
-      [(displayName)]="newProject.display_name"
-      [(name)]="newProject.name"
-      (submitted)="createProject()"
-      (nameFieldsChanged)="createError.set(null)"
-    />
-
-    <gr-form-field label="Description" for="description">
-      <textarea
-        grInput
-        id="description"
-        [(ngModel)]="newProject.description"
-        placeholder="Describe your project..."
-        rows="3"
-      ></textarea>
-    </gr-form-field>
-
-    <gr-form-field label="Visibility" for="visibility" hint="Public: Everyone can view its builds, tasks and logs, even visitors who aren't signed in.">
-      <gr-select
-        inputId="visibility"
-        [options]="visibilityOptions"
-        optionLabel="label"
-        optionValue="value"
-        [(ngModel)]="newProject.public"
-      />
-    </gr-form-field>
-  </div>
-
-  <div grDialogFooter>
-    <button
-      grButton
-      label="Cancel"
-      severity="secondary"
-      (click)="createDialog.close()"
-      [disabled]="creating()"
-    ></button>
-    <button
-      grButton
-      label="Create"
-      (click)="createProject()"
-      [disabled]="names.blocksSubmit() || creating()"
-      [loading]="creating()"
-    ></button>
-  </div>
-</gr-dialog>
+<app-create-project-dialog [(visible)]="showCreateDialog" (created)="openCreatedProject($event)" />

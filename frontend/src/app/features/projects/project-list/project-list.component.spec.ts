@@ -8,12 +8,15 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PendingInvitesService } from '@core/services/pending-invites.service';
 import { Router, provideRouter } from '@angular/router';
-import { Observable, Subject, of, throwError } from 'rxjs';
+import { By } from '@angular/platform-browser';
+import { CreateProjectDialogComponent } from '@shared/forms';
+import { Observable, of, throwError } from 'rxjs';
 import { ProjectListComponent } from './project-list.component';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { ApiError } from '@core/services/api.service';
+import { TeamsService } from '@core/services/teams.service';
+import { UserService } from '@core/services/user.service';
 
 const EMPTY_PAGE = { items: [], total: 0, page: 1 };
 
@@ -22,12 +25,15 @@ function render(
   getPublicProjects: () => Observable<unknown> = () => of(EMPTY_PAGE),
   signedIn = true,
   invitationCount = 0,
+  accessSummary: () => Observable<unknown> = () => of(null),
 ) {
   const projects = vi.fn(getProjects);
   TestBed.configureTestingModule({
     imports: [ProjectListComponent],
     providers: [
       provideRouter([]),
+      { provide: UserService, useValue: { getProjectsCachesAndTeamsCurrentUserCanReach: accessSummary } },
+      { provide: TeamsService, useValue: { list: () => of([]) } },
       { provide: PendingInvitesService, useValue: { count: signal(invitationCount), all: signal([...Array(invitationCount).fill({ kind: 'project' }), { kind: 'cache' }]) } },
       { provide: AuthService, useValue: { isAuthenticated: () => signedIn, user: () => (signedIn ? { superuser: false } : null) } },
       { provide: ConfigService, useValue: { publicListing: true, createProject: 'everyone', canCreate: () => true } },
@@ -141,96 +147,23 @@ describe('ProjectListComponent', () => {
     expect(root.textContent).not.toContain('No projects yet');
   });
 
-  it('keeps a failed create inside the open Create Project dialog', () => {
-    const { fixture } = render(() => of(EMPTY_PAGE));
-    const service = TestBed.inject(ProjectsService) as unknown as { createProject: () => unknown };
-    service.createProject = () => throwError(() => new ApiError('Project name acme is taken', 409));
-    const cmp = fixture.componentInstance;
-    cmp.openCreateDialog();
-    cmp.newProject.name = 'acme';
-    cmp.newProject.display_name = 'Acme';
-    cmp.createProject();
-    fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog gr-message-banner')?.textContent).toContain('Project name acme is taken');
-    expect(cmp.showCreateDialog()).toBe(true);
+  it('shows the effective role from the access overview instead of the strongest role', () => {
+    const page = { items: [{ id: 'p1', name: 'acme', display_name: 'Acme', role: 'Admin' }], total: 1, page: 1 };
+    const access = { superuser: false, projects: [{ name: 'acme', display_name: 'Acme', role: 'Write', reasons: [] }], caches: [], teams: [] };
+    const { root } = render(() => of(page), undefined, true, 0, () => of(access));
+    expect(Array.from(root.querySelectorAll('gr-badge')).map((b) => b.textContent?.trim())).toEqual(['Write']);
   });
 
-  it('closes an untouched Create Project dialog on Cancel and asks first once something was typed', () => {
-    const { fixture } = render(() => of(EMPTY_PAGE));
-    const cmp = fixture.componentInstance;
-    const cancel = () => [...document.querySelectorAll<HTMLButtonElement>('[grDialogFooter] button')].find((b) => b.textContent?.includes('Cancel'))!;
-    cmp.openCreateDialog();
-    fixture.detectChanges();
-    cancel().click();
-    fixture.detectChanges();
-    expect(cmp.showCreateDialog()).toBe(false);
-
-    cmp.openCreateDialog();
-    cmp.newProject.description = 'Nightly builds';
-    fixture.detectChanges();
-    cancel().click();
-    fixture.detectChanges();
-    expect(document.querySelector('.gr-dialog__discard')?.textContent).toContain('Discard changes?');
-    expect(cmp.showCreateDialog()).toBe(true);
+  it('names the owner team next to the project name', () => {
+    const page = { items: [{ id: 'p1', name: 'acme', display_name: 'Acme', role: 'Admin', owner_team: { name: 'infra', display_name: 'Infra' } }], total: 1, page: 1 };
+    const { root } = render(() => of(page));
+    expect(root.querySelector('gr-nav-card')?.textContent).toContain('Acme · Infra');
   });
 
   it('opens the created project', () => {
     const { fixture } = render(() => of(EMPTY_PAGE));
-    (TestBed.inject(ProjectsService) as unknown as { createProject: () => unknown }).createProject = () => of({ id: 'p1', name: 'acme-ci', url: '' });
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
-    const cmp = fixture.componentInstance;
-    cmp.openCreateDialog();
-    cmp.newProject.name = 'acme';
-    cmp.newProject.display_name = 'Acme';
-    cmp.createProject();
-    expect(String(navigate.mock.calls[0][0])).toBe('/project/acme-ci');
-    expect(cmp.showCreateDialog()).toBe(true);
-  });
-
-  it('ignores Enter while the project name is still being checked', () => {
-    const { fixture } = render(() => of(EMPTY_PAGE));
-    const createProject = vi.fn(() => of(undefined));
-    (TestBed.inject(ProjectsService) as unknown as { createProject: typeof createProject }).createProject = createProject;
-    const cmp = fixture.componentInstance;
-    cmp.openCreateDialog();
-    cmp.newProject.display_name = 'Acme';
-    cmp.newProject.name = 'acme';
-    (cmp as unknown as { names: { check(name: string): void } }).names.check('acme');
-    cmp.createProject();
-    expect(createProject).not.toHaveBeenCalled();
-  });
-
-  it('sends one create and stays open while the request runs', () => {
-    const { fixture } = render(() => of(EMPTY_PAGE));
-    const createProject = vi.fn(() => new Subject<void>());
-    (TestBed.inject(ProjectsService) as unknown as { createProject: typeof createProject }).createProject = createProject;
-    const cmp = fixture.componentInstance;
-    cmp.openCreateDialog();
-    cmp.newProject.name = 'acme';
-    cmp.newProject.display_name = 'Acme';
-    cmp.createProject();
-    fixture.detectChanges();
-    cmp.createProject();
-    const dialog = document.querySelector('.gr-dialog')!;
-    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    fixture.detectChanges();
-    expect(createProject).toHaveBeenCalledTimes(1);
-    expect(cmp.showCreateDialog()).toBe(true);
-    expect(dialog.getAttribute('aria-busy')).toBe('true');
-  });
-
-  it('says what is missing when Create is clicked on an empty form', () => {
-    const { fixture } = render(() => of(EMPTY_PAGE));
-    const createProject = vi.fn(() => of(undefined));
-    (TestBed.inject(ProjectsService) as unknown as { createProject: typeof createProject }).createProject = createProject;
-    fixture.componentInstance.openCreateDialog();
-    fixture.detectChanges();
-    const dialog = document.querySelector('.gr-dialog')!;
-    Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Create')!.click();
-    fixture.detectChanges();
-    expect(dialog.querySelector('gr-message-banner')).toBeNull();
-    expect(dialog.textContent).toContain('Enter a display name.');
-    expect(dialog.textContent).toContain('Enter a name.');
-    expect(createProject).not.toHaveBeenCalled();
+    fixture.debugElement.query(By.directive(CreateProjectDialogComponent)).componentInstance.created.emit('acme');
+    expect(String(navigate.mock.calls[0][0])).toBe('/project/acme');
   });
 });

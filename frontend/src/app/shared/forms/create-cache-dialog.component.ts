@@ -12,13 +12,15 @@ import {
   FormFieldComponent,
   InputDirective,
   SelectComponent,
+  SubmitDirective,
 } from '@gradient/ui/ui';
 import { CachesService } from '@core/services/caches.service';
 import { apiErrorMessage } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
-import type { MakeCacheRequest } from '@core/models';
+import type { MakeCacheRequest, TeamNameAndDisplayName } from '@core/models';
 import { nameAvailability } from './name-availability';
 import { NameFieldsComponent } from './name-fields.component';
+import { OwnerTeamSelectComponent } from './owner-team-select.component';
 import { dialogFormChangesSinceOpen } from './unsaved-changes';
 import { injectRevealFirstInvalid } from './reveal-invalid';
 
@@ -27,7 +29,7 @@ const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description:
 @Component({
   selector: 'app-create-cache-dialog',
   standalone: true,
-  imports: [FormsModule, ButtonComponent, DialogComponent, FormFieldComponent, InputDirective, SelectComponent, NameFieldsComponent],
+  imports: [FormsModule, ButtonComponent, DialogComponent, FormFieldComponent, InputDirective, SelectComponent, SubmitDirective, NameFieldsComponent, OwnerTeamSelectComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <gr-dialog #cacheDialog [header]="header()" [(visible)]="visible" width="500px" [busy]="creating()" [error]="error()" [confirmDiscard]="formChanges.changed()">
@@ -53,12 +55,15 @@ const EMPTY_CACHE: MakeCacheRequest = { name: '', display_name: '', description:
           [(ngModel)]="cache.public"
         />
       </gr-form-field>
+      @if (visible()) {
+        <app-owner-team-select memberPlace="cache" [preselectedOwnerTeam]="preselectedOwnerTeam()" [(selectedOwnerTeam)]="cache.owner_team" />
+      }
       <div grDialogFooter>
         <button grButton label="Cancel" severity="secondary" (click)="cacheDialog.close()" [disabled]="creating()"></button>
         <button
           grButton
           [label]="submitLabel()"
-          (click)="create()"
+          (grSubmit)="create()"
           [disabled]="names.blocksSubmit() || creating()"
           [loading]="creating()"
         ></button>
@@ -73,6 +78,7 @@ export class CreateCacheDialogComponent {
   visible = model(false);
   header = input('Create Cache');
   submitLabel = input('Create');
+  preselectedOwnerTeam = input<TeamNameAndDisplayName | null>(null);
   created = output<string>();
 
   protected readonly visibilityOptions = [
@@ -85,6 +91,7 @@ export class CreateCacheDialogComponent {
   protected error = signal<string | null>(null);
   protected submitAttempted = signal(false);
   private nameFields = viewChild('nameFields', { read: ElementRef<HTMLElement> });
+  private ownerTeamSelect = viewChild(OwnerTeamSelectComponent);
   private revealFirstInvalid = injectRevealFirstInvalid();
   protected formChanges = dialogFormChangesSinceOpen(() => this.cache);
 
@@ -110,7 +117,7 @@ export class CreateCacheDialogComponent {
     }
     this.creating.set(true);
     this.error.set(null);
-    this.caches.createCache(this.cache).subscribe({
+    this.caches.createCache({ ...this.cache, owner_team: this.ownerTeamSelect()?.ownerTeamNameToSend() ?? null }).subscribe({
       next: (cache) => {
         this.creating.set(false);
         this.visible.set(false);

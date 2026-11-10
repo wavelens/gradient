@@ -6,6 +6,12 @@
 
 <gr-page-layout [breadcrumb]="breadcrumb()" [title]="team()?.display_name || teamName">
   <gr-copy-field slot="meta" inline [value]="teamName" copyLabel="Copy team name for CLI" />
+  @if (canSetOwnerTeam() && canCreateProject()) {
+    <button slot="actions" grButton label="Create Project" icon="add" severity="secondary" (click)="isCreateProjectDialogOpen.set(true)"></button>
+  }
+  @if (canSetOwnerTeam() && canCreateCache()) {
+    <button slot="actions" grButton label="Create Cache" icon="add" severity="secondary" (click)="isCreateCacheDialogOpen.set(true)"></button>
+  }
   <a slot="actions" grButton label="Members" icon="group" severity="secondary" [routerLink]="links.membersPage('team', teamName)"></a>
   @if (isAdmin()) {
     <a slot="actions" grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.teamPage(teamName, 'settings')"></a>
@@ -60,3 +66,6 @@
     <app-team-workers [team]="team" />
   }
 </gr-page-layout>
+
+<app-create-project-dialog [(visible)]="isCreateProjectDialogOpen" [preselectedOwnerTeam]="team()" (created)="openCreatedProject($event)" />
+<app-create-cache-dialog [(visible)]="isCreateCacheDialogOpen" [preselectedOwnerTeam]="team()" (created)="openCreatedCache($event)" />

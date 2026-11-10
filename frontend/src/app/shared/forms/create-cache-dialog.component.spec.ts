@@ -8,6 +8,7 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject, of, throwError } from 'rxjs';
 import { CachesService } from '@core/services/caches.service';
+import { TeamsService } from '@core/services/teams.service';
 import { ApiError } from '@core/services/api.service';
 import { NotifyService } from '@core/services/notify.service';
 import { CreateCacheDialogComponent } from './create-cache-dialog.component';
@@ -25,7 +26,10 @@ class HostComponent {
 
 async function setup(createCache: () => unknown, available = true) {
   TestBed.configureTestingModule({
-    providers: [{ provide: CachesService, useValue: { createCache, checkCacheNameAvailable: () => of(available) } }],
+    providers: [
+      { provide: CachesService, useValue: { createCache, checkCacheNameAvailable: () => of(available) } },
+      { provide: TeamsService, useValue: { list: () => of([{ name: 'infra', display_name: 'Infra', role: 'member' }]) } },
+    ],
   });
   const fixture = TestBed.createComponent(HostComponent);
   const settle = async () => {
@@ -80,7 +84,7 @@ describe('CreateCacheDialogComponent', () => {
     const { host, type, submit } = await setup(createCache);
     await type('#cache-display-name', 'Team Cache');
     await submit();
-    expect(createCache).toHaveBeenCalledWith(expect.objectContaining({ name: 'team-cache', display_name: 'Team Cache', public: false }));
+    expect(createCache).toHaveBeenCalledWith(expect.objectContaining({ name: 'team-cache', display_name: 'Team Cache', public: false, owner_team: 'infra' }));
     expect(host.created).toEqual(['team-cache']);
     expect(host.visible).toBe(false);
   });

@@ -4,59 +4,45 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ElementRef, OnInit, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
-import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
-import { FormsModule } from '@angular/forms';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
-import { NotifyService } from '@core/services/notify.service';
-import { apiErrorMessage } from '@core/services/api.service';
 import {
   BadgeComponent,
   EmptyStateComponent,
   LoadMoreComponent,
   ButtonComponent,
   CardGridComponent,
-  DialogComponent,
-  FormFieldComponent,
-  InputDirective,
   LoadStateComponent,
   NavCardComponent,
   PageLayoutComponent,
-  SelectComponent,
 } from '@gradient/ui/ui';
-import { NameFieldsComponent, dialogFormChangesSinceOpen, injectRevealFirstInvalid, nameAvailability, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
+import { CreateProjectDialogComponent, injectCanCreateProject, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
 import { ProjectSummary, PublicProjectSummary } from '@core/models';
 import { links } from '@shared/routing';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, merge } from 'rxjs';
 import { PHASE_SEVERITY } from '@shared/evaluation';
-import { PendingInvitationsBannerComponent } from '@shared/access';
+import { PendingInvitationsBannerComponent, getDisplayNameWithOwnerTeam, loadSignedInUserAccessSummary } from '@shared/access';
 
 @Component({
   selector: 'app-project-list',
   standalone: true,
   imports: [
     EntityNameComponent,
-    CommonModule,
     RouterModule,
-    FormsModule,
-    DialogComponent,
     ButtonComponent,
-    InputDirective,
     LoadStateComponent,
     PageLayoutComponent,
-    FormFieldComponent,
     NavCardComponent,
     CardGridComponent,
     BadgeComponent,
     EmptyStateComponent,
     LoadMoreComponent,
-    SelectComponent,
-    NameFieldsComponent,
+    CreateProjectDialogComponent,
     PendingInvitationsBannerComponent,
   ],
   templateUrl: './project-list.component.html',
@@ -67,38 +53,19 @@ export class ProjectListComponent implements OnInit {
   protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
   protected readonly phaseSeverity = PHASE_SEVERITY;
-  readonly visibilityOptions = [
-    { label: 'Private', value: false },
-    { label: 'Public', value: true },
-  ];
+  protected readonly getDisplayNameWithOwnerTeam = getDisplayNameWithOwnerTeam;
 
   private projectsService = inject(ProjectsService);
   protected authService = inject(AuthService);
   private config = inject(ConfigService);
-  private notify = inject(NotifyService);
   private router = inject(Router);
-  protected names = nameAvailability((name) => this.projectsService.checkProjectNameAvailable(name));
-  private revealFirstInvalid = injectRevealFirstInvalid();
-  private createForm = viewChild<ElementRef<HTMLElement>>('createForm');
 
-  get canCreateProject(): boolean {
-    if (!this.authService.isAuthenticated()) return false;
-    return this.config.canCreate(this.config.createProject, this.authService.user()?.superuser === true);
-  }
+  protected canCreateProject = injectCanCreateProject();
+  protected signedInUserAccess = loadSignedInUserAccessSummary();
+  protected userAccessByProjectName = computed(() => new Map(this.signedInUserAccess()?.projects.map((row) => [row.name, row])));
 
   projects = pagedList<ProjectSummary>('projects', (page) => this.projectsService.getProjects(page, 50));
   showCreateDialog = signal(false);
-  creating = signal(false);
-  createError = signal<string | null>(null);
-  createAttempted = signal(false);
-  createFormChanges = dialogFormChangesSinceOpen(() => this.newProject);
-
-  newProject = {
-    name: '',
-    display_name: '',
-    description: '',
-    public: false,
-  };
 
   publicProjects = pagedList<PublicProjectSummary>('public projects', (page) => this.projectsService.getPublicProjects(page, 50));
 
@@ -107,7 +74,7 @@ export class ProjectListComponent implements OnInit {
       this.authService.isAuthenticated() ? this.projects.refreshFirstPageSilently() : EMPTY,
       this.config.publicListing ? this.publicProjects.refreshFirstPageSilently() : EMPTY,
     ));
-    openCreateDialogFromUrlIfAllowed(() => this.canCreateProject, () => this.openCreateDialog());
+    openCreateDialogFromUrlIfAllowed(() => this.canCreateProject(), () => this.openCreateDialog());
   }
 
   ngOnInit(): void {
@@ -116,12 +83,11 @@ export class ProjectListComponent implements OnInit {
   }
 
   openCreateDialog(): void {
-    this.newProject = { name: '', display_name: '', description: '', public: false };
-    this.names.reset();
-    this.createError.set(null);
-    this.createAttempted.set(false);
-    this.createFormChanges.mark();
     this.showCreateDialog.set(true);
+  }
+
+  openCreatedProject(name: string): void {
+    this.router.navigateByUrl(links.project(name));
   }
 
   get filteredPublicProjects(): PublicProjectSummary[] {
@@ -129,25 +95,7 @@ export class ProjectListComponent implements OnInit {
     return this.publicProjects.items().filter((o) => !ownedIds.has(o.id));
   }
 
-  createProject(): void {
-    if (this.creating() || this.names.blocksSubmit()) return;
-    this.createAttempted.set(true);
-    if (!this.newProject.name || !this.newProject.display_name) {
-      this.revealFirstInvalid(() => this.createForm()?.nativeElement);
-      return;
-    }
-
-    this.creating.set(true);
-    this.createError.set(null);
-    this.projectsService.createProject(this.newProject).subscribe({
-      next: (project) => {
-        this.notify.success('Project created');
-        this.router.navigateByUrl(links.project(project.name));
-      },
-      error: (error: unknown) => {
-        this.createError.set(apiErrorMessage(error, 'Failed to create project.'));
-        this.creating.set(false);
-      },
-    });
+  protected getEffectiveProjectRole(project: ProjectSummary): string | null | undefined {
+    return this.signedInUserAccess() ? this.userAccessByProjectName().get(project.name)?.role : project.role;
   }
 }

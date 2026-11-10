@@ -14,7 +14,8 @@ import { CachesService } from '@core/services/caches.service';
 import { ConfigService } from '@core/services/config.service';
 import { AuthService } from '@core/services/auth.service';
 import { ApiError } from '@core/services/api.service';
-import { Cache } from '@core/models';
+import { UserService } from '@core/services/user.service';
+import { Cache, UserAccessSummary } from '@core/models';
 
 const OWN = { id: 'c1', name: 'main', display_name: 'Main', active: true, public: false, priority: 10 } as Cache;
 const PUBLIC = { id: 'c2', name: 'shared', display_name: 'Shared', active: true, public: true, priority: 20 } as Cache;
@@ -23,6 +24,7 @@ function setup(opts: {
   authenticated: boolean;
   getCaches?: () => Observable<{ items: Cache[] }>;
   getPublicCaches?: () => Observable<Cache[]>;
+  accessSummary?: UserAccessSummary | null;
 }) {
   const getCaches = vi.fn(opts.getCaches ?? (() => of({ items: [OWN] })));
   const getPublicCaches = vi.fn(opts.getPublicCaches ?? (() => of([PUBLIC])));
@@ -30,6 +32,7 @@ function setup(opts: {
     imports: [CacheListComponent],
     providers: [
       provideRouter([]),
+      { provide: UserService, useValue: { getProjectsCachesAndTeamsCurrentUserCanReach: () => of(opts.accessSummary ?? null), getInvites: () => of([]) } },
       { provide: CachesService, useValue: { getCaches, getPublicCaches } },
       { provide: ConfigService, useValue: { publicListing: true, createCache: 'everyone', canCreate: () => true } },
       { provide: AuthService, useValue: { isAuthenticated: () => opts.authenticated, user: () => null } },
@@ -108,5 +111,17 @@ describe('CacheListComponent', () => {
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     fixture.debugElement.query(By.directive(CreateCacheDialogComponent)).componentInstance.created.emit('team-cache');
     expect(String(navigate.mock.calls[0][0])).toBe('/caches/team-cache');
+  });
+
+  it('shows the effective role and owner team from the access overview', () => {
+    const accessSummary: UserAccessSummary = {
+      superuser: false,
+      projects: [],
+      caches: [{ name: 'main', display_name: 'Main', role: 'Read', owner_team: { name: 'infra', display_name: 'Infra' }, reasons: [] }],
+      teams: [],
+    };
+    const { element } = setup({ authenticated: true, getPublicCaches: () => of([]), accessSummary });
+    expect(element.querySelector('gr-nav-card')?.textContent).toContain('Main · Infra');
+    expect(Array.from(element.querySelectorAll('gr-badge')).map((badge) => badge.textContent?.trim())).toEqual(['Read']);
   });
 });

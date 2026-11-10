@@ -33,14 +33,18 @@
         <div class="section">
           <gr-card-grid>
             @for (cache of activeCaches; track cache.id) {
+              @let access = userAccessByCacheName().get(cache.name);
               <gr-nav-card
                 [icon]="entityKindToIconName.cache"
-                [title]="formatEntityLabel(cache)"
+                [title]="formatEntityLabel(cache, access?.owner_team)"
                 [description]="cache.description"
                 [link]="links.cache(cache.name)"
               >
-                <gr-entity-name slot="title" [displayName]="cache.display_name" [name]="cache.name" />
+                <gr-entity-name slot="title" [displayName]="cache.display_name" [name]="cache.name" [ownerTeam]="access?.owner_team" />
                 <div slot="meta">
+                  @if (access?.role && access?.role !== 'Admin') {
+                    <gr-badge>{{ access?.role }}</gr-badge>
+                  }
                   @if (cache.public) {
                     <gr-badge>Public</gr-badge>
                   }
@@ -56,16 +60,20 @@
           <h2>Inactive Caches</h2>
           <gr-card-grid>
             @for (cache of inactiveCaches; track cache.id) {
+              @let access = userAccessByCacheName().get(cache.name);
               <gr-nav-card
                 muted
                 icon="cloud_off"
-                [title]="formatEntityLabel(cache)"
+                [title]="formatEntityLabel(cache, access?.owner_team)"
                 [description]="cache.description"
                 [link]="links.cache(cache.name)"
               >
-                <gr-entity-name slot="title" [displayName]="cache.display_name" [name]="cache.name" />
+                <gr-entity-name slot="title" [displayName]="cache.display_name" [name]="cache.name" [ownerTeam]="access?.owner_team" />
                 <div slot="meta">
                   <gr-badge severity="neutral">Inactive</gr-badge>
+                  @if (access?.role && access?.role !== 'Admin') {
+                    <gr-badge>{{ access?.role }}</gr-badge>
+                  }
                   @if (cache.public) {
                     <gr-badge>Public</gr-badge>
                   }

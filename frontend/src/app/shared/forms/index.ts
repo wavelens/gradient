@@ -6,6 +6,8 @@
 
 export * from './create-cache-button.component';
 export * from './create-cache-dialog.component';
+export * from './create-project-dialog.component';
+export * from './owner-team-select.component';
 export * from './ip-network';
 export * from './lists';
 export * from './name-availability';

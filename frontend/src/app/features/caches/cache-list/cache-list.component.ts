@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
@@ -23,7 +23,7 @@ import {
 import { CreateCacheButtonComponent, CreateCacheDialogComponent, openCreateDialogFromUrlIfAllowed } from '@shared/forms';
 import { Cache } from '@core/models';
 import { links } from '@shared/routing';
-import { PendingInvitationsBannerComponent } from '@shared/access';
+import { PendingInvitationsBannerComponent, loadSignedInUserAccessSummary } from '@shared/access';
 import { pagedList, runReloadIntervalWhileTabVisible } from '@shared/paging';
 import { EMPTY, catchError, merge, tap } from 'rxjs';
 
@@ -61,6 +61,9 @@ export class CacheListComponent implements OnInit {
     if (!this.authService.isAuthenticated()) return false;
     return this.config.canCreate(this.config.createCache, this.authService.user()?.superuser === true);
   }
+
+  private signedInUserAccess = loadSignedInUserAccessSummary();
+  protected userAccessByCacheName = computed(() => new Map(this.signedInUserAccess()?.caches.map((row) => [row.name, row])));
 
   caches = pagedList<Cache>('caches', (page) => this.cachesService.getCaches(page));
   showCreateDialog = signal(false);

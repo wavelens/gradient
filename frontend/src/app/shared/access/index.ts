@@ -18,3 +18,4 @@ export * from './only-admin-member-change-block';
 export * from './member-access-change-confirmation';
 export * from './public-visibility-change-confirmation';
 export * from './pending-invitations-banner.component';
+export * from './signed-in-user-access-summary';

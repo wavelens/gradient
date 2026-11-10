@@ -43,7 +43,7 @@ const request: TeamRequestItem = {
   created_at: '2026-10-01T10:00:00',
 };
 
-function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().mockReturnValue(of('ok')), workers: unknown[] = []) {
+function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().mockReturnValue(of('ok')), workers: unknown[] = [], superuser = false) {
   const notify = { success: vi.fn(), failure: vi.fn() };
   const confirm = vi.fn((confirmRequest: ConfirmRequest): Observable<unknown> => confirmRequest.action());
   const denyRequest = vi.fn().mockReturnValue(of('ok'));
@@ -57,7 +57,7 @@ function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().m
         provide: ActivatedRoute,
         useValue: { snapshot: { paramMap: convertToParamMap({ team: 'platform' }), data: { teamAccess: { team: { ...team, role } } } }, data: of({ teamAccess: { team: { ...team, role } } }) },
       },
-      { provide: ConfigService, useValue: { gradientCiEnabled: false } },
+      { provide: ConfigService, useValue: { gradientCiEnabled: false, createProject: 'everyone', createCache: 'everyone', canCreate: () => true } },
       {
         provide: TeamsService,
         useValue: {
@@ -69,9 +69,10 @@ function setup(role: TeamResponse['role'] = 'member', approveRequest = vi.fn().m
           requests: () => of([request]),
           approveRequest,
           denyRequest,
+          list: () => of([]),
         },
       },
-      { provide: AuthService, useValue: { user: signal({ superuser: false }) } },
+      { provide: AuthService, useValue: { user: signal({ superuser }), isAuthenticated: () => true } },
       { provide: NotifyService, useValue: notify },
       { provide: ConfirmService, useValue: { confirm } },
     ],
@@ -186,7 +187,32 @@ describe('TeamOverviewComponent', () => {
     denyButton(root).click();
     expect(denyRequest).not.toHaveBeenCalled();
   });
+
+  it('offers team members to create a project or cache owned by the team', () => {
+    expect(actionButtonLabels(setup('member').root)).toEqual(['Create Project', 'Create Cache']);
+  });
+
+  it('offers instance admins outside the team to create a project or cache owned by the team', () => {
+    expect(actionButtonLabels(setup(null, undefined, [], true).root)).toEqual(['Create Project', 'Create Cache']);
+  });
+
+  it('hides project and cache creation from users outside the team', () => {
+    expect(actionButtonLabels(setup(null).root)).toEqual([]);
+  });
+
+  it('opens Create Project with the team as owner team', async () => {
+    const { fixture, root } = setup('member');
+    Array.from(root.querySelectorAll<HTMLButtonElement>('button[slot="actions"]'))[0].click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(document.querySelector('#project-owner-team')?.textContent).toContain('Platform');
+  });
 });
+
+function actionButtonLabels(root: HTMLElement): string[] {
+  return Array.from(root.querySelectorAll('button[slot="actions"] .gr-button__label'), (label) => label.textContent?.trim() ?? '');
+}
 
 function denyButton(root: HTMLElement): HTMLButtonElement {
   return Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find(

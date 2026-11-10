@@ -8,6 +8,12 @@ import { Signal, computed, inject } from '@angular/core';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 
+export function injectCanCreateProject(): Signal<boolean> {
+  const auth = inject(AuthService);
+  const config = inject(ConfigService);
+  return computed(() => auth.isAuthenticated() && config.canCreate(config.createProject, auth.user()?.superuser === true));
+}
+
 export function injectCanCreateCache(): Signal<boolean> {
   const auth = inject(AuthService);
   const config = inject(ConfigService);
