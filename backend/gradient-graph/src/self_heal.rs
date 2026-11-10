@@ -30,7 +30,9 @@ pub(crate) async fn repair_missing_inputs(
     failed_derivation: DerivationId,
     missing_paths: &[String],
 ) -> Result<()> {
-    use gradient_db::caches::demotion::{DemoteWhen, demote_cached_output, unwalk_parents_of};
+    use gradient_db::caches::demotion::{
+        DemoteWhen, demote_cached_output, object_exists_in_storage_or_error, unwalk_parents_of,
+    };
 
     let db = &ctx.worker_db;
     let mut purged = 0usize;
@@ -62,7 +64,8 @@ pub(crate) async fn repair_missing_inputs(
             Err(e) => warn!(%path, error = %e, "missing input: diagnosis query failed"),
         }
 
-        match demote_cached_output(ctx, hash, DemoteWhen::ObjectMissing).await {
+        let object_present = object_exists_in_storage_or_error(ctx, hash).await;
+        match demote_cached_output(ctx, hash, DemoteWhen::ObjectMissing, object_present).await {
             Ok(drvs) if !drvs.is_empty() => {
                 purged += 1;
                 if !any_reachable(db, &drvs).await {

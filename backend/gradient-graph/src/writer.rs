@@ -164,12 +164,23 @@ impl Actor for GraphWriter {
             }
             GraphMsg::Demote(demotion, reply) => {
                 flush(&myself, st).await;
+                let object_present =
+                    demote::check_nar_object_exists_in_object_storage(&st.ctx, &demotion).await;
                 let demotion = &demotion;
                 let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
-                    demote::apply(&scoped, demotion.clone()).await
+                    demote::apply(&scoped, demotion.clone(), object_present).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
+                let result = match result {
+                    Ok(demoted) => Ok(
+                        demote::delete_nar_object_from_object_storage_after_demotion_commit(
+                            &st.ctx, demoted,
+                        )
+                        .await,
+                    ),
+                    Err(e) => Err(e),
+                };
                 let _ = reply.send(result);
             }
             GraphMsg::Gc(request, reply) => {

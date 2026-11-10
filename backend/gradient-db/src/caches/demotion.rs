@@ -7,7 +7,6 @@
 use gradient_entity::build::BuildStatus;
 use gradient_types::ids::DerivationId;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
-use tracing::warn;
 
 #[derive(Debug, Default)]
 pub struct MissingInputDiagnosis {
@@ -84,23 +83,27 @@ crate::sql! {
         params = [DerivationIds(64)];
 }
 
+pub async fn object_exists_in_storage_or_error(ctx: &crate::DbContext, hash: &str) -> bool {
+    ctx.storage.nar_storage.exists(hash).await.unwrap_or(true)
+}
+
 /// Acquire the [`crate::graph::runtime_can_start::lock_cached_paths`] first. Clear `cache_available` under that lock before a concurrent retire can read that value. All writers follow the class order `cached_path`, then `derivation`, then `derivation_build`. A concurrent retire can deadlock with this path on any other order.
 pub async fn demote_cached_output(
     ctx: &crate::DbContext,
     hash: &str,
     when: DemoteWhen,
+    object_present: bool,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
     use gradient_entity::derivation_output::{Column as CDO, Entity as EDO};
     use sea_orm::{ActiveModelTrait, TransactionTrait};
 
     let db = &ctx.worker_db;
-    let nar_storage = &ctx.storage.nar_storage;
     let outputs = EDO::find().filter(CDO::Hash.eq(hash)).all(db).await?;
     let has_producer = !outputs.is_empty();
 
     // Nothing is deleted on uncertainty. A present object stays, a probe error keeps it, and a
     // producerless input has nothing to rebuild it.
-    if probe_before_demoting(when, has_producer) && nar_storage.exists(hash).await.unwrap_or(true) {
+    if probe_before_demoting(when, has_producer) && object_present {
         return Ok(Vec::new());
     }
 
@@ -137,10 +140,6 @@ pub async fn demote_cached_output(
     let settled = crate::graph::can_start::update_and_settle_need(db, &producers).await?;
     retired.transitions.extend(settled.changes);
     crate::status::emit_transition_effects(ctx, &retired.transitions).await?;
-
-    if let Err(e) = nar_storage.delete(hash).await {
-        warn!(%hash, error = %e, "demote: failed to delete NAR object from storage");
-    }
 
     Ok(producers)
 }
@@ -228,7 +227,8 @@ mod tests {
             .into_connection();
         let (ctx, _pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
 
-        let producers = demote_cached_output(&ctx, hash, DemoteWhen::ObjectMissing)
+        let object_present = object_exists_in_storage_or_error(&ctx, hash).await;
+        let producers = demote_cached_output(&ctx, hash, DemoteWhen::ObjectMissing, object_present)
             .await
             .unwrap();
 
@@ -240,7 +240,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_invalidation_deletes_a_present_output_object() {
+    async fn invalidating_cached_output_with_producer_removes_cached_path_row_in_lock_order_and_keeps_stored_nar_object_until_commit()
+     {
         use gradient_types::ids::{DerivationId, DerivationOutputId};
         use sea_orm::{MockExecResult, Value};
         use std::collections::BTreeMap;
@@ -286,12 +287,15 @@ mod tests {
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
 
-        let producers = demote_cached_output(&ctx, hash, DemoteWhen::Always)
+        let producers = demote_cached_output(&ctx, hash, DemoteWhen::Always, true)
             .await
             .unwrap();
 
         assert_eq!(producers.len(), 1, "the output's producer is returned");
-        assert!(!file.exists(), "demote must delete the output's NAR object");
+        assert!(
+            file.exists(),
+            "the object outlives the transaction, which can still roll back"
+        );
         drop(ctx);
         let log = statements(pool.into_transaction_log());
         assert!(
@@ -382,7 +386,8 @@ mod tests {
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
 
-        let producers = demote_cached_output(&ctx, hash, DemoteWhen::ObjectMissing)
+        let object_present = object_exists_in_storage_or_error(&ctx, hash).await;
+        let producers = demote_cached_output(&ctx, hash, DemoteWhen::ObjectMissing, object_present)
             .await
             .unwrap();
 
@@ -451,7 +456,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
 
-        demote_cached_output(&ctx, hash, DemoteWhen::Always)
+        demote_cached_output(&ctx, hash, DemoteWhen::Always, true)
             .await
             .unwrap();
 
