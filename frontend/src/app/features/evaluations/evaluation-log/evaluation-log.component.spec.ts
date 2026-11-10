@@ -671,6 +671,43 @@ describe('EvaluationLogComponent', () => {
       vi.useRealTimers();
     });
 
+    it('loads a running log from the stream alone, so output between two requests is not lost', async () => {
+      vi.useFakeTimers();
+      const { cmp } = setup();
+      const reads = [`${JSON.stringify('first\nsec')}\n`, `${JSON.stringify('ond\n')}\n`]
+        .map((text) => ({ done: false, value: new TextEncoder().encode(text) }));
+      const reader = { read: vi.fn(async () => reads.shift() ?? { done: true }), cancel: vi.fn() };
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: { getReader: () => reader } });
+      vi.stubGlobal('fetch', fetchMock);
+      vi.spyOn(TestBed.inject(EvaluationsService), 'getBuild').mockReturnValue(of({ status: 'Completed' } as BuildWithOutputs));
+      cmp.builds.set([build('b1', 'hash-hello.drv', 'Building')]);
+      cmp.selectedBuildId.set('b1');
+      await (cmp as unknown as Internals).fetchInitialLogs('b1');
+      await vi.waitFor(() => expect(reader.read).toHaveBeenCalledTimes(3));
+      vi.advanceTimersByTime(300);
+      expect(fetchMock.mock.calls.map(([url, init]) => `${init.method} ${url}`)).toEqual([expect.stringMatching(/^POST .*builds\/b1\/log$/)]);
+      expect(cmp.logLines()).toEqual(['first', 'second']);
+      expect(cmp.logLoading()).toBe(false);
+      vi.useRealTimers();
+    });
+
+    it('aborts the pending stream request of the previous build when another build is selected', () => {
+      const { cmp } = setup();
+      const signals: AbortSignal[] = [];
+      vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => {
+        signals.push(init.signal!);
+        return new Promise(() => undefined);
+      }));
+      vi.spyOn(TestBed.inject(EvaluationsService), 'getBuild').mockReturnValue(NEVER);
+      const [first, second] = [build('b1', 'hash-hello.drv', 'Building'), build('b2', 'hash-world.drv', 'Building')];
+      cmp.builds.set([first, second]);
+      cmp.selectBuild(first, true);
+      cmp.selectBuild(second, true);
+      expect(signals.map((signal) => signal.aborted)).toEqual([true, false]);
+      cmp.ngOnDestroy();
+      expect(signals[1].aborted).toBe(true);
+    });
+
     describe('when the stream ends by itself', () => {
       type Stream = { startLogStream: (id: string) => Promise<void> } & Internals;
       const endedStream = { ok: true, body: { getReader: () => ({ read: async () => ({ done: true }), cancel: vi.fn() }) } };
@@ -957,6 +994,7 @@ describe('EvaluationLogComponent', () => {
             getBuilds,
             getEvaluationMessages: () => of([]),
             getBuildAttempts: () => of([]),
+            getBuild: () => NEVER,
           } },
         ],
       });
@@ -1281,13 +1319,11 @@ describe('EvaluationLogComponent', () => {
           { provide: LiveService, useValue: { connect: () => frames } },
         ],
       });
-      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
+      vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise(() => undefined));
       const fixture = TestBed.createComponent(EvaluationLogComponent);
       const cmp = fixture.componentInstance;
       cmp.ngOnInit();
-      cmp.selectedBuildId.set('b1');
       cmp.logLoading.set(false);
-      (cmp as unknown as { watchProgress: (id: string) => void }).watchProgress('b1');
       fixture.detectChanges();
       const panel = () => fixture.nativeElement.querySelector('gr-build-progress') as HTMLElement | null;
       return { fixture, cmp, frames, getBuild, panel };

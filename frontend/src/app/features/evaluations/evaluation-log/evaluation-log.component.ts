@@ -76,7 +76,6 @@ import {
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
 import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildPhase, buildStatusLabel, buildPhaseFinished, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, getEvaluationMessageSourceLabel, removeNixErrorInternalsFromEvaluationMessage, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
-import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
 const packageNameVisibleTrailingCharacterCount = 10;
@@ -273,8 +272,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   private liveSub?: Subscription;
   private progressSub?: Subscription;
-  private activeStreamReader?: ReadableStreamDefaultReader<Uint8Array>;
-  private streamingBuildId?: string;
+  private logStreamAbortController?: AbortController;
   buildIdWithEndedLogStream = signal<string | null>(null);
   private buildLogStreamReconnectAttemptsSinceLastOutput = 0;
   private logStreamReconnectTimer?: ReturnType<typeof setTimeout>;
@@ -589,13 +587,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
         // ── Log transitions ─────────────────────────────────────────────────
 
-        // Queued -> Building: reload logs for the newly started build
-        if (prevSelected?.status === 'Queued' && newSelected?.status === 'Building') {
-          this.pendingLogLines = [];
-          this.logLoading.set(true);
-          this.fetchInitialLogs(newSelected.id);
-        }
-
         // Building -> Completed: flush logs.
         // Only auto-switch to the next building build when in auto-follow mode
         // (the user hasn't manually picked a build). When the user explicitly
@@ -879,7 +870,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     if (attemptId === null) this.fetchSelectedBuildAttempts(buildId);
 
     const selected = this.builds().find(b => b.id === buildId);
-    const terminal = attemptId !== null || (selected && !['Queued', 'Building', 'Created'].includes(selected.status));
+    if (attemptId === null && selected && ['Queued', 'Building'].includes(selected.status)) {
+      void this.startLogStream(buildId);
+      this.watchProgress(buildId);
+      return;
+    }
+
+    const terminal = attemptId !== null || (selected && selected.status !== 'Created');
     if (terminal && (await this.fetchChunkedLog(buildId, attemptId))) {
       if (!isStale()) this.logLoading.set(false);
       return;
@@ -900,16 +897,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (isStale()) return;
-    this.logLoading.set(false);
-
-    // If this build is still running, start streaming
-    const build = this.builds().find(b => b.id === buildId);
-    const isBuilding = attemptId === null && build && ['Queued', 'Building'].includes(build.status);
-    if (isBuilding) {
-      this.startLogStream(buildId);
-      this.watchProgress(buildId);
-    }
+    if (!isStale()) this.logLoading.set(false);
   }
 
   /// A running build reports its prefetch, download and upload transfers: seed
@@ -942,19 +930,28 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private async startLogStream(buildId: string): Promise<void> {
-    if (this.streamingBuildId === buildId) return;
     this.stopActiveStream();
-    this.streamingBuildId = buildId;
+    const controller = new AbortController();
+    this.logStreamAbortController = controller;
+    const isCurrent = () => this.logStreamAbortController === controller;
+
+    let response: Response;
+    try {
+      response = await fetchBuildLogResponseWithCookiesOrThrow(`builds/${buildId}/log`, { method: 'POST', signal: controller.signal });
+    } catch (error) {
+      if (!isCurrent()) return;
+      this.logStreamAbortController = undefined;
+      this.stopProgressWatch();
+      this.logRequestError.set(error);
+      this.logLoading.set(false);
+      return;
+    }
 
     try {
-      const response = await fetch(`${environment.apiUrl}/builds/${buildId}/log`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (response.ok && response.body && this.streamingBuildId === buildId) {
+      if (response.body && isCurrent()) {
+        this.logLoading.set(false);
         if (this.buildIdWithEndedLogStream() === buildId) this.buildIdWithEndedLogStream.set(null);
-        this.activeStreamReader = response.body.getReader();
+        const reader = response.body.getReader();
         const textDecoder = new TextDecoder();
         const logDecoder = new BuildLogStreamDecoder();
         const queueLines = (lines: string[]) => {
@@ -965,8 +962,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         };
 
         while (true) {
-          const { done, value } = await this.activeStreamReader.read();
-          if (this.selectedBuildId() !== buildId) break;
+          const { done, value } = await reader.read();
+          if (!isCurrent()) break;
           if (done) {
             queueLines(logDecoder.takeLastLogLineWithoutNewline());
             break;
@@ -975,16 +972,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         }
       }
     } catch {
-      // stream ended or aborted
+      // The stream broke off or ended early. The finally block can run the reconnect check.
     } finally {
-      const endedByItself = this.streamingBuildId === buildId;
-      if (endedByItself) {
-        this.activeStreamReader = undefined;
-        this.streamingBuildId = undefined;
-      }
-      if (this.selectedBuildId() === buildId) {
+      if (isCurrent()) {
+        this.logStreamAbortController = undefined;
         this.stopProgressWatch();
-        if (endedByItself) this.fetchBuildAndScheduleReconnectIfQueuedOrBuilding(buildId);
+        this.fetchBuildAndScheduleReconnectIfQueuedOrBuilding(buildId);
       }
     }
   }
@@ -1015,9 +1008,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private stopActiveStream(): void {
-    try { this.activeStreamReader?.cancel(); } catch { /* ignore */ }
-    this.activeStreamReader = undefined;
-    this.streamingBuildId = undefined;
+    this.logStreamAbortController?.abort();
+    this.logStreamAbortController = undefined;
     this.pendingLogLines = [];
     clearTimeout(this.logStreamReconnectTimer);
     this.logStreamReconnectTimer = undefined;

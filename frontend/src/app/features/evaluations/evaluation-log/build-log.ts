@@ -18,10 +18,13 @@ async function serverReason(res: Response): Promise<string | null> {
   }
 }
 
-export async function fetchBuildLogResponseWithCookiesOrThrow(path: string): Promise<Response> {
+export async function fetchBuildLogResponseWithCookiesOrThrow(
+  path: string,
+  { method = 'GET', signal }: Pick<RequestInit, 'method' | 'signal'> = {},
+): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(`${environment.apiUrl}/${path}`, { method: 'GET', credentials: 'include' });
+    res = await fetch(`${environment.apiUrl}/${path}`, { method, signal, credentials: 'include' });
   } catch {
     throw new ApiError('Failed to connect to the server. Check the connection and try again.', 0);
   }
