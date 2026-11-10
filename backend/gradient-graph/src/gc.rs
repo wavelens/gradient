@@ -150,6 +150,9 @@ pub(crate) async fn apply(ctx: &DbContext, req: GcRequest) -> Result<GcReport> {
             unused_since,
             scanned_at,
         } => delete_unused_claims(ctx, &hashes, unused_since, scanned_at).await,
+        GcRequest::MissingNarFileCachedPathHashes { hashes } => {
+            retire_path_hashes(ctx, &hashes).await
+        }
         GcRequest::Evaluations { ids } => delete_evaluations(ctx, &ids).await,
     }
 }

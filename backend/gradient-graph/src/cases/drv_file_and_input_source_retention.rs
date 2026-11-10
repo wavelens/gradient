@@ -166,6 +166,40 @@ async fn removing_dependent_derivation_drv_from_cache_marks_it_unwalked_and_depe
 }
 
 #[tokio::test]
+async fn expiry_gc_paths_keeps_live_input_source_and_removes_missing_nar_file_marks_derivation_not_walked_and_stops_known_report()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case =
+        Case::start(entry_derivation_depends_on_derivation_with_cached_input_source(e1)).await;
+    let source = store_path_name_hash_part(B_INPUT_SOURCE_PATCH_STORE_PATH_NAME);
+    case.gc(GcRequest::Paths {
+        hashes: vec![source.to_owned()],
+        scanned_at: t0(),
+    })
+    .await;
+    let path = case.find_cached_path(source).await;
+    assert!(
+        path.is_some(),
+        "before: expiry recheck can keep live input sources"
+    );
+    assert_server_reports_derivations_a_and_b_as_known(&case).await;
+
+    case.gc(GcRequest::MissingNarFileCachedPathHashes {
+        hashes: vec![source.to_owned()],
+    })
+    .await;
+
+    let path = case.find_cached_path(source).await;
+    assert!(
+        path.is_none(),
+        "after 1: the cached_path row with the missing NAR file is gone"
+    );
+    assert_dependent_walked_with_one_unwalked_input_and_neither_derivation_known(&case).await;
+    case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
 async fn failed_build_with_missing_input_source_and_missing_storage_object_marks_derivation_as_not_walked()
  {
     let e1 = EvaluationId::now_v7();

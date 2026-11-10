@@ -147,13 +147,11 @@ async fn purge_zombie_cached_paths(
     }
 
     const ZOMBIE_DELETE_BATCH: usize = 8000;
-    let scanned_at = now();
     let mut purged = 0u64;
     for chunk in zombies.chunks(ZOMBIE_DELETE_BATCH) {
         match graph
-            .gc(GcRequest::Paths {
+            .gc(GcRequest::MissingNarFileCachedPathHashes {
                 hashes: chunk.to_vec(),
-                scanned_at,
             })
             .await
         {

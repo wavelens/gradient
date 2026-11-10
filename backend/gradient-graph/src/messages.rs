@@ -327,6 +327,10 @@ pub enum GcRequest {
         unused_since: NaiveDateTime,
         scanned_at: NaiveDateTime,
     },
+    /// The storage probe can already detect a missing NAR file, so live paths lose that row too.
+    MissingNarFileCachedPathHashes {
+        hashes: Vec<String>,
+    },
     Evaluations {
         ids: Vec<EvaluationId>,
     },
