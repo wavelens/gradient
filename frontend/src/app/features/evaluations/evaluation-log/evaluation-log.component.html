@@ -46,7 +46,7 @@
         role="button"
         [attr.aria-pressed]="selectedSection() === 'messages'"
       >
-        <span class="sidebar-item-label">Evaluation</span>
+        <span class="sidebar-item-label">Messages</span>
         @if (errorMessages().length > 0) {
           <gr-badge severity="danger">{{ errorMessages().length }}</gr-badge>
         }
@@ -213,7 +213,6 @@
         }
         @if (selectedSection() === 'messages') {
           <div class="messages-panel">
-            <div class="messages-panel-header">Evaluation Messages</div>
             <gr-load-state [loading]="messagesLoading()" [error]="messagesError()" [empty]="messages().length === 0" flat
                            errorTitle="Failed to load evaluation messages" (retry)="loadMessages()">
               <div slot="empty" class="no-messages">No messages</div>
@@ -222,8 +221,8 @@
                   <div class="message-item message-item--{{ msg.level.toLowerCase() }}">
                     <gr-icon [name]="msg.level === 'Error' ? 'error' : msg.level === 'Warning' ? 'warning' : 'info'" class="message-icon" />
                     <div class="message-body">
-                      @if (msg.source) {
-                        <span class="message-source">{{ msg.source }}</span>
+                      @if (msg.sourceLabel) {
+                        <span class="message-source">{{ msg.sourceLabel }}</span>
                       }
                       <pre class="message-text" [innerHTML]="msg.renderedHtml"></pre>
                     </div>
@@ -236,11 +235,9 @@
           @if (ev.status === 'Fetching') {
             <div class="evaluating-hint">
               <gr-icon name="cloud_download" class="evaluating-icon" size="xl" />
-              <span class="evaluating-title">Fetching</span>
+              <span class="evaluating-title">Fetching flake</span>
               @if (fetchRows().length) {
                 <gr-input-fetch-list [inputs]="fetchRows()" />
-              } @else {
-                <span class="evaluating-sub">Prefetching Nix flake&hellip;</span>
               }
             </div>
           } @else if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {

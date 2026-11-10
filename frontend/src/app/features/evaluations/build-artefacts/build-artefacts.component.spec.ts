@@ -52,7 +52,7 @@ describe('BuildArtefactsComponent', () => {
   it('explains how artefacts are produced when the build has none', () => {
     const { root } = render(() => of([]));
     expect(root.textContent).toContain('No artefacts available for this build.');
-    expect(root.textContent).toContain('hydra-build-products');
+    expect(root.querySelector('.empty-hint a')?.getAttribute('href')).toContain('guides/artefacts/');
   });
 
   it('heads the page with the package name instead of the build id', () => {

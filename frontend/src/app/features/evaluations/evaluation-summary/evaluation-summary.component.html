@@ -41,7 +41,7 @@
       @if (countTiles().length) {
         <gr-card-grid min="150px">
           @for (tile of countTiles(); track tile.label) {
-            <gr-stat-card [class.zero]="tile.isValueZero" [label]="tile.label" [value]="tile.value" />
+            <gr-stat-card [label]="tile.label" [value]="tile.value" />
           }
         </gr-card-grid>
       }

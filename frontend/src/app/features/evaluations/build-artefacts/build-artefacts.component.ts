@@ -21,6 +21,7 @@ import {
   RowListComponent,
 } from '@gradient/ui/ui';
 import { environment } from '@environments/environment';
+import { docsUrl } from '@core/docs';
 import { formatBytes, packageNameFromDerivationPath } from '@shared/text';
 import { BuildProduct } from '@core/models';
 
@@ -57,6 +58,7 @@ export class BuildArtefactsComponent implements OnInit {
   loadError = signal<unknown>(null);
   artefacts = signal<BuildProduct[]>([]);
   packageName = signal('');
+  protected readonly artefactsDocsUrl = docsUrl('guides/artefacts/');
   private downloadToken = signal<string | null>(null);
 
   projectName = '';

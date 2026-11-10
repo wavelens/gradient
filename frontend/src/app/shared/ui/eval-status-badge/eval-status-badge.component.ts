@@ -26,6 +26,7 @@ export class EvalStatusBadgeComponent {
   label = computed(() => {
     const s = this.status();
     if (this.phase() === 'waiting') return 'Waiting';
+    if (s === 'Fetching') return 'Fetching flake';
     if (s === 'EvaluatingFlake' || s === 'EvaluatingDerivation') return 'Evaluating';
     return s;
   });

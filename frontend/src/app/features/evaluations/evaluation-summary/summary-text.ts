@@ -6,7 +6,7 @@
 
 import type { BuildStatus, EvaluationFailureSummary, EvaluationStatus, FailedBuildSummary } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
-import { buildStatusLabel, getBuildCountTextPieces, isEvaluationNotStartedStatus, isRunningEvaluationStatus } from '@shared/evaluation';
+import { buildStatusLabel, getBuildCountTextPieces, isEvaluationNotStartedStatus, isRunningEvaluationStatus, removeNixErrorInternalsFromEvaluationMessage } from '@shared/evaluation';
 import { removeAnsiEscapeSequences } from '@shared/log';
 import { plural } from '@shared/text';
 
@@ -15,16 +15,15 @@ const BLOCKED_NAMED = 5;
 export interface SummaryCountTile {
   label: string;
   value: number;
-  isValueZero: boolean;
 }
 
 function countTile(value: number, singular: string, pluralLabel: string): SummaryCountTile {
-  return { label: value === 1 ? singular : pluralLabel, value, isValueZero: value === 0 };
+  return { label: value === 1 ? singular : pluralLabel, value };
 }
 
 export function getEvaluationSummaryCountTiles(summary: EvaluationFailureSummary, status: EvaluationStatus): SummaryCountTile[] {
-  if (isEvaluationNotStartedStatus(status)) return [];
-  const { failed, blocked, built, unfinished } = summary.packages;
+  const { total, failed, blocked, built, unfinished } = summary.packages;
+  if (isEvaluationNotStartedStatus(status) || total === 0) return [];
   return [
     countTile(failed, 'Failed package', 'Failed packages'),
     countTile(blocked, 'Blocked package', 'Blocked packages'),
@@ -74,5 +73,5 @@ export function blockedLine(failure: FailedBuildSummary): string {
 }
 
 export function firstLine(message: string): string {
-  return removeAnsiEscapeSequences(message).split('\n').map((line) => line.trim()).find((line) => line.length > 0) ?? '';
+  return removeNixErrorInternalsFromEvaluationMessage(removeAnsiEscapeSequences(message)).split('\n').map((line) => line.trim()).find((line) => line.length > 0) ?? '';
 }

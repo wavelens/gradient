@@ -19,16 +19,6 @@
   overflow: hidden;
 }
 
-.messages-panel-header {
-  padding: $spacing-sm $spacing-lg;
-  font-size: $font-size-sm;
-  font-weight: 600;
-  color: var(--gr-text-secondary);
-  background: color-mix(in srgb, var(--gr-text-primary) 3%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
-  flex-shrink: 0;
-}
-
 .messages-list {
   flex: 1;
   overflow-y: auto;

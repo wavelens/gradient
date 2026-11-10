@@ -21,6 +21,7 @@ export type DocLink =
   | 'exec/secrets/'
   | 'exec/secrets/#3-encrypt-repository-sops-files'
   | 'guides/actions/'
+  | 'guides/artefacts/'
   | 'guides/flake-updates/#1-track-the-inputs'
   | 'guides/flake-updates/#2-add-the-open-pr-action'
   | 'guides/gitea/#inbound-and-outbound'

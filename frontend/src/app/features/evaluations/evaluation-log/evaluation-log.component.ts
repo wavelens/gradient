@@ -72,7 +72,7 @@ import {
   SkeletonComponent,
 } from '@gradient/ui/ui';
 import { BuildProgressComponent, EvalStatusBadgeComponent, InputFetchListComponent, LiveStatusComponent, ThunkProgressComponent, WaitingNoticeComponent } from '@shared/ui';
-import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildPhase, buildStatusLabel, buildPhaseFinished, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildPhase, buildStatusLabel, buildPhaseFinished, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getDownloadLogMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, evaluationDuration, getEvaluationTriggerLabel, isPendingBuildStatus, isRunningEvaluationStatus, phaseProgress, thunkProgress, waitingAccessFrom, getEvaluationMessageSourceLabel, removeNixErrorInternalsFromEvaluationMessage, PHASE_COLOR, type StatusPhase } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { saveResponse } from '@shared/download';
 
@@ -127,7 +127,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return p?.kind === 'fetching' ? p.inputs : [];
   });
   builds = signal<BuildItem[]>([]);
-  messages = signal<(EvaluationMessageResponse & { renderedHtml: SafeHtml })[]>([]);
+  messages = signal<(EvaluationMessageResponse & { renderedHtml: SafeHtml; sourceLabel: string | null })[]>([]);
   selectedBuildId = signal<string | null>(null);
   selectedSection = signal<'messages' | null>(null);
   buildsOpen = signal(false);
@@ -388,7 +388,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.messages.set(
           msgs.map(m => ({
             ...m,
-            renderedHtml: this.sanitizer.bypassSecurityTrustHtml(ansiToHtml(m.message)),
+            renderedHtml: this.sanitizer.bypassSecurityTrustHtml(ansiToHtml(removeNixErrorInternalsFromEvaluationMessage(m.message))),
+            sourceLabel: getEvaluationMessageSourceLabel(m.source),
           }))
         );
         this.messagesError.set(null);

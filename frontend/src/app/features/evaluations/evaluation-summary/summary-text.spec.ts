@@ -60,9 +60,9 @@ describe('evaluation summary text', () => {
     expect(tiles(summary({ built: 5 }), 'Waiting')).toEqual([]);
   });
 
-  it('keeps zero tiles in place and marks them for dimming', () => {
-    const zero = getEvaluationSummaryCountTiles(summary({ built: 20 }), 'Completed').map((t) => t.isValueZero);
-    expect(zero).toEqual([true, true, false, true]);
+  it('shows no tiles until the evaluation found its packages', () => {
+    expect(getEvaluationSummaryCountTiles(summary({ total: 0 }), 'EvaluatingDerivation')).toEqual([]);
+    expect(getEvaluationSummaryCountTiles(summary({ total: 0 }, 1), 'Failed')).toEqual([]);
   });
 
   it('reports a clean evaluation', () => {
