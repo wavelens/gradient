@@ -275,7 +275,6 @@ pub(crate) fn auth_api(limits: &BodyLimits) -> OpenApiRouter<Arc<ServerState>> {
                     caches::subscriptions::post_approve_subscription_request,
                     caches::subscriptions::delete_subscription_request
                 ))
-                .routes(routes!(user::get))
                 .routes(routes!(user::get_search))
                 .routes(routes!(dashboard::tasks::get_tasks))
                 .routes(routes!(dashboard::stats::get_stats))
@@ -351,6 +350,7 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
     optionally_secured(
         enveloped(wildcard(
             OpenApiRouter::new()
+                .routes(routes!(user::get))
                 .routes(routes!(projects::management::get_project))
                 .routes(routes!(membership::endpoints::project::list_members))
                 .routes(routes!(teams::grants::get_project_teams))

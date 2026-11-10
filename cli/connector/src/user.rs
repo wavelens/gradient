@@ -28,7 +28,9 @@ impl UserApi<'_> {
             "user",
             true,
         )?;
-        http::decode(req.send().await?).await
+        http::decode::<Option<UserInfoResponse>>(req.send().await?)
+            .await?
+            .ok_or(ConnectorError::Unauthorized)
     }
 
     pub async fn update_settings(

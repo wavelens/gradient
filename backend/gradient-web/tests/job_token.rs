@@ -59,7 +59,7 @@ async fn a_job_token_is_refused_on_account_routes() {
     let server = make_test_server(with_job_token(mock_db()).into_connection());
 
     let res = server
-        .get("/api/v1/user")
+        .get("/api/v1/user/keys")
         .add_header("Authorization", TOKEN)
         .await;
 

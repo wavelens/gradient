@@ -12207,7 +12207,7 @@ paths:
       tags:
       - user
       summary: Get current user
-      description: Returns the id, username, display name, and email of the authenticated user.
+      description: Return the id, username, display name and email address of the signed-in user. Return `null` for a request with no session cookie and no API key. Return `401` for a rejected session or API key.
       operationId: getUser
       responses:
         '200':
@@ -12223,10 +12223,13 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/UserInfoResponse'
+                    oneOf:
+                    - $ref: '#/components/schemas/UserInfoResponse'
+                    - type: 'null'
         default:
           $ref: '#/components/responses/Error'
       security:
+      - {}
       - bearerAuth: []
     delete:
       tags:

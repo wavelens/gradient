@@ -74,8 +74,7 @@ export class AuthService {
         remember_me: rememberMe,
       })
       .pipe(
-        switchMap(() => this.api.get<UserInfoResponse>('user')),
-        tap((user) => this.userSignal.set(user)),
+        switchMap(() => this.fetchUserOrFailWhenSessionCookieMissing()),
         finalize(() => this.loadingSignal.set(false))
       );
   }
@@ -134,8 +133,8 @@ export class AuthService {
   }
 
   stillSignedIn(): Observable<boolean> {
-    this.sessionCheck ??= this.api.get<UserInfoResponse>('user', asSessionProbe()).pipe(
-      map(() => true),
+    this.sessionCheck ??= this.api.get<UserInfoResponse | null>('user', asSessionProbe()).pipe(
+      map((user) => user !== null),
       catchError((error: unknown) => of(error instanceof ApiError && error.unreachable)),
       finalize(() => (this.sessionCheck = undefined)),
       shareReplay(1),
@@ -174,13 +173,13 @@ export class AuthService {
   /// outage into a login screen; the state stays unknown until a real answer
   /// comes back.
   private probe(): Observable<boolean> {
-    return this.api.get<UserInfoResponse>('user', asSessionProbe()).pipe(
+    return this.api.get<UserInfoResponse | null>('user', asSessionProbe()).pipe(
       tap((user) => {
         this.userSignal.set(user);
         this.unreachableSignal.set(false);
         this.tokenRejectedOnStartup = false;
       }),
-      map(() => true),
+      map((user) => user !== null),
       catchError((error: unknown) => {
         const unreachable = error instanceof ApiError && error.unreachable;
         this.unreachableSignal.set(unreachable);
@@ -208,8 +207,18 @@ export class AuthService {
    * The cookie is already set by the backend redirect; just load the user.
    */
   loginWithCookie(): Observable<UserInfoResponse> {
-    return this.api.get<UserInfoResponse>('user').pipe(
-      tap((user) => this.userSignal.set(user))
+    return this.fetchUserOrFailWhenSessionCookieMissing();
+  }
+
+  private fetchUserOrFailWhenSessionCookieMissing(): Observable<UserInfoResponse> {
+    return this.api.get<UserInfoResponse | null>('user').pipe(
+      map((user) => {
+        if (user === null) {
+          throw new ApiError('Sign-in succeeded, but the browser did not store the session cookie. Allow cookies for this site, then sign in again.', 401);
+        }
+        return user;
+      }),
+      tap((user) => this.userSignal.set(user)),
     );
   }
 

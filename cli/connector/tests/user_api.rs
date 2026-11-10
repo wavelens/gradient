@@ -31,6 +31,26 @@ async fn get_user_returns_info() {
 }
 
 #[tokio::test]
+async fn get_user_with_null_message_for_missing_credentials_returns_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::Value::Null)))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    assert!(matches!(
+        client.user().get().await,
+        Err(connector::ConnectorError::Unauthorized)
+    ));
+}
+
+#[tokio::test]
 async fn list_keys_returns_vec() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

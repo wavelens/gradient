@@ -6,7 +6,9 @@
 
 use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
 use crate::audit::Audit;
-use crate::authorization::{can_disconnect, generate_api_key, hash_api_key, session_claims};
+use crate::authorization::{
+    MaybeUser, can_disconnect, generate_api_key, hash_api_key, session_claims,
+};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::json_body::JsonBody;
@@ -365,26 +367,26 @@ pub async fn get_search(
     operation_id = "getUser",
     tag = "user",
     summary = "Get current user",
-    description = "Returns the id, username, display name, and email of the authenticated user.",
-    responses((status = OK, description = "User info", body = UserInfoResponse), WebError)
+    description = "Return the id, username, display name and email address of the signed-in user. Return `null` for a request with no session cookie and no API key. Return `401` for a rejected session or API key.",
+    responses((status = OK, description = "User info", body = Option<UserInfoResponse>), WebError)
 )]
 pub async fn get(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-) -> WebResult<Json<BaseResponse<UserInfoResponse>>> {
+    Extension(MaybeUser(user)): Extension<MaybeUser>,
+) -> WebResult<Json<BaseResponse<Option<UserInfoResponse>>>> {
+    let Some(user) = user else {
+        return Ok(ok_json(None));
+    };
     let can_create_cache = state
         .extensions
         .cache_creation_limit
         .allows_another_cache(&user)
         .await?;
-    let user_info = UserInfoResponse::new(&user, can_create_cache);
 
-    let res = BaseResponse {
-        error: false,
-        message: user_info,
-    };
-
-    Ok(Json(res))
+    Ok(ok_json(Some(UserInfoResponse::new(
+        &user,
+        can_create_cache,
+    ))))
 }
 
 #[utoipa::path(

@@ -32,16 +32,26 @@ fn assert_envelope(body: &Value, expected_message: &str) {
 #[tokio::test(flavor = "multi_thread")]
 async fn missing_auth_header_returns_403_envelope() {
     let s = server();
-    let res = s.get("/api/v1/user").await;
+    let res = s.get("/api/v1/user/search").await;
     res.assert_status_forbidden();
     assert_envelope(&res.json::<Value>(), "Authorization header not found");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn get_user_without_credentials_returns_200_envelope() {
+    let res = server().get("/api/v1/user").await;
+    res.assert_status_ok();
+    assert_eq!(
+        res.json::<Value>(),
+        serde_json::json!({ "error": false, "message": null })
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn malformed_bearer_returns_403_envelope() {
     let s = server();
     let res = s
-        .get("/api/v1/user")
+        .get("/api/v1/user/search")
         .add_header("authorization", "NotBearer xyz")
         .await;
     res.assert_status_forbidden();

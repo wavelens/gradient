@@ -100,7 +100,9 @@ describe('AuthService session probe', () => {
   });
 
   it('sends a visitor without a session to sign in without claiming it expired', () => {
-    boot(() => httpMock.expectOne(userUrl).flush({ error: true, message: 'no' }, { status: 403, statusText: 'Forbidden' }));
+    boot(() => httpMock.expectOne(userUrl).flush({ error: false, message: null }));
+    expect(service.isAuthenticated()).toBe(false);
+    expect(service.serverUnreachable()).toBe(false);
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     service.sessionLost('/settings/keys');
     httpMock.expectNone(`${environment.apiUrl}/auth/logout`);
@@ -116,13 +118,31 @@ describe('AuthService session probe', () => {
   });
 
   it('marks the sign-in link as expired only when the server rejected a token on page load', () => {
-    const signInFor = (status: number) => {
+    const signInFor = (answer: () => void) => {
       TestBed.resetTestingModule();
-      boot(() => httpMock.expectOne(userUrl).flush({ error: true, message: 'no' }, { status, statusText: 'No' }));
+      boot(answer);
       return TestBed.inject(Router).serializeUrl(service.getSignInPageUrl('/teams'));
     };
-    expect(signInFor(401)).toBe('/account/login?next=%2Fteams&reason=expired');
-    expect(signInFor(403)).toBe('/account/login?next=%2Fteams');
+    const rejected = () =>
+      httpMock.expectOne(userUrl).flush({ error: true, message: 'no' }, { status: 401, statusText: 'No' });
+    const anonymous = () => httpMock.expectOne(userUrl).flush({ error: false, message: null });
+    expect(signInFor(rejected)).toBe('/account/login?next=%2Fteams&reason=expired');
+    expect(signInFor(anonymous)).toBe('/account/login?next=%2Fteams');
+  });
+
+  it('reports a lost session when the server no longer finds a session cookie', async () => {
+    boot(() => httpMock.expectOne(userUrl).flush({ error: false, message: user }));
+    const check = firstValueFrom(service.stillSignedIn());
+    httpMock.expectOne(userUrl).flush({ error: false, message: null });
+    expect(await check).toBe(false);
+  });
+
+  it('fails a sign-in whose session cookie the browser dropped', async () => {
+    boot(() => httpMock.expectOne(userUrl).flush({ error: false, message: null }));
+    const signedIn = firstValueFrom(service.loginWithCookie());
+    httpMock.expectOne(userUrl).flush({ error: false, message: null });
+    await expect(signedIn).rejects.toThrow(/session cookie/);
+    expect(service.isAuthenticated()).toBe(false);
   });
 
   it('redirects once while the sign-in page is already on its way', () => {
