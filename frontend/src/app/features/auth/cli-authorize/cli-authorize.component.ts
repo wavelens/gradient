@@ -132,6 +132,7 @@ export class CliAuthorizeComponent implements OnInit {
     this.status.set('pending');
     this.errorMessage.set(null);
     this.form.reset({ userCode: '' });
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { code: null }, queryParamsHandling: 'merge', replaceUrl: true });
   }
 
   authorize(): void {

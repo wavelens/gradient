@@ -107,10 +107,12 @@ describe('CliAuthorizeComponent', () => {
 
   it('returns to an empty code form for another code', () => {
     const { fixture } = setup('ABCD-EF23');
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     const root = fixture.nativeElement as HTMLElement;
     Array.from(root.querySelectorAll('button')).find((b) => b.textContent?.includes('Enter another code'))!.click();
     fixture.detectChanges();
     expect(fixture.componentInstance.info()).toBeNull();
     expect(root.querySelector<HTMLInputElement>('#userCode')?.value).toBe('');
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { code: null }, replaceUrl: true }));
   });
 });
