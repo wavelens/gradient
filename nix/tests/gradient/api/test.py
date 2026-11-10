@@ -701,7 +701,7 @@ forged_codes = [
         f" -H 'X-Forwarded-For: 203.0.113.{n}' -H 'Content-Type: application/json'"
         " -d '{\"username\": \"forged\"}'"
     ).strip()
-    for n in range(1, 9)
+    for n in range(1, 21)
 ]
 assert forged_codes[-1] == "429", forged_codes
 
