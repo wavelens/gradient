@@ -272,6 +272,10 @@ pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
     let mut products = Vec::new();
     for line in content.lines() {
         if let Some((file_type, subtype, path)) = parse_hydra_product_line(line) {
+            if !is_build_product_path_inside_build_output_store_path(store_path, &path).await {
+                warn!(output = %store_path, product = %path, "Ignore a build artifact outside the output.");
+                continue;
+            }
             let name = std::path::Path::new(&path)
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -288,6 +292,25 @@ pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
         }
     }
     products
+}
+
+async fn is_build_product_path_inside_build_output_store_path(output: &str, path: &str) -> bool {
+    let product = std::path::Path::new(path);
+    let lexically_inside = product.starts_with(output)
+        && !product
+            .components()
+            .any(|c| c == std::path::Component::ParentDir);
+    if !lexically_inside {
+        return false;
+    }
+    match (
+        tokio::fs::canonicalize(output).await,
+        tokio::fs::canonicalize(product).await,
+    ) {
+        (Ok(output), Ok(product)) => product.starts_with(output),
+        (_, Err(e)) => e.kind() == std::io::ErrorKind::NotFound,
+        (Err(_), Ok(_)) => false,
+    }
 }
 
 pub async fn build_derivation(
@@ -765,5 +788,31 @@ mod tests {
         assert_eq!(products.len(), 1);
         assert_eq!(products[0].name, "image.iso");
         assert_eq!(products[0].size, None);
+    }
+
+    #[tokio::test]
+    async fn load_products_skips_paths_outside_the_output() {
+        let root = tempfile::tempdir().unwrap();
+        let output = root.path().join("output");
+        let support = output.join("nix-support");
+        tokio::fs::create_dir_all(&support).await.unwrap();
+        let secret = root.path().join("secret");
+        tokio::fs::write(&secret, b"hidden").await.unwrap();
+        tokio::fs::symlink(&secret, output.join("link"))
+            .await
+            .unwrap();
+        let lines = [
+            format!("file doc {}", secret.display()),
+            format!("file doc {}/../secret", output.display()),
+            format!("file doc {}", output.join("link").display()),
+        ]
+        .join("\n");
+        tokio::fs::write(support.join("hydra-build-products"), lines)
+            .await
+            .unwrap();
+
+        let products = load_products(output.to_str().unwrap()).await;
+
+        assert!(products.is_empty(), "{products:?}");
     }
 }
