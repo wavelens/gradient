@@ -12,7 +12,7 @@
   >
     <div slot="actions">
       <a grButton label="Packages" icon="database" severity="secondary" [routerLink]="links.cachePage(cacheName, 'nars')"></a>
-      @if (c.can_edit) {
+      @if (editAccess().canEdit) {
         <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.cachePage(cacheName, 'settings')"></a>
       }
       @if (authService.isAuthenticated()) {
