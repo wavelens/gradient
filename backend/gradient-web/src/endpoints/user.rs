@@ -9,7 +9,7 @@ use crate::audit::{Audit, changed_fields};
 use crate::authorization::{
     MaybeUser, can_disconnect, generate_api_key, hash_api_key, session_claims,
 };
-use crate::error::{WebError, WebResult};
+use crate::error::{WebError, WebResult, unique_violation};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::json_body::JsonBody;
 use crate::lookup::require;
@@ -30,6 +30,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
 use chrono::Duration;
+use email_address::EmailAddress;
 use gradient_core::ServerState;
 use gradient_types::consts::*;
 use gradient_types::input::validate_username;
@@ -348,7 +349,7 @@ impl From<MUser> for UserSearchResult {
     operation_id = "searchUsers",
     tag = "user",
     summary = "Search users by username",
-    description = "Returns up to 10 users whose username contains the given query string. Used for autocomplete in member and ownership dialogs.",
+    description = "The endpoint can return up to 10 users with usernames that contain the specified query string. No users match an empty query. The member and ownership dialogs use this endpoint for autocomplete.",
     params(("q" = String, Query)),
     responses((status = OK, description = "Matching users", body = Vec<UserSearchResult>), WebError)
 )]
@@ -356,9 +357,12 @@ pub async fn get_search(
     state: State<Arc<ServerState>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<Vec<UserSearchResult>>>> {
-    let q = params.get("q").cloned().unwrap_or_default();
+    let q = params.get("q").map(|q| q.trim()).unwrap_or_default();
+    if q.is_empty() {
+        return Ok(ok_json(Vec::new()));
+    }
 
-    let users = gradient_db::users::search_by_username(&state.web_db, &q, 10).await?;
+    let users = gradient_db::users::search_by_username(&state.web_db, q, 10).await?;
 
     let results = users.into_iter().map(UserSearchResult::from).collect();
 
@@ -428,7 +432,7 @@ pub async fn put_seen_version(
     operation_id = "deleteUser",
     tag = "user",
     summary = "Delete current user",
-    description = "Permanently deletes the authenticated user and all associated data.\nRequires re-authentication: password-auth users must supply their\ncurrent password in `password`; users without a password must echo\ntheir username in `confirm_username`.",
+    description = "Completely delete the authenticated user and all related data.\nThis request requires re-authentication. Users with password authentication enter their current\npassword in `password`. Users without a password enter\ntheir username as-is in `confirm_username`. Managed users (created in the NixOS configuration) answer `403`.",
     request_body = DeleteUserRequest,
     responses((status = OK, description = "User deleted", body = String, content_type = "application/json"), WebError)
 )]
@@ -438,6 +442,9 @@ pub async fn delete(
     Extension(user): Extension<MUser>,
     Json(body): Json<DeleteUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    if user.managed {
+        return Err(SharedRefusal::StateManaged(Change::Delete, Resource::User).into());
+    }
     if let Some(ref hashed) = user.password {
         let provided = body
             .password
@@ -632,6 +639,9 @@ pub async fn post_keys(
     if body.expires_in_days == Some(0) {
         return Err(UserRefusal::ApiKeyExpiryShorterThanOneDay.into());
     }
+    if body.name.trim().is_empty() {
+        return Err(SharedRefusal::EmptyField("name").into());
+    }
 
     let existing_api_key =
         gradient_db::api_keys::by_owner_and_name(&state.web_db, user.id, &body.name).await?;
@@ -731,6 +741,9 @@ pub async fn patch_key(
     let mut active: AApi = api_key.into_active_model();
 
     if let Some(name) = body.name {
+        if name.trim().is_empty() {
+            return Err(SharedRefusal::EmptyField("name").into());
+        }
         if name != previous_name {
             let clash =
                 gradient_db::api_keys::other_with_name(&state.web_db, user.id, &name, api_id)
@@ -984,7 +997,7 @@ pub async fn get_settings(
     operation_id = "patchUserSettings",
     tag = "user",
     summary = "Update user settings",
-    description = "Updates one or more user profile fields. Only fields that are present in the\nrequest body are changed. Managed users (created via NixOS config) cannot be\nmodified through the API.",
+    description = "Update one or more fields of a user profile. Only fields present in the request body change. Managed users (accounts declared in NixOS configuration) can't change through the API. A new `email` must be a valid address. No other account can have that address. The comparison is case-insensitive. The changed address can become unverified. The server can send a new verification email if email verification is enabled. Sign-in again can proceed only with a verified address.",
     request_body = PatchUserSettingsRequest,
     responses((status = OK, description = "Settings updated", body = String, content_type = "application/json"), WebError)
 )]
@@ -1004,6 +1017,14 @@ pub async fn patch_settings(
     }
 
     let user_id = user.id;
+    let previous_email_address = user.email.clone();
+    let verification_email_recipient_name = user.name.clone();
+    let requires_verification = state
+        .config
+        .email
+        .as_ref()
+        .is_some_and(|e| e.require_verification);
+    let mut new_email_verification_token = None;
     let fields = changed_fields([
         ("username", body.username.is_some()),
         ("name", body.name.is_some()),
@@ -1030,10 +1051,24 @@ pub async fn patch_settings(
     }
 
     if let Some(email) = body.email {
-        let existing_user = gradient_db::users::by_email(&state.web_db, &email).await?;
+        if !EmailAddress::is_valid(&email) {
+            return Err(WebError::invalid_email());
+        }
+
+        let existing_user =
+            gradient_db::users::by_email_ignoring_case(&state.web_db, &email).await?;
 
         if existing_user.is_some_and(|other| other.id != user_id) {
             return Err(WebError::already_exists(Resource::Email));
+        }
+
+        if requires_verification && !email.eq_ignore_ascii_case(&previous_email_address) {
+            let token = gradient_notify::generate_verification_token();
+            auser.email_verified = Set(false);
+            auser.email_verification_token = Set(Some(token.clone()));
+            auser.email_verification_token_expires =
+                Set(Some(gradient_types::now() + Duration::hours(24)));
+            new_email_verification_token = Some((email.clone(), token));
         }
 
         auser.email = Set(email);
@@ -1041,7 +1076,27 @@ pub async fn patch_settings(
 
     gradient_db::rows::update::<EUser, _>(&state.web_db, auser)
         .await
-        .map_err(|e| WebError::from_db_err(e, Resource::Username))?;
+        .map_err(|e| match unique_violation(&e) {
+            Some(constraint) if constraint.contains("email") => {
+                WebError::already_exists(Resource::Email)
+            }
+            Some(_) => WebError::already_exists(Resource::Username),
+            None => e.into(),
+        })?;
+
+    if let Some((email, token)) = new_email_verification_token
+        && let Err(e) = state
+            .email
+            .send_verification_email(
+                &email,
+                &verification_email_recipient_name,
+                &token,
+                &state.config.server.serve_url,
+            )
+            .await
+    {
+        tracing::warn!(error = %e, "Failed to send verification email");
+    }
     audit
         .write(
             Action::UserUpdateAccountSettings,
