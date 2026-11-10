@@ -15,7 +15,10 @@ use gradient_db::evaluations::failed_attributes::failed_attributes;
 use gradient_db::lookup::by_id;
 use gradient_git_host::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
-use gradient_types::{BuildJobId, CEntryPoint, EBuildJob, EEntryPoint, EEvaluation, EvaluationId};
+use gradient_types::{
+    BuildJobId, CEntryPoint, EBuildJob, EDerivationBuild, EEntryPoint, EEvaluation, EExecJob,
+    EvaluationId, ExecJobId,
+};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value as JsonValue;
 use tracing::warn;
@@ -90,6 +93,19 @@ pub(super) async fn build_ci_reports_from_payload(
     }
 
     let (evaluation, build_job) = load_subject(ctx, payload).await?;
+    let kind = reporting::check_context_kind_for_event(event);
+    let status = match status {
+        CiStatus::Pending | CiStatus::Running => load_current_ci_status_from_database(
+            ctx,
+            kind,
+            &evaluation,
+            build_job.as_ref(),
+            payload,
+        )
+        .await?
+        .unwrap_or(status),
+        status => status,
+    };
     let EvaluationRows { task, commit } = load_evaluation_rows(ctx, &evaluation).await?;
 
     // Reports must target the task's base repository, not `evaluation.repository`. Fork PR
@@ -114,7 +130,7 @@ pub(super) async fn build_ci_reports_from_payload(
     let description = s("description");
     let payload_check_id = payload.get("check_run_id").and_then(|v| v.as_i64());
 
-    let mut reports = match reporting::check_context_kind_for_event(event) {
+    let mut reports = match kind {
         Some(reporting::CheckContextKind::Approval) => vec![target.report(
             reporting::approval_check_context(&task.name),
             status,
@@ -207,6 +223,42 @@ async fn load_subject(
         .context("load evaluation")?
         .ok_or(MissingRow::Evaluation { id: evaluation_id })?;
     Ok((evaluation, None))
+}
+
+async fn load_current_ci_status_from_database(
+    ctx: &CiContext,
+    kind: Option<reporting::CheckContextKind>,
+    evaluation: &gradient_types::MEvaluation,
+    build_job: Option<&gradient_types::MBuildJob>,
+    payload: &JsonValue,
+) -> Result<Option<CiStatus>> {
+    let db = &ctx.db.worker_db;
+    Ok(match kind {
+        Some(reporting::CheckContextKind::Build) => match build_job {
+            Some(job) => by_id::<EDerivationBuild, _>(db, job.derivation_build)
+                .await
+                .context("load derivation_build")?
+                .and_then(|build| reporting::ci_status_for_build(&build.status)),
+            None => None,
+        },
+        Some(reporting::CheckContextKind::ExecJob) => {
+            let job = payload
+                .get("job")
+                .and_then(|v| v.as_str())
+                .and_then(|id| id.parse::<ExecJobId>().ok());
+            match job {
+                Some(job) => by_id::<EExecJob, _>(db, job)
+                    .await
+                    .context("load exec_job")?
+                    .and_then(|job| reporting::ci_status_for_exec_job(job.status)),
+                None => None,
+            }
+        }
+        Some(reporting::CheckContextKind::Evaluation) | None => {
+            reporting::ci_status_for_evaluation(&evaluation.status)
+        }
+        Some(reporting::CheckContextKind::Approval) => None,
+    })
 }
 
 async fn build_job_entry_point(

@@ -7,6 +7,7 @@
 use crate::CiStatus;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
+use gradient_entity::exec_job::ExecJobStatus;
 use gradient_types::events::names;
 
 pub fn eval_kind_str(kind: EvaluationKind) -> &'static str {
@@ -103,6 +104,16 @@ pub fn ci_status_for_evaluation(status: &EvaluationStatus) -> Option<CiStatus> {
         | EvaluationStatus::EvaluatingDerivation
         | EvaluationStatus::Building
         | EvaluationStatus::Waiting => None,
+    }
+}
+
+pub fn ci_status_for_exec_job(status: ExecJobStatus) -> Option<CiStatus> {
+    match status {
+        ExecJobStatus::Running => Some(CiStatus::Running),
+        ExecJobStatus::Completed => Some(CiStatus::Success),
+        ExecJobStatus::Failed => Some(CiStatus::Failure),
+        ExecJobStatus::Aborted => Some(CiStatus::Error),
+        ExecJobStatus::Created | ExecJobStatus::Queued | ExecJobStatus::Starting => None,
     }
 }
 
@@ -229,6 +240,27 @@ mod tests {
         for s in [BuildStatus::Created, BuildStatus::Queued] {
             assert_eq!(ci_status_for_build(&s), None);
         }
+    }
+
+    #[test]
+    fn exec_job_status_maps_running_and_final_states() {
+        assert_eq!(
+            ci_status_for_exec_job(ExecJobStatus::Completed),
+            Some(CiStatus::Success)
+        );
+        assert_eq!(
+            ci_status_for_exec_job(ExecJobStatus::Failed),
+            Some(CiStatus::Failure)
+        );
+        assert_eq!(
+            ci_status_for_exec_job(ExecJobStatus::Aborted),
+            Some(CiStatus::Error)
+        );
+        assert_eq!(
+            ci_status_for_exec_job(ExecJobStatus::Running),
+            Some(CiStatus::Running)
+        );
+        assert_eq!(ci_status_for_exec_job(ExecJobStatus::Queued), None);
     }
 
     #[test]

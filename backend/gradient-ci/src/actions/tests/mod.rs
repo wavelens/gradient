@@ -552,6 +552,56 @@ fn exec_events_report_one_status_per_entry_point() {
 }
 
 #[test]
+fn a_late_start_event_reports_the_result_of_the_finished_exec_job() {
+    use gradient_entity::exec_job::ExecJobStatus;
+    use gradient_types::{EvaluationId, ExecJobId, MCommit, MEvaluation, MExecJob, MTask, TaskId};
+
+    run(async {
+        let evaluation_id = EvaluationId::now_v7();
+        let task = TaskId::now_v7();
+        let job = ExecJobId::now_v7();
+        let db = mock_db()
+            .append_query_results([vec![MEvaluation {
+                id: evaluation_id,
+                task: Some(task),
+                ..Default::default()
+            }]])
+            .append_query_results([vec![MExecJob {
+                id: job,
+                status: ExecJobStatus::Completed,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![MTask {
+                id: task,
+                name: "master".into(),
+                repository: "https://git.example.com/acme/infra".into(),
+                ..Default::default()
+            }]])
+            .append_query_results([vec![MCommit {
+                hash: vec![0xab, 0xcd],
+                ..Default::default()
+            }]])
+            .append_query_results([Vec::<gradient_types::MProject>::new()]);
+        let ctx = make_ctx_with(db);
+        let payload = json!({
+            "job": job.to_string(),
+            "evaluation": evaluation_id.to_string(),
+            "entry_point_name": "apps.x86_64-linux.update",
+        });
+
+        let reports =
+            build_ci_reports_from_payload(&ctx, "exec_job.started", &payload, CiStatus::Running)
+                .await
+                .unwrap();
+
+        let [report] = reports.as_slice() else {
+            panic!("{reports:?}");
+        };
+        assert_eq!(report.status, CiStatus::Success);
+    });
+}
+
+#[test]
 fn a_failed_connectivity_test_lands_in_the_delivery_history() {
     use gradient_fixtures::mock::raw_statements;
 
