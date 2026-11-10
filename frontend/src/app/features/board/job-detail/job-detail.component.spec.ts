@@ -440,6 +440,15 @@ describe('BoardJobDetailComponent - pending route', () => {
     expect(el.textContent).not.toContain('Not found or access denied');
   });
 
+  it('names a malformed pending id the server rejects as not found, without a retry', () => {
+    const el = setup({
+      getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
+      getLatestAssignmentForEvaluation: () => throwError(() => ({ status: 400, message: 'Invalid URL: UUID parsing failed' })),
+    }, 'not-a-job-id', true).nativeElement as HTMLElement;
+    expect(el.querySelector('h1')?.textContent).toBe('Job not found');
+    expect(el.textContent).not.toContain('Try Again');
+  });
+
   it('opens the latest assignment when a worker has already taken the job', () => {
     const getLatestAssignmentForEvaluation = vi.fn(() => of({ dispatched_job_id: 'job-7', evaluation_id: 'e1', project_name: 'sandbox' }));
     const fixture = setup({ getPendingJobs: () => of({ jobs: [], other_pending: 0 }), getLatestAssignmentForEvaluation }, 'b9', true);

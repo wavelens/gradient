@@ -749,7 +749,10 @@ export class BoardJobDetailComponent implements OnInit {
           return EMPTY;
         }
         return this.board.getLatestAssignmentForEvaluation(id).pipe(
-          catchError((error: unknown) => (error as { status?: number } | null)?.status === 404 ? of(null) : throwError(() => error)),
+          catchError((error: unknown) => {
+            const status = (error as { status?: number } | null)?.status;
+            return status === 400 || status === 404 ? of(null) : throwError(() => error);
+          }),
           tap((latest) => {
             if (this.jobId !== id) return;
             if (latest?.dispatched_job_id) {
