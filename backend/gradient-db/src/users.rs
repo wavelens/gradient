@@ -232,4 +232,86 @@ mod tests {
         assert!(second.is_err(), "the index refuses a case variant");
         db.finish().await;
     }
+
+    #[tokio::test]
+    async fn username_index_migration_renames_case_duplicates() {
+        use sea_orm_migration::MigratorTrait;
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let connection = db.connection();
+        let migrations = gradient_migration::Migrator::migrations();
+        let case_insensitive_username_unique_index_migration_position = migrations
+            .iter()
+            .position(|m| m.name() == "m20261124_000000_case_insensitive_username_unique_index")
+            .expect("register the migration for the index on user names");
+        let migration_count_to_revert_before_case_insensitive_username_unique_index =
+            u32::try_from(
+                migrations.len() - case_insensitive_username_unique_index_migration_position,
+            )
+            .expect("the count fits in u32");
+        gradient_migration::Migrator::down(
+            &connection,
+            Some(migration_count_to_revert_before_case_insensitive_username_unique_index),
+        )
+        .await
+        .expect("the migrations after the case-sensitive username index revert");
+        let start = chrono::DateTime::UNIX_EPOCH.naive_utc();
+        let account = |username: &str, minute: i64, managed: bool| MUser {
+            id: UserId::now_v7(),
+            username: username.into(),
+            name: username.into(),
+            email: format!("{username}@example.com"),
+            active: true,
+            managed,
+            created_at: start + chrono::Duration::minutes(minute),
+            ..Default::default()
+        };
+        let accounts = [
+            account("alice", 0, false),
+            account("Alice", 1, false),
+            account("ALICE", 2, false),
+            account("bob", 0, false),
+            account("Bob", 1, true),
+            account("carol", 0, false),
+            account("CAROL-2", 0, false),
+            account("Carol", 1, false),
+        ];
+        for user in &accounts {
+            crate::rows::insert::<EUser, _>(&connection, user.clone())
+                .await
+                .expect("case variants are allowed before the migration");
+        }
+
+        gradient_migration::Migrator::up(&connection, None)
+            .await
+            .expect("the migration runs on case duplicates");
+
+        let mut renamed = Vec::new();
+        for user in &accounts {
+            let row = db
+                .find::<EUser>(user.id)
+                .await
+                .expect("the account remains");
+            renamed.push((user.username.clone(), row.username));
+        }
+        let pairs = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+            list.iter()
+                .map(|(old, new)| (old.to_string(), new.to_string()))
+                .collect()
+        };
+        assert_eq!(
+            renamed,
+            pairs(&[
+                ("alice", "alice"),
+                ("Alice", "Alice-2"),
+                ("ALICE", "ALICE-3"),
+                ("bob", "bob-2"),
+                ("Bob", "Bob"),
+                ("carol", "carol"),
+                ("CAROL-2", "CAROL-2"),
+                ("Carol", "Carol-3"),
+            ])
+        );
+        db.finish().await;
+    }
 }
