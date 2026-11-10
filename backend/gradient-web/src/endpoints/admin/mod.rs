@@ -10,7 +10,6 @@ pub mod maintenance;
 mod refusal;
 pub mod state;
 pub mod tasks;
-pub mod workers;
 
 use crate::endpoints::webhooks::{self, WebhookMount};
 use crate::error::{WebResult, require_superuser};

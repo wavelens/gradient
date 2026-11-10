@@ -15,10 +15,8 @@ use gradient_ci::{APPROVAL_ACTION_ID, find_approval_gated_eval, unpark_approval}
 use gradient_db::lookup::by_id;
 use gradient_db::{DbContext, WebDb};
 use gradient_git_host::{ParsedPullRequestEvent, ParsedPullRequestReviewEvent};
-use gradient_scheduler::Scheduler;
 use gradient_types::events::evaluation;
 use gradient_types::*;
-use std::sync::Arc;
 use tracing::{info, warn};
 
 #[derive(Debug, Clone, Default)]
@@ -40,11 +38,7 @@ impl From<&ParsedPullRequestEvent> for PullRequestApprovalContext {
     }
 }
 
-pub(super) async fn handle_github_check_run(
-    ci: &CiContext,
-    _scheduler: &Arc<Scheduler>,
-    body: &[u8],
-) {
+pub(super) async fn handle_github_check_run(ci: &CiContext, body: &[u8]) {
     let payload: GithubCheckRunRequestedAction = match serde_json::from_slice(body) {
         Ok(p) => p,
         Err(e) => {

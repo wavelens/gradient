@@ -563,10 +563,7 @@ pub async fn post_oauth_authorize(state: State<Arc<ServerState>>) -> WebResult<R
     description = "Redirects the browser to the OIDC provider's authorization endpoint (HTTP 302) using\nPKCE (S256), and sets a short-lived `oidc_csrf` cookie carrying the signed `state`,\n`nonce`, and PKCE verifier that must be returned on the callback.",
     responses((status = FOUND, description = "Redirect to OIDC provider"), WebError)
 )]
-pub async fn get_oidc_login(
-    state: State<Arc<ServerState>>,
-    Query(_query): Query<HashMap<String, String>>,
-) -> WebResult<Response> {
+pub async fn get_oidc_login(state: State<Arc<ServerState>>) -> WebResult<Response> {
     if state.config.oidc.is_none() {
         return Err(WebError::oauth_disabled());
     }

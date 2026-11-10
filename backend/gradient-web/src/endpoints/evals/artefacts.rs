@@ -18,8 +18,6 @@ use std::sync::Arc;
 
 use super::EvalAccessContext;
 
-const IS_IN_CHUNK: usize = 10_000;
-
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 pub struct ArtefactTree {
     pub evaluation: EvaluationId,
@@ -128,30 +126,23 @@ pub async fn get_artefacts(
         .into_iter()
         .collect();
 
-    let mut build_job_by_drv: HashMap<DerivationId, BuildJobId> = HashMap::new();
-    for chunk in drv_ids.chunks(IS_IN_CHUNK) {
-        for row in gradient_db::build_jobs::of_derivations_in_evaluation(
+    let build_job_by_drv: HashMap<DerivationId, BuildJobId> =
+        gradient_db::build_jobs::of_derivations_in_evaluation(
             &state.web_db,
             evaluation.id,
-            chunk,
+            &drv_ids,
         )
         .await?
-        {
-            build_job_by_drv.insert(row.derivation, row.id);
-        }
-    }
+        .into_iter()
+        .map(|row| (row.derivation, row.id))
+        .collect();
 
     let derivations =
         gradient_db::graph::reachability::derivations_by_id(&state.web_db, &drv_ids).await?;
 
     let mut outputs_by_drv: HashMap<DerivationId, Vec<MDerivationOutput>> = HashMap::new();
-    if !drv_ids.is_empty() {
-        for chunk in drv_ids.chunks(IS_IN_CHUNK) {
-            for row in gradient_db::derivation_outputs::of_derivations(&state.web_db, chunk).await?
-            {
-                outputs_by_drv.entry(row.derivation).or_default().push(row);
-            }
-        }
+    for row in gradient_db::derivation_outputs::of_derivations(&state.web_db, &drv_ids).await? {
+        outputs_by_drv.entry(row.derivation).or_default().push(row);
     }
 
     let output_ids: Vec<DerivationOutputId> = outputs_by_drv
@@ -160,15 +151,11 @@ pub async fn get_artefacts(
         .collect();
 
     let mut products_by_output: HashMap<DerivationOutputId, Vec<MBuildProduct>> = HashMap::new();
-    if !output_ids.is_empty() {
-        for chunk in output_ids.chunks(IS_IN_CHUNK) {
-            for row in gradient_db::build_products::of_outputs(&state.web_db, chunk).await? {
-                products_by_output
-                    .entry(row.derivation_output)
-                    .or_default()
-                    .push(row);
-            }
-        }
+    for row in gradient_db::build_products::of_outputs(&state.web_db, &output_ids).await? {
+        products_by_output
+            .entry(row.derivation_output)
+            .or_default()
+            .push(row);
     }
 
     let mut tree: Vec<EntryPointArtefacts> = entry_points

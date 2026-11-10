@@ -176,10 +176,6 @@ pub async fn get_evaluation(
     Ok(Json(res))
 }
 
-/// Postgres' wire protocol is limiting a query to 65 535 bind parameters. 10 000 is leaving room
-/// for further filters on evaluations with tens of thousands of builds (#237).
-const IS_IN_CHUNK: usize = 10_000;
-
 fn status_rank(status: BuildStatus) -> u32 {
     use gradient_entity::build::BuildStatus::*;
     match status {
@@ -296,12 +292,9 @@ pub async fn get_evaluation_builds(
         let output_to_drv: HashMap<DerivationOutputId, DerivationId> =
             outputs.iter().map(|o| (o.id, o.derivation)).collect();
         let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
-        for chunk in output_ids.chunks(IS_IN_CHUNK) {
-            let products = gradient_db::build_products::of_outputs(&state.web_db, chunk).await?;
-            for bp in products {
-                if let Some(&drv) = output_to_drv.get(&bp.derivation_output) {
-                    has_artefacts.insert(drv);
-                }
+        for bp in gradient_db::build_products::of_outputs(&state.web_db, &output_ids).await? {
+            if let Some(&drv) = output_to_drv.get(&bp.derivation_output) {
+                has_artefacts.insert(drv);
             }
         }
     }

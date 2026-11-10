@@ -376,7 +376,8 @@ pub async fn post_accept_invite(
                         role,
                     },
                 )
-                .await?;
+                .await
+                .map_err(|e| WebError::from_db_err(e, Resource::CacheMembership))?;
             }
 
             (
@@ -407,7 +408,8 @@ pub async fn post_accept_invite(
                         source: TeamMemberSource::Api,
                     },
                 )
-                .await?;
+                .await
+                .map_err(|e| WebError::from_db_err(e, Resource::TeamMembership))?;
             }
 
             (Action::TeamInvitationAccept, EventOwner::default(), payload)

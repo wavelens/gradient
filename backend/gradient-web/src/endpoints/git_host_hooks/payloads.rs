@@ -129,6 +129,10 @@ pub(super) struct CommentSender {
 pub(super) struct CommentRepo {
     #[serde(default)]
     pub(super) full_name: Option<String>,
+    #[serde(default)]
+    pub(super) html_url: Option<String>,
+    #[serde(default)]
+    pub(super) clone_url: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -145,6 +149,10 @@ pub(super) struct GitlabNoteAttrs {
 pub(super) struct GitlabNoteProject {
     #[serde(default)]
     pub(super) path_with_namespace: Option<String>,
+    #[serde(default)]
+    pub(super) web_url: Option<String>,
+    #[serde(default)]
+    pub(super) git_http_url: Option<String>,
 }
 
 #[derive(Deserialize, Default)]

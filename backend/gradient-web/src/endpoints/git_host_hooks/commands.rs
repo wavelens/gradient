@@ -28,6 +28,7 @@ struct CommentEvent {
     pr_number: Option<u64>,
     sender_login: Option<String>,
     owner_repo: Option<String>,
+    repository_urls: Vec<String>,
     comment_id: Option<i64>,
 }
 
@@ -46,12 +47,17 @@ fn parse_comment_event(git_host: GitHostType, body: &[u8]) -> Option<CommentEven
             if attrs.noteable_type.as_deref() != Some("MergeRequest") {
                 return None;
             }
+            let project = payload.project.unwrap_or_default();
             Some(CommentEvent {
                 comment_id: attrs.id,
                 comment_body: attrs.note.unwrap_or_default(),
                 pr_number: payload.merge_request.and_then(|m| m.iid),
                 sender_login: payload.user.and_then(|u| u.username.or(u.login)),
-                owner_repo: payload.project.and_then(|p| p.path_with_namespace),
+                owner_repo: project.path_with_namespace,
+                repository_urls: [project.web_url, project.git_http_url]
+                    .into_iter()
+                    .flatten()
+                    .collect(),
             })
         }
         _ => {
@@ -59,6 +65,7 @@ fn parse_comment_event(git_host: GitHostType, body: &[u8]) -> Option<CommentEven
                 return None;
             }
             let comment = payload.comment.unwrap_or_default();
+            let repository = payload.repository.unwrap_or_default();
             Some(CommentEvent {
                 comment_id: comment.id,
                 comment_body: comment.body.unwrap_or_default(),
@@ -67,7 +74,11 @@ fn parse_comment_event(git_host: GitHostType, body: &[u8]) -> Option<CommentEven
                     .or(payload.issue)
                     .and_then(|i| i.number),
                 sender_login: payload.sender.and_then(|s| s.login.or(s.username)),
-                owner_repo: payload.repository.and_then(|r| r.full_name),
+                owner_repo: repository.full_name,
+                repository_urls: [repository.html_url, repository.clone_url]
+                    .into_iter()
+                    .flatten()
+                    .collect(),
             })
         }
     }
@@ -134,6 +145,7 @@ pub(super) async fn handle_issue_comment(
             cmd: &cmd,
             owner,
             repo,
+            repository_urls: &event.repository_urls,
             sender: &sender,
             pr_number,
             wildcard_override: &wildcard_override,
@@ -209,6 +221,7 @@ struct CommentRoute<'a> {
     cmd: &'a GradientCommand,
     owner: &'a str,
     repo: &'a str,
+    repository_urls: &'a [String],
     sender: &'a str,
     pr_number: u64,
     wildcard_override: &'a Option<String>,
@@ -367,12 +380,19 @@ async fn run_fresh_evaluation(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bo
             "comment_id": t.comment_id,
         })
     });
-    let event_repo_urls = [format!("https://github.com/{}/{}", ctx.owner, ctx.repo)];
+    if ctx.repository_urls.is_empty() {
+        warn!(
+            integration_id = %ctx.integration_id,
+            pr_number = ctx.pr_number,
+            "/gradient run: no repository URL in the comment payload"
+        );
+        return false;
+    }
     let outcome = trigger_pr_for_integration(
         ctx.ci,
         ctx.scheduler,
         ctx.integration_id,
-        &event_repo_urls,
+        ctx.repository_urls,
         Some(snapshot.head_branch.as_str()),
         "synchronize",
         commit_hash,
@@ -655,8 +675,19 @@ mod tests {
                 "comment": { "id": 555, "body": "/gradient run" },
                 "issue": { "number": 42 },
                 "sender": { "login": "octocat" },
-                "repository": { "full_name": "octo/repo" },
+                "repository": {
+                    "full_name": "octo/repo",
+                    "html_url": "https://github.example/octo/repo",
+                    "clone_url": "https://github.example/octo/repo.git",
+                },
             }),
+        );
+        assert_eq!(
+            e.repository_urls,
+            [
+                "https://github.example/octo/repo",
+                "https://github.example/octo/repo.git"
+            ]
         );
         assert_eq!(e.comment_body, "/gradient run");
         assert_eq!(e.pr_number, Some(42));
@@ -696,9 +727,13 @@ mod tests {
                 },
                 "merge_request": { "iid": 5 },
                 "user": { "username": "gl-user" },
-                "project": { "path_with_namespace": "group/proj" },
+                "project": {
+                    "path_with_namespace": "group/proj",
+                    "web_url": "https://gitlab.example/group/proj",
+                },
             }),
         );
+        assert_eq!(e.repository_urls, ["https://gitlab.example/group/proj"]);
         assert_eq!(e.comment_body, "/gradient run");
         assert_eq!(e.pr_number, Some(5));
         assert_eq!(e.sender_login.as_deref(), Some("gl-user"));

@@ -173,7 +173,7 @@ async fn handle_github_app_webhook(
             IncomingWebhookResponse::empty(&event)
         }
         "check_run" => {
-            approval::handle_github_check_run(ci, scheduler, body).await;
+            approval::handle_github_check_run(ci, body).await;
             IncomingWebhookResponse::empty(&event)
         }
         "issue_comment" => {
