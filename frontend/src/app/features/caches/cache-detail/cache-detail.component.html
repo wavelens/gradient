@@ -10,6 +10,7 @@
     [title]="c.display_name"
     [subtitle]="c.description"
   >
+    <gr-copy-field slot="meta" inline [value]="cacheName" copyLabel="Copy cache name for the CLI" />
     <div slot="actions">
       <a grButton label="Packages" icon="database" severity="secondary" [routerLink]="links.cachePage(cacheName, 'nars')"></a>
       @if (editAccess().canEdit) {
@@ -135,8 +136,8 @@
         @if (used.projects.length) {
           <gr-row-list>
             @for (project of used.projects; track project.project) {
-              <gr-row [icon]="entityKindToIconName.project" [link]="links.project(project.project)" [linkLabel]="project.project_display_name">
-                {{ project.project_display_name }}
+              <gr-row [icon]="entityKindToIconName.project" [link]="links.project(project.project)" [linkLabel]="'Open project ' + formatEntityLabel({ display_name: project.project_display_name, name: project.project })">
+                <gr-entity-name [displayName]="project.project_display_name" [name]="project.project" />
                 <gr-badge severity="neutral">{{ modeLabel(project.mode) }}</gr-badge>
               </gr-row>
             }

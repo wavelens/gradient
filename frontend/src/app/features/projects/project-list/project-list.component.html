@@ -34,10 +34,11 @@
         @for (project of projects.items(); track project.id) {
           <gr-nav-card
             [icon]="entityKindToIconName.project"
-            [title]="project.display_name || project.name"
+            [title]="formatEntityLabel(project)"
             [description]="project.description"
             [link]="links.project(project.name)"
           >
+            <gr-entity-name slot="title" [displayName]="project.display_name" [name]="project.name" />
             <div slot="meta">
               @if (project.role && project.role !== 'Admin') {
                 <gr-badge>{{ project.role }}</gr-badge>
@@ -79,10 +80,12 @@
       @for (project of filteredPublicProjects; track project.id) {
         <gr-nav-card
           icon="public"
-          [title]="project.display_name || project.name"
+          [title]="formatEntityLabel(project)"
           [description]="project.description"
           [link]="links.project(project.name)"
-        ></gr-nav-card>
+        >
+          <gr-entity-name slot="title" [displayName]="project.display_name" [name]="project.name" />
+        </gr-nav-card>
       }
     </gr-card-grid>
     <gr-load-more [shown]="publicProjects.items().length" [total]="publicProjects.total()" [loading]="publicProjects.loadingMore()" (more)="publicProjects.loadMore()" />

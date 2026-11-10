@@ -30,7 +30,7 @@ import {
   InputDirective,
   SelectComponent,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent } from '@shared/ui';
+import { LabelHelpComponent, entityToPickerOption } from '@shared/ui';
 import { fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
 import { links } from '@shared/routing';
 
@@ -190,7 +190,7 @@ export class ActionFormComponent implements OnChanges {
       .map((value) => ({ label: ACTION_TYPE_LABEL[value], value })),
   );
 
-  readonly taskOptions = computed(() => this.tasks().map((t) => ({ label: t.name, value: t.id })));
+  readonly taskOptions = computed(() => this.tasks().map((t) => entityToPickerOption(t, t.id)));
 
   readonly integrationOptions = computed(() =>
     this.outboundIntegrations().map((i) => ({ label: i.display_name, value: i.id })),

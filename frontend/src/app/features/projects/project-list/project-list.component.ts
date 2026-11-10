@@ -5,7 +5,7 @@
  */
 
 import { Component, ElementRef, OnInit, inject, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
-import { entityKindToIconName } from '@shared/ui';
+import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -40,6 +40,7 @@ import { PendingInvitationsBannerComponent } from '@shared/access';
   selector: 'app-project-list',
   standalone: true,
   imports: [
+    EntityNameComponent,
     CommonModule,
     RouterModule,
     FormsModule,
@@ -63,6 +64,7 @@ import { PendingInvitationsBannerComponent } from '@shared/access';
 })
 export class ProjectListComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
+  protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
   protected readonly phaseSeverity = PHASE_SEVERITY;
   readonly visibilityOptions = [

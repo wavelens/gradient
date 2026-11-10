@@ -34,7 +34,9 @@ import {
   MetricChartComponent,
   MetricSeries,
   StarButtonComponent,
+  EntityNameComponent,
   entityKindToIconName,
+  formatEntityLabel,
 } from '@shared/ui';
 import {
   StarTarget,
@@ -87,6 +89,7 @@ const CHART_COLORS = {
     RowListComponent,
     RowComponent,
     UseCacheDialogComponent,
+    EntityNameComponent,
   ],
   templateUrl: './cache-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -94,6 +97,7 @@ const CHART_COLORS = {
 })
 export class CacheDetailComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
+  protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
   protected readonly netrcDocsUrl = docsUrl('guides/share-a-cache/#1-use-the-cache-on-a-machine');
   private route = inject(ActivatedRoute);

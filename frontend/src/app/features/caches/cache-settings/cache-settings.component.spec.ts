@@ -194,7 +194,7 @@ describe('CacheSettingsComponent - write failures', () => {
     service.deleteCache = vi.fn(() => of(undefined));
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     findByText(fixture.nativeElement, 'delete cache')!.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete cache', target: 'Demo' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete cache', target: 'Demo (demo)' }));
     expect(service.deleteCache).toHaveBeenCalledWith('demo');
     expect(notify.success).toHaveBeenCalledWith('Cache deleted');
     expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/caches');
@@ -278,7 +278,7 @@ describe('CacheSettingsComponent - edits', () => {
     saveButton(fixture).click();
     expect(updateCache).not.toHaveBeenCalled();
     expect(setCachePublic).toHaveBeenCalledWith('demo');
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Make cache public', target: 'Demo' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Make cache public', target: 'Demo (demo)' }));
   });
 
   it('shows no Save spinner while the make-public confirmation waits', () => {

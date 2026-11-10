@@ -25,8 +25,8 @@
     }
     <gr-row-list>
       @for (team of items(); track team.name) {
-        <gr-row [icon]="entityKindToIconName.team" [link]="links.team(team.name)" [linkLabel]="'Open team ' + team.display_name">
-          {{ team.display_name }}
+        <gr-row [icon]="entityKindToIconName.team" [link]="links.team(team.name)" [linkLabel]="'Open team ' + formatEntityLabel(team)">
+          <gr-entity-name [displayName]="team.display_name" [name]="team.name" />
           <gr-badge>{{ teamRoleDisplayLabels[team.role] }}</gr-badge>
         </gr-row>
       }

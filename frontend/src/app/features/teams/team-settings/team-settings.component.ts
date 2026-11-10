@@ -13,6 +13,7 @@ import { AuthService } from '@core/services/auth.service';
 import { injectTeam } from '@core/resolvers/team-access.resolver';
 import { NotifyService } from '@core/services/notify.service';
 import { AccessState, TeamResponse, PatchTeamRequest } from '@core/models';
+import { formatEntityLabel } from '@shared/ui';
 import { AccessService, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canManageTeam } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
@@ -147,7 +148,7 @@ export class TeamSettingsComponent implements OnInit, CanComponentDeactivate {
     this.confirm
       .confirm({
         title: 'Delete team',
-        target: this.team()?.display_name ?? this.teamName,
+        target: formatEntityLabel({ display_name: this.team()?.display_name, name: this.teamName }),
         consequence:
           'Delete the pending requests and invitations of the team, the access of the team to projects and caches, and the team workers. Connected team workers stop builds in those projects.',
         isIrreversible: true,

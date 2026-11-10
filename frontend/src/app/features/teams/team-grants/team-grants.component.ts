@@ -15,7 +15,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { entityKindToIconName } from '@shared/ui';
+import { doesSearchQueryMatchEntityNameOrSlug, EntityNameComponent, entityKindToIconName, formatEntityLabel, entityToPickerOption } from '@shared/ui';
 import { FormsModule } from '@angular/forms';
 import { RouterModule, type UrlTree } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -54,6 +54,7 @@ interface GrantForm {
   selector: 'app-team-grants',
   standalone: true,
   imports: [
+    EntityNameComponent,
     FormsModule,
     RouterModule,
     AutoCompleteComponent,
@@ -73,6 +74,7 @@ interface GrantForm {
 })
 export class TeamGrantsComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
+  protected readonly formatEntityLabel = formatEntityLabel;
   private teams = inject(TeamsService);
   private authService = inject(AuthService);
   private notify = inject(NotifyService);
@@ -143,12 +145,11 @@ export class TeamGrantsComponent implements OnInit {
   }
 
   search(event: { query: string }): void {
-    const query = event.query.toLowerCase();
     this.suggestions.set(
       this.myTeams()
         .filter((team) => this.canOfferTeamInGrantPicker(team))
-        .filter((team) => `${team.name} ${team.display_name}`.toLowerCase().includes(query))
-        .map((team) => ({ label: team.display_name || team.name, value: team.name })),
+        .filter((team) => doesSearchQueryMatchEntityNameOrSlug(team, event.query))
+        .map((team) => entityToPickerOption(team)),
     );
   }
 

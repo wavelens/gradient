@@ -23,7 +23,7 @@
     <gr-row-list>
       @for (request of requests(); track request.project) {
         <gr-row [icon]="entityKindToIconName.project">
-          {{ request.project_display_name }}
+          <gr-entity-name [displayName]="request.project_display_name" [name]="request.project" />
           <gr-badge severity="neutral">{{ modeLabel(request.mode) }}</gr-badge>
           <span slot="meta">
             Requested by {{ request.requested_by_display_name ?? request.requested_by }} ·

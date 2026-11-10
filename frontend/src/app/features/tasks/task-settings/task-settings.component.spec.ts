@@ -300,7 +300,7 @@ describe('TaskSettingsComponent - write failures', () => {
     tasks()['deleteTask'] = deleteTask;
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     findByText(fixture.nativeElement, 'delete task')!.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete task', target: 'Demo' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete task', target: 'Demo (demo)' }));
     expect(deleteTask).toHaveBeenCalledWith('acme', 'demo');
     expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/project/acme');
   });
@@ -360,7 +360,7 @@ describe('TaskSettingsComponent - write failures', () => {
     const component = fixture.componentInstance;
     component.openTransferOwnershipDialogAndLoadTargetProjects();
     expect(component.showTransferDialog()).toBe(true);
-    expect(component.transferTargetProjectOptions()).toEqual([{ label: 'Other Team', value: 'other' }]);
+    expect(component.transferTargetProjectOptions()).toEqual([{ label: 'Other Team (other)', value: 'other' }]);
   });
 
   it('shows a refused transfer inside the open dialog, not on the page', () => {

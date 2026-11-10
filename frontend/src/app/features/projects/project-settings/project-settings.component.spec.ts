@@ -148,7 +148,7 @@ describe('ProjectSettingsComponent - validation and unsaved edits', () => {
     fixture.componentInstance.saveSettings();
     expect(writes.updateProject).not.toHaveBeenCalled();
     expect(writes.setPublic).toHaveBeenCalledWith('acme');
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Make project public', target: 'Acme' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Make project public', target: 'Acme (acme)' }));
   });
 
   it('sends nothing when making the project public is cancelled', async () => {
@@ -315,7 +315,7 @@ describe('ProjectSettingsComponent - confirmed actions', () => {
     Object.assign(TestBed.inject(ProjectsService), { deleteProject });
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     findByText(fixture.nativeElement, 'delete project')!.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete project', target: projectFor(admin).display_name }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete project', target: 'Acme (acme)' }));
     expect(deleteProject).toHaveBeenCalledWith('acme');
     expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/projects');
   });

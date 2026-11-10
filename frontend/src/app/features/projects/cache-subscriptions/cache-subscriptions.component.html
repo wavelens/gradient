@@ -27,7 +27,7 @@
       <gr-row-list>
         @for (cache of caches(); track cache.id) {
           <gr-row [icon]="entityKindToIconName.cache">
-            {{ cache.display_name }}
+            <gr-entity-name [displayName]="cache.display_name" [name]="cache.name" />
             @if (cache.status === 'pending') {
               <gr-badge severity="warning">Pending approval</gr-badge>
             }
@@ -38,7 +38,7 @@
                 severity="secondary"
                 size="small"
                 [routerLink]="links.cache(cache.name)"
-                [attr.aria-label]="'Open cache ' + cache.display_name"
+                [attr.aria-label]="'Open cache ' + formatEntityLabel(cache)"
                 grTooltip="Open cache"
               ></a>
               <button

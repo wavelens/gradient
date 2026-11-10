@@ -115,7 +115,7 @@ describe('TeamGrantsComponent', () => {
 
   it('names what Remove takes away on each part', () => {
     const users = setup('project', 'users');
-    expect(users.fixture.nativeElement.querySelector('[aria-label="Remove role of Platform"]')).not.toBeNull();
+    expect(users.fixture.nativeElement.querySelector('[aria-label="Remove role of Platform (platform)"]')).not.toBeNull();
     TestBed.resetTestingModule();
     const workers = setup('project', 'workers');
     expect(workers.fixture.nativeElement.querySelector('[aria-label^="Remove workers of "]')).not.toBeNull();
@@ -243,13 +243,13 @@ describe('TeamGrantsComponent', () => {
   it('suggests teams by their display name', () => {
     const { component } = setup('project', 'users');
     component.search({ query: 'farm' });
-    expect(component.suggestions()).toEqual([{ label: 'Build Farm', value: 'infra' }]);
+    expect(component.suggestions()).toEqual([{ label: 'Build Farm (infra)', value: 'infra' }]);
   });
 
   it('leaves teams that already have member roles out of the suggestions', () => {
     const { component } = setup('project', 'users');
     component.search({ query: '' });
-    expect(component.suggestions()).toEqual([{ label: 'Build Farm', value: 'infra' }]);
+    expect(component.suggestions()).toEqual([{ label: 'Build Farm (infra)', value: 'infra' }]);
   });
 
   it('suggests adding workers to a granted team only to its Admins', () => {
@@ -259,7 +259,7 @@ describe('TeamGrantsComponent', () => {
       { team: 'infra', display_name: 'Build Farm', role: 'View', users: true, workers: false, pending: false },
     ]);
     component.search({ query: '' });
-    expect(component.suggestions()).toEqual([{ label: 'Build Farm', value: 'infra' }]);
+    expect(component.suggestions()).toEqual([{ label: 'Build Farm (infra)', value: 'infra' }]);
   });
 
   it('shows the server answer after a grant, which can be a request to the team', () => {

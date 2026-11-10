@@ -154,9 +154,9 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     const component = fixture.componentInstance;
     component.openSubscribeDialog();
     component.onCacheSearch({ query: 'My' });
-    expect(component.cacheSuggestions()).toEqual([{ label: 'MyCache', value: 'mycache' }]);
+    expect(component.cacheSuggestions()).toEqual([{ label: 'MyCache (mycache)', value: 'mycache' }]);
     component.onCacheSearch({ query: '' });
-    expect(component.cacheSuggestions()).toEqual([{ label: 'MyCache', value: 'mycache' }]);
+    expect(component.cacheSuggestions()).toEqual([{ label: 'MyCache (mycache)', value: 'mycache' }]);
   });
 
   it('opens Subscribe with the cache picked on the cache page', async () => {
@@ -176,7 +176,7 @@ describe('CacheSubscriptionsComponent - create cache', () => {
       expect.objectContaining({ queryParams: { subscribe: null }, queryParamsHandling: 'merge', replaceUrl: true }),
     );
     fixture.componentInstance.onCacheSearch({ query: '' });
-    expect(fixture.componentInstance.cacheSuggestions()).toEqual([{ label: 'Nix Packages', value: 'nixpkgs' }]);
+    expect(fixture.componentInstance.cacheSuggestions()).toEqual([{ label: 'Nix Packages (nixpkgs)', value: 'nixpkgs' }]);
   });
 
   it('opens Subscribe for the picked cache only after the subscriptions load', async () => {
@@ -199,7 +199,7 @@ describe('CacheSubscriptionsComponent - create cache', () => {
     publicCaches.next([{ name: 'nixpkgs', display_name: 'Nix Packages' }]);
     publicCaches.complete();
     await settled(fixture);
-    expect(document.body.querySelector<HTMLInputElement>('#cache-name')?.value).toBe('Nix Packages');
+    expect(document.body.querySelector<HTMLInputElement>('#cache-name')?.value).toBe('Nix Packages (nixpkgs)');
     expect(fixture.componentInstance.newCacheName).toBe('nixpkgs');
   });
 
@@ -297,7 +297,7 @@ describe('CacheSubscriptionsComponent - unsubscribe', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
     (findByText(fixture.nativeElement, 'unsubscribe') as HTMLButtonElement).click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Shared Cache', confirmLabel: 'Unsubscribe' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Shared Cache (shared)', confirmLabel: 'Unsubscribe' }));
     expect(unsubscribeCache).toHaveBeenCalledWith('acme', 'shared');
     expect(notify.success).toHaveBeenCalledWith('Removed cache subscription');
   });
@@ -306,7 +306,7 @@ describe('CacheSubscriptionsComponent - unsubscribe', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     await settled(fixture);
     (findByText(fixture.nativeElement, 'withdraw request') as HTMLButtonElement).click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Staging Cache', confirmLabel: 'Withdraw' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Staging Cache (staging)', confirmLabel: 'Withdraw' }));
     expect(unsubscribeCache).toHaveBeenCalledWith('acme', 'staging');
   });
 

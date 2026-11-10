@@ -35,10 +35,11 @@
             @for (cache of activeCaches; track cache.id) {
               <gr-nav-card
                 [icon]="entityKindToIconName.cache"
-                [title]="cache.display_name"
+                [title]="formatEntityLabel(cache)"
                 [description]="cache.description"
                 [link]="links.cache(cache.name)"
               >
+                <gr-entity-name slot="title" [displayName]="cache.display_name" [name]="cache.name" />
                 <div slot="meta">
                   @if (cache.public) {
                     <gr-badge>Public</gr-badge>
@@ -58,10 +59,11 @@
               <gr-nav-card
                 muted
                 icon="cloud_off"
-                [title]="cache.display_name"
+                [title]="formatEntityLabel(cache)"
                 [description]="cache.description"
                 [link]="links.cache(cache.name)"
               >
+                <gr-entity-name slot="title" [displayName]="cache.display_name" [name]="cache.name" />
                 <div slot="meta">
                   <gr-badge severity="neutral">Inactive</gr-badge>
                   @if (cache.public) {
@@ -94,27 +96,21 @@
       <div class="discover-header">
         <h2>Discover Public Caches</h2>
       </div>
-      <div class="cache-grid">
+      <gr-card-grid>
         @for (cache of filteredPublicCaches; track cache.id) {
-          <a [routerLink]="links.cache(cache.name)" class="cache-card">
-            <div class="cache-icon">
-              <gr-icon name="public" size="xl" />
+          <gr-nav-card
+            icon="public"
+            [title]="formatEntityLabel(cache)"
+            [description]="cache.description"
+            [link]="links.cache(cache.name)"
+          >
+            <gr-entity-name slot="title" [displayName]="cache.display_name" [name]="cache.name" />
+            <div slot="meta">
+              <gr-badge>Public</gr-badge>
             </div>
-            <div class="cache-content">
-              <h3>{{ cache.display_name }}</h3>
-              @if (cache.description) {
-                <p class="text-secondary">{{ cache.description }}</p>
-              }
-              <div class="cache-meta">
-                <gr-badge>Public</gr-badge>
-              </div>
-            </div>
-            <div class="cache-arrow">
-              <gr-icon name="arrow_forward" />
-            </div>
-          </a>
+          </gr-nav-card>
         }
-      </div>
+      </gr-card-grid>
     </gr-load-state>
   }
 </gr-page-layout>

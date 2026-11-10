@@ -61,7 +61,7 @@ describe('ProjectDetailComponent subscribed caches', () => {
 
   it('names the active caches in the header and links to the cache subscriptions', () => {
     const { root } = render(true, undefined, undefined, caches);
-    const line = root.querySelector<HTMLAnchorElement>('[slot="meta"]')!;
+    const line = root.querySelector<HTMLAnchorElement>('a[slot="meta"]')!;
     expect(line.textContent?.trim()).toBe('Caches: Main, Research');
     expect(line.getAttribute('href')).toBe('/project/acme/caches');
   });
@@ -69,7 +69,7 @@ describe('ProjectDetailComponent subscribed caches', () => {
   it('asks nothing for a visitor without a role and shows no cache line', () => {
     const { root, getSubscribedCaches } = render(false, undefined, { role: null, permissions: [] }, caches);
     expect(getSubscribedCaches).not.toHaveBeenCalled();
-    expect(root.querySelector('[slot="meta"]')).toBeNull();
+    expect(root.querySelector('a[slot="meta"]')).toBeNull();
     expect(root.querySelector('[data-testid="no-cache-banner"]')).toBeNull();
   });
 
@@ -99,6 +99,14 @@ describe('ProjectDetailComponent task cards', () => {
     expect(metas).toEqual(['', 'Inactive']);
     expect(root.querySelector('gr-badge .badge')?.classList).toContain('is-neutral');
   });
+
+  it('titles each card with the display name and the slug', () => {
+    const task = { id: 't1', name: 'build', display_name: 'Nightly Build', description: '', active: true };
+    const card = render(true, () => of({ items: [task], total: 1, page: 1 })).root.querySelector('gr-nav-card')!;
+    expect(card.querySelector('.nav-card__title')?.getAttribute('title')).toBe('Nightly Build (build)');
+    expect(card.querySelector('.entity-name__display')?.textContent).toBe('Nightly Build');
+    expect(card.querySelector('.entity-name__slug')?.textContent).toBe('build');
+  });
 });
 
 describe('ProjectDetailComponent header', () => {
@@ -117,6 +125,12 @@ describe('ProjectDetailComponent header', () => {
 
   it('shows no star to a guest', () => {
     expect(render(false).root.querySelector('gr-star-button')).toBeNull();
+  });
+
+  it('offers the project slug the CLI uses for copying, also to guests', () => {
+    const copy = render(false).root.querySelector('gr-copy-field[slot="meta"]');
+    expect(copy?.querySelector('code')?.textContent).toBe('acme');
+    expect(copy?.querySelector('button')?.getAttribute('aria-label')).toBe('Copy project name for CLI');
   });
 
   it('offers a viewer neither Settings nor Connect repository, like the task header', () => {

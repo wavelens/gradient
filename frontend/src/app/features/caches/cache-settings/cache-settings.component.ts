@@ -38,7 +38,7 @@ import {
 import { injectCacheAccess, injectCacheAccessData, injectCacheAccessTo } from '@core/resolvers/inject-access';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { CacheResponse, CacheSubscribersResponse, PatchCacheRequest } from '@core/models';
-import { LabelHelpComponent } from '@shared/ui';
+import { LabelHelpComponent, formatEntityLabel } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { links } from '@shared/routing';
@@ -246,7 +246,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
     this.saveError.set(null);
     this.saveSettingsWithPrivateToPublicConfirmation({
       kind: 'cache',
-      target: this.cache()?.display_name ?? this.cacheName,
+      target: formatEntityLabel({ display_name: this.cache()?.display_name, name: this.cacheName }),
       becomesPublic: values.public && !this.saved.public,
       save,
     })
@@ -310,7 +310,7 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
         switchMap((consequence) =>
           this.confirm.confirm({
             title: 'Delete cache',
-            target: this.cache()?.display_name ?? this.cacheName,
+            target: formatEntityLabel({ display_name: this.cache()?.display_name, name: this.cacheName }),
             consequence,
             confirmLabel: 'Delete',
             failure: 'Cache deletion failed.',

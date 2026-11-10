@@ -22,6 +22,7 @@
           <gr-live-status [connected]="false" />
         }
       </div>
+      <gr-copy-field inline [value]="projectName + '/' + taskName" copyLabel="Copy task path for CLI" />
     </div>
     <div class="head-actions phone-icon-buttons">
       @if (authService.isAuthenticated()) {

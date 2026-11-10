@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
-import { entityKindToIconName } from '@shared/ui';
+import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { Router, RouterModule } from '@angular/router';
 import { TeamsService } from '@core/services/teams.service';
 import { TeamSummary } from '@core/models';
@@ -25,6 +25,7 @@ import { PendingInvitationsBannerComponent, teamRoleDisplayLabels } from '@share
   selector: 'app-teams-list',
   standalone: true,
   imports: [
+    EntityNameComponent,
     RouterModule,
     BadgeComponent,
     ButtonComponent,
@@ -40,6 +41,7 @@ import { PendingInvitationsBannerComponent, teamRoleDisplayLabels } from '@share
 })
 export class TeamsListComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
+  protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
   protected readonly teamRoleDisplayLabels = teamRoleDisplayLabels;
   private teams = inject(TeamsService);

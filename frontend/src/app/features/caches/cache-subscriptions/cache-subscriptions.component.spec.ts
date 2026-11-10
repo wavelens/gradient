@@ -129,7 +129,7 @@ describe('CacheSubscriptionRequestsComponent', () => {
   it('asks before approving a request that may push, naming the project', () => {
     const { fixture, approve, confirm } = setup([request]);
     buttonByText(fixture.nativeElement, 'Approve')?.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Approve subscription request', target: 'Wavelens' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Approve subscription request', target: 'Wavelens (wavelens)' }));
     expect(approve).toHaveBeenCalledWith('prod', 'wavelens');
   });
 
@@ -143,7 +143,7 @@ describe('CacheSubscriptionRequestsComponent', () => {
   it('asks before denying a request, naming the project, then denies it by project name', () => {
     const { fixture, deny, confirm } = setup([request]);
     buttonByText(fixture.nativeElement, 'Deny')?.click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Wavelens' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Wavelens (wavelens)' }));
     expect(deny).toHaveBeenCalledWith('prod', 'wavelens');
   });
 

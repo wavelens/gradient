@@ -5,6 +5,7 @@
 -->
 
 <gr-page-layout [breadcrumb]="breadcrumb()" [title]="team()?.display_name || teamName">
+  <gr-copy-field slot="meta" inline [value]="teamName" copyLabel="Copy team name for CLI" />
   @if (isAdmin()) {
     <a slot="actions" grButton label="Settings" icon="settings" severity="secondary" [routerLink]="links.teamPage(teamName, 'settings')"></a>
   }
@@ -14,7 +15,7 @@
         <gr-row-list>
           @for (request of requests(); track request.id) {
             <gr-row icon="mark_email_unread">
-              {{ request.display_name }}
+              <gr-entity-name [displayName]="request.display_name" [name]="request.target" />
               <span slot="meta">{{ requestMeta(request) }}</span>
               <div slot="actions">
                 <button grButton label="Approve" icon="check" severity="secondary" size="small"
@@ -41,14 +42,14 @@
           <a slot="empty-action" grButton label="Caches" [icon]="entityKindToIconName.cache" severity="secondary" [routerLink]="links.caches()"></a>
           <gr-row-list>
             @for (grant of grants().projects; track grant.project) {
-              <gr-row [icon]="entityKindToIconName.project" [link]="links.project(grant.project)" [linkLabel]="'Open project ' + grant.display_name">
-                {{ grant.display_name }}
+              <gr-row [icon]="entityKindToIconName.project" [link]="links.project(grant.project)" [linkLabel]="'Open project ' + formatEntityLabel({ display_name: grant.display_name, name: grant.project })">
+                <gr-entity-name [displayName]="grant.display_name" [name]="grant.project" />
                 <span slot="meta">{{ grantMeta(grant) }}</span>
               </gr-row>
             }
             @for (grant of grants().caches; track grant.cache) {
-              <gr-row [icon]="entityKindToIconName.cache" [link]="links.cache(grant.cache)" [linkLabel]="'Open cache ' + grant.display_name">
-                {{ grant.display_name }}
+              <gr-row [icon]="entityKindToIconName.cache" [link]="links.cache(grant.cache)" [linkLabel]="'Open cache ' + formatEntityLabel({ display_name: grant.display_name, name: grant.cache })">
+                <gr-entity-name [displayName]="grant.display_name" [name]="grant.cache" />
                 <span slot="meta">Members get {{ grant.role ?? 'unknown role' }}</span>
               </gr-row>
             }

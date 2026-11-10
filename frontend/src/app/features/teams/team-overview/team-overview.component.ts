@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, linkedSignal, signal } from '@angular/core';
-import { entityKindToIconName } from '@shared/ui';
+import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
 import { TeamsService } from '@core/services/teams.service';
@@ -17,6 +17,7 @@ import { ConfirmService } from '@shared/confirm';
 import { canManageTeam } from '@shared/access';
 import {
   ButtonComponent,
+  CopyFieldComponent,
   LoadStateComponent,
   PageLayoutComponent,
   RowComponent,
@@ -33,8 +34,10 @@ import { runReloadIntervalWhileTabVisible } from '@shared/paging';
   selector: 'app-team-overview',
   standalone: true,
   imports: [
+    EntityNameComponent,
     RouterModule,
     ButtonComponent,
+    CopyFieldComponent,
     LoadStateComponent,
     TeamMembersComponent,
     TeamWorkersComponent,
@@ -48,6 +51,7 @@ import { runReloadIntervalWhileTabVisible } from '@shared/paging';
 })
 export class TeamOverviewComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
+  protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -90,7 +94,7 @@ export class TeamOverviewComponent implements OnInit {
   }
 
   requestMeta(request: TeamRequestItem): string {
-    return [request.kind, request.target, this.grantMeta(request)].filter((part) => part).join(' · ');
+    return [request.kind, this.grantMeta(request)].filter((part) => part).join(' · ');
   }
 
   approve(id: string): void {
@@ -111,7 +115,7 @@ export class TeamOverviewComponent implements OnInit {
     this.confirm
       .confirm({
         title: 'Deny Request',
-        target: request.display_name,
+        target: formatEntityLabel({ display_name: request.display_name, name: request.target }),
         consequence: 'The request is deleted and nothing is granted.',
         confirmLabel: 'Deny',
         failure: 'Failed to deny request.',

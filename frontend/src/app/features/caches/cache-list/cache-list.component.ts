@@ -5,9 +5,9 @@
  */
 
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
-import { entityKindToIconName } from '@shared/ui';
+import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { CommonModule } from '@angular/common';
-import { Router, RouterModule } from '@angular/router';
+import { Router } from '@angular/router';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -16,7 +16,6 @@ import {
   CardGridComponent,
   LoadMoreComponent,
   EmptyStateComponent,
-  IconComponent,
   LoadStateComponent,
   NavCardComponent,
   PageLayoutComponent,
@@ -32,11 +31,10 @@ import { EMPTY, catchError, merge, tap } from 'rxjs';
   selector: 'app-cache-list',
   standalone: true,
   imports: [
+    EntityNameComponent,
     CommonModule,
-    RouterModule,
     LoadStateComponent,
     EmptyStateComponent,
-    IconComponent,
     PageLayoutComponent,
     NavCardComponent,
     CardGridComponent,
@@ -52,6 +50,7 @@ import { EMPTY, catchError, merge, tap } from 'rxjs';
 })
 export class CacheListComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
+  protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
   private cachesService = inject(CachesService);
   protected authService = inject(AuthService);

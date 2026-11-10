@@ -204,7 +204,7 @@ describe('TeamSettingsComponent', () => {
     const { fixture, remove, notify, confirm } = setup(true);
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     buttonByText(fixture.nativeElement, 'Delete Team').click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete team', target: 'Platform' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete team', target: 'Platform (platform)' }));
     expect(remove).toHaveBeenCalledWith('platform');
     expect(notify.success).toHaveBeenCalledWith('Team deleted');
     expect(String(navigate.mock.calls.at(-1)?.[0])).toBe('/teams');

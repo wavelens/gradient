@@ -187,7 +187,7 @@ describe('TeamOverviewComponent', () => {
   it('asks before denying a request, naming who asked', () => {
     const { root, notify, confirm, denyRequest } = setup('admin');
     denyButton(root).click();
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Acme', confirmLabel: 'Deny' }));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ target: 'Acme (acme)', confirmLabel: 'Deny' }));
     expect(denyRequest).toHaveBeenCalledWith('platform', 'r1');
     expect(notify.success).toHaveBeenCalledWith('Request denied');
   });

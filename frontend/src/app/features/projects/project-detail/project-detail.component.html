@@ -6,6 +6,7 @@
 
 @if (project(); as project) {
   <gr-page-layout [breadcrumb]="breadcrumb()" [title]="project.display_name" [subtitle]="project.description">
+  <gr-copy-field slot="meta" inline [value]="projectName" copyLabel="Copy project name for CLI" />
   @if (activeBinaryCacheNames().length) {
     <a slot="meta" [routerLink]="links.projectPage(projectName, 'caches')">Caches: {{ activeBinaryCacheNames().join(', ') }}</a>
   }
@@ -41,10 +42,11 @@
         @for (task of tasks.items(); track task.id) {
           <gr-nav-card
             [icon]="entityKindToIconName.task"
-            [title]="task.display_name || task.name"
+            [title]="formatEntityLabel(task)"
             [description]="task.description"
             [link]="links.task(projectName, task.name)"
           >
+            <gr-entity-name slot="title" [displayName]="task.display_name" [name]="task.name" />
             <div slot="meta">
               @if (!task.active) {
                 <gr-badge severity="neutral">Inactive</gr-badge>

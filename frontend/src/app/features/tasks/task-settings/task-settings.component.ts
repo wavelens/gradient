@@ -31,7 +31,7 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent } from '@shared/ui';
+import { LabelHelpComponent, entityToPickerOption, formatEntityLabel } from '@shared/ui';
 import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, canOpenProjectSettings } from '@shared/access';
 import { fieldChecks, injectRevealFirstInvalid, maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
 import { wildcardError } from '../wildcard-error';
@@ -268,7 +268,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
     this.projectsService.getProjects().subscribe({
       next: (res) => this.transferTargetProjectOptions.set(res.items
         .filter((project) => project.name !== this.projectName && !project.managed)
-        .map((project) => ({ label: project.display_name || project.name, value: project.name }))),
+        .map((project) => entityToPickerOption(project))),
       error: (error: unknown) => this.transferError.set(apiErrorMessage(error, 'Failed to load projects.')),
     });
   }
@@ -301,7 +301,7 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
   deleteTask(): void {
     this.confirm.confirm({
       title: 'Delete task',
-      target: this.task()?.display_name || this.taskName,
+      target: formatEntityLabel({ display_name: this.task()?.display_name, name: this.taskName }),
       consequence: 'All evaluations, triggers, actions, and overrides for flake inputs disappear along with the task.',
       isIrreversible: true,
       confirmLabel: 'Delete',

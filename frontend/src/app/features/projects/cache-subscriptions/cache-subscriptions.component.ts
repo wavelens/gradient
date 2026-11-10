@@ -28,7 +28,7 @@ import {
   TooltipDirective,
   type AutoCompleteSuggestion,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent, entityKindToIconName } from '@shared/ui';
+import { EntityNameComponent, LabelHelpComponent, doesSearchQueryMatchEntityNameOrSlug, entityKindToIconName, entityToPickerOption, formatEntityLabel } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { CreateCacheDialogComponent, injectCanCreateCache } from '@shared/forms';
@@ -42,6 +42,7 @@ import { EMPTY, Observable, catchError, forkJoin, map, of, tap } from 'rxjs';
   selector: 'app-cache-subscriptions',
   standalone: true,
   imports: [
+    EntityNameComponent,
     LabelHelpComponent,
     CommonModule,
     RouterModule,
@@ -67,6 +68,7 @@ import { EMPTY, Observable, catchError, forkJoin, map, of, tap } from 'rxjs';
 })
 export class CacheSubscriptionsComponent implements OnInit {
   protected readonly entityKindToIconName = entityKindToIconName;
+  protected readonly formatEntityLabel = formatEntityLabel;
   protected readonly links = links;
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -155,11 +157,10 @@ export class CacheSubscriptionsComponent implements OnInit {
   }
 
   onCacheSearch(event: { query: string }): void {
-    const q = event.query.trim().toLowerCase();
     this.cacheSuggestions.set(
       this.availableCaches
-        .filter((c) => c.name.toLowerCase().includes(q) || c.display_name.toLowerCase().includes(q))
-        .map((c) => ({ label: c.display_name || c.name, value: c.name })),
+        .filter((c) => doesSearchQueryMatchEntityNameOrSlug(c, event.query))
+        .map((c) => entityToPickerOption(c)),
     );
   }
 
@@ -197,10 +198,10 @@ export class CacheSubscriptionsComponent implements OnInit {
     this.confirm
       .confirm({
         title: pending ? 'Withdraw Subscription Request' : 'Unsubscribe from Cache',
-        target: cache.display_name,
+        target: formatEntityLabel(cache),
         consequence: pending
-          ? `Delete the subscription request to ${cache.display_name}.`
-          : `Builds for this project no longer use ${cache.display_name}.`,
+          ? `Delete the subscription request to ${formatEntityLabel(cache)}.`
+          : `Builds for this project no longer use ${formatEntityLabel(cache)}.`,
         confirmLabel: pending ? 'Withdraw' : 'Unsubscribe',
         failure: 'Failed to delete the subscription.',
         action: () => this.projectsService.unsubscribeCache(this.projectName, cache.name),

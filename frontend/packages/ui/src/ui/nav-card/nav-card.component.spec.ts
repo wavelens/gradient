@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { NavCardComponent } from './nav-card.component';
@@ -40,5 +41,20 @@ describe('gr-nav-card', () => {
   it('marks a muted card so it reads as secondary', async () => {
     const root = await render({ icon: 'storage', title: 'old', muted: true });
     expect(root.querySelector('.nav-card')?.classList).toContain('is-muted');
+  });
+
+  it('shows projected title content in place of the plain title', async () => {
+    @Component({
+      standalone: true,
+      imports: [NavCardComponent],
+      template: `<gr-nav-card icon="storage" title="MyCache"><span slot="title">MyCache <small>testcache</small></span></gr-nav-card>`,
+    })
+    class HostWithTitleContent {}
+    const fixture = TestBed.createComponent(HostWithTitleContent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const heading = (fixture.nativeElement as HTMLElement).querySelector('.nav-card__title');
+    expect(heading?.querySelector('small')?.textContent).toBe('testcache');
+    expect(heading?.textContent?.match(/MyCache/g)).toHaveLength(1);
   });
 });

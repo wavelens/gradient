@@ -5,7 +5,7 @@
  */
 
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
-import { entityKindToIconName } from '@shared/ui';
+import { EntityNameComponent, entityKindToIconName, formatEntityLabel } from '@shared/ui';
 import { ServerTimestampToLocalDateTimePipe, subscriptionModeLabel } from '@shared/text';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
@@ -31,6 +31,7 @@ import {
   selector: 'app-cache-subscription-requests',
   standalone: true,
   imports: [
+    EntityNameComponent,
     CommonModule,
     ServerTimestampToLocalDateTimePipe,
     BadgeComponent,
@@ -111,7 +112,7 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
     this.confirm
       .confirm({
         title: 'Approve subscription request',
-        target: request.project_display_name,
+        target: formatEntityLabel({ display_name: request.project_display_name, name: request.project }),
         consequence: 'The project can push store paths to this cache. All users of this cache get the pushed paths.',
         confirmLabel: 'Approve',
         failure: "Couldn't approve the subscription request",
@@ -127,11 +128,12 @@ export class CacheSubscriptionRequestsComponent implements OnInit {
   }
 
   deny(request: SubscriptionRequestItem): void {
+    const project = formatEntityLabel({ display_name: request.project_display_name, name: request.project });
     this.confirm
       .confirm({
         title: 'Deny subscription request',
-        target: request.project_display_name,
-        consequence: `${request.project_display_name} can't use this cache. The project can apply again later.`,
+        target: project,
+        consequence: `${project} can't use this cache. The project can apply again later.`,
         confirmLabel: 'Deny',
         failure: 'Failed to deny the subscription request.',
         action: () => this.cachesService.denySubscriptionRequest(this.cacheName, request.project),

@@ -29,7 +29,7 @@ import {
   SettingsSectionComponent,
   SubmitDirective,
 } from '@gradient/ui/ui';
-import { LabelHelpComponent } from '@shared/ui';
+import { LabelHelpComponent, formatEntityLabel } from '@shared/ui';
 import { AccessService, WritableDirective, ManagedDisableDirective, ServerConfigurationManagedBannerComponent, requestIfProjectMember, isViewerProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
 import { maxDisplayNameCharacterCount, splitLines, unsavedChanges } from '@shared/forms';
@@ -220,7 +220,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
     this.saveError.set(null);
     this.saveSettingsWithPrivateToPublicConfirmation({
       kind: 'project',
-      target: this.project()?.display_name ?? this.projectName,
+      target: formatEntityLabel({ display_name: this.project()?.display_name, name: this.projectName }),
       becomesPublic: visibility && !saved.public,
       save,
     })
@@ -238,7 +238,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
     this.confirm
       .confirm({
         title: 'Delete project',
-        target: this.project()?.display_name ?? this.projectName,
+        target: formatEntityLabel({ display_name: this.project()?.display_name, name: this.projectName }),
         consequence:
           "The project's tasks, evaluations, builds, logs, secrets, workers and members are deleted.",
         isIrreversible: true,
@@ -256,7 +256,7 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
     this.confirm
       .confirm({
         title: 'Regenerate SSH key',
-        target: this.project()?.display_name ?? this.projectName,
+        target: formatEntityLabel({ display_name: this.project()?.display_name, name: this.projectName }),
         consequence:
           "Three things stop working right away with the current key. A repository with this deploy key can lose access. The project can't decrypt secrets that are encrypted in the repository until someone can encrypt them again with the new key. Servers for remote builds reject Gradient until the new key is present in authorized_keys.",
         confirmLabel: 'Regenerate',

@@ -8,7 +8,7 @@ SPDX-License-Identifier: AGPL-3.0-only
     <gr-icon [name]="icon()" size="xl" />
   </div>
   <div class="nav-card__body">
-    <h2 class="nav-card__title" [attr.title]="title()">{{ title() }}</h2>
+    <h2 class="nav-card__title" [attr.title]="title()"><ng-content select="[slot=title]">{{ title() }}</ng-content></h2>
     @if (description(); as text) {
       <p class="nav-card__description" [attr.title]="text">{{ text }}</p>
     }

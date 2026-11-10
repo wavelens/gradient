@@ -42,6 +42,7 @@ flowchart LR
 - Render every page inside the single `<main id="main-content">` of the app shell, never add a second `<main>`. Give each page exactly one `h1`, hidden with `.sr-only` when the layout shows no title, and never skip a heading level. Card, chart and empty-state titles are `h2`.
 - Give every icon-only button or link a name through `label` or `aria-label`, and name the target ("Remove bob", not "Remove"). `pnpm button-names:check` fails on an unnamed icon-only button. A `gr-copy-field` or `gr-select` inside a `gr-form-field` takes the field label. The outer one can pass `label` to the copy field and `ariaLabel` to the select.
 - Use `@shared/ui`'s `entityKindToIconName` for project, task, cache, and team icons in every place with the entity on screen (rows, cards, empty states, invite lists). Don't enter Material icon names for those entities in templates.
+- Use `gr-entity-name` from `@shared/ui` in lists, rows, cards, and requests to show a project, task, cache, or team. Render the display name. Render the slug in muted monospace text when the slug and display name differ. Two items with the same display name stay distinct. Use `gr-nav-card` to project the entity with `slot="title"`. Set `[title]` to `formatEntityLabel(item)` for the tooltip. Use `formatEntityLabel()` for plain text such as confirmation targets, aria labels, and toasts (for example, "Web Shop (shop)"). Pickers build options with `entityToPickerOption()` and filter with `doesSearchQueryMatchEntityNameOrSlug()`. Users can find an item by either name. Detail pages show the slug for the CLI (`project`, `project/task`, `cache`, `team`) as inline `gr-copy-field` in the header. Breadcrumbs and page titles keep the display name.
 - Pass the display name of the starred item to `gr-star-button` (`starredItemDisplayName`). Use that name as the button label ("Star Web Shop"). Restore the button to its original state after a failed star or unstar action. Then show a failure toast with that name.
 - User menu commands close the header drawer on narrow screens before they open a dialog or navigate. Dialogs never show behind the drawer.
 - Add `grScrollRegion` to every element that scrolls on its own, so keyboard users can focus and scroll it while its content overflows. `gr-table` and the log viewer already do this.
@@ -160,7 +161,7 @@ The package `@gradient/ui` lives in the pnpm workspace at `frontend/packages/ui`
 
 ## `gr-ui`
 
-The generic building blocks live in `frontend/packages/ui/src/ui/` and build on `@angular/cdk`. Gradient-specific components (`gr-eval-status-badge`, `gr-status-icon`, `gr-waiting-notice`, `gr-live-status`, `gr-metric-chart`, `gr-star-button`, `gr-label-help`) live in `frontend/src/app/shared/ui/`. Imports go through the barrel of each layer.
+The generic building blocks live in `frontend/packages/ui/src/ui/` and build on `@angular/cdk`. Gradient-specific components (`gr-eval-status-badge`, `gr-status-icon`, `gr-waiting-notice`, `gr-live-status`, `gr-metric-chart`, `gr-star-button`, `gr-label-help`, `gr-entity-name`) live in `frontend/src/app/shared/ui/`. Imports go through the barrel of each layer.
 
 ```ts
 import { FormFieldComponent, PageLayoutComponent, SettingsSectionComponent } from '@gradient/ui/ui';
