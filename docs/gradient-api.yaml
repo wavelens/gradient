@@ -2207,13 +2207,16 @@ paths:
       - build-requests
       summary: Append a chunk of a source NAR to a staged upload
       description: |-
-        Streams a large source NAR to the server in slices so no single request
-        hits a body limit. `upload` is a client-chosen id (the CLI uses the NAR's
-        content hash, which makes a retry resumable). `offset` must equal the
-        bytes already received (`0` starts fresh); a mismatch appends nothing and
-        returns the authoritative `received` so the client resumes. The staged
-        total is bounded by `max_source_upload_size`. Finalise with
-        `POST /build-requests/source/{upload}/finalize`.
+        Large source NARs stream to the server in slices, so requests never hit the limit on body size.
+        The client can choose `upload`.
+        The CLI can use the content hash of the NAR as that ID, so retries can resume.
+        Match `offset` to the number of bytes already received.
+        Use `0` to start a new upload.
+        Mismatches add no bytes.
+        The server can return the authoritative `received`, so the client can resume.
+        Use `triggerEvaluation` on `project`.
+        All incomplete uploads for one user share one `max_source_upload_size` limit.
+        Use `POST /build-requests/source/{upload}/finalize` to finalize the upload.
       operationId: putBuildRequestSourceChunk
       parameters:
       - name: upload
@@ -2228,6 +2231,11 @@ paths:
           type: integer
           format: int64
           minimum: 0
+      - name: project
+        in: query
+        required: true
+        schema:
+          type: string
       requestBody:
         content:
           application/octet-stream:
@@ -6011,7 +6019,7 @@ paths:
   /api/v1/evals/{evaluation}/retry:
     post:
       tags:
-      - evaluations
+      - evals
       summary: Retry evaluation
       description: Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Callers need the `triggerEvaluation` permission on the project. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.
       operationId: retryEvaluation
@@ -7540,12 +7548,12 @@ paths:
       - integrations
       summary: Update integration
       description: |-
-        Patch-updates an integration. Omit a field to leave it unchanged.
-        Pass an empty string for `access_token` to **clear** it. Inbound integrations reject an empty `secret` with `400`.
+        Patch an integration. Omitted fields stay unchanged.
+        An empty string for `access_token` or `endpoint_url` on an inbound integration **clear** that field. Outbound integrations need both fields and return `400`. Inbound integrations reject an empty `secret` with `400`.
 
-        `git_host_type=github` rows are managed by the App and installation; PATCH
-        rejects them with `400`. Delete the row to remove the integration.
-        State-managed integrations are rejected with `403`.
+        The App and the installation manage rows in `git_host_type=github`. PATCH
+        requests on these rows receive `400`. To delete an integration, delete its row.
+        State-managed integrations receive `403`.
       operationId: patchProjectIntegration
       parameters:
       - name: project
@@ -9072,7 +9080,7 @@ paths:
       description: |-
         Removes the worker registration. The worker may still be connected until
         it disconnects naturally - it will not be able to reconnect after that.
-        A team worker answers `409`; it is deleted on its team.
+        A team worker or a state-managed worker returns `409`. Delete a team worker in its team.
       operationId: deleteProjectWorker
       parameters:
       - name: project
@@ -9474,7 +9482,7 @@ paths:
       tags:
       - tasks
       summary: Update task
-      description: Updates one or more task fields.
+      description: Update one or more fields of a task. Changes to `repository`, `wildcard`, `only_evaluate`, `exec_enabled` or `multi_node_evaluation` trigger a re-evaluation of the latest commit. Other fields take effect at the next evaluation.
       operationId: patchTask
       parameters:
       - name: project
@@ -10715,7 +10723,7 @@ paths:
       - tasks
       summary: Open a pull request from a patch
       description: |-
-        Applies a unified diff to the start commit and opens or updates a pull request through the Git host integration of the task's `open_pr` action. Inside an exec job the start commit is the job's evaluation commit and the pull request is listed on the job; any other caller passes `commit`. Without `branch` the branch name follows the touched paths, so the same paths update one pull request. The patch may add and change files but not delete them.
+        Applies a unified diff to the start commit and opens or updates a pull request through the Git host integration of the task's `open_pr` action. Inside an exec job the start commit is the job's evaluation commit and the pull request is listed on the job; any other caller passes `commit`. Start the specified `branch` with `gradient/`. Without `branch` the branch name follows the touched paths, so the same paths update one pull request. The patch may add and change files but not delete them.
 
         **Access:** Members with the `triggerEvaluation` permission, or the job token of an exec job of the task.
       operationId: openTaskPullRequest
@@ -10934,7 +10942,7 @@ paths:
       tags:
       - tasks
       summary: Move task to another project
-      description: Moves the task into the project named in the body. Allowed for the task owner or a member with the edit-task permission, who also needs the create-task permission in the target project. Rejects state-managed tasks and target projects.
+      description: Moves the task into the project named in the body. Allowed for the task owner or a member with the edit-task permission, who also needs the create-task permission in the target project. Rejects state-managed tasks and target projects. Reject tasks that use an integration with a Git host in a trigger or action. Return `409` for a name already taken in the target project.
       operationId: transferTask
       parameters:
       - name: project
@@ -12380,10 +12388,10 @@ paths:
       - user
       summary: Delete current user
       description: |-
-        Permanently deletes the authenticated user and all associated data.
-        Requires re-authentication: password-auth users must supply their
-        current password in `password`; users without a password must echo
-        their username in `confirm_username`.
+        Completely delete the authenticated user and all related data.
+        This request requires re-authentication. Users with password authentication enter their current
+        password in `password`. Users without a password enter
+        their username as-is in `confirm_username`. Managed users (created in the NixOS configuration) answer `403`.
       operationId: deleteUser
       requestBody:
         content:
@@ -12815,7 +12823,7 @@ paths:
       tags:
       - user
       summary: Search users by username
-      description: Returns up to 10 users whose username contains the given query string. Used for autocomplete in member and ownership dialogs.
+      description: The endpoint can return up to 10 users with usernames that contain the specified query string. No users match an empty query. The member and ownership dialogs use this endpoint for autocomplete.
       operationId: searchUsers
       parameters:
       - name: q
@@ -12949,10 +12957,7 @@ paths:
       tags:
       - user
       summary: Update user settings
-      description: |-
-        Updates one or more user profile fields. Only fields that are present in the
-        request body are changed. Managed users (created via NixOS config) cannot be
-        modified through the API.
+      description: Update one or more fields of a user profile. Only fields present in the request body change. Managed users (accounts declared in NixOS configuration) can't change through the API. A new `email` must be a valid address. No other account can have that address. The comparison is case-insensitive. The changed address can become unverified. The server can send a new verification email if email verification is enabled. Sign-in again can proceed only with a verified address.
       operationId: patchUserSettings
       requestBody:
         content:
@@ -13851,9 +13856,7 @@ paths:
       tags:
       - scim
       summary: Patch SCIM group membership
-      description: |-
-        Adds or removes members of the team whose `scim_group` matches. Added users
-        join as Members. Unknown group names return 404.
+      description: Use this endpoint to add, remove, or replace members of the team with a matching `scim_group`. Added users join as members. Use a `replace` for `members` to remove SCIM-added members that aren't in the new list. Members added manually or by the state remain. Unknown group names return 404.
       operationId: scimPatchGroup
       parameters:
       - name: id
@@ -14210,7 +14213,7 @@ paths:
       tags:
       - scim
       summary: Patch a SCIM user
-      description: Applies a SCIM PatchOp. Typically toggles `active` for deactivation/reactivation.
+      description: A SCIM PatchOp can carry `add` or `replace` operations. These operations apply to `active`, `displayName`, `name.formatted`. Other operations and attributes produce a 400 response and leave everything unchanged.
       operationId: scimPatchUser
       parameters:
       - name: id
@@ -17102,6 +17105,10 @@ components:
           oneOf:
           - $ref: '#/components/schemas/WalkMode'
           - type: 'null'
+    EvaluationAction:
+      type: string
+      enum:
+      - abort
     EvaluationFailureSummary:
       type: object
       required:
@@ -19198,7 +19205,7 @@ components:
       - method
       properties:
         method:
-          type: string
+          $ref: '#/components/schemas/EvaluationAction'
     MakeLoginRequest:
       type: object
       required:
@@ -19669,7 +19676,7 @@ components:
           type: string
         FileSize:
           type: integer
-          format: int32
+          format: int64
           minimum: 0
         NarHash:
           type: string

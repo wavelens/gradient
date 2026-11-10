@@ -25,8 +25,8 @@ pub struct GcArgs {
     #[arg(default_value_t = 336)]
     pub nar_ttl_hours: u64,
 
-    /// Hours before the deletion of an unreferenced NAR object, covering the window between its
-    /// upload and the commit of its database rows.
+    /// Hours before deletion of an unreferenced NAR object or build-request blob. These hours cover
+    /// the window between upload and the commit of database rows.
     #[arg(default_value_t = 24)]
     pub nar_upload_grace_hours: u32,
 

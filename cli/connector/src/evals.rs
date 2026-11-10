@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    ArtefactTree, ClosureGraph, EvaluationFailureSummary, EvaluationMessageResponse,
-    EvaluationResponse, FlakeGraphNode, MakeEvaluationRequest, OutputArtefacts, PaginatedBuilds,
+    ArtefactTree, ClosureGraph, EvaluationAction, EvaluationFailureSummary,
+    EvaluationMessageResponse, EvaluationResponse, FlakeGraphNode, MakeEvaluationRequest,
+    OutputArtefacts, PaginatedBuilds,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, DownloadedBinaryFile, LiveUpdateEvent, http};
@@ -48,7 +49,7 @@ impl EvalsApi<'_> {
             true,
         )?
         .json(&MakeEvaluationRequest {
-            method: "abort".to_owned(),
+            method: EvaluationAction::Abort,
         });
         http::decode(req.send().await?).await
     }

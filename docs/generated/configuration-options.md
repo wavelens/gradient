@@ -18,7 +18,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `publicStats` | bool | `false` | `GRADIENT_PUBLIC_STATS` | Expose `GET /api/v1/workers` and worker stats without authentication. Only superusers can access those endpoints with `false` (default). |
 | `retentionDays` | unsigned int | `90` | `GRADIENT_RETENTION_DAYS` | Days to keep job assignment records, finished deliveries, worker connection history, webhook and task action deliveries, expired sessions and CLI logins. Finished admin tasks, the audit log, per-build resource samples and finished cluster jobs share the same limit. Removed resource samples no longer feed build predictions. Finished cluster jobs without remaining members go on the next hourly pass. Active cluster jobs and the newest finished admin task of each kind stay exempt. Open worker connections stay until the next connection of the same worker. Set it to `0` to keep every record forever. |
 | `serveUrl` | string | derived | `GRADIENT_SERVE_URL` | Public URL of Gradient. Set this for a URL other than `domain`, for example behind a port mapping. |
-| `storePath` | null or string | `null` | `GRADIENT_STORE_PATH` |  |
 | `useQuic` | bool | `false` | `GRADIENT_USE_QUIC` | Whether to enable advertising HTTP/3 (QUIC) to clients. |
 | `useTls` | bool | `true` | `GRADIENT_USE_TLS` | Whether to enable TLS. |
 
@@ -50,7 +49,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `database.cache.minConnections` | unsigned int | `2` | `GRADIENT_DATABASE_CACHE_MIN_CONNECTIONS` | Minimum connections kept open in the cache query pool. |
 | `database.maxConnections` | positive int | `16` | `GRADIENT_DATABASE_MAX_CONNECTIONS` | Maximum connections of the scheduler and worker pool. Server processes each open up to the sum of `database.maxConnections`, `database.cache.maxConnections` and `database.web.maxConnections`. PostgreSQL's `max_connections` must accommodate that sum. |
 | `database.minConnections` | unsigned int | `2` | `GRADIENT_DATABASE_MIN_CONNECTIONS` | Minimum connections kept open in the scheduler and worker pool. |
-| `database.url` | string | `"postgresql://gradient@localhost/gradient?host=/run/postgresql"` | `GRADIENT_DATABASE_URL` | PostgreSQL connection URL. |
+| `database.url` | string | `"postgresql://gradient@localhost/gradient?host=/run/postgresql"` | `GRADIENT_DATABASE_URL` | Use a connection URL for PostgreSQL without a password. Files in the Nix store are world-readable and contain the connection URL. Use `database.urlFile` for a URL with a password. |
 | `database.urlFile` | path | derived | `GRADIENT_DATABASE_URL_FILE` | File containing the PostgreSQL connection URL, taking precedence over `database.url`. |
 | `database.web.maxConnections` | positive int | `8` | `GRADIENT_DATABASE_WEB_MAX_CONNECTIONS` | Maximum connections of the HTTP API pool. |
 | `database.web.minConnections` | unsigned int | `1` | `GRADIENT_DATABASE_WEB_MIN_CONNECTIONS` | Minimum connections kept open in the HTTP API pool. |
@@ -101,7 +100,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 | `gc.deepPaceMs` | unsigned int | `1000` | `GRADIENT_GC_DEEP_PACE_MS` | Milliseconds between two units of a storage migration or a background deep garbage collection round. Requested rounds run their units without a pause. |
 | `gc.intervalSecs` | positive int | `3600` | `GRADIENT_GC_INTERVAL_SECS` | Seconds between garbage collection passes. |
 | `gc.narTtlHours` | unsigned int | `336` | `GRADIENT_GC_NAR_TTL_HOURS` | The number of hours a cache can hold claims for cached paths outside the live closure of retained evaluations. Start the count at the last fetch of that cache. Start the count at claim creation when the cache never had a fetch. The system can remove the cached path itself once the claims on that path drop to zero. Always add this number to `gc.narUploadGraceHours`. Set this option to `0` to keep nothing beyond this grace period. |
-| `gc.narUploadGraceHours` | unsigned int | `24` | `GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS` | Hours before the deletion of an unreferenced NAR object, covering the window between its upload and the commit of its database rows. |
+| `gc.narUploadGraceHours` | unsigned int | `24` | `GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS` | Hours before deletion of an unreferenced NAR object or build-request blob. These hours cover the window between upload and the commit of database rows. |
 | `gc.orphanDerivationHours` | unsigned int | `24` | `GRADIENT_GC_ORPHAN_DERIVATION_HOURS` | Hours before the deletion of a derivation outside the build closure of every retained evaluation. Quick re-evaluations can reuse the derivation during this grace. Set it to `0` to delete such derivations on the next run. |
 
 ## `giteaApp`
@@ -223,12 +222,14 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `proto.allowWorkerUrlsOnPrivateNetworks` | bool | `false` | `GRADIENT_PROTO_ALLOW_WORKER_URLS_ON_PRIVATE_NETWORKS` | Whether the server can connect to worker URLs on private, loopback, or link-local addresses. Leave this option off unless a worker is reachable only on an internal network. Otherwise, a project member with permission to manage workers can make the server open a connection to that network. |
 | `proto.anonymousCache.enable` | bool | `true` | `GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE` | Whether unauthenticated clients can use `GET /cache/{cache}/proto` for public caches. Private caches always require an API key. |
 | `proto.anonymousCache.maxConnectionsPerIp` | positive int | `32` | `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP` | Maximum simultaneous anonymous `/cache/proto` connections per client IP. |
 | `proto.assignmentReclaimGraceSecs` | unsigned int | `600` | `GRADIENT_PROTO_ASSIGNMENT_RECLAIM_GRACE_SECS` | Seconds the server keeps the open assignments of a disconnected worker for the worker to report them in `RunningJobs`. After a server restart this covers the open assignments of every worker. Assignments nobody reports within this time are re-queued and count as a lost worker. A worker that disconnected with a `maxLifetime` gets at most its remaining lifetime. Assignments kept over a server restart get the full time. Set it to `0` to re-queue at once. |
 | `proto.discoverable` | bool | `true` | `GRADIENT_PROTO_DISCOVERABLE` | Whether to enable incoming worker and federation connections on `/proto`. |
 | `proto.federate` | bool | `false` | `GRADIENT_PROTO_FEDERATE` | Whether to enable federation with other Gradient servers over `/proto`. |
 | `proto.maxConnections` | positive int | `256` | `GRADIENT_PROTO_MAX_CONNECTIONS` | Maximum simultaneous `/proto` WebSocket connections. |
+| `proto.maxConnectionsPerIp` | positive int | `64` | `GRADIENT_PROTO_MAX_CONNECTIONS_PER_IP` | Maximum number of simultaneous `/proto` WebSocket connections from one IP address of a client. Raise this value when many workers connect through one NAT address. |
 | `proto.public` | bool | `false` | - | Whether to enable exposing `/proto` through the reverse proxy for remote workers and federation. |
 | `proto.workerHeartbeatTimeoutSecs` | unsigned int | `120` | `GRADIENT_PROTO_WORKER_HEARTBEAT_TIMEOUT_SECS` | Seconds a connected worker can stay silent before counting as dead, with its jobs re-queued. Workers heartbeat every 10 seconds, giving the default a tolerance of twelve missed beats. The timeout is the only detection for a worker lost without a clean TCP close (OOM kill, frozen host, network partition). Set it to `0` to disable the watchdog. |
 
@@ -278,7 +279,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 |---|---|---|---|---|
 | `scheduler.clusterPrepareTimeoutSecs` | positive int | `30` | `GRADIENT_SCHEDULER_CLUSTER_PREPARE_TIMEOUT_SECS` | Seconds for every member of a cluster job attempt to accept its assignment. Attempts not accepted by all members in time abort, and their cluster jobs return to the queue. |
 | `scheduler.clusterReserveAfterSecs` | positive int | `600` | `GRADIENT_SCHEDULER_CLUSTER_RESERVE_AFTER_SECS` | Seconds cluster jobs that can start wait for enough simultaneously idle workers before reserving a placement. Reserved workers receive no new single jobs until the cluster job's start or the reservation's expiry. |
-| `scheduler.clusterReserveTimeoutSecs` | positive int | `1800` | `GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS` | Seconds to hold a cluster job reservation before releasing it and planning the cluster job again. |
+| `scheduler.clusterReserveTimeoutSecs` | positive int | `1800` | `GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS` | Number of seconds to keep a reservation for a cluster job before release. Cluster jobs wait one cluster-reserve-after period before they can reserve workers again. |
 | `scheduler.scoringPolicy` | one of `simple` `resource-aware` | `"resource-aware"` | `GRADIENT_SCHEDULER_SCORING_POLICY` | Policy ranking queued jobs for a requesting worker. Factors of `simple`: path availability, NAR size, dependency count, waiting time, builtins and fetch worker reservation. Factors of `resource-aware`: the same plus memory fit, worker saturation, CPU, disk and network affinity and `preferLocalBuild`. |
 
 ## `scim`
@@ -326,7 +327,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.acceptedServerTokensFile` | null or path | `null` | `GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE` | File of token hashes required from connecting servers, with `peer_id:hash` per line and `#` starting a comment. A hash is an argon2 PHC string or the lowercase SHA-256 hex digest of the token itself, for example from `printf %s "$TOKEN" \| sha256sum`. Peer ID `*` matches any peer. The worker reads this file only with `GRADIENT_WORKER_DISCOVERABLE`. Set it to `null` to accept every server; avoid that in a production setup. |
+| `worker.acceptedServerTokensFile` | null or path | `null` | `GRADIENT_WORKER_ACCEPTED_SERVER_TOKENS_FILE` | File of token hashes required from connecting servers, with `peer_id:hash` per line and `#` starting a comment. A hash is an argon2 PHC string or the lowercase SHA-256 hex digest of the token itself, for example from `printf %s "$TOKEN" \| sha256sum`. Peer ID `*` matches any peer. The worker reads this file only with `GRADIENT_WORKER_DISCOVERABLE`. Use `null` to accept every server. This value needs `worker.allowDiscoverableWithoutAcceptedServerTokensFile`. |
+| `worker.allowDiscoverableWithoutAcceptedServerTokensFile` | bool | `false` | - | Set `worker.discoverable` and leave `worker.acceptedServerTokensFile` unset to accept every server that can connect. This setting is for closed networks only. |
 | `worker.baseDir` | path | `"/var/lib/gradient-worker"` | `GRADIENT_WORKER_BASE_DIR` | Directory holding the worker's state. |
 | `worker.discoverable` | bool | `false` | `GRADIENT_WORKER_DISCOVERABLE` | Whether to enable incoming server connections on `/proto`. |
 | `worker.domain` | string | `""` | - | Domain of the worker's reverse proxy virtual host. Only applies with a reverse proxy enabled. |
@@ -426,7 +428,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `worker.log.burstBytesPerMin` | unsigned int | `33554432` | `GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN` | The limit on bytes of build log that the worker can forward for each build in any one minute. The worker can pause the log for a build over this limit and resume it when the rate is lower. A note can give the number of skipped lines. The build itself can continue. |
-| `worker.log.fetchFromStore` | bool | `true` | `GRADIENT_WORKER_LOG_FETCH_FROM_STORE` | Whether to forward the stored build log of a derivation already built locally and therefore producing no new log. |
+| `worker.log.fetchFromStore` | bool | `true` | `GRADIENT_WORKER_LOG_FETCH_FROM_STORE` | Whether to forward saved build logs for derivations that already built locally and produce no new logs. Forwarded logs get a cutoff at burstBytesPerMin. |
 | `worker.log.level.build` | null or one of `trace` `debug` `info` `warn` `error` | `null` | `GRADIENT_WORKER_LOG_LEVEL_BUILD` | Log level of the builder. `null` uses `worker.log.level.default`. |
 | `worker.log.level.default` | one of `trace` `debug` `info` `warn` `error` | `"info"` | `GRADIENT_WORKER_LOG_LEVEL_DEFAULT` | Default log level. |
 | `worker.log.level.eval` | null or one of `trace` `debug` `info` `warn` `error` | `null` | `GRADIENT_WORKER_LOG_LEVEL_EVAL` | Log level of the evaluator. `null` uses `worker.log.level.default`. |

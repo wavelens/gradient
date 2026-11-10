@@ -976,6 +976,8 @@ export interface EvaluateRequest {
   walk?: WalkMode | null;
 }
 
+export type EvaluationAction = "abort";
+
 export interface EvaluationFailureSummary {
   compared_with?: ComparedEvaluation | null;
   packages: PackageCounts;
@@ -1661,7 +1663,7 @@ export interface MakeCacheRequest {
 }
 
 export interface MakeEvaluationRequest {
-  method: string;
+  method: EvaluationAction;
 }
 
 export interface MakeLoginRequest {

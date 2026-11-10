@@ -97,16 +97,6 @@
   },
   {
     "group": "",
-    "field": "store_path",
-    "flag": "store-path",
-    "env": "GRADIENT_STORE_PATH",
-    "type": "Option<String>",
-    "description": "",
-    "default": null,
-    "values": []
-  },
-  {
-    "group": "",
     "field": "public_stats",
     "flag": "public-stats",
     "env": "GRADIENT_PUBLIC_STATS",
@@ -476,12 +466,35 @@
   },
   {
     "group": "proto",
+    "field": "allow_worker_urls_on_private_networks",
+    "flag": "proto-allow-worker-urls-on-private-networks",
+    "env": "GRADIENT_PROTO_ALLOW_WORKER_URLS_ON_PRIVATE_NETWORKS",
+    "type": "bool",
+    "description": "Whether the server can connect to worker URLs on private, loopback, or link-local\naddresses. Leave this option off unless a worker is reachable only on an internal network.\nOtherwise, a project member with permission to manage workers can make the server open a\nconnection to that network.",
+    "default": "false",
+    "values": [
+      "true",
+      "false"
+    ]
+  },
+  {
+    "group": "proto",
     "field": "max_connections",
     "flag": "proto-max-connections",
     "env": "GRADIENT_PROTO_MAX_CONNECTIONS",
     "type": "NonZeroUsize",
     "description": "Maximum simultaneous `/proto` WebSocket connections.",
     "default": "256",
+    "values": []
+  },
+  {
+    "group": "proto",
+    "field": "max_connections_per_ip",
+    "flag": "proto-max-connections-per-ip",
+    "env": "GRADIENT_PROTO_MAX_CONNECTIONS_PER_IP",
+    "type": "NonZeroUsize",
+    "description": "Maximum number of simultaneous `/proto` WebSocket connections from one IP address of a\nclient. Raise this value when many workers connect through one NAT address.",
+    "default": "64",
     "values": []
   },
   {
@@ -736,7 +749,7 @@
     "flag": "gc-nar-upload-grace-hours",
     "env": "GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS",
     "type": "u32",
-    "description": "Hours before the deletion of an unreferenced NAR object, covering the window between its\nupload and the commit of its database rows.",
+    "description": "Hours before deletion of an unreferenced NAR object or build-request blob. These hours cover\nthe window between upload and the commit of database rows.",
     "default": "24",
     "values": []
   },
@@ -919,7 +932,7 @@
     "flag": "scheduler-cluster-reserve-timeout-secs",
     "env": "GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS",
     "type": "NonZeroU64",
-    "description": "Seconds to hold a cluster job reservation before releasing it and planning the cluster\njob again.",
+    "description": "Number of seconds to keep a reservation for a cluster job before release. Cluster jobs wait\none cluster-reserve-after period before they can reserve workers again.",
     "default": "1800",
     "values": []
   },
