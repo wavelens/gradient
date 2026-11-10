@@ -19,7 +19,7 @@ flowchart LR
 ## Subprocess IPC
 
 - **Frames:** each frame start with a `u32` little-endian length prefix, followed by an rkyv payload (`gradient-eval/src/ipc.rs`).
-- **Version byte:** before the first frame, subprocesses write `EVAL_IPC_VERSION` (currently 15). A binary swapped mid-evaluation then fail the handshake instead of sending undecodable frames.
+- **Version byte:** before the first frame, subprocesses write `EVAL_IPC_VERSION` (currently 19). A binary swapped mid-evaluation then fail the handshake instead of sending undecodable frames.
 - **Fetch byte:** parents reply with one byte. Subprocesses given `1` ask the parent for [missing inputs](#missing-inputs). Subprocesses given `0` let Nix download them.
 - **Responses:** each request pair with one response. `Stats` ticks and [build requests](#import-from-derivation) can arrive before that response. `List` responses carry the derivation path of every attribute found, resolved in the subprocess that forced the attribute.
 - **Shards:** `Plan` can split each include at its first wildcard.
@@ -31,7 +31,18 @@ flowchart LR
     - Those children appear in `deferred` as a `*` shard.
     - The parent can queue those names in batches.
     - One heavy set then spread across the pool instead of keeping one subprocess busy while the rest sit idle.
-- **Warm walker:** a subprocess can keep one walker (locked flake plus open eval cache) across consecutive requests for the same repository. A Plan / List sequence then pay for the lock and the cache open only once.
+- **Warm walker:** The subprocess can keep one walker (a locked flake and an open evaluation cache) over consecutive requests for the same evaluation target (repository, input overrides, fetch URL access). A Plan / List sequence can then pay the cost to lock and open the cache once.
+
+## Restricted Evaluation
+
+One pooled subprocess can handle evaluations for many projects. `restrict-eval` and `allowed-uris` change per request, not once at startup.
+
+- `NixEvaluator::set_restrict_eval_and_allowed_uris` can set both settings on the running evaluator through `EvalState::set_evaluator_setting` (nix-bindings shim `nix_eval_state_set_setting`). `None` can disable restrictions.
+- `WalkerCache` can form the cache key for warm walkers across all of `FlakeEvalTarget` - repository, input overrides, access to fetch URLs.
+- Only the extra prefixes apply before the lock. They cover fetches in `flake.nix` during the lock.
+- `FlakeWalker::input_fetch_urls` can add the exact fetch URLs of all locked inputs after the lock. Later requests against a cached walker apply the saved list again.
+- `Fingerprint` can apply the extra prefixes before the lock.
+- `FetchInput` can run without restrictions. The evaluator that requested the input already checked that URL.
 
 ## Import From Derivation
 

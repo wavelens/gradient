@@ -85,6 +85,29 @@ Import from derivation (IFD) allow a flake to read a derivation's output during 
 - When an import fail, every attribute that depend on it fail too, with the error `import from derivation '<name>' failed: build <build id> <status>`.
 - If no connected worker has the target system, the import fail after 5 minutes. A task can opt into waiting for workers instead.
 
+## Restricted Evaluation
+
+Evaluations use the Nix setting `restrict-eval` by default. Fetches during evaluation (`builtins.fetchTree`, `fetchurl`, `fetchTarball`, `fetchGit`) can access only the URLs below.
+
+- The exact URLs of inputs locked in `flake.lock`. Nix can build those URLs the same way Nix can fetch those inputs during flake load.
+- Prefixes from the server option `GRADIENT_EVAL_ALLOWED_URI_PREFIXES` (comma-separated). See [Configuration](../reference/configuration.md).
+- URL prefixes that a project can allow in addition (`extra_allowed_uri_prefixes`).
+
+All other fetches fail with `forbidden in restricted mode`.
+
+- Prefixes match the same URL, or a longer URL with `/` right after the prefix.
+- Prefixes that end in `:` (for example, `github:`) match an entire URL scheme.
+- Prefixes can't be empty and can't contain whitespace.
+
+Use the project option `restrict_evaluation_fetches` (enabled by default) to disable the restriction for one project. Use the project settings page, API `patchProject`, or [declarative state](../reference/state.md) to change both project options.
+
+Builds of [imported derivations](#imported-derivations) run inside the same restricted evaluator.
+
+Limitations:
+
+- Earlier unrestricted evaluations of the same locked flake fill the eval cache. Restricted evaluations still read from that cache.
+- Nix doesn't check the URL for the top-level fetch of `builtins.getFlake`.
+
 ## Related
 
 - [Projects and Tasks](projects-and-tasks.md): where evaluations come from
