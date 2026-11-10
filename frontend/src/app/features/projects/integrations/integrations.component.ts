@@ -402,10 +402,12 @@ export class IntegrationsComponent implements OnInit {
       .confirm({
         title: 'Delete integration',
         target: integration.display_name,
-        consequence: `Inbound webhook events and outbound status reports for ${integration.display_name} stop.`,
+        consequence: integration.kind === 'inbound'
+          ? `Webhook events from the Git host for ${integration.display_name} no longer reach Gradient.`
+          : `Build statuses from Gradient to the Git host no longer go through ${integration.display_name}.`,
         isIrreversible: true,
         confirmLabel: 'Delete',
-        failure: 'Integration deletion failed.',
+        failure: 'Failed to delete the integration.',
         action: () => this.integrationsService.deleteProjectIntegration(this.projectName, integration.id),
       })
       .subscribe(() => {

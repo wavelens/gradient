@@ -295,6 +295,20 @@ describe('IntegrationsComponent - write failures', () => {
     );
   });
 
+  it('names only the direction an integration covers in its delete confirm', async () => {
+    const outbound: IntegrationResponse = { ...baseIntegration, id: 'o1', name: 'gitea-status', display_name: 'Gitea Status', kind: 'outbound' };
+    const fixture = setup(writable, [baseIntegration, outbound]);
+    Object.assign(TestBed.inject(IntegrationsService), { deleteProjectIntegration: vi.fn(() => of(undefined)) });
+    confirm.mockImplementation(() => EMPTY);
+    await settled(fixture);
+    findAllByText(fixture.nativeElement, 'delete').forEach((b) => b.click());
+    const consequences = confirm.mock.calls.map(([request]) => (request as ConfirmRequest).consequence);
+    expect(consequences).toEqual([
+      'Webhook events from the Git host for Gitea Prod no longer reach Gradient.',
+      'Build statuses from Gradient to the Git host no longer go through Gitea Status.',
+    ]);
+  });
+
   it('sends no delete when the confirmation is cancelled', async () => {
     const fixture = setup(writable, [baseIntegration]);
     const deleteProjectIntegration = vi.fn(() => of(undefined));
