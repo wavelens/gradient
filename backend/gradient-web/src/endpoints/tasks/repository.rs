@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::RepositoryFetchStatus;
 use super::auto_attach::integration_serves_repository;
 use super::refusal::TaskRefusal;
+use super::{RepositoryFetchStatus, error_message_if_caller_can_edit_task};
 use crate::access::load_membership_with_permissions;
 use crate::api_spec::TaskPath;
 use crate::endpoints::projects::integrations::{IncomingWebhookDeliveryResponse, WebhookBase};
@@ -242,7 +242,10 @@ async fn repository_response(
                 .map(|d| StatusReportDelivery {
                     success: d.success,
                     response_status: d.response_status,
-                    error_message: d.error_message,
+                    error_message: error_message_if_caller_can_edit_task(
+                        d.error_message,
+                        can_edit_task,
+                    ),
                     delivered_at: d.delivered_at,
                 });
             Some(StatusReport {

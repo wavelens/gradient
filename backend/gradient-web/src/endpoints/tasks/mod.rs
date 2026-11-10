@@ -77,15 +77,22 @@ pub struct RepositoryFetchStatus {
 }
 
 impl RepositoryFetchStatus {
-    /// Only members who can edit the task can view those errors. Git errors can contain internal hostnames.
     pub fn of(task: &MTask, can_edit: bool) -> Option<Self> {
         Some(Self {
             checked_at: task.last_fetch_at?,
             ok_at: task.last_fetch_ok_at,
             failed: task.last_fetch_error.is_some(),
-            error: task.last_fetch_error.clone().filter(|_| can_edit),
+            error: error_message_if_caller_can_edit_task(task.last_fetch_error.clone(), can_edit),
         })
     }
+}
+
+/// Only members who can edit the task can view those errors. Git errors can contain internal hostnames.
+pub(crate) fn error_message_if_caller_can_edit_task(
+    error: Option<String>,
+    can_edit: bool,
+) -> Option<String> {
+    error.filter(|_| can_edit)
 }
 
 impl TaskResponse {

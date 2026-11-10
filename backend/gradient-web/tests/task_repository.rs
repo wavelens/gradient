@@ -160,6 +160,52 @@ async fn view_members_see_no_credential_state_and_cannot_edit() {
 }
 
 #[tokio::test]
+async fn view_members_see_that_a_status_report_failed_but_not_the_error() {
+    let session_id = SessionId::now_v7();
+    let status_action = task_action::Model {
+        id: TaskActionId::now_v7(),
+        task: task_id(),
+        action_type: gradient_types::actions::ActionType::GitHostStatusReport,
+        config: json!({ "type": "git_host_status_report", "integration_id": inbound().id }),
+        active: true,
+        created_by: user_id(),
+        created_at: test_date(),
+        updated_at: test_date(),
+        ..Default::default()
+    };
+    let failed = gradient_entity::task_action_delivery::Model {
+        id: TaskActionDeliveryId::now_v7(),
+        action_id: status_action.id,
+        success: false,
+        error_message: Some("POST https://git.internal.example/api: 500".into()),
+        delivered_at: test_date(),
+        ..Default::default()
+    };
+    let db = with_mask(
+        with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_VIEW_ID),
+        BASE_ROLE_VIEW_ID,
+    )
+    .append_query_results([Vec::<task_trigger::Model>::new()])
+    .append_query_results([vec![status_action]])
+    .append_query_results([vec![inbound()]])
+    .append_query_results([vec![failed]]);
+
+    let res = make_test_server(db.into_connection())
+        .get(URL)
+        .add_header(
+            "authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    let delivery = &body["message"]["report_status"]["last_delivery"];
+    assert_eq!(delivery["success"], false);
+    assert!(delivery["error_message"].is_null(), "{delivery}");
+}
+
+#[tokio::test]
 async fn turning_on_push_builds_needs_a_receiving_integration() {
     let session_id = SessionId::now_v7();
     let db = with_task_scope(with_auth(mock_db(), session_id), BASE_ROLE_ADMIN_ID);
