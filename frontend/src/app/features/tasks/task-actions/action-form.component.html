@@ -12,6 +12,7 @@
   [error]="error()"
   [busy]="busy()"
 >
+  <div #actionForm class="action-form-fields">
   <gr-form-field label="Name" for="action-name" required [invalid]="showError('name')" [error]="errors().name ?? ''">
     <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" (blur)="touch('name')" (keyup.enter)="onSubmit()" />
   </gr-form-field>
@@ -300,6 +301,7 @@
   <gr-checkbox inputId="action-active" [ngModel]="active()" (ngModelChange)="active.set($event)" [binary]="true"
     label="Active"
   />
+  </div>
 
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" [disabled]="busy()" (click)="onCancel()"></button>

@@ -99,6 +99,15 @@ describe('ActionFormComponent', () => {
     expect(emitted.events).toEqual([]);
   });
 
+  it('moves focus to the first invalid field after an invalid submit', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    Element.prototype.scrollIntoView = vi.fn();
+    fixture.componentInstance.onSubmit();
+    TestBed.tick();
+    expect(document.activeElement?.id).toBe('action-name');
+  });
+
   it('hard-wires events to empty for open_pr (fires on the verify gate, not events)', () => {
     const fixture = createFixture(true);
     fixture.detectChanges();

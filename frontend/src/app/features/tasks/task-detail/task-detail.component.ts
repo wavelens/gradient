@@ -155,6 +155,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private olderEvaluations = signal<EvaluationSummary[]>([]);
   private loadingOlder = false;
   hasOlderEvaluations = signal(true);
+  olderEvaluationsLoadError = signal<string | null>(null);
   evaluations = computed(() => {
     const newest = this.task()?.last_evaluations ?? [];
     const shown = new Set(newest.map(e => e.id));
@@ -257,6 +258,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const oldest = this.evaluations().at(-1);
     if (this.loadingOlder || !this.hasOlderEvaluations() || !oldest) return;
     this.loadingOlder = true;
+    this.olderEvaluationsLoadError.set(null);
     this.tasksService.getEvaluations(this.projectName, this.taskName, this.OLDER_PAGE, oldest.id)
       .pipe(finalize(() => (this.loadingOlder = false)))
       .subscribe({
@@ -264,7 +266,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
           this.olderEvaluations.update(loaded => [...loaded, ...page]);
           if (page.length < this.OLDER_PAGE) this.hasOlderEvaluations.set(false);
         },
-        error: () => this.hasOlderEvaluations.set(false),
+        error: (error) => this.olderEvaluationsLoadError.set(apiErrorMessage(error, 'no response from the server')),
       });
   }
 
@@ -562,7 +564,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.loadEntryPoints(this.selected()?.id);
   }
 
-  /// Ctrl/Cmd+F searches the packages; left/right arrows step through the evaluation strip.
+  /// Ctrl/Cmd+F searches the packages; left/right arrows step through the evaluation strip, Home and End jump to its ends.
   @HostListener('document:keydown', ['$event'])
   onKeydown(e: KeyboardEvent): void {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f' && this.selected()) {
@@ -570,18 +572,19 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       this.openSearch();
       return;
     }
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     const target = e.target as HTMLElement | null;
+    const focusOnEvaluationTab = target?.getAttribute('role') === 'tab' && target.classList.contains('eval-card');
+    const isArrow = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+    if (!isArrow && !(focusOnEvaluationTab && (e.key === 'Home' || e.key === 'End'))) return;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
     const list = this.evaluations();
     if (!list.length) return;
     const cur = this.selected();
     const idx = cur ? list.findIndex(x => x.id === cur.id) : 0;
-    const next = e.key === 'ArrowLeft' ? idx - 1 : idx + 1;
-    if (next < 0 || next >= list.length) return;
+    const next = { ArrowLeft: idx - 1, ArrowRight: idx + 1, Home: 0, End: list.length - 1 }[e.key];
+    if (next < 0 || next >= list.length || next === idx) return;
     e.preventDefault();
-    const focusOnEvaluationTab = target?.getAttribute('role') === 'tab' && target.classList.contains('eval-card');
     this.select(list[next]);
     requestAnimationFrame(() => {
       const card = this.host.nativeElement.querySelector('.eval-card.selected') as HTMLElement | null;
@@ -633,6 +636,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   readonly commitWebUrl = commitWebUrl;
   readonly repositoryWebUrl = repositoryWebUrl;
   readonly splitRepository = splitRepository;
+
+  getCommitMessageAndShortHashTooltip(e: EvaluationSummary): string {
+    return e.commit_message ? `${e.commit_message} · ${commitLabel(e.commit)}` : commitLabel(e.commit);
+  }
 
   evalTitle(e: EvaluationSummary): string {
     return evaluationTitle(e);

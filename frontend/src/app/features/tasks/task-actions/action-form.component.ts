@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnChanges, SimpleChanges, computed, inject, input, output, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, OnChanges, SimpleChanges, computed, inject, input, output, signal, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -31,7 +31,7 @@ import {
   SelectComponent,
 } from '@gradient/ui/ui';
 import { LabelHelpComponent } from '@shared/ui';
-import { fieldChecks } from '@shared/forms';
+import { fieldChecks, injectRevealFirstInvalid } from '@shared/forms';
 import { links } from '@shared/routing';
 
 type FormMode = 'create' | 'edit';
@@ -106,6 +106,8 @@ const requiredUrl = (value: string, message: string): string | null =>
 export class ActionFormComponent implements OnChanges {
   protected readonly links = links;
   private config = inject(ConfigService);
+  private actionForm = viewChild<ElementRef<HTMLElement>>('actionForm');
+  private revealFirstInvalid = injectRevealFirstInvalid();
 
   mode = input<FormMode>('create');
   existing = input<ActionResponse | null>(null);
@@ -443,7 +445,10 @@ export class ActionFormComponent implements OnChanges {
   onSubmit(): void {
     if (this.busy()) return;
     this.submitAttempted.set(true);
-    if (this.hasErrors()) return;
+    if (this.hasErrors()) {
+      this.revealFirstInvalid(() => this.actionForm()?.nativeElement);
+      return;
+    }
     const config = this.buildConfig();
     const events = this.eventsHardwired() ? [] : this.events();
     if (this.mode() === 'create') {

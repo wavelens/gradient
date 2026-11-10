@@ -75,6 +75,9 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
 // its top border sits exactly at the tab's bottom edge.
 .strip-wrap {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
   overflow-x: auto;
   overflow-y: hidden;
   z-index: 5;
@@ -99,7 +102,17 @@ h1 { font-size: $font-size-xxl; margin: 0; overflow-wrap: anywhere; }
   @media (hover: none) { display: none; }
 }
 
-.eval-strip { display: flex; gap: $spacing-sm; align-items: flex-start; }
+.eval-strip { display: flex; flex: none; gap: $spacing-sm; align-items: flex-start; }
+
+.strip-load-error {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: $spacing-sm;
+  color: var(--gr-status-danger-text);
+  font-size: $font-size-sm;
+  white-space: nowrap;
+}
 .strip-more { flex: none; width: 1px; align-self: stretch; }
 
 .eval-card {

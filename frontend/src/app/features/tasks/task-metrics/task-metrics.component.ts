@@ -11,17 +11,9 @@ import { LoadStateComponent, PageLayoutComponent } from '@gradient/ui/ui';
 import { MetricChartComponent } from '@shared/ui';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { formatBytes, formatCount, formatDuration, monthDayClockTime, plural } from '@shared/text';
+import { formatDependencyCount, metricSeriesChartColorTokenNames } from '../common-chart-style';
+import { formatBytes, formatDuration, monthDayClockTime } from '@shared/text';
 import { TaskMetricPoint, TaskMetricsResponse } from '@core/models';
-
-const CHART_COLORS = {
-  buildTime: '--gr-chart-cyan',
-  evalTime: '--gr-chart-purple',
-  outputSize: '--gr-chart-green',
-  closureSize: '--gr-chart-orange',
-  runtimeClosure: '--gr-chart-teal',
-  deps: '--gr-chart-pink',
-};
 
 @Component({
   selector: 'app-task-metrics',
@@ -85,13 +77,13 @@ export class TaskMetricsComponent implements OnInit {
     { name: 'Dependencies', data: this.metrics().map((p) => p.dependencies_count) },
   ]);
 
-  readonly buildTimeColor = [CHART_COLORS.buildTime];
-  readonly evalTimeColor = [CHART_COLORS.evalTime];
-  readonly outputSizeColor = [CHART_COLORS.outputSize];
-  readonly closureSizeColors = [CHART_COLORS.closureSize, CHART_COLORS.runtimeClosure];
-  readonly depsColor = [CHART_COLORS.deps];
+  readonly buildTimeColor = [metricSeriesChartColorTokenNames.buildTime];
+  readonly evalTimeColor = [metricSeriesChartColorTokenNames.evalTime];
+  readonly outputSizeColor = [metricSeriesChartColorTokenNames.outputSize];
+  readonly closureSizeColors = [metricSeriesChartColorTokenNames.closureSize, metricSeriesChartColorTokenNames.runtimeClosure];
+  readonly depsColor = [metricSeriesChartColorTokenNames.deps];
 
   readonly formatDuration = formatDuration;
   readonly formatBytes = formatBytes;
-  readonly formatDeps = (v: number) => (v === 1 ? plural(v, 'dep') : `${formatCount(v)} deps`);
+  readonly formatDeps = formatDependencyCount;
 }

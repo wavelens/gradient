@@ -15,19 +15,12 @@ import {
 import { MetricChartComponent } from '@shared/ui';
 import { TasksService } from '@core/services/tasks.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
-import { formatBytes, formatCount, formatDuration, monthDayClockTime } from '@shared/text';
+import { formatDependencyCount, metricSeriesChartColorTokenNames } from '../common-chart-style';
+import { formatBytes, formatDuration, monthDayClockTime } from '@shared/text';
 import { buildPhase, buildStatusLabel, getClosureMenuItemDisabledReason } from '@shared/evaluation';
 import { BuildStatus, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/models';
 import { links } from '@shared/routing';
 import { getEntryPointShortName } from '../task-detail/entry-point-groups';
-
-const CHART_COLORS = {
-  buildTime: '--gr-chart-cyan',
-  outputSize: '--gr-chart-green',
-  closureSize: '--gr-chart-orange',
-  runtimeClosure: '--gr-chart-teal',
-  deps: '--gr-chart-pink',
-};
 
 @Component({
   selector: 'app-entry-point-metrics',
@@ -101,14 +94,14 @@ export class EntryPointMetricsComponent implements OnInit {
     { name: 'Dependencies', data: this.points().map((p) => p.dependencies_count) },
   ]);
 
-  readonly buildTimeColor = [CHART_COLORS.buildTime];
-  readonly outputSizeColor = [CHART_COLORS.outputSize];
-  readonly closureSizeColors = [CHART_COLORS.closureSize, CHART_COLORS.runtimeClosure];
-  readonly depsColor = [CHART_COLORS.deps];
+  readonly buildTimeColor = [metricSeriesChartColorTokenNames.buildTime];
+  readonly outputSizeColor = [metricSeriesChartColorTokenNames.outputSize];
+  readonly closureSizeColors = [metricSeriesChartColorTokenNames.closureSize, metricSeriesChartColorTokenNames.runtimeClosure];
+  readonly depsColor = [metricSeriesChartColorTokenNames.deps];
 
   readonly formatDuration = formatDuration;
   readonly formatBytes = formatBytes;
-  readonly formatDeps = (v: number) => `${formatCount(v)} deps`;
+  readonly formatDeps = formatDependencyCount;
 
   newestBuildHistoryMetricPoint = computed(() => this.points().at(-1));
   closureDisabledReason = computed(() => getClosureMenuItemDisabledReason(this.newestBuildHistoryMetricPoint()?.build_status ?? ''));

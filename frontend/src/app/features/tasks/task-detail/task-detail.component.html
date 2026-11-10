@@ -87,17 +87,23 @@
                     (contextmenu)="select(e); evalMenu.openAt($event)">
               <span class="l1">
                 <gr-status-icon class="phase-swatch" [phase]="evaluationPhase(e.status, e.waiting_reason)" [prioritized]="e.prioritized" size="sm" />
-                <span class="ev-title" [class.mono]="!e.commit_message">{{ evalTitle(e) }}</span>
+                <span class="ev-title" [class.mono]="!e.commit_message" [title]="getCommitMessageAndShortHashTooltip(e)">{{ evalTitle(e) }}</span>
               </span>
               <span class="l2">
                 <time [attr.datetime]="e.started_at ?? e.created_at">{{ monthDayClockTime(e.started_at ?? e.created_at) }}</time><span>{{ triggerLabel(e) }}</span><span>{{ evalDuration(e) }}</span>
               </span>
             </button>
           }
-          @if (hasOlderEvaluations()) {
+          @if (hasOlderEvaluations() && !olderEvaluationsLoadError()) {
             <div class="strip-more" aria-hidden="true" (grInView)="loadOlderEvaluations()" [grInViewKey]="evaluations().length"></div>
           }
         </div>
+        @if (olderEvaluationsLoadError(); as loadError) {
+          <div class="strip-load-error" role="alert">
+            <span [title]="loadError">Couldn't load older evaluations: {{ loadError }}</span>
+            <button grButton label="Retry" icon="refresh" severity="secondary" size="small" (click)="loadOlderEvaluations()"></button>
+          </div>
+        }
         <gr-menu #evalMenu [model]="evalMenuModel()" />
       </div>
       <button grButton class="strip-arrow strip-arrow--end" icon="chevron_right" severity="secondary" size="small" tabindex="-1"

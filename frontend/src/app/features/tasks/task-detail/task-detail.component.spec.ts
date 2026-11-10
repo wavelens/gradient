@@ -282,6 +282,28 @@ describe('TaskDetailComponent - older evaluations', () => {
     expect(more()).toBeNull();
   });
 
+  it('shows a failed older page inline with a retry instead of ending the strip silently', () => {
+    const getEvaluations = vi.fn()
+      .mockReturnValueOnce(throwError(() => new ApiError('database is down', 500)))
+      .mockReturnValueOnce(of(page('a', 3)));
+    const { fixture } = setup(access, { getEvaluations });
+    const root = fixture.nativeElement as HTMLElement;
+    fixture.componentInstance.loadOlderEvaluations();
+    fixture.detectChanges();
+    expect(root.querySelector('.strip-load-error')?.textContent).toContain("Couldn't load older evaluations: database is down");
+    expect(root.querySelector('.strip-more')).toBeNull();
+
+    root.querySelector<HTMLButtonElement>('.strip-load-error button')!.click();
+    fixture.detectChanges();
+    expect(root.querySelector('.strip-load-error')).toBeNull();
+    expect(fixture.componentInstance.evaluations().map((e) => e.id)).toEqual(['e1', 'a0', 'a1', 'a2']);
+  });
+
+  it('shows the commit message and the short hash in the tooltip of an evaluation tab', () => {
+    const { fixture } = setup(access, { primary: { commit_message: 'bump nonce', commit: 'abcdef1234567' } });
+    expect((fixture.nativeElement as HTMLElement).querySelector('.eval-card .ev-title')?.getAttribute('title')).toBe('bump nonce · abcdef12');
+  });
+
   it('lists an evaluation once when a refresh moves it into the newest page', () => {
     const getEvaluations = vi.fn(() => of(page('a', 10)));
     const { fixture } = setup(access, { getEvaluations });
@@ -1390,6 +1412,24 @@ describe('TaskDetailComponent - #636 eval page', () => {
     expect(fixture.componentInstance.selected()?.id).toBe('e2');
     expect(document.activeElement).toBe(tabs()[1]);
     expect(tabs()[1].tabIndex).toBe(0);
+    raf.mockRestore();
+  });
+
+  it('jumps to the last and first evaluation tab with End and Home', () => {
+    const { fixture } = setup(access, { extraEvals: [evalSummary('e2', 'Completed'), evalSummary('e3', 'Completed')] });
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 0);
+    HTMLElement.prototype.scrollIntoView ??= () => {};
+    const root = fixture.nativeElement as HTMLElement;
+    const press = (key: string) => {
+      const tab = root.querySelector<HTMLButtonElement>('[role="tab"].selected')!;
+      tab.focus();
+      tab.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      fixture.detectChanges();
+    };
+    press('End');
+    expect(fixture.componentInstance.selected()?.id).toBe('e3');
+    press('Home');
+    expect(fixture.componentInstance.selected()?.id).toBe('e1');
     raf.mockRestore();
   });
 
