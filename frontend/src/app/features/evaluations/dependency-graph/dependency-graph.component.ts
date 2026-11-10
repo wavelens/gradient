@@ -34,8 +34,8 @@ import {
   LoadStateComponent,
   LoadingSpinnerComponent,
 } from '@gradient/ui/ui';
-import { plural } from '@shared/text';
-import { PHASE_COLOR, PHASE_SEVERITY, buildDurationText, buildPhase, buildStatusLabel, type StatusPhase } from '@shared/evaluation';
+import { formatDuration, plural } from '@shared/text';
+import { PHASE_COLOR, PHASE_SEVERITY, buildDuration, buildPhase, buildStatusLabel, type StatusPhase } from '@shared/evaluation';
 import { longestPathDepths } from './dependency-depths';
 import { observeElementResizeUntilDestroyed } from '../observe-element-resize-until-destroyed';
 import { BuildGraph, BuildStatus, DependencyEdge, DependencyGraphNode } from '@core/models';
@@ -588,7 +588,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   }
 
   private calcDuration(node: LayoutNode): string {
-    return node.status == null ? '' : buildDurationText({ ...node, status: node.status }, Date.now());
+    if (node.status == null) return '';
+    const ms = buildDuration({ ...node, status: node.status }, Date.now());
+    return ms == null ? '' : formatDuration(ms);
   }
 
   private phase(status?: string | null): StatusPhase {

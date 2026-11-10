@@ -59,7 +59,7 @@ import {
   EvaluationStatus,
   ExecJobSummary,
 } from '@core/models';
-import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget,buildDurationText, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
+import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, buildAbortTargetLine, evaluationAbortTarget, buildDurationTextForEvaluation, buildStatusToShowInEvaluation, canAbortBuild, canPrioritizeBuild, canRetryBuild, commitLabel, commitWebUrl, getArtefactsMenuItemDisabledReason, getClosureMenuItemDisabledReason, getSbomDownloadMenuItemDisabledReason, showJobMenuItemDisabledReason, entryPointPhaseWithExecJob, phaseInFinishedEvaluation, evaluationDuration, evaluationPhase, evaluationTitle, explainWaiting, getEvaluationTriggerLabel, inputFetchPhase, isEvaluationNotStartedStatus, isRunningEvaluationStatus, phaseProgress, buildTally, repositoryWebUrl, splitRepository, thunkProgress, waitingAccessFrom, type StatusPhase } from '@shared/evaluation';
 
 const NO_EVALUATION_SELECTED = 'No evaluation selected.';
 
@@ -625,8 +625,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   pkgDuration(evaluation: EvaluationSummary, ep: EntryPointSummary): string {
-    if (ep.build_status === 'Building' && !isRunningEvaluationStatus(evaluation.status)) return '';
-    return buildDurationText({ status: ep.build_status, ...ep }, ep.build_status === 'Building' ? this.tick() : 0, evaluation.created_at);
+    const running = ep.build_status === 'Building' && isRunningEvaluationStatus(evaluation.status);
+    return buildDurationTextForEvaluation({ status: ep.build_status, ...ep }, evaluation, running ? this.tick() : 0);
   }
 
   readonly commitLabel = commitLabel;
@@ -664,6 +664,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   protected packagePhase(evaluation: EvaluationSummary, entry: EntryPointSummary): StatusPhase {
     if (evaluation.only_evaluate) return 'success';
+    if (buildStatusToShowInEvaluation({ status: entry.build_status, ...entry }, evaluation) !== entry.build_status) return 'aborted';
     return phaseInFinishedEvaluation(entryPointPhaseWithExecJob(entry, this.execJobStatusByEntryPointAttributePath().get(entry.eval)), evaluation.status);
   }
 

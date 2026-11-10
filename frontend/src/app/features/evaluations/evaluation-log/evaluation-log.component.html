@@ -125,7 +125,7 @@
                   @let statusLabel = buildStatusLabel(getBuildRowDisplayStatus(build));
                   @if (statusLabel !== group.label) { <span class="build-status-label">{{ statusLabel }}</span> }
                   @if (getBuildElapsed(build)) {
-                    <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
+                    <span class="build-elapsed" [class.build-elapsed--running]="getBuildRowDisplayStatus(build) === 'Building'">{{ getBuildElapsed(build) }}</span>
                   }
                   <button type="button" class="sidebar-kebab" [attr.aria-label]="'Actions for ' + buildDisplayName(build.name)"
                           (click)="toggleBuildMenu($event, build, buildMenu)">
@@ -198,7 +198,7 @@
         }
         @if (selectedSection() !== 'messages' && selectedBuild(); as build) {
           @if (getBuildRowDisplayStatus(build) !== build.status) {
-            <gr-message-banner type="info">This evaluation finished. The build is still in progress for a newer evaluation.</gr-message-banner>
+            <gr-message-banner type="info">This evaluation ended before the build finished. The build continued in a newer evaluation.</gr-message-banner>
           }
         }
         @if (ev.status === 'Waiting' && selectedSection() !== 'messages' && selectedBuildId()) {

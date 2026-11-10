@@ -627,6 +627,21 @@ describe('TaskDetailComponent - in-progress state (#452)', () => {
     expect(counter).toBe('4 / 4 builds · 1 failed · 1 not built · 1 aborted · 6 total');
   });
 
+  it('draws the shared build of an aborted evaluation as aborted, not as building stripes', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {
+      primaryStatus: 'Aborted',
+      primary: { builds: { ...zeroCounts(), completed: 1, building: 1 }, finished_at: '2026-01-01T00:04:00' },
+      getEntryPoints: () => of({ entry_points: [{ ...epSummary('slow'), build_status: 'Building', build_started_at: '2026-01-01T00:01:00' }], total: 1, failed_attributes: [] }),
+    });
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect((root.querySelector('.eval-bar .seg-building') as HTMLElement).style.width).toBe('0%');
+    expect(root.querySelector('.bar-line > span')?.textContent).toContain('1 aborted');
+    expect(root.querySelector('.entry-row.pkg')?.getAttribute('data-phase')).toBe('aborted');
+    expect((root.querySelector('.pkg-bar .seg-building') as HTMLElement).style.width).toBe('0%');
+    expect(root.querySelector('.pkg-time')?.textContent?.trim()).toBe('3m 00s');
+  });
+
   it('names the wait reason next to the badge of a building evaluation that waits for exec jobs', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true },
       { primaryStatus: 'Building', primary: { waiting_reason: { kind: 'exec_jobs', waiting_exec_jobs: 1 } } });

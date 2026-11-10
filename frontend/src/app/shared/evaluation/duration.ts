@@ -5,7 +5,7 @@
  */
 
 import { EvaluationStatus } from '@core/models';
-import { formatDuration, serverTime } from '@shared/text';
+import { serverTime } from '@shared/text';
 
 const RUNNING_STATUSES: ReadonlySet<EvaluationStatus> = new Set([
   'Queued',
@@ -46,12 +46,4 @@ export function buildDuration(build: BuildTimes, nowMs: number): number | null {
   if (build.build_time_ms != null) return build.build_time_ms;
   if (build.status !== 'Building' || !build.build_started_at) return null;
   return Math.max(0, nowMs - serverTime(build.build_started_at).getTime());
-}
-
-// A build that started before the evaluation existed was reused from an earlier evaluation, so its build time doesn't belong to this one.
-export function buildDurationText(build: BuildTimes, nowMs: number, evaluationCreatedAt?: string | null): string {
-  if (build.build_started_at && evaluationCreatedAt
-    && serverTime(build.build_started_at).getTime() < serverTime(evaluationCreatedAt).getTime()) return 'reused';
-  const ms = buildDuration(build, nowMs);
-  return ms == null ? '' : formatDuration(ms);
 }

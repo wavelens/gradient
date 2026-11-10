@@ -137,7 +137,3 @@ const PENDING_BUILD_STATUSES: ReadonlySet<string> = new Set<BuildStatus>(['Creat
 export function isPendingBuildStatus(status: string): boolean {
   return PENDING_BUILD_STATUSES.has(status);
 }
-
-export function buildStatusInFinishedEvaluation(status: string, evaluationStatus: EvaluationStatus): string {
-  return isPendingBuildStatus(status) && !isRunningEvaluationStatus(evaluationStatus) ? 'Aborted' : status;
-}
