@@ -352,7 +352,7 @@ pub async fn load_membership_with_permissions(
     project_id: ProjectId,
     api_key: Option<&ApiKeyContext>,
 ) -> WebResult<Option<PermissionMask>> {
-    if api_key.is_some_and(|ctx| ctx.project.is_some_and(|pinned| pinned != project_id)) {
+    if api_key_is_pinned_to_other_project(api_key, project_id) {
         return Ok(None);
     }
     Ok(
@@ -362,13 +362,20 @@ pub async fn load_membership_with_permissions(
     )
 }
 
+pub fn api_key_is_pinned_to_other_project(
+    api_key: Option<&ApiKeyContext>,
+    project_id: ProjectId,
+) -> bool {
+    api_key.is_some_and(|ctx| ctx.project.is_some_and(|pinned| pinned != project_id))
+}
+
 pub fn key_limited_project_mask(
     mask: PermissionMask,
     project_id: ProjectId,
     api_key: Option<&ApiKeyContext>,
 ) -> PermissionMask {
     match api_key {
-        Some(ctx) if ctx.project.is_some_and(|pinned| pinned != project_id) => 0,
+        _ if api_key_is_pinned_to_other_project(api_key, project_id) => 0,
         Some(ctx) => mask & ctx.mask,
         None => mask,
     }

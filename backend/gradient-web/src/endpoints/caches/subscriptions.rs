@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, caller_cache_mask, project_admin_emails};
+use crate::access::{
+    Caller, api_key_is_pinned_to_other_project, caller_cache_mask, project_admin_emails,
+};
 use crate::api_spec::CachePath;
 use crate::audit::Audit;
 use crate::endpoints::projects::settings::mode_label;
@@ -149,9 +151,12 @@ pub async fn get_cache_subscribers(
                     .await?,
                 crate::permissions::CachePermission::ManageCacheSubscriptions,
             );
-            let member_of =
+            let mut member_of =
                 gradient_db::access::project_role_names(&db.web_db, user.id, project_ids.clone())
                     .await?;
+            member_of.retain(|project, _| {
+                !api_key_is_pinned_to_other_project(api_key.as_ref(), *project)
+            });
             (user.superuser || manages, member_of)
         }
         None => (false, HashMap::new()),
