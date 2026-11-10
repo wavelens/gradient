@@ -5,6 +5,7 @@
  */
 
 use bytes::Bytes;
+use gradient_secret::SecretString;
 
 use crate::codec::Proto;
 use crate::types::{
@@ -23,7 +24,7 @@ pub enum ClientMessage {
     },
 
     AuthResponse {
-        tokens: Vec<(String, String)>,
+        tokens: Vec<(String, SecretString)>,
     },
 
     ReauthRequest,

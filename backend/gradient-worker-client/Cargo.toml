@@ -19,6 +19,7 @@ testing = ["gradient-wire/testing"]
 [dependencies]
 gradient-storage = { workspace = true }
 gradient-util    = { workspace = true }
+gradient-secret  = { workspace = true }
 gradient-wire    = { workspace = true }
 
 anyhow              = { workspace = true }

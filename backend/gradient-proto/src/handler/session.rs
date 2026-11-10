@@ -19,6 +19,7 @@ use async_trait::async_trait;
 
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::ConnectionDirection;
+use gradient_types::SecretString;
 use gradient_wire::Rejection;
 use gradient_wire::messages::{GradientCapabilities, ServerMessage};
 use gradient_wire::session::handshake as handshake_fsm;
@@ -181,9 +182,9 @@ impl PeerAuthority for ServerAuthority {
 
     async fn authorize(
         &self,
-        claimed: &str,
+        _claimed: &str,
         challenge: ServerChallenge,
-        tokens: &[(String, String)],
+        tokens: &[(String, SecretString)],
     ) -> Result<AuthOutcome> {
         let ServerChallenge {
             team,
@@ -192,13 +193,10 @@ impl PeerAuthority for ServerAuthority {
         let resolved = resolve_authorized(&self.db, &team, &registered_peers, tokens).await?;
         self.proven.store(resolved.proven, Ordering::Relaxed);
 
-        let has_any = registered_peers.is_empty() && has_any_registrations(&self.db, claimed).await;
         match decide_auth(
-            registered_peers.is_empty(),
-            has_any,
+            resolved.proven,
             resolved.authorized.is_empty(),
             resolved.emptied_by_missing_cache,
-            team.is_some(),
         ) {
             AuthDecision::Accept => Ok(AuthOutcome::Accept {
                 authorized_peers: resolved.authorized,
@@ -330,38 +328,17 @@ enum AuthDecision {
 }
 
 fn decide_auth(
-    registered_peers_empty: bool,
-    has_any_registrations: bool,
+    proven: bool,
     authorized_peers_empty: bool,
     emptied_by_missing_cache: bool,
-    is_team: bool,
 ) -> AuthDecision {
-    if is_team {
-        return match (authorized_peers_empty, emptied_by_missing_cache) {
-            (false, _) => AuthDecision::Accept,
-            // The projects did enable this worker but have no cache. A "not enabled" message would
-            // send the operator to the wrong page.
-            (true, true) => AuthDecision::Reject(Rejection::NoCacheSubscribed),
-            (true, false) => AuthDecision::Reject(Rejection::NoProjectGrant),
-        };
-    }
-
-    if registered_peers_empty {
-        return if has_any_registrations {
-            AuthDecision::Reject(Rejection::WorkerDeactivated)
-        } else {
-            AuthDecision::Reject(Rejection::UnknownWorker)
-        };
-    }
-
-    if authorized_peers_empty {
-        if emptied_by_missing_cache {
-            AuthDecision::Reject(Rejection::NoCacheSubscribed)
-        } else {
-            AuthDecision::Reject(Rejection::NoValidPeerTokens)
-        }
-    } else {
-        AuthDecision::Accept
+    match (proven, authorized_peers_empty, emptied_by_missing_cache) {
+        (false, _, _) => AuthDecision::Reject(Rejection::UnknownWorkerOrWrongToken),
+        (true, false, _) => AuthDecision::Accept,
+        // The projects did enable this worker but have no cache. A "not enabled" message would
+        // send the operator to the wrong page.
+        (true, true, true) => AuthDecision::Reject(Rejection::NoCacheSubscribed),
+        (true, true, false) => AuthDecision::Reject(Rejection::NoProjectGrant),
     }
 }
 
@@ -373,37 +350,26 @@ mod auth_decision_tests {
     fn decide_auth_maps_every_input_to_the_right_decision() {
         let cases = [
             (
-                (true, false, true, false, false),
-                AuthDecision::Reject(Rejection::UnknownWorker),
+                (false, true, false),
+                AuthDecision::Reject(Rejection::UnknownWorkerOrWrongToken),
             ),
             (
-                (true, true, true, false, false),
-                AuthDecision::Reject(Rejection::WorkerDeactivated),
+                (false, true, true),
+                AuthDecision::Reject(Rejection::UnknownWorkerOrWrongToken),
             ),
             (
-                (false, false, true, false, false),
-                AuthDecision::Reject(Rejection::NoValidPeerTokens),
-            ),
-            (
-                (false, false, true, true, false),
+                (true, true, true),
                 AuthDecision::Reject(Rejection::NoCacheSubscribed),
             ),
             (
-                (false, false, true, true, true),
-                AuthDecision::Reject(Rejection::NoCacheSubscribed),
-            ),
-            (
-                (false, false, true, false, true),
+                (true, true, false),
                 AuthDecision::Reject(Rejection::NoProjectGrant),
             ),
-            ((false, false, false, false, false), AuthDecision::Accept),
-            ((false, false, false, false, true), AuthDecision::Accept),
+            ((true, false, false), AuthDecision::Accept),
+            ((true, false, true), AuthDecision::Accept),
         ];
-        for ((unknown, deactivated, no_tokens, no_cache, team), expected) in cases {
-            assert_eq!(
-                decide_auth(unknown, deactivated, no_tokens, no_cache, team),
-                expected
-            );
+        for ((proven, no_authorized, no_cache), expected) in cases {
+            assert_eq!(decide_auth(proven, no_authorized, no_cache), expected);
         }
     }
 }
@@ -438,7 +404,11 @@ mod authority_tests {
         };
 
         let outcome = authority
-            .authorize("w1", challenge, &[(project.to_string(), "t1".into())])
+            .authorize(
+                "w1",
+                challenge,
+                &[(project.to_string(), SecretString::from("t1".to_owned()))],
+            )
             .await
             .unwrap();
 
@@ -447,5 +417,35 @@ mod authority_tests {
             AuthOutcome::Reject(Rejection::NoCacheSubscribed)
         ));
         assert!(authority.proven.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_worker_id_and_a_wrong_token_get_the_same_rejection() {
+        let project = ProjectId::now_v7().to_string();
+        let state = gradient_test_support::prelude::test_state(mock_db().into_connection());
+        let authority = ServerAuthority {
+            db: state.worker_db.clone(),
+            config: Arc::clone(&state.config),
+            proven: AtomicBool::new(false),
+        };
+        let token = [(project.clone(), SecretString::from("wrong".to_owned()))];
+
+        let unknown = ServerChallenge {
+            team: None,
+            registered_peers: vec![],
+        };
+        let wrong_token = ServerChallenge {
+            team: None,
+            registered_peers: vec![(project, SHA256_OF_T1.into())],
+        };
+
+        for challenge in [unknown, wrong_token] {
+            let outcome = authority.authorize("w1", challenge, &token).await.unwrap();
+            assert_eq!(
+                outcome,
+                AuthOutcome::Reject(Rejection::UnknownWorkerOrWrongToken)
+            );
+        }
+        assert!(!authority.proven.load(Ordering::Relaxed));
     }
 }

@@ -6,8 +6,8 @@
 
 use anyhow::Context as _;
 use gradient_db::WorkerDb;
-use gradient_types::RuntimeConfig;
 use gradient_types::ids::ProjectId;
+use gradient_types::{RuntimeConfig, SecretString};
 use sea_orm::DbErr;
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
@@ -169,7 +169,7 @@ static WORKER_TOKEN_CHECK_SEMAPHORE: LazyLock<Arc<Semaphore>> = LazyLock::new(||
 
 async fn validate_tokens_on_limited_blocking_pool(
     registered: &[(String, String)],
-    tokens: &[(String, String)],
+    tokens: &[(String, SecretString)],
 ) -> anyhow::Result<(Vec<String>, Vec<FailedPeer>)> {
     let _permit = Arc::clone(&WORKER_TOKEN_CHECK_SEMAPHORE)
         .acquire_owned()
@@ -184,7 +184,7 @@ pub(super) async fn resolve_authorized(
     db: &WorkerDb,
     team: &Option<TeamWorkerChallenge>,
     registered: &[(String, String)],
-    tokens: &[(String, String)],
+    tokens: &[(String, SecretString)],
 ) -> anyhow::Result<Resolved> {
     let (token_authorized, mut failed) =
         validate_tokens_on_limited_blocking_pool(registered, tokens).await?;

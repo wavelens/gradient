@@ -60,7 +60,7 @@ mod tests {
     fn rejected(claimed: &str) -> Rejected {
         Rejected {
             code: 401,
-            reason: "no valid peer tokens provided".into(),
+            reason: "unknown worker id or wrong token".into(),
             claimed: Some(claimed.into()),
         }
     }
@@ -95,7 +95,7 @@ mod tests {
         record_inbound(&state.worker_db, &failures, &rejected("w1"), true).await;
 
         let failure = failures.last("w1").expect("recorded");
-        assert_eq!(failure.reason, "401 no valid peer tokens provided");
+        assert_eq!(failure.reason, "401 unknown worker id or wrong token");
         assert_eq!(failure.direction, ConnectionDirection::Inbound);
         assert!(failure.before_auth);
     }

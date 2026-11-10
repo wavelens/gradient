@@ -327,7 +327,7 @@ fn plan_worker(group: WorkerDial, decrypt: &impl Fn(&str) -> Option<SecretString
         tokens.extend(
             row.token_peers
                 .iter()
-                .map(|peer| (peer.clone(), token.expose().to_owned())),
+                .map(|peer| (peer.clone(), token.clone())),
         );
     }
 
@@ -427,9 +427,9 @@ mod tests {
         target
     }
 
-    fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
+    fn pairs(list: &[(&str, &str)]) -> Vec<(String, SecretString)> {
         list.iter()
-            .map(|(p, t)| (p.to_string(), t.to_string()))
+            .map(|(p, t)| (p.to_string(), SecretString::from(*t)))
             .collect()
     }
 
@@ -548,7 +548,7 @@ mod tests {
         assert_eq!(target.token_projects, vec![granting.to_string()]);
         assert_eq!(
             target.credentials.tokens,
-            vec![(team.to_string(), "team".to_string())]
+            vec![(team.to_string(), SecretString::from("team"))]
         );
     }
 

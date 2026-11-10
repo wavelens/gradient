@@ -23,7 +23,7 @@ use crate::upload::UploadClient;
 
 pub struct PeerSpec {
     pub id: String,
-    pub tokens: Vec<(String, String)>,
+    pub tokens: Vec<(String, gradient_secret::SecretString)>,
     pub capabilities: GradientCapabilities,
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,

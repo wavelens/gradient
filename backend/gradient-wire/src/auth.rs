@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_secret::SecretString;
+
 use crate::messages::FailedPeer;
 
 /// Two storage formats are verifiable in constant time. PHC strings like `$argon2id$...` are what
@@ -22,7 +24,7 @@ pub fn verify_token(token: &str, token_hash: &str) -> bool {
 
 pub fn validate_tokens(
     registered_peers: &[(String, String)],
-    auth_tokens: &[(String, String)],
+    auth_tokens: &[(String, SecretString)],
 ) -> (Vec<String>, Vec<FailedPeer>) {
     let mut authorized = Vec::new();
     let mut failed = Vec::new();
@@ -30,7 +32,7 @@ pub fn validate_tokens(
     for (peer_id, token_hash) in registered_peers {
         match auth_tokens.iter().find(|(pid, _)| pid == peer_id) {
             Some((_, token)) => {
-                if verify_token(token, token_hash) {
+                if verify_token(token.expose(), token_hash) {
                     authorized.push(peer_id.clone());
                 } else {
                     failed.push(FailedPeer {
@@ -51,11 +53,15 @@ pub fn validate_tokens(
     (authorized, failed)
 }
 
-pub fn verify_dialer_tokens(accepted: &[(String, String)], presented: &[(String, String)]) -> bool {
+pub fn verify_dialer_tokens(
+    accepted: &[(String, String)],
+    presented: &[(String, SecretString)],
+) -> bool {
     !presented.is_empty()
         && presented.iter().all(|(peer, token)| {
             accepted.iter().any(|(accepted_peer, hash)| {
-                (accepted_peer == peer || accepted_peer == "*") && verify_token(token, hash)
+                (accepted_peer == peer || accepted_peer == "*")
+                    && verify_token(token.expose(), hash)
             })
         })
 }
@@ -78,7 +84,7 @@ mod tests {
         let token = "my-secret-token";
         let hash = sha256_hex(token);
         let registered = vec![("peer-a".to_string(), hash)];
-        let auth = vec![("peer-a".to_string(), token.to_string())];
+        let auth = vec![("peer-a".to_string(), SecretString::from(token.to_string()))];
         let (authorized, failed) = validate_tokens(&registered, &auth);
         assert_eq!(authorized, vec!["peer-a"]);
         assert!(failed.is_empty());
@@ -87,7 +93,10 @@ mod tests {
     #[test]
     fn validate_tokens_wrong_hash_fails() {
         let registered = vec![("peer-a".to_string(), sha256_hex("correct-token"))];
-        let auth = vec![("peer-a".to_string(), "wrong-token".to_string())];
+        let auth = vec![(
+            "peer-a".to_string(),
+            SecretString::from("wrong-token".to_string()),
+        )];
         let (authorized, failed) = validate_tokens(&registered, &auth);
         assert!(authorized.is_empty());
         assert_eq!(failed.len(), 1);
@@ -114,8 +123,14 @@ mod tests {
             ("peer-c".to_string(), sha256_hex("token-c")),
         ];
         let auth = vec![
-            ("peer-a".to_string(), "token-a".to_string()),
-            ("peer-b".to_string(), "wrong".to_string()),
+            (
+                "peer-a".to_string(),
+                SecretString::from("token-a".to_string()),
+            ),
+            (
+                "peer-b".to_string(),
+                SecretString::from("wrong".to_string()),
+            ),
         ];
         let (authorized, failed) = validate_tokens(&registered, &auth);
         assert_eq!(authorized, vec!["peer-a"]);
@@ -134,7 +149,10 @@ mod tests {
 
     #[test]
     fn validate_tokens_extra_tokens_ignored() {
-        let auth = vec![("unknown-peer".to_string(), "some-token".to_string())];
+        let auth = vec![(
+            "unknown-peer".to_string(),
+            SecretString::from("some-token".to_string()),
+        )];
         let (authorized, failed) = validate_tokens(&[], &auth);
         assert!(authorized.is_empty());
         assert!(failed.is_empty());
@@ -144,7 +162,7 @@ mod tests {
     fn validate_tokens_argon2_hash_authorizes() {
         let token = "argon2-token";
         let registered = vec![("peer-a".to_string(), argon2(token))];
-        let auth = vec![("peer-a".to_string(), token.to_string())];
+        let auth = vec![("peer-a".to_string(), SecretString::from(token.to_string()))];
         let (authorized, failed) = validate_tokens(&registered, &auth);
         assert_eq!(authorized, vec!["peer-a"]);
         assert!(failed.is_empty());
@@ -153,7 +171,10 @@ mod tests {
     #[test]
     fn validate_tokens_argon2_wrong_token_fails() {
         let registered = vec![("peer-a".to_string(), argon2("correct"))];
-        let auth = vec![("peer-a".to_string(), "wrong".to_string())];
+        let auth = vec![(
+            "peer-a".to_string(),
+            SecretString::from("wrong".to_string()),
+        )];
         let (authorized, failed) = validate_tokens(&registered, &auth);
         assert!(authorized.is_empty());
         assert_eq!(failed.len(), 1);
@@ -176,8 +197,11 @@ mod tests {
         let token = "correct";
         let registered = vec![("peer-a".to_string(), sha256_hex(token))];
         let auth = vec![
-            ("peer-a".to_string(), token.to_string()),
-            ("peer-a".to_string(), "wrong".to_string()),
+            ("peer-a".to_string(), SecretString::from(token.to_string())),
+            (
+                "peer-a".to_string(),
+                SecretString::from("wrong".to_string()),
+            ),
         ];
         let (authorized, failed) = validate_tokens(&registered, &auth);
         assert_eq!(authorized, vec!["peer-a"]);
@@ -190,7 +214,7 @@ mod tests {
             ("p1".to_string(), sha256_hex("t1")),
             ("p2".to_string(), sha256_hex("t2")),
         ];
-        let pair = |p: &str, t: &str| (p.to_string(), t.to_string());
+        let pair = |p: &str, t: &str| (p.to_string(), SecretString::from(t.to_string()));
 
         assert!(verify_dialer_tokens(
             &accepted,
@@ -209,7 +233,7 @@ mod tests {
         let accepted = vec![("*".to_string(), argon2("t1"))];
         assert!(verify_dialer_tokens(
             &accepted,
-            &[("p9".to_string(), "t1".to_string())]
+            &[("p9".to_string(), SecretString::from("t1".to_string()))]
         ));
     }
 }

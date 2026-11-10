@@ -370,6 +370,7 @@ mod tests {
     use crate::session::handshake::as_peer;
     use crate::traits::{CapabilitiesProvider, PeerIdentity};
     use async_trait::async_trait;
+    use gradient_secret::SecretString;
 
     struct Peer;
 
@@ -379,7 +380,7 @@ mod tests {
             "peer-1".into()
         }
 
-        async fn tokens_for(&self, _: &[String]) -> Result<Vec<(String, String)>> {
+        async fn tokens_for(&self, _: &[String]) -> Result<Vec<(String, SecretString)>> {
             Ok(vec![])
         }
     }

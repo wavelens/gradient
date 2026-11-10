@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use gradient_secret::SecretString;
 use gradient_wire::auth::verify_dialer_tokens;
 use gradient_wire::messages::GradientCapabilities;
 use gradient_wire::session::frame::HANDSHAKE_TIMEOUT;
@@ -18,15 +19,12 @@ use tracing::info;
 use super::{ProtoConnection, Unresponsive};
 
 pub fn resolve_tokens_for_challenge(
-    peer_tokens: &[(String, String)],
+    peer_tokens: &[(String, SecretString)],
     challenged: &[String],
-) -> Vec<(String, String)> {
-    let wildcard_token: Option<&str> = peer_tokens
-        .iter()
-        .find(|(id, _)| id == "*")
-        .map(|(_, t)| t.as_str());
+) -> Vec<(String, SecretString)> {
+    let wildcard_token = peer_tokens.iter().find(|(id, _)| id == "*").map(|(_, t)| t);
 
-    let mut result: Vec<(String, String)> = peer_tokens
+    let mut result: Vec<(String, SecretString)> = peer_tokens
         .iter()
         .filter(|(id, _)| id != "*" && challenged.contains(id))
         .cloned()
@@ -35,10 +33,10 @@ pub fn resolve_tokens_for_challenge(
     if let Some(token) = wildcard_token {
         let covered: std::collections::HashSet<String> =
             result.iter().map(|(id, _)| id.clone()).collect();
-        let extras: Vec<(String, String)> = challenged
+        let extras: Vec<(String, SecretString)> = challenged
             .iter()
             .filter(|pid| !covered.contains(*pid))
-            .map(|pid| (pid.clone(), token.to_owned()))
+            .map(|pid| (pid.clone(), token.clone()))
             .collect();
         result.extend(extras);
     }
@@ -48,7 +46,7 @@ pub fn resolve_tokens_for_challenge(
 
 struct WorkerIdentity {
     peer_id: String,
-    peer_tokens: Vec<(String, String)>,
+    peer_tokens: Vec<(String, SecretString)>,
 }
 
 #[async_trait]
@@ -57,7 +55,7 @@ impl PeerIdentity for WorkerIdentity {
         self.peer_id.clone()
     }
 
-    async fn tokens_for(&self, peers: &[String]) -> Result<Vec<(String, String)>> {
+    async fn tokens_for(&self, peers: &[String]) -> Result<Vec<(String, SecretString)>> {
         Ok(resolve_tokens_for_challenge(&self.peer_tokens, peers))
     }
 }
@@ -74,7 +72,7 @@ impl CapabilitiesProvider for StaticCapabilities {
 pub async fn perform_handshake(
     conn: &mut ProtoConnection,
     peer_id: String,
-    peer_tokens: Vec<(String, String)>,
+    peer_tokens: Vec<(String, SecretString)>,
     capabilities: GradientCapabilities,
 ) -> Result<HandshakeResult> {
     let identity = WorkerIdentity {
@@ -107,7 +105,7 @@ struct AcceptedServers(Option<Arc<Vec<(String, String)>>>);
 
 #[async_trait]
 impl DialerVerifier for AcceptedServers {
-    async fn verify(&self, _worker_id: &str, tokens: &[(String, String)]) -> bool {
+    async fn verify(&self, _worker_id: &str, tokens: &[(String, SecretString)]) -> bool {
         let Some(accepted) = self.0.clone() else {
             return true;
         };
@@ -220,7 +218,7 @@ mod tests {
         let result = perform_handshake(
             &mut conn,
             "worker-id".to_owned(),
-            vec![("peer-1".to_owned(), "tok".to_owned())],
+            vec![("peer-1".to_owned(), SecretString::from("tok"))],
             all_caps(),
         )
         .await
@@ -360,8 +358,8 @@ mod tests {
             let auth_resp = sc.recv().await.unwrap();
             if let ClientMessage::AuthResponse { tokens } = auth_resp {
                 let map: std::collections::HashMap<_, _> = tokens.into_iter().collect();
-                assert_eq!(map["p1"], "wild-tok");
-                assert_eq!(map["p2"], "wild-tok");
+                assert_eq!(map["p1"].expose(), "wild-tok");
+                assert_eq!(map["p2"].expose(), "wild-tok");
             } else {
                 panic!("expected AuthResponse");
             }
@@ -375,7 +373,7 @@ mod tests {
             .unwrap();
         });
 
-        let peer_tokens = vec![("*".to_owned(), "wild-tok".to_owned())];
+        let peer_tokens = vec![("*".to_owned(), SecretString::from("wild-tok"))];
         let mut conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
@@ -389,20 +387,23 @@ mod tests {
     #[test]
     fn resolve_tokens_explicit_only() {
         let tokens = vec![
-            ("peer-a".to_owned(), "tok-a".to_owned()),
-            ("peer-c".to_owned(), "tok-c".to_owned()),
+            ("peer-a".to_owned(), SecretString::from("tok-a")),
+            ("peer-c".to_owned(), SecretString::from("tok-c")),
         ];
         let challenged = vec!["peer-a".to_owned(), "peer-b".to_owned()];
         let result = resolve_tokens_for_challenge(&tokens, &challenged);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0], ("peer-a".to_owned(), "tok-a".to_owned()));
+        assert_eq!(
+            result[0],
+            ("peer-a".to_owned(), SecretString::from("tok-a"))
+        );
     }
 
     #[test]
     fn resolve_tokens_wildcard_fills_gaps() {
         let tokens = vec![
-            ("*".to_owned(), "wild".to_owned()),
-            ("peer-a".to_owned(), "tok-a".to_owned()),
+            ("*".to_owned(), SecretString::from("wild")),
+            ("peer-a".to_owned(), SecretString::from("tok-a")),
         ];
         let challenged = vec![
             "peer-a".to_owned(),
@@ -413,14 +414,14 @@ mod tests {
         assert_eq!(result.len(), 3);
 
         let map: std::collections::HashMap<_, _> = result.into_iter().collect();
-        assert_eq!(map["peer-a"], "tok-a");
-        assert_eq!(map["peer-b"], "wild");
-        assert_eq!(map["peer-c"], "wild");
+        assert_eq!(map["peer-a"].expose(), "tok-a");
+        assert_eq!(map["peer-b"].expose(), "wild");
+        assert_eq!(map["peer-c"].expose(), "wild");
     }
 
     #[test]
     fn resolve_tokens_empty_when_no_match() {
-        let tokens = vec![("peer-x".to_owned(), "tok".to_owned())];
+        let tokens = vec![("peer-x".to_owned(), SecretString::from("tok"))];
         let challenged = vec!["peer-y".to_owned()];
         let result = resolve_tokens_for_challenge(&tokens, &challenged);
         assert!(result.is_empty());

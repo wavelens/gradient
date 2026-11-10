@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use gradient_secret::SecretString;
 
 use crate::messages::{
     BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, FailedPeer, GradientCapabilities,
@@ -117,7 +118,7 @@ pub trait InputProgressSink: Send + Sync {
 pub trait PeerIdentity: Send + Sync {
     fn peer_id(&self) -> String;
 
-    async fn tokens_for(&self, peers: &[String]) -> Result<Vec<(String, String)>>;
+    async fn tokens_for(&self, peers: &[String]) -> Result<Vec<(String, SecretString)>>;
 }
 
 #[async_trait]
@@ -144,7 +145,7 @@ pub trait PeerAuthority: Send + Sync {
         &self,
         claimed: &str,
         challenge: Self::Challenge,
-        tokens: &[(String, String)],
+        tokens: &[(String, SecretString)],
     ) -> Result<AuthOutcome>;
 
     async fn negotiate(
@@ -167,5 +168,5 @@ pub trait DialerAuthority: Send + Sync {
 
 #[async_trait]
 pub trait DialerVerifier: Send + Sync {
-    async fn verify(&self, worker_id: &str, tokens: &[(String, String)]) -> bool;
+    async fn verify(&self, worker_id: &str, tokens: &[(String, SecretString)]) -> bool;
 }

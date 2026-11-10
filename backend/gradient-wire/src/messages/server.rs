@@ -160,7 +160,7 @@ pub enum ServerMessage {
     },
     Authenticate {
         worker_id: String,
-        tokens: Vec<(String, String)>,
+        tokens: Vec<(String, SecretString)>,
     },
 
     ImportResult {

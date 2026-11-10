@@ -6,8 +6,8 @@
  * Security probe: connect to a Gradient server's `/proto` endpoint with a
  * never-before-seen worker UUID and zero auth tokens.
  *
- * Per docs/src/contributors/proto/connection.md (`403` `unknown worker`) the
- * expected outcome is `Reject`. If the server instead returns `InitAck`, an
+ * The expected result is `Reject` according to `docs/src/contributors/proto/connection.md` (`401` `unknown worker id or wrong token`).
+ * If the server instead returns `InitAck`, an
  * unauthenticated client has been admitted in "open mode" (`PeerAuth::Open`,
  * backend/gradient-pool/src/peer_auth.rs).
  *

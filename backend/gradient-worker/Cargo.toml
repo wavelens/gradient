@@ -28,6 +28,7 @@ gradient-derive = { workspace = true }
 gradient-util = { workspace = true }
 gradient-types = { workspace = true }
 gradient-vm = { workspace = true }
+gradient-secret = { workspace = true }
 gradient-wire = { workspace = true }
 gradient-worker-client = { workspace = true }
 gradient-storage = { workspace = true }

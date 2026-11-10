@@ -11,7 +11,7 @@ use std::time::Instant;
 use gradient_types::events::{build, evaluation};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
 use gradient_types::{
-    BuildProgress, BuildProgressPhase, EvaluationProgress, StorePath, StorePathMapper,
+    BuildProgress, BuildProgressPhase, EvaluationProgress, SecretString, StorePath, StorePathMapper,
 };
 use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
@@ -831,7 +831,7 @@ impl<'a> InboundContext<'a> {
         .is_ok()
     }
 
-    async fn on_auth_response(&mut self, tokens: Vec<(String, String)>) -> bool {
+    async fn on_auth_response(&mut self, tokens: Vec<(String, SecretString)>) -> bool {
         let db = &self.handles.db.worker_db;
         let (team, registered_peers) = challenge_for(db, self.peer_id).await;
         let resolved = match resolve_authorized(db, &team, &registered_peers, &tokens).await {

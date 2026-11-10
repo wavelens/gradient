@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gradient_eval::pool::MemoryGuard;
+use gradient_secret::SecretString;
 use gradient_vm::{SupervisorConfig, VmConfig};
 use gradient_wire::types::{ExecAllow, ExecDefaults, GradientCapabilities, GuestSize, PortRanges};
 
@@ -26,7 +27,7 @@ pub fn host_system() -> String {
 }
 
 impl WorkerConfig {
-    pub fn peer_tokens(&self) -> Vec<(String, String)> {
+    pub fn peer_tokens(&self) -> Vec<(String, SecretString)> {
         let raw = if let Some(path) = &self.peers_file {
             match std::fs::read_to_string(path) {
                 Ok(s) => s,
@@ -61,7 +62,7 @@ impl WorkerConfig {
                     );
                     return None;
                 }
-                Some((peer_id, token))
+                Some((peer_id, SecretString::from(token)))
             })
             .collect()
     }
@@ -482,22 +483,22 @@ mod tests {
         assert_eq!(
             cfg.peer_tokens(),
             vec![
-                ("peer1".to_owned(), TOK64.to_owned()),
-                ("peer2".to_owned(), TOK64.to_owned())
+                ("peer1".to_owned(), SecretString::from(TOK64)),
+                ("peer2".to_owned(), SecretString::from(TOK64))
             ]
         );
 
         let cfg = config_with_peers(&format!("\n# a comment line\npeer:{TOK64}\n\n"));
         assert_eq!(
             cfg.peer_tokens(),
-            vec![("peer".to_owned(), TOK64.to_owned())]
+            vec![("peer".to_owned(), SecretString::from(TOK64))]
         );
 
         for bad in [TOK63, TOK65] {
             let cfg = config_with_peers(&format!("peer-bad:{bad}\npeer-ok:{TOK64}"));
             assert_eq!(
                 cfg.peer_tokens(),
-                vec![("peer-ok".to_owned(), TOK64.to_owned())],
+                vec![("peer-ok".to_owned(), SecretString::from(TOK64))],
                 "{bad}"
             );
         }
@@ -505,11 +506,14 @@ mod tests {
         let cfg = config_with_peers(&format!(":tok64ok\npeer:\nnocolon\npeer-valid:{TOK64}"));
         assert_eq!(
             cfg.peer_tokens(),
-            vec![("peer-valid".to_owned(), TOK64.to_owned())]
+            vec![("peer-valid".to_owned(), SecretString::from(TOK64))]
         );
 
         let cfg = config_with_peers(&format!("*:{TOK64}"));
-        assert_eq!(cfg.peer_tokens(), vec![("*".to_owned(), TOK64.to_owned())]);
+        assert_eq!(
+            cfg.peer_tokens(),
+            vec![("*".to_owned(), SecretString::from(TOK64))]
+        );
     }
 
     #[test]
@@ -524,7 +528,10 @@ mod tests {
         };
         let tokens = cfg.peer_tokens();
         let _ = std::fs::remove_file(&path);
-        assert_eq!(tokens, vec![("peer-file".to_owned(), TOK64.to_owned())]);
+        assert_eq!(
+            tokens,
+            vec![("peer-file".to_owned(), SecretString::from(TOK64))]
+        );
     }
 
     #[test]

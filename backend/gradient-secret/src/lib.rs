@@ -87,6 +87,12 @@ impl From<String> for SecretString {
     }
 }
 
+impl From<&str> for SecretString {
+    fn from(s: &str) -> Self {
+        Self::new(s.to_owned())
+    }
+}
+
 pub struct SecretBytes(Box<[u8]>);
 
 impl SecretBytes {

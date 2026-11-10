@@ -45,8 +45,8 @@ Handshake messages can be at most `MAX_HANDSHAKE_MESSAGE_SIZE` (64 KiB) in size.
 | Code | Reason |
 |---|---|
 | `400` | An unexpected message during the handshake |
-| `401` | `no valid peer tokens provided` |
-| `403` | `unknown worker`, `worker is deactivated`, `no project grants this team's workers`, or the server is not accepting connections |
+| `401` | `unknown worker id or wrong token`: the same answer for an unknown worker ID, a deactivated worker and a wrong token, so a client can't tell them apart before it proves a token |
+| `403` | `worker is deactivated` (sent to an already connected worker after its last registration is deactivated), `no project grants this team's workers`, or the server is not accepting connections |
 | `495` | `project has no cache subscribed`: every authorized project is lacking a cache |
 | `496` | `worker already connected` |
 

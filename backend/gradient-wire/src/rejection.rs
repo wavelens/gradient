@@ -16,16 +16,12 @@ pub enum Rejection {
     ExpectedAuthResponse,
     #[error("expected Authenticate")]
     ExpectedAuthenticate,
-    #[error("no valid peer tokens provided")]
-    NoValidPeerTokens,
     #[error("unknown worker id or wrong token")]
     UnknownWorkerOrWrongToken,
     #[error("server is not accepting connections")]
     NotAcceptingConnections,
     #[error("worker is deactivated")]
     WorkerDeactivated,
-    #[error("unknown worker")]
-    UnknownWorker,
     #[error("no project grants this team's workers")]
     NoProjectGrant,
     #[error("no project authorizes this worker")]
@@ -58,10 +54,9 @@ impl Rejection {
             Self::ExpectedInitConnection
             | Self::ExpectedAuthResponse
             | Self::ExpectedAuthenticate => 400,
-            Self::NoValidPeerTokens | Self::UnknownWorkerOrWrongToken => 401,
+            Self::UnknownWorkerOrWrongToken => 401,
             Self::NotAcceptingConnections
             | Self::WorkerDeactivated
-            | Self::UnknownWorker
             | Self::NoProjectGrant
             | Self::NoProjectAuthorization
             | Self::PushOnCacheSession

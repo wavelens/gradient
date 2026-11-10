@@ -5,6 +5,7 @@
  */
 
 use anyhow::Context;
+use gradient_secret::SecretString;
 
 use crate::error::HandshakeError;
 use crate::messages::{ClientMessage, FailedPeer, GradientCapabilities, ServerMessage};
@@ -118,7 +119,7 @@ where
         ServerMessage::Reject { code, reason } => {
             anyhow::bail!(HandshakeError::ServerRejected { code, reason });
         }
-        other => anyhow::bail!("expected AuthChallenge, got: {other:?}"),
+        other => anyhow::bail!("expected AuthChallenge, got: {}", other.variant_name()),
     };
 
     let tokens = identity.tokens_for(&challenged).await?;
@@ -134,7 +135,7 @@ where
         if let ServerMessage::Reject { code, reason } = ack {
             anyhow::bail!(HandshakeError::ServerRejected { code, reason });
         }
-        anyhow::bail!("expected InitAck, got: {ack:?}");
+        anyhow::bail!("expected InitAck, got: {}", ack.variant_name());
     };
 
     Ok(HandshakeResult {
@@ -157,12 +158,12 @@ pub struct Rejected {
 #[derive(Clone)]
 pub struct DialerCredentials {
     pub worker_id: String,
-    pub tokens: Vec<(String, String)>,
+    pub tokens: Vec<(String, SecretString)>,
 }
 
 pub struct DialerClaim {
     pub worker_id: String,
-    pub tokens: Vec<(String, String)>,
+    pub tokens: Vec<(String, SecretString)>,
 }
 
 pub fn on_authenticate(msg: ServerMessage) -> Result<DialerClaim, Intent> {
@@ -554,7 +555,7 @@ mod tests {
             self.0.into()
         }
 
-        async fn tokens_for(&self, _: &[String]) -> anyhow::Result<Vec<(String, String)>> {
+        async fn tokens_for(&self, _: &[String]) -> anyhow::Result<Vec<(String, SecretString)>> {
             Ok(vec![])
         }
     }
@@ -569,11 +570,11 @@ mod tests {
         }
     }
 
-    struct Expects(Vec<(String, String)>);
+    struct Expects(Vec<(String, SecretString)>);
 
     #[async_trait::async_trait]
     impl DialerVerifier for Expects {
-        async fn verify(&self, _: &str, tokens: &[(String, String)]) -> bool {
+        async fn verify(&self, _: &str, tokens: &[(String, SecretString)]) -> bool {
             tokens == self.0.as_slice()
         }
     }
@@ -641,6 +642,28 @@ mod tests {
             })
         );
         assert_eq!(second, None);
+    }
+
+    #[tokio::test]
+    async fn an_out_of_order_server_message_with_tokens_is_reported_by_type_only_without_the_tokens()
+     {
+        let (mut accepted, mut dialing) = loopback().await;
+        let server = async {
+            accepted.recv_msg().await.expect("InitConnection");
+            accepted
+                .send_msg(&ServerMessage::Authenticate {
+                    worker_id: "w1".into(),
+                    tokens: credentials().tokens,
+                })
+                .await
+                .expect("send Authenticate");
+        };
+
+        let (outcome, ()) =
+            tokio::join!(as_peer(&mut dialing, &Worker("w1"), &Worker("w1")), server);
+        let error = format!("{:#}", outcome.expect_err("out-of-order message"));
+        assert!(error.contains("Authenticate"));
+        assert!(!error.contains("s3cret"));
     }
 
     #[tokio::test]
