@@ -40,7 +40,10 @@ use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+
+static PASSWORD_HASH_FOR_MISSING_OR_PASSWORDLESS_ACCOUNT: LazyLock<String> =
+    LazyLock::new(|| generate_hash(Alphanumeric.sample_string(&mut rand::rng(), 32)));
 
 #[derive(Debug, thiserror::Error)]
 enum AuthRefusal {
@@ -323,14 +326,30 @@ pub async fn post_basic_login(
         return Err(WebError::oauth_required());
     }
 
-    let user = match gradient_db::users::by_username_or_email(
-        &state.web_db,
-        &body.loginname,
-        &body.loginname,
+    let user =
+        gradient_db::users::by_username_or_email(&state.web_db, &body.loginname, &body.loginname)
+            .await?;
+    let stored_hash = user.as_ref().and_then(|u| u.password.as_deref());
+    let password_matches = verify_password(
+        &body.password,
+        stored_hash.unwrap_or(&PASSWORD_HASH_FOR_MISSING_OR_PASSWORDLESS_ACCOUNT),
     )
-    .await?
-    {
-        Some(u) => u,
+    .is_ok()
+        && stored_hash.is_some();
+
+    let user = match user {
+        Some(user) if password_matches => user,
+        Some(user) => {
+            audit
+                .write_as(
+                    Some(user.id),
+                    Action::LoginFailure,
+                    EventOwner::default(),
+                    None,
+                )
+                .await;
+            return Err(WebError::invalid_credentials());
+        }
         None => {
             audit
                 .write(
@@ -342,20 +361,6 @@ pub async fn post_basic_login(
             return Err(WebError::invalid_credentials());
         }
     };
-
-    let user_password = user.password.clone().ok_or_else(WebError::oauth_required)?;
-
-    if verify_password(body.password, &user_password).is_err() {
-        audit
-            .write_as(
-                Some(user.id),
-                Action::LoginFailure,
-                EventOwner::default(),
-                None,
-            )
-            .await;
-        return Err(WebError::invalid_credentials());
-    }
 
     if !user.active {
         return Err(SharedRefusal::AccountDeactivated.into());
@@ -446,20 +451,50 @@ pub async fn get_oauth_authorize(
     headers: axum::http::HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
+    let use_tls = state.config.server.use_tls;
+    let token = complete_oidc_login_from_callback(
+        &state,
+        &audit,
+        &headers,
+        &query,
+        "oauth_authorize_callback",
+    )
+    .await?;
+
+    let res = BaseResponse {
+        error: false,
+        message: token,
+    };
+
+    let mut response = Json(res).into_response();
+    response.headers_mut().append(
+        axum::http::header::SET_COOKIE,
+        HeaderValue::from_str(&csrf_clear_cookie(OIDC_CSRF_COOKIE, use_tls))
+            .context("bad cookie")?,
+    );
+    Ok(response)
+}
+
+async fn complete_oidc_login_from_callback(
+    state: &ServerState,
+    audit: &Audit,
+    headers: &HeaderMap,
+    query: &HashMap<String, String>,
+    stage: &'static str,
+) -> WebResult<String> {
     if state.config.oidc.is_none() {
         return Err(WebError::oauth_disabled());
     }
 
     let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
     let state_query = query.get("state").ok_or(AuthRefusal::MissingOidcState)?;
-    let csrf = cookie_value(&headers, OIDC_CSRF_COOKIE)
+    let csrf = cookie_value(headers, OIDC_CSRF_COOKIE)
         .ok_or(AuthRefusal::MissingOidcCsrfCookie)?
         .to_owned();
 
-    let use_tls = state.config.server.use_tls;
-    let user: MUser = oidc_login_verify(&state, code.to_string(), state_query.to_string(), csrf)
+    let user: MUser = oidc_login_verify(state, code.to_string(), state_query.to_string(), csrf)
         .await
-        .map_err(oidc_failure("oauth_authorize_callback"))?;
+        .map_err(oidc_failure(stage))?;
 
     let (_session_id, token) = create_session_and_token(
         &state.web_db,
@@ -480,19 +515,7 @@ pub async fn get_oauth_authorize(
             serde_json::json!({ "method": "oidc" }),
         )
         .await;
-
-    let res = BaseResponse {
-        error: false,
-        message: token,
-    };
-
-    let mut response = Json(res).into_response();
-    response.headers_mut().append(
-        axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&csrf_clear_cookie(OIDC_CSRF_COOKIE, use_tls))
-            .context("bad cookie")?,
-    );
-    Ok(response)
+    Ok(token)
 }
 
 #[utoipa::path(
@@ -581,36 +604,10 @@ pub async fn get_oidc_callback(
     headers: axum::http::HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
-    let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
-    let state_query = query.get("state").ok_or(AuthRefusal::MissingOidcState)?;
-    let csrf = cookie_value(&headers, OIDC_CSRF_COOKIE)
-        .ok_or(AuthRefusal::MissingOidcCsrfCookie)?
-        .to_owned();
-
     let use_tls = state.config.server.use_tls;
-    let user: MUser = oidc_login_verify(&state, code.to_string(), state_query.to_string(), csrf)
-        .await
-        .map_err(oidc_failure("oidc_callback"))?;
-
-    let (_session_id, token) = create_session_and_token(
-        &state.web_db,
-        &state.jwt_secret,
-        user.id,
-        false,
-        audit.info().user_agent.clone(),
-        audit.info().ip.clone(),
-    )
-    .await
-    .map_err(|_| WebError::failed_to_generate_token())?;
-
-    audit
-        .write_as(
-            Some(user.id),
-            Action::LoginSuccess,
-            EventOwner::default(),
-            serde_json::json!({ "method": "oidc" }),
-        )
-        .await;
+    let token =
+        complete_oidc_login_from_callback(&state, &audit, &headers, &query, "oidc_callback")
+            .await?;
 
     let session_cookie = jwt_cookie(&token, false, use_tls);
     let clear_csrf = csrf_clear_cookie(OIDC_CSRF_COOKIE, use_tls);
@@ -798,8 +795,6 @@ pub async fn post_resend_verification(
     state: State<Arc<ServerState>>,
     Json(body): Json<CheckUsernameRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    use sea_orm::TransactionTrait;
-
     if !state
         .config
         .email
@@ -820,10 +815,8 @@ pub async fn post_resend_verification(
     let verification_token = generate_verification_token();
     let verification_expires = gradient_types::now() + chrono::Duration::hours(24);
 
-    let tx = state.web_db.inner().begin().await?;
-
     gradient_db::users::set_email_verification_token(
-        &tx,
+        &state.web_db,
         user.clone(),
         verification_token.clone(),
         verification_expires,
@@ -840,8 +833,6 @@ pub async fn post_resend_verification(
         )
         .await
         .context("send verification email")?;
-
-    tx.commit().await?;
 
     Ok(ok_json("Verification email sent successfully".to_string()))
 }
@@ -1084,10 +1075,13 @@ pub async fn post_cli_device_authorize(
     Extension(user): Extension<MUser>,
     Json(body): Json<CliDeviceAuthorizeRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    use sea_orm::TransactionTrait;
+
     let row = find_active_user_code(&state.web_db, &body.user_code).await?;
 
+    let tx = state.web_db.inner().begin().await?;
     let (_session_id, token) = create_session_and_token(
-        &state.web_db,
+        &tx,
         &state.jwt_secret,
         user.id,
         true,
@@ -1099,11 +1093,12 @@ pub async fn post_cli_device_authorize(
 
     let now = gradient_types::now();
     let authorized =
-        gradient_db::cli_device_authorizations::authorize(&state.web_db, row, user.id, token, now)
-            .await?;
+        gradient_db::cli_device_authorizations::authorize(&tx, row, user.id, token, now).await?;
     if authorized.is_none() {
+        tx.rollback().await?;
         return Err(refusal_for_settled_code(&state.web_db, &body.user_code).await);
     }
+    tx.commit().await?;
 
     audit
         .write(

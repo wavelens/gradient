@@ -125,8 +125,8 @@ fn sign_session_jwt(jwt_secret: &SecretString, session: &MSession) -> Result<Str
     sign_claims(jwt_secret, &claim).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-pub async fn create_session_and_token(
-    db: &WebDb,
+pub async fn create_session_and_token<C: sea_orm::ConnectionTrait>(
+    db: &C,
     jwt_secret: &SecretString,
     user_id: UserId,
     remember_me: bool,

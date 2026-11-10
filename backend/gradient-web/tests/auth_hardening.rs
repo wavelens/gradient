@@ -199,6 +199,26 @@ async fn delete_user_without_password_is_forbidden() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn login_to_an_unknown_or_passwordless_account_fails_like_a_wrong_password() {
+    let passwordless = gradient_entity::user::Model {
+        password: None,
+        ..user()
+    };
+    for accounts in [vec![], vec![passwordless]] {
+        let s = server_with(|db| db.append_query_results([accounts]));
+
+        let res = s
+            .post("/api/v1/auth/basic/login")
+            .json(&serde_json::json!({ "loginname": "someone", "password": "guess" }))
+            .await;
+
+        res.assert_status_unauthorized();
+        let body: Value = res.json();
+        assert_eq!(body["code"], "invalid_credentials");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn api_key_with_zero_day_expiry_is_rejected() {
     let session = live_session(SessionId::now_v7());
     let token = sign_session_jwt(user_id(), session.id, Duration::hours(1));
