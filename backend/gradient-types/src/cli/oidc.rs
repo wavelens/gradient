@@ -17,7 +17,9 @@ pub struct OidcArgs {
     #[arg(default_value = "false")]
     pub required: bool,
     /// OIDC client ID.
+    #[arg(id = "oidc-client-id")]
     pub client_id: Option<String>,
+    #[arg(id = "oidc-client-secret-file")]
     pub client_secret_file: Option<String>,
     /// OIDC scopes to request.
     #[arg(value_delimiter = ',', default_value = "openid,email,profile")]
