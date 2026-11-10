@@ -104,6 +104,7 @@ nav:
   - Using the UI:
       - Dashboard: ui/dashboard.md
       - Job Board: ui/job-board.md
+      - Administration: ui/administration.md
       - Closure View: ui/closure-view.md
       - Members and Roles: ui/members-and-roles.md
       - Settings: ui/settings.md

@@ -35,7 +35,7 @@ flowchart LR
 | [Triggers](triggers.md) | Start condition and branch of an evaluation: push, pull request, polling (every 300 s by default) or a cron schedule |
 | Actions | Follow-up steps: mail, web request, Git host status, flake update pull request |
 | Flake Input Overrides | Replace a flake input for every evaluation, e.g. a newer nixpkgs |
-| Keep Evaluations | How many finished evaluations stay, 30 by default |
+| Keep Evaluations | Number of completed evaluations to keep. Default 30. Server option `eval.maxKeep` can set the upper limit for this value. The settings page can show that limit as **Instance limit**. **Delete old evaluations** in the task's **Danger Zone** can remove completed evaluations created before the specified date. |
 
 ## Repository URL
 

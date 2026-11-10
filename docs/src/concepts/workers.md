@@ -96,6 +96,7 @@ A worker can stop at any time. Disposable VMs follow the same rule. Jobs survive
 - Use a second `SIGTERM` or `SIGINT` to abort running jobs. The server can requeue those jobs for other workers.
 - The NixOS module can set `TimeoutStopSec = infinity`, so a restart can wait for running jobs. Shorten this value to cap the wait time. Systemd can force-kill the worker and the server can requeue that job.
 - An administrator can also drain one worker from **Administration > Workers** or `gradient administration worker drain <id>`. The worker can keep the connection and receive jobs again after **Undrain**.
+- A team admin can drain a worker from the team workers page or with `gradient team worker edit <TEAM> <WORKER_ID> --draining true`. Use **Deactivate** instead to abort running jobs immediately.
 
 ## Related
 

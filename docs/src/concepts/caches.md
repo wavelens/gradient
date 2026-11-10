@@ -22,6 +22,14 @@ The cache page lists two values needed for Nix configuration: the substituter UR
 
 Each cache sends a priority to `nix`. The default value is `10`, and lower numbers take precedence. A cache can also send a separate priority to machines on the local network. Those machines then prefer the Gradient cache over remote caches.
 
+## Signing Key
+
+Caches sign their store paths with a single key. To create a new key pair, set **Rotate Key** in the cache configuration. New key pairs require `manageCacheKeys` permission and fail for caches from declarative state.
+
+Key rotations reuse the key name, so `trusted-public-keys` can have one entry per cache. Store paths carry both the previous key signature and the new key signature. Both signatures appear in the `.narinfo` response. Clients that trust only the old key keep working until the next rotation. No timers end that grace period. Add the new public key to all clients before the next rotation.
+
+The current public key and its start date appear on the Settings page. Retired keys appear with their dates.
+
 ## Upstream Types
 
 Find upstream caches under **Settings -> Upstream Caches** on the cache page.

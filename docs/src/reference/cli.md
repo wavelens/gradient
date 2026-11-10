@@ -234,6 +234,7 @@ gradient account switch work
 | `gradient cache edit <NAME>` | `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--priority <PRIORITY>`, `--max-storage-gb <MAX_STORAGE_GB>` | Change settings of an existing cache |
 | `gradient cache delete <NAME>` | `--yes` | Remove a cache |
 | `gradient cache show <NAME>` | - | Print the public key of a cache |
+| `gradient cache rotate-key <NAME>` | - | Replace the cache signing key and print the new public key. Store paths keep the old signature until the next rotation. |
 | `gradient cache install-netrc --server <SERVER> --cache <CACHE>` | `--server <SERVER>`, `--token <TOKEN>`, `--cache <CACHE>`, `--netrc-file <NETRC_FILE>` | Write a netrc entry for a cache from an existing API key. The server is not contacted. Run as root to write `/etc/nix/netrc` |
 | `gradient cache nar list <CACHE>` | `--hash <HASH>`, `--package <PACKAGE>`, `--sort <SORT>`, `--order <ORDER>`, `--page <PAGE>`, `--per-page <PER_PAGE>`, `--interactive` | List the NARs stored in a cache |
 | `gradient cache nar show <CACHE> <HASH>` | - | Print the full metadata of one NAR |
@@ -286,7 +287,10 @@ These commands act on the whole instance. They need a superuser account. AI agen
 | `gradient administration deep-gc` | - | Start deep garbage collection for the database and storage. Print the task ID. |
 | `gradient administration task list\|show [TASK_ID]` | - | List the administration tasks, or show one task (for example, to track deep garbage collection). |
 | `gradient administration webhook <VERB>` | see [Webhooks](#webhooks) | Manage webhooks across the entire instance. See [Webhooks](#webhooks) for details. |
-| `gradient administration worker list\|show [WORKER_ID]` | - | List the workers that connect to this server, or print a single worker. |
+| `gradient administration worker list\|show\|drain\|undrain [WORKER_ID]` | - | List registered workers with team, project and connection status, or show a single worker. Drain a worker to finish running jobs and block new jobs, or end the drain. |
+| `gradient administration config` | - | Show all server options with their values and sources. Secret values stay hidden. |
+| `gradient administration storage` | - | Display free disk space and the stored size of each cache, project, and task. |
+| `gradient administration gc` | - | Start a GC round immediately, without waiting for the next interval. |
 
 ## Webhooks
 
@@ -324,7 +328,7 @@ These commands act on the whole instance. They need a superuser account. AI agen
 | `gradient team projects-and-caches <TEAM>` | - | Show the projects and caches that grant the team access |
 | `gradient team worker list <TEAM>` | - | Show the workers of a team |
 | `gradient team worker register <TEAM> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--url <URL>`, `--token <TOKEN>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Add a worker that builds for every project granting the team its workers |
-| `gradient team worker edit <TEAM> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--active <BOOL>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Change a team worker. Deactivating aborts its running jobs |
+| `gradient team worker edit <TEAM> <WORKER_ID>` | `--display-name <DISPLAY_NAME>`, `--active <BOOL>`, `--draining <BOOL>`, `--enable-network <BOOL>`, `--enable-secrets <BOOL>`, `--enable-exec <BOOL>`, `--enable-eval <BOOL>`, `--enable-build <BOOL>` | Edit a team worker. Disabling it can abort running jobs. Use `--draining true` to let running jobs complete and to stop new job submission. |
 | `gradient team worker delete <TEAM> <WORKER_ID>` | `--yes` | Remove a team worker |
 | `gradient team worker missing-worker-capabilities <TEAM>` | `--projects <PROJECTS>` | Show what waiting evaluations need that no connected worker offers |
 | `gradient team webhook <VERB> <TEAM>` | see [Webhooks](#webhooks) | Manage team webhooks. See [Webhooks](#webhooks). |
