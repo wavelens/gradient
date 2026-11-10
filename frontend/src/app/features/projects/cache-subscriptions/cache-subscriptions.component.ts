@@ -35,6 +35,7 @@ import { CreateCacheDialogComponent, injectCanCreateCache } from '@shared/forms'
 import { accessTo, Cache, CacheSubscriptionItem } from '@core/models';
 import { links } from '@shared/routing';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
+import { ProjectNoActiveWritableCacheSubscriptionWarningComponent } from '../project-no-active-writable-cache-subscription-warning.component';
 import { EMPTY, Observable, catchError, forkJoin, map, of, tap } from 'rxjs';
 
 @Component({
@@ -59,6 +60,7 @@ import { EMPTY, Observable, catchError, forkJoin, map, of, tap } from 'rxjs';
     RowComponent,
     TooltipDirective,
     CreateCacheDialogComponent,
+    ProjectNoActiveWritableCacheSubscriptionWarningComponent,
   ],
   templateUrl: './cache-subscriptions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

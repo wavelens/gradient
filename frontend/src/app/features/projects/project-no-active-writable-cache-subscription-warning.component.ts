@@ -24,11 +24,15 @@ export function hasActiveCacheSubscriptionWithWriteAccess(caches: readonly Cache
         @if (requestPending()) {
           <strong>Subscription request pending</strong>
           Evaluations wait until a cache admin approves the request.
-          <a [routerLink]="links.projectPage(projectName(), 'caches')">View request</a>
+          @if (showCacheSubscriptionsPageLink()) {
+            <a [routerLink]="links.projectPage(projectName(), 'caches')">View request</a>
+          }
         } @else {
           <strong>No writable cache</strong>
           Evaluations wait for the project to subscribe to a writable cache.
-          <a [routerLink]="links.projectPage(projectName(), 'caches')">Add a cache</a>
+          @if (showCacheSubscriptionsPageLink()) {
+            <a [routerLink]="links.projectPage(projectName(), 'caches')">Add a cache</a>
+          }
         }
       </gr-message-banner>
     }
@@ -40,6 +44,7 @@ export class ProjectNoActiveWritableCacheSubscriptionWarningComponent {
   protected readonly links = links;
   readonly projectName = input.required<string>();
   readonly caches = input.required<readonly CacheSubscriptionItem[] | null>();
+  readonly showCacheSubscriptionsPageLink = input(true);
   protected readonly visible = computed(() => {
     const caches = this.caches();
     return caches !== null && !hasActiveCacheSubscriptionWithWriteAccess(caches);

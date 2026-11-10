@@ -265,11 +265,30 @@ describe('CacheSubscriptionsComponent - load errors', () => {
     expect(root.textContent).toContain('Failed to load caches');
     expect(root.textContent).toContain('database is down');
     expect(root.textContent).not.toContain('No cache subscriptions');
+    expect(root.querySelector('[data-testid=no-cache-banner]')).toBeNull();
 
     service.getSubscribedCaches = () => of([]);
     root.querySelector<HTMLButtonElement>('.gr-load-state__error button')!.click();
     await settled(fixture);
     expect(root.textContent).not.toContain('Failed to load caches');
+  });
+});
+
+describe('CacheSubscriptionsComponent - no writable cache', () => {
+  it('warns on the page that fixes it, without linking back to itself', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const service = TestBed.inject(ProjectsService) as unknown as { getSubscribedCaches: () => unknown };
+    service.getSubscribedCaches = () => of([{ id: 'c', name: 'mirror', display_name: 'Mirror', mode: 'ReadOnly', status: 'active' }]);
+    await settled(fixture);
+    const banner = (fixture.nativeElement as HTMLElement).querySelector('[data-testid=no-cache-banner]');
+    expect(banner?.textContent).toContain('No writable cache');
+    expect(banner?.querySelector('a')).toBeNull();
+  });
+
+  it('stays quiet once an active writable cache is subscribed', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid=no-cache-banner]')).toBeNull();
   });
 });
 

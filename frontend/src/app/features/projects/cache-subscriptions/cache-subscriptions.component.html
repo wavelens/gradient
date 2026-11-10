@@ -6,6 +6,8 @@
 
 <gr-page-layout width="settings" [breadcrumb]="breadcrumb()" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
   <app-server-configuration-managed-banner [access]="access()" kind="project" />
+  <app-project-no-active-writable-cache-subscription-warning [projectName]="projectName" [caches]="loading() || loadError() ? null : caches()"
+                                                             [showCacheSubscriptionsPageLink]="false" />
   @if (!loading() && !loadError()) {
     <button slot="actions"
         *appWritable="access()"
