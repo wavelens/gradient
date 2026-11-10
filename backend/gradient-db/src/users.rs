@@ -10,7 +10,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, ExprTrait, Func, SimpleExpr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
-    PaginatorTrait, QueryFilter, QuerySelect, Select,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Select,
 };
 
 pub async fn by_username<C: ConnectionTrait>(
@@ -71,8 +71,14 @@ pub async fn search_by_username<C: ConnectionTrait>(
     text: &str,
     limit: u64,
 ) -> Result<Vec<MUser>, DbErr> {
+    use sea_orm::sea_query::extension::postgres::PgExpr;
+
     EUser::find()
-        .filter(CUser::Username.contains(text))
+        .filter(PgExpr::ilike(
+            Expr::col(CUser::Username),
+            crate::dashboard::ilike_contains(text),
+        ))
+        .order_by_asc(CUser::Username)
         .limit(limit)
         .all(db)
         .await
@@ -199,6 +205,28 @@ mod tests {
         );
         let values = format!("{:?}", select.values);
         assert!(values.contains("\"alice@example.com\""), "{values}");
+    }
+
+    #[tokio::test]
+    async fn search_by_username_is_case_insensitive_escapes_wildcards_and_orders_by_username() {
+        let db = mock_db()
+            .append_query_results([Vec::<MUser>::new()])
+            .into_connection();
+
+        search_by_username(&db, "a_b%", 10).await.expect("query");
+
+        let statements = raw_statements(db.into_transaction_log());
+        let [select] = statements.as_slice() else {
+            panic!("expected one statement, got {statements:?}");
+        };
+        assert!(select.sql.contains("ILIKE"), "{}", select.sql);
+        assert!(
+            select.sql.contains("ORDER BY \"user\".\"username\" ASC"),
+            "{}",
+            select.sql
+        );
+        let values = format!("{:?}", select.values);
+        assert!(values.contains(r#""%a\\_b\\%%""#), "{values}");
     }
 
     #[tokio::test]

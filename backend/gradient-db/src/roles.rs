@@ -47,7 +47,7 @@ where
     E::find()
         .filter(
             Condition::all()
-                .add(name_column.eq(name))
+                .add(Expr::expr(Func::lower(Expr::col(name_column))).eq(name.to_lowercase()))
                 .add(owned_or_builtin(owner_column, owner)),
         )
         .one(db)

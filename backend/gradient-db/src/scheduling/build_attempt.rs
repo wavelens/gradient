@@ -151,21 +151,10 @@ pub async fn latest_attempt<C: ConnectionTrait>(
         .await
 }
 
-fn latest_attempts_sql(chunk: &[DerivationBuildId]) -> String {
-    let in_list = chunk
-        .iter()
-        .map(|id| format!("'{}'", id.into_inner()))
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "SELECT DISTINCT ON (derivation_build) * FROM build_attempt \
-         WHERE derivation_build IN ({in_list}) ORDER BY derivation_build, created_at DESC"
-    )
-}
-
-crate::sql_fn! {
-    LATEST_ATTEMPTS = || latest_attempts_sql(&[DerivationBuildId::nil(); 64]),
-        params = [];
+crate::sql! {
+    LATEST_ATTEMPTS = "SELECT DISTINCT ON (derivation_build) * FROM build_attempt \
+         WHERE derivation_build = ANY() ORDER BY derivation_build, created_at DESC",
+        params = [SharedBuildIds(64)];
 }
 
 pub async fn latest_attempts<C: ConnectionTrait>(
@@ -173,8 +162,9 @@ pub async fn latest_attempts<C: ConnectionTrait>(
     shared_builds: &[DerivationBuildId],
 ) -> Result<std::collections::HashMap<DerivationBuildId, Model>, DbErr> {
     let rows = crate::fetch_in_chunks(shared_builds, |chunk| async move {
+        let ids: Vec<Uuid> = chunk.iter().map(|id| id.into_inner()).collect();
         Entity::find()
-            .from_raw_sql(LATEST_ATTEMPTS.bind_built(latest_attempts_sql(&chunk), []))
+            .from_raw_sql(LATEST_ATTEMPTS.bind([ids.into()]))
             .all(db)
             .await
     })
@@ -300,24 +290,6 @@ pub async fn finish_latest_attempt<C: ConnectionTrait>(
         .await?;
 
     Ok(())
-}
-
-pub async fn fail_latest_attempt<C: ConnectionTrait>(
-    db: &C,
-    derivation_build: DerivationBuildId,
-    outcome: AttemptOutcome,
-    reason: Option<AttemptFailureReason>,
-    failure_message: Option<String>,
-) -> Result<(), DbErr> {
-    finish_latest_attempt(db, derivation_build, outcome, reason, failure_message).await
-}
-
-pub async fn succeed_latest_attempt<C: ConnectionTrait>(
-    db: &C,
-    derivation_build: DerivationBuildId,
-    outcome: AttemptOutcome,
-) -> Result<(), DbErr> {
-    finish_latest_attempt(db, derivation_build, outcome, None, None).await
 }
 
 pub async fn abort_running_attempts<C: ConnectionTrait>(

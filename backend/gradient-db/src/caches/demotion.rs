@@ -18,7 +18,6 @@ pub struct MissingInputDiagnosis {
 
 pub async fn diagnose_missing_input<C: ConnectionTrait>(
     db: &C,
-    _evaluation_id: gradient_types::ids::EvaluationId,
     hash: &str,
 ) -> Result<MissingInputDiagnosis, sea_orm::DbErr> {
     use gradient_entity::cached_path::{Column as CCP, Entity as ECP};

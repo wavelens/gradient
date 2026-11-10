@@ -9,8 +9,7 @@ use gradient_db::{
     DbContext,
     graph::{can_start::unpromote_ungated, promotion::cascade_dependency_failed},
     scheduling::build_attempt::{
-        abort_running_attempts, fail_latest_attempt, open_failed_attempt, succeed_latest_attempt,
-        worker_loss_streaks,
+        abort_running_attempts, finish_latest_attempt, open_failed_attempt, worker_loss_streaks,
     },
     status::{
         EvaluationFailure, EvaluationWarning, emit_transition_effects,
@@ -644,10 +643,12 @@ async fn build_completed(
     let was_external_cached = shared_build.cache_available;
 
     let terminal = policy::terminal_success_status(shared_build.substituted);
-    if let Err(e) = succeed_latest_attempt(
+    if let Err(e) = finish_latest_attempt(
         &ctx.worker_db,
         derivation_build,
         policy::terminal_success_outcome(shared_build.substituted),
+        None,
+        None,
     )
     .await
     {
@@ -814,7 +815,7 @@ async fn build_failed(
     };
 
     if running_attempt.is_some()
-        && let Err(e) = fail_latest_attempt(
+        && let Err(e) = finish_latest_attempt(
             &ctx.worker_db,
             derivation_build,
             policy::attempt_outcome(kind),
@@ -978,7 +979,7 @@ async fn fail_build_lost_with_every_worker(
         warn!(%derivation_build, error = %e, "failed to append the worker loss to the build log");
     }
 
-    if let Err(e) = fail_latest_attempt(
+    if let Err(e) = finish_latest_attempt(
         &ctx.worker_db,
         derivation_build,
         AttemptOutcome::Failed,

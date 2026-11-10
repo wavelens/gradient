@@ -45,13 +45,7 @@ pub(crate) async fn repair_missing_inputs(
         };
         let hash = stored.hash();
 
-        match gradient_db::caches::demotion::diagnose_missing_input(
-            db,
-            EvaluationId::now_v7(),
-            hash,
-        )
-        .await
-        {
+        match gradient_db::caches::demotion::diagnose_missing_input(db, hash).await {
             Ok(d) => warn!(
                 %path,
                 hash,
