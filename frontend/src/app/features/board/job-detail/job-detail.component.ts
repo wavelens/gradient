@@ -63,7 +63,7 @@ import {
 import { links } from '@shared/routing';
 import { removeAnsiEscapeSequences } from '@shared/log';
 import { runReloadIntervalWhileTabVisible } from '@shared/paging';
-import { EMPTY, Observable, catchError, of, switchMap, tap, throwError } from 'rxjs';
+import { EMPTY, Observable, Subject, catchError, of, switchMap, tap, throwError } from 'rxjs';
 
 type PendingLookup = 'pending' | 'left' | 'not-found';
 
@@ -510,7 +510,7 @@ interface RuleRow {
         <gr-loading-spinner message="Loading build..." />
       } @else if (buildError()) {
         <p class="muted">{{ buildError() }}</p>
-      } @else if (build(); as b) {
+      } @else if (selectedBuildForBuildDetailsDialog(); as b) {
         <div class="build-grid">
           <div><span class="label">Build ID</span><span class="mono">{{ b.id }}</span></div>
           <div><span class="label">Status</span><span class="mono">{{ b.status }}</span></div>
@@ -571,7 +571,9 @@ export class BoardJobDetailComponent implements OnInit {
   private jobId: string | null = null;
   private descriptions = signal<Map<string, string>>(new Map());
   activeRule = signal<RuleDescription | null>(null);
-  build = signal<BuildWithOutputs | null>(null);
+  shownJobBuild = signal<BuildWithOutputs | null>(null);
+  selectedBuildForBuildDetailsDialog = signal<BuildWithOutputs | null>(null);
+  private readonly buildInfoDialogRequestedBuildIdSubject = new Subject<string>();
   buildDialog = signal(false);
   buildLoading = signal(false);
   buildError = signal<string | null>(null);
@@ -620,7 +622,7 @@ export class BoardJobDetailComponent implements OnInit {
 
   jobStatusBadge = computed<{ phase: StatusPhase; label: string }>(() => {
     const j = this.job();
-    const b = this.build();
+    const b = this.shownJobBuild();
     if (j && b && b.id === j.build_id) return { phase: buildPhase(b.status), label: buildStatusLabel(b.status) };
     if (j?.passed_over) return { phase: 'aborted', label: 'Passed over' };
     if (!j?.finished_at) return { phase: 'running', label: 'Running' };
@@ -650,7 +652,7 @@ export class BoardJobDetailComponent implements OnInit {
   }
 
   buildWorker = computed(() => {
-    const worker = this.build()?.worker ?? null;
+    const worker = this.selectedBuildForBuildDetailsDialog()?.worker ?? null;
     const job = this.job();
     if (!worker) return '-';
     return workerDisplayNameOrNotSharedLabel(worker === job?.worker_id ? job.worker_name : null);
@@ -672,6 +674,26 @@ export class BoardJobDetailComponent implements OnInit {
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => this.refetchJobWhileUnfinished(), 5_000);
+    this.buildInfoDialogRequestedBuildIdSubject
+      .pipe(
+        tap(() => {
+          this.selectedBuildForBuildDetailsDialog.set(null);
+          this.buildLoading.set(true);
+          this.buildError.set(null);
+        }),
+        switchMap((buildId) => this.evaluations.getBuild(buildId).pipe(
+          catchError(() => {
+            this.buildError.set('Failed to load build.');
+            this.buildLoading.set(false);
+            return EMPTY;
+          }),
+        )),
+        takeUntilDestroyed(),
+      )
+      .subscribe((b) => {
+        this.selectedBuildForBuildDetailsDialog.set(b);
+        this.buildLoading.set(false);
+      });
     const title = inject(Title);
     effect(() => {
       const j = this.job();
@@ -689,7 +711,7 @@ export class BoardJobDetailComponent implements OnInit {
       tap((d) => {
         if (this.job()?.id !== d.id) return;
         this.job.set(d);
-        if (d.finished_at && d.build_id && (this.build()?.id ?? d.build_id) === d.build_id) this.loadBuild(d.build_id);
+        if (d.finished_at && d.build_id) this.loadShownJobBuild(d.build_id);
       }),
     );
   }
@@ -698,8 +720,6 @@ export class BoardJobDetailComponent implements OnInit {
     this.board
       .getScoringRules()
       .subscribe((rules) => this.descriptions.set(new Map(rules.map((r) => [r.rule, r.description]))));
-    // Navigating between Previous Build Attempts reuses this component, so react
-    // to param changes rather than reading the snapshot once.
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((pm) => {
       const id = pm.get('id');
       if (id) this.loadJob(id);
@@ -717,7 +737,8 @@ export class BoardJobDetailComponent implements OnInit {
     this.loadError.set(null);
     this.pendingLookup.set(null);
     this.pendingJobEvaluationLink.set(null);
-    this.build.set(null);
+    this.shownJobBuild.set(null);
+    this.selectedBuildForBuildDetailsDialog.set(null);
     this.buildDialog.set(false);
     if (this.route.snapshot.data['pending'] === true) {
       this.loadPending(id);
@@ -726,9 +747,7 @@ export class BoardJobDetailComponent implements OnInit {
     this.board.getJob(id).subscribe({
       next: (d) => {
         this.job.set(d);
-        if (d.build_id) {
-          this.loadBuild(d.build_id);
-        }
+        if (d.build_id) this.loadShownJobBuild(d.build_id);
       },
       error: (error: unknown) => this.loadError.set(error),
     });
@@ -792,9 +811,7 @@ export class BoardJobDetailComponent implements OnInit {
 
   openBuild(buildId: string): void {
     this.buildDialog.set(true);
-    if (this.build()?.id !== buildId) {
-      this.loadBuild(buildId);
-    }
+    if (this.selectedBuildForBuildDetailsDialog()?.id !== buildId) this.buildInfoDialogRequestedBuildIdSubject.next(buildId);
   }
 
   outputs(b: BuildWithOutputs): { name: string; path: string }[] {
@@ -829,18 +846,12 @@ export class BoardJobDetailComponent implements OnInit {
       .map(([name, w, format]) => ({ name, values: [w.w5m, w.w1h, w.w24h].map((v) => (v === null ? '-' : format(v))) }));
   }
 
-  private loadBuild(buildId: string): void {
-    this.buildLoading.set(true);
-    this.buildError.set(null);
+  private loadShownJobBuild(buildId: string): void {
     this.evaluations.getBuild(buildId).subscribe({
       next: (b) => {
-        this.build.set(b);
-        this.buildLoading.set(false);
+        if (this.job()?.build_id === buildId) this.shownJobBuild.set(b);
       },
-      error: () => {
-        this.buildError.set('Failed to load build.');
-        this.buildLoading.set(false);
-      },
+      error: () => {},
     });
   }
 }

@@ -264,6 +264,17 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(ids).toEqual(['bj1']);
   });
 
+  it('keeps the header on the status of the job build while the popup shows another build', () => {
+    const builds: Record<string, { id: string; status: string }> = { own: { id: 'own', status: 'Building' }, bj1: { id: 'bj1', status: 'FailedPermanent' } };
+    TestBed.overrideProvider(EvaluationsService, { useValue: { getBuild: (id: string) => of(builds[id]) } });
+    const fixture = setup({ getJob: () => of({ ...DETAIL, build_id: 'own' }) });
+    const el = fixture.nativeElement as HTMLElement;
+    (el.querySelector('.drv-row') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.selectedBuildForBuildDetailsDialog()?.id).toBe('bj1');
+    expect(el.querySelector('.head gr-status-badge')?.textContent?.trim()).toBe('Building');
+  });
+
   it('leaves a derivation whose build the eval no longer has unclickable', () => {
     const detail = {
       ...DETAIL,
