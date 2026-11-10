@@ -414,13 +414,13 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.log.burstBytesPerMin` | unsigned int | `8388608` | `GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN` | The limit on bytes of build log that the worker can forward for each build in any one minute. The worker can pause the log for a build over this limit and resume it when the rate is lower. A note can give the number of skipped lines. The build itself can continue. |
+| `worker.log.burstBytesPerMin` | unsigned int | `33554432` | `GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN` | The limit on bytes of build log that the worker can forward for each build in any one minute. The worker can pause the log for a build over this limit and resume it when the rate is lower. A note can give the number of skipped lines. The build itself can continue. |
 | `worker.log.fetchFromStore` | bool | `true` | `GRADIENT_WORKER_LOG_FETCH_FROM_STORE` | Whether to forward the stored build log of a derivation already built locally and therefore producing no new log. |
 | `worker.log.level.build` | null or one of `trace` `debug` `info` `warn` `error` | `null` | `GRADIENT_WORKER_LOG_LEVEL_BUILD` | Log level of the builder. `null` uses `worker.log.level.default`. |
 | `worker.log.level.default` | one of `trace` `debug` `info` `warn` `error` | `"info"` | `GRADIENT_WORKER_LOG_LEVEL_DEFAULT` | Default log level. |
 | `worker.log.level.eval` | null or one of `trace` `debug` `info` `warn` `error` | `null` | `GRADIENT_WORKER_LOG_LEVEL_EVAL` | Log level of the evaluator. `null` uses `worker.log.level.default`. |
 | `worker.log.level.proto` | null or one of `trace` `debug` `info` `warn` `error` | `null` | `GRADIENT_WORKER_LOG_LEVEL_PROTO` | Log level of the protocol layer. `null` uses `worker.log.level.default`. |
-| `worker.log.sustainedBytesPerHour` | unsigned int | `67108864` | `GRADIENT_WORKER_LOG_SUSTAINED_BYTES_PER_HOUR` | Build log bytes forwarded per build within any hour. |
+| `worker.log.sustainedBytesPerHour` | unsigned int | `536870912` | `GRADIENT_WORKER_LOG_SUSTAINED_BYTES_PER_HOUR` | Build log bytes forwarded per build within any hour. |
 | `worker.log.traceDir` | null or path | `null` | `GRADIENT_WORKER_LOG_TRACE_DIR` | Directory receiving every closed stage span of the worker and its eval subprocesses as JSON lines, one file per process. `null` disables span tracing. |
 
 ## `worker.nar`

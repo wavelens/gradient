@@ -88,7 +88,7 @@ Before any build work starts, workers fetch all inputs that the local store does
 - Workers stream build output over the bulk lane as `LogChunk { job_id, data }` messages with no acknowledgement.
 - The server can append every chunk to the open attempt of the job's build.
 - Chunks for evaluations or finished attempts get dropped by the server.
-- Workers cap each build's log at `worker.log.burstBytesPerMin` (8 MiB) and `worker.log.sustainedBytesPerHour` (64 MiB).
+- Workers cap each build's log at `worker.log.burstBytesPerMin` (32 MiB) and `worker.log.sustainedBytesPerHour` (512 MiB).
 - The worker can pause forwarding and add a pause note past either limit. The worker can resume after both limits have headroom again and add a note with the number of skipped lines.
 - A build already in the store can forward its stored Nix log with `worker.log.fetchFromStore` (on by default).
 - The log ends up as zstd chunks of `log.chunkBytes` (256 KiB), each carrying a chunk index after the build.

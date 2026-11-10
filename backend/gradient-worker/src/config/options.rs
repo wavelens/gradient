@@ -325,11 +325,11 @@ pub struct LogArgs {
     /// The limit on bytes of build log that the worker can forward for each build in any one minute.
     /// The worker can pause the log for a build over this limit and resume it when the rate is lower.
     /// A note can give the number of skipped lines. The build itself can continue.
-    #[arg(default_value_t = 8 * 1024 * 1024)]
+    #[arg(default_value_t = 32 * 1024 * 1024)]
     pub burst_bytes_per_min: u64,
 
     /// Build log bytes forwarded per build within any hour.
-    #[arg(default_value_t = 64 * 1024 * 1024)]
+    #[arg(default_value_t = 512 * 1024 * 1024)]
     pub sustained_bytes_per_hour: u64,
 
     /// Whether to forward the stored build log of a derivation already built locally and

@@ -496,7 +496,7 @@
     "env": "GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN",
     "type": "u64",
     "description": "The limit on bytes of build log that the worker can forward for each build in any one minute.\nThe worker can pause the log for a build over this limit and resume it when the rate is lower.\nA note can give the number of skipped lines. The build itself can continue.",
-    "default": "8388608",
+    "default": "33554432",
     "values": []
   },
   {
@@ -506,7 +506,7 @@
     "env": "GRADIENT_WORKER_LOG_SUSTAINED_BYTES_PER_HOUR",
     "type": "u64",
     "description": "Build log bytes forwarded per build within any hour.",
-    "default": "67108864",
+    "default": "536870912",
     "values": []
   },
   {
