@@ -804,10 +804,7 @@ paths:
       tags:
       - auth
       summary: Register a new user
-      description: |-
-        Creates a new user account. Fails if registration is disabled (OIDC-only mode)
-        or if the username/email is already taken. When email verification is enabled,
-        a verification email is sent and login is blocked until the address is confirmed.
+      description: Create a new user account. Registration requests fail in OIDC-only mode. They also fail when a username is already in use. Verification emails go out when email verification is on. Users cannot log in until confirmation of the address. Registration requests for an email address linked to an existing account return the same response as a successful registration. Notifications go to that address instead. Response fields reveal no information about which addresses have accounts. Requests that use an email address already in use fail with `email_address_already_in_use` when email verification is off.
       operationId: registerUser
       requestBody:
         content:
@@ -2467,7 +2464,7 @@ paths:
       tags:
       - builds
       summary: Abort build
-      description: Stops a created, queued or running build of a running evaluation. The build becomes `Aborted` and its dependents in the evaluation become `DependencyFailed`. The evaluation no longer waits for them, and no heal of the evaluation queues them again. A later evaluation builds them again. Requires project membership or a superuser. Answers 409 when the evaluation has finished, the build has another status, or another evaluation still needs the build.
+      description: Stops a created, queued or running build of a running evaluation. The build becomes `Aborted` and its dependents in the evaluation become `DependencyFailed`. The evaluation no longer waits for them, and no heal of the evaluation queues them again. A later evaluation builds them again. Callers need the `triggerEvaluation` permission on the project, or superuser access. Answers 409 when the evaluation has finished, the build has another status, or another evaluation still needs the build.
       operationId: abortBuild
       parameters:
       - name: build
@@ -3008,7 +3005,7 @@ paths:
       tags:
       - builds
       summary: Retry build
-      description: Queues a `FailedPermanent`, `FailedTimeout`, `Aborted` or `DependencyFailed` build again, together with its dependents in the evaluation that failed only through it. A `DependencyFailed` build retries the failed builds below it. A reproducible builder failure is retried too. A retry reopens a `Failed` or `Aborted` evaluation that reached its build phase. Requires project membership. Answers 409 when the evaluation has completed or never reached its build phase, a newer or running evaluation of the task exists, the build has another status, no failed dependency is retryable, or its worker has not confirmed an earlier abort yet.
+      description: Queues a `FailedPermanent`, `FailedTimeout`, `Aborted` or `DependencyFailed` build again, together with its dependents in the evaluation that failed only through it. A `DependencyFailed` build retries the failed builds below it. A reproducible builder failure is retried too. A retry reopens a `Failed` or `Aborted` evaluation that reached its build phase. Callers need the `triggerEvaluation` permission on the project. Answers 409 when the evaluation has completed or never reached its build phase, a newer or running evaluation of the task exists, the build has another status, no failed dependency is retryable, or its worker has not confirmed an earlier abort yet.
       operationId: retryBuild
       parameters:
       - name: build
@@ -5470,7 +5467,7 @@ paths:
       summary: Evaluation action
       description: |-
         Performs an action on the evaluation. Currently the only supported action is
-        `"abort"`, which cancels all in-progress and queued builds. Requires project membership or a superuser.
+        `"abort"`, which cancels all in-progress and queued builds. Callers need the `triggerEvaluation` permission on the project, or superuser access.
       operationId: postEvaluation
       parameters:
       - name: evaluation
@@ -5926,7 +5923,7 @@ paths:
       tags:
       - evaluations
       summary: Retry evaluation
-      description: Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Requires project membership. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.
+      description: Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Callers need the `triggerEvaluation` permission on the project. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.
       operationId: retryEvaluation
       parameters:
       - name: evaluation
