@@ -334,6 +334,7 @@ pub(crate) fn account_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(invites::post_decline_invite))
                 .routes(routes!(user::get_sessions))
                 .routes(routes!(user::delete_session))
+                .routes(routes!(auth::post_session_renew))
                 .routes(routes!(user::get_audit_log))
                 .routes(routes!(user::get_settings, user::patch_settings))
                 .routes(routes!(login_providers::get_provider_connect))

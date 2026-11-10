@@ -12,6 +12,7 @@ mod logfmt;
 mod narinfo;
 mod netrc;
 pub mod output;
+mod session_token_renewal;
 mod tui;
 
 use commands::base;

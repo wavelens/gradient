@@ -187,6 +187,10 @@ pub fn account_name_from_flag_or_env() -> Option<&'static str> {
     invocation_overrides().account.as_deref()
 }
 
+pub fn invocation_token_is_from_env_var() -> bool {
+    invocation_overrides().token.is_some()
+}
+
 fn apply_invocation_settings_to_saved_login(mut login: SavedLogin) -> SavedLogin {
     let overrides = invocation_overrides();
     if let Some(server) = &overrides.server {

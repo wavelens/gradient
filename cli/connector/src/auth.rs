@@ -61,6 +61,12 @@ impl AuthApi<'_> {
         http::decode(req.send().await?).await
     }
 
+    pub async fn renew_session(&self) -> Result<String, ConnectorError> {
+        self.0
+            .send_authenticated_request(Method::POST, "auth/session/renew", None::<&()>)
+            .await
+    }
+
     pub async fn cli_device_start(&self) -> Result<CliDeviceStartResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),

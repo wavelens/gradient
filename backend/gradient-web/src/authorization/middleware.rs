@@ -198,6 +198,9 @@ pub async fn authorize(
     )
     .await;
 
+    if let DecodedRequest::Session { session } = &decoded {
+        parts.extensions.insert(session.clone());
+    }
     parts.extensions.insert(current_user);
     parts.extensions.insert(MaybeApiKey::from(&decoded));
     parts.extensions.insert(decoded.principal());

@@ -7,7 +7,7 @@
 use crate::audit::Audit;
 use crate::authorization::{
     clear_jwt_token_cookie, cookie_value, create_session_and_token, jwt_cookie, oidc_login_create,
-    oidc_login_verify, session_claims, update_last_login,
+    oidc_login_verify, renew_session_expiry_and_sign_token, session_claims, update_last_login,
 };
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -310,7 +310,7 @@ async fn send_registration_attempt_email_to_existing_account_owner(
     operation_id = "loginUser",
     tag = "auth",
     summary = "Login with username/password",
-    description = "Verify the credentials and return a signed JWT. Pass the token as `Authorization: Bearer <token>` on later requests. Use either a username or an email address for `loginname`. Set `remember_me: true` to get a long-lived token. Sessions expire 24 hours after last use (30 days with `remember_me`). Automatic refreshes of the browser cookie `jwt_token` happen while the session is active. Bearer tokens don't refresh.",
+    description = "Verify credentials. Return a signed JWT. Pass the token as ``Authorization: Bearer <token>`` on later requests. Use either a username or an email address for ``loginname``. Set ``remember_me: true`` to get a long-lived token. Sessions expire 24 hours after last use (30 days with ``remember_me``). Browsers refresh cookie ``jwt_token`` automatically while the session is valid. Bearer clients use ``POST /auth/session/renew`` to refresh the token.",
     request_body = MakeLoginRequest,
     responses((status = OK, description = "JWT token", body = String, content_type = "application/json"), WebError)
 )]
@@ -627,11 +627,32 @@ pub async fn get_oidc_callback(
 
 #[utoipa::path(
     post,
+    path = "/auth/session/renew",
+    operation_id = "renewSession",
+    tag = "auth",
+    summary = "Renew session",
+    description = "Extend the expiry of the caller session to 24 hours from now. Use 30 days for a `remember_me` session instead. Send back a new signed JWT for that session. Previous tokens keep working until their own expiry. Bearer clients such as the CLI call this endpoint to stay signed in while they work. Browser cookies refresh automatically.",
+    responses((status = OK, description = "New session token", body = String, content_type = "application/json"), WebError)
+)]
+pub async fn post_session_renew(
+    state: State<Arc<ServerState>>,
+    Extension(session): Extension<MSession>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (_session, token) =
+        renew_session_expiry_and_sign_token(&state.web_db, &state.jwt_secret, session)
+            .await
+            .map_err(|_| WebError::failed_to_generate_token())?;
+
+    Ok(ok_json(token))
+}
+
+#[utoipa::path(
+    post,
     path = "/auth/logout",
     operation_id = "logout",
     tag = "auth",
     summary = "Logout",
-    description = "Invalidates the current session (no-op for stateless JWTs; present for API completeness).",
+    description = "Calls to this endpoint revoke the session of the presented token (`Authorization: Bearer` header or `jwt_token` cookie). The token and the matching session stop working immediately. Calls to this endpoint clear the `jwt_token` cookie. Calls without a valid token still succeed.",
     responses((status = OK, description = "Logged out", body = String, content_type = "application/json"), WebError)
 )]
 pub async fn post_logout(

@@ -298,6 +298,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         cli.project_name,
         cli.task_override,
     );
+    crate::session_token_renewal::renew_saved_session_token_if_half_lifetime_passed().await;
 
     match cli.cmd {
         MainCommands::Account { cmd } => saved_account_commands::handle(cmd, out),

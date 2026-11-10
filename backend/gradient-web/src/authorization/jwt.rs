@@ -170,13 +170,25 @@ pub(super) async fn extend_session_and_return_set_cookie_if_due(
         return None;
     }
 
-    let session = gradient_db::sessions::extend_expiry(db, session.clone(), now)
+    let (session, token) = renew_session_expiry_and_sign_token(db, jwt_secret, session.clone())
         .await
-        .inspect_err(|e| warn!(error = %e, "failed to extend session expiry"))
+        .inspect_err(|_| warn!(session = %session.id, "failed to extend session expiry"))
         .ok()?;
-    let token = sign_session_jwt(jwt_secret, &session).ok()?;
 
     HeaderValue::from_str(&jwt_cookie(&token, session.remember_me, use_tls)).ok()
+}
+
+pub async fn renew_session_expiry_and_sign_token(
+    db: &WebDb,
+    jwt_secret: &SecretString,
+    session: MSession,
+) -> Result<(MSession, String), StatusCode> {
+    let session = gradient_db::sessions::extend_expiry(db, session, gradient_types::now())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let token = sign_session_jwt(jwt_secret, &session)?;
+
+    Ok((session, token))
 }
 
 pub async fn decode_jwt(
