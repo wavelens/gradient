@@ -1311,11 +1311,12 @@ impl Actor for CoreActor {
                 let _ = reply.send(());
             }
             SchedulerMsg::CancelJobs { job_ids, reply } => {
-                let running = core.abort_running(|job_id, _| job_ids.iter().any(|id| id == job_id));
-                for id in job_ids
-                    .iter()
-                    .filter(|id| !running.iter().any(|(_, job_id)| job_id == *id))
-                {
+                let mut job_ids: HashSet<String> = job_ids.into_iter().collect();
+                let running = core.abort_running(|job_id, _| job_ids.contains(job_id));
+                for (_, job_id) in &running {
+                    job_ids.remove(job_id);
+                }
+                for id in &job_ids {
                     core.tracker.remove_job(id);
                 }
                 let _ = reply.send(running);
