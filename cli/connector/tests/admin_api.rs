@@ -9,22 +9,163 @@ fn ok<T: serde::Serialize>(m: T) -> serde_json::Value {
     serde_json::json!({ "error": false, "message": m })
 }
 
-#[tokio::test]
-async fn list_admin_workers_returns_vec() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/api/v1/admin/workers"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!([]))))
-        .mount(&server)
-        .await;
-
-    let client = Client::builder()
+fn client(server: &MockServer) -> Client {
+    Client::builder()
         .base_url(server.uri())
         .token("t")
         .build()
+        .expect("the client builds")
+}
+
+fn registered_worker(draining: bool) -> serde_json::Value {
+    serde_json::json!({
+        "worker_id": "w1",
+        "display_name": "builder",
+        "team": {
+            "id": "b4361159-0dc0-462c-9dad-411b23394cd8",
+            "name": "ops",
+            "display_name": "Ops",
+            "active": true,
+            "managed": false
+        },
+        "registrations": [],
+        "projects": [],
+        "connected": false,
+        "requested_by_admin": draining
+    })
+}
+
+#[tokio::test]
+async fn list_admin_workers_decodes_registered_workers_with_their_team() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/admin/workers"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(ok(serde_json::json!([registered_worker(false)]))),
+        )
+        .mount(&server)
+        .await;
+
+    let workers = client(&server).admin().workers().await.unwrap();
+    assert_eq!(workers[0].worker_id, "w1");
+    assert_eq!(workers[0].team.as_ref().unwrap().name, "ops");
+    assert!(!workers[0].connected);
+}
+
+#[tokio::test]
+async fn worker_drain_patches_the_one_worker() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/api/v1/admin/workers/w1"))
+        .and(body_json(serde_json::json!({"draining": true})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok(registered_worker(true))))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let worker = client(&server)
+        .admin()
+        .set_worker_draining_enabled("w1", true)
+        .await
         .unwrap();
-    let workers = client.admin().workers().await.unwrap();
-    assert!(workers.is_empty());
+    assert!(worker.requested_by_admin);
+}
+
+#[tokio::test]
+async fn admin_config_decodes_options_with_their_source() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/admin/config"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ok(serde_json::json!([
+                {
+                    "group": "database",
+                    "field": "url",
+                    "flag": "database-url",
+                    "env": "GRADIENT_DATABASE_URL",
+                    "secret": true,
+                    "source": "env"
+                },
+                {
+                    "group": "eval",
+                    "field": "max_keep",
+                    "flag": "eval-max-keep",
+                    "value": "30",
+                    "secret": false,
+                    "source": "default"
+                }
+            ]))),
+        )
+        .mount(&server)
+        .await;
+
+    let options = client(&server)
+        .admin()
+        .get_admin_config_options_with_values_and_sources()
+        .await
+        .unwrap();
+    assert!(options[0].secret);
+    assert_eq!(options[0].value, None);
+    assert_eq!(options[1].value.as_deref(), Some("30"));
+}
+
+#[tokio::test]
+async fn admin_storage_decodes_disk_and_cache_usage() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/admin/storage"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
+                "disk_total_bytes": 1000,
+                "disk_free_bytes": 400,
+                "caches": [{
+                    "id": "640633e7-4189-4eb0-b633-dd440eb2ac3f",
+                    "name": "main",
+                    "display_name": "Main",
+                    "max_storage_gb": 0,
+                    "packages": 3,
+                    "bytes": 600
+                }],
+                "projects": [],
+                "tasks": []
+            }))),
+        )
+        .mount(&server)
+        .await;
+
+    let storage = client(&server)
+        .admin()
+        .get_admin_storage_disk_usage_and_gc_stats()
+        .await
+        .unwrap();
+    assert_eq!(storage.disk_free_bytes, Some(400));
+    assert_eq!(storage.caches[0].bytes, 600);
+}
+
+#[tokio::test]
+async fn gc_round_accepts_an_empty_202() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/admin/maintenance/gc"))
+        .respond_with(ResponseTemplate::new(202))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    client(&server).admin().request_gc_round().await.unwrap();
+}
+
+#[tokio::test]
+async fn gc_round_reports_a_refusal() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/admin/maintenance/gc"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+        .mount(&server)
+        .await;
+
+    assert!(client(&server).admin().request_gc_round().await.is_err());
 }
 
 #[tokio::test]

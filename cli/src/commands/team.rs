@@ -234,6 +234,9 @@ pub enum TeamWorkerSubcommand {
         /// Activate or deactivate a worker
         #[arg(long)]
         active: Option<bool>,
+        /// Drain a worker or cancel the drain. Draining workers complete running jobs and don't take new jobs.
+        #[arg(long)]
+        draining: Option<bool>,
         #[command(flatten)]
         capabilities: WorkerCapabilityToggles,
     },
@@ -629,11 +632,13 @@ async fn handle_workers(cmd: TeamWorkerSubcommand, client: &connector::Client, o
             worker_id,
             display_name,
             active,
+            draining,
             capabilities,
         } => {
             let body = PatchWorkerRequest {
                 active,
                 display_name,
+                draining,
                 enable_network: capabilities.enable_network,
                 enable_secrets: capabilities.enable_secrets,
                 enable_exec: capabilities.enable_exec,

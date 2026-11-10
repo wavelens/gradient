@@ -47,7 +47,8 @@ fn worker_entry() -> Value {
         "enable_exec": false,
         "enable_eval": true,
         "enable_build": true,
-        "connected": false
+        "connected": false,
+        "requested_by_admin": false
     })
 }
 

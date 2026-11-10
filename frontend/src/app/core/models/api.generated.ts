@@ -92,6 +92,15 @@ export type AddUpstreamRequest = {
   type: "gradient_proto";
 };
 
+export interface AdminStorageResponse {
+  disk_total_bytes?: number | null;
+  disk_free_bytes?: number | null;
+  caches: CacheStorageSummary[];
+  projects: ProjectStoredBytes[];
+  tasks: TaskStoredBytes[];
+  last_deep_gc?: DeepGarbageCollectionStats | null;
+}
+
 export interface AdminTaskDto {
   id: AdminTaskId;
   kind: string;
@@ -106,6 +115,16 @@ export interface AdminTaskDto {
 }
 
 export type AdminTaskId = string;
+
+export type AdminWorkerListEntry = WorkerConnection & {
+  worker_id: string;
+  display_name?: string | null;
+  team?: WorkerOwningTeam | null;
+  registrations: WorkerProjectRegistration[];
+  projects: BoardProject[];
+  live?: WorkerInfo | null;
+  requested_by_admin: boolean;
+};
 
 export type ApiId = string;
 
@@ -419,6 +438,12 @@ export interface CacheMetricPoint {
 
 export type CachePermission = "viewCache" | "readStore" | "writeStore" | "manageCacheSettings" | "manageCacheKeys" | "manageUpstreamCaches" | "manageCacheMembers" | "manageCacheRoles" | "manageCacheSubscriptions" | "deleteCache" | "manageCacheWebhooks";
 
+export interface CachePublicKeyHistory {
+  public_key: string;
+  created_at: string;
+  retired: RetiredPublicKeyEntry[];
+}
+
 export interface CacheResponse {
   id: CacheId;
   name: string;
@@ -456,6 +481,15 @@ export interface CacheStatsResponse {
   hours: CacheMetricPoint[];
   days: CacheMetricPoint[];
   weeks: CacheMetricPoint[];
+}
+
+export interface CacheStorageSummary {
+  id: CacheId;
+  name: string;
+  display_name: string;
+  max_storage_gb: number;
+  packages: number;
+  bytes: number;
 }
 
 export interface CacheSubscriberItem {
@@ -770,6 +804,15 @@ export type DecisionCandidateView = JobEvaluationNames & {
   won: boolean;
 };
 
+export interface DeepGarbageCollectionStats {
+  nars_scanned?: number;
+  orphan_nars_removed?: number;
+  blobs_scanned?: number;
+  orphan_blobs_removed?: number;
+  logs_scanned?: number;
+  orphan_logs_removed?: number;
+}
+
 export interface DeleteUserRequest {
   password?: string | null;
   confirm_username?: string | null;
@@ -931,6 +974,16 @@ export interface DuplicateTaskRequest {
 export interface DurationsHeatmap {
   times: string[];
   bands: HeatmapBand[];
+}
+
+export interface EffectiveConfigOption {
+  group: string;
+  field: string;
+  flag: string;
+  env?: string | null;
+  value?: string | null;
+  secret: boolean;
+  source: ServerOptionValueSource;
 }
 
 export interface EmailResource {
@@ -1867,7 +1920,7 @@ export interface NixPathInfo {
   NarHash: string;
   NarSize: number;
   References: string[];
-  Sig: string;
+  Sig: string[];
   Deriver?: string | null;
   CA?: string | null;
 }
@@ -2075,6 +2128,7 @@ export interface PatchWorkerRequest {
   enable_exec?: boolean | null;
   enable_eval?: boolean | null;
   enable_build?: boolean | null;
+  draining?: boolean | null;
 }
 
 export interface PendingInvitationItem {
@@ -2179,6 +2233,12 @@ export interface ProjectSecretSummary {
   updated_at: string;
   updated_by?: string | null;
   managed: boolean;
+}
+
+export interface ProjectStoredBytes {
+  project: BoardProject;
+  packages: number;
+  bytes: number;
 }
 
 export interface ProjectSummary {
@@ -2344,6 +2404,12 @@ export interface RepositoryIntegration {
 
 export type RequestKind = "project" | "cache";
 
+export interface RetiredPublicKeyEntry {
+  public_key: string;
+  created_at: string;
+  retired_at: string;
+}
+
 export interface RevokeInvitationRequest {
   user: string;
 }
@@ -2476,7 +2542,10 @@ export interface ServerConfig {
   exec_enabled: boolean;
   public_listing: boolean;
   max_keep_evaluations_per_task?: number | null;
+  max_cached_nar_storage_gb?: number | null;
 }
+
+export type ServerOptionValueSource = "flag" | "env" | "default" | "unset";
 
 export type SessionId = string;
 
@@ -2705,6 +2774,18 @@ export interface TaskRow {
   history: HistoryBar[];
 }
 
+export interface TaskStoredBytes {
+  id: TaskId;
+  name: string;
+  display_name: string;
+  project: BoardProject;
+  keep_evaluations: number;
+  evaluations: number;
+  oldest_evaluation_at?: string | null;
+  packages: number;
+  bytes: number;
+}
+
 export type TaskTriggerId = string;
 
 export interface TasksPage {
@@ -2825,6 +2906,7 @@ export type TeamWorkerEntry = WorkerConnection & {
   enable_eval: boolean;
   enable_build: boolean;
   live?: WorkerLiveInfo | null;
+  requested_by_admin: boolean;
 };
 
 export type Tier = "starred_active" | "active" | "starred" | "team" | "member";
@@ -2916,6 +2998,10 @@ export interface UpdateWebhookRequest {
   url?: string | null;
   events?: string[] | null;
   active?: boolean | null;
+}
+
+export interface UpdateWorkerRequest {
+  draining?: boolean | null;
 }
 
 export type UploadSessionId = string;
@@ -3141,6 +3227,21 @@ export interface WorkerNet {
   upload_speed_mbps?: number | null;
   download_speed_mbps?: number | null;
   disk_speed_mbps?: number | null;
+}
+
+export interface WorkerOwningTeam {
+  id: TeamId;
+  name: string;
+  display_name: string;
+  active: boolean;
+  managed: boolean;
+}
+
+export interface WorkerProjectRegistration {
+  project: BoardProject;
+  display_name: string;
+  active: boolean;
+  managed: boolean;
 }
 
 export interface WorkerSamplePoint {

@@ -399,3 +399,26 @@ async fn create_cache_webhook_returns_secret() {
     assert_eq!(created.secret, "whsec");
     assert_eq!(created.webhook.name, "hook");
 }
+
+#[tokio::test]
+async fn rotate_cache_signing_key_posts_and_returns_the_new_public_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/caches/my-cache/key/rotate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok("host-my-cache:bmV3LWtleQ==")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    let key = client
+        .caches()
+        .rotate_cache_signing_key("my-cache")
+        .await
+        .unwrap();
+    assert_eq!(key, "host-my-cache:bmV3LWtleQ==");
+}

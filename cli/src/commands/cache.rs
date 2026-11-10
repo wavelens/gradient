@@ -78,6 +78,12 @@ pub enum Commands {
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
     },
+    /// Generate a new signing key for the cache. Store paths keep old signatures. Nix clients with old public keys can still verify them. Update ``trusted-public-keys`` with the new key.
+    RotateKey {
+        /// Cache name
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        name: String,
+    },
     /// Build a netrc entry locally for a cache and install it into a netrc file.
     /// No request is sent to the server - bring your own API key (issued via the
     /// frontend or `gradient` UI). Intended to be run as root (e.g. sudo) to
@@ -327,6 +333,17 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Ok(key) => {
                     out.ok(&serde_json::json!({"public_key": key}));
                     out.human(format!("Cache Public Key: {}", key));
+                }
+                Err(e) => out.fail(e),
+            }
+        }
+
+        Commands::RotateKey { name } => {
+            let client = client_from_config(out);
+            match client.caches().rotate_cache_signing_key(&name).await {
+                Ok(key) => {
+                    out.ok(&serde_json::json!({"public_key": key}));
+                    out.human(format!("New public key: {key}"));
                 }
                 Err(e) => out.fail(e),
             }

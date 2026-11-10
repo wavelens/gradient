@@ -133,6 +133,16 @@ impl CachesApi<'_> {
         http::decode(req.send().await?).await
     }
 
+    pub async fn rotate_cache_signing_key(&self, cache: &str) -> Result<String, ConnectorError> {
+        self.0
+            .send_authenticated_request(
+                Method::POST,
+                &format!("caches/{cache}/key/rotate"),
+                None::<&()>,
+            )
+            .await
+    }
+
     pub async fn stats(&self, cache: &str) -> Result<CacheStatsResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),

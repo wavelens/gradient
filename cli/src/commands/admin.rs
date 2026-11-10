@@ -10,7 +10,7 @@ use crate::commands::webhook::{
 use crate::input::{OnOffSetting, client_from_config};
 use crate::output::Output;
 use clap::Subcommand;
-use connector::api::{AdminTaskDto, WorkerInfo};
+use connector::api::{AdminTaskDto, AdminWorkerListEntry};
 use connector::webhooks::WebhookResource;
 
 #[derive(Subcommand, Debug)]
@@ -38,11 +38,17 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WebhookSubcommands<NoWebhookOwnerArguments>,
     },
-    /// Inspect the workers that connect to this server
+    /// Manage the workers that are registered on this server.
     Worker {
         #[command(subcommand)]
         cmd: AdministrationWorkerCommand,
     },
+    /// Print all server options with their values and the source of each value. Secret values stay hidden.
+    Config,
+    /// Print free disk space and storage usage for each cache, project, and task.
+    Storage,
+    /// Start one garbage collection now. Don't wait for the next interval.
+    Gc,
 }
 
 #[derive(Subcommand, Debug)]
@@ -58,10 +64,20 @@ pub enum AdministrationTaskCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum AdministrationWorkerCommand {
-    /// List connected workers
+    /// List registered workers with team, project, and connection state.
     List,
-    /// Print one connected worker
+    /// Show one registered worker
     Show {
+        /// Worker ID
+        worker_id: String,
+    },
+    /// Drain one worker. Jobs in progress run to completion on this worker. New jobs don't go to this worker.
+    Drain {
+        /// Worker ID
+        worker_id: String,
+    },
+    /// Stop the drain on one worker and allow it to fetch new jobs again
+    Undrain {
         /// Worker ID
         worker_id: String,
     },
@@ -143,23 +159,94 @@ pub async fn handle(cmd: Commands, out: Output) {
             Ok(workers) => {
                 out.ok(&workers);
                 if workers.is_empty() {
-                    out.human("No workers connected.");
+                    out.human("No workers registered.");
                 }
                 workers
                     .iter()
-                    .for_each(|worker| print_connected_worker_status_line(worker, out));
+                    .for_each(|worker| print_admin_worker_list_entry_line(worker, out));
             }
             Err(e) => out.fail(e),
         },
         Commands::Worker {
             cmd: AdministrationWorkerCommand::Show { worker_id },
-        } => match admin.get_connected_worker_by_id(&worker_id).await {
+        } => match admin.get_registered_worker_by_id(&worker_id).await {
             Ok(worker) => {
                 out.ok(&worker);
-                print_connected_worker_status_line(&worker, out);
+                print_admin_worker_list_entry_line(&worker, out);
             }
             Err(e) => out.fail(e),
         },
+        Commands::Worker {
+            cmd: AdministrationWorkerCommand::Drain { worker_id },
+        } => set_worker_draining(&admin, &worker_id, true, out).await,
+        Commands::Worker {
+            cmd: AdministrationWorkerCommand::Undrain { worker_id },
+        } => set_worker_draining(&admin, &worker_id, false, out).await,
+        Commands::Config => match admin
+            .get_admin_config_options_with_values_and_sources()
+            .await
+        {
+            Ok(options) => {
+                out.ok(&options);
+                for option in &options {
+                    out.human(format!(
+                        "--{} = {} ({:?})",
+                        option.flag,
+                        option.value.as_deref().unwrap_or(""),
+                        option.source
+                    ));
+                }
+            }
+            Err(e) => out.fail(e),
+        },
+        Commands::Storage => match admin.get_admin_storage_disk_usage_and_gc_stats().await {
+            Ok(storage) => {
+                out.ok(&storage);
+                if let (Some(total), Some(free)) =
+                    (storage.disk_total_bytes, storage.disk_free_bytes)
+                {
+                    out.human(format!("Disk: {free} of {total} bytes free"));
+                }
+                for cache in &storage.caches {
+                    out.human(format!("cache {}: {} bytes", cache.name, cache.bytes));
+                }
+                for project in &storage.projects {
+                    out.human(format!(
+                        "project {}: {} bytes",
+                        project.project.name, project.bytes
+                    ));
+                }
+                for task in &storage.tasks {
+                    out.human(format!(
+                        "task {}/{}: {} bytes",
+                        task.project.name, task.name, task.bytes
+                    ));
+                }
+            }
+            Err(e) => out.fail(e),
+        },
+        Commands::Gc => match admin.request_gc_round().await {
+            Ok(()) => {
+                out.ok(&serde_json::json!({"status": "accepted"}));
+                out.human("A round of garbage collection started.");
+            }
+            Err(e) => out.fail(e),
+        },
+    }
+}
+
+async fn set_worker_draining(
+    admin: &connector::admin::AdminApi<'_>,
+    worker_id: &str,
+    draining: bool,
+    out: Output,
+) {
+    match admin.set_worker_draining_enabled(worker_id, draining).await {
+        Ok(worker) => {
+            out.ok(&worker);
+            print_admin_worker_list_entry_line(&worker, out);
+        }
+        Err(e) => out.fail(e),
     }
 }
 
@@ -170,14 +257,29 @@ fn print_admin_background_task_human_readable_line(task: &AdminTaskDto, out: Out
     ));
 }
 
-fn print_connected_worker_status_line(worker: &WorkerInfo, out: Output) {
-    let draining = if worker.draining { " [Draining]" } else { "" };
-    out.human(format!(
-        "{} ({}): {} / {} jobs{}",
-        worker.id,
-        worker.architectures.join(","),
-        worker.assigned_job_count,
-        worker.max_concurrent_builds,
-        draining
-    ));
+fn print_admin_worker_list_entry_line(worker: &AdminWorkerListEntry, out: Output) {
+    let owner = worker
+        .team
+        .as_ref()
+        .map(|team| team.name.clone())
+        .unwrap_or_else(|| {
+            worker
+                .registrations
+                .iter()
+                .map(|registration| registration.project.name.clone())
+                .collect::<Vec<_>>()
+                .join(",")
+        });
+    let state = match &worker.live {
+        Some(live) if live.draining => format!(
+            "draining, {} / {} jobs",
+            live.assigned_job_count, live.max_concurrent_builds
+        ),
+        Some(live) => format!(
+            "{} / {} jobs",
+            live.assigned_job_count, live.max_concurrent_builds
+        ),
+        None => "offline".to_owned(),
+    };
+    out.human(format!("{} [{}]: {}", worker.worker_id, owner, state));
 }

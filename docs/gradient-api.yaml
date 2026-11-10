@@ -92,6 +92,34 @@ info:
     identifier: AGPL-3.0-only
   version: 2.0.1
 paths:
+  /api/v1/admin/config:
+    get:
+      tags:
+      - admin
+      summary: Get server options
+      description: 'List every valid server option with its group, CLI flag, environment variable, current value, and value source. A value source is one of `flag`, `env`, `default`, `unset`. Secret options such as database URL, Sentry DSN, and S3 access key ID have `secret: true` and no value. Options that NixOS modules set show `env` or `flag`, depending on how the module can pass them. Add `superuser` as a requirement.'
+      operationId: getServerOptions
+      responses:
+        '200':
+          description: Valid server options
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EffectiveConfigOption'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/admin/draining:
     post:
       tags:
@@ -280,6 +308,20 @@ paths:
           $ref: '#/components/responses/Error'
       security:
       - bearerAuth: []
+  /api/v1/admin/maintenance/gc:
+    post:
+      tags:
+      - admin
+      summary: Run a GC round now
+      description: Start one normal GC round now, without waiting for the next interval. Delete evaluations that exceed the keep limit for each task. Delete orphaned derivations. Discard expired cached paths. Return `202` immediately. This round can run on the server instance for cache maintenance. Include `superuser` in the request.
+      operationId: startGcRound
+      responses:
+        '202':
+          description: A round request arrived.
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/admin/state:
     get:
       tags:
@@ -325,6 +367,32 @@ paths:
                   error:
                     type: boolean
                   message: {}
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/admin/storage:
+    get:
+      tags:
+      - admin
+      summary: Get storage usage
+      description: Get storage usage for an instance. The response fields report the total disk capacity and free space of the local NAR store. These values don't exist for S3 storage. Other fields give the size and package count of each cache, the bytes in the cache for each project and each task, the oldest evaluation for each task, and the result of the last completed deep GC. Numbers come from a computation at request time. Store paths that multiple tasks build count once per task and once per project. The request needs `superuser`.
+      operationId: getStorage
+      responses:
+        '200':
+          description: Storage usage
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/AdminStorageResponse'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -700,17 +768,12 @@ paths:
     get:
       tags:
       - admin
-      summary: List connected workers
-      description: |-
-        Returns all workers currently connected to the server via the `/proto`
-        WebSocket, including their capabilities and assigned job counts.
-
-        Requires the caller to have the `superuser` flag, unless the server
-        is started with `GRADIENT_PUBLIC_STATS=true`.
+      summary: List workers
+      description: List every worker in the instance. Team workers, project registrations and connected workers without registration all appear here. Entries list the owning team, project registration, the projects that belong to the worker, connection status and live info for connected workers. An admin drain can keep `requested_by_admin` true while active. Reconnects do not clear the drain. An admin cancel or a server restart can clear the drain. Requests need `superuser`.
       operationId: listWorkers
       responses:
         '200':
-          description: Worker list
+          description: Worker List
           content:
             application/json:
               schema:
@@ -724,7 +787,7 @@ paths:
                   message:
                     type: array
                     items:
-                      $ref: '#/components/schemas/WorkerInfo'
+                      $ref: '#/components/schemas/AdminWorkerListEntry'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -733,11 +796,8 @@ paths:
     get:
       tags:
       - admin
-      summary: Get connected worker
-      description: |-
-        Returns one connected worker with its capabilities, assigned job counts, exec labels and exec devices. Device `free` counts leave out devices held by assigned exec jobs.
-
-        Same access as `listWorkers`. Answers 404 when no worker with this id is connected.
+      summary: Get worker
+      description: Return one worker in the same format as `listWorkers`. Return 404 if the worker is neither registered nor connected. Require `superuser`.
       operationId: getWorker
       parameters:
       - name: worker
@@ -759,7 +819,44 @@ paths:
                   error:
                     type: boolean
                   message:
-                    $ref: '#/components/schemas/WorkerInfo'
+                    $ref: '#/components/schemas/AdminWorkerListEntry'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+    patch:
+      tags:
+      - admin
+      summary: Drain or undrain worker
+      description: 'Start an admin drain (`draining: true`) or cancel the drain (`draining: false`). Drained workers receive no new jobs. They finish running jobs and keep the drain state on reconnect until an admin can cancel the drain or the server can restart. Return the worker as `listWorkers`. Add `superuser` to the request.'
+      operationId: updateWorker
+      parameters:
+      - name: worker
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWorkerRequest'
+        required: true
+      responses:
+        '200':
+          description: Worker
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/AdminWorkerListEntry'
         default:
           $ref: '#/components/responses/Error'
       security:
@@ -3542,6 +3639,71 @@ paths:
         default:
           $ref: '#/components/responses/Error'
       security:
+      - bearerAuth: []
+  /api/v1/caches/{cache}/key/rotate:
+    post:
+      tags:
+      - caches
+      summary: Rotate the cache signing key
+      description: Generate a new signing key pair for the cache. Retire the old key. Existing store paths keep the old signature next to the new signature. Nix clients that still list only the old public key at `trusted-public-keys` can verify those paths until they switch. The signature sweep can re-sign every path with the new key right away. Paths uploaded after rotation carry only the new signature. Both keys use the same key name, so clients trust only one key at a time. Callers need `manageCacheKeys`. Requests for a managed cache fail because keys for that cache come from the state file. Return the new public key.
+      operationId: rotateCacheKey
+      parameters:
+      - name: cache
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: New public key in Nix format
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    type: string
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
+  /api/v1/caches/{cache}/keys:
+    get:
+      tags:
+      - caches
+      summary: List public keys of a cache
+      description: Return the current public key of a cache. The response can also list every retired public key with the dates those keys were used. A narinfo response can contain a signature from the newest retired key until the re-signing of that path. Paths signed before rotation get that signature too.
+      operationId: listCachePublicKeys
+      parameters:
+      - name: cache
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current public keys and retired public keys
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/CachePublicKeyHistory'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
       - bearerAuth: []
   /api/v1/caches/{cache}/members:
     get:
@@ -10470,6 +10632,42 @@ paths:
       security:
       - {}
       - bearerAuth: []
+    delete:
+      tags:
+      - tasks
+      summary: Delete old evaluations
+      description: Delete completed evaluations of a task created before `before`, together with their builds and the cached outputs that only those evaluations referenced. Running evaluations and the latest completed evaluation stay. The response body is the number of deleted evaluations. Callers need permission to edit the task.
+      operationId: deleteTaskEvaluations
+      parameters:
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: task
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: before
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Number of deleted evaluations
+          content:
+            text/plain:
+              schema:
+                type: integer
+                format: int64
+                minimum: 0
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - bearerAuth: []
   /api/v1/tasks/{project}/{task}/flake-inputs:
     get:
       tags:
@@ -12333,7 +12531,7 @@ paths:
       tags:
       - teams
       summary: Change team worker
-      description: Needs Admin in the team. Deactivating aborts the worker's running jobs of the granted projects.
+      description: Requests require admin permission for the team. Disabling a worker can abort jobs of that worker that run in granted projects. `draining` can start a drain or cancel a drain. The worker can accept no new jobs and can finish jobs in progress.
       operationId: patchTeamWorker
       parameters:
       - name: team
@@ -14690,6 +14888,41 @@ components:
             type: string
             enum:
             - gradient_proto
+    AdminStorageResponse:
+      type: object
+      required:
+      - caches
+      - projects
+      - tasks
+      properties:
+        disk_total_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        disk_free_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        caches:
+          type: array
+          items:
+            $ref: '#/components/schemas/CacheStorageSummary'
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectStoredBytes'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskStoredBytes'
+        last_deep_gc:
+          oneOf:
+          - $ref: '#/components/schemas/DeepGarbageCollectionStats'
+          - type: 'null'
     AdminTaskDto:
       type: object
       required:
@@ -14733,6 +14966,40 @@ components:
     AdminTaskId:
       type: string
       format: uuid
+    AdminWorkerListEntry:
+      allOf:
+      - $ref: '#/components/schemas/WorkerConnection'
+      - type: object
+        required:
+        - worker_id
+        - registrations
+        - projects
+        - requested_by_admin
+        properties:
+          worker_id:
+            type: string
+          display_name:
+            type:
+            - string
+            - 'null'
+          team:
+            oneOf:
+            - $ref: '#/components/schemas/WorkerOwningTeam'
+            - type: 'null'
+          registrations:
+            type: array
+            items:
+              $ref: '#/components/schemas/WorkerProjectRegistration'
+          projects:
+            type: array
+            items:
+              $ref: '#/components/schemas/BoardProject'
+          live:
+            oneOf:
+            - $ref: '#/components/schemas/WorkerInfo'
+            - type: 'null'
+          requested_by_admin:
+            type: boolean
     ApiId:
       type: string
       format: uuid
@@ -15684,6 +15951,22 @@ components:
       - manageCacheSubscriptions
       - deleteCache
       - manageCacheWebhooks
+    CachePublicKeyHistory:
+      type: object
+      required:
+      - public_key
+      - created_at
+      - retired
+      properties:
+        public_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        retired:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetiredPublicKeyEntry'
     CacheResponse:
       type: object
       required:
@@ -15814,6 +16097,31 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CacheMetricPoint'
+    CacheStorageSummary:
+      type: object
+      required:
+      - id
+      - name
+      - display_name
+      - max_storage_gb
+      - packages
+      - bytes
+      properties:
+        id:
+          $ref: '#/components/schemas/CacheId'
+        name:
+          type: string
+        display_name:
+          type: string
+        max_storage_gb:
+          type: integer
+          format: int32
+        packages:
+          type: integer
+          format: int64
+        bytes:
+          type: integer
+          format: int64
     CacheSubscriberItem:
       type: object
       required:
@@ -16636,6 +16944,39 @@ components:
             format: double
           won:
             type: boolean
+    DeepGarbageCollectionStats:
+      type: object
+      properties:
+        nars_scanned:
+          type: integer
+          format: int64
+          default: 0
+          minimum: 0
+        orphan_nars_removed:
+          type: integer
+          format: int64
+          default: 0
+          minimum: 0
+        blobs_scanned:
+          type: integer
+          format: int64
+          default: 0
+          minimum: 0
+        orphan_blobs_removed:
+          type: integer
+          format: int64
+          default: 0
+          minimum: 0
+        logs_scanned:
+          type: integer
+          format: int64
+          default: 0
+          minimum: 0
+        orphan_logs_removed:
+          type: integer
+          format: int64
+          default: 0
+          minimum: 0
     DeleteUserRequest:
       type: object
       properties:
@@ -17114,6 +17455,33 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/HeatmapBand'
+    EffectiveConfigOption:
+      type: object
+      required:
+      - group
+      - field
+      - flag
+      - secret
+      - source
+      properties:
+        group:
+          type: string
+        field:
+          type: string
+        flag:
+          type: string
+        env:
+          type:
+          - string
+          - 'null'
+        value:
+          type:
+          - string
+          - 'null'
+        secret:
+          type: boolean
+        source:
+          $ref: '#/components/schemas/ServerOptionValueSource'
     EmailResource:
       type: object
       required:
@@ -19898,7 +20266,9 @@ components:
           items:
             type: string
         Sig:
-          type: string
+          type: array
+          items:
+            type: string
         Deriver:
           type:
           - string
@@ -20533,6 +20903,10 @@ components:
           type:
           - boolean
           - 'null'
+        draining:
+          type:
+          - boolean
+          - 'null'
     PendingInvitationItem:
       type: object
       required:
@@ -20847,6 +21221,21 @@ components:
           - 'null'
         managed:
           type: boolean
+    ProjectStoredBytes:
+      type: object
+      required:
+      - project
+      - packages
+      - bytes
+      properties:
+        project:
+          $ref: '#/components/schemas/BoardProject'
+        packages:
+          type: integer
+          format: int64
+        bytes:
+          type: integer
+          format: int64
     ProjectSummary:
       type: object
       required:
@@ -21278,6 +21667,21 @@ components:
       enum:
       - project
       - cache
+    RetiredPublicKeyEntry:
+      type: object
+      required:
+      - public_key
+      - created_at
+      - retired_at
+      properties:
+        public_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        retired_at:
+          type: string
+          format: date-time
     RevokeInvitationRequest:
       type: object
       required:
@@ -21656,6 +22060,20 @@ components:
           - integer
           - 'null'
           format: int32
+        max_cached_nar_storage_gb:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Limit for cached NAR storage across the instance, in GB (`cache.maxStorageGb`). This field does not exist when the limit is off.
+          minimum: 0
+    ServerOptionValueSource:
+      type: string
+      enum:
+      - flag
+      - env
+      - default
+      - unset
     SessionId:
       type: string
       format: uuid
@@ -22303,6 +22721,43 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/HistoryBar'
+    TaskStoredBytes:
+      type: object
+      required:
+      - id
+      - name
+      - display_name
+      - project
+      - keep_evaluations
+      - evaluations
+      - packages
+      - bytes
+      properties:
+        id:
+          $ref: '#/components/schemas/TaskId'
+        name:
+          type: string
+        display_name:
+          type: string
+        project:
+          $ref: '#/components/schemas/BoardProject'
+        keep_evaluations:
+          type: integer
+          format: int32
+        evaluations:
+          type: integer
+          format: int64
+        oldest_evaluation_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        packages:
+          type: integer
+          format: int64
+        bytes:
+          type: integer
+          format: int64
     TaskTriggerId:
       type: string
       format: uuid
@@ -22595,6 +23050,7 @@ components:
         - enable_exec
         - enable_eval
         - enable_build
+        - requested_by_admin
         properties:
           worker_id:
             type: string
@@ -22627,6 +23083,8 @@ components:
             oneOf:
             - $ref: '#/components/schemas/WorkerLiveInfo'
             - type: 'null'
+          requested_by_admin:
+            type: boolean
     Tier:
       type: string
       enum:
@@ -22886,6 +23344,13 @@ components:
           items:
             type: string
         active:
+          type:
+          - boolean
+          - 'null'
+    UpdateWorkerRequest:
+      type: object
+      properties:
+        draining:
           type:
           - boolean
           - 'null'
@@ -23576,6 +24041,41 @@ components:
           - number
           - 'null'
           format: float
+    WorkerOwningTeam:
+      type: object
+      required:
+      - id
+      - name
+      - display_name
+      - active
+      - managed
+      properties:
+        id:
+          $ref: '#/components/schemas/TeamId'
+        name:
+          type: string
+        display_name:
+          type: string
+        active:
+          type: boolean
+        managed:
+          type: boolean
+    WorkerProjectRegistration:
+      type: object
+      required:
+      - project
+      - display_name
+      - active
+      - managed
+      properties:
+        project:
+          $ref: '#/components/schemas/BoardProject'
+        display_name:
+          type: string
+        active:
+          type: boolean
+        managed:
+          type: boolean
     WorkerSamplePoint:
       type: object
       required:

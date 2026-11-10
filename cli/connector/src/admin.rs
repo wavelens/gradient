@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    AdminTaskDto, DrainingResponse, GithubAppManifestRequest, GithubAppManifestResponse,
-    ManifestResult, SetDrainingRequest, StartDeepGcResponse, WorkerInfo,
+    AdminStorageResponse, AdminTaskDto, AdminWorkerListEntry, DrainingResponse,
+    EffectiveConfigOption, GithubAppManifestRequest, GithubAppManifestResponse, ManifestResult,
+    SetDrainingRequest, StartDeepGcResponse, UpdateWorkerRequest,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -12,7 +13,7 @@ use reqwest::Method;
 pub struct AdminApi<'a>(pub(crate) &'a Client);
 
 impl AdminApi<'_> {
-    pub async fn workers(&self) -> Result<Vec<WorkerInfo>, ConnectorError> {
+    pub async fn workers(&self) -> Result<Vec<AdminWorkerListEntry>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -24,10 +25,10 @@ impl AdminApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn get_connected_worker_by_id(
+    pub async fn get_registered_worker_by_id(
         &self,
         worker: &str,
-    ) -> Result<WorkerInfo, ConnectorError> {
+    ) -> Result<AdminWorkerListEntry, ConnectorError> {
         self.0
             .send_authenticated_request(
                 Method::GET,
@@ -35,6 +36,50 @@ impl AdminApi<'_> {
                 None::<&()>,
             )
             .await
+    }
+
+    pub async fn set_worker_draining_enabled(
+        &self,
+        worker: &str,
+        draining: bool,
+    ) -> Result<AdminWorkerListEntry, ConnectorError> {
+        self.0
+            .send_authenticated_request(
+                Method::PATCH,
+                &format!("admin/workers/{worker}"),
+                Some(&UpdateWorkerRequest {
+                    draining: Some(draining),
+                }),
+            )
+            .await
+    }
+
+    pub async fn get_admin_config_options_with_values_and_sources(
+        &self,
+    ) -> Result<Vec<EffectiveConfigOption>, ConnectorError> {
+        self.0
+            .send_authenticated_request(Method::GET, "admin/config", None::<&()>)
+            .await
+    }
+
+    pub async fn get_admin_storage_disk_usage_and_gc_stats(
+        &self,
+    ) -> Result<AdminStorageResponse, ConnectorError> {
+        self.0
+            .send_authenticated_request(Method::GET, "admin/storage", None::<&()>)
+            .await
+    }
+
+    pub async fn request_gc_round(&self) -> Result<(), ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            "admin/maintenance/gc",
+            true,
+        )?;
+        http::decode_raw_string(req.send().await?).await.map(drop)
     }
 
     pub async fn export_state_configuration_as_text(
