@@ -25,8 +25,8 @@ import { lastRateLimitNote, rateLimitMarker } from './log-rate-limit';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
-import { Observable, Subscription, firstValueFrom, merge } from 'rxjs';
-import { auditTime, filter, map, share, switchMap } from 'rxjs/operators';
+import { EMPTY, Observable, Subscription, firstValueFrom, forkJoin, merge } from 'rxjs';
+import { auditTime, catchError, filter, map, share, switchMap, tap } from 'rxjs/operators';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { LiveEvent, LiveService, createResyncOnLiveSocketReconnectCallback } from '@core/services/live.service';
 import { BreadcrumbsService } from '@core/services/breadcrumbs.service';
@@ -54,6 +54,7 @@ import {
   BuildWithOutputs,
   DependencyGraphNode,
   ExecJobSummary,
+  PaginatedBuilds,
   Permission,
 } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
@@ -79,6 +80,10 @@ import { abortBuildConfirm, abortedWithoutBuildsTitle, abortEvaluationConfirm, b
 import { saveResponse } from '@shared/download';
 
 const packageNameVisibleTrailingCharacterCount = 10;
+const buildStatusNamesByStatusCode: readonly BuildStatus[] = [
+  'Created', 'Queued', 'Building', 'Completed', 'FailedPermanent', 'Aborted',
+  'DependencyFailed', 'Substituted', 'FailedTransient', 'FailedTimeout', 'Skipped',
+];
 
 @Component({
   selector: 'app-evaluation-log',
@@ -193,7 +198,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return build ? this.buildDisplayName(build.name) : null;
   });
 
-  visibleBuilds = signal<BuildItem[]>([]);
   failedDependencies = signal<DependencyGraphNode[]>([]);
 
   buildOf(node: DependencyGraphNode): BuildItem | null {
@@ -279,8 +283,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private autoFollowBuilding = false;
   private userPickedBuild = false;
   private isInitialBuildsLoad = true;
-  private pendingBuilds: BuildItem[] = [];
-  private buildRevealTimer?: ReturnType<typeof setInterval>;
+  private readonly latestLiveBuildStatusByBuildId = new Map<string, BuildStatus>();
   private pendingLogLines: string[] = [];
   private logDrainTimer?: ReturnType<typeof setInterval>;
   private readonly PAGE_SIZE = 1000;
@@ -322,7 +325,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     document.body.style.overflow = '';
     this.stopLiveUpdates();
     this.stopActiveStream();
-    this.stopBuildRevealTimer();
   }
 
   loadEvaluation(): void {
@@ -356,7 +358,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private refreshEvaluation(): void {
     this.evalService.getEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(evaluation => {
       this.evaluation.set(evaluation);
-      this.loadBuilds();
+      this.loadBuilds(Math.max(this.PAGE_SIZE, this.builds().length));
       if (this.isRunningStatus(evaluation.status) && !this.liveSub) {
         this.startLiveUpdates(evaluation.status);
       }
@@ -434,13 +436,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   collapsedGroups = signal<ReadonlySet<string>>(new Set());
 
-  /// `visibleBuilds` bucketed into the status sections above (only non-empty
+  /// `builds` bucketed into the status sections above (only non-empty
   /// ones), in the flat status-sorted order keyboard navigation walks.
   groupedBuilds = computed(() => {
     const indexByGroup = new Map<string, number>();
     this.buildGroups.forEach((g, i) => g.members.forEach((m) => indexByGroup.set(m, i)));
     const buckets: BuildItem[][] = this.buildGroups.map(() => []);
-    for (const build of this.visibleBuilds()) {
+    for (const build of this.builds()) {
       if (!matchesBuildSearch(build.name, this.sidebarSearchQuery())) continue;
       buckets[indexByGroup.get(this.statusClass(this.getBuildRowDisplayStatus(build))) ?? buckets.length - 1].push(build);
     }
@@ -515,113 +517,88 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     });
   }
 
-  loadBuilds(): void {
-    // Initial load uses PAGE_SIZE for speed. Subsequent polls fetch ALL builds so that
-    // builds which changed sort rank (e.g. Building -> Completed moves from rank 0 to rank 5)
-    // are never left in `beyondFirstPage` with a stale status.
-    const limit = this.isInitialBuildsLoad
-      ? this.PAGE_SIZE
-      : Math.max(this.PAGE_SIZE, this.totalBuilds(), this.activeBuildsCount());
-    this.evalService.getBuilds(this.evaluationId, limit, 0, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (result) => {
-        this.buildListError.set(null);
-        this.hasLoadedFirstBuildPage.set(true);
-        this.totalBuilds.set(result.total);
-        this.activeBuildsCount.set(result.active_count);
-        if (!this.isRunning() && result.active_count === 0) this.stopLiveUpdates();
-        const prevSelected = this.selectedBuild();
-
-        // Merge: keep any already-loaded builds beyond the first page,
-        // replace the first page with fresh data.
-        const freshIds = new Set(result.builds.map(b => b.id));
-        const beyondFirstPage = this.builds().filter(b => !freshIds.has(b.id));
-        // Only keep beyond-page builds that aren't in the fresh result
-        // (they may have changed status and moved into the first page)
-        this.builds.set(this.sortBuilds([...result.builds, ...beyondFirstPage]));
-
-        const newSelected = this.selectedBuild();
-        const isEvaluating = this.evaluation()?.status === 'Fetching' || this.evaluation()?.status === 'EvaluatingFlake' || this.evaluation()?.status === 'EvaluatingDerivation';
-
-        // ── Build list visibility ───────────────────────────────────────────
-        if (this.isInitialBuildsLoad) {
-          // First load: show everything we have immediately
-          this.visibleBuilds.set(this.builds());
-          this.isInitialBuildsLoad = false;
-          const evalStatus = this.evaluation()?.status;
-          const failedWithNoBuilds = result.total === 0 && evalStatus === 'Failed';
-          if (this.initialShowEval || failedWithNoBuilds) {
-            // Open the evaluation messages view directly (explicit request via ?eval,
-            // or implicit fallback when there is nothing to build).
-            this.initialShowEval = false;
-            this.selectEvaluationSection();
-          } else if (!this.initialBuildId && !this.selectedBuildId()) {
-            const firstBuilding = this.builds().find(b => b.status === 'Building');
-            const firstFailed = this.builds().find(b => this.statusClass(b.status) === 'failed');
-            const defaultEntryPointBuild = evalStatus === 'Completed' ? this.builds().find((b) => b.depth === 0) : undefined;
-            const first = firstBuilding ?? firstFailed ?? defaultEntryPointBuild;
-            if (first) this.selectBuild(first);
-            else if (evalStatus === 'Aborted' && result.total > 0) this.selectEvaluationSection();
-            if (!firstBuilding) this.autoFollowBuilding = true;
-          }
-        } else if (!isEvaluating) {
-          // Evaluation is no longer Evaluating: flush all builds immediately
-          this.flushPendingBuilds();
-        } else {
-          // Still evaluating: incrementally reveal newly added builds
-          const knownIds = new Set([
-            ...this.visibleBuilds().map(b => b.id),
-            ...this.pendingBuilds.map(b => b.id),
-          ]);
-
-          const newBuilds = this.builds().filter(b => !knownIds.has(b.id));
-          if (newBuilds.length > 0) {
-            this.pendingBuilds.unshift(...newBuilds);
-            this.startBuildRevealTimer();
-          }
-
-          // Refresh statuses & order of already-visible builds
-          this.visibleBuilds.update(vbs =>
-            this.sortBuilds(vbs.map(vb => this.builds().find(b => b.id === vb.id) ?? vb))
-          );
-        }
-
-        // ── Log transitions ─────────────────────────────────────────────────
-
-        // Building -> Completed: flush logs.
-        // Only auto-switch to the next building build when in auto-follow mode
-        // (the user hasn't manually picked a build). When the user explicitly
-        // selected or navigated to this build, stay on it so they can read the log.
-        if (prevSelected?.status === 'Building' && newSelected?.status === 'Completed') {
-          this.flushPendingLogs();
-          if (!this.userPickedBuild) {
-            const next = this.builds().find(b => b.status === 'Building');
-            if (next) {
-              this.selectBuild(next);
-            } else {
-              this.autoFollowBuilding = true;
-            }
-          }
-        }
-
-        // Auto-select the first building build while waiting for one to start
-        if (this.autoFollowBuilding) {
-          const next = this.builds().find(b => b.status === 'Building');
-          if (next) {
-            this.autoFollowBuilding = false;
-            this.selectBuild(next);
-          }
-        }
-
-        this.resolveInitialBuild();
-
-        // Auto-fetch more pages until all active builds are in memory.
-        // This ensures status transitions and log streaming work for every build.
-        if (this.builds().length < result.active_count && !this.loadingMore()) {
-          this.doLoadMore();
-        }
-      },
+  loadBuilds(limit = this.PAGE_SIZE): void {
+    this.firstBuildPage(limit).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (result) => this.mergeBuildPageAndSelectOrFollowBuild(result),
       error: (error: unknown) => this.buildListError.set(error),
     });
+  }
+
+  private firstBuildPage(limit = this.PAGE_SIZE): Observable<PaginatedBuilds> {
+    return this.evalService.getBuilds(this.evaluationId, limit, 0, this.scopeBuildId() ?? undefined);
+  }
+
+  private mergeBuildPageAndSelectOrFollowBuild(result: PaginatedBuilds): void {
+    this.buildListError.set(null);
+    this.hasLoadedFirstBuildPage.set(true);
+    this.totalBuilds.set(result.total);
+    this.activeBuildsCount.set(result.active_count);
+    if (!this.isRunning() && result.active_count === 0) this.stopLiveUpdates();
+    const prevSelected = this.selectedBuild();
+
+    const byId = new Map(this.builds().map((b) => [b.id, b]));
+    for (const [id, status] of this.latestLiveBuildStatusByBuildId) {
+      const known = byId.get(id);
+      if (known) byId.set(id, { ...known, status });
+    }
+    this.latestLiveBuildStatusByBuildId.clear();
+    for (const fresh of result.builds) byId.set(fresh.id, fresh);
+    this.builds.set(this.sortBuilds([...byId.values()]));
+
+    const newSelected = this.selectedBuild();
+
+    if (this.isInitialBuildsLoad) {
+      this.isInitialBuildsLoad = false;
+      const evalStatus = this.evaluation()?.status;
+      const failedWithNoBuilds = result.total === 0 && evalStatus === 'Failed';
+      if (this.initialShowEval || failedWithNoBuilds) {
+        // Open the evaluation messages view directly (explicit request via ?eval,
+        // or implicit fallback when there is nothing to build).
+        this.initialShowEval = false;
+        this.selectEvaluationSection();
+      } else if (!this.initialBuildId && !this.selectedBuildId()) {
+        const firstBuilding = this.builds().find(b => b.status === 'Building');
+        const firstFailed = this.builds().find(b => this.statusClass(b.status) === 'failed');
+        const defaultEntryPointBuild = evalStatus === 'Completed' ? this.builds().find((b) => b.depth === 0) : undefined;
+        const first = firstBuilding ?? firstFailed ?? defaultEntryPointBuild;
+        if (first) this.selectBuild(first);
+        else if (evalStatus === 'Aborted' && result.total > 0) this.selectEvaluationSection();
+        if (!firstBuilding) this.autoFollowBuilding = true;
+      }
+    }
+
+    // Building -> Completed: flush logs.
+    // Only auto-switch to the next building build when in auto-follow mode
+    // (the user hasn't manually picked a build). When the user explicitly
+    // selected or navigated to this build, stay on it so they can read the log.
+    if (prevSelected?.status === 'Building' && newSelected?.status === 'Completed') {
+      this.flushPendingLogs();
+      if (!this.userPickedBuild) {
+        const next = this.builds().find(b => b.status === 'Building');
+        if (next) {
+          this.selectBuild(next);
+        } else {
+          this.autoFollowBuilding = true;
+        }
+      }
+    }
+
+    // Auto-select the first building build while waiting for one to start
+    if (this.autoFollowBuilding) {
+      const next = this.builds().find(b => b.status === 'Building');
+      if (next) {
+        this.autoFollowBuilding = false;
+        this.selectBuild(next);
+      }
+    }
+
+    this.resolveInitialBuild();
+
+    // Auto-fetch more pages until all active builds are in memory.
+    // This ensures status transitions and log streaming work for every build.
+    if (this.builds().length < result.active_count && !this.loadingMore()) {
+      this.doLoadMore();
+    }
   }
 
   /** Triggered by scroll proximity - pre-fetches next page before user hits bottom. */
@@ -644,7 +621,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           const newBuilds = result.builds.filter(b => !existingIds.has(b.id));
           if (newBuilds.length > 0) {
             this.builds.update(current => this.sortBuilds([...current, ...newBuilds]));
-            this.visibleBuilds.update(current => this.sortBuilds([...current, ...newBuilds]));
           }
         }
         this.loadingMore.set(false);
@@ -678,14 +654,23 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       frames
         .pipe(
           filter(e => e.event !== 'evaluation.activity'),
+          tap((e) => {
+            const status = e.content.status === undefined ? undefined : buildStatusNamesByStatusCode[e.content.status];
+            if (e.content.build_id && status) this.latestLiveBuildStatusByBuildId.set(e.content.build_id, status);
+          }),
           auditTime(300),
-          switchMap(() => this.evalService.getEvaluation(this.evaluationId)),
+          switchMap(() => forkJoin({ evaluation: this.evalService.getEvaluation(this.evaluationId), page: this.firstBuildPage() }).pipe(
+            catchError((error: unknown) => {
+              this.buildListError.set(error);
+              return EMPTY;
+            }),
+          )),
         )
         .subscribe({
-          next: (evaluation) => {
+          next: ({ evaluation, page }) => {
             const finishedNow = this.isRunning() && !this.isRunningStatus(evaluation.status);
             this.evaluation.set(evaluation);
-            this.loadBuilds();
+            this.mergeBuildPageAndSelectOrFollowBuild(page);
             if (!finishedNow) return;
             this.loadMessages(true);
             this.stopLiveUpdates();
@@ -767,7 +752,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         };
         this.initialBuildId = null;
         this.builds.update(cur => this.sortBuilds([item, ...cur]));
-        this.visibleBuilds.update(cur => this.sortBuilds([item, ...cur]));
         this.selectBuild(item, true);
         settled?.();
       },
@@ -1082,33 +1066,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   closeSidebarSearch(): void {
     this.sidebarSearchOpen.set(false);
     this.sidebarSearchQuery.set('');
-  }
-
-  // ── Build reveal animation ──────────────────────────────────────────────────
-
-  private startBuildRevealTimer(): void {
-    if (this.buildRevealTimer !== undefined) return;
-    this.buildRevealTimer = setInterval(() => {
-      if (this.pendingBuilds.length === 0) {
-        this.stopBuildRevealTimer();
-        return;
-      }
-      const next = this.pendingBuilds.shift()!;
-      this.visibleBuilds.update(vbs => vbs.some(b => b.id === next.id) ? vbs : [next, ...vbs]);
-    }, 10);
-  }
-
-  private stopBuildRevealTimer(): void {
-    if (this.buildRevealTimer !== undefined) {
-      clearInterval(this.buildRevealTimer);
-      this.buildRevealTimer = undefined;
-    }
-  }
-
-  private flushPendingBuilds(): void {
-    this.stopBuildRevealTimer();
-    this.pendingBuilds = [];
-    this.visibleBuilds.set(this.builds());
   }
 
   // ── Log drain animation ─────────────────────────────────────────────────────

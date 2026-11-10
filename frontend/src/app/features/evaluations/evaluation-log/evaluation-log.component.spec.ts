@@ -138,7 +138,7 @@ describe('EvaluationLogComponent', () => {
     it('closes once a build or the evaluation is picked', () => {
       const { cmp } = setup();
       const b = build('a', 'aaa');
-      cmp.visibleBuilds.set([b]);
+      cmp.builds.set([b]);
 
       cmp.buildsOpen.set(true);
       cmp.selectBuild(b, true);
@@ -157,7 +157,7 @@ describe('EvaluationLogComponent', () => {
   describe('sidebar search', () => {
     it('filters grouped builds by name, case-insensitively', () => {
       const { cmp } = setup();
-      cmp.visibleBuilds.set([build('a', '/nix/store/aaa-hello'), build('b', '/nix/store/bbb-world')]);
+      cmp.builds.set([build('a', '/nix/store/aaa-hello'), build('b', '/nix/store/bbb-world')]);
       cmp.sidebarSearchQuery.set('HELLO');
       const names = cmp.groupedBuilds().flatMap((g) => g.builds.map((b) => b.name));
       expect(names).toEqual(['/nix/store/aaa-hello']);
@@ -165,7 +165,7 @@ describe('EvaluationLogComponent', () => {
 
     it('keeps every build when the query is empty', () => {
       const { cmp } = setup();
-      cmp.visibleBuilds.set([build('a', 'aaa'), build('b', 'bbb')]);
+      cmp.builds.set([build('a', 'aaa'), build('b', 'bbb')]);
       cmp.sidebarSearchQuery.set('');
       const names = cmp.groupedBuilds().flatMap((g) => g.builds.map((b) => b.name));
       expect(names).toEqual(['aaa', 'bbb']);
@@ -173,7 +173,7 @@ describe('EvaluationLogComponent', () => {
 
     it('arrow navigation skips builds the query filters out', () => {
       const { cmp } = setup();
-      cmp.visibleBuilds.set([build('a', 'app'), build('b', 'bbb'), build('c', 'apt')]);
+      cmp.builds.set([build('a', 'app'), build('b', 'bbb'), build('c', 'apt')]);
       cmp.sidebarSearchQuery.set('ap');
       cmp.selectAdjacentBuild('a', 1);
       expect(cmp.selectedBuildId()).toBe('c');
@@ -187,14 +187,14 @@ describe('EvaluationLogComponent', () => {
 
     it('Add builds of unknown status to the Other section.', () => {
       const { cmp } = setup();
-      cmp.visibleBuilds.set([build('c1', 'c1', 'Completed'), build('n1', 'n1', 'Rebuilding')]);
+      cmp.builds.set([build('c1', 'c1', 'Completed'), build('n1', 'n1', 'Rebuilding')]);
       expect(cmp.groupedBuilds().map((g) => [g.key, g.builds.map((b) => b.id)])).toEqual([['completed', ['c1']], ['other', ['n1']]]);
     });
 
     it('labels substituted builds as substituted and gives every finished build its duration', () => {
       const { cmp } = setup();
       const timedOut = { ...build('t1', 't1', 'FailedTimeout'), build_time_ms: 287 };
-      cmp.visibleBuilds.set([build('c1', 'c1', 'Completed'), build('s1', 's1', 'Substituted'), timedOut]);
+      cmp.builds.set([build('c1', 'c1', 'Completed'), build('s1', 's1', 'Substituted'), timedOut]);
       expect(cmp.groupedBuilds().map((g) => g.label)).toEqual(['Failed', 'Completed', 'Substituted']);
       expect(cmp.getBuildElapsed(timedOut)).toBe('287 ms');
     });
@@ -203,7 +203,7 @@ describe('EvaluationLogComponent', () => {
       const { cmp } = setup();
       cmp.evaluation.set({ status: 'Aborted' } as EvaluationResponse);
       const reused = build('r1', 'r1', 'Building');
-      cmp.visibleBuilds.set([reused, build('c1', 'c1', 'Completed')]);
+      cmp.builds.set([reused, build('c1', 'c1', 'Completed')]);
       expect(cmp.groupedBuilds().map((g) => [g.key, g.builds.map((b) => b.id)])).toEqual([['aborted', ['r1']], ['completed', ['c1']]]);
       expect(cmp.getBuildRowDisplayStatus(reused)).toBe('Aborted');
       cmp.evaluation.set({ status: 'Building' } as EvaluationResponse);
@@ -212,13 +212,13 @@ describe('EvaluationLogComponent', () => {
 
     it('starts with every section expanded', () => {
       const { cmp } = setup();
-      cmp.visibleBuilds.set(builds());
+      cmp.builds.set(builds());
       expect(cmp.groupedBuilds().map((g) => g.collapsed)).toEqual([false, false, false]);
     });
 
     it('toggling a section collapses it and keeps its count', () => {
       const { cmp } = setup();
-      cmp.visibleBuilds.set(builds());
+      cmp.builds.set(builds());
       cmp.toggleGroup('failed');
       const failed = cmp.groupedBuilds().find((g) => g.key === 'failed')!;
       expect(failed.collapsed).toBe(true);
@@ -229,7 +229,7 @@ describe('EvaluationLogComponent', () => {
 
     it('arrow navigation skips builds in a collapsed section', () => {
       const { cmp } = setup();
-      cmp.visibleBuilds.set(builds());
+      cmp.builds.set(builds());
       cmp.toggleGroup('failed');
       cmp.selectAdjacentBuild('b1', 1);
       expect(cmp.selectedBuildId()).toBe('c1');
@@ -437,7 +437,7 @@ describe('EvaluationLogComponent', () => {
       const { fixture, cmp } = setup();
       fixture.detectChanges();
       cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
-      cmp.visibleBuilds.set([target({ id: 'b1' }), target({ id: 'b2', dispatched_job: 'job-2' })]);
+      cmp.builds.set([target({ id: 'b1' }), target({ id: 'b2', dispatched_job: 'job-2' })]);
       fixture.detectChanges();
 
       expect(fixture.nativeElement.querySelector('.sidebar-builds-heading')?.textContent?.trim()).toBe('Builds');
@@ -454,7 +454,7 @@ describe('EvaluationLogComponent', () => {
       const { fixture, cmp } = setup();
       fixture.detectChanges();
       cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
-      cmp.visibleBuilds.set([target({ id: 'b1' }), target({ id: 'b2' })]);
+      cmp.builds.set([target({ id: 'b1' }), target({ id: 'b2' })]);
       fixture.detectChanges();
       const select = vi.spyOn(cmp, 'selectBuild');
 
@@ -475,7 +475,7 @@ describe('EvaluationLogComponent', () => {
       vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
       fixture.detectChanges();
       cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
-      cmp.visibleBuilds.set([target({ id: 'b1' })]);
+      cmp.builds.set([target({ id: 'b1' })]);
       fixture.detectChanges();
 
       const select = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.build-item button.sidebar-row-link')!;
@@ -489,7 +489,7 @@ describe('EvaluationLogComponent', () => {
       const { fixture, cmp } = setup();
       fixture.detectChanges();
       cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as EvaluationResponse);
-      cmp.visibleBuilds.set([build('b1', '/nix/store/hash-run-r9-evaluations-package-42.drv')]);
+      cmp.builds.set([build('b1', '/nix/store/hash-run-r9-evaluations-package-42.drv')]);
       fixture.detectChanges();
 
       const item = (fixture.nativeElement as HTMLElement).querySelector('.build-item')!;
@@ -1185,6 +1185,19 @@ describe('EvaluationLogComponent', () => {
       fixture.componentInstance.ngOnInit();
       return { fixture, frames, getEvaluation };
     }
+
+    it('reloads only the first page per live event and takes the status of other builds from the event', async () => {
+      const { fixture, frames } = setupLive(null, 'Building', [build('top', 'hash-top.drv', 'Queued')]);
+      const cmp = fixture.componentInstance;
+      cmp.builds.update((builds) => [...builds, build('far', 'hash-far.drv', 'Building', 3)]);
+      const getBuilds = vi.spyOn(TestBed.inject(EvaluationsService), 'getBuilds');
+
+      frames.next({ event: 'build.status_changed', at: '', content: { build_id: 'far', status: 3 } });
+      await new Promise(resolve => setTimeout(resolve, 350));
+      expect(getBuilds.mock.calls).toEqual([['eval-1', 1000, 0, undefined]]);
+      expect(cmp.builds().map((b) => `${b.id}:${b.status}`)).toEqual(['top:Queued', 'far:Completed']);
+      fixture.destroy();
+    });
 
     it('drops the live badge and the socket once the evaluation reaches a final status', async () => {
       const { fixture, frames, getEvaluation } = setupLive(null, 'Building');

@@ -82,9 +82,9 @@
         </div>
       }
 
-      @if (buildListError() && visibleBuilds().length === 0) {
+      @if (buildListError() && builds().length === 0) {
         <gr-load-state flat [error]="buildListError()" errorTitle="Failed to load builds" (retry)="loadBuilds()" />
-      } @else if (visibleBuilds().length > 0) {
+      } @else if (builds().length > 0) {
         <h2 class="sidebar-builds-heading">
           @if (builds().length < totalBuilds()) { {{ builds().length }} of {{ plural(totalBuilds(), 'build') }} } @else { Builds }
         </h2>
@@ -295,7 +295,7 @@
               <span class="queued-title">Waiting in Queue</span>
               <span class="queued-sub">The evaluation will start when a slot becomes available&hellip;</span>
             </div>
-          } @else if (hasLoadedFirstBuildPage() && visibleBuilds().length === 0) {
+          } @else if (hasLoadedFirstBuildPage() && builds().length === 0) {
             <div class="select-build-hint">
               <gr-icon [name]="ev.status === 'Aborted' ? 'cancel' : 'inventory_2'" class="hint-icon" size="xl" />
               <span class="hint-text">{{ ev.status === 'Aborted' ? abortedWithoutBuildsTitle(ev.started_at) : isRunning() ? 'Nothing built yet' : 'No builds' }}</span>
