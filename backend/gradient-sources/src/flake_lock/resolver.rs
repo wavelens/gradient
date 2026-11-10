@@ -10,6 +10,7 @@ use gradient_types::SecretString;
 use gradient_wire::traits::InputProgressSink;
 use serde::Deserialize;
 use std::sync::Arc;
+use url::Url;
 
 use super::lock::{GITHUB_HOST, GITLAB_HOST, LockedRef};
 use super::narhash::{nar_hash_of_dir, tarball_source_nar_hash};
@@ -85,9 +86,13 @@ impl HttpRevisionResolver {
         progress: &dyn InputProgressSink,
     ) -> Result<ResolvedRev> {
         let r = ref_.clone().unwrap_or_else(|| "HEAD".to_owned());
-        let url = format!("{GITHUB_API}/repos/{owner}/{repo}/commits/{r}");
+        let github = Url::parse(GITHUB_API).context("Parse a URL for the GitHub API")?;
+        let url = url_with_percent_encoded_path_segments(
+            &github,
+            &["repos", owner, repo, "commits", &r],
+        )?;
         let commit: GithubCommit = self
-            .github_get(&url)
+            .github_get(url)
             .send()
             .await
             .context("github commit lookup")?
@@ -98,8 +103,11 @@ impl HttpRevisionResolver {
             .context("parse github commit")?;
 
         let last_modified = parse_rfc3339(&commit.commit.committer.date)?;
-        let tarball = format!("{GITHUB_API}/repos/{owner}/{repo}/tarball/{}", commit.sha);
-        let nar_hash = tarball_source_nar_hash(self.github_get(&tarball), progress).await?;
+        let tarball = url_with_percent_encoded_path_segments(
+            &github,
+            &["repos", owner, repo, "tarball", &commit.sha],
+        )?;
+        let nar_hash = tarball_source_nar_hash(self.github_get(tarball), progress).await?;
 
         Ok(ResolvedRev {
             rev: commit.sha,
@@ -117,11 +125,12 @@ impl HttpRevisionResolver {
         ref_: &Option<String>,
         progress: &dyn InputProgressSink,
     ) -> Result<ResolvedRev> {
-        let project_api = gitlab_project_api(host, owner, repo);
+        let project_api = gitlab_project_api(host, owner, repo)?;
         let r = ref_.clone().unwrap_or_else(|| "HEAD".to_owned());
-        let url = format!("{project_api}/repository/commits/{r}");
+        let url =
+            url_with_percent_encoded_path_segments(&project_api, &["repository", "commits", &r])?;
         let commit: GitlabCommit = self
-            .gitlab_get(&url)
+            .gitlab_get(url)
             .send()
             .await
             .context("gitlab commit lookup")?
@@ -132,11 +141,12 @@ impl HttpRevisionResolver {
             .context("parse gitlab commit")?;
 
         let last_modified = parse_rfc3339(&commit.committed_date)?;
-        let tarball = format!(
-            "{project_api}/repository/archive.tar.gz?sha={}",
-            commit.id
-        );
-        let nar_hash = tarball_source_nar_hash(self.gitlab_get(&tarball), progress).await?;
+        let mut tarball = url_with_percent_encoded_path_segments(
+            &project_api,
+            &["repository", "archive.tar.gz"],
+        )?;
+        tarball.query_pairs_mut().append_pair("sha", &commit.id);
+        let nar_hash = tarball_source_nar_hash(self.gitlab_get(tarball), progress).await?;
 
         Ok(ResolvedRev {
             rev: commit.id,
@@ -169,7 +179,7 @@ impl HttpRevisionResolver {
         })
     }
 
-    fn github_get(&self, url: &str) -> reqwest::RequestBuilder {
+    fn github_get(&self, url: Url) -> reqwest::RequestBuilder {
         let mut req = self
             .client
             .get(url)
@@ -183,7 +193,7 @@ impl HttpRevisionResolver {
         req
     }
 
-    fn gitlab_get(&self, url: &str) -> reqwest::RequestBuilder {
+    fn gitlab_get(&self, url: Url) -> reqwest::RequestBuilder {
         let mut req = self.client.get(url).header("User-Agent", USER_AGENT);
         if let Some(token) = &self.gitlab_token {
             req = req.header("PRIVATE-TOKEN", token);
@@ -219,7 +229,8 @@ impl RevisionResolver for HttpRevisionResolver {
                 ref_,
             } => {
                 let host = host.as_deref().unwrap_or(GITLAB_HOST);
-                self.resolve_gitlab(host, owner, repo, ref_, &*progress).await
+                self.resolve_gitlab(host, owner, repo, ref_, &*progress)
+                    .await
             }
             LockedRef::Git { url, ref_ } => self.resolve_git(url, ref_).await,
             LockedRef::Tarball { .. } => {
@@ -233,9 +244,28 @@ impl RevisionResolver for HttpRevisionResolver {
     }
 }
 
-fn gitlab_project_api(host: &str, owner: &str, repo: &str) -> String {
-    let project = format!("{}/{repo}", owner.replace("%2F", "/")).replace('/', "%2F");
-    format!("https://{host}/api/v4/projects/{project}")
+fn gitlab_project_api(host: &str, owner: &str, repo: &str) -> Result<Url> {
+    let project = format!("{}/{repo}", owner.replace("%2F", "/"));
+    url_with_percent_encoded_path_segments(
+        &gitlab_server_https_base_url_from_flake_lock(host)?,
+        &["api", "v4", "projects", &project],
+    )
+}
+
+fn gitlab_server_https_base_url_from_flake_lock(host: &str) -> Result<Url> {
+    let mut url = Url::parse("https://gitlab.com").context("Parse a GitLab URL")?;
+    url.set_host(Some(host))
+        .with_context(|| format!("Invalid GitLab host `{host}`"))?;
+    Ok(url)
+}
+
+fn url_with_percent_encoded_path_segments(base: &Url, segments: &[&str]) -> Result<Url> {
+    let mut url = base.clone();
+    url.path_segments_mut()
+        .map_err(|()| anyhow::anyhow!("{base} cannot have a path."))?
+        .pop_if_empty()
+        .extend(segments);
+    Ok(url)
 }
 
 fn git_checkout(
@@ -330,9 +360,30 @@ mod tests {
     #[test]
     fn a_gitlab_input_is_resolved_through_the_projects_api_of_its_host() {
         assert_eq!(
-            gitlab_project_api("gitlab.example.com", "group%2Fsub", "tool"),
+            gitlab_project_api("gitlab.example.com", "group%2Fsub", "tool")
+                .unwrap()
+                .as_str(),
             "https://gitlab.example.com/api/v4/projects/group%2Fsub%2Ftool"
         );
+    }
+
+    #[test]
+    fn flake_lock_values_stay_inside_their_url_path_segment() {
+        let github = Url::parse(GITHUB_API).unwrap();
+        let url = url_with_percent_encoded_path_segments(
+            &github,
+            &["repos", "owner", "repo", "commits", "feature/x?y#z"],
+        )
+        .unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://api.github.com/repos/owner/repo/commits/feature%2Fx%3Fy%23z"
+        );
+    }
+
+    #[test]
+    fn a_gitlab_host_with_a_path_is_rejected() {
+        assert!(gitlab_project_api("evil.example.com/x", "group", "tool").is_err());
     }
 
     #[test]
