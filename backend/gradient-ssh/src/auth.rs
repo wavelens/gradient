@@ -7,6 +7,7 @@
 use crate::gateway_user::parse_login;
 use crate::session::{Session, SshHandles};
 use gradient_db::lookup::by_id;
+use gradient_types::permissions::PermissionMask;
 use gradient_types::*;
 use russh::keys::{HashAlg, PublicKey};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
@@ -39,11 +40,68 @@ pub async fn authorize(
     }
 }
 
+struct SshKeyProjectLoginRecord {
+    key: MUserSshKey,
+    user: MUser,
+    project: MProject,
+    permissions: PermissionMask,
+    caches: Vec<CacheId>,
+}
+
 async fn load_session(
     handles: &SshHandles,
     project_name: &str,
     fingerprint: &str,
 ) -> anyhow::Result<Option<Session>> {
+    let Some(login) =
+        find_user_project_permission_mask_and_caches_by_ssh_key_fingerprint_and_project(
+            handles,
+            project_name,
+            fingerprint,
+        )
+        .await?
+    else {
+        return Ok(None);
+    };
+    let mut used = login.key.into_active_model();
+    used.last_used_at = Set(Some(now()));
+    used.update(&handles.db.web_db).await?;
+
+    Ok(Some(
+        Session::open(
+            handles.clone(),
+            login.user,
+            login.project,
+            login.permissions,
+            login.caches,
+        )
+        .await?,
+    ))
+}
+
+pub async fn check_session_access_still_matches_login(
+    session: &Session,
+    fingerprint: &str,
+) -> anyhow::Result<bool> {
+    let login = find_user_project_permission_mask_and_caches_by_ssh_key_fingerprint_and_project(
+        &session.handles,
+        &session.project.name,
+        fingerprint,
+    )
+    .await?;
+    Ok(login.is_some_and(|login| {
+        login.user.id == session.user.id
+            && login.project.id == session.project.id
+            && login.permissions == session.permissions
+            && login.caches == session.caches
+    }))
+}
+
+async fn find_user_project_permission_mask_and_caches_by_ssh_key_fingerprint_and_project(
+    handles: &SshHandles,
+    project_name: &str,
+    fingerprint: &str,
+) -> anyhow::Result<Option<SshKeyProjectLoginRecord>> {
     let Some(key) = EUserSshKey::find()
         .filter(CUserSshKey::Fingerprint.eq(fingerprint))
         .one(&handles.db.web_db)
@@ -75,13 +133,13 @@ async fn load_session(
 
     let caches =
         gradient_db::cache_paths::project_read_caches(&handles.db.web_db, project.id).await?;
-    let mut used = key.into_active_model();
-    used.last_used_at = Set(Some(now()));
-    used.update(&handles.db.web_db).await?;
-
-    Ok(Some(
-        Session::open(handles.clone(), user, project, permissions, caches).await?,
-    ))
+    Ok(Some(SshKeyProjectLoginRecord {
+        key,
+        user,
+        project,
+        permissions,
+        caches,
+    }))
 }
 
 #[cfg(test)]
@@ -137,6 +195,39 @@ mod tests {
             rejected.err().map(|r| r.to_string()),
             Some(Rejected.to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn open_session_loses_access_when_user_is_deactivated() {
+        let user = gradient_fixtures::rows::user();
+        let key = MUserSshKey {
+            user: user.id,
+            ..Default::default()
+        };
+        let deactivated = MUser {
+            active: false,
+            ..user.clone()
+        };
+        let db = mock_db()
+            .append_query_results([vec![key]])
+            .append_query_results([vec![deactivated]])
+            .into_connection();
+        let state = TestState::new().web_db(db).build();
+        let session = Session::open(
+            SshHandles::for_tests(&state),
+            user,
+            gradient_fixtures::rows::project(),
+            0,
+            Vec::new(),
+        )
+        .await
+        .unwrap();
+
+        let still = check_session_access_still_matches_login(&session, "SHA256:known")
+            .await
+            .unwrap();
+
+        assert!(!still);
     }
 
     #[tokio::test]

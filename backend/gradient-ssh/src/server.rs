@@ -4,18 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::auth::{authorize, fingerprint};
+use crate::auth::{authorize, check_session_access_still_matches_login, fingerprint};
 use crate::gateway::{TerminalSize, run_forward, run_shell};
 use crate::gateway_user::{GatewayTarget, gateway_shell_kind};
 use crate::roots::Roots;
 use crate::session::{Session, SshHandles};
 use russh::keys::{PrivateKey, PublicKey};
-use russh::server::{Auth, ChannelOpenHandle, Msg, Session as SshSession};
-use russh::{Channel, ChannelId, ChannelOpenFailure, MethodKind, MethodSet, Pty};
+use russh::server::{Auth, ChannelOpenHandle, Handle, Msg, Session as SshSession};
+use russh::{Channel, ChannelId, ChannelOpenFailure, Disconnect, MethodKind, MethodSet, Pty};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
+
+const OPEN_CONNECTION_ACCESS_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 pub fn config(host_key: PrivateKey) -> russh::server::Config {
     russh::server::Config {
@@ -48,6 +50,7 @@ impl russh::server::Server for SshServer {
             handles: self.handles.clone(),
             roots: self.roots.clone(),
             session: None,
+            fingerprint: String::new(),
             channels: HashMap::new(),
             sizes: HashMap::new(),
         }
@@ -58,6 +61,7 @@ pub struct Connection {
     handles: SshHandles,
     roots: Arc<Roots>,
     session: Option<Arc<Session>>,
+    fingerprint: String,
     channels: HashMap<ChannelId, Channel<Msg>>,
     sizes: HashMap<ChannelId, watch::Sender<(u16, u16)>>,
 }
@@ -110,6 +114,35 @@ impl Connection {
     }
 }
 
+async fn recheck_connection_access_and_disconnect_if_changed(
+    session: Arc<Session>,
+    fingerprint: String,
+    connection: Handle,
+) {
+    loop {
+        tokio::select! {
+            () = session.closed.cancelled() => return,
+            () = tokio::time::sleep(OPEN_CONNECTION_ACCESS_RECHECK_INTERVAL) => {}
+        }
+        match check_session_access_still_matches_login(&session, &fingerprint).await {
+            Ok(true) => continue,
+            Ok(false) => break,
+            Err(error) => {
+                tracing::warn!(%error, "Failed to re-check access for the SSH session");
+                continue;
+            }
+        }
+    }
+    session.closed.cancel();
+    let _ = connection
+        .disconnect(
+            Disconnect::ByApplication,
+            "Access to this project changed. Reconnect.".to_owned(),
+            String::new(),
+        )
+        .await;
+}
+
 impl Drop for Connection {
     fn drop(&mut self) {
         if let Some(session) = &self.session {
@@ -122,13 +155,29 @@ impl russh::server::Handler for Connection {
     type Error = russh::Error;
 
     async fn auth_publickey(&mut self, user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
-        match authorize(&self.handles, user, &fingerprint(key)).await {
+        let fingerprint = fingerprint(key);
+        match authorize(&self.handles, user, &fingerprint).await {
             Ok(session) => {
                 self.session = Some(session);
+                self.fingerprint = fingerprint;
                 Ok(Auth::Accept)
             }
             Err(_) => Ok(Auth::reject()),
         }
+    }
+
+    async fn auth_succeeded(&mut self, session: &mut SshSession) -> Result<(), Self::Error> {
+        if let Some(user_session) = self.session.clone() {
+            self.handles
+                .db
+                .shutdown
+                .spawn(recheck_connection_access_and_disconnect_if_changed(
+                    user_session,
+                    self.fingerprint.clone(),
+                    session.handle(),
+                ));
+        }
+        Ok(())
     }
 
     async fn channel_open_session(
