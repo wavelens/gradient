@@ -6,10 +6,14 @@
 
 use axum::http::StatusCode;
 use gradient_entity::ids::RoleId;
-use gradient_entity::role;
+use gradient_entity::{role, worker_registration};
 use gradient_fixtures::ids::project_id;
-use gradient_fixtures::rows::{project, project_member, user, view_role};
+use gradient_fixtures::mock::ran;
+use gradient_fixtures::rows::{
+    admin_role, project, project_member, user, view_role, worker_registration,
+};
 use gradient_test_support::web::{make_test_server, signed_in_as};
+use gradient_types::consts::BASE_ROLE_ADMIN_ID;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -70,4 +74,30 @@ async fn a_member_without_manage_workers_cannot_change_project_workers() {
 #[tokio::test]
 async fn a_view_member_cannot_change_project_workers() {
     assert_worker_changes_forbidden(view_role()).await;
+}
+
+#[tokio::test]
+async fn a_state_managed_project_worker_cannot_be_deleted() {
+    let (db, auth) = signed_in_as(user());
+    let conn = db
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![project_member(BASE_ROLE_ADMIN_ID)]])
+        .append_query_results([vec![admin_role()]])
+        .append_query_results([vec![worker_registration::Model {
+            peer_id: project_id(),
+            worker_id: WORKER.into(),
+            managed: true,
+            ..worker_registration(true, true)
+        }]])
+        .into_connection();
+    let server = make_test_server(conn.clone());
+
+    let res = server
+        .delete(&format!("{WORKERS}/{WORKER}"))
+        .add_header("authorization", auth)
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
+    drop(server);
+    assert!(!ran(conn, "DELETE FROM \"worker_registration\""));
 }

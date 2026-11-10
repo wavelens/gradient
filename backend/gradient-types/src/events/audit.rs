@@ -68,6 +68,7 @@ actions! {
     ProjectWebhookCreate => "project.webhook.create",
     ProjectWebhookUpdate => "project.webhook.update",
     ProjectWebhookDelete => "project.webhook.delete",
+    ProjectWorkerRegistrationDelete => "project.worker.delete",
     TaskCreate => "task.create",
     TaskUpdate => "task.update",
     TaskDelete => "task.delete",

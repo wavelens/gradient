@@ -6,6 +6,7 @@
 
 use crate::access::has_permission;
 use crate::api_spec::ProjectPath;
+use crate::audit::Audit;
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::State;
@@ -19,6 +20,8 @@ use gradient_entity::worker_registration::{
 use gradient_pool::WorkerInfo;
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::connection_failures::{ConnectionFailure, ConnectionFailures};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::ids::*;
 use gradient_types::permissions::Permission;
 use gradient_types::{BaseResponse, MTeam, MTeamWorker};
@@ -685,7 +688,7 @@ pub async fn patch_project_worker(
     operation_id = "deleteProjectWorker",
     tag = "workers",
     summary = "Unregister a worker from a project",
-    description = "Removes the worker registration. The worker may still be connected until\nit disconnects naturally - it will not be able to reconnect after that.\nA team worker answers `409`; it is deleted on its team.",
+    description = "Removes the worker registration. The worker may still be connected until\nit disconnects naturally - it will not be able to reconnect after that.\nA team worker or a state-managed worker returns `409`. Delete a team worker in its team.",
     params(ProjectPath, ("worker_id" = String, Path)),
     responses((status = OK, description = "Worker unregistered", body = String, content_type = "application/json"), WebError)
 )]
@@ -696,22 +699,29 @@ pub async fn delete_project_worker(
         params,
         ..
     }: ProjectScope<Requires<can::ManageWorkers>>,
+    audit: Audit,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let worker_id: String = params.param("worker_id")?;
 
-    let deleted = gradient_db::worker_registrations::delete_by_project_and_worker_id(
+    let Some(registration) = gradient_db::worker_registrations::by_project_and_worker_id(
         &db.web_db, project.id, &worker_id,
     )
-    .await?;
-
-    if deleted == 0 {
+    .await?
+    else {
         if gradient_db::teams::workers::is_team_worker(&db.web_db, &worker_id).await? {
             return Err(ProjectRefusal::TeamWorkerManagedOnTeamPage.into());
         }
-
         return Err(WebError::not_found(Resource::WorkerRegistration));
+    };
+    if registration.managed {
+        return Err(SharedRefusal::WorkerManagedByState.into());
     }
+
+    gradient_db::worker_registrations::delete_by_project_and_worker_id(
+        &db.web_db, project.id, &worker_id,
+    )
+    .await?;
 
     let project_set = std::collections::HashSet::from([project.id]);
     scheduler
@@ -721,6 +731,13 @@ pub async fn delete_project_worker(
     scheduler.request_reauth(&worker_id).await;
     scheduler.connection_failures.clear(&worker_id);
 
+    audit
+        .write(
+            Action::ProjectWorkerRegistrationDelete,
+            EventOwner::project(project.id),
+            serde_json::json!({ "worker_id": worker_id, "display_name": registration.display_name }),
+        )
+        .await;
     Ok(ok_json(format!("worker '{}' unregistered", worker_id)))
 }
 
