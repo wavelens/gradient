@@ -48,6 +48,19 @@
         diff -u ${./frontend/src/app/core/models/api.generated.ts} api.generated.ts
         touch $out
       '';
+      configuration-options-reference-spec = pkgs.runCommand "gradient-configuration-options-check" {
+        nativeBuildInputs = [ pkgs.python3 ];
+        options = builtins.toJSON (import ./docs/tools/options.nix);
+        passAsFile = [ "options" ];
+      } ''
+        mkdir -p docs/tools backend/gradient-types backend/gradient-worker
+        cp ${./docs/tools/options.py} docs/tools/options.py
+        cp ${./backend/gradient-types/options.json} backend/gradient-types/options.json
+        cp ${./backend/gradient-worker/options.json} backend/gradient-worker/options.json
+        python3 docs/tools/options.py < "$optionsPath" > configuration-options.md
+        diff -u ${./docs/generated/configuration-options.md} configuration-options.md
+        touch $out
+      '';
       cli-clippy = self.packages.${system}.gradient-cli-full.clippy;
       cli-unittest = self.packages.${system}.gradient-cli-full.tests;
       cli-static-clippy = self.packages.${system}.gradient-cli-static.clippy;

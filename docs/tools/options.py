@@ -82,7 +82,13 @@ def render(options, server_specs, worker_specs):
         if option["name"].split(".")[0] == "state" or option["type"] == "submodule":
             continue
         sections.setdefault(section_of(option["name"]), []).append(option)
-    lines = []
+    lines = [
+        "<!--",
+        "SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>",
+        "SPDX-License-Identifier: AGPL-3.0-only",
+        "-->",
+        "",
+    ]
     for title in sorted(sections, key=lambda title: (title != "General", title.strip("`"))):
         lines += [f"## {title}", "", "| Option | Type | Default | Env | Description |", "|---|---|---|---|---|"]
         for option in sorted(sections[title], key=lambda option: option["name"]):
