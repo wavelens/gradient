@@ -71,6 +71,35 @@
       />
     </gr-form-field>
 
+    <gr-form-field>
+      <gr-checkbox
+        inputId="restrict-evaluation-fetches"
+        [(ngModel)]="formData.restrict_evaluation_fetches"
+        [binary]="true"
+        [appManagedDisable]="access()"
+        label="Restrict fetches during evaluation to locked flake inputs and allowed URL prefixes"
+      />
+    </gr-form-field>
+
+    @if (formData.restrict_evaluation_fetches) {
+      <gr-form-field
+        label="Additional Allowed URL Prefixes"
+        for="extra-allowed-uri-prefixes"
+        hint="One per line. Entries add to locked inputs and the server prefix. Prefixes also cover URLs under them. Use `github:` for the whole scheme."
+        [invalid]="!!extraAllowedUriPrefixesError"
+        [error]="extraAllowedUriPrefixesError ?? ''"
+      >
+        <textarea
+          grInput
+          id="extra-allowed-uri-prefixes"
+          rows="3"
+          [(ngModel)]="formData.extra_allowed_uri_prefixes"
+          [appManagedDisable]="access()"
+          placeholder="https://example.com/archives&#10;github:"
+        ></textarea>
+      </gr-form-field>
+    }
+
     @if (saveError()) {
       <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
     }
