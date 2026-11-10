@@ -13,7 +13,6 @@
   writtenByHand ? [ ],
   withoutEnvironment ? [ ],
   examples ? { },
-  emptyListIsUnset ? false,
 }: let
   camel = name: let
     parts = lib.splitString "_" name;
@@ -78,7 +77,7 @@
       || lib.getAttrFromPath [ (camel spec.group) "enable" ] cfg)
     && (!(groupSwitches ? ${spec.group}) || lib.getAttrFromPath groupSwitches.${spec.group} cfg);
 
-  isSet = value: value != null && !(emptyListIsUnset && value == [ ]);
+  isSet = spec: value: value != null && !(value == [ ] && spec.default == null);
 in {
   options = lib.foldl' lib.recursiveUpdate { } (map
     (spec: lib.setAttrByPath (pathOf spec) (optionOf spec))
@@ -86,6 +85,6 @@ in {
 
   environment = cfg: lib.listToAttrs (lib.concatMap (spec: let
     value = lib.getAttrFromPath (pathOf spec) cfg;
-  in lib.optional (isEnabled cfg spec && isSet value) (lib.nameValuePair spec.env (environmentValue value)))
+  in lib.optional (isEnabled cfg spec && isSet spec value) (lib.nameValuePair spec.env (environmentValue value)))
     (lib.filter (spec: spec.env != null && !(isCredential spec) && !(lib.elem (pathOf spec) withoutEnvironment)) specs));
 }

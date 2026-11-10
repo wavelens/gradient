@@ -20,7 +20,6 @@
     specs = builtins.fromJSON (builtins.readFile ../../../backend/gradient-worker/options.json);
     subGroups = { eval = [ "cache" ]; log = [ "level" ]; exec = [ "allow" "defaults" "sops" ]; };
     groupSwitches.exec = [ "capabilities" "exec" ];
-    emptyListIsUnset = true;
 
     examples = {
       endpoint = "10.0.0.7:7000";
