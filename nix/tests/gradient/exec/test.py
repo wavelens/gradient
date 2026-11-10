@@ -94,7 +94,7 @@ def job(name):
 def job_log(name, attempt=None, node=None):
     params = [f"{key}={value}" for key, value in [("attempt", attempt), ("node", node)] if value is not None]
     query = f"?{'&'.join(params)}" if params else ""
-    return api("GET", f"exec/{JOBS[name]}/log{query}")
+    return api("GET", f"exec/{JOBS[name]}/log{query}")["log"]
 
 
 def sql(query):
