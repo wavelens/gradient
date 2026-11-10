@@ -18,7 +18,6 @@ import {
 import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/http';
 
 import { routes } from './app.routes';
-import { authInterceptor } from '@core/interceptors/auth.interceptor';
 import { errorInterceptor } from '@core/interceptors/error.interceptor';
 import { ConfigService } from '@core/services/config.service';
 import { GradientTitleStrategy } from '@core/title/gradient-title-strategy';
@@ -43,7 +42,7 @@ export const appConfig: ApplicationConfig = {
     { provide: TitleStrategy, useClass: GradientTitleStrategy },
     { provide: RouteReuseStrategy, useClass: ParamReuseStrategy },
     provideHttpClient(withXhr(), 
-      withInterceptors([authInterceptor, errorInterceptor])
+      withInterceptors([errorInterceptor])
     ),
     {
       provide: APP_INITIALIZER,
