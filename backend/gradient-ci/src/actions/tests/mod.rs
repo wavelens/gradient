@@ -574,3 +574,33 @@ fn a_failed_connectivity_test_lands_in_the_delivery_history() {
         assert!(values.contains(&sea_orm::Value::Bool(Some(false))));
     });
 }
+
+#[test]
+fn a_failed_delivery_does_not_move_the_last_fired_time() {
+    use gradient_fixtures::mock::{exec_ok, raw_statements};
+    use gradient_types::actions::ActionConfig;
+
+    run(async {
+        let db = mock_db()
+            .append_query_results([vec![gradient_types::MTaskActionDelivery::default()]])
+            .append_exec_results([exec_ok()]);
+        let ctx = make_ctx_with(db);
+        let action = gradient_types::MTaskAction {
+            config: serde_json::to_value(ActionConfig::SendWebRequest {
+                url: "http://127.0.0.1/hook".into(),
+                token: None,
+            })
+            .unwrap(),
+            ..action_with(ActionType::SendWebRequest, vec![])
+        };
+
+        let result = super::execute_action(&ctx, action, "evaluation.failed", json!({})).await;
+
+        assert!(result.is_err());
+        let log = raw_statements(ctx.db.worker_db.into_transaction_log());
+        assert!(
+            !log.iter().any(|s| s.sql.starts_with("UPDATE task_action")),
+            "{log:?}"
+        );
+    });
+}
