@@ -38,7 +38,7 @@ pub use self::oidc::{OidcAuthRequest, oidc_login_create, oidc_login_verify};
 pub use self::provider_flow::{
     ProviderCallback, ProviderPurpose, provider_authorize, provider_callback,
 };
-pub use self::scim::authorize_scim;
+pub use self::scim::{ScimBearerTokenSha256Digest, authorize_scim};
 pub use self::websocket_credential_recheck::{
     LiveStreamAuthToken, WebSocketCredentialRecheckDependencies,
 };

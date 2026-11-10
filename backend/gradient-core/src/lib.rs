@@ -62,6 +62,8 @@ pub enum InitError {
     EncryptionKeyFile(#[source] anyhow::Error),
     #[error("failed to load JWT secret: {0}")]
     JwtSecret(#[source] anyhow::Error),
+    #[error("failed to load SCIM token: {0}")]
+    ScimToken(#[source] anyhow::Error),
     #[error("email service init failed: {0}")]
     Email(#[source] anyhow::Error),
     #[error("S3 NAR storage error: {0}")]

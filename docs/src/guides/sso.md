@@ -76,7 +76,7 @@ services.gradient.scim = {
 services.gradient.state.teams.acme-eng.scim_group = "acme-eng";
 ```
 
-1.  Any random string, e.g. `openssl rand -hex 32`. The provider sends this value as the bearer token.
+1. Any random string (for example, `openssl rand -hex 32`). Set this value as the bearer token in the provider. Gradient can read the file at startup. Restart `gradient-server` after a token change.
 
 Configure the provider with the SCIM base URL `https://gradient.example.com/scim/v2` and the bearer token. Turn on pushing of users, profile updates and groups.
 

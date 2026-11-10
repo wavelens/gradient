@@ -429,12 +429,19 @@ pub fn create_router_with_scheduler(
         .merge(cache_log)
         .merge(cache_proto_route);
 
-    if state.config.scim.is_some() {
+    if let Some(scim) = &state.config.scim {
+        let token = authorization::ScimBearerTokenSha256Digest::load(&scim.token_file)
+            .map_err(InitError::ScimToken)?;
         let (scim_routes, _) = routes::scim_routes().split_for_parts();
-        let scim_routes = scim_routes.route_layer(middleware::from_fn_with_state(
-            Arc::clone(&state),
-            authorization::authorize_scim,
-        ));
+        let scim_routes = scim_routes
+            .route_layer(middleware::from_fn_with_state(
+                token,
+                authorization::authorize_scim,
+            ))
+            .route_layer(GovernorLayer::new(rate_limit(
+                Duration::from_millis(100),
+                100,
+            )?));
         app = app.nest("/scim/v2", scim_routes);
     }
 
