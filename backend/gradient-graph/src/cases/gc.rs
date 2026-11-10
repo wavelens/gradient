@@ -532,11 +532,14 @@ async fn c12_unused_claim_deleted_shared_path_kept_until_last_claim() {
     let report = gc_unused_cache_claims(&case, t0()).await;
 
     let expected = GcReport {
-        retired: vec![drv_hash(O).to_owned()],
         deleted_claim_row_count: 1,
         ..Default::default()
     };
     assert_eq!(report, expected, "after 1: report");
+    assert!(
+        stored(&case, drv_hash(O)).await,
+        "after 1: cached_path(O.drv) present"
+    );
     assert_eq!(
         case.signature(O_OUT, c1).await,
         None,
