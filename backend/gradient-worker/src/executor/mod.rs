@@ -389,8 +389,11 @@ impl JobExecutor {
         credentials: &JobCredentials,
         abort: &AbortSignal,
     ) -> Result<()> {
+        let evaluator = self
+            .evaluator
+            .evaluator_for_single_evaluation_job_with_own_statistics();
         let context = eval_split::SplitContext {
-            evaluator: &self.evaluator,
+            evaluator: &evaluator,
             store: &self.store,
             job,
             abort,
@@ -440,7 +443,9 @@ impl JobExecutor {
 
                     let _g = updater.phase(JobPhase::EvalDerivations);
                     eval::evaluate_derivations(
-                        &self.evaluator,
+                        &self
+                            .evaluator
+                            .evaluator_for_single_evaluation_job_with_own_statistics(),
                         job,
                         local_flake_path,
                         updater,

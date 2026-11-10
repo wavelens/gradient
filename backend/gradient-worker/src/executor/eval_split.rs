@@ -6,14 +6,12 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
-use gradient_eval::pool::LiveThunks;
 use gradient_sources::ShardSpec;
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{FlakeJob, FlakeOutputNode};
@@ -28,7 +26,7 @@ use super::AbortSignal;
 use super::eval::{
     CorruptEvalCache, WorkerEvaluator, build_eval_stats_report, build_job_eval_target,
     corrupt_cache_in, drop_corrupt_cache, eval_cache_fingerprint, eval_cache_path,
-    evaluate_shard_with, plan_shards_with, report_failed_attrs,
+    evaluate_shard_with, make_thunk_count_since_call, plan_shards_with, report_failed_attrs,
 };
 use super::eval_cache_sharing::{EVAL_CACHE_FLUSH_INTERVAL, EvalCacheSharing, share_eval_cache};
 use super::progress_report::report_thunks_during;
@@ -272,7 +270,7 @@ pub(super) async fn run_primary(
 ) -> Result<()> {
     updater.report_evaluating_derivations().await?;
     let started = Instant::now();
-    let thunks = counted_thunks(context.evaluator);
+    let thunks = make_thunk_count_since_call(context.evaluator);
     let sink = updater.eval_progress_sink();
     let server = updater.concurrent();
     let eval_target = build_job_eval_target(context.job, Some(source_path));
@@ -286,7 +284,7 @@ pub(super) async fn run_primary(
     };
     let mut work = PoolShardWork::open(context, Some(source_path), fingerprint, updater).await;
     let sharing = work.sharing();
-    let take = report_thunks_during(&*sink, || thunks.total(), take_shards(&server, &mut work));
+    let take = report_thunks_during(&*sink, thunks, take_shards(&server, &mut work));
     tokio::try_join!(announce, flushing_beside(sharing, take))?;
 
     work.report_stats(started).await;
@@ -298,7 +296,7 @@ pub(super) async fn run_companion(
     updater: &mut JobUpdater,
 ) -> Result<()> {
     let started = Instant::now();
-    let thunks = counted_thunks(context.evaluator);
+    let thunks = make_thunk_count_since_call(context.evaluator);
     let sink = updater.eval_progress_sink();
     let server = updater.concurrent();
     let Some((source_path, fingerprint)) = await_source(&server).await? else {
@@ -311,7 +309,7 @@ pub(super) async fn run_companion(
     let fingerprint = (!fingerprint.is_empty()).then_some(fingerprint);
     let mut work = PoolShardWork::open(context, Some(&source_path), fingerprint, updater).await;
     let sharing = work.sharing();
-    let take = report_thunks_during(&*sink, || thunks.total(), take_shards(&server, &mut work));
+    let take = report_thunks_during(&*sink, thunks, take_shards(&server, &mut work));
     flushing_beside(sharing, take).await?;
 
     work.report_stats(started).await;
@@ -330,12 +328,6 @@ async fn flushing_beside<T>(
         }
         None => evaluation.await,
     }
-}
-
-fn counted_thunks(evaluator: &WorkerEvaluator) -> Arc<LiveThunks> {
-    let thunks = evaluator.resolver().live_thunks();
-    thunks.reset();
-    thunks
 }
 
 struct PoolShardWork<'a> {
@@ -478,6 +470,7 @@ mod tests {
     use super::*;
     use gradient_wire::traits::EvalProgressSink;
     use gradient_wire::types::EvalProgress;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     type Request = (bool, Option<FinishedShard>, Vec<String>);

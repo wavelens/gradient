@@ -26,7 +26,7 @@ use super::exec_app::exec_spec;
 pub struct WorkerPoolResolver {
     pool: Arc<EvalPool>,
     config: EvalPoolConfig,
-    stats: Arc<Mutex<EvalStatsAccumulator>>,
+    stats: Mutex<EvalStatsAccumulator>,
 }
 
 struct SourceDependencies<'a>(&'a dyn EvalDependencies);
@@ -124,7 +124,15 @@ impl WorkerPoolResolver {
         Self {
             pool: EvalPool::new(config.clone()),
             config,
-            stats: Arc::new(Mutex::new(EvalStatsAccumulator::default())),
+            stats: Mutex::default(),
+        }
+    }
+
+    pub(crate) fn evaluation_resolver_with_own_statistics(&self) -> Self {
+        Self {
+            pool: Arc::clone(&self.pool),
+            config: self.config.clone(),
+            stats: Mutex::default(),
         }
     }
 
@@ -151,7 +159,6 @@ impl WorkerPoolResolver {
     }
 
     pub fn take_eval_stats(&self) -> EvalStatsTotals {
-        self.pool.live_thunks().reset();
         let acc = std::mem::take(&mut *self.stats.lock());
         acc.finish()
     }
@@ -273,5 +280,46 @@ impl DerivationResolver for WorkerPoolResolver {
         let drv = self.get_derivation(drv_path).await?;
         let features = drv.required_system_features();
         Ok((drv.system.clone(), features))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_eval::stats::StatsDelta;
+
+    fn call(thunks: u64) -> CallStats {
+        CallStats {
+            entry_point: "packages.x86_64-linux.a".into(),
+            pattern: "packages.x86_64-linux.a".into(),
+            first_call: false,
+            stats: Some(StatsDelta {
+                nr_thunks: thunks,
+                ..Default::default()
+            }),
+            eval_ms: 0,
+            attrs: vec![],
+            rss: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn each_evaluation_takes_only_its_own_statistics() {
+        let shared = WorkerPoolResolver::new(
+            1,
+            0,
+            MemoryGuard::MaxTotal(1024 * 1024 * 1024),
+            String::new(),
+            None,
+            false,
+        );
+        let first = shared.evaluation_resolver_with_own_statistics();
+        let second = shared.evaluation_resolver_with_own_statistics();
+
+        first.observe(vec![call(3)]);
+        second.observe(vec![call(40)]);
+
+        assert_eq!(first.take_eval_stats().total_thunks, 3);
+        assert_eq!(second.take_eval_stats().total_thunks, 40);
     }
 }

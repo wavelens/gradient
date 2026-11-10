@@ -180,9 +180,22 @@ impl WorkerEvaluator {
         }
     }
 
+    pub(crate) fn evaluator_for_single_evaluation_job_with_own_statistics(&self) -> Self {
+        Self {
+            resolver: Arc::new(self.resolver.evaluation_resolver_with_own_statistics()),
+            eval_cache_share: self.eval_cache_share,
+        }
+    }
+
     pub async fn shutdown(&self) {
         self.resolver.shutdown().await;
     }
+}
+
+pub(super) fn make_thunk_count_since_call(evaluator: &WorkerEvaluator) -> impl Fn() -> u64 {
+    let thunks = evaluator.resolver.live_thunks();
+    let before = thunks.total();
+    move || thunks.total().saturating_sub(before)
 }
 
 impl Clone for WorkerEvaluator {
@@ -232,12 +245,11 @@ pub async fn evaluate_derivations(
         None => None,
     };
 
-    let thunks = evaluator.resolver.live_thunks();
-    thunks.reset();
+    let thunks = make_thunk_count_since_call(evaluator);
     let sink = updater.eval_progress_sink();
     let evaluation = report_thunks_during(
         &*sink,
-        || thunks.total(),
+        thunks,
         evaluate_derivations_with(
             &*evaluator.resolver,
             &FsDrvReader,
