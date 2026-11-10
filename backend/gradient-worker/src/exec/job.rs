@@ -10,7 +10,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use gradient_redact::SecretRedactor;
 use gradient_types::RepositoryLocation;
 use gradient_types::secret::SecretString;
 use gradient_vm::{
@@ -206,13 +205,11 @@ pub async fn execute(
     let (cluster, held_address) = cluster_member(cluster, job.context.master_port)?;
     let token = SecretString::new(std::mem::take(&mut job.context.token));
     let secrets = job_secrets(&job.secrets, credentials, &host.secrets, &host.worker_id)?;
-    let redactor = job_redactor(&secrets, token.expose());
     let mut run = ExecRun {
         host,
         job,
         token,
         secrets,
-        redactor,
         updater,
         nix,
         abort,
@@ -312,14 +309,15 @@ fn exec_job_of(job_id: &str) -> &str {
     job_id.strip_prefix(EXEC_KEY_PREFIX).unwrap_or(job_id)
 }
 
-pub(crate) fn job_redactor(secrets: &[GuestSecret], token: &str) -> SecretRedactor {
-    let token = (!token.is_empty()).then_some(("job-token", token.as_bytes()));
-    SecretRedactor::new(
-        secrets
-            .iter()
-            .map(|secret| (secret.name.as_str(), secret.value.expose()))
-            .chain(token),
-    )
+pub(crate) fn named_secrets_to_hide_in_exec_job_console_output(
+    secrets: &[GuestSecret],
+    token: &str,
+) -> Vec<GuestSecret> {
+    let token = (!token.is_empty()).then(|| GuestSecret {
+        name: "job-token".to_owned(),
+        value: token.as_bytes().to_vec().into(),
+    });
+    secrets.iter().cloned().chain(token).collect()
 }
 
 pub struct GuestJob {
@@ -518,7 +516,9 @@ async fn take_side_message<R: ExecReport>(
                 .await;
         }
         AgentToWorker::JobSecrets { secrets, token } => {
-            channels.mask_console(&job_redactor(&secrets, &token));
+            channels.mask_console(&named_secrets_to_hide_in_exec_job_console_output(
+                &secrets, &token,
+            ));
         }
         AgentToWorker::UploadStart {
             upload_id,
@@ -628,7 +628,6 @@ struct ExecRun<'a> {
     job: ExecJob,
     token: SecretString,
     secrets: Vec<GuestSecret>,
-    redactor: SecretRedactor,
     updater: &'a mut JobUpdater,
     nix: StoreAccess<'a>,
     abort: AbortSignal,
@@ -720,7 +719,10 @@ impl ExecRun<'_> {
         let requirement = &self.job.requirement;
         let mut mux =
             GuestChannelMux::new(requirement.ssh, requirement.ports.clone(), agent.version());
-        mux.mask_console(&self.redactor);
+        mux.mask_console(&named_secrets_to_hide_in_exec_job_console_output(
+            &self.secrets,
+            self.token.expose(),
+        ));
         let mut job = GuestJob {
             watchdog: Watchdog::new(
                 Instant::now(),
@@ -1497,8 +1499,11 @@ mod tests {
     #[test]
     fn the_job_token_is_masked_as_job_token() {
         assert_eq!(
-            job_redactor(&[], "gr_job_abcdefgh123").redact(b"t=gr_job_abcdefgh123"),
-            b"t=[secret:job-token]"
+            named_secrets_to_hide_in_exec_job_console_output(&[], "gr_job_abcdefgh123"),
+            [GuestSecret {
+                name: "job-token".into(),
+                value: b"gr_job_abcdefgh123".to_vec().into()
+            }]
         );
     }
 

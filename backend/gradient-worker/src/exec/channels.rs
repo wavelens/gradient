@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use gradient_redact::{SecretRedactor, StreamRedactor};
 use gradient_wire::guest::{
     GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_AGENT_SINCE, GUEST_CHANNELS_AGENT_SINCE,
-    GUEST_CONSOLE_RESIZE_SINCE, WorkerToAgent,
+    GUEST_CONSOLE_RESIZE_SINCE, GuestSecret, WorkerToAgent,
 };
 use gradient_wire::messages::{GUEST_CHANNEL_CHUNK, GuestChannelKind};
 
@@ -81,6 +81,7 @@ pub struct GuestChannelMux {
     console_viewers: Vec<u64>,
     scrollback: ConsoleScrollback,
     console_redactor: StreamRedactor,
+    append_only_guest_secrets_masked_in_console_output: Vec<GuestSecret>,
 }
 
 impl GuestChannelMux {
@@ -93,11 +94,23 @@ impl GuestChannelMux {
             console_viewers: Vec::new(),
             scrollback: ConsoleScrollback::default(),
             console_redactor: SecretRedactor::default().stream(),
+            append_only_guest_secrets_masked_in_console_output: Vec::new(),
         }
     }
 
-    pub fn mask_console(&mut self, redactor: &SecretRedactor) {
-        self.console_redactor = redactor.stream();
+    pub fn mask_console(&mut self, secrets: &[GuestSecret]) {
+        let masked = &mut self.append_only_guest_secrets_masked_in_console_output;
+        for secret in secrets {
+            if !masked.contains(secret) {
+                masked.push(secret.clone());
+            }
+        }
+        self.console_redactor = SecretRedactor::new(
+            masked
+                .iter()
+                .map(|secret| (secret.name.as_str(), secret.value.expose())),
+        )
+        .stream();
     }
 
     pub fn on_command(&mut self, command: GuestChannelCommand) -> Vec<MuxAction> {
@@ -771,12 +784,37 @@ mod tests {
     }
 
     #[test]
+    fn the_guest_cannot_remove_a_masked_secret() {
+        let mut mux = mux();
+        mux.mask_console(&[GuestSecret {
+            name: "wandb-token".into(),
+            value: b"s3cr3t-value".to_vec().into(),
+        }]);
+        mux.mask_console(&[]);
+        mux.on_command(open(1, GuestChannelKind::Console));
+
+        let seen: Vec<u8> = mux
+            .on_console_output(b"tok s3cr3t-value\n")
+            .iter()
+            .flat_map(|action| match action {
+                MuxAction::ToServerData {
+                    channel_id: 1,
+                    data,
+                } => data.clone(),
+                _ => Vec::new(),
+            })
+            .collect();
+
+        assert_eq!(seen, b"tok [secret:wandb-token]\n");
+    }
+
+    #[test]
     fn the_console_is_masked_across_chunks_for_every_viewer() {
         let mut mux = mux();
-        mux.mask_console(&SecretRedactor::new([(
-            "wandb-token",
-            b"s3cr3t-value".as_slice(),
-        )]));
+        mux.mask_console(&[GuestSecret {
+            name: "wandb-token".into(),
+            value: b"s3cr3t-value".to_vec().into(),
+        }]);
         mux.on_command(open(1, GuestChannelKind::Console));
 
         let mut actions = mux.on_console_output(b"tok s3cr3t");

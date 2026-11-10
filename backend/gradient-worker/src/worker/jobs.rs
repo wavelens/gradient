@@ -223,7 +223,17 @@ impl JobRegistry {
     fn send_to_channel_job(&self, channel_id: u64, command: GuestChannelCommand) -> bool {
         self.find_active_job_by_guest_channel_id(channel_id)
             .and_then(|job| job.guest_channels.as_ref())
-            .is_some_and(|commands| commands.try_send(command).is_ok())
+            .is_some_and(|commands| match commands.try_send(command) {
+                Ok(()) => true,
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    warn!(
+                        channel_id,
+                        "Guest channel frame dropped. The exec job does not read its channel inbox fast enough."
+                    );
+                    true
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => false,
+            })
     }
 
     pub(super) fn close_guest_channels(&mut self) {
