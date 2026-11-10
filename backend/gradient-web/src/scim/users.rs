@@ -83,7 +83,7 @@ pub async fn list(
     let rows = if count == 0 {
         Vec::new()
     } else {
-        gradient_db::users::page_of_managed(db, &filter, count, (start - 1) / count.max(1)).await?
+        gradient_db::users::list_managed_users(db, &filter, start - 1, count).await?
     };
 
     let resources: Vec<_> = rows.iter().map(UserResource::from).collect();

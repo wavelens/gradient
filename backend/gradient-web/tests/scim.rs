@@ -95,6 +95,31 @@ fn count_row(num: i64) -> BTreeMap<&'static str, sea_orm::Value> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn scim_list_users_starts_at_the_requested_index() {
+    let db = mock_db()
+        .append_query_results([vec![count_row(150)]])
+        .append_query_results([Vec::<user::Model>::new()])
+        .into_connection();
+    let server = scim_server(db.clone());
+    let res = server
+        .get("/scim/v2/Users")
+        .add_query_param("startIndex", "51")
+        .add_query_param("count", "100")
+        .add_header("Authorization", auth_header())
+        .await;
+    res.assert_status_ok();
+    drop(server);
+
+    let page = all_statements(db.into_transaction_log())
+        .into_iter()
+        .find(|s| s.sql.contains("OFFSET"))
+        .expect("the user list query uses an offset");
+    let values = format!("{:?}", page.values);
+    assert!(values.contains("(Some(50))"), "{values}");
+    assert!(values.contains("(Some(100))"), "{values}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn scim_create_user_returns_201() {
     let created = scim_user("alice@example.com", true);
     let db = mock_db()

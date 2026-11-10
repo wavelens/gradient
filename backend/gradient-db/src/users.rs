@@ -147,15 +147,17 @@ pub async fn count_managed<C: ConnectionTrait>(
     managed(filter).count(db).await
 }
 
-pub async fn page_of_managed<C: ConnectionTrait>(
+pub async fn list_managed_users<C: ConnectionTrait>(
     db: &C,
     filter: &ManagedUserFilter,
-    per_page: u64,
-    page: u64,
+    offset: u64,
+    limit: u64,
 ) -> Result<Vec<MUser>, DbErr> {
     managed(filter)
-        .paginate(db, per_page)
-        .fetch_page(page)
+        .order_by_asc(CUser::Id)
+        .offset(offset)
+        .limit(limit)
+        .all(db)
         .await
 }
 
