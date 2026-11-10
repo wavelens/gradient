@@ -10,14 +10,13 @@ use crate::commands::cache_upload;
 use crate::commands::cache_upstream;
 use crate::commands::completion;
 use crate::commands::webhook::{WebhookSubcommands, run_webhook_subcommand};
-use crate::error::{CliError, FileAction};
+use crate::error::CliError;
 use crate::input::{ask_for_secret, client_from_config, handle_input};
 use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::{MakeCacheRequest, PatchCacheRequest};
 use connector::webhooks::WebhookResource;
-use std::fs;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -349,30 +348,24 @@ pub async fn handle(cmd: Commands, out: Output) {
                 _ => ask_for_secret("API key (GRAD…)", out),
             };
 
+            if token.contains(char::is_whitespace) {
+                out.err(
+                    ExitKind::Usage,
+                    "API keys cannot contain spaces or newlines.",
+                );
+            }
+
             let machine_host = crate::netrc::machine_host(&server);
             if machine_host.is_empty() {
                 out.err(ExitKind::Usage, format!("Invalid server URL: '{}'", server));
             }
 
-            let new_entry = crate::netrc::entry(&machine_host, &token);
-
-            let existing = fs::read_to_string(&netrc_file).unwrap_or_default();
-            let filtered = crate::netrc::remove_entry(&existing, &machine_host);
-
-            let updated = if filtered.ends_with('\n') || filtered.is_empty() {
-                format!("{}{}", filtered, new_entry)
-            } else {
-                format!("{}\n{}", filtered, new_entry)
-            };
-
-            if let Some(parent) = std::path::Path::new(&netrc_file).parent()
-                && let Err(e) = fs::create_dir_all(parent)
-            {
-                out.fail(CliError::file(FileAction::Create, parent, e));
-            }
-
-            fs::write(&netrc_file, &updated)
-                .unwrap_or_else(|e| out.fail(CliError::file(FileAction::Write, &netrc_file, e)));
+            crate::netrc::replace_entry_for_host_atomically(
+                std::path::Path::new(&netrc_file),
+                &machine_host,
+                &token,
+            )
+            .unwrap_or_else(|e| out.fail(e));
 
             out.ok(&serde_json::json!({
                 "installed": true,
