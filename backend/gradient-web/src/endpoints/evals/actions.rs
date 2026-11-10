@@ -5,11 +5,12 @@
  */
 
 use super::refusal::EvaluationRefusal;
-use crate::access::can_view_project;
+use crate::access::require_project_permission;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult, require_superuser};
 use crate::helpers::ok_json;
 use crate::lookup::require;
+use crate::permissions::Permission;
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::{Path, State};
@@ -33,13 +34,26 @@ async fn load_abortable_evaluation(
         return EvalAccessContext::load_unguarded(db, evaluation_id).await;
     }
 
+    load_triggerable_evaluation(db, user, api_key, evaluation_id).await
+}
+
+async fn load_triggerable_evaluation(
+    db: &gradient_db::WebDb,
+    user: &MUser,
+    api_key: &MaybeApiKey,
+    evaluation_id: EvaluationId,
+) -> WebResult<EvalAccessContext> {
     let api_key_ref = api_key.as_ref();
     let ctx = EvalAccessContext::load(db, evaluation_id, &Some(user.clone()), api_key_ref).await?;
-    // Mutations require explicit project membership even on a public project.
-    if !can_view_project(db, user.id, ctx.project_id, api_key_ref).await? {
-        return Err(WebError::not_found(Resource::Evaluation));
-    }
-
+    require_project_permission(
+        db,
+        user.id,
+        ctx.project_id,
+        Permission::TriggerEvaluation,
+        Resource::Evaluation,
+        api_key_ref,
+    )
+    .await?;
     Ok(ctx)
 }
 
@@ -49,7 +63,7 @@ async fn load_abortable_evaluation(
     operation_id = "postEvaluation",
     tag = "evals",
     summary = "Evaluation action",
-    description = "Performs an action on the evaluation. Currently the only supported action is\n`\"abort\"`, which cancels all in-progress and queued builds. Requires project membership or a superuser.",
+    description = "Performs an action on the evaluation. Currently the only supported action is\n`\"abort\"`, which cancels all in-progress and queued builds. Callers need the `triggerEvaluation` permission on the project, or superuser access.",
     params(("evaluation" = EvaluationId, Path)),
     request_body = MakeEvaluationRequest,
     responses((status = OK, description = "Success", body = String, content_type = "application/json"), WebError)
@@ -77,7 +91,7 @@ pub async fn post_evaluation(
     operation_id = "retryEvaluation",
     tag = "evaluations",
     summary = "Retry evaluation",
-    description = "Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Requires project membership. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.",
+    description = "Starts a new evaluation of the same commit without fetching or evaluating again, and returns its UUID in `message`. The new evaluation queues every failed, timed-out, aborted and dependency-failed build of the finished evaluation again, a reproducible builder failure included, whatever the task's `retry_failed_builds`. Callers need the `triggerEvaluation` permission on the project. Answers 409 while the evaluation or another evaluation of its task is running. A new evaluation can inherit the trigger of the completed evaluation and record the caller as `triggered_by`.",
     params(("evaluation" = EvaluationId, Path)),
     responses((status = OK, description = "UUID of the new evaluation", body = String, content_type = "application/json"), WebError)
 )]
@@ -87,17 +101,7 @@ pub async fn post_evaluation_retry(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let api_key_ref = api_key.as_ref();
-    let ctx = EvalAccessContext::load(
-        &state.web_db,
-        evaluation_id,
-        &Some(user.clone()),
-        api_key_ref,
-    )
-    .await?;
-    if !can_view_project(&state.web_db, user.id, ctx.project_id, api_key_ref).await? {
-        return Err(WebError::not_found(Resource::Evaluation));
-    }
+    let ctx = load_triggerable_evaluation(&state.web_db, &user, &api_key, evaluation_id).await?;
 
     if !EvaluationStatus::TERMINAL.contains(&ctx.evaluation.status) {
         return Err(EvaluationRefusal::StillRunning.into());
