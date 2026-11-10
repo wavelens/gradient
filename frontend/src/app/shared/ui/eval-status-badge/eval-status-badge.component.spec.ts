@@ -33,6 +33,15 @@ describe('EvalStatusBadgeComponent', () => {
     }
   });
 
+  it('shows a building evaluation that waits for exec jobs as waiting', () => {
+    const fixture = TestBed.createComponent(EvalStatusBadgeComponent);
+    fixture.componentRef.setInput('status', 'Building');
+    fixture.componentRef.setInput('waitingReason', { kind: 'exec_jobs', waiting_exec_jobs: 2 });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.status-badge').dataset.phase).toBe('waiting');
+    expect(fixture.nativeElement.textContent.trim()).toBe('Waiting');
+  });
+
   it('keeps queued distinct from running', () => {
     const fixture = render('Queued');
     expect(fixture.nativeElement.querySelector('gr-status-icon').dataset.phase).toBe('queued');

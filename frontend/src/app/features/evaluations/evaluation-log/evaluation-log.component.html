@@ -160,7 +160,7 @@
           (click)="buildsOpen.set(!buildsOpen())"></button>
         <div class="info-bar-left">
           <div class="info-metric">
-            <gr-eval-status-badge [status]="ev.status" [prioritized]="ev.prioritized" />
+            <gr-eval-status-badge [status]="ev.status" [waitingReason]="ev.waiting_reason" [prioritized]="ev.prioritized" />
           </div>
           @if (ev.started_at) {
             <div class="info-metric">

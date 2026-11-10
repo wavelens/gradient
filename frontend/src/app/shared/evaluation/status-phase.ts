@@ -10,6 +10,7 @@ import type {
   InputFetchState,
   EntryPointSummary,
   ExecJobStatus,
+  WaitingReason,
 } from '@core/models';
 import type { BadgeSeverity } from '@gradient/ui/ui';
 import { isRunningEvaluationStatus } from './duration';
@@ -35,7 +36,12 @@ export const PHASE_SEVERITY: Record<StatusPhase, BadgeSeverity> = {
   aborted: 'neutral',
 };
 
-export function evaluationPhase(status: EvaluationStatus): StatusPhase {
+export function evaluationPhase(status: EvaluationStatus, waitingReason?: WaitingReason | null): StatusPhase {
+  const phase = statusToDisplayPhase(status);
+  return waitingReason && (phase === 'queued' || phase === 'running') ? 'waiting' : phase;
+}
+
+function statusToDisplayPhase(status: EvaluationStatus): StatusPhase {
   switch (status) {
     case 'Queued': return 'queued';
     case 'Waiting': return 'waiting';

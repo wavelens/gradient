@@ -9,7 +9,7 @@
     <gr-page-layout [breadcrumb]="breadcrumb()" [title]="headline()">
       <div slot="meta" class="facts">
         <span class="status">
-          <gr-eval-status-badge [status]="ev.status" />
+          <gr-eval-status-badge [status]="ev.status" [waitingReason]="ev.waiting_reason" />
           @if (liveConnectionOpen() !== null) { <gr-live-status [connected]="!!liveConnectionOpen()" /> }
         </span>
         @if (s.packages.total) {

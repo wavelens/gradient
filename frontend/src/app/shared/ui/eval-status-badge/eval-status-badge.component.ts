@@ -7,7 +7,7 @@
 import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
 import { evaluationPhase } from '@shared/evaluation';
 import { StatusBadgeComponent } from '../status-badge/status-badge.component';
-import { EvaluationStatus } from '@core/models';
+import type { EvaluationStatus, WaitingReason } from '@core/models';
 
 @Component({
   selector: 'gr-eval-status-badge',
@@ -19,11 +19,13 @@ import { EvaluationStatus } from '@core/models';
 export class EvalStatusBadgeComponent {
   status = input.required<EvaluationStatus>();
   prioritized = input(false);
+  waitingReason = input<WaitingReason | null | undefined>(null);
 
-  phase = computed(() => evaluationPhase(this.status()));
+  phase = computed(() => evaluationPhase(this.status(), this.waitingReason()));
 
   label = computed(() => {
     const s = this.status();
+    if (this.phase() === 'waiting') return 'Waiting';
     if (s === 'EvaluatingFlake' || s === 'EvaluatingDerivation') return 'Evaluating';
     return s;
   });

@@ -36,6 +36,13 @@ describe('evaluationPhase', () => {
   ])('maps %s to %s', (status, phase) => {
     expect(evaluationPhase(status)).toBe(phase);
   });
+
+  it('turns a queued or running evaluation with a waiting reason into waiting, but keeps finished ones', () => {
+    expect(evaluationPhase('Building', { kind: 'exec_jobs', waiting_exec_jobs: 1 })).toBe('waiting');
+    expect(evaluationPhase('Queued', { kind: 'no_cache' })).toBe('waiting');
+    expect(evaluationPhase('Failed', { kind: 'no_cache' })).toBe('failure');
+    expect(evaluationPhase('Building', null)).toBe('running');
+  });
 });
 
 describe('buildPhase', () => {

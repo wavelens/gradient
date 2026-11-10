@@ -83,10 +83,10 @@
             @let isSelected = selected()?.id === e.id;
             <button type="button" role="tab" class="eval-card" [id]="'evaluation-tab-' + e.id"
                     [attr.aria-selected]="isSelected" aria-controls="evaluation-detail-panel" [tabindex]="isSelected ? 0 : -1"
-                    [attr.data-phase]="evaluationPhase(e.status)" [class.selected]="isSelected" (click)="select(e)"
+                    [attr.data-phase]="evaluationPhase(e.status, e.waiting_reason)" [class.selected]="isSelected" (click)="select(e)"
                     (contextmenu)="select(e); evalMenu.openAt($event)">
               <span class="l1">
-                <gr-status-icon class="phase-swatch" [phase]="evaluationPhase(e.status)" [prioritized]="e.prioritized" size="sm" />
+                <gr-status-icon class="phase-swatch" [phase]="evaluationPhase(e.status, e.waiting_reason)" [prioritized]="e.prioritized" size="sm" />
                 <span class="ev-title" [class.mono]="!e.commit_message">{{ evalTitle(e) }}</span>
               </span>
               <span class="l2">
@@ -120,7 +120,7 @@
                     {{ evalTitle(sel) }}
                   }
                 </h2>
-                <gr-eval-status-badge [status]="sel.status" [prioritized]="sel.prioritized" />
+                <gr-eval-status-badge [status]="sel.status" [waitingReason]="sel.waiting_reason" [prioritized]="sel.prioritized" />
                 @if (getWaitingReasonTitleForEvaluationWithNonWaitingStatus(sel); as waitingTitle) {
                   <span class="waiting-reason"><gr-icon name="pause_circle" size="sm" /> {{ waitingTitle }}</span>
                 }

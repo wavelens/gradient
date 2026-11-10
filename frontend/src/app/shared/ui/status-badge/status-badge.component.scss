@@ -19,8 +19,8 @@
 
   &[data-phase='success'] { color: var(--gr-status-success-text); }
   &[data-phase='failure'] { color: var(--gr-status-danger-text); }
-  &[data-phase='aborted'] { color: var(--gr-text-secondary); }
+  &[data-phase='aborted'] { color: var(--gr-text-primary); }
   &[data-phase='waiting'] { color: var(--gr-status-warning-text); }
-  &[data-phase='queued'] { color: var(--gr-text-secondary); }
+  &[data-phase='queued'] { color: var(--gr-text-secondary); background: transparent; outline: 1px dashed var(--gr-border); outline-offset: -1px; }
   &[data-phase='running'] { color: var(--gr-status-info-text); }
 }
