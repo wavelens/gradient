@@ -37,6 +37,7 @@ import {
   WritableDirective,
   ManagedDisableDirective,
   ServerConfigurationManagedBannerComponent,
+  buildMemberSoleAdminDisabledReasonTextForUsername,
   compareRoleNamesByBuiltInAccessThenName,
   countRoleHoldersAndBuildBreakdownText,
   formatMemberNameForConfirmDialog,
@@ -152,10 +153,12 @@ export class MembersRolesComponent implements OnInit {
       invitations: this.invitations(),
     }),
   );
-  soleAdminUsername = computed(() => {
-    const admins = this.members().filter((member) => member.name === 'Admin');
-    return admins.length === 1 ? admins[0].id : null;
-  });
+  memberOnlyAdminDisabledReason = computed(() =>
+    buildMemberSoleAdminDisabledReasonTextForUsername(
+      'project',
+      this.members().filter((member) => member.name === 'Admin').map((member) => member.id),
+    ),
+  );
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';

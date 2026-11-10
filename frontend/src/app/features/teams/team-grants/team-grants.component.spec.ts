@@ -97,6 +97,22 @@ describe('TeamGrantsComponent', () => {
     expect(text()).toContain(message);
   });
 
+  it('names the teams whose workers still serve the project when no team has a role', () => {
+    const { fixture, service, component, text } = setup('project', 'users');
+    service.projectGrants = () => of(grants.filter((grant) => !grant.users));
+    component.load();
+    fixture.detectChanges();
+    expect(text()).toContain('No teams');
+    expect(text()).toContain("Ops still run this project's builds on their own workers.");
+    expect(text()).not.toContain('QA');
+  });
+
+  it('says only the role went when the team keeps serving the project with its workers', () => {
+    const { component, notify } = setup('project', 'users');
+    component.remove(grantOf('platform'));
+    expect(notify.success).toHaveBeenCalledWith('Team role removed');
+  });
+
   it('names what Remove takes away on each part', () => {
     const users = setup('project', 'users');
     expect(users.fixture.nativeElement.querySelector('[aria-label="Remove role of Platform"]')).not.toBeNull();

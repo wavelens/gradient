@@ -36,6 +36,7 @@ import {
   WritableDirective,
   ManagedDisableDirective,
   ServerConfigurationManagedBannerComponent,
+  buildMemberSoleAdminDisabledReasonTextForUsername,
   compareRoleNamesByBuiltInAccessThenName,
   countRoleHoldersAndBuildBreakdownText,
   formatMemberNameForConfirmDialog,
@@ -155,10 +156,12 @@ export class CacheMembersRolesComponent implements OnInit {
       invitations: this.invitations(),
     }),
   );
-  soleAdminUsername = computed(() => {
-    const admins = this.members().filter((member) => member.name === 'Admin');
-    return admins.length === 1 ? admins[0].id : null;
-  });
+  memberOnlyAdminDisabledReason = computed(() =>
+    buildMemberSoleAdminDisabledReasonTextForUsername(
+      'cache',
+      this.members().filter((member) => member.name === 'Admin').map((member) => member.id),
+    ),
+  );
 
   constructor() {
     runReloadIntervalWhileTabVisible(() => merge(

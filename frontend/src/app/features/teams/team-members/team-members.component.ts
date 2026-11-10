@@ -15,6 +15,7 @@ import { AuthService } from '@core/services/auth.service';
 import { ConfirmService } from '@shared/confirm';
 import { PENDING_INVITATION_REVOKE_FAILURE, getPendingInvitationRevocationConsequenceSentence } from '@shared/access/pending-invitation-revoke-dialog-texts';
 import {
+  buildMemberSoleAdminDisabledReasonTextForUsername,
   canManageTeam,
   formatMemberNameForConfirmDialog,
   getMemberRemovalConsequenceSentence,
@@ -97,10 +98,12 @@ export class TeamMembersComponent implements OnInit {
   readonly sourceLabels: Record<TeamMemberSource, string | null> = { api: null, state: 'Server configuration', group: 'Group' };
 
   canEdit = computed(() => canManageTeam(this.team(), this.auth.user()));
-  soleAdminUsername = computed(() => {
-    const admins = this.members().filter((member) => member.role === 'admin');
-    return admins.length === 1 ? admins[0].user : null;
-  });
+  memberOnlyAdminDisabledReason = computed(() =>
+    buildMemberSoleAdminDisabledReasonTextForUsername(
+      'team',
+      this.members().filter((member) => member.role === 'admin').map((member) => member.user),
+    ),
+  );
   readonly allMembersPhraseByMemberSource: Record<TeamMemberSource, string | null> = {
     api: null,
     state: 'from the server configuration',

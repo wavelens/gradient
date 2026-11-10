@@ -15,10 +15,10 @@ import { getMembersWithPermissionPhrase } from './missing-permission';
   standalone: true,
   imports: [MessageBannerComponent],
   template: `
-    @if (access()?.managed && access()?.canEdit) {
+    @if (access()?.managed) {
       <gr-message-banner type="info">
         Settings for this {{ kind() }} come from the server configuration.
-        @if (kind() === 'cache') { Deactivating the cache still works here.}
+        @if (kind() === 'cache' && access()?.canEdit) { Deactivating the cache still works here.}
       </gr-message-banner>
     } @else if (showReadOnlyNote() && access() && !access()?.canEdit) {
       <gr-message-banner type="info">Only the {{ settingsEditors() }} can change these settings.</gr-message-banner>

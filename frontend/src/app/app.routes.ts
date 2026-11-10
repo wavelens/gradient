@@ -285,7 +285,7 @@ export const routes: Routes = [
       },
       {
         path: 'nars',
-        title: 'Cache NARs',
+        title: 'Cache packages',
         loadComponent: () =>
           import('./features/caches/cache-nars/cache-nars.component').then(
             (m) => m.CacheNarsComponent,

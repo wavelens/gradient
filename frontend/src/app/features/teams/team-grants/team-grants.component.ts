@@ -96,8 +96,12 @@ export class TeamGrantsComponent implements OnInit {
   shownGrants = computed(() => this.allGrants().filter((grant) => grant[this.part()]));
   emptyMessage = computed(() => {
     const workers = this.part() === 'workers';
-    if (this.canEdit()) return workers ? "Grant a team to run this project's builds on the team's workers." : 'Grant a team to give its members a role here.';
-    return workers ? "No team's workers run this project's builds." : 'No team has a role here.';
+    if (workers) return this.canEdit() ? "Grant a team to run this project's builds on the team's workers." : "No team's workers run this project's builds.";
+    const base = this.canEdit() ? 'Grant a team to give its members a role here.' : 'No team has a role here.';
+    const teams = this.allGrants()
+      .filter((grant) => grant.workers && !grant.users && !grant.pending)
+      .map((grant) => grant.display_name);
+    return teams.length ? `${base} ${teams.join(', ')} still run this project's builds on their own workers.` : base;
   });
   myTeams = signal<TeamSummary[]>([]);
   suggestions = signal<AutoCompleteSuggestion[]>([]);
@@ -211,6 +215,7 @@ export class TeamGrantsComponent implements OnInit {
   remove(grant: TeamGrantEntry): void {
     const team = grant.display_name;
     const workers = this.part() === 'workers';
+    const keepsWorkers = this.kind() === 'project' && !workers && grant.workers && !grant.pending;
     this.confirm
       .confirm({
         title: grant.pending
@@ -226,7 +231,9 @@ export class TeamGrantsComponent implements OnInit {
           this.kind() === 'project' ? this.removeFromProject(grant) : this.teams.removeCacheGrant(this.name(), grant.team),
       })
       .subscribe(() => {
-        this.notify.success(grant.pending ? 'Request withdrawn' : workers ? 'Team workers removed' : 'Team access removed');
+        this.notify.success(
+          grant.pending ? 'Request withdrawn' : workers ? 'Team workers removed' : keepsWorkers ? 'Team role removed' : 'Team access removed',
+        );
         this.refresh();
       });
   }
