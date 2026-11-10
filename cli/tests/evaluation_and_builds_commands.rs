@@ -208,3 +208,25 @@ async fn logs_exits_non_zero_when_the_log_stream_cannot_be_opened() {
         true
     );
 }
+
+#[tokio::test]
+async fn a_quiet_build_outside_a_repository_reports_the_failure_as_json() {
+    let server = MockServer::start().await;
+    let dir = TempDir::new().unwrap();
+
+    let failed = run_gradient_json_with_temp_home_for_wiremock_in_dir(
+        &server,
+        dir.path(),
+        &["--project", "p", "build", "--quiet"],
+    )
+    .failure()
+    .code(1);
+    let envelope = parse_gradient_json_stdout_as_json_value(&failed);
+    assert_eq!(envelope["error"], true);
+    assert!(
+        envelope["message"]
+            .as_str()
+            .unwrap()
+            .contains("Not in a git repository")
+    );
+}

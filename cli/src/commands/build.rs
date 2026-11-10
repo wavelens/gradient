@@ -16,7 +16,6 @@ use connector::api::{DispatchResponse, EvaluationResponse, EvaluationStatus, Run
 #[cfg(not(feature = "nix"))]
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::exit;
 
 pub(crate) struct BuildParams {
     pub target: Option<String>,
@@ -35,23 +34,17 @@ pub async fn handle_build(
     let (client, started) = submit_build_request(params, quiet, out).await;
     let evaluation = started.evaluation.to_string();
 
-    if background {
-        out.ok(&started);
-        out.human(evaluation.clone());
-        return;
-    }
-
-    if quiet {
+    out.ok(&started);
+    if background || quiet {
         out.human(evaluation.clone());
     } else {
-        out.ok(&started);
         out.human(format!("Evaluation: {}", evaluation));
         out.human(format!("Task:    {}", started.task));
         out.human(format!("Commit:     {}", started.commit));
-    }
-
-    if !quiet {
         out.human("Streaming evaluation logs...");
+    }
+    if background {
+        return;
     }
 
     if let Err(e) = crate::commands::logstream::stream_eval_logs(&client, &evaluation, out).await {
@@ -110,31 +103,22 @@ pub(crate) async fn submit_build_request(
     });
 
     let cwd = std::env::current_dir().unwrap_or_else(|e| {
-        if !quiet {
-            out.progress(format!("Failed to read current directory: {}", e));
-        }
-        exit(1);
+        out.err(
+            ExitKind::Api,
+            format!("Failed to read current directory: {}", e),
+        );
     });
 
     let repo = git2::Repository::discover(&cwd).unwrap_or_else(|e| {
-        if !quiet {
-            out.progress(format!("Not in a git repository: {}", e));
-        }
-        exit(1);
+        out.err(ExitKind::Api, format!("Not in a git repository: {}", e));
     });
 
     let workdir = repo.workdir().map(Path::to_path_buf).unwrap_or_else(|| {
-        if !quiet {
-            out.progress("Bare repositories are not supported.");
-        }
-        exit(1);
+        out.err(ExitKind::Api, "Bare repositories are not supported.");
     });
 
     let index = repo.index().unwrap_or_else(|e| {
-        if !quiet {
-            out.progress(format!("Failed to read git index: {}", e));
-        }
-        exit(1);
+        out.err(ExitKind::Api, format!("Failed to read git index: {}", e));
     });
 
     let mut entries: Vec<TrackedFile> = Vec::new();
@@ -151,10 +135,7 @@ pub(crate) async fn submit_build_request(
     }
 
     if entries.is_empty() {
-        if !quiet {
-            out.progress("No tracked files to upload.");
-        }
-        exit(1);
+        out.err(ExitKind::Api, "No tracked files to upload.");
     }
 
     let started = upload_and_start(&client, &project, &entries, &params, quiet, out).await;
@@ -222,10 +203,10 @@ async fn start_via_manifest(
         .map(|e| match hash_file(&e.abs) {
             Ok((hash, size)) => (e.path.clone(), hash, size),
             Err(err) => {
-                if !quiet {
-                    out.progress(format!("Failed to hash {}: {}", e.abs.display(), err));
-                }
-                exit(1);
+                out.err(
+                    ExitKind::Api,
+                    format!("Failed to hash {}: {}", e.abs.display(), err),
+                );
             }
         })
         .collect();
@@ -245,10 +226,7 @@ async fn start_via_manifest(
     let manifest = match client.build_requests().submit_manifest(manifest_req).await {
         Ok(m) => m,
         Err(e) => {
-            if !quiet {
-                out.progress(format!("Manifest rejected: {}", e));
-            }
-            exit(1);
+            out.err(ExitKind::from(&e), format!("Manifest rejected: {}", e));
         }
     };
 
@@ -274,10 +252,10 @@ async fn start_via_manifest(
             match std::fs::read(abs) {
                 Ok(bytes) => blobs_by_hash.push((hash.clone(), bytes.into())),
                 Err(e) => {
-                    if !quiet {
-                        out.progress(format!("Failed to read {}: {}", abs.display(), e));
-                    }
-                    exit(1);
+                    out.err(
+                        ExitKind::Api,
+                        format!("Failed to read {}: {}", abs.display(), e),
+                    );
                 }
             }
         }
@@ -293,10 +271,7 @@ async fn start_via_manifest(
                 }
             }
             Err(e) => {
-                if !quiet {
-                    out.progress(format!("Failed to upload blobs: {}", e));
-                }
-                exit(1);
+                out.err(ExitKind::from(&e), format!("Failed to upload blobs: {}", e));
             }
         }
     }
@@ -325,10 +300,10 @@ async fn start_via_manifest(
     {
         Ok(d) => d,
         Err(e) => {
-            if !quiet {
-                out.progress(format!("Failed to start build request: {}", e));
-            }
-            exit(1);
+            out.err(
+                ExitKind::from(&e),
+                format!("Failed to start build request: {}", e),
+            );
         }
     }
 }
