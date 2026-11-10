@@ -17,7 +17,7 @@ use gradient_types::{
     GitHostType, GitHubAppConfig, MIntegration, MTask, MTaskAction, MTaskTrigger, ProjectId,
     TaskActionId, TaskTriggerId, UserId,
 };
-use sea_orm::{ConnectionTrait, TransactionTrait};
+use sea_orm::ConnectionTrait;
 
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct AutoAttach {
@@ -223,26 +223,14 @@ async fn bind_github_app(
         return Ok(());
     };
 
-    let txn = web_db.inner().begin().await?;
-    let installation = gradient_ci::upsert_github_installation(
-        &txn,
+    gradient_ci::link_project_github_installation(
+        web_db.inner(),
         task.project,
         installation_id,
         Some(&account),
         task.created_by,
     )
     .await?;
-    let name = gradient_ci::github_integration_name(Some(&account), installation_id);
-    gradient_ci::ensure_github_app_integrations(
-        &txn,
-        task.project,
-        installation,
-        &name,
-        "GitHub",
-        task.created_by,
-    )
-    .await?;
-    txn.commit().await?;
     Ok(())
 }
 

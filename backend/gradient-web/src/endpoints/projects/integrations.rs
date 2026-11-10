@@ -350,7 +350,7 @@ pub async fn put_integration(
         })?;
 
         let txn = state.web_db.inner().begin().await?;
-        let inst = gradient_ci::upsert_github_installation(
+        let link = gradient_ci::link_project_github_installation(
             &txn,
             project.id,
             installation_id,
@@ -358,17 +358,15 @@ pub async fn put_integration(
             user.id,
         )
         .await?;
-        let name = gradient_ci::github_integration_name(Some(&account), installation_id);
-        gradient_ci::ensure_github_app_integrations(
-            &txn, project.id, inst, &name, "GitHub", user.id,
+        let created = gradient_db::integrations::outbound_of_installation(
+            &txn,
+            project.id,
+            link.installation,
         )
-        .await?;
-
-        let created = gradient_db::integrations::outbound_of_installation(&txn, project.id, inst)
-            .await?
-            .ok_or_else(|| ProjectRefusal::IntegrationNameTaken {
-                name: name.to_string(),
-            })?;
+        .await?
+        .ok_or(ProjectRefusal::IntegrationNameTaken {
+            name: link.integration_name,
+        })?;
         txn.commit().await?;
 
         let mut response = integration_response(&state.web_db, &base, created).await?;

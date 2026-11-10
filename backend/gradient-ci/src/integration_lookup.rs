@@ -9,6 +9,7 @@ use gradient_entity::ids::GithubInstallationId;
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    TransactionSession, TransactionTrait,
     sea_query::{Expr, OnConflict},
 };
 use tracing::warn;
@@ -17,7 +18,7 @@ pub use gradient_entity::integration::IntegrationKind;
 
 pub const GITHUB_APP_INTEGRATION_DISPLAY_NAME: &str = "GitHub";
 
-pub fn github_integration_name(account_login: Option<&str>, installation_id: i64) -> String {
+fn github_integration_name(account_login: Option<&str>, installation_id: i64) -> String {
     match account_login {
         Some(login) if !login.trim().is_empty() => {
             format!("github-{}", login.trim().to_ascii_lowercase())
@@ -61,14 +62,44 @@ pub async fn upsert_github_installation<C: ConnectionTrait>(
     Ok(res.id)
 }
 
-pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
+#[derive(Debug)]
+pub struct InstallationLinkResult {
+    pub installation: GithubInstallationId,
+    pub integration_name: String,
+    pub created_any_integration: bool,
+}
+
+pub async fn link_project_github_installation<C: TransactionTrait>(
+    db: &C,
+    project: ProjectId,
+    installation_id: i64,
+    account_login: Option<&str>,
+    creator: UserId,
+) -> Result<InstallationLinkResult, sea_orm::DbErr> {
+    let txn = db.begin().await?;
+    let installation =
+        upsert_github_installation(&txn, project, installation_id, account_login, creator).await?;
+    let integration_name = github_integration_name(account_login, installation_id);
+    let created_any_integration =
+        ensure_github_app_integrations(&txn, project, installation, &integration_name, creator)
+            .await?;
+    txn.commit().await?;
+
+    Ok(InstallationLinkResult {
+        installation,
+        integration_name,
+        created_any_integration,
+    })
+}
+
+async fn ensure_github_app_integrations<C: ConnectionTrait>(
     db: &C,
     project_id: ProjectId,
     installation: GithubInstallationId,
     name: &str,
-    display_name: &str,
     creator: UserId,
-) -> Result<(), sea_orm::DbErr> {
+) -> Result<bool, sea_orm::DbErr> {
+    let mut created = false;
     for kind in [IntegrationKind::Inbound, IntegrationKind::Outbound] {
         let existing = EIntegration::find()
             .filter(CIntegration::Project.eq(project_id))
@@ -96,7 +127,7 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
             id: IntegrationId::now_v7(),
             project: project_id,
             name: name.to_string(),
-            display_name: display_name.to_string(),
+            display_name: GITHUB_APP_INTEGRATION_DISPLAY_NAME.to_string(),
             kind,
             git_host_type: GitHostType::GitHub,
             github_installation: Some(installation),
@@ -107,9 +138,10 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
         .into_active_model()
         .insert(db)
         .await?;
+        created = true;
     }
 
-    Ok(())
+    Ok(created)
 }
 
 #[cfg(test)]
@@ -171,16 +203,16 @@ mod ensure_tests {
             .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
             .into_connection();
 
-        ensure_github_app_integrations(
+        let created = ensure_github_app_integrations(
             &db,
             project(),
             installation(),
             "github-acme-corp",
-            GITHUB_APP_INTEGRATION_DISPLAY_NAME,
             user(),
         )
         .await
         .expect("ensure should succeed");
+        assert!(created);
     }
 
     #[tokio::test]
@@ -190,15 +222,42 @@ mod ensure_tests {
             .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
             .into_connection();
 
-        ensure_github_app_integrations(
+        let created = ensure_github_app_integrations(
             &db,
             project(),
             installation(),
             "github-acme-corp",
-            GITHUB_APP_INTEGRATION_DISPLAY_NAME,
             user(),
         )
         .await
         .expect("ensure should be idempotent");
+        assert!(!created);
+    }
+
+    #[tokio::test]
+    async fn linking_an_installation_stores_it_and_creates_its_integrations() {
+        let stored = github_installation::Model {
+            id: installation(),
+            project: project(),
+            installation_id: 42,
+            account_login: Some("Acme-Corp".into()),
+            created_by: user(),
+            created_at: chrono::Utc::now().naive_utc(),
+        };
+        let db = mock_db()
+            .append_query_results([vec![stored]])
+            .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
+            .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
+            .append_query_results([vec![github_row(IntegrationKind::Inbound)]])
+            .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
+            .into_connection();
+
+        let link = link_project_github_installation(&db, project(), 42, Some("Acme-Corp"), user())
+            .await
+            .expect("linking should succeed");
+
+        assert_eq!(link.installation, installation());
+        assert_eq!(link.integration_name, "github-acme-corp");
+        assert!(link.created_any_integration);
     }
 }

@@ -86,8 +86,8 @@ async fn store_installation_id(db: &WebDb, payload: &GitHubInstallationPayload) 
     for project in projects {
         let project_id = project.id;
         let creator = project.created_by;
-        let inst = match gradient_ci::upsert_github_installation(
-            db,
+        match gradient_ci::link_project_github_installation(
+            db.inner(),
             project_id,
             installation_id,
             Some(github_login),
@@ -95,21 +95,12 @@ async fn store_installation_id(db: &WebDb, payload: &GitHubInstallationPayload) 
         )
         .await
         {
-            Ok(id) => id,
-            Err(e) => {
-                warn!(error = %e, installation_id, %project_id, "Failed to upsert github_installation");
-                continue;
+            Ok(_) => {
+                info!(installation_id, %project_id, github_login = %github_login, "GitHub App installed on project")
             }
-        };
-
-        info!(installation_id, %project_id, github_login = %github_login, "GitHub App installed on project");
-        let name = gradient_ci::github_integration_name(Some(github_login), installation_id);
-        if let Err(e) = gradient_ci::ensure_github_app_integrations(
-            db, project_id, inst, &name, "GitHub", creator,
-        )
-        .await
-        {
-            warn!(error = %e, %project_id, "Failed to materialise GitHub App integration rows");
+            Err(e) => {
+                warn!(error = %e, installation_id, %project_id, "Failed to link the installation of the GitHub App to the project")
+            }
         }
     }
 }
